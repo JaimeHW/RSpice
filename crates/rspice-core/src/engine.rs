@@ -108,13 +108,13 @@ impl Engine {
                 ElementKind::Inductor { value, .. } => {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
-                    let branch = circuit.allocate_branch();
+                    let branch = circuit.allocate_branch_named(&element.name);
                     circuit.inductors.add(element.name.clone(), np, nn, branch, *value);
                 }
                 ElementKind::VoltageSource(spec) => {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
-                    let branch = circuit.allocate_branch();
+                    let branch = circuit.allocate_branch_named(&element.name);
                     let dc_value = extract_dc_value(&spec);
                     circuit.voltage_sources.add(element.name.clone(), np, nn, branch, dc_value);
                 }
@@ -179,25 +179,48 @@ impl Engine {
                     let cn = circuit.get_or_create_node(&control_nodes.1);
                     circuit.vccs.add(element.name.clone(), np, nn, cp, cn, *transconductance);
                 }
-                ElementKind::Cccs { gain, control_element: _ } => {
+                ElementKind::Cccs { gain, control_element } => {
                     // CCCS needs the branch of a controlling voltage source
-                    // For now, use branch 1 as placeholder (requires lookup)
+                    // Register for deferred resolution after all elements are added
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
-                    // TODO: Look up control_element branch index
-                    circuit.cccs.add(element.name.clone(), np, nn, 1, *gain);
+                    let cccs_idx = circuit.cccs.len();
+                    // Add with placeholder branch (will be resolved later)
+                    circuit.cccs.add(element.name.clone(), np, nn, 0, *gain);
+                    circuit.add_cccs_pending(cccs_idx, control_element.clone());
                 }
-                ElementKind::Ccvs { transresistance, control_element: _ } => {
+                ElementKind::Ccvs { transresistance, control_element } => {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
-                    let branch = circuit.allocate_branch();
-                    // TODO: Look up control_element branch index
-                    circuit.ccvs.add(element.name.clone(), np, nn, branch, 1, *transresistance);
+                    let branch = circuit.allocate_branch_named(&element.name);
+                    let ccvs_idx = circuit.ccvs.len();
+                    // Add with placeholder control branch (will be resolved later)
+                    circuit.ccvs.add(element.name.clone(), np, nn, branch, 0, *transresistance);
+                    circuit.add_ccvs_pending(ccvs_idx, control_element.clone());
                 }
                 // Behavioral sources
-                ElementKind::BehavioralVoltage { expression: _ } |
-                ElementKind::BehavioralCurrent { expression: _ } => {
-                    // TODO: Integrate B-source stamping
+                ElementKind::BehavioralVoltage { expression } => {
+                    let np = circuit.get_or_create_node(&element.nodes[0]);
+                    let nn = circuit.get_or_create_node(&element.nodes[1]);
+                    let branch = circuit.allocate_branch_named(&element.name);
+                    
+                    let bvs = crate::device::BehavioralVoltageSource::new(
+                        element.name.clone(),
+                        np, nn, branch,
+                        expression,
+                    );
+                    circuit.behavioral_sources.add_voltage(bvs);
+                }
+                ElementKind::BehavioralCurrent { expression } => {
+                    let np = circuit.get_or_create_node(&element.nodes[0]);
+                    let nn = circuit.get_or_create_node(&element.nodes[1]);
+                    
+                    let bcs = crate::device::BehavioralCurrentSource::new(
+                        element.name.clone(),
+                        np, nn,
+                        expression,
+                    );
+                    circuit.behavioral_sources.add_current(bcs);
                 }
                 // Subcircuit instances should be flattened before reaching here
                 ElementKind::Subcircuit { .. } => {}
@@ -262,6 +285,10 @@ impl Engine {
                 }
             }
         }
+
+        // Resolve all pending CCCS/CCVS control element references
+        circuit.resolve_control_elements()
+            .map_err(|e| SimulationError::Circuit(e.to_string()))?;
 
         Ok(circuit)
     }
@@ -820,7 +847,7 @@ impl Engine {
         // Initialize timestep controller
         let initial_step = (max_step / 10.0).min(tstop / 100.0);
         let mut timestep = TimestepController::new(initial_step, self.config.min_timestep, max_step);
-        let breakpoints = BreakpointManager::new();
+        let mut breakpoints = BreakpointManager::new();
         let mut lte_estimator = LteEstimator::new(self.config.tolerance);
         
         // Initialize result storage
@@ -835,7 +862,7 @@ impl Engine {
         
         // Main transient loop
         while t < tstop {
-            let dt = breakpoints.limit_step(t, timestep.dt());
+            let (dt, _at_breakpoint) = breakpoints.limit_step(t, timestep.dt());
             let dt = dt.min(tstop - t); // Don't overshoot tstop
             
             // Prepare for Newton iteration at this timestep
@@ -1014,7 +1041,7 @@ impl Engine {
         // Initialize timestep controller
         let initial_step = (max_step / 10.0).min(tstop / 100.0);
         let mut timestep = TimestepController::new(initial_step, self.config.min_timestep, max_step);
-        let breakpoints = BreakpointManager::new();
+        let mut breakpoints = BreakpointManager::new();
         let mut lte_estimator = LteEstimator::new(self.config.tolerance);
         
         // Initialize compressed waveform recorder
@@ -1028,7 +1055,7 @@ impl Engine {
         
         // Main transient loop
         while t < tstop {
-            let dt = breakpoints.limit_step(t, timestep.dt());
+            let (dt, _at_breakpoint) = breakpoints.limit_step(t, timestep.dt());
             let dt = dt.min(tstop - t);
             
             // Prepare for Newton iteration at this timestep
@@ -1167,13 +1194,14 @@ impl Engine {
     /// Run AC small-signal analysis
     /// 
     /// Linearizes circuit at DC operating point, then solves at each frequency.
+    /// When the `parallel` feature is enabled and there are many frequency points,
+    /// the frequency sweep is parallelized for better performance.
     pub fn run_ac(
         &self,
         netlist: &Netlist,
         frequencies: &[Value],
     ) -> Result<Vec<AcResult>, SimulationError> {
         use crate::solver::ComplexMatrix;
-        use crate::Complex64;
         use std::f64::consts::PI;
         
         let mut circuit = self.build_circuit(netlist)?;
@@ -1190,16 +1218,14 @@ impl Engine {
         let num_nodes = circuit.num_nodes();
         let size = circuit.matrix_size();
         
-        // Create complex matrix from real structure
-        let mut ac_matrix = ComplexMatrix::from_real_structure(&matrix);
-        
-        let mut results = Vec::with_capacity(frequencies.len());
-        
-        for &freq in frequencies {
+        // Closure to solve at a single frequency
+        let solve_at_freq = |freq: Value| -> Result<AcResult, SimulationError> {
+            use crate::Complex64;
+            
             let omega = 2.0 * PI * freq;
             
-            // Clear and rebuild AC matrix
-            ac_matrix.clear_values();
+            // Create fresh complex matrix for this frequency (thread-safe)
+            let mut ac_matrix = ComplexMatrix::from_real_structure(&matrix);
             
             // Stamp resistors (real conductance)
             for (r_idx, stamp) in circuit.resistors.stamps.iter().enumerate() {
@@ -1222,19 +1248,19 @@ impl Engine {
             // Stamp capacitors: jωC
             for (i, stamp) in circuit.capacitors.stamps.iter().enumerate() {
                 let c = circuit.capacitors.capacitances.get(i).copied().unwrap_or(0.0);
-                let jωc = omega * c; // Imaginary part
+                let jwc = omega * c; // Imaginary part
                 
                 if stamp.pp.row > 0 && stamp.pp.col > 0 {
-                    ac_matrix.add_imag(stamp.pp.row - 1, stamp.pp.col - 1, jωc);
+                    ac_matrix.add_imag(stamp.pp.row - 1, stamp.pp.col - 1, jwc);
                 }
                 if stamp.pn.row > 0 && stamp.pn.col > 0 {
-                    ac_matrix.add_imag(stamp.pn.row - 1, stamp.pn.col - 1, -jωc);
+                    ac_matrix.add_imag(stamp.pn.row - 1, stamp.pn.col - 1, -jwc);
                 }
                 if stamp.np.row > 0 && stamp.np.col > 0 {
-                    ac_matrix.add_imag(stamp.np.row - 1, stamp.np.col - 1, -jωc);
+                    ac_matrix.add_imag(stamp.np.row - 1, stamp.np.col - 1, -jwc);
                 }
                 if stamp.nn.row > 0 && stamp.nn.col > 0 {
-                    ac_matrix.add_imag(stamp.nn.row - 1, stamp.nn.col - 1, jωc);
+                    ac_matrix.add_imag(stamp.nn.row - 1, stamp.nn.col - 1, jwc);
                 }
             }
             
@@ -1269,25 +1295,36 @@ impl Engine {
             }
             
             // Solve
-            match ac_matrix.solve(&rhs) {
-                Ok(solution) => {
-                    results.push(AcResult {
-                        frequency: freq,
-                        voltages: solution[..num_nodes].to_vec(),
-                        currents: if size > num_nodes {
-                            solution[num_nodes..].to_vec()
-                        } else {
-                            vec![]
-                        },
-                    });
-                }
-                Err(e) => {
-                    return Err(SimulationError::Solver(e));
-                }
+            let solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+            
+            Ok(AcResult {
+                frequency: freq,
+                voltages: solution[..num_nodes].to_vec(),
+                currents: if size > num_nodes {
+                    solution[num_nodes..].to_vec()
+                } else {
+                    vec![]
+                },
+            })
+        };
+        
+        // Use parallel iteration when feature is enabled and we have many frequencies
+        #[cfg(feature = "parallel")]
+        {
+            use rayon::prelude::*;
+            
+            // Parallel threshold: use parallel for 10+ frequency points
+            if frequencies.len() >= 10 {
+                let results: Result<Vec<_>, _> = frequencies
+                    .par_iter()
+                    .map(|&freq| solve_at_freq(freq))
+                    .collect();
+                return results;
             }
         }
         
-        Ok(results)
+        // Sequential fallback (or when parallel feature disabled)
+        frequencies.iter().map(|&freq| solve_at_freq(freq)).collect()
     }
 }
 
