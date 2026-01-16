@@ -377,6 +377,74 @@ pub struct TransientResultCompressed {
     pub input_points: usize,
 }
 
+/// Detailed compression statistics
+#[derive(Debug, Clone)]
+pub struct CompressionStats {
+    /// Total input time points
+    pub input_points: usize,
+    /// Stored time points after compression
+    pub stored_points: usize,
+    /// Number of channels (signals)
+    pub num_channels: usize,
+    /// Compression ratio (input / stored)
+    pub compression_ratio: Value,
+    /// Estimated input memory (bytes, without compression)
+    pub input_bytes: usize,
+    /// Actual stored memory (bytes)
+    pub stored_bytes: usize,
+    /// Memory savings ratio
+    pub memory_savings_ratio: Value,
+}
+
+impl CompressionStats {
+    /// Calculate compression statistics
+    pub fn calculate(input_points: usize, stored_points: usize, num_channels: usize) -> Self {
+        // f64 is 8 bytes
+        let bytes_per_value = std::mem::size_of::<Value>();
+        
+        // Input: time vec + N channel vecs, all with input_points entries
+        let input_bytes = bytes_per_value * input_points * (1 + num_channels);
+        
+        // Stored: time vec + N channel vecs, all with stored_points entries
+        let stored_bytes = bytes_per_value * stored_points * (1 + num_channels);
+        
+        let compression_ratio = if stored_points > 0 {
+            input_points as Value / stored_points as Value
+        } else {
+            1.0
+        };
+        
+        let memory_savings_ratio = if stored_bytes > 0 {
+            input_bytes as Value / stored_bytes as Value
+        } else {
+            1.0
+        };
+        
+        Self {
+            input_points,
+            stored_points,
+            num_channels,
+            compression_ratio,
+            input_bytes,
+            stored_bytes,
+            memory_savings_ratio,
+        }
+    }
+    
+    /// Format as human-readable summary
+    pub fn summary(&self) -> String {
+        format!(
+            "{}/{} points ({:.1}x), {:.0} KB → {:.0} KB ({:.1}x memory savings)",
+            self.stored_points,
+            self.input_points,
+            self.compression_ratio,
+            self.input_bytes as f64 / 1024.0,
+            self.stored_bytes as f64 / 1024.0,
+            self.memory_savings_ratio,
+        )
+    }
+}
+
 impl TransientResultCompressed {
     /// Get value at arbitrary time via linear interpolation
     ///
