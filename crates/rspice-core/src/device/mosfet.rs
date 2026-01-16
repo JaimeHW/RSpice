@@ -7,6 +7,60 @@ use crate::{circuit::NodeId, Value};
 use crate::solver::{StaticMatrix, CscIndex};
 use super::traits::{NonlinearDevice, MatrixStamper};
 
+//=============================================================================
+// Smooth Transition Functions for C1 Continuity
+//=============================================================================
+
+/// Smoothing voltage range for region transitions (in Volts)
+/// Smaller = sharper transitions, larger = smoother but less accurate
+const SMOOTH_VOLTAGE: Value = 0.05;
+
+/// Smooth step function using tanh for C1 continuous transitions
+/// 
+/// Returns a value smoothly transitioning from 0 to 1 as x goes from -∞ to +∞
+/// The transition width is controlled by the `width` parameter.
+/// 
+/// ```text
+/// smooth_step(x, w) ≈ 0   when x << -w
+/// smooth_step(x, w) ≈ 0.5 when x = 0  
+/// smooth_step(x, w) ≈ 1   when x >> w
+/// ```
+#[inline]
+fn smooth_step(x: Value, width: Value) -> Value {
+    0.5 * (1.0 + (x / width.max(1e-12)).tanh())
+}
+
+/// Smooth maximum function: returns approximately max(a, b) but C1 continuous
+/// 
+/// When `a >> b + smoothing`, returns `a`
+/// When `b >> a + smoothing`, returns `b`  
+/// When `a ≈ b`, returns smooth blend slightly above both
+#[inline]
+fn smooth_max(a: Value, b: Value, smoothing: Value) -> Value {
+    let diff = a - b;
+    let s = smooth_step(diff, smoothing);
+    s * a + (1.0 - s) * b + smoothing * 0.5 * (1.0 - (diff / smoothing.max(1e-12)).tanh().powi(2))
+}
+
+/// Smooth minimum function: returns approximately min(a, b) but C1 continuous
+#[inline]
+fn smooth_min(a: Value, b: Value, smoothing: Value) -> Value {
+    -smooth_max(-a, -b, smoothing)
+}
+
+/// Smooth clamp: clamps x to [min_val, max_val] with C1 continuity
+#[inline]
+fn smooth_clamp(x: Value, min_val: Value, max_val: Value, smoothing: Value) -> Value {
+    smooth_min(smooth_max(x, min_val, smoothing), max_val, smoothing)
+}
+
+/// Smooth positive part: returns approximately max(x, 0) but C1 continuous
+/// This is crucial for the cutoff->on transition
+#[inline]
+fn smooth_positive(x: Value, smoothing: Value) -> Value {
+    smooth_max(x, 0.0, smoothing)
+}
+
 /// MOSFET type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MosType {
@@ -100,6 +154,26 @@ pub struct Mosfet {
     /// Source/drain resistance (RDSW) in ohm*um
     pub rdsw: Value,
     
+    // BSIM4-specific parameters for enhanced short-channel modeling
+    /// Short-channel Vth roll-off coefficient 0 (DVT0)
+    pub dvt0: Value,
+    /// Short-channel Vth roll-off coefficient 1 (DVT1)
+    pub dvt1: Value,
+    /// Short-channel Vth roll-off body-bias coefficient (DVT2)
+    pub dvt2: Value,
+    /// First body effect coefficient (K1)
+    pub k1: Value,
+    /// Second body effect coefficient (K2)
+    pub k2: Value,
+    /// Gate-source overlap capacitance per width (CGSO) in F/m
+    pub cgso: Value,
+    /// Gate-drain overlap capacitance per width (CGDO) in F/m
+    pub cgdo: Value,
+    /// Gate-bulk overlap capacitance per length (CGBO) in F/m
+    pub cgbo: Value,
+    /// Source/drain sheet resistance (RSH) in ohm/square
+    pub rsh: Value,
+    
     // Operating point values
     vgs: Value,
     vds: Value,
@@ -160,6 +234,17 @@ impl Mosfet {
             pclm: 1.3,          // Channel length modulation
             rdsw: 200.0,        // S/D resistance (ohm*um)
             
+            // BSIM4 parameters
+            dvt0: 2.2,          // Short-channel Vth roll-off
+            dvt1: 0.53,         // First-order roll-off
+            dvt2: -0.032,       // Body-bias dependent roll-off
+            k1: 0.53,           // First body effect coefficient
+            k2: -0.186,         // Second body effect coefficient
+            cgso: 2.4e-10,      // Gate-source overlap cap (F/m)
+            cgdo: 2.4e-10,      // Gate-drain overlap cap (F/m)
+            cgbo: 0.0,          // Gate-bulk overlap cap (F/m)
+            rsh: 0.0,           // Sheet resistance (ohm/sq)
+            
             vgs: 0.0,
             vds: 0.0,
             vbs: 0.0,
@@ -199,6 +284,16 @@ impl Mosfet {
         if let Some(&v) = params.get("NFACTOR") { self.nfactor = v; }
         if let Some(&v) = params.get("PCLM") { self.pclm = v; }
         if let Some(&v) = params.get("RDSW") { self.rdsw = v; }
+        // BSIM4 parameters
+        if let Some(&v) = params.get("DVT0") { self.dvt0 = v; }
+        if let Some(&v) = params.get("DVT1") { self.dvt1 = v; }
+        if let Some(&v) = params.get("DVT2") { self.dvt2 = v; }
+        if let Some(&v) = params.get("K1") { self.k1 = v; }
+        if let Some(&v) = params.get("K2") { self.k2 = v; }
+        if let Some(&v) = params.get("CGSO") { self.cgso = v; }
+        if let Some(&v) = params.get("CGDO") { self.cgdo = v; }
+        if let Some(&v) = params.get("CGBO") { self.cgbo = v; }
+        if let Some(&v) = params.get("RSH") { self.rsh = v; }
         self
     }
 
@@ -272,14 +367,64 @@ impl Mosfet {
         }
     }
 
-    /// Calculate effective threshold voltage with body effect
+    /// Calculate effective threshold voltage with body effect and short-channel effects
+    /// 
+    /// For Level 1: Standard body effect formula
+    /// For Level 3+: Includes BSIM4 short-channel Vth roll-off
     fn vth(&self, vbs: Value) -> Value {
         let p = self.polarity();
         let vbs_eff = p * vbs;
         
-        // Body effect: Vth = Vto + gamma * (sqrt(phi - Vbs) - sqrt(phi))
+        // Base body effect: Vth = Vto + gamma * (sqrt(phi - Vbs) - sqrt(phi))
         let phi_vbs = (self.phi - vbs_eff).max(0.0);
-        self.vto + self.gamma * (phi_vbs.sqrt() - self.phi.sqrt())
+        let vth_base = self.vto + self.gamma * (phi_vbs.sqrt() - self.phi.sqrt());
+        
+        if self.level < 3 {
+            return vth_base;
+        }
+        
+        // BSIM4 short-channel Vth roll-off
+        // Delta_Vth = -DVT0 * L_eff / Ldrawn * (1 + DVT2 * Vbs)
+        // where L_eff adjustment factor uses DVT1
+        let l_ratio = 1e-6 / self.l.max(1e-9);  // Normalize to 1um
+        let dvth_sce = -self.dvt0 * l_ratio * (1.0 + self.dvt1 * l_ratio);
+        
+        // Body-bias modulation of SCE
+        let dvth_bias = self.dvt2 * vbs_eff * l_ratio;
+        
+        // Enhanced body effect using K1/K2 (BSIM4 style)
+        // Vth = Vto + K1 * sqrt(phi - Vbs) + K2 * (phi - Vbs)
+        let vth_k1k2 = self.vto + self.k1 * phi_vbs.sqrt() + self.k2 * (self.phi - vbs_eff);
+        
+        // Blend between GAMMA-based and K1/K2-based body effect based on model level
+        // Use K1/K2 formulation for short channels (level 3+)
+        vth_k1k2 + dvth_sce + dvth_bias
+    }
+
+    /// Calculate overlap capacitances for AC analysis
+    /// Returns (Cgs_overlap, Cgd_overlap, Cgb_overlap)
+    pub fn overlap_capacitances(&self) -> (Value, Value, Value) {
+        // Cgs_overlap = CGSO * W
+        let cgs = self.cgso * self.w;
+        // Cgd_overlap = CGDO * W
+        let cgd = self.cgdo * self.w;
+        // Cgb_overlap = CGBO * L
+        let cgb = self.cgbo * self.l;
+        
+        (cgs, cgd, cgb)
+    }
+
+    /// Calculate source/drain series resistance (per side)
+    /// Returns resistance in Ohms
+    pub fn source_drain_resistance(&self) -> Value {
+        // Rsd = RDSW / W (per side, so total is 2x)
+        // If RSH is specified, add sheet resistance contribution
+        if self.rsh > 0.0 {
+            // Assume 1 square of S/D diffusion
+            self.rdsw / (self.w * 1e6) + self.rsh
+        } else {
+            self.rdsw / (self.w * 1e6)
+        }
     }
 
     /// Calculate W/L ratio
@@ -301,31 +446,44 @@ impl Mosfet {
         }
     }
 
-    /// Level 1 (Shichman-Hodges) drain current calculation
+    /// Level 1 (Shichman-Hodges) drain current calculation with C1 continuous transitions
+    /// 
+    /// Uses smooth blending between regions to ensure continuous first derivatives,
+    /// which is critical for Newton-Raphson convergence.
     fn calculate_id_level1(&self, vgs: Value, vds: Value, vbs: Value) -> (Value, MosRegion) {
         let p = self.polarity();
         let vgs_eff = p * vgs;
-        let vds_eff = p * vds;
+        let vds_eff = smooth_positive(p * vds, SMOOTH_VOLTAGE * 0.1); // Ensure positive Vds
         let vth = self.vth(vbs);
         
-        let vgt = vgs_eff - vth; // Gate overdrive
+        // Gate overdrive with smooth cutoff transition
+        // vgt_smooth ≈ 0 when vgs < vth, ≈ (vgs - vth) when vgs > vth
+        let vgt_raw = vgs_eff - vth;
+        let vgt = smooth_positive(vgt_raw, SMOOTH_VOLTAGE);
         
-        if vgt <= 0.0 {
-            // Cutoff region
-            (0.0, MosRegion::Cutoff)
-        } else if vds_eff < vgt {
-            // Linear (triode) region
-            // Id = beta * ((Vgs - Vth) * Vds - Vds^2/2) * (1 + lambda * Vds)
-            let id = p * self.beta() * (vgt * vds_eff - 0.5 * vds_eff * vds_eff) 
-                   * (1.0 + self.lambda * vds_eff);
-            (id, MosRegion::Linear)
+        // Determine effective region for reporting (but calculations are smooth)
+        let region = if vgt_raw <= -SMOOTH_VOLTAGE {
+            MosRegion::Cutoff
+        } else if vds_eff < vgt - SMOOTH_VOLTAGE {
+            MosRegion::Linear
         } else {
-            // Saturation region
-            // Id = beta/2 * (Vgs - Vth)^2 * (1 + lambda * Vds)
-            let id = p * 0.5 * self.beta() * vgt * vgt 
-                   * (1.0 + self.lambda * vds_eff);
-            (id, MosRegion::Saturation)
-        }
+            MosRegion::Saturation
+        };
+        
+        // Smooth saturation voltage: Vdsat = min(Vgt, Vds) but smooth
+        // This naturally blends linear and saturation regions
+        let vdsat = smooth_min(vgt, vds_eff, SMOOTH_VOLTAGE);
+        
+        // Unified current equation that smoothly transitions between regions:
+        // In linear: Id = beta * (Vgt * Vds - Vds²/2)
+        // In saturation: Id = beta/2 * Vgt² (when Vds = Vgt)
+        // 
+        // Using Vdsat as the effective drain voltage gives us both:
+        // Id = beta * (Vgt * Vdsat - Vdsat²/2) * (1 + lambda * Vds)
+        let id_core = self.beta() * (vgt * vdsat - 0.5 * vdsat * vdsat);
+        let id = p * id_core * (1.0 + self.lambda * vds_eff);
+        
+        (id, region)
     }
 
     /// BSIM3-like drain current with short-channel effects
@@ -334,101 +492,151 @@ impl Mosfet {
     /// - Velocity saturation
     /// - Drain-Induced Barrier Lowering (DIBL)
     /// - Channel length modulation
+    /// BSIM3-like drain current with C1 continuous transitions
     fn calculate_id_bsim3(&self, vgs: Value, vds: Value, vbs: Value) -> (Value, MosRegion) {
         let p = self.polarity();
         let vgs_eff = p * vgs;
-        let vds_eff = (p * vds).max(1e-12);  // Avoid division by zero
+        let vds_eff = smooth_positive(p * vds, SMOOTH_VOLTAGE * 0.1);
         let vbs_eff = p * vbs;
         
-        // DIBL: threshold voltage reduction with drain bias
+        // DIBL: threshold voltage reduction with drain bias (smooth minimum for Vth)
         let vth_dibl = self.vth(vbs) - self.eta0 * vds_eff - self.etab * vbs_eff * vds_eff;
-        let vth = vth_dibl.max(0.1);  // Minimum threshold
+        let vth = smooth_max(vth_dibl, 0.1, SMOOTH_VOLTAGE);
         
-        let vgt = vgs_eff - vth;  // Gate overdrive
+        // Gate overdrive with smooth transition
+        let vgt_raw = vgs_eff - vth;
+        let vgt = smooth_positive(vgt_raw, SMOOTH_VOLTAGE);
         
-        if vgt <= 0.0 {
-            // Subthreshold region (simplified exponential)
-            // Subthreshold current for proper convergence
-            let vt = 0.0259;  // Thermal voltage at 300K
-            let n = self.nfactor;
-            let i_sub = 1e-12 * (vgt / (n * vt)).exp().min(1e6);
-            return (p * i_sub, MosRegion::Cutoff);
-        }
+        // Subthreshold current blended smoothly with above-threshold current
+        let vt = 0.0259;  // Thermal voltage at 300K
+        let n = self.nfactor;
+        // Smooth blend factor: 0 when well above threshold, 1 when below
+        let subthreshold_blend = 1.0 - smooth_step(vgt_raw, SMOOTH_VOLTAGE);
+        let i_sub = 1e-12 * (vgt_raw.min(100.0 * vt) / (n * vt)).exp().min(1e6);
         
         // Mobility degradation (vertical field effect)
-        // µeff = µ0 / (1 + Ua*(Vgs-Vth)/tox + Ub*((Vgs-Vth)/tox)^2)
-        let eeff = vgt / (6e-9);  // Assume tox = 6nm
+        let eeff = vgt / 6e-9;  // Assume tox = 6nm
         let mobility = self.u0 / (1.0 + self.ua * eeff + self.ub * eeff * eeff);
         
         // Effective beta with mobility degradation
-        let beta_eff = mobility * 1e-4 * self.cox * self.wl_ratio();  // Convert cm^2 to m^2
+        let beta_eff = mobility * 1e-4 * self.cox * self.wl_ratio();
         
-        // Saturation voltage with velocity saturation
-        // Vdsat = (Vgs - Vth) / (1 + (Vgs - Vth) / (L * Vsat / µ))
+        // Saturation voltage with velocity saturation (smooth formulation)
         let vsat_over_l = self.vsat / self.l;
-        let mu_m2 = mobility * 1e-4;  // Convert to m^2/V*s
-        let vdsat = vgt / (1.0 + vgt / (self.l * vsat_over_l / mu_m2).max(1e-6));
+        let mu_m2 = mobility * 1e-4;
+        let vdsat_vel = vgt / (1.0 + vgt / (self.l * vsat_over_l / mu_m2).max(1e-6));
         
-        if vds_eff < vdsat {
-            // Linear region
-            let id = p * beta_eff * (vgt * vds_eff - 0.5 * vds_eff * vds_eff);
-            (id, MosRegion::Linear)
+        // Smooth min between Vds and Vdsat for unified linear/saturation
+        let vdsat = smooth_min(vdsat_vel, vds_eff, SMOOTH_VOLTAGE);
+        
+        // Channel length modulation (smooth)
+        let vds_over_vdsat = vds_eff / vdsat_vel.max(1e-6);
+        let clm_arg = smooth_positive(vds_over_vdsat - 1.0, 0.01);
+        let clm = 1.0 + self.pclm * clm_arg.ln_1p();
+        
+        // Unified current equation
+        let id_above = beta_eff * (vgt * vdsat - 0.5 * vdsat * vdsat) * clm;
+        
+        // Blend subthreshold and above-threshold currents
+        let id = p * (subthreshold_blend * i_sub + (1.0 - subthreshold_blend) * id_above);
+        
+        // Region determination (for reporting only)
+        let region = if vgt_raw <= -SMOOTH_VOLTAGE {
+            MosRegion::Cutoff
+        } else if vds_eff < vdsat_vel - SMOOTH_VOLTAGE {
+            MosRegion::Linear
         } else {
-            // Saturation region with CLM
-            let vds_over_vdsat = vds_eff / vdsat.max(1e-6);
-            let clm = 1.0 + self.pclm * (vds_over_vdsat - 1.0).max(0.0).ln_1p();
-            let id = p * 0.5 * beta_eff * vgt * vgt * clm;
-            (id, MosRegion::Saturation)
-        }
+            MosRegion::Saturation
+        };
+        
+        (id, region)
     }
 
-    /// Calculate transconductance gm = dId/dVgs
+    /// Calculate transconductance gm = dId/dVgs with C1 continuity
+    /// 
+    /// Uses the same smooth transitions as calculate_id for consistent derivatives.
     fn gm(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
         let p = self.polarity();
         let vgs_eff = p * vgs;
-        let vds_eff = p * vds;
+        let vds_eff = smooth_positive(p * vds, SMOOTH_VOLTAGE * 0.1);
         let vth = self.vth(vbs);
-        let vgt = vgs_eff - vth;
         
-        if vgt <= 0.0 {
-            1e-12 // Minimum conductance in cutoff
-        } else if vds_eff < vgt {
-            // Linear region: gm = beta * Vds
-            self.beta() * vds_eff * (1.0 + self.lambda * vds_eff)
-        } else {
-            // Saturation region: gm = beta * (Vgs - Vth)
-            self.beta() * vgt * (1.0 + self.lambda * vds_eff)
-        }
+        // Smooth gate overdrive
+        let vgt_raw = vgs_eff - vth;
+        let vgt = smooth_positive(vgt_raw, SMOOTH_VOLTAGE);
+        
+        // Smooth Vdsat for region blending
+        let vdsat = smooth_min(vgt, vds_eff, SMOOTH_VOLTAGE);
+        
+        // Derivative of smooth_positive for cutoff transition
+        // d(smooth_positive(x))/dx = smooth_step(x)
+        let dvgt_dvgs = smooth_step(vgt_raw, SMOOTH_VOLTAGE);
+        
+        // In unified formulation: Id = beta * (Vgt * Vdsat - Vdsat²/2)
+        // Taking derivative w.r.t Vgs:
+        // dId/dVgs = beta * (Vdsat * dVgt/dVgs + Vgt * dVdsat/dVgs - Vdsat * dVdsat/dVgs)
+        // When Vds > Vgt (saturation): dVdsat/dVgs ≈ dVgt/dVgs
+        // When Vds < Vgt (linear): dVdsat/dVgs ≈ 0 (Vdsat = Vds)
+        
+        // Blend factor: how much Vdsat follows Vgt
+        let sat_blend = smooth_step(vgt - vds_eff, SMOOTH_VOLTAGE);
+        let dvdsat_dvgs = sat_blend * dvgt_dvgs;
+        
+        let gm_core = self.beta() * (vdsat * dvgt_dvgs + (vgt - vdsat) * dvdsat_dvgs);
+        let gm_clm = gm_core * (1.0 + self.lambda * vds_eff);
+        
+        // Ensure minimum conductance for numerical stability
+        gm_clm.max(1e-12)
     }
 
-    /// Calculate output conductance gds = dId/dVds
+    /// Calculate output conductance gds = dId/dVds with C1 continuity
     fn gds(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
         let p = self.polarity();
         let vgs_eff = p * vgs;
-        let vds_eff = p * vds;
+        let vds_eff = smooth_positive(p * vds, SMOOTH_VOLTAGE * 0.1);
         let vth = self.vth(vbs);
-        let vgt = vgs_eff - vth;
         
-        if vgt <= 0.0 {
-            1e-12 // Minimum conductance in cutoff
-        } else if vds_eff < vgt {
-            // Linear region: gds = beta * (Vgt - Vds)
-            self.beta() * (vgt - vds_eff) * (1.0 + self.lambda * vds_eff)
-                + self.beta() * (vgt * vds_eff - 0.5 * vds_eff * vds_eff) * self.lambda
-        } else {
-            // Saturation region: gds = lambda * Id
-            0.5 * self.beta() * vgt * vgt * self.lambda
-        }
+        // Smooth gate overdrive
+        let vgt_raw = vgs_eff - vth;
+        let vgt = smooth_positive(vgt_raw, SMOOTH_VOLTAGE);
+        
+        // Smooth Vdsat
+        let vdsat = smooth_min(vgt, vds_eff, SMOOTH_VOLTAGE);
+        
+        // Blend factor for region transition
+        let lin_blend = smooth_step(vgt - vds_eff, SMOOTH_VOLTAGE);
+        
+        // In linear region: gds = beta * (Vgt - Vds) + lambda term
+        // In saturation: gds = lambda * Id (small)
+        // Derivative of Vdsat w.r.t Vds: ~1 in linear, ~0 in saturation
+        let dvdsat_dvds = 1.0 - lin_blend;
+        
+        // dId/dVds from main current term
+        let gds_core = self.beta() * (vgt - vdsat) * dvdsat_dvds;
+        
+        // Channel length modulation term
+        let id_core = self.beta() * (vgt * vdsat - 0.5 * vdsat * vdsat);
+        let gds_clm = id_core * self.lambda;
+        
+        // Total conductance
+        let gds_total = gds_core * (1.0 + self.lambda * vds_eff) + gds_clm;
+        
+        // Ensure minimum conductance
+        gds_total.max(1e-12)
     }
 
-    /// Calculate body transconductance gmb = dId/dVbs
+    /// Calculate body transconductance gmb = dId/dVbs with C1 continuity
     fn gmb(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
         let p = self.polarity();
         let vbs_eff = p * vbs;
         
         // gmb = -gm * (gamma / (2 * sqrt(phi - Vbs)))
+        // The gm function is already smooth, so gmb inherits smoothness
         let gm = self.gm(vgs, vds, vbs);
-        let phi_vbs = (self.phi - vbs_eff).max(1e-6);
+        
+        // Smooth the phi - Vbs term to avoid singularity
+        let phi_vbs = smooth_max(self.phi - vbs_eff, SMOOTH_VOLTAGE, SMOOTH_VOLTAGE);
+        
         gm * self.gamma / (2.0 * phi_vbs.sqrt())
     }
 }
@@ -519,10 +727,10 @@ mod tests {
     fn test_mosfet_cutoff() {
         let m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0);
         
-        // Vgs < Vth -> cutoff
+        // Vgs < Vth -> cutoff (with smooth transitions, current is very small but not exactly zero)
         let (id, region) = m.calculate_id(0.3, 5.0, 0.0);
         assert_eq!(region, MosRegion::Cutoff);
-        assert_eq!(id, 0.0);
+        assert!(id.abs() < 1e-6, "Cutoff current should be negligible, got {}", id);
     }
 
     #[test]
@@ -583,5 +791,124 @@ mod tests {
         let (id, region) = m.calculate_id(3.0, 3.0, 0.0);
         assert_eq!(region, MosRegion::Saturation);
         assert!(id > 0.0);
+    }
+
+    //=========================================================================
+    // C1 Continuity Tests - Verify smooth transitions across region boundaries
+    //=========================================================================
+
+    #[test]
+    fn test_id_continuity_at_threshold() {
+        // Test that drain current is continuous as Vgs crosses threshold
+        let m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0);
+        let vth = m.vto; // ~0.7V
+        let vds = 2.0;
+        let vbs = 0.0;
+        
+        // Sample around the threshold with fine resolution
+        let delta = 0.001; // 1mV steps
+        let mut prev_id: Option<Value> = None;
+        
+        for i in -50..=50 {
+            let vgs = vth + (i as f64) * delta;
+            let (id, _) = m.calculate_id(vgs, vds, vbs);
+            
+            if let Some(prev) = prev_id {
+                let change = (id - prev).abs();
+                // Current should change smoothly, not jump
+                assert!(
+                    change < 1e-4,
+                    "Discontinuity at Vgs={:.4}: Id jumped by {:.2e}",
+                    vgs, change
+                );
+            }
+            prev_id = Some(id);
+        }
+    }
+
+    #[test]
+    fn test_id_continuity_at_saturation_boundary() {
+        // Test that drain current is continuous as Vds crosses Vdsat (linear <-> saturation)
+        let m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0);
+        let vgs = 2.0;
+        let vbs = 0.0;
+        let vdsat = vgs - m.vto; // ~1.3V
+        
+        let delta = 0.001;
+        let mut prev_id: Option<Value> = None;
+        
+        for i in -50..=50 {
+            let vds = vdsat + (i as f64) * delta;
+            if vds <= 0.0 { continue; }
+            
+            let (id, _) = m.calculate_id(vgs, vds, vbs);
+            
+            if let Some(prev) = prev_id {
+                let change = (id - prev).abs();
+                assert!(
+                    change < 1e-4,
+                    "Discontinuity at Vds={:.4}: Id jumped by {:.2e}",
+                    vds, change
+                );
+            }
+            prev_id = Some(id);
+        }
+    }
+
+    #[test]
+    fn test_gm_continuity() {
+        // Test that transconductance gm is continuous (C1 of Id)
+        let m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0);
+        let vth = m.vto;
+        let vds = 2.0;
+        let vbs = 0.0;
+        
+        let delta = 0.001;
+        let mut prev_gm: Option<Value> = None;
+        
+        for i in -50..=50 {
+            let vgs = vth + (i as f64) * delta;
+            let gm = m.gm(vgs, vds, vbs);
+            
+            if let Some(prev) = prev_gm {
+                let change = (gm - prev).abs();
+                // gm should change smoothly
+                assert!(
+                    change < 1e-3,
+                    "gm discontinuity at Vgs={:.4}: jumped by {:.2e}",
+                    vgs, change
+                );
+            }
+            prev_gm = Some(gm);
+        }
+    }
+
+    #[test]
+    fn test_gds_continuity() {
+        // Test that output conductance gds is continuous
+        let m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0);
+        let vgs = 2.0;
+        let vbs = 0.0;
+        let vdsat = vgs - m.vto;
+        
+        let delta = 0.001;
+        let mut prev_gds: Option<Value> = None;
+        
+        for i in -50..=50 {
+            let vds = vdsat + (i as f64) * delta;
+            if vds <= 0.0 { continue; }
+            
+            let gds = m.gds(vgs, vds, vbs);
+            
+            if let Some(prev) = prev_gds {
+                let change = (gds - prev).abs();
+                assert!(
+                    change < 1e-3,
+                    "gds discontinuity at Vds={:.4}: jumped by {:.2e}",
+                    vds, change
+                );
+            }
+            prev_gds = Some(gds);
+        }
     }
 }
