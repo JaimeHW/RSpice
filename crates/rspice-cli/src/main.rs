@@ -83,20 +83,143 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     // Parse the netlist
     let netlist = rspice_core::Netlist::parse_file(&input_path)?;
     
-    log::info!("Title: {}", netlist.title);
-    log::info!("Elements: {}", netlist.elements.len());
-    log::info!("Analyses: {}", netlist.analyses.len());
-
-    // TODO: Build circuit, run simulation, output results
-    println!("Netlist '{}' parsed successfully.", netlist.title);
-    println!("  {} element(s)", netlist.elements.len());
-    println!("  {} analysis command(s)", netlist.analyses.len());
-    
-    for analysis in &netlist.analyses {
-        println!("  Analysis: {:?}", analysis);
+    if args.verbose {
+        println!("Title: {}", netlist.title);
+        println!("Elements: {}", netlist.elements.len());
+        println!("Analyses: {}", netlist.analyses.len());
     }
 
-    println!("\nSimulation engine under development...");
+    // Create simulation engine
+    let engine = rspice_core::Engine::default();
+    
+    // Process all analysis commands in the netlist
+    use rspice_core::netlist::AnalysisCommand;
+    
+    for (idx, analysis) in netlist.analyses.iter().enumerate() {
+        if args.verbose {
+            println!("\nRunning analysis {}/{}: {:?}", idx + 1, netlist.analyses.len(), analysis);
+        }
+        
+        match analysis {
+            AnalysisCommand::Op => {
+                println!("Running DC operating point...");
+                match engine.run_dc_op(&netlist) {
+                    Ok(result) => {
+                        println!("DC Operating Point:");
+                        for i in 1..=result.node_voltages.len().min(10) {
+                            println!("  V({}) = {:.6} V", i, result.voltage(i));
+                        }
+                        if result.node_voltages.len() > 10 {
+                            println!("  ... ({} more nodes)", result.node_voltages.len() - 10);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("DC OP failed: {}", e);
+                    }
+                }
+            }
+            AnalysisCommand::Dc { source, start, stop, step } => {
+                println!("Running DC sweep on {} from {} to {} by {}...", source, start, stop, step);
+                match engine.run_dc_sweep(&netlist, source, *start, *stop, *step) {
+                    Ok(results) => {
+                        println!("DC Sweep: {} points computed", results.len());
+                        // Export if output path specified
+                        if let Some(ref output_path) = args.output {
+                            let sweep_vals: Vec<f64> = results.iter().map(|(v, _)| *v).collect();
+                            let mut node_waveforms: Vec<Vec<f64>> = Vec::new();
+                            if !results.is_empty() {
+                                let num_nodes = results[0].1.node_voltages.len();
+                                for node in 0..num_nodes.min(5) {
+                                    let waveform: Vec<f64> = results.iter().map(|(_, r)| r.voltage(node + 1)).collect();
+                                    node_waveforms.push(waveform);
+                                }
+                            }
+                            let node_names: Vec<String> = (1..=node_waveforms.len()).map(|i| i.to_string()).collect();
+                            let format = if args.format == "ascii" { 
+                                rspice_core::analysis::RawFormat::Ascii 
+                            } else { 
+                                rspice_core::analysis::RawFormat::Binary 
+                            };
+                            rspice_core::analysis::export_dc_sweep(output_path, &sweep_vals, source, &node_names, &node_waveforms, format)?;
+                            println!("Results exported to: {}", output_path.display());
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("DC sweep failed: {}", e);
+                    }
+                }
+            }
+            AnalysisCommand::Tran { step, stop, start, max_step: _ } => {
+                let tstart = start.unwrap_or(0.0);
+                println!("Running transient analysis: {} to {} (step {})...", tstart, stop, step);
+                
+                match engine.run_tran(&netlist, *stop, *step) {
+                    Ok(result) => {
+                        println!("Transient: {} time points", result.time.len());
+                        
+                        // Export if output path specified
+                        if let Some(ref output_path) = args.output {
+                            let node_names: Vec<String> = (1..=result.voltages.len()).map(|i| i.to_string()).collect();
+                            let format = if args.format == "ascii" { 
+                                rspice_core::analysis::RawFormat::Ascii 
+                            } else { 
+                                rspice_core::analysis::RawFormat::Binary 
+                            };
+                            rspice_core::analysis::export_transient(output_path, &result.time, &node_names, &result.voltages, format)?;
+                            println!("Results exported to: {}", output_path.display());
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Transient failed: {}", e);
+                    }
+                }
+            }
+            AnalysisCommand::Ac { variation: _, points, start_freq, stop_freq } => {
+                println!("Running AC analysis: {} to {} Hz ({} points)...", start_freq, stop_freq, points);
+                
+                // Generate frequency points (decade sweep)
+                let frequencies: Vec<f64> = (0..*points)
+                    .map(|i| start_freq * (stop_freq / start_freq).powf(i as f64 / (*points as f64 - 1.0)))
+                    .collect();
+                
+                match engine.run_ac(&netlist, &frequencies) {
+                    Ok(results) => {
+                        println!("AC Analysis: {} frequency points", results.len());
+                        if args.verbose && !results.is_empty() {
+                            let first = &results[0];
+                            let last = results.last().unwrap();
+                            println!("  @ {:e} Hz: |V(1)| = {:.4}", first.frequency, first.voltage_magnitude(1));
+                            println!("  @ {:e} Hz: |V(1)| = {:.4}", last.frequency, last.voltage_magnitude(1));
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("AC analysis failed: {}", e);
+                    }
+                }
+            }
+            _ => {
+                println!("Analysis type {:?} not yet fully supported", analysis);
+            }
+        }
+    }
 
+    if netlist.analyses.is_empty() {
+        // Default: run DC operating point
+        println!("No analysis commands - running default DC OP...");
+        match engine.run_dc_op(&netlist) {
+            Ok(result) => {
+                println!("DC Operating Point:");
+                for i in 1..=result.node_voltages.len().min(10) {
+                    println!("  V({}) = {:.6} V", i, result.voltage(i));
+                }
+            }
+            Err(e) => {
+                eprintln!("DC OP failed: {}", e);
+            }
+        }
+    }
+
+    println!("\nSimulation complete.");
     Ok(())
 }
+
