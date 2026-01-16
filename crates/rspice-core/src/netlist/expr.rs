@@ -582,8 +582,109 @@ fn eval_function(name: &str, args: &[Expr], ctx: &ParamContext) -> Result<Value,
             let x = get_arg(0)?;
             Ok(if x > 0.0 { 1.0 } else if x < 0.0 { -1.0 } else { 0.0 })
         }
+        "TABLE" => {
+            // TABLE(x, x1, y1, x2, y2, ...) - piecewise linear interpolation
+            // Used extensively in vendor models for nonlinear behavior
+            if args.len() < 3 {
+                return Err(ExprError::WrongArgCount("TABLE".to_string()));
+            }
+            
+            let x = get_arg(0)?;
+            
+            // Extract (x, y) pairs from remaining arguments
+            let mut points: Vec<(Value, Value)> = Vec::new();
+            let mut i = 1;
+            while i + 1 < args.len() {
+                let xi = get_arg(i)?;
+                let yi = get_arg(i + 1)?;
+                points.push((xi, yi));
+                i += 2;
+            }
+            
+            Ok(table_interpolate(x, &points))
+        }
+        "PWL" => {
+            // PWL is an alias for TABLE (both do piecewise linear)
+            if args.len() < 3 {
+                return Err(ExprError::WrongArgCount("PWL".to_string()));
+            }
+            
+            let x = get_arg(0)?;
+            let mut points: Vec<(Value, Value)> = Vec::new();
+            let mut i = 1;
+            while i + 1 < args.len() {
+                let xi = get_arg(i)?;
+                let yi = get_arg(i + 1)?;
+                points.push((xi, yi));
+                i += 2;
+            }
+            
+            Ok(table_interpolate(x, &points))
+        }
         _ => Err(ExprError::UnknownFunction(name.to_string())),
     }
+}
+
+/// Piecewise linear interpolation for TABLE function
+/// 
+/// Linearly interpolates between defined points.
+/// For x outside the defined range, extrapolates from the nearest segment.
+#[inline]
+fn table_interpolate(x: Value, points: &[(Value, Value)]) -> Value {
+    if points.is_empty() {
+        return 0.0;
+    }
+    
+    if points.len() == 1 {
+        return points[0].1;
+    }
+    
+    // Sort points by x (should already be sorted in valid input)
+    // For performance, we assume input is sorted
+    
+    // Handle x below first point - extrapolate
+    if x <= points[0].0 {
+        if points.len() >= 2 {
+            let (x0, y0) = points[0];
+            let (x1, y1) = points[1];
+            if (x1 - x0).abs() > 1e-18 {
+                let slope = (y1 - y0) / (x1 - x0);
+                return y0 + slope * (x - x0);
+            }
+        }
+        return points[0].1;
+    }
+    
+    // Handle x above last point - extrapolate
+    let last = points.len() - 1;
+    if x >= points[last].0 {
+        if points.len() >= 2 {
+            let (x0, y0) = points[last - 1];
+            let (x1, y1) = points[last];
+            if (x1 - x0).abs() > 1e-18 {
+                let slope = (y1 - y0) / (x1 - x0);
+                return y1 + slope * (x - x1);
+            }
+        }
+        return points[last].1;
+    }
+    
+    // Find bracketing points and interpolate
+    for i in 0..points.len() - 1 {
+        let (x0, y0) = points[i];
+        let (x1, y1) = points[i + 1];
+        
+        if x >= x0 && x <= x1 {
+            if (x1 - x0).abs() < 1e-18 {
+                return y0;
+            }
+            let t = (x - x0) / (x1 - x0);
+            return y0 + t * (y1 - y0);
+        }
+    }
+    
+    // Fallback (shouldn't reach here)
+    points[last].1
 }
 
 //=============================================================================
@@ -777,5 +878,56 @@ mod tests {
         
         let result = eval_expression("cabs(3, 4)", &ctx).unwrap();
         assert!(approx_eq(result, 5.0));
+    }
+
+    #[test]
+    fn test_table_interpolation() {
+        let ctx = ParamContext::new();
+        
+        // TABLE(x, x1,y1, x2,y2, ...) - simple linear interpolation
+        // Points: (0,0), (1,10), (2,20)
+        let result = eval_expression("TABLE(0.5, 0,0, 1,10, 2,20)", &ctx).unwrap();
+        assert!(approx_eq(result, 5.0)); // Midpoint between (0,0) and (1,10)
+        
+        let result = eval_expression("TABLE(1.5, 0,0, 1,10, 2,20)", &ctx).unwrap();
+        assert!(approx_eq(result, 15.0)); // Midpoint between (1,10) and (2,20)
+    }
+
+    #[test]
+    fn test_table_extrapolation() {
+        let ctx = ParamContext::new();
+        
+        // Extrapolate below first point
+        let result = eval_expression("TABLE(-0.5, 0,0, 1,10)", &ctx).unwrap();
+        assert!(approx_eq(result, -5.0)); // Extrapolate with slope 10
+        
+        // Extrapolate above last point
+        let result = eval_expression("TABLE(2.0, 0,0, 1,10)", &ctx).unwrap();
+        assert!(approx_eq(result, 20.0)); // Extrapolate with slope 10
+    }
+
+    #[test]
+    fn test_table_at_points() {
+        let ctx = ParamContext::new();
+        
+        // Value exactly at defined points
+        let result = eval_expression("TABLE(0, 0,5, 1,10)", &ctx).unwrap();
+        assert!((result - 5.0).abs() < 1e-10);
+        
+        let result = eval_expression("TABLE(1, 0,5, 1,10)", &ctx).unwrap();
+        assert!((result - 10.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_table_nonlinear_curve() {
+        let ctx = ParamContext::new();
+        
+        // Model a diode-like I-V curve with TABLE
+        // Points: (0,0) -> (0.6,0.001) -> (0.7,0.1) -> (0.8,1.0)
+        // At x=0.5, we're in the first segment (0,0) to (0.6,0.001)
+        // Interpolation: t = 0.5/0.6 = 0.833..., y = 0 + 0.833*(0.001-0) ≈ 0.00083
+        let result = eval_expression("TABLE(0.5, 0,0, 0.6,0.001, 0.7,0.1, 0.8,1.0)", &ctx).unwrap();
+        // x=0.5 is between first point (0,0) and (0.6,0.001)
+        assert!(result >= 0.0 && result < 0.001, "Expected ~0.00083, got {}", result);
     }
 }

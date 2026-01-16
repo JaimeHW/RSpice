@@ -15,7 +15,7 @@
 //! - S-parameter analysis
 //! - Pole-zero analysis
 
-mod dc;
+pub mod dc;
 pub mod ac;
 pub mod transient;
 pub mod noise;
@@ -29,6 +29,8 @@ pub mod transfer;
 pub mod sensitivity;
 pub mod s_param;
 pub mod pole_zero;
+pub mod laplace;
+pub mod waveform_stream;
 
 pub use dc::{DcAnalysis, DcSweep};
 pub use ac::{AcAnalysis, AcResult};
@@ -44,6 +46,8 @@ pub use transfer::{TransferFunctionResult, TransferFunctionConfig, TransferAnaly
 pub use sensitivity::{SensitivityResult, Sensitivity, SensitivityAnalyzer, ElementType, ElementDesc};
 pub use s_param::{SParameterResult, SParameterConfig, SParameterAnalyzer, SMatrix, Port, FrequencySweep};
 pub use pole_zero::{PoleZeroResult, PoleZeroConfig, PoleZeroAnalyzer, Matrix as PzMatrix};
+pub use laplace::{TransferFunction, DiscreteFilter};
+pub use waveform_stream::{StreamingWaveformWriter, StreamingWaveformReader};
 
 use crate::Value;
 

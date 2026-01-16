@@ -10,6 +10,7 @@ rust-version.workspace = true
 [features]
 default = []
 wasm = ["wasm-bindgen"]
+parallel = ["rayon", "portable-atomic"]
 
 [dependencies]
 faer.workspace = true
@@ -19,9 +20,14 @@ nom.workspace = true
 num-complex.workspace = true
 serde = { workspace = true, optional = true }
 
+# Parallel computation (optional)
+rayon = { workspace = true, optional = true }
+portable-atomic = { workspace = true, optional = true }
+
 # WASM support (optional)
 wasm-bindgen = { version = "0.2", optional = true }
 
 [dev-dependencies]
 approx.workspace = true
 env_logger.workspace = true
+
