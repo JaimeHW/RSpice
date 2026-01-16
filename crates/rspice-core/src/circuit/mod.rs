@@ -8,6 +8,7 @@
 use crate::Value;
 use crate::solver::{TripletMatrix, StaticMatrix, CscIndex};
 use crate::device::{Diode, Bjt, Mosfet, MatrixStamper, Vcvs, Vccs, Cccs, Ccvs};
+use crate::device::behavioral::BehavioralSources;
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -775,6 +776,9 @@ impl Mosfets {
 pub struct CircuitData {
     /// Node name to ID mapping
     node_map: HashMap<String, NodeId>,
+    /// Branch element name to branch ordinal mapping (for CCCS/CCVS control lookup)
+    /// Keys are element names (e.g., "V1", "L1"), values are branch ordinals (1-indexed)
+    branch_names: HashMap<String, NodeId>,
     /// Number of nodes (excluding ground)
     num_nodes: usize,
     /// Number of branch current variables (voltage sources, inductors)
@@ -798,11 +802,20 @@ pub struct CircuitData {
     pub cccs: Cccs,
     pub ccvs: Ccvs,
     
+    // Pending control element resolutions (element name -> CCCS/CCVS indices)
+    /// CCCS elements pending control branch resolution: (cccs_index, control_element_name)
+    pending_cccs: Vec<(usize, String)>,
+    /// CCVS elements pending control branch resolution: (ccvs_index, control_element_name)
+    pending_ccvs: Vec<(usize, String)>,
+    
     // Advanced device storage
     pub vswitches: Vec<crate::device::VoltageSwitch>,
     pub iswitches: Vec<crate::device::CurrentSwitch>,
     pub tlines: Vec<crate::device::TransmissionLine>,
     pub couplings: Vec<crate::device::InductorCoupling>,
+    
+    // Behavioral sources (expression-based B-elements)
+    pub behavioral_sources: BehavioralSources,
 }
 
 impl CircuitData {
@@ -815,6 +828,7 @@ impl CircuitData {
         
         Self {
             node_map,
+            branch_names: HashMap::new(),
             num_nodes: 0,
             num_branches: 0,
             resistors: Resistors::new(),
@@ -829,11 +843,14 @@ impl CircuitData {
             vccs: Vccs::new(),
             cccs: Cccs::new(),
             ccvs: Ccvs::new(),
+            pending_cccs: Vec::new(),
+            pending_ccvs: Vec::new(),
             // New device types
             vswitches: Vec::new(),
             iswitches: Vec::new(),
             tlines: Vec::new(),
             couplings: Vec::new(),
+            behavioral_sources: BehavioralSources::new(),
         }
     }
 
@@ -856,6 +873,64 @@ impl CircuitData {
         self.num_branches  // Return branch ordinal (1, 2, 3...)
     }
 
+    /// Allocate a branch and register it with the given element name
+    /// This allows CCCS/CCVS to look up control branches by name
+    pub fn allocate_branch_named(&mut self, name: &str) -> NodeId {
+        let branch = self.allocate_branch();
+        // Store both original and uppercase for case-insensitive lookup
+        self.branch_names.insert(name.to_string(), branch);
+        self.branch_names.insert(name.to_uppercase(), branch);
+        branch
+    }
+
+    /// Look up a branch ordinal by element name (for CCCS/CCVS control element)
+    /// Returns None if the element is not found
+    pub fn get_branch_by_name(&self, name: &str) -> Option<NodeId> {
+        self.branch_names.get(name)
+            .or_else(|| self.branch_names.get(&name.to_uppercase()))
+            .copied()
+    }
+
+    /// Register a CCCS element for pending control branch resolution
+    /// The control_element_name will be resolved after all elements are added
+    pub fn add_cccs_pending(&mut self, cccs_index: usize, control_element_name: String) {
+        self.pending_cccs.push((cccs_index, control_element_name));
+    }
+
+    /// Register a CCVS element for pending control branch resolution
+    pub fn add_ccvs_pending(&mut self, ccvs_index: usize, control_element_name: String) {
+        self.pending_ccvs.push((ccvs_index, control_element_name));
+    }
+
+    /// Resolve all pending CCCS/CCVS control element references
+    /// Call this after all elements have been added to the circuit
+    /// Returns an error if any control element is not found
+    pub fn resolve_control_elements(&mut self) -> Result<(), CircuitError> {
+        // Resolve CCCS control branches
+        for (cccs_idx, control_name) in self.pending_cccs.drain(..).collect::<Vec<_>>() {
+            let branch = self.get_branch_by_name(&control_name)
+                .ok_or_else(|| CircuitError::InvalidComponent(
+                    format!("CCCS control element not found: {}", control_name)
+                ))?;
+            if cccs_idx < self.cccs.ctrl_branch.len() {
+                self.cccs.ctrl_branch[cccs_idx] = branch;
+            }
+        }
+        
+        // Resolve CCVS control branches
+        for (ccvs_idx, control_name) in self.pending_ccvs.drain(..).collect::<Vec<_>>() {
+            let branch = self.get_branch_by_name(&control_name)
+                .ok_or_else(|| CircuitError::InvalidComponent(
+                    format!("CCVS control element not found: {}", control_name)
+                ))?;
+            if ccvs_idx < self.ccvs.ctrl_branch.len() {
+                self.ccvs.ctrl_branch[ccvs_idx] = branch;
+            }
+        }
+        
+        Ok(())
+    }
+
     /// Convert branch ordinal to matrix index
     /// Branch ordinals start at 1, matrix indices for branches start at num_nodes
     pub fn get_branch_matrix_index(&self, branch_ordinal: NodeId) -> usize {
@@ -875,6 +950,22 @@ impl CircuitData {
     /// Number of branches
     pub fn num_branches(&self) -> usize {
         self.num_branches
+    }
+
+    /// Total device count (for parallel stamping threshold)
+    pub fn device_count(&self) -> usize {
+        self.resistors.len()
+            + self.capacitors.len()
+            + self.inductors.len()
+            + self.voltage_sources.len()
+            + self.current_sources.len()
+            + self.diodes.len()
+            + self.bjts.len()
+            + self.mosfets.len()
+            + self.vcvs.len()
+            + self.vccs.len()
+            + self.cccs.len()
+            + self.ccvs.len()
     }
 
     /// Create a triplet matrix for this circuit

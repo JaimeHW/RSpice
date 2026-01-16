@@ -135,6 +135,7 @@ impl<'a> Flattener<'a> {
     }
 
     /// Remap an element's nodes using the current prefix and node map
+    /// Also remaps CCCS/CCVS control element names
     fn remap_element(
         &self,
         element: &Element,
@@ -152,9 +153,38 @@ impl<'a> Flattener<'a> {
             .map(|n| self.remap_node(n, prefix, node_map))
             .collect();
 
+        // Remap the element kind, handling CCCS/CCVS control element names
+        let new_kind = match &element.kind {
+            ElementKind::Cccs { gain, control_element } => {
+                // Remap control element name with prefix (like element names)
+                let new_ctrl = if prefix.is_empty() {
+                    control_element.clone()
+                } else {
+                    format!("{}.{}", prefix, control_element)
+                };
+                ElementKind::Cccs {
+                    gain: *gain,
+                    control_element: new_ctrl,
+                }
+            }
+            ElementKind::Ccvs { transresistance, control_element } => {
+                let new_ctrl = if prefix.is_empty() {
+                    control_element.clone()
+                } else {
+                    format!("{}.{}", prefix, control_element)
+                };
+                ElementKind::Ccvs {
+                    transresistance: *transresistance,
+                    control_element: new_ctrl,
+                }
+            }
+            // All other kinds - clone as-is
+            other => other.clone(),
+        };
+
         Element {
             name: new_name,
-            kind: element.kind.clone(),
+            kind: new_kind,
             nodes: new_nodes,
         }
     }
