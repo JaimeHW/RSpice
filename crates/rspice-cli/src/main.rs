@@ -151,11 +151,22 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             }
             AnalysisCommand::Tran { step, stop, start, max_step: _ } => {
                 let tstart = start.unwrap_or(0.0);
-                println!("Running transient analysis: {} to {} (step {})...", tstart, stop, step);
                 
-                match engine.run_tran(&netlist, *stop, *step) {
+                // Progress indicator for transient simulation
+                use indicatif::{ProgressBar, ProgressStyle};
+                let pb = ProgressBar::new_spinner();
+                pb.set_style(ProgressStyle::default_spinner()
+                    .template("{spinner:.green} {msg}")
+                    .unwrap());
+                pb.set_message(format!("Running transient: {} to {} (step {})...", tstart, stop, step));
+                pb.enable_steady_tick(std::time::Duration::from_millis(100));
+                
+                let result = engine.run_tran(&netlist, *stop, *step);
+                pb.finish_and_clear();
+                
+                match result {
                     Ok(result) => {
-                        println!("Transient: {} time points", result.time.len());
+                        println!("✓ Transient complete: {} time points computed", result.time.len());
                         
                         // Export if output path specified
                         if let Some(ref output_path) = args.output {
@@ -166,11 +177,11 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                                 rspice_core::analysis::RawFormat::Binary 
                             };
                             rspice_core::analysis::export_transient(output_path, &result.time, &node_names, &result.voltages, format)?;
-                            println!("Results exported to: {}", output_path.display());
+                            println!("  Results exported to: {}", output_path.display());
                         }
                     }
                     Err(e) => {
-                        eprintln!("Transient failed: {}", e);
+                        eprintln!("✗ Transient failed: {}", e);
                     }
                 }
             }

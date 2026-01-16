@@ -17,3 +17,5 @@ clap.workspace = true
 log.workspace = true
 env_logger.workspace = true
 thiserror.workspace = true
+indicatif = "0.17"
+
