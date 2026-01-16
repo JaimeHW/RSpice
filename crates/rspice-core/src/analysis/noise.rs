@@ -1,0 +1,520 @@
+//! Noise Analysis Module
+//!
+//! Computes noise spectral density as a function of frequency.
+//! Supports:
+//! - **Thermal noise**: Johnson-Nyquist noise from resistors (4kTR)
+//! - **Shot noise**: From PN junctions in diodes and BJTs (2qI)
+//! - **Flicker noise**: 1/f noise in semiconductors (KF/f^AF)
+//!
+//! # Algorithm
+//! 1. Compute small-signal AC solution at each frequency
+//! 2. For each noise source, compute noise current spectral density
+//! 3. Use transfer function to compute output voltage noise contribution
+//! 4. Sum all contributions (in mean-square) for total output noise
+//!
+//! # Example
+//! ```ignore
+//! .NOISE V(out) Vin DEC 10 1Hz 100kHz
+//! ```
+//! This computes noise at output node referenced to input source Vin.
+
+use crate::Value;
+use super::AnalysisConfig;
+
+//=============================================================================
+// Constants
+//=============================================================================
+
+/// Boltzmann constant (J/K)
+pub const K_BOLTZMANN: Value = 1.380649e-23;
+/// Electron charge (C)
+pub const Q_ELECTRON: Value = 1.602176634e-19;
+/// Default temperature (K) = 300K = 27°C
+pub const T_NOMINAL: Value = 300.0;
+
+//=============================================================================
+// Noise Source Types
+//=============================================================================
+
+/// Types of noise sources in the circuit
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoiseSourceType {
+    /// Thermal (Johnson-Nyquist) noise: 4kTR
+    Thermal,
+    /// Shot noise: 2qI
+    Shot,
+    /// Flicker (1/f) noise: KF * I^AF / f
+    Flicker,
+}
+
+/// A noise source in the circuit
+#[derive(Debug, Clone)]
+pub struct NoiseSource {
+    /// Name of the device generating this noise
+    pub device_name: String,
+    /// Type of noise
+    pub noise_type: NoiseSourceType,
+    /// Node where noise current is injected (+)
+    pub node_pos: usize,
+    /// Node where noise current is injected (-)
+    pub node_neg: usize,
+    /// Spectral density parameter (R for thermal, I for shot, KF for flicker)
+    pub parameter: Value,
+    /// Flicker noise exponent (AF, typically 1.0)
+    pub af: Value,
+    /// Current for flicker noise (only used for flicker type)
+    pub current: Value,
+}
+
+impl NoiseSource {
+    /// Create a thermal noise source (resistor)
+    pub fn thermal(device_name: String, node_pos: usize, node_neg: usize, resistance: Value) -> Self {
+        Self {
+            device_name,
+            noise_type: NoiseSourceType::Thermal,
+            node_pos,
+            node_neg,
+            parameter: resistance,
+            af: 1.0,
+            current: 0.0,
+        }
+    }
+
+    /// Create a shot noise source (diode/BJT junction)
+    pub fn shot(device_name: String, node_pos: usize, node_neg: usize, current: Value) -> Self {
+        Self {
+            device_name,
+            noise_type: NoiseSourceType::Shot,
+            node_pos,
+            node_neg,
+            parameter: current.abs(),
+            af: 1.0,
+            current: 0.0,
+        }
+    }
+
+    /// Create a flicker (1/f) noise source
+    pub fn flicker(
+        device_name: String,
+        node_pos: usize,
+        node_neg: usize,
+        kf: Value,
+        af: Value,
+        current: Value,
+    ) -> Self {
+        Self {
+            device_name,
+            noise_type: NoiseSourceType::Flicker,
+            node_pos,
+            node_neg,
+            parameter: kf,
+            af,
+            current,
+        }
+    }
+
+    /// Compute current noise spectral density (A²/Hz) at given frequency
+    pub fn spectral_density(&self, frequency: Value, temperature: Value) -> Value {
+        match self.noise_type {
+            NoiseSourceType::Thermal => {
+                // Thermal noise: Si = 4kT/R (current noise spectral density)
+                // For resistor R: current noise = 4kT/R A²/Hz
+                if self.parameter > 0.0 {
+                    4.0 * K_BOLTZMANN * temperature / self.parameter
+                } else {
+                    0.0
+                }
+            }
+            NoiseSourceType::Shot => {
+                // Shot noise: Si = 2qI (A²/Hz)
+                2.0 * Q_ELECTRON * self.parameter
+            }
+            NoiseSourceType::Flicker => {
+                // Flicker noise: Si = KF * I^AF / f (A²/Hz)
+                if frequency > 0.0 {
+                    self.parameter * self.current.abs().powf(self.af) / frequency
+                } else {
+                    0.0 // Avoid division by zero
+                }
+            }
+        }
+    }
+}
+
+//=============================================================================
+// Noise Analysis Engine
+//=============================================================================
+
+/// Noise Analysis engine
+#[derive(Debug)]
+pub struct NoiseAnalysis {
+    config: AnalysisConfig,
+    /// Frequency points for analysis
+    frequencies: Vec<Value>,
+    /// Temperature for noise calculations (K)
+    temperature: Value,
+    /// Output node for noise measurement
+    output_node: Option<usize>,
+    /// Reference node (usually ground)
+    reference_node: usize,
+    /// Input source name for input-referred noise
+    input_source: Option<String>,
+}
+
+impl NoiseAnalysis {
+    /// Create a new noise analysis
+    pub fn new(config: AnalysisConfig) -> Self {
+        Self {
+            config,
+            frequencies: Vec::new(),
+            temperature: T_NOMINAL,
+            output_node: None,
+            reference_node: 0,
+            input_source: None,
+        }
+    }
+
+    /// Set output node for noise measurement
+    pub fn set_output(&mut self, node: usize) {
+        self.output_node = Some(node);
+    }
+
+    /// Set reference node (default is ground = 0)
+    pub fn set_reference(&mut self, node: usize) {
+        self.reference_node = node;
+    }
+
+    /// Set input source for input-referred noise calculation
+    pub fn set_input_source(&mut self, source_name: String) {
+        self.input_source = Some(source_name);
+    }
+
+    /// Set temperature for noise calculations
+    pub fn set_temperature(&mut self, temp_kelvin: Value) {
+        self.temperature = temp_kelvin;
+    }
+
+    /// Set up decade frequency sweep
+    pub fn decade_sweep(&mut self, start: Value, stop: Value, points_per_decade: usize) {
+        let start_log = start.log10();
+        let stop_log = stop.log10();
+        let num_decades = stop_log - start_log;
+        let total_points = (num_decades * points_per_decade as f64).ceil() as usize;
+        
+        self.frequencies = (0..=total_points)
+            .map(|i| {
+                let log_f = start_log + (stop_log - start_log) * (i as f64) / (total_points as f64);
+                10.0_f64.powf(log_f)
+            })
+            .collect();
+    }
+
+    /// Set up linear frequency sweep
+    pub fn linear_sweep(&mut self, start: Value, stop: Value, points: usize) {
+        self.frequencies = (0..points)
+            .map(|i| start + (stop - start) * (i as f64) / ((points - 1).max(1) as f64))
+            .collect();
+    }
+
+    /// Get frequency points
+    pub fn frequencies(&self) -> &[Value] {
+        &self.frequencies
+    }
+
+    /// Get temperature
+    pub fn temperature(&self) -> Value {
+        self.temperature
+    }
+
+    /// Get config
+    pub fn config(&self) -> &AnalysisConfig {
+        &self.config
+    }
+}
+
+impl Default for NoiseAnalysis {
+    fn default() -> Self {
+        Self::new(AnalysisConfig::default())
+    }
+}
+
+//=============================================================================
+// Noise Result
+//=============================================================================
+
+/// Noise analysis result at a single frequency
+#[derive(Debug, Clone)]
+pub struct NoiseResult {
+    /// Frequency (Hz)
+    pub frequency: Value,
+    /// Total output voltage noise spectral density (V²/Hz)
+    pub output_noise_density: Value,
+    /// Input-referred noise spectral density (V²/Hz)
+    pub input_referred_density: Value,
+    /// Individual noise contributions from each source
+    pub contributions: Vec<NoiseContribution>,
+}
+
+/// Contribution from a single noise source
+#[derive(Debug, Clone)]
+pub struct NoiseContribution {
+    /// Device name
+    pub device_name: String,
+    /// Noise type
+    pub noise_type: NoiseSourceType,
+    /// Contribution to output noise (V²/Hz)
+    pub output_contribution: Value,
+    /// Percentage of total noise
+    pub percentage: Value,
+}
+
+impl NoiseResult {
+    /// Get total output noise in V/√Hz (RMS voltage noise density)
+    pub fn output_noise_rms(&self) -> Value {
+        self.output_noise_density.sqrt()
+    }
+
+    /// Get input-referred noise in V/√Hz
+    pub fn input_referred_rms(&self) -> Value {
+        self.input_referred_density.sqrt()
+    }
+
+    /// Get total output noise in dBV/Hz
+    pub fn output_noise_dbv(&self) -> Value {
+        if self.output_noise_density > 0.0 {
+            10.0 * self.output_noise_density.log10()
+        } else {
+            -200.0
+        }
+    }
+
+    /// Get the dominant noise source
+    pub fn dominant_source(&self) -> Option<&NoiseContribution> {
+        self.contributions.iter().max_by(|a, b| {
+            a.output_contribution.partial_cmp(&b.output_contribution)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    }
+}
+
+//=============================================================================
+// Integrated Noise Calculator
+//=============================================================================
+
+/// Calculator for integrated noise over a frequency band
+#[derive(Debug)]
+pub struct IntegratedNoise {
+    /// Results at each frequency point
+    results: Vec<NoiseResult>,
+}
+
+impl IntegratedNoise {
+    /// Create from a vector of noise results
+    pub fn new(results: Vec<NoiseResult>) -> Self {
+        Self { results }
+    }
+
+    /// Calculate total integrated output noise over the frequency band (V RMS)
+    /// Uses trapezoidal integration
+    pub fn total_output_noise(&self) -> Value {
+        if self.results.len() < 2 {
+            return 0.0;
+        }
+
+        let mut total = 0.0;
+        for i in 1..self.results.len() {
+            let f1 = self.results[i - 1].frequency;
+            let f2 = self.results[i].frequency;
+            let s1 = self.results[i - 1].output_noise_density;
+            let s2 = self.results[i].output_noise_density;
+            
+            // Trapezoidal integration
+            total += 0.5 * (s1 + s2) * (f2 - f1);
+        }
+
+        total.sqrt() // Return RMS voltage
+    }
+
+    /// Calculate integrated input-referred noise (V RMS)
+    pub fn total_input_referred_noise(&self) -> Value {
+        if self.results.len() < 2 {
+            return 0.0;
+        }
+
+        let mut total = 0.0;
+        for i in 1..self.results.len() {
+            let f1 = self.results[i - 1].frequency;
+            let f2 = self.results[i].frequency;
+            let s1 = self.results[i - 1].input_referred_density;
+            let s2 = self.results[i].input_referred_density;
+            
+            total += 0.5 * (s1 + s2) * (f2 - f1);
+        }
+
+        total.sqrt()
+    }
+
+    /// Get the frequency with maximum noise density
+    pub fn peak_noise_frequency(&self) -> Option<Value> {
+        self.results
+            .iter()
+            .max_by(|a, b| {
+                a.output_noise_density.partial_cmp(&b.output_noise_density)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|r| r.frequency)
+    }
+
+    /// Get all results
+    pub fn results(&self) -> &[NoiseResult] {
+        &self.results
+    }
+}
+
+//=============================================================================
+// Helper Functions
+//=============================================================================
+
+/// Calculate thermal noise voltage spectral density for a resistor (V²/Hz)
+#[inline]
+pub fn thermal_voltage_noise(resistance: Value, temperature: Value) -> Value {
+    4.0 * K_BOLTZMANN * temperature * resistance
+}
+
+/// Calculate thermal noise current spectral density for a resistor (A²/Hz)
+#[inline]
+pub fn thermal_current_noise(resistance: Value, temperature: Value) -> Value {
+    if resistance > 0.0 {
+        4.0 * K_BOLTZMANN * temperature / resistance
+    } else {
+        0.0
+    }
+}
+
+/// Calculate shot noise current spectral density (A²/Hz)
+#[inline]
+pub fn shot_noise(current: Value) -> Value {
+    2.0 * Q_ELECTRON * current.abs()
+}
+
+/// Calculate equivalent noise bandwidth for a first-order lowpass filter
+#[inline]
+pub fn noise_bandwidth_first_order(f3db: Value) -> Value {
+    std::f64::consts::FRAC_PI_2 * f3db
+}
+
+/// Calculate equivalent noise bandwidth for a second-order lowpass filter (Q=0.707)
+#[inline]
+pub fn noise_bandwidth_second_order_butterworth(f3db: Value) -> Value {
+    1.11 * f3db
+}
+
+//=============================================================================
+// Tests
+//=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_thermal_noise_resistor() {
+        // 1kΩ resistor at 300K should have ~4.14e-17 V²/Hz
+        let noise = thermal_voltage_noise(1000.0, 300.0);
+        let expected = 4.0 * K_BOLTZMANN * 300.0 * 1000.0;
+        assert!((noise - expected).abs() < 1e-25);
+        assert!((noise - 1.66e-17).abs() < 1e-18);
+    }
+
+    #[test]
+    fn test_shot_noise_diode() {
+        // 1mA current should have shot noise of ~3.2e-22 A²/Hz
+        let noise = shot_noise(1e-3);
+        let expected = 2.0 * Q_ELECTRON * 1e-3;
+        assert!((noise - expected).abs() < 1e-30);
+    }
+
+    #[test]
+    fn test_noise_source_thermal() {
+        let source = NoiseSource::thermal("R1".to_string(), 1, 0, 1000.0);
+        let density = source.spectral_density(1000.0, 300.0);
+        
+        // Should be 4kT/R = 4 * 1.38e-23 * 300 / 1000 ≈ 1.66e-23 A²/Hz
+        assert!((density - 1.66e-23).abs() < 1e-24);
+    }
+
+    #[test]
+    fn test_noise_source_shot() {
+        let source = NoiseSource::shot("D1".to_string(), 1, 0, 1e-3);
+        let density = source.spectral_density(1000.0, 300.0);
+        
+        // Should be 2qI = 2 * 1.6e-19 * 1e-3 ≈ 3.2e-22 A²/Hz
+        assert!((density - 3.2e-22).abs() < 1e-23);
+    }
+
+    #[test]
+    fn test_noise_source_flicker() {
+        let source = NoiseSource::flicker("Q1".to_string(), 1, 0, 1e-15, 1.0, 1e-3);
+        
+        // At 100Hz with KF=1e-15, AF=1, I=1mA:
+        // Si = 1e-15 * 1e-3 / 100 = 1e-20 A²/Hz
+        let density = source.spectral_density(100.0, 300.0);
+        assert!((density - 1e-20).abs() < 1e-22);
+        
+        // At 1000Hz, should be 10x lower
+        let density_1k = source.spectral_density(1000.0, 300.0);
+        assert!((density / density_1k - 10.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_decade_sweep() {
+        let mut noise = NoiseAnalysis::default();
+        noise.decade_sweep(1.0, 1e6, 10);
+        
+        let freqs = noise.frequencies();
+        assert!(freqs[0] >= 1.0 - 1e-10);
+        assert!(*freqs.last().unwrap() <= 1e6 + 1.0);
+    }
+
+    #[test]
+    fn test_noise_result_rms() {
+        let result = NoiseResult {
+            frequency: 1000.0,
+            output_noise_density: 1e-18,  // V²/Hz
+            input_referred_density: 1e-18,
+            contributions: vec![],
+        };
+        
+        // RMS should be sqrt of density
+        assert!((result.output_noise_rms() - 1e-9).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_integrated_noise() {
+        // Create white noise results (constant spectral density)
+        let results: Vec<NoiseResult> = (0..100)
+            .map(|i| NoiseResult {
+                frequency: (i + 1) as f64 * 100.0,  // 100Hz to 10kHz
+                output_noise_density: 1e-18,  // Constant V²/Hz
+                input_referred_density: 1e-18,
+                contributions: vec![],
+            })
+            .collect();
+        
+        let integrated = IntegratedNoise::new(results);
+        let total = integrated.total_output_noise();
+        
+        // Total should be sqrt(density * bandwidth) = sqrt(1e-18 * 9900) ≈ 3.15e-8 V
+        let expected = (1e-18_f64 * (10000.0 - 100.0)).sqrt();
+        assert!((total - expected).abs() / expected < 0.02);  // 2% tolerance
+    }
+
+    #[test]
+    fn test_noise_analysis_temperature() {
+        let mut noise = NoiseAnalysis::default();
+        assert_eq!(noise.temperature(), 300.0);
+        
+        noise.set_temperature(400.0);
+        assert_eq!(noise.temperature(), 400.0);
+    }
+}

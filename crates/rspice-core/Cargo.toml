@@ -1,0 +1,27 @@
+[package]
+name = "rspice-core"
+description = "High-performance SPICE circuit simulation engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+wasm = ["wasm-bindgen"]
+
+[dependencies]
+faer.workspace = true
+thiserror.workspace = true
+log.workspace = true
+nom.workspace = true
+num-complex.workspace = true
+serde = { workspace = true, optional = true }
+
+# WASM support (optional)
+wasm-bindgen = { version = "0.2", optional = true }
+
+[dev-dependencies]
+approx.workspace = true
+env_logger.workspace = true

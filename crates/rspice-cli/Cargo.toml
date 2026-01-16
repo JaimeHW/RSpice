@@ -1,0 +1,19 @@
+[package]
+name = "rspice-cli"
+description = "Command-line interface for RSpice circuit simulator"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "rspice"
+path = "src/main.rs"
+
+[dependencies]
+rspice-core.workspace = true
+clap.workspace = true
+log.workspace = true
+env_logger.workspace = true
+thiserror.workspace = true

@@ -1,0 +1,38 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rspice-core",
+    "crates/rspice-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["RSpice Contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/rspice/rspice"
+rust-version = "1.85"
+
+[workspace.dependencies]
+# Core dependencies - faer for high-performance sparse linear algebra
+faer = "0.21"
+thiserror = "2.0"
+log = "0.4"
+env_logger = "0.11"
+num-complex = "0.4"
+
+# Parsing
+nom = "8.0"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Testing
+approx = "0.5"
+
+# Internal crates
+rspice-core = { path = "crates/rspice-core" }
