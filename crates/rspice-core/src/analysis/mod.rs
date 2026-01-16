@@ -31,6 +31,7 @@ pub mod s_param;
 pub mod pole_zero;
 pub mod laplace;
 pub mod waveform_stream;
+pub mod raw_export;
 
 pub use dc::{DcAnalysis, DcSweep};
 pub use ac::{AcAnalysis, AcResult};
@@ -48,6 +49,7 @@ pub use s_param::{SParameterResult, SParameterConfig, SParameterAnalyzer, SMatri
 pub use pole_zero::{PoleZeroResult, PoleZeroConfig, PoleZeroAnalyzer, Matrix as PzMatrix};
 pub use laplace::{TransferFunction, DiscreteFilter};
 pub use waveform_stream::{StreamingWaveformWriter, StreamingWaveformReader};
+pub use raw_export::{RawExporter, RawFormat, RawVariable, VariableType, export_transient, export_dc_sweep};
 
 use crate::Value;
 
