@@ -16,6 +16,13 @@ pub struct TransientAnalysis {
     initial_step: Value,
     /// Integration method
     method: IntegrationMethod,
+    /// Use Initial Conditions (UIC) - skip DC operating point, use IC= values
+    /// When true:
+    /// - Skip DC operating point calculation
+    /// - Use IC= values on capacitors and inductors directly
+    /// - Set all unspecified node voltages to 0V
+    /// This is useful for oscillators and circuits that don't have a stable DC OP
+    use_initial_conditions: bool,
 }
 
 /// Numerical integration methods for transient analysis
@@ -41,6 +48,7 @@ impl TransientAnalysis {
             max_step,
             initial_step: max_step / 100.0,
             method: IntegrationMethod::Trapezoidal,
+            use_initial_conditions: false,
         }
     }
 
@@ -54,6 +62,27 @@ impl TransientAnalysis {
     pub fn with_initial_step(mut self, step: Value) -> Self {
         self.initial_step = step;
         self
+    }
+
+    /// Enable Use Initial Conditions (UIC) mode
+    /// 
+    /// When UIC is enabled:
+    /// - Skip DC operating point calculation at t=0
+    /// - Use IC= values on capacitors (voltage) and inductors (current)
+    /// - Unspecified nodes start at 0V
+    /// 
+    /// This is useful for:
+    /// - Oscillators (no stable DC OP)
+    /// - Circuits where you want to specify exact starting conditions
+    /// - Faster simulation when DC OP is not needed
+    pub fn with_uic(mut self, uic: bool) -> Self {
+        self.use_initial_conditions = uic;
+        self
+    }
+
+    /// Check if UIC (Use Initial Conditions) mode is enabled
+    pub fn uic(&self) -> bool {
+        self.use_initial_conditions
     }
 
     /// Get stop time
@@ -144,14 +173,24 @@ impl TimestepController {
     }
 }
 
+/// Minimum timestep to use immediately after a breakpoint (for restart behavior)
+const MIN_STEP_AFTER_BREAKPOINT: Value = 1e-12;
+
+/// Tolerance for detecting exact breakpoint landing
+const BREAKPOINT_TOLERANCE: Value = 1e-15;
+
 /// Breakpoint manager for handling discontinuities
+/// 
+/// Ensures solver lands exactly on breakpoints and restarts with minimal timestep
+/// immediately after, preventing numerical ringing from stepping over discontinuities.
 #[derive(Debug, Default)]
-#[allow(dead_code)] // Reserved for breakpoint tracking
 pub struct BreakpointManager {
     /// Sorted list of breakpoint times
     breakpoints: Vec<Value>,
-    /// Current index
+    /// Index of next unprocessed breakpoint (for efficiency)
     current_index: usize,
+    /// Flag indicating we just passed a breakpoint
+    just_passed_breakpoint: bool,
 }
 
 impl BreakpointManager {
@@ -159,8 +198,13 @@ impl BreakpointManager {
         Self::default()
     }
 
-    /// Add a breakpoint time
+    /// Add a breakpoint time (deduplicates automatically)
     pub fn add(&mut self, time: Value) {
+        // Check for duplicates within tolerance
+        if self.breakpoints.iter().any(|&t| (t - time).abs() < BREAKPOINT_TOLERANCE) {
+            return;
+        }
+        
         // Insert in sorted order
         let pos = self.breakpoints.iter().position(|&t| t > time);
         match pos {
@@ -169,7 +213,7 @@ impl BreakpointManager {
         }
     }
 
-    /// Add breakpoints from a periodic source
+    /// Add breakpoints from a periodic source (pulse edges, clock, etc.)
     pub fn add_periodic(&mut self, start: Value, period: Value, end: Value) {
         let mut t = start;
         while t <= end {
@@ -180,22 +224,78 @@ impl BreakpointManager {
 
     /// Get next breakpoint after given time
     pub fn next_after(&self, time: Value) -> Option<Value> {
-        self.breakpoints.iter().copied().find(|&t| t > time + 1e-15)
+        self.breakpoints.iter()
+            .skip(self.current_index)
+            .copied()
+            .find(|&t| t > time + BREAKPOINT_TOLERANCE)
     }
 
-    /// Limit timestep to not cross next breakpoint
-    pub fn limit_step(&self, current_time: Value, proposed_dt: Value) -> Value {
+    /// Check if current time is exactly at a breakpoint
+    pub fn at_breakpoint(&self, time: Value) -> bool {
+        self.breakpoints.iter()
+            .any(|&bp| (time - bp).abs() < BREAKPOINT_TOLERANCE)
+    }
+
+    /// Limit timestep to land exactly on next breakpoint
+    /// 
+    /// Returns (adjusted_dt, will_land_on_breakpoint)
+    pub fn limit_step(&mut self, current_time: Value, proposed_dt: Value) -> (Value, bool) {
         match self.next_after(current_time) {
             Some(bp) => {
                 let time_to_bp = bp - current_time;
-                if proposed_dt > time_to_bp * 0.9 {
-                    time_to_bp
+                
+                if proposed_dt >= time_to_bp {
+                    // Force landing exactly on breakpoint
+                    self.just_passed_breakpoint = false; // Will be set after solving at BP
+                    (time_to_bp.max(MIN_STEP_AFTER_BREAKPOINT), true)
+                } else if proposed_dt > time_to_bp * 0.9 {
+                    // Close to breakpoint - go directly there
+                    (time_to_bp, true)
                 } else {
-                    proposed_dt
+                    (proposed_dt, false)
                 }
             }
-            None => proposed_dt,
+            None => (proposed_dt, false),
         }
+    }
+
+    /// Mark that we just solved at a breakpoint (call after solving at BP)
+    /// Returns the recommended minimal timestep for restart
+    pub fn mark_breakpoint_solved(&mut self, time: Value) -> Value {
+        // Advance current_index past this breakpoint
+        while self.current_index < self.breakpoints.len() 
+            && self.breakpoints[self.current_index] <= time + BREAKPOINT_TOLERANCE 
+        {
+            self.current_index += 1;
+        }
+        self.just_passed_breakpoint = true;
+        MIN_STEP_AFTER_BREAKPOINT
+    }
+
+    /// Check if we just passed a breakpoint and should use minimal timestep
+    pub fn should_use_minimal_step(&self) -> bool {
+        self.just_passed_breakpoint
+    }
+
+    /// Clear the just-passed flag (call after first step post-breakpoint)
+    pub fn clear_breakpoint_flag(&mut self) {
+        self.just_passed_breakpoint = false;
+    }
+
+    /// Reset the manager for a new simulation
+    pub fn reset(&mut self) {
+        self.current_index = 0;
+        self.just_passed_breakpoint = false;
+    }
+
+    /// Get total number of breakpoints
+    pub fn len(&self) -> usize {
+        self.breakpoints.len()
+    }
+
+    /// Check if empty
+    pub fn is_empty(&self) -> bool {
+        self.breakpoints.is_empty()
     }
 }
 
