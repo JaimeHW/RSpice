@@ -1264,6 +1264,61 @@ impl Engine {
                 }
             }
             
+            // Stamp MOSFET capacitances: jωCgs, jωCgd, jωCgb (Meyer model)
+            // Each MOSFET contributes intrinsic + overlap capacitances
+            for mos in &circuit.mosfets.devices {
+                let (cgs, cgd, cgb) = mos.ac_capacitances();
+                let ng = mos.node_gate;
+                let nd = mos.node_drain;
+                let ns = mos.node_source;
+                let nb = mos.node_bulk;
+                
+                // Cgs: gate-source capacitance
+                let jwcgs = omega * cgs;
+                if ng > 0 && ng > 0 {
+                    ac_matrix.add_imag(ng - 1, ng - 1, jwcgs);
+                }
+                if ng > 0 && ns > 0 {
+                    ac_matrix.add_imag(ng - 1, ns - 1, -jwcgs);
+                }
+                if ns > 0 && ng > 0 {
+                    ac_matrix.add_imag(ns - 1, ng - 1, -jwcgs);
+                }
+                if ns > 0 && ns > 0 {
+                    ac_matrix.add_imag(ns - 1, ns - 1, jwcgs);
+                }
+                
+                // Cgd: gate-drain capacitance
+                let jwcgd = omega * cgd;
+                if ng > 0 && ng > 0 {
+                    ac_matrix.add_imag(ng - 1, ng - 1, jwcgd);
+                }
+                if ng > 0 && nd > 0 {
+                    ac_matrix.add_imag(ng - 1, nd - 1, -jwcgd);
+                }
+                if nd > 0 && ng > 0 {
+                    ac_matrix.add_imag(nd - 1, ng - 1, -jwcgd);
+                }
+                if nd > 0 && nd > 0 {
+                    ac_matrix.add_imag(nd - 1, nd - 1, jwcgd);
+                }
+                
+                // Cgb: gate-bulk capacitance
+                let jwcgb = omega * cgb;
+                if ng > 0 && ng > 0 {
+                    ac_matrix.add_imag(ng - 1, ng - 1, jwcgb);
+                }
+                if ng > 0 && nb > 0 {
+                    ac_matrix.add_imag(ng - 1, nb - 1, -jwcgb);
+                }
+                if nb > 0 && ng > 0 {
+                    ac_matrix.add_imag(nb - 1, ng - 1, -jwcgb);
+                }
+                if nb > 0 && nb > 0 {
+                    ac_matrix.add_imag(nb - 1, nb - 1, jwcgb);
+                }
+            }
+            
             // Voltage sources for AC (MNA branch equations)
             for i in 0..circuit.voltage_sources.len() {
                 let np = circuit.voltage_sources.node_pos[i];
