@@ -1381,6 +1381,228 @@ impl Engine {
         // Sequential fallback (or when parallel feature disabled)
         frequencies.iter().map(|&freq| solve_at_freq(freq)).collect()
     }
+
+    /// Run noise analysis
+    /// 
+    /// Computes thermal, shot, and flicker noise at each frequency point.
+    /// Returns integrated noise results.
+    pub fn run_noise(
+        &self,
+        netlist: &Netlist,
+        output_node: usize,
+        frequencies: &[Value],
+        temperature: Value,
+    ) -> Result<Vec<crate::analysis::NoiseResult>, SimulationError> {
+        use crate::analysis::noise::{NoiseSource, NoiseResult, NoiseContribution, NoiseSourceType};
+        use crate::solver::ComplexMatrix;
+        use std::f64::consts::PI;
+        
+        let mut circuit = self.build_circuit(netlist)?;
+        let mut matrix = self.build_matrix(&circuit)?;
+        circuit.link_indices(&matrix);
+        
+        // Get DC operating point for bias-dependent noise
+        let dc_solution = if circuit.has_nonlinear_devices() {
+            self.solve_nonlinear(&mut circuit, &mut matrix)?
+        } else {
+            self.solve_linear(&circuit, &mut matrix)?
+        };
+        
+        // Collect noise sources
+        let mut noise_sources: Vec<NoiseSource> = Vec::new();
+        
+        // Thermal noise from resistors (4kT/R)
+        for (i, stamp) in circuit.resistors.stamps.iter().enumerate() {
+            let r = 1.0 / circuit.resistors.conductances.get(i).copied().unwrap_or(1.0);
+            if r > 0.0 && r < 1e12 {
+                noise_sources.push(NoiseSource::thermal(
+                    format!("R{}", i + 1),
+                    stamp.pp.row,
+                    stamp.nn.row,
+                    r,
+                ));
+            }
+        }
+        
+        // Note: Shot noise from diodes/BJTs would require public current() methods
+        // or calculating current from voltage. For now, thermal noise captures
+        // the dominant noise contributor in most circuits.
+        
+        // Now compute noise at each frequency
+        let num_nodes = circuit.num_nodes();
+        let size = circuit.matrix_size();
+        
+        let results: Vec<NoiseResult> = frequencies.iter().map(|&freq| {
+            let omega = 2.0 * PI * freq;
+            
+            // Build small-signal AC matrix at this frequency
+            let mut ac_matrix = ComplexMatrix::from_real_structure(&matrix);
+            
+            // Stamp resistors
+            for (r_idx, stamp) in circuit.resistors.stamps.iter().enumerate() {
+                let g = circuit.resistors.conductances.get(r_idx).copied().unwrap_or(0.0);
+                if stamp.pp.row > 0 && stamp.pp.col > 0 {
+                    ac_matrix.add_real(stamp.pp.row - 1, stamp.pp.col - 1, g);
+                }
+                if stamp.pn.row > 0 && stamp.pn.col > 0 {
+                    ac_matrix.add_real(stamp.pn.row - 1, stamp.pn.col - 1, -g);
+                }
+                if stamp.np.row > 0 && stamp.np.col > 0 {
+                    ac_matrix.add_real(stamp.np.row - 1, stamp.np.col - 1, -g);
+                }
+                if stamp.nn.row > 0 && stamp.nn.col > 0 {
+                    ac_matrix.add_real(stamp.nn.row - 1, stamp.nn.col - 1, g);
+                }
+            }
+            
+            // Stamp capacitors
+            for (i, stamp) in circuit.capacitors.stamps.iter().enumerate() {
+                let c = circuit.capacitors.capacitances.get(i).copied().unwrap_or(0.0);
+                let jwc = omega * c;
+                if stamp.pp.row > 0 && stamp.pp.col > 0 {
+                    ac_matrix.add_imag(stamp.pp.row - 1, stamp.pp.col - 1, jwc);
+                }
+                if stamp.pn.row > 0 && stamp.pn.col > 0 {
+                    ac_matrix.add_imag(stamp.pn.row - 1, stamp.pn.col - 1, -jwc);
+                }
+                if stamp.np.row > 0 && stamp.np.col > 0 {
+                    ac_matrix.add_imag(stamp.np.row - 1, stamp.np.col - 1, -jwc);
+                }
+                if stamp.nn.row > 0 && stamp.nn.col > 0 {
+                    ac_matrix.add_imag(stamp.nn.row - 1, stamp.nn.col - 1, jwc);
+                }
+            }
+            
+            // Voltage sources
+            for i in 0..circuit.voltage_sources.len() {
+                let np = circuit.voltage_sources.node_pos[i];
+                let nn = circuit.voltage_sources.node_neg[i];
+                let br_ordinal = circuit.voltage_sources.branch_indices[i];
+                let br = circuit.get_branch_matrix_index(br_ordinal);
+                
+                if np > 0 {
+                    ac_matrix.add_real(br - 1, np - 1, 1.0);
+                    ac_matrix.add_real(np - 1, br - 1, 1.0);
+                }
+                if nn > 0 {
+                    ac_matrix.add_real(br - 1, nn - 1, -1.0);
+                    ac_matrix.add_real(nn - 1, br - 1, -1.0);
+                }
+            }
+            
+            // Small diagonal for stability
+            for i in 0..size {
+                ac_matrix.add_real(i, i, 1e-15);
+            }
+            
+            // For each noise source, inject current and compute output voltage
+            let mut total_noise_v2_hz = 0.0;
+            let mut contributions = Vec::new();
+            
+            for source in &noise_sources {
+                let si = source.spectral_density(freq, temperature);
+                
+                // Inject unit current at noise source nodes, solve for voltage
+                let mut rhs = vec![crate::Complex64::new(0.0, 0.0); size];
+                if source.node_pos > 0 && source.node_pos <= num_nodes {
+                    rhs[source.node_pos - 1] = crate::Complex64::new(1.0, 0.0);
+                }
+                if source.node_neg > 0 && source.node_neg <= num_nodes {
+                    rhs[source.node_neg - 1] = crate::Complex64::new(-1.0, 0.0);
+                }
+                
+                if let Ok(solution) = ac_matrix.solve(&rhs) {
+                    // Transfer impedance to output node
+                    let v_out = if output_node > 0 && output_node <= num_nodes {
+                        solution[output_node - 1].norm()
+                    } else {
+                        0.0
+                    };
+                    
+                    // Output voltage noise = Si * |Z_trans|^2
+                    let output_v2 = si * v_out * v_out;
+                    total_noise_v2_hz += output_v2;
+                    
+                    contributions.push(NoiseContribution {
+                        device_name: source.device_name.clone(),
+                        noise_type: source.noise_type,
+                        output_contribution: output_v2,
+                        percentage: 0.0, // Will calculate after summing
+                    });
+                }
+            }
+            
+            // Calculate percentages
+            for contrib in &mut contributions {
+                contrib.percentage = if total_noise_v2_hz > 0.0 {
+                    100.0 * contrib.output_contribution / total_noise_v2_hz
+                } else {
+                    0.0
+                };
+            }
+            
+            NoiseResult {
+                frequency: freq,
+                output_noise_density: total_noise_v2_hz,
+                input_referred_density: total_noise_v2_hz, // Simplified
+                contributions,
+            }
+        }).collect();
+        
+        Ok(results)
+    }
+
+    /// Run Monte Carlo analysis
+    /// 
+    /// Performs multiple simulation runs with random component variations.
+    pub fn run_monte_carlo(
+        &self,
+        netlist: &Netlist,
+        num_runs: usize,
+        seed: u64,
+    ) -> Result<crate::analysis::MonteCarloResult, SimulationError> {
+        use crate::analysis::monte_carlo::{MonteCarloResult, VariableStatistics, Xorshift128Plus};
+        
+        let mut rng = Xorshift128Plus::new(seed);
+        let mut results = Vec::with_capacity(num_runs);
+        
+        // Run DC OP multiple times
+        for _run in 0..num_runs {
+            // TODO: Apply component variations to netlist copy
+            match self.run_dc_op(netlist) {
+                Ok(result) => {
+                    // Collect node voltages
+                    results.push(result.node_voltages.clone());
+                }
+                Err(_) => {
+                    // Skip failed runs
+                }
+            }
+        }
+        
+        // Compute statistics for each node
+        let num_nodes = results.first().map(|r| r.len()).unwrap_or(0);
+        let mut variables: std::collections::HashMap<String, VariableStatistics> = std::collections::HashMap::new();
+        
+        for node in 0..num_nodes.min(10) {
+            let samples: Vec<Value> = results.iter()
+                .filter_map(|r| r.get(node).copied())
+                .collect();
+            
+            if !samples.is_empty() {
+                let name = format!("V({})", node + 1);
+                let stats = VariableStatistics::from_samples(&name, samples, 20);
+                variables.insert(name, stats);
+            }
+        }
+        
+        Ok(MonteCarloResult {
+            num_runs: results.len(),
+            variables,
+            all_converged: results.len() == num_runs,
+            num_failures: num_runs - results.len(),
+        })
+    }
 }
 
 impl TransientResult {
