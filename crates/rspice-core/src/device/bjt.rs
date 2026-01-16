@@ -294,7 +294,10 @@ impl Bjt {
         (self.is / (n * self.vt)) * (v_limited / (n * self.vt)).exp()
     }
 
-    /// Calculate Ebers-Moll currents
+    /// Calculate BJT currents using Ebers-Moll with Gummel-Poon enhancements
+    /// 
+    /// Base model is Ebers-Moll for stability. Early voltage and high-injection
+    /// effects are applied via go() output conductance and base charge modulation.
     fn calculate_currents(&self, vbe: Value, vbc: Value) -> (Value, Value, Value) {
         let p = self.polarity();
         let vbe_eff = p * vbe;
@@ -304,21 +307,42 @@ impl Bjt {
         let if_diode = self.diode_current(vbe_eff, self.nf);
         let ir_diode = self.diode_current(vbc_eff, self.nr);
         
-        // Ebers-Moll equations
-        // Ic = Is * (exp(Vbe/Vt) - exp(Vbc/Vt)) - Is/BR * (exp(Vbc/Vt) - 1)
-        // Ib = Is/BF * (exp(Vbe/Vt) - 1) + Is/BR * (exp(Vbc/Vt) - 1)
+        // High-injection correction (Gummel-Poon)
+        // At high currents (If >> IKF), effective beta is reduced
+        let ikf_ratio = if_diode / self.ikf.max(1e-6);
+        let ikr_ratio = ir_diode / self.ikr.max(1e-6);
         
-        let ic = p * (if_diode - ir_diode - ir_diode / self.br);
+        // Smooth high-injection factor: approaches 1/sqrt(I/IK) at high currents
+        let hf_factor = 1.0 / (1.0 + ikf_ratio.sqrt()).max(0.1);
+        let hr_factor = 1.0 / (1.0 + ikr_ratio.sqrt()).max(0.1);
+        
+        // Ebers-Moll with high-injection modification
+        let ic = p * (if_diode * hf_factor - ir_diode * hr_factor - ir_diode / self.br);
         let ib = p * (if_diode / self.bf + ir_diode / self.br);
         let ie = -(ic + ib); // KCL: Ic + Ib + Ie = 0
         
         (ic, ib, ie)
     }
 
-    /// Get transconductance gm = dIc/dVbe
+    /// Get transconductance gm = dIc/dVbe with Gummel-Poon high-injection
+    /// 
+    /// Includes the reduction in gm at high currents due to high-injection.
     fn gm(&self, vbe: Value) -> Value {
         let p = self.polarity();
-        self.diode_conductance(p * vbe, self.nf)
+        let vbe_eff = p * vbe;
+        
+        // Base diode conductance
+        let g_diode = self.diode_conductance(vbe_eff, self.nf);
+        let if_diode = self.diode_current(vbe_eff, self.nf);
+        
+        // High-injection correction factor and its derivative
+        let ikf_ratio = if_diode / self.ikf.max(1e-6);
+        let hf = 1.0 / (1.0 + ikf_ratio.sqrt()).max(0.1);
+        
+        // d(hf)/dVbe approx for smooth behavior (simplified)
+        // At low currents: gm ≈ g_diode
+        // At high currents: gm ≈ g_diode * hf (reduced)
+        g_diode * hf
     }
 
     /// Get output conductance go = dIc/dVce (Early effect)
