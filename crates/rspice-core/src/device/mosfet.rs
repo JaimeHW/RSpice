@@ -414,6 +414,43 @@ impl Mosfet {
         (cgs, cgd, cgb)
     }
 
+    /// Calculate total AC small-signal capacitances using Meyer model
+    /// 
+    /// Returns (Cgs, Cgd, Cgb) including both intrinsic channel capacitances
+    /// and overlap capacitances. Values depend on operating region.
+    /// 
+    /// # Meyer Capacitance Model
+    /// - Cutoff: Cgb dominates, Cgs = Cgd = overlap only
+    /// - Linear: Cgs = Cgd = Cox*W*L/2 + overlap
+    /// - Saturation: Cgs = 2/3*Cox*W*L + overlap, Cgd = overlap only
+    pub fn ac_capacitances(&self) -> (Value, Value, Value) {
+        let (cgs_ov, cgd_ov, cgb_ov) = self.overlap_capacitances();
+        
+        // Intrinsic gate oxide capacitance
+        let cox_wl = self.cox * self.w * self.l;
+        
+        // Determine operating region from stored values
+        let vgs_eff = self.polarity() * self.vgs;
+        let vds_eff = self.polarity() * self.vds;
+        let vth = self.vth(self.vbs);
+        let vgt = vgs_eff - self.polarity() * vth;
+        
+        if vgt <= 0.0 {
+            // Cutoff region: only overlap capacitances, Cgb = Cox*W*L
+            (cgs_ov, cgd_ov, cox_wl + cgb_ov)
+        } else if vds_eff < vgt {
+            // Linear region: symmetric distribution
+            let cgs_int = 0.5 * cox_wl;
+            let cgd_int = 0.5 * cox_wl;
+            (cgs_int + cgs_ov, cgd_int + cgd_ov, cgb_ov)
+        } else {
+            // Saturation region: 2/3 to source, nearly zero to drain
+            let cgs_int = (2.0 / 3.0) * cox_wl;
+            let cgd_int = 0.0; // Small in saturation
+            (cgs_int + cgs_ov, cgd_int + cgd_ov, cgb_ov)
+        }
+    }
+
     /// Calculate source/drain series resistance (per side)
     /// Returns resistance in Ohms
     pub fn source_drain_resistance(&self) -> Value {
