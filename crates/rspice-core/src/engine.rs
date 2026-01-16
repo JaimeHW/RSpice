@@ -1603,6 +1603,87 @@ impl Engine {
             num_failures: num_runs - results.len(),
         })
     }
+
+    /// Run pole-zero analysis
+    /// 
+    /// Finds poles and zeros of the transfer function from input to output node.
+    /// Uses the MNA formulation: (G + s·C)·V = I
+    /// - Poles: values of s where det(G + s·C) = 0
+    /// - Zeros: values of s where output is zero for a given input
+    pub fn run_pz(
+        &self,
+        netlist: &Netlist,
+        input_node: usize,
+        output_node: usize,
+    ) -> Result<crate::analysis::pole_zero::PoleZeroResult, SimulationError> {
+        use crate::analysis::pole_zero::{Matrix, PoleZeroAnalyzer, PoleZeroConfig};
+        
+        let circuit = self.build_circuit(netlist)?;
+        let num_nodes = circuit.num_nodes();
+        
+        if input_node > num_nodes || output_node > num_nodes {
+            return Err(SimulationError::Circuit(format!(
+                "Invalid node for PZ analysis: input={} output={} (max={})",
+                input_node, output_node, num_nodes
+            )));
+        }
+        
+        // Build G matrix (conductance, frequency-independent)
+        let mut g_matrix = Matrix::zeros(num_nodes, num_nodes);
+        
+        // Stamp resistors into G
+        for (i, stamp) in circuit.resistors.stamps.iter().enumerate() {
+            let g = circuit.resistors.conductances.get(i).copied().unwrap_or(0.0);
+            
+            if stamp.pp.row > 0 && stamp.pp.col > 0 {
+                g_matrix.add(stamp.pp.row - 1, stamp.pp.col - 1, g);
+            }
+            if stamp.pn.row > 0 && stamp.pn.col > 0 {
+                g_matrix.add(stamp.pn.row - 1, stamp.pn.col - 1, -g);
+            }
+            if stamp.np.row > 0 && stamp.np.col > 0 {
+                g_matrix.add(stamp.np.row - 1, stamp.np.col - 1, -g);
+            }
+            if stamp.nn.row > 0 && stamp.nn.col > 0 {
+                g_matrix.add(stamp.nn.row - 1, stamp.nn.col - 1, g);
+            }
+        }
+        
+        // Build C matrix (capacitance, coefficient of s)
+        let mut c_matrix = Matrix::zeros(num_nodes, num_nodes);
+        
+        // Stamp capacitors into C
+        for (i, stamp) in circuit.capacitors.stamps.iter().enumerate() {
+            let c = circuit.capacitors.capacitances.get(i).copied().unwrap_or(0.0);
+            
+            if stamp.pp.row > 0 && stamp.pp.col > 0 {
+                c_matrix.add(stamp.pp.row - 1, stamp.pp.col - 1, c);
+            }
+            if stamp.pn.row > 0 && stamp.pn.col > 0 {
+                c_matrix.add(stamp.pn.row - 1, stamp.pn.col - 1, -c);
+            }
+            if stamp.np.row > 0 && stamp.np.col > 0 {
+                c_matrix.add(stamp.np.row - 1, stamp.np.col - 1, -c);
+            }
+            if stamp.nn.row > 0 && stamp.nn.col > 0 {
+                c_matrix.add(stamp.nn.row - 1, stamp.nn.col - 1, c);
+            }
+        }
+        
+        // Add small diagonal for numerical stability
+        for i in 0..num_nodes {
+            g_matrix.add(i, i, 1e-12);
+        }
+        
+        // Create analyzer and run
+        let analyzer = PoleZeroAnalyzer::new(g_matrix, c_matrix);
+        let config = PoleZeroConfig::poles_and_zeros(
+            input_node.saturating_sub(1),  // Convert to 0-indexed
+            output_node.saturating_sub(1),
+        );
+        
+        Ok(analyzer.analyze(&config))
+    }
 }
 
 impl TransientResult {
