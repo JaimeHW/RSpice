@@ -31,10 +31,14 @@ impl Default for NewtonConfig {
 }
 
 /// Newton-Raphson iteration state
+/// 
+/// Uses double-buffering to avoid allocation during convergence checks.
 pub struct NewtonSolver {
     config: NewtonConfig,
-    /// Previous solution vector
+    /// Previous solution vector (buffer A)
     x_prev: Vec<Value>,
+    /// Temporary buffer for swap operations (buffer B)
+    x_temp: Vec<Value>,
     /// Current iteration count
     iteration: usize,
     /// Has converged flag
@@ -46,29 +50,47 @@ impl NewtonSolver {
         Self {
             config,
             x_prev: Vec::new(),
+            x_temp: Vec::new(),
             iteration: 0,
             converged: false,
         }
     }
 
     /// Initialize for a new solve
+    /// 
+    /// Pre-allocates buffers to the correct size to avoid allocation during iteration.
     pub fn init(&mut self, initial_guess: Vec<Value>) {
-        self.x_prev = initial_guess;
+        let n = initial_guess.len();
+        
+        // Resize buffers if needed (only allocates if growing)
+        if self.x_prev.len() != n {
+            self.x_prev = initial_guess;
+            self.x_temp = vec![0.0; n];
+        } else {
+            // Reuse existing allocation - just copy data
+            self.x_prev.copy_from_slice(&initial_guess);
+            // x_temp already has correct size
+        }
+        
         self.iteration = 0;
         self.converged = false;
     }
 
     /// Check if solution has converged
+    /// 
+    /// Uses double-buffering with O(1) swap instead of allocation.
     pub fn check_convergence(&mut self, x_new: &[Value]) -> bool {
+        // Handle size mismatch (should only happen on first call if init wasn't called properly)
         if self.x_prev.len() != x_new.len() {
             self.x_prev = x_new.to_vec();
+            self.x_temp = vec![0.0; x_new.len()];
             return false;
         }
 
         let mut max_diff = 0.0_f64;
         let mut max_rel_diff = 0.0_f64;
 
-        for (_i, (&x_old, &x_curr)) in self.x_prev.iter().zip(x_new.iter()).enumerate() {
+        for (i, (&x_old, &x_curr)) in self.x_prev.iter().zip(x_new.iter()).enumerate() {
             let diff = (x_curr - x_old).abs();
             max_diff = max_diff.max(diff);
 
@@ -76,9 +98,14 @@ impl NewtonSolver {
                 let rel_diff = diff / x_curr.abs();
                 max_rel_diff = max_rel_diff.max(rel_diff);
             }
+            
+            // Copy new value into temp buffer (no allocation)
+            self.x_temp[i] = x_curr;
         }
 
-        self.x_prev = x_new.to_vec();
+        // O(1) swap of buffer pointers instead of allocation
+        std::mem::swap(&mut self.x_prev, &mut self.x_temp);
+        
         self.iteration += 1;
 
         self.converged = max_diff < self.config.abs_tol || max_rel_diff < self.config.rel_tol;

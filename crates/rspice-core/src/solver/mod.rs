@@ -4,6 +4,9 @@ mod sparse;
 mod newton;
 pub mod convergence;
 
+#[cfg(feature = "parallel")]
+pub mod parallel;
+
 pub use sparse::*;
 pub use newton::*;
 pub use convergence::{
