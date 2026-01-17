@@ -162,6 +162,7 @@ pub(crate) fn extract_dc_value(spec: &SourceSpec) -> Value {
         SourceSpec::Pulse { v1, .. } => *v1, // Use initial value
         SourceSpec::Sin { offset, .. } => *offset, // Use DC offset
         SourceSpec::Pwl { points } => points.first().map(|(_, v)| *v).unwrap_or(0.0),
+        SourceSpec::PwlFile { value_offset, .. } => *value_offset, // Use value offset as DC
         SourceSpec::Exp { v1, .. } => *v1,
         SourceSpec::Ac { .. } => 0.0, // AC sources have no DC component
     }

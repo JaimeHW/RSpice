@@ -128,13 +128,71 @@ fn parse_sin_spec(
     })
 }
 
-/// Parse PWL specification: PWL(T1 V1 T2 V2 ...)
+/// Parse PWL specification: PWL(T1 V1 T2 V2 ...) or PWL FILE="filename" [TSCALE=x] [VSCALE=x]
 fn parse_pwl_spec(
     stream: &mut TokenStream,
     params: &ParamContext,
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
 
+    // Check for FILE= syntax
+    if let TokenKind::Ident(s) = &stream.peek().kind {
+        if s.to_uppercase() == "FILE" {
+            stream.advance();
+            stream.consume(&TokenKind::Equals);
+
+            // Get filename (may be quoted or unquoted)
+            let path = match &stream.peek().kind {
+                TokenKind::String(s) => {
+                    let p = s.clone();
+                    stream.advance();
+                    p
+                }
+                TokenKind::Ident(s) => {
+                    let p = s.clone();
+                    stream.advance();
+                    p
+                }
+                _ => return Err(ParseError::MissingParameter("PWL filename".to_string())),
+            };
+
+            // Parse optional scaling parameters
+            let mut time_scale = 1.0;
+            let mut value_scale = 1.0;
+            let mut time_offset = 0.0;
+            let mut value_offset = 0.0;
+
+            while let TokenKind::Ident(key) = &stream.peek().kind {
+                let key_upper = key.to_uppercase();
+                stream.advance();
+                stream.consume(&TokenKind::Equals);
+
+                let value = try_value(stream, params).unwrap_or(1.0);
+
+                match key_upper.as_str() {
+                    "TSCALE" | "TIMESCALE" => time_scale = value,
+                    "VSCALE" | "VALUESCALE" | "SCALE" => value_scale = value,
+                    "TOFFSET" | "TIMEOFFSET" | "TD" => time_offset = value,
+                    "VOFFSET" | "VALUEOFFSET" | "DC" => value_offset = value,
+                    _ => break,
+                }
+            }
+
+            if has_paren {
+                stream.consume(&TokenKind::RParen);
+            }
+
+            return Ok(SourceSpec::PwlFile {
+                path,
+                time_scale,
+                value_scale,
+                time_offset,
+                value_offset,
+            });
+        }
+    }
+
+    // Standard inline PWL points
     let mut points = Vec::new();
     while !stream.is_eof() {
         skip_commas(stream);

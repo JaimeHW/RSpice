@@ -39,12 +39,12 @@ impl ParametricValue {
     pub fn from_value(v: Value) -> Self {
         ParametricValue::Resolved(v)
     }
-    
+
     /// Create from an expression string
     pub fn from_expr(s: &str) -> Self {
         ParametricValue::Expression(s.to_string())
     }
-    
+
     /// Try to get the resolved value
     pub fn as_value(&self) -> Option<Value> {
         match self {
@@ -52,12 +52,12 @@ impl ParametricValue {
             ParametricValue::Expression(_) => None,
         }
     }
-    
+
     /// Check if this is a resolved value
     pub fn is_resolved(&self) -> bool {
         matches!(self, ParametricValue::Resolved(_))
     }
-    
+
     /// Resolve this value using a parameter lookup function.
     /// Returns the resolved value or an error message.
     pub fn resolve<F>(&self, lookup: F) -> Result<Value, String>
@@ -114,87 +114,81 @@ pub enum ElementKind {
     //-------------------------------------------------------------------------
     // Passive Components
     //-------------------------------------------------------------------------
-    
     /// Resistor: value in Ohms
     Resistor { value: Value },
-    
+
     /// Capacitor: value in Farads
-    Capacitor { 
-        value: Value, 
-        initial_voltage: Option<Value> 
+    Capacitor {
+        value: Value,
+        initial_voltage: Option<Value>,
     },
-    
+
     /// Inductor: value in Henries
-    Inductor { 
-        value: Value, 
-        initial_current: Option<Value> 
+    Inductor {
+        value: Value,
+        initial_current: Option<Value>,
     },
-    
+
     //-------------------------------------------------------------------------
     // Sources
     //-------------------------------------------------------------------------
-    
     /// Voltage source
     VoltageSource(SourceSpec),
-    
+
     /// Current source
     CurrentSource(SourceSpec),
-    
+
     //-------------------------------------------------------------------------
     // Semiconductor Devices
     //-------------------------------------------------------------------------
-    
     /// Diode
     Diode { model: String },
-    
+
     /// BJT (NPN or PNP)
     Bjt { model: String, bjt_type: BjtType },
-    
+
     /// MOSFET
     Mosfet { model: String, mos_type: MosType },
-    
+
     //-------------------------------------------------------------------------
     // Controlled Sources
     //-------------------------------------------------------------------------
-    
     /// Voltage-controlled voltage source: E1 n+ n- nc+ nc- gain
-    Vcvs { 
-        gain: Value, 
-        control_nodes: (String, String) 
+    Vcvs {
+        gain: Value,
+        control_nodes: (String, String),
     },
-    
+
     /// Current-controlled current source: F1 n+ n- Vname gain
-    Cccs { 
-        gain: Value, 
-        control_element: String 
+    Cccs {
+        gain: Value,
+        control_element: String,
     },
-    
+
     /// Voltage-controlled current source: G1 n+ n- nc+ nc- gm
-    Vccs { 
-        transconductance: Value, 
-        control_nodes: (String, String) 
+    Vccs {
+        transconductance: Value,
+        control_nodes: (String, String),
     },
-    
+
     /// Current-controlled voltage source: H1 n+ n- Vname rm
-    Ccvs { 
-        transresistance: Value, 
-        control_element: String 
+    Ccvs {
+        transresistance: Value,
+        control_element: String,
     },
-    
+
     //-------------------------------------------------------------------------
     // Behavioral Sources
     //-------------------------------------------------------------------------
-    
     /// Behavioral voltage source: B1 n+ n- V=expr
     BehavioralVoltage { expression: String },
-    
+
     /// Behavioral current source: B1 n+ n- I=expr
     BehavioralCurrent { expression: String },
-    
+
     //-------------------------------------------------------------------------
     // Switches
     //-------------------------------------------------------------------------
-    
     /// Voltage-controlled switch: S1 n+ n- nc+ nc- MODEL [ON|OFF]
     VSwitch {
         /// Control node positive
@@ -206,7 +200,7 @@ pub enum ElementKind {
         /// Initial state
         initial_state: Option<SwitchState>,
     },
-    
+
     /// Current-controlled switch: W1 n+ n- Vname MODEL [ON|OFF]
     ISwitch {
         /// Control element (voltage source for sensing)
@@ -216,11 +210,10 @@ pub enum ElementKind {
         /// Initial state
         initial_state: Option<SwitchState>,
     },
-    
+
     //-------------------------------------------------------------------------
     // Transmission Lines
     //-------------------------------------------------------------------------
-    
     /// Lossless transmission line: T1 port1+ port1- port2+ port2- Z0=val TD=val
     TransmissionLine {
         /// Characteristic impedance (Ohms)
@@ -232,11 +225,10 @@ pub enum ElementKind {
         /// Normalized electrical length at freq (wavelengths)
         nl: Option<Value>,
     },
-    
+
     //-------------------------------------------------------------------------
     // Coupled Inductors
     //-------------------------------------------------------------------------
-    
     /// Coupling coefficient: K1 L1 L2 [L3...] coefficient
     Coupling {
         /// Names of coupled inductors
@@ -244,15 +236,14 @@ pub enum ElementKind {
         /// Coupling coefficient (0 < k ≤ 1)
         coefficient: Value,
     },
-    
+
     //-------------------------------------------------------------------------
     // Subcircuits
     //-------------------------------------------------------------------------
-    
     /// Subcircuit instance: X1 node1 node2... SUBCKTNAME [PARAM=val...]
-    Subcircuit { 
-        subckt_name: String, 
-        params: Vec<(String, Value)> 
+    Subcircuit {
+        subckt_name: String,
+        params: Vec<(String, Value)>,
     },
 }
 
@@ -290,13 +281,10 @@ pub enum MosType {
 pub enum SourceSpec {
     /// DC value
     Dc(Value),
-    
+
     /// AC magnitude and phase
-    Ac { 
-        magnitude: Value, 
-        phase: Value 
-    },
-    
+    Ac { magnitude: Value, phase: Value },
+
     /// Pulse source: PULSE(v1 v2 td tr tf pw per)
     Pulse {
         v1: Value,
@@ -307,7 +295,7 @@ pub enum SourceSpec {
         width: Value,
         period: Value,
     },
-    
+
     /// Sinusoidal source: SIN(vo va freq td theta phase)
     Sin {
         offset: Value,
@@ -317,10 +305,25 @@ pub enum SourceSpec {
         damping: Value,
         phase: Value,
     },
-    
+
     /// Piecewise linear source: PWL(t1 v1 t2 v2 ...)
     Pwl { points: Vec<(Value, Value)> },
-    
+
+    /// Piecewise linear source from external file: PWL FILE="filename"
+    /// Supports CSV (time,value columns) and WAV audio files
+    PwlFile {
+        /// Path to the data file (CSV or WAV)
+        path: String,
+        /// Time scaling factor (default 1.0)
+        time_scale: Value,
+        /// Value scaling factor (default 1.0)  
+        value_scale: Value,
+        /// Time offset (default 0.0)
+        time_offset: Value,
+        /// Value offset (default 0.0)
+        value_offset: Value,
+    },
+
     /// Exponential source: EXP(v1 v2 td1 tau1 td2 tau2)
     Exp {
         v1: Value,
@@ -341,7 +344,7 @@ pub enum SourceSpec {
 pub enum AnalysisCommand {
     /// DC operating point: .OP
     Op,
-    
+
     /// DC sweep: .DC source start stop step
     Dc {
         source: String,
@@ -349,7 +352,7 @@ pub enum AnalysisCommand {
         stop: Value,
         step: Value,
     },
-    
+
     /// AC analysis: .AC DEC|LIN|OCT np fstart fstop
     Ac {
         variation: FreqVariation,
@@ -357,7 +360,7 @@ pub enum AnalysisCommand {
         start_freq: Value,
         stop_freq: Value,
     },
-    
+
     /// Transient analysis: .TRAN tstep tstop [tstart [tmaxstep]]
     Tran {
         step: Value,
@@ -365,7 +368,7 @@ pub enum AnalysisCommand {
         start: Option<Value>,
         max_step: Option<Value>,
     },
-    
+
     /// Noise analysis: .NOISE V(out) Vsource DEC|LIN|OCT np fstart fstop
     Noise {
         output_node: String,
@@ -376,21 +379,19 @@ pub enum AnalysisCommand {
         start_freq: Value,
         stop_freq: Value,
     },
-    
+
     /// Fourier analysis: .FOUR freq output1 [output2...]
     Four {
         fundamental: Value,
         outputs: Vec<String>,
         num_harmonics: usize,
     },
-    
+
     /// Parametric sweep: .STEP PARAM name start stop increment
     Step(StepCommand),
-    
+
     /// Temperature sweep: .TEMP t1 [t2 t3...]
-    Temp {
-        temperatures: Vec<Value>,
-    },
+    Temp { temperatures: Vec<Value> },
 }
 
 /// Parametric sweep specification
@@ -563,7 +564,12 @@ mod tests {
                 freq: None,
                 nl: None,
             },
-            nodes: vec!["in".to_string(), "0".to_string(), "out".to_string(), "0".to_string()],
+            nodes: vec![
+                "in".to_string(),
+                "0".to_string(),
+                "out".to_string(),
+                "0".to_string(),
+            ],
         };
         assert_eq!(tl.nodes.len(), 4);
     }
