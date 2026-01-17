@@ -182,7 +182,7 @@ impl ComponentType {
                 ("S", Point::new(2, 1)),  // Source
                 ("B", Point::new(2, 0)),  // Bulk (usually tied to source)
             ],
-            ComponentType::Ground => vec![("", Point::new(0, 0))],
+            ComponentType::Ground => vec![("GND", Point::new(0, -2))], // Terminal at top where wire connects
         }
     }
 }
@@ -353,14 +353,80 @@ pub enum Tool {
     Label,
 }
 
+/// Wire routing mode for orthogonal drawing
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WireRoutingMode {
+    /// Horizontal first, then vertical (L-shape)
+    #[default]
+    HorizontalFirst,
+    /// Vertical first, then horizontal (inverted L-shape)
+    VerticalFirst,
+}
+
+impl WireRoutingMode {
+    /// Toggle between routing modes
+    pub fn toggle(self) -> Self {
+        match self {
+            WireRoutingMode::HorizontalFirst => WireRoutingMode::VerticalFirst,
+            WireRoutingMode::VerticalFirst => WireRoutingMode::HorizontalFirst,
+        }
+    }
+}
+
 /// Wire drawing state
 #[derive(Debug, Clone, Default)]
 pub struct WireDrawing {
-    /// Points in the current wire being drawn
+    /// Points in the current wire being drawn (committed vertices)
     pub points: Vec<Point>,
 
     /// Whether currently drawing
     pub active: bool,
+
+    /// Current mouse position for preview (grid-aligned)
+    pub preview_pos: Option<Point>,
+
+    /// Routing mode for orthogonal wires
+    pub routing_mode: WireRoutingMode,
+}
+
+impl WireDrawing {
+    /// Get intermediate points for orthogonal routing from last point to target
+    /// Returns the corner point for L-shaped routing
+    pub fn get_route_corner(&self, target: Point) -> Option<Point> {
+        let last = self.points.last()?;
+        if last.x == target.x || last.y == target.y {
+            // Already aligned - no corner needed
+            return None;
+        }
+
+        match self.routing_mode {
+            WireRoutingMode::HorizontalFirst => {
+                // Go horizontal first, then vertical
+                Some(Point::new(target.x, last.y))
+            }
+            WireRoutingMode::VerticalFirst => {
+                // Go vertical first, then horizontal
+                Some(Point::new(last.x, target.y))
+            }
+        }
+    }
+
+    /// Get preview path from last committed point to mouse position
+    pub fn get_preview_path(&self) -> Vec<Point> {
+        let mut path = Vec::new();
+
+        if let (Some(&last), Some(target)) = (self.points.last(), self.preview_pos) {
+            path.push(last);
+
+            if let Some(corner) = self.get_route_corner(target) {
+                path.push(corner);
+            }
+
+            path.push(target);
+        }
+
+        path
+    }
 }
 
 /// Net label for naming nodes in the schematic
@@ -423,6 +489,9 @@ pub struct SchematicState {
 
     /// Net labels for naming nodes
     pub net_labels: Vec<NetLabel>,
+
+    /// Preview rotation for component placement
+    pub preview_rotation: Rotation,
 }
 
 impl Default for SchematicState {
@@ -440,6 +509,7 @@ impl Default for SchematicState {
             component_counters: HashMap::new(),
             clipboard: ClipboardData::default(),
             net_labels: Vec::new(),
+            preview_rotation: Rotation::default(),
         }
     }
 }
@@ -469,6 +539,7 @@ impl SchematicState {
         let name = self.generate_name(kind);
         let mut component = Component::new(id, kind, pos);
         component.name = name;
+        component.rotation = self.preview_rotation; // Apply preview rotation
 
         // Set default values
         component.value = match kind {
@@ -552,18 +623,43 @@ impl SchematicState {
     pub fn start_wire(&mut self, pos: Point) {
         self.wire_drawing.points.clear();
         self.wire_drawing.points.push(pos);
+        self.wire_drawing.preview_pos = None;
         self.wire_drawing.active = true;
     }
 
-    /// Add a point to the current wire
+    /// Update the wire preview position (called on mouse move)
+    pub fn update_wire_preview(&mut self, pos: Point) {
+        if self.wire_drawing.active {
+            self.wire_drawing.preview_pos = Some(pos);
+        }
+    }
+
+    /// Toggle wire routing mode (horizontal-first vs vertical-first)
+    pub fn toggle_wire_routing(&mut self) {
+        self.wire_drawing.routing_mode = self.wire_drawing.routing_mode.toggle();
+    }
+
+    /// Add a point to the current wire using orthogonal routing
+    /// This commits the current preview path segment
     pub fn extend_wire(&mut self, pos: Point) {
         if !self.wire_drawing.active {
             return;
         }
-        if let Some(last) = self.wire_drawing.points.last() {
-            if *last != pos {
-                self.wire_drawing.points.push(pos);
+
+        if let Some(last) = self.wire_drawing.points.last().copied() {
+            if last == pos {
+                return; // Same point, skip
             }
+
+            // Add corner point for orthogonal routing if needed
+            if let Some(corner) = self.wire_drawing.get_route_corner(pos) {
+                // Only add corner if it's different from last and target
+                if corner != last && corner != pos {
+                    self.wire_drawing.points.push(corner);
+                }
+            }
+
+            self.wire_drawing.points.push(pos);
         }
     }
 
@@ -573,13 +669,49 @@ impl SchematicState {
             return None;
         }
         self.wire_drawing.active = false;
+        self.wire_drawing.preview_pos = None;
+
+        // Get the committed points
         let points = std::mem::take(&mut self.wire_drawing.points);
-        self.add_wire(points)
+
+        // Simplify wire by removing collinear points
+        let simplified = Self::simplify_wire_path(points);
+
+        self.add_wire(simplified)
+    }
+
+    /// Simplify wire path by removing intermediate points on straight segments
+    fn simplify_wire_path(points: Vec<Point>) -> Vec<Point> {
+        if points.len() <= 2 {
+            return points;
+        }
+
+        let mut result = Vec::with_capacity(points.len());
+        result.push(points[0]);
+
+        for i in 1..points.len() - 1 {
+            let prev = result.last().unwrap();
+            let curr = &points[i];
+            let next = &points[i + 1];
+
+            // Check if curr is collinear with prev and next
+            let same_x = prev.x == curr.x && curr.x == next.x;
+            let same_y = prev.y == curr.y && curr.y == next.y;
+
+            // Only keep if not collinear (it's a corner)
+            if !same_x && !same_y {
+                result.push(*curr);
+            }
+        }
+
+        result.push(*points.last().unwrap());
+        result
     }
 
     /// Cancel wire drawing
     pub fn cancel_wire(&mut self) {
         self.wire_drawing.active = false;
+        self.wire_drawing.preview_pos = None;
         self.wire_drawing.points.clear();
     }
 

@@ -2,16 +2,20 @@
 //!
 //! Application state for simulation, project, and UI state.
 
+pub mod canvas_focus;
 pub mod fft;
 pub mod history;
+pub mod netlist_generator;
 mod schematic;
 mod simulation;
 mod simulation_runner;
 pub mod waveform_math;
 
+pub use canvas_focus::{use_canvas_focus, CanvasFocus, CanvasFocusState};
 #[allow(unused_imports)]
 pub use fft::{compute_fft, FftResult, WindowFunction};
 pub use history::SchematicHistory;
+pub use netlist_generator::{generate_netlist, NetlistResult};
 pub use schematic::*;
 pub use simulation::{ConsoleMessage, MessageSeverity, SimulationState, WaveformData};
 pub use simulation_runner::run_simulation;
