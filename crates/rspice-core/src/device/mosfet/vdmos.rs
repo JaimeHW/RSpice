@@ -58,6 +58,262 @@ pub enum VdmosRegion {
 }
 
 //=============================================================================
+// Thermal Network for Self-Heating
+//=============================================================================
+
+/// Thermal network for electro-thermal simulation
+///
+/// Models the junction temperature rise due to power dissipation using
+/// a single-pole Foster RC network:
+///   dTj/dt = (P - (Tj - Ta)/Rth) / Cth
+///
+/// At steady-state: Tj = Ta + P * Rth
+#[derive(Debug, Clone, Copy)]
+pub struct ThermalNetwork {
+    /// Thermal resistance junction-to-ambient (K/W)
+    pub rth: Value,
+    /// Thermal capacitance (J/K)
+    pub cth: Value,
+    /// Ambient temperature (K)
+    pub t_ambient: Value,
+    /// Current junction temperature (K)
+    pub t_junction: Value,
+    /// Previous junction temperature for transient integration
+    prev_t_junction: Value,
+    /// Accumulated power for averaging (W·s)
+    power_integral: Value,
+    /// Time of last thermal update (s)
+    last_update_time: Value,
+}
+
+impl Default for ThermalNetwork {
+    fn default() -> Self {
+        Self {
+            rth: 1.0,           // 1 K/W - typical for TO-220 with heatsink
+            cth: 0.01,          // 10 mJ/K - typical thermal mass
+            t_ambient: 300.15,  // 27°C in Kelvin
+            t_junction: 300.15, // Start at ambient
+            prev_t_junction: 300.15,
+            power_integral: 0.0,
+            last_update_time: 0.0,
+        }
+    }
+}
+
+impl ThermalNetwork {
+    /// Create a new thermal network with specified parameters
+    pub fn new(rth: Value, cth: Value, t_ambient: Value) -> Self {
+        Self {
+            rth,
+            cth,
+            t_ambient,
+            t_junction: t_ambient,
+            prev_t_junction: t_ambient,
+            power_integral: 0.0,
+            last_update_time: 0.0,
+        }
+    }
+
+    /// Check if thermal network is enabled (Rth > 0)
+    #[inline]
+    pub fn is_enabled(&self) -> bool {
+        self.rth > 0.0 && self.cth > 0.0
+    }
+
+    /// Get thermal voltage at current junction temperature
+    #[inline]
+    pub fn thermal_voltage(&self) -> Value {
+        const K_BOLTZMANN: Value = 1.380649e-23;
+        const Q_ELECTRON: Value = 1.602176634e-19;
+        K_BOLTZMANN * self.t_junction / Q_ELECTRON
+    }
+
+    /// Update junction temperature based on instantaneous power
+    ///
+    /// Uses backward Euler integration for stability:
+    ///   Tj(n+1) = (Cth*Tj(n) + dt*(P + Ta/Rth)) / (Cth + dt/Rth)
+    pub fn update(&mut self, power: Value, time: Value, dt: Value) {
+        if !self.is_enabled() || dt <= 0.0 {
+            return;
+        }
+
+        self.prev_t_junction = self.t_junction;
+
+        // Backward Euler for thermal RC network
+        let g_th = 1.0 / self.rth;
+        let denominator = self.cth + dt * g_th;
+        let numerator = self.cth * self.t_junction + dt * (power + g_th * self.t_ambient);
+        self.t_junction = numerator / denominator;
+
+        // Clamp to reasonable range (prevent runaway)
+        self.t_junction = self
+            .t_junction
+            .clamp(self.t_ambient, self.t_ambient + 200.0);
+
+        self.last_update_time = time;
+    }
+
+    /// Get steady-state junction temperature for given power
+    #[inline]
+    pub fn steady_state_temperature(&self, power: Value) -> Value {
+        self.t_ambient + power * self.rth
+    }
+
+    /// Reset thermal state to ambient
+    pub fn reset(&mut self) {
+        self.t_junction = self.t_ambient;
+        self.prev_t_junction = self.t_ambient;
+        self.power_integral = 0.0;
+        self.last_update_time = 0.0;
+    }
+}
+
+//=============================================================================
+// Soft-Recovery Body Diode
+//=============================================================================
+
+/// Body diode reverse recovery model
+///
+/// Models the stored charge in the body diode that must be removed
+/// during turn-off, causing reverse recovery current.
+///
+/// Key parameters:
+/// - Qrr: Total reverse recovery charge
+/// - trr: Reverse recovery time
+/// - Softness: Controls snap-off behavior (0=snappy, 1=soft)
+///
+/// The recovery current follows: Irr = Qrr * f(t/trr, softness)
+#[derive(Debug, Clone, Copy)]
+pub struct DiodeRecovery {
+    /// Reverse recovery charge (C)
+    pub qrr: Value,
+    /// Reverse recovery time (s)
+    pub trr: Value,
+    /// Softness factor (0.0 = snappy, 1.0 = soft)
+    pub softness: Value,
+    /// Current stored charge (C)
+    stored_charge: Value,
+    /// Previous diode current for charge tracking
+    prev_current: Value,
+    /// Time when recovery started
+    recovery_start_time: Value,
+    /// Flag indicating active recovery
+    in_recovery: bool,
+}
+
+impl Default for DiodeRecovery {
+    fn default() -> Self {
+        Self {
+            qrr: 0.0,      // Disabled by default
+            trr: 100e-9,   // 100ns typical
+            softness: 0.5, // Moderate softness
+            stored_charge: 0.0,
+            prev_current: 0.0,
+            recovery_start_time: 0.0,
+            in_recovery: false,
+        }
+    }
+}
+
+impl DiodeRecovery {
+    /// Create a new recovery model with specified parameters
+    pub fn new(qrr: Value, trr: Value, softness: Value) -> Self {
+        Self {
+            qrr,
+            trr,
+            softness: softness.clamp(0.0, 1.0),
+            stored_charge: 0.0,
+            prev_current: 0.0,
+            recovery_start_time: 0.0,
+            in_recovery: false,
+        }
+    }
+
+    /// Check if recovery model is enabled
+    #[inline]
+    pub fn is_enabled(&self) -> bool {
+        self.qrr > 0.0 && self.trr > 0.0
+    }
+
+    /// Update stored charge based on diode current
+    ///
+    /// During forward conduction: charge builds up toward Qrr
+    /// During reverse: charge depletes, causing recovery current
+    pub fn update(&mut self, diode_current: Value, time: Value, dt: Value) {
+        if !self.is_enabled() || dt <= 0.0 {
+            self.prev_current = diode_current;
+            return;
+        }
+
+        if diode_current > 0.0 {
+            // Forward conduction: charge builds up with time constant ~ tt
+            // Q approaches Qrr * (1 - exp(-If*dt/Qrr))
+            let charge_rate = diode_current.min(self.qrr / self.trr);
+            self.stored_charge += charge_rate * dt;
+            self.stored_charge = self.stored_charge.min(self.qrr);
+            self.in_recovery = false;
+        } else if self.stored_charge > 1e-15 {
+            // Reverse transition: start recovery
+            if !self.in_recovery && self.prev_current > 0.0 {
+                self.recovery_start_time = time;
+                self.in_recovery = true;
+            }
+
+            // Deplete charge based on reverse current
+            self.stored_charge += diode_current * dt; // diode_current is negative
+            self.stored_charge = self.stored_charge.max(0.0);
+
+            if self.stored_charge < 1e-15 {
+                self.in_recovery = false;
+            }
+        }
+
+        self.prev_current = diode_current;
+    }
+
+    /// Get recovery current contribution
+    ///
+    /// Returns additional current that flows during reverse recovery.
+    /// Uses a softness-dependent waveform shape.
+    pub fn recovery_current(&self, time: Value) -> Value {
+        if !self.in_recovery || self.stored_charge <= 0.0 {
+            return 0.0;
+        }
+
+        let t_rel = time - self.recovery_start_time;
+        if t_rel < 0.0 || t_rel > 3.0 * self.trr {
+            return 0.0;
+        }
+
+        // Recovery waveform: triangular modified by softness
+        // ta = trr * softness (time of peak reverse current)
+        // tb = trr * (1 - softness) (decay time)
+        let ta = self.trr * (1.0 - self.softness * 0.5);
+        let tb = self.trr * (1.0 + self.softness);
+
+        let irr_peak = 2.0 * self.qrr / (ta + tb);
+
+        if t_rel < ta {
+            // Rising to peak
+            -irr_peak * t_rel / ta
+        } else if t_rel < ta + tb {
+            // Decaying from peak
+            -irr_peak * (1.0 - (t_rel - ta) / tb)
+        } else {
+            0.0
+        }
+    }
+
+    /// Reset recovery state
+    pub fn reset(&mut self) {
+        self.stored_charge = 0.0;
+        self.prev_current = 0.0;
+        self.recovery_start_time = 0.0;
+        self.in_recovery = false;
+    }
+}
+
+//=============================================================================
 // Stamp Indices for O(1) Matrix Access
 //=============================================================================
 
@@ -169,6 +425,18 @@ pub struct Vdmos {
     pub bv: Value,
 
     //=========================================================================
+    // Thermal Model (Self-Heating)
+    //=========================================================================
+    /// Thermal network for electro-thermal simulation
+    pub thermal: ThermalNetwork,
+
+    //=========================================================================
+    // Body Diode Reverse Recovery
+    //=========================================================================
+    /// Diode recovery model for switching transients
+    pub recovery: DiodeRecovery,
+
+    //=========================================================================
     // Operating State
     //=========================================================================
     /// Current operating region
@@ -177,6 +445,8 @@ pub struct Vdmos {
     pub id: Value,
     /// Body diode current
     pub id_diode: Value,
+    /// Instantaneous power dissipation (W)
+    pub power: Value,
     /// Previous voltages for convergence
     prev_vgs: Value,
     prev_vds: Value,
@@ -239,9 +509,14 @@ impl Vdmos {
             tt: 50e-9,
             bv: 100.0,
 
+            // Thermal and recovery models (disabled by default)
+            thermal: ThermalNetwork::default(),
+            recovery: DiodeRecovery::default(),
+
             region: VdmosRegion::Cutoff,
             id: 0.0,
             id_diode: 0.0,
+            power: 0.0,
             prev_vgs: 0.0,
             prev_vds: 0.0,
 
@@ -332,6 +607,31 @@ impl Vdmos {
         if let Some(&v) = params.get("BV") {
             self.bv = v;
         }
+
+        // Thermal model parameters
+        if let Some(&v) = params.get("RTH") {
+            self.thermal.rth = v;
+        }
+        if let Some(&v) = params.get("CTH") {
+            self.thermal.cth = v;
+        }
+        if let Some(&v) = params.get("TAMB") {
+            // Convert Celsius to Kelvin
+            self.thermal.t_ambient = v + 273.15;
+            self.thermal.t_junction = self.thermal.t_ambient;
+        }
+
+        // Body diode reverse recovery parameters
+        if let Some(&v) = params.get("QRR") {
+            self.recovery.qrr = v;
+        }
+        if let Some(&v) = params.get("TRR") {
+            self.recovery.trr = v;
+        }
+        if let Some(&v) = params.get("SOFTNESS") {
+            self.recovery.softness = v.clamp(0.0, 1.0);
+        }
+
         self
     }
 
@@ -903,5 +1203,182 @@ mod tests {
         let c_high = vdmos.junction_capacitance(1e-9, 0.9, 0.8, 0.5, 0.5);
         assert!(c_high < 1e-6, "Capacitance should be capped: {}", c_high);
         assert!(c_high > 1e-9, "Capacitance should increase in forward bias");
+    }
+
+    //=========================================================================
+    // Thermal Network Tests
+    //=========================================================================
+
+    #[test]
+    fn test_thermal_network_defaults() {
+        let thermal = ThermalNetwork::default();
+        assert!(thermal.rth > 0.0);
+        assert!(thermal.cth > 0.0);
+        assert!((thermal.t_junction - thermal.t_ambient).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_thermal_network_steady_state() {
+        let thermal = ThermalNetwork::new(1.0, 0.01, 300.0);
+        let power = 10.0; // 10W
+        let expected_tj = 300.0 + 10.0 * 1.0; // Ta + P * Rth = 310K
+        let actual = thermal.steady_state_temperature(power);
+        assert!(
+            (actual - expected_tj).abs() < 0.01,
+            "Expected {}, got {}",
+            expected_tj,
+            actual
+        );
+    }
+
+    #[test]
+    fn test_thermal_network_transient() {
+        let mut thermal = ThermalNetwork::new(10.0, 0.1, 300.0);
+        let power = 5.0; // 5W
+
+        // Simulate for many timesteps - temperature should rise
+        for i in 0..1000 {
+            let time = i as f64 * 0.001;
+            thermal.update(power, time, 0.001);
+        }
+
+        // After 1 second, should be close to steady state (Rth*Cth = 1s)
+        let steady_state = thermal.steady_state_temperature(power);
+        assert!(thermal.t_junction > 300.0, "Temperature should rise");
+        assert!(
+            (thermal.t_junction - steady_state).abs() / steady_state < 0.1,
+            "Should approach steady state: {} vs {}",
+            thermal.t_junction,
+            steady_state
+        );
+    }
+
+    #[test]
+    fn test_thermal_network_reset() {
+        let mut thermal = ThermalNetwork::new(1.0, 0.01, 300.0);
+        thermal.update(100.0, 0.1, 0.1); // Heat up
+        assert!(thermal.t_junction > 300.0);
+
+        thermal.reset();
+        assert!((thermal.t_junction - thermal.t_ambient).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_thermal_voltage_calculation() {
+        let thermal = ThermalNetwork::new(1.0, 0.01, 300.0);
+        let vt = thermal.thermal_voltage();
+        // At 300K, Vt ≈ 25.9mV
+        assert!(
+            (vt - 0.0259).abs() < 0.001,
+            "Thermal voltage at 300K: {}",
+            vt
+        );
+    }
+
+    //=========================================================================
+    // Diode Recovery Tests
+    //=========================================================================
+
+    #[test]
+    fn test_diode_recovery_defaults() {
+        let recovery = DiodeRecovery::default();
+        assert!(!recovery.is_enabled()); // Disabled by default (qrr = 0)
+    }
+
+    #[test]
+    fn test_diode_recovery_charge_buildup() {
+        let mut recovery = DiodeRecovery::new(1e-6, 100e-9, 0.5);
+
+        // Forward current should build up charge
+        for i in 0..100 {
+            let time = i as f64 * 1e-6;
+            recovery.update(1.0, time, 1e-6); // 1A forward
+        }
+
+        assert!(recovery.stored_charge > 0.0, "Charge should accumulate");
+    }
+
+    #[test]
+    fn test_diode_recovery_current_waveform() {
+        let mut recovery = DiodeRecovery::new(1e-6, 100e-9, 0.5);
+        recovery.stored_charge = 1e-6; // Pre-load with Qrr
+        recovery.in_recovery = true;
+        recovery.recovery_start_time = 0.0;
+
+        // At t=0, recovery is starting
+        let i_start = recovery.recovery_current(0.0);
+
+        // At mid-recovery, should have significant current
+        let i_mid = recovery.recovery_current(50e-9);
+
+        // After recovery (3*trr), current should be zero
+        let i_end = recovery.recovery_current(400e-9);
+
+        assert!(i_mid < 0.0, "Recovery current should be negative (reverse)");
+        assert!(
+            i_mid.abs() > i_start.abs(),
+            "Current should peak during recovery"
+        );
+        assert!(i_end.abs() < 1e-12, "Current should be zero after recovery");
+    }
+
+    #[test]
+    fn test_diode_recovery_softness() {
+        let snappy = DiodeRecovery::new(1e-6, 100e-9, 0.0);
+        let soft = DiodeRecovery::new(1e-6, 100e-9, 1.0);
+
+        // Both should have same Qrr
+        assert_eq!(snappy.qrr, soft.qrr);
+
+        // Softness should affect waveform shape
+        assert!(snappy.softness < soft.softness);
+    }
+
+    #[test]
+    fn test_diode_recovery_reset() {
+        let mut recovery = DiodeRecovery::new(1e-6, 100e-9, 0.5);
+        recovery.stored_charge = 0.5e-6;
+        recovery.in_recovery = true;
+
+        recovery.reset();
+
+        assert_eq!(recovery.stored_charge, 0.0);
+        assert!(!recovery.in_recovery);
+    }
+
+    //=========================================================================
+    // VDMOS with Thermal/Recovery Integration Tests
+    //=========================================================================
+
+    #[test]
+    fn test_vdmos_thermal_params() {
+        use std::collections::HashMap;
+
+        let mut params = HashMap::new();
+        params.insert("RTH".to_string(), 2.5);
+        params.insert("CTH".to_string(), 0.05);
+        params.insert("TAMB".to_string(), 50.0); // 50°C
+
+        let vdmos = Vdmos::new_nvdmos("M1".to_string(), 1, 2, 3).with_params(&params);
+
+        assert!((vdmos.thermal.rth - 2.5).abs() < 0.01);
+        assert!((vdmos.thermal.cth - 0.05).abs() < 0.01);
+        assert!((vdmos.thermal.t_ambient - 323.15).abs() < 0.1); // 50°C + 273.15
+    }
+
+    #[test]
+    fn test_vdmos_recovery_params() {
+        use std::collections::HashMap;
+
+        let mut params = HashMap::new();
+        params.insert("QRR".to_string(), 500e-9);
+        params.insert("TRR".to_string(), 75e-9);
+        params.insert("SOFTNESS".to_string(), 0.3);
+
+        let vdmos = Vdmos::new_nvdmos("M1".to_string(), 1, 2, 3).with_params(&params);
+
+        assert!((vdmos.recovery.qrr - 500e-9).abs() < 1e-12);
+        assert!((vdmos.recovery.trr - 75e-9).abs() < 1e-12);
+        assert!((vdmos.recovery.softness - 0.3).abs() < 0.01);
     }
 }
