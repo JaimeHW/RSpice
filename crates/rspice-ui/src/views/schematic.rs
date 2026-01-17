@@ -1,11 +1,31 @@
 //! Schematic Editor View - Pure SVG Implementation
 //!
 //! Interactive schematic capture using SVG for all rendering.
+//! Supports pan, zoom, drag-to-move, undo/redo, and context menus.
 
 use dioxus::prelude::*;
 
-use crate::state::{ComponentType, Point, SchematicState, Tool};
+use crate::components::context_menu::{schematic_context_menu, canvas_context_menu, ContextMenu, MenuAction};
+use crate::state::{ComponentType, Point, SchematicState, Tool, SchematicHistory};
 use crate::theme::Theme;
+
+/// Drag operation state
+#[derive(Clone, Copy, PartialEq, Default)]
+struct DragState {
+    active: bool,
+    component_id: Option<u64>,
+    start_grid: Point,
+    current_grid: Point,
+}
+
+/// Context menu state
+#[derive(Clone, Default)]
+struct ContextMenuState {
+    visible: bool,
+    position: (f64, f64),
+    target_component: Option<u64>,
+    target_wire: Option<u64>,
+}
 
 /// Main schematic editor component - Pure SVG
 #[component]
@@ -16,11 +36,20 @@ pub fn Schematic() -> Element {
     let mut schematic: Signal<SchematicState> = use_context();
 
     // Viewport state
-    let mut pan = use_signal(|| (400.0f64, 300.0f64)); // Start centered
+    let mut pan = use_signal(|| (400.0f64, 300.0f64));
     let mut zoom = use_signal(|| 1.0f64);
     let mut is_panning = use_signal(|| false);
     let mut last_mouse = use_signal(|| (0.0f64, 0.0f64));
     let mut mouse_grid = use_signal(|| Point::new(0, 0));
+
+    // Drag-to-move state
+    let mut drag = use_signal(DragState::default);
+
+    // Context menu state
+    let mut context_menu = use_signal(ContextMenuState::default);
+
+    // Undo/Redo history (local for now, will integrate with SchematicHistory later)
+    let mut history = use_signal(|| SchematicHistory::new(schematic.read().clone(), 100));
 
     rsx! {
         div {
@@ -40,32 +69,94 @@ pub fn Schematic() -> Element {
                     onmousemove: move |evt| {
                         let c = evt.element_coordinates();
                         
-                        if *is_panning.read() {
-                            let (lx, ly) = *last_mouse.read();
-                            let (opx, opy) = *pan.read();
-                            pan.set((opx + c.x - lx, opy + c.y - ly));
-                        }
-                        last_mouse.set((c.x, c.y));
-                        
+                        // Calculate grid position
                         let (px, py) = *pan.read();
                         let z = *zoom.read();
                         let wx = (c.x - px) / z;
                         let wy = (c.y - py) / z;
                         let gs = schematic.read().grid_size;
-                        mouse_grid.set(Point::from_pixels(wx, wy, gs));
+                        let gp = Point::from_pixels(wx, wy, gs);
+                        mouse_grid.set(gp);
+                        
+                        // Handle panning
+                        if *is_panning.read() {
+                            let (lx, ly) = *last_mouse.read();
+                            let (opx, opy) = *pan.read();
+                            pan.set((opx + c.x - lx, opy + c.y - ly));
+                        }
+                        
+                        // Handle component dragging
+                        let d = *drag.read();
+                        if d.active && d.component_id.is_some() {
+                            drag.set(DragState {
+                                current_grid: gp,
+                                ..d
+                            });
+                        }
+                        
+                        last_mouse.set((c.x, c.y));
                     },
 
                     onmousedown: move |evt| {
                         let c = evt.element_coordinates();
+                        let (px, py) = *pan.read();
+                        let z = *zoom.read();
+                        let gs = schematic.read().grid_size;
+                        let gp = Point::from_pixels((c.x - px) / z, (c.y - py) / z, gs);
+                        
+                        // Middle mouse or shift+left for pan
                         if evt.trigger_button() == Some(dioxus::html::input_data::MouseButton::Auxiliary)
                            || (evt.modifiers().shift() && evt.trigger_button() == Some(dioxus::html::input_data::MouseButton::Primary)) {
                             is_panning.set(true);
                             last_mouse.set((c.x, c.y));
                         }
+                        // Left click on component to start drag (in Select mode)
+                        else if evt.trigger_button() == Some(dioxus::html::input_data::MouseButton::Primary) {
+                            let s = schematic.read();
+                            if matches!(s.tool, Tool::Select) {
+                                if let Some(comp_id) = s.component_at(gp) {
+                                    drag.set(DragState {
+                                        active: true,
+                                        component_id: Some(comp_id),
+                                        start_grid: gp,
+                                        current_grid: gp,
+                                    });
+                                }
+                            }
+                        }
                     },
 
-                    onmouseup: move |_| { is_panning.set(false); },
-                    onmouseleave: move |_| { is_panning.set(false); },
+                    onmouseup: move |_| {
+                        is_panning.set(false);
+                        
+                        // Commit drag if active
+                        let d = *drag.read();
+                        if d.active {
+                            if let Some(comp_id) = d.component_id {
+                                let delta_x = d.current_grid.x - d.start_grid.x;
+                                let delta_y = d.current_grid.y - d.start_grid.y;
+                                
+                                if delta_x != 0 || delta_y != 0 {
+                                    // Apply the move FIRST
+                                    {
+                                        let mut s = schematic.write();
+                                        if let Some(comp) = s.components.iter_mut().find(|c| c.id == comp_id) {
+                                            comp.pos.x += delta_x;
+                                            comp.pos.y += delta_y;
+                                        }
+                                    }
+                                    // Then save state AFTER the change
+                                    history.write().push(schematic.read().clone(), "Move component");
+                                }
+                            }
+                            drag.set(DragState::default());
+                        }
+                    },
+                    
+                    onmouseleave: move |_| {
+                        is_panning.set(false);
+                        drag.set(DragState::default());
+                    },
 
                     onwheel: move |evt| {
                         let c = evt.element_coordinates();
@@ -83,6 +174,12 @@ pub fn Schematic() -> Element {
                     },
 
                     onclick: move |evt| {
+                        // Close context menu if open
+                        if context_menu.read().visible {
+                            context_menu.set(ContextMenuState::default());
+                            return;
+                        }
+                        
                         let c = evt.element_coordinates();
                         let (px, py) = *pan.read();
                         let z = *zoom.read();
@@ -96,12 +193,39 @@ pub fn Schematic() -> Element {
                                 if let Some(id) = s.component_at(gp) { s.selection.components.push(id); }
                                 else if let Some(id) = s.wire_at(gp) { s.selection.wires.push(id); }
                             }
-                            Tool::Place(k) => { s.add_component(k, gp); }
+                            Tool::Place(k) => {
+                                // Make the change first
+                                s.add_component(k, gp);
+                                // Then push to history AFTER the change
+                                drop(s);
+                                history.write().push(schematic.read().clone(), format!("Add {:?}", k));
+                            }
                             Tool::Wire => {
                                 if s.wire_drawing.active { s.extend_wire(gp); }
                                 else { s.start_wire(gp); }
                             }
                         }
+                    },
+
+                    // Context menu on right-click
+                    oncontextmenu: move |evt| {
+                        evt.prevent_default();
+                        let c = evt.element_coordinates();
+                        let (px, py) = *pan.read();
+                        let z = *zoom.read();
+                        let gs = schematic.read().grid_size;
+                        let gp = Point::from_pixels((c.x - px) / z, (c.y - py) / z, gs);
+                        
+                        let s = schematic.read();
+                        let comp = s.component_at(gp);
+                        let wire = s.wire_at(gp);
+                        
+                        context_menu.set(ContextMenuState {
+                            visible: true,
+                            position: (c.x, c.y),
+                            target_component: comp,
+                            target_wire: wire,
+                        });
                     },
 
                     ondoubleclick: move |_| {
@@ -110,11 +234,44 @@ pub fn Schematic() -> Element {
                     },
 
                     onkeydown: move |evt| {
+                        // Handle Ctrl+Z (Undo) and Ctrl+Y (Redo)
+                        if evt.modifiers().ctrl() {
+                            match evt.key() {
+                                Key::Character(c) if c == "z" || c == "Z" => {
+                                    if history.read().can_undo() {
+                                        history.write().undo();
+                                        schematic.set(history.read().current().clone());
+                                    }
+                                    return;
+                                }
+                                Key::Character(c) if c == "y" || c == "Y" => {
+                                    if history.read().can_redo() {
+                                        history.write().redo();
+                                        schematic.set(history.read().current().clone());
+                                    }
+                                    return;
+                                }
+                                _ => {}
+                            }
+                        }
+                        
                         let mut s = schematic.write();
                         match evt.key() {
                             Key::Escape => { s.tool = Tool::Select; s.wire_drawing.active = false; }
-                            Key::Delete => s.delete_selection(),
-                            Key::Character(c) if c == "r" || c == "R" => s.rotate_selection(),
+                            Key::Delete => {
+                                // Make the change FIRST
+                                s.delete_selection();
+                                // Then push to history AFTER
+                                drop(s);
+                                history.write().push(schematic.read().clone(), "Delete selection");
+                            }
+                            Key::Character(c) if c == "r" || c == "R" => {
+                                // Make the change FIRST
+                                s.rotate_selection();
+                                // Then push to history AFTER
+                                drop(s);
+                                history.write().push(schematic.read().clone(), "Rotate selection");
+                            }
                             Key::Character(c) if c == "w" || c == "W" => s.tool = Tool::Wire,
                             _ => {}
                         }
@@ -197,8 +354,55 @@ pub fn Schematic() -> Element {
                 // Status bar
                 div {
                     style: "position: absolute; bottom: 0; left: 0; right: 0; display: flex; justify-content: space-between; padding: 4px 8px; background: {th.bg_tertiary()}dd; font-size: 11px; color: {th.text_muted()}; font-family: monospace;",
-                    span { {match schematic.read().tool { Tool::Select => "Select | Del: delete | R: rotate", Tool::Wire => "Wire | Click: add points | DblClick: finish", Tool::Place(_) => "Place | Click: place | Esc: cancel" }} }
+                    span { {match schematic.read().tool { Tool::Select => "Select | Del: delete | R: rotate | Ctrl+Z/Y: undo/redo", Tool::Wire => "Wire | Click: add points | DblClick: finish", Tool::Place(_) => "Place | Click: place | Esc: cancel" }} }
                     span { {format!("({}, {}) | {:.0}%", mouse_grid.read().x, mouse_grid.read().y, *zoom.read() * 100.0)} }
+                }
+
+                // Context menu overlay
+                if context_menu.read().visible {
+                    ContextMenu {
+                        position: context_menu.read().position,
+                        items: {
+                            let cm = context_menu.read();
+                            let has_selection = !schematic.read().selection.is_empty();
+                            let can_undo = history.read().can_undo();
+                            let can_redo = history.read().can_redo();
+                            
+                            if cm.target_component.is_some() || has_selection {
+                                schematic_context_menu(has_selection, false, can_undo, can_redo)
+                            } else {
+                                canvas_context_menu(false, can_undo, can_redo)
+                            }
+                        },
+                        on_action: move |action| {
+                            match action {
+                                MenuAction::Undo => {
+                                    if history.read().can_undo() {
+                                        history.write().undo();
+                                        schematic.set(history.read().current().clone());
+                                    }
+                                }
+                                MenuAction::Redo => {
+                                    if history.read().can_redo() {
+                                        history.write().redo();
+                                        schematic.set(history.read().current().clone());
+                                    }
+                                }
+                                MenuAction::Delete => {
+                                    schematic.write().delete_selection();
+                                    history.write().push(schematic.read().clone(), "Delete selection");
+                                }
+                                MenuAction::Rotate => {
+                                    schematic.write().rotate_selection();
+                                    history.write().push(schematic.read().clone(), "Rotate selection");
+                                }
+                                _ => {} // Other actions not yet implemented
+                            }
+                        },
+                        on_close: move |_| {
+                            context_menu.set(ContextMenuState::default());
+                        },
+                    }
                 }
             }
         }
