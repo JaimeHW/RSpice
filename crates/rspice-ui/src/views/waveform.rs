@@ -1038,6 +1038,9 @@ fn format_time(t: f64) -> String {
 /// GPU-accelerated waveform canvas component
 #[component]
 fn GpuWaveformCanvas(view: ViewState, waveforms: Vec<crate::state::WaveformData>) -> Element {
+    // Track container size for dynamic resolution
+    let mut container_size = use_signal(|| (1200u32, 400u32)); // Default size
+
     // Build traces from waveform data
     let traces: Vec<WaveformTrace> = if waveforms.is_empty() {
         // Demo waveform - generate X values covering current view
@@ -1080,22 +1083,42 @@ fn GpuWaveformCanvas(view: ViewState, waveforms: Vec<crate::state::WaveformData>
         dirty: true,
     }));
 
+    let (width, height) = *container_size.read();
+    // Render at 2x resolution for high-DPI displays, with minimum size
+    let render_width = (width * 2).max(800);
+    let render_height = (height * 2).max(300);
+
     let mut painter = WaveformPainter::new(gpu_state);
-    // Render at higher resolution for sharper display on large monitors
-    let img_src = painter.render_to_base64(2400, 600).unwrap_or_default();
+    let img_src = painter
+        .render_to_base64(render_width, render_height)
+        .unwrap_or_default();
 
     rsx! {
-        if !img_src.is_empty() {
-            img {
-                style: "
-                    position: absolute;
-                    inset: 0;
-                    width: 100%;
-                    height: 100%;
-                    object-fit: fill;
-                    image-rendering: auto;
-                ",
-                src: "{img_src}",
+        div {
+            style: "position: absolute; inset: 0;",
+            onmounted: move |evt| {
+                // Measure container size when mounted
+                spawn(async move {
+                    if let Ok(rect) = evt.get_client_rect().await {
+                        let w = rect.width() as u32;
+                        let h = rect.height() as u32;
+                        if w > 0 && h > 0 {
+                            container_size.set((w, h));
+                        }
+                    }
+                });
+            },
+            if !img_src.is_empty() {
+                img {
+                    style: "
+                        position: absolute;
+                        inset: 0;
+                        width: 100%;
+                        height: 100%;
+                        object-fit: fill;
+                    ",
+                    src: "{img_src}",
+                }
             }
         }
     }
