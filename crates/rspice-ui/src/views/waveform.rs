@@ -1081,8 +1081,8 @@ fn GpuWaveformCanvas(view: ViewState, waveforms: Vec<crate::state::WaveformData>
     }));
 
     let mut painter = WaveformPainter::new(gpu_state);
-    // Render at higher resolution for sharper display when scaled
-    let img_src = painter.render_to_base64(1600, 400).unwrap_or_default();
+    // Render at higher resolution for sharper display on large monitors
+    let img_src = painter.render_to_base64(2400, 600).unwrap_or_default();
 
     rsx! {
         if !img_src.is_empty() {

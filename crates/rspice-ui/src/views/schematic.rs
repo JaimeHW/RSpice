@@ -648,10 +648,11 @@ fn symbol_path(k: ComponentType) -> &'static str {
         ComponentType::VoltageSource | ComponentType::VoltageSourceAc | ComponentType::VoltageSourcePulse | ComponentType::VoltageSourceSin => 
             "M0-20 L0-12 M0 12 L0 20 M0 0 m-12 0 a12 12 0 1 0 24 0 a12 12 0 1 0-24 0 M-4-4 L4-4 M0-8 L0 0",
         ComponentType::CurrentSource => "M0-20 L0-12 M0 12 L0 20 M0 0 m-12 0 a12 12 0 1 0 24 0 a12 12 0 1 0-24 0 M0-6 L0 6 M-3 3 L0 6 L3 3",
-        // NPN BJT: horizontal base input, vertical bar, angled collector (up-right), angled emitter (down-right) with arrow OUT
-        ComponentType::NpnBjt => "M-20 0 L-5 0 M-5-10 L-5 10 M-5-4 L10-16 L10-20 M-5 4 L10 16 L10 20 M6 12 L10 16 L6 16",
-        // PNP BJT: same structure but arrow points IN on emitter  
-        ComponentType::PnpBjt => "M-20 0 L-5 0 M-5-10 L-5 10 M-5-4 L10-16 L10-20 M-5 4 L10 16 L10 20 M-1 6 L-5 4 L-1 8",
+        // NPN BJT: base input, vertical bar, collector (angled up-right), emitter (angled down-right) with arrow pointing OUT from bar
+        // Arrow is midway on emitter line, pointing away from base
+        ComponentType::NpnBjt => "M-20 0 L-5 0 M-5-10 L-5 10 M-5-4 L10-16 L10-20 M-5 4 L10 16 L10 20 M2 10 L6 13 L2 13",
+        // PNP BJT: same structure, arrow on emitter pointing IN toward bar
+        ComponentType::PnpBjt => "M-20 0 L-5 0 M-5-10 L-5 10 M-5-4 L10-16 L10-20 M-5 4 L10 16 L10 20 M-2 6 L-5 4 L-5 7",
         // NMOS: gate on left, vertical gate plate, channel with gaps, source (bottom) and drain (top) with body arrow IN
         ComponentType::Nmos => "M-20 0 L-8 0 M-8-12 L-8 12 M-4-10 L-4-3 M-4 3 L-4 10 M-4-7 L10-7 L10-20 M-4 7 L10 7 L10 20 M-4 0 L10 0 M6-3 L10 0 L6 3",
         // PMOS: same as NMOS but with inversion bubble on gate
