@@ -19,7 +19,7 @@ mod parser;
 pub mod include;
 
 pub use ast::*;
-pub use flattener::{flatten_netlist, Flattener};
+pub use flattener::{flatten_netlist, Flattener, FlattenerConfig};
 pub use parser::*;
 pub use expr::ParamContext;
 pub use include::{IncludeProcessor, parse_include_directive, parse_lib_directive};

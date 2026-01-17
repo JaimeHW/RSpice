@@ -80,6 +80,37 @@ impl SimulationResult {
             }
         }
     }
+
+    /// Get branch current by index
+    /// 
+    /// Branch currents are stored for voltage sources and inductors
+    /// which require additional MNA variables.
+    #[inline]
+    pub fn branch_current(&self, branch_idx: usize) -> Option<Value> {
+        self.branch_currents.get(branch_idx).copied()
+    }
+
+    /// Get branch current by element name using a lookup map
+    /// 
+    /// # Arguments
+    /// * `name` - Element name (e.g., "V1", "L1", "VSRC")
+    /// * `branch_map` - Map from element name to branch index
+    /// 
+    /// # Returns
+    /// Current value if found, None otherwise
+    /// 
+    /// # Example
+    /// ```ignore
+    /// let current = result.branch_current_by_name("V1", &circuit.branch_names);
+    /// ```
+    pub fn branch_current_by_name(
+        &self,
+        name: &str,
+        branch_map: &std::collections::HashMap<String, usize>,
+    ) -> Option<Value> {
+        branch_map.get(name)
+            .and_then(|&idx| self.branch_currents.get(idx).copied())
+    }
 }
 
 /// Main simulator interface

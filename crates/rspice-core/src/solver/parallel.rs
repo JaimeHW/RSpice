@@ -239,6 +239,121 @@ pub fn should_use_parallel(num_devices: usize) -> bool {
 }
 
 //=============================================================================
+// Parallel Stamping for Diodes
+//=============================================================================
+
+/// Parallel-safe diode stamping data
+/// 
+/// Holds pre-computed indices for O(1) atomic stamping without locks.
+#[cfg(feature = "parallel")]
+#[derive(Debug, Clone)]
+pub struct DiodeParallelStamper {
+    /// Device name for debugging
+    pub name: String,
+    /// Anode node ID
+    pub node_anode: usize,
+    /// Cathode node ID  
+    pub node_cathode: usize,
+    /// Saturation current
+    pub is: Value,
+    /// Emission coefficient
+    pub n: Value,
+    /// Thermal voltage
+    pub vt: Value,
+    /// Pre-computed matrix indices
+    pub idx_aa: Option<usize>,
+    pub idx_ac: Option<usize>,
+    pub idx_ca: Option<usize>,
+    pub idx_cc: Option<usize>,
+}
+
+#[cfg(feature = "parallel")]
+impl DiodeParallelStamper {
+    /// Create from a Diode device with linked indices
+    pub fn from_diode(d: &crate::device::diode::Diode) -> Self {
+        Self {
+            name: d.name.clone(),
+            node_anode: d.node_anode,
+            node_cathode: d.node_cathode,
+            is: d.is,
+            n: d.n,
+            vt: d.vt,
+            idx_aa: d.indices.aa.map(|i| i.0),
+            idx_ac: d.indices.ac.map(|i| i.0),
+            idx_ca: d.indices.ca.map(|i| i.0),
+            idx_cc: d.indices.cc.map(|i| i.0),
+        }
+    }
+
+    /// Compute diode current using Shockley equation
+    #[inline]
+    fn current(&self, vd: Value) -> Value {
+        let vd_limited = vd.min(80.0 * self.n * self.vt);
+        self.is * ((vd_limited / (self.n * self.vt)).exp() - 1.0)
+    }
+
+    /// Compute diode conductance
+    #[inline]
+    fn conductance(&self, vd: Value) -> Value {
+        let vd_limited = vd.min(80.0 * self.n * self.vt);
+        (self.is / (self.n * self.vt)) * (vd_limited / (self.n * self.vt)).exp()
+    }
+}
+
+#[cfg(feature = "parallel")]
+impl ParallelStamp for DiodeParallelStamper {
+    fn stamp_atomic(&self, matrix: &AtomicMatrix, voltages: &[Value], rhs: &AtomicRhs) {
+        let va = if self.node_anode == 0 { 0.0 } else { voltages[self.node_anode - 1] };
+        let vc = if self.node_cathode == 0 { 0.0 } else { voltages[self.node_cathode - 1] };
+        let vd = va - vc;
+        
+        let id = self.current(vd);
+        let gd = self.conductance(vd);
+        let ieq = id - gd * vd;
+        
+        // Atomic matrix stamping
+        if let Some(idx) = self.idx_aa { matrix.add(idx, gd); }
+        if let Some(idx) = self.idx_ac { matrix.add(idx, -gd); }
+        if let Some(idx) = self.idx_ca { matrix.add(idx, -gd); }
+        if let Some(idx) = self.idx_cc { matrix.add(idx, gd); }
+        
+        // Atomic RHS stamping
+        if self.node_anode > 0 { rhs.add(self.node_anode - 1, -ieq); }
+        if self.node_cathode > 0 { rhs.add(self.node_cathode - 1, ieq); }
+    }
+}
+
+//=============================================================================
+// Circuit-Level Parallel Stamping
+//=============================================================================
+
+/// Options for controlling parallel stamping behavior
+#[derive(Debug, Clone, Copy)]
+pub struct ParallelStampConfig {
+    /// Minimum number of total nonlinear devices to enable parallel stamping
+    pub min_devices: usize,
+    /// Whether to force parallel stamping regardless of device count
+    pub force_parallel: bool,
+}
+
+impl Default for ParallelStampConfig {
+    fn default() -> Self {
+        Self {
+            min_devices: 1000,
+            force_parallel: false,
+        }
+    }
+}
+
+impl ParallelStampConfig {
+    /// Check if parallel stamping should be used
+    #[inline]
+    pub fn should_use(&self, num_devices: usize) -> bool {
+        self.force_parallel || num_devices >= self.min_devices
+    }
+}
+
+//=============================================================================
 // Tests
 //=============================================================================
 
@@ -318,5 +433,84 @@ mod tests {
         assert!(!should_use_parallel(500));
         assert!(should_use_parallel(1000));
         assert!(should_use_parallel(10000));
+    }
+
+    #[test]
+    fn test_parallel_stamp_config_default() {
+        let config = ParallelStampConfig::default();
+        assert_eq!(config.min_devices, 1000);
+        assert!(!config.force_parallel);
+        
+        assert!(!config.should_use(500));
+        assert!(config.should_use(1000));
+        assert!(config.should_use(5000));
+    }
+
+    #[test]
+    fn test_parallel_stamp_config_force() {
+        let config = ParallelStampConfig {
+            min_devices: 1000,
+            force_parallel: true,
+        };
+        
+        // Should always use parallel when forced
+        assert!(config.should_use(1));
+        assert!(config.should_use(100));
+        assert!(config.should_use(10000));
+    }
+
+    #[test]
+    fn test_diode_parallel_stamper_current() {
+        // Create a simple diode stamper
+        let stamper = DiodeParallelStamper {
+            name: "D1".to_string(),
+            node_anode: 1,
+            node_cathode: 0,
+            is: 1e-14,
+            n: 1.0,
+            vt: 0.026,
+            idx_aa: Some(0),
+            idx_ac: None,
+            idx_ca: None,
+            idx_cc: None,
+        };
+        
+        // Forward bias should give positive current
+        let id_forward = stamper.current(0.7);
+        assert!(id_forward > 0.0);
+        
+        // Reverse bias should give ~-Is
+        let id_reverse = stamper.current(-1.0);
+        assert!(id_reverse.abs() < 1e-8);
+    }
+
+    #[test]
+    fn test_diode_parallel_stamper_atomic() {
+        let matrix = AtomicMatrix::new(5);
+        let rhs = AtomicRhs::new(3);
+        
+        let stamper = DiodeParallelStamper {
+            name: "D1".to_string(),
+            node_anode: 1,
+            node_cathode: 2,
+            is: 1e-14,
+            n: 1.0,
+            vt: 0.026,
+            idx_aa: Some(0),
+            idx_ac: Some(1),
+            idx_ca: Some(2),
+            idx_cc: Some(3),
+        };
+        
+        // Stamp with voltages [0V, 0.7V, 0V]
+        let voltages = vec![0.7, 0.0, 0.0];
+        stamper.stamp_atomic(&matrix, &voltages, &rhs);
+        
+        // Conductance should be stamped
+        let gd = matrix.get(0);
+        assert!(gd > 0.0, "Conductance should be positive, got {}", gd);
+        
+        // RHS should have current contributions
+        assert!(rhs.get(0).abs() > 0.0 || rhs.get(1).abs() > 0.0);
     }
 }

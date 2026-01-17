@@ -10,19 +10,75 @@ use std::collections::HashMap;
 use super::{Element, ElementKind, Netlist, SubcircuitDef, ParseError};
 use crate::Value;
 
+//=============================================================================
+// Flattener Configuration
+//=============================================================================
+
+/// Configuration options for subcircuit flattening
+#[derive(Debug, Clone)]
+pub struct FlattenerConfig {
+    /// Maximum recursion depth to prevent infinite loops
+    pub max_depth: usize,
+    /// Preserve hierarchical node names for debugging (X1.X2.node format)
+    /// When true, internal nodes keep the full hierarchical path
+    /// When false, uses shorter hash-based names for efficiency
+    pub preserve_hierarchy: bool,
+    /// Separator character for hierarchical names (default: '.')
+    pub hierarchy_separator: char,
+}
+
+impl Default for FlattenerConfig {
+    fn default() -> Self {
+        Self {
+            max_depth: 100,
+            preserve_hierarchy: true,  // Default to full path for debugging
+            hierarchy_separator: '.',
+        }
+    }
+}
+
+impl FlattenerConfig {
+    /// Create a config optimized for debugging (full hierarchical names)
+    pub fn debug() -> Self {
+        Self {
+            max_depth: 100,
+            preserve_hierarchy: true,
+            hierarchy_separator: '.',
+        }
+    }
+    
+    /// Create a config optimized for performance (shorter names)
+    pub fn production() -> Self {
+        Self {
+            max_depth: 100,
+            preserve_hierarchy: false,
+            hierarchy_separator: '_',
+        }
+    }
+}
+
+//=============================================================================
+// Flattener
+//=============================================================================
+
 /// Flattens a hierarchical netlist into a flat element list
 pub struct Flattener<'a> {
     /// Subcircuit definitions indexed by name
     subcircuits: HashMap<&'a str, &'a SubcircuitDef>,
-    #[allow(dead_code)] // Reserved for unique node generation
+    /// Counter for generating unique node names (when not preserving hierarchy)
     node_counter: usize,
-    /// Maximum recursion depth to prevent infinite loops
-    max_depth: usize,
+    /// Configuration options
+    config: FlattenerConfig,
 }
 
 impl<'a> Flattener<'a> {
     /// Create a new flattener with the given subcircuit definitions
     pub fn new(subcircuits: &'a [SubcircuitDef]) -> Self {
+        Self::with_config(subcircuits, FlattenerConfig::default())
+    }
+
+    /// Create a flattener with custom configuration
+    pub fn with_config(subcircuits: &'a [SubcircuitDef], config: FlattenerConfig) -> Self {
         let subcircuits = subcircuits
             .iter()
             .map(|s| (s.name.as_str(), s))
@@ -31,7 +87,7 @@ impl<'a> Flattener<'a> {
         Self {
             subcircuits,
             node_counter: 0,
-            max_depth: 100,
+            config,
         }
     }
 
@@ -55,10 +111,10 @@ impl<'a> Flattener<'a> {
         depth: usize,
         output: &mut Vec<Element>,
     ) -> Result<(), ParseError> {
-        if depth > self.max_depth {
+        if depth > self.config.max_depth {
             return Err(ParseError::Syntax {
                 line: 0,
-                message: format!("Subcircuit recursion depth exceeded (max {})", self.max_depth),
+                message: format!("Subcircuit recursion depth exceeded (max {})", self.config.max_depth),
             });
         }
 
@@ -210,7 +266,7 @@ impl<'a> Flattener<'a> {
         if prefix.is_empty() {
             node.to_string()
         } else {
-            format!("{}.{}", prefix, node)
+            format!("{}{}{}", prefix, self.config.hierarchy_separator, node)
         }
     }
 

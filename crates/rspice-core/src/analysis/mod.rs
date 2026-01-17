@@ -35,7 +35,7 @@ pub mod raw_export;
 
 pub use dc::{DcAnalysis, DcSweep};
 pub use ac::{AcAnalysis, AcResult};
-pub use transient::{TransientAnalysis, TimestepController, BreakpointManager, LteEstimator, TrapGearController};
+pub use transient::{TransientAnalysis, TimestepController, BreakpointManager, LteEstimator, TrapGearController, CompanionCoefficients, IntegrationMethod};
 pub use noise::{NoiseAnalysis, NoiseResult, NoiseSource, NoiseSourceType, IntegratedNoise};
 pub use parametric::{ParametricSweep, StepSpec, StepType, StepTarget, ParametricResults};
 pub use temperature::{TemperatureContext, ResistorTempCoeffs, JunctionTempScaling, MosfetTempScaling};

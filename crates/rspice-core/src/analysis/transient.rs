@@ -304,18 +304,27 @@ impl BreakpointManager {
 /// Uses difference between predicted and calculated values to estimate
 /// the integration error. This allows rejecting timesteps that converge
 /// numerically but are physically inaccurate.
+/// 
+/// Supports both standard extrapolation and Richardson extrapolation for
+/// higher accuracy LTE estimates.
 #[derive(Debug)]
 pub struct LteEstimator {
     /// Previous solution vector (t - dt)
     prev_solution: Vec<Value>,
     /// Solution before previous (t - 2*dt)
     prev_prev_solution: Vec<Value>,
+    /// Solution from 3 steps ago (t - 3*dt) for Richardson extrapolation
+    prev_prev_prev_solution: Vec<Value>,
     /// Previous timestep
     prev_dt: Value,
+    /// Timestep before previous
+    prev_prev_dt: Value,
     /// LTE tolerance
     tolerance: Value,
     /// Number of valid history entries
     history_count: usize,
+    /// Current integration method (for order-aware scaling)
+    method_order: u32,
 }
 
 impl LteEstimator {
@@ -324,18 +333,32 @@ impl LteEstimator {
         Self {
             prev_solution: Vec::new(),
             prev_prev_solution: Vec::new(),
+            prev_prev_prev_solution: Vec::new(),
             prev_dt: 0.0,
+            prev_prev_dt: 0.0,
             tolerance,
             history_count: 0,
+            method_order: 2, // Default to trapezoidal order
         }
+    }
+
+    /// Set the integration method order for accurate timestep scaling
+    /// - BackwardEuler: order 1
+    /// - Trapezoidal, Gear2: order 2
+    #[inline]
+    pub fn set_method_order(&mut self, order: u32) {
+        self.method_order = order.max(1);
     }
 
     /// Record a solution point for history
     pub fn record(&mut self, solution: &[Value], dt: Value) {
+        // Shift history: prev_prev_prev <- prev_prev <- prev <- new
+        self.prev_prev_prev_solution = std::mem::take(&mut self.prev_prev_solution);
         self.prev_prev_solution = std::mem::take(&mut self.prev_solution);
         self.prev_solution = solution.to_vec();
+        self.prev_prev_dt = self.prev_dt;
         self.prev_dt = dt;
-        if self.history_count < 2 {
+        if self.history_count < 3 {
             self.history_count += 1;
         }
     }
@@ -381,14 +404,57 @@ impl LteEstimator {
         (max_lte, accept)
     }
 
+    /// Richardson extrapolation LTE estimate (more accurate)
+    /// 
+    /// Uses solutions computed with steps h and h/2 to estimate the true error:
+    /// `LTE ≈ (x_h - x_{h/2}) / (2^p - 1)` where p is the method order.
+    /// 
+    /// This provides a more accurate LTE estimate by exploiting the known
+    /// convergence order of the integration method.
+    /// 
+    /// # Arguments
+    /// * `x_full` - Solution computed with full timestep h
+    /// * `x_half` - Solution computed with two half-steps h/2
+    /// 
+    /// # Returns
+    /// (lte_estimate, should_accept)
+    pub fn richardson_estimate(&self, x_full: &[Value], x_half: &[Value]) -> (Value, bool) {
+        if x_full.len() != x_half.len() || x_full.is_empty() {
+            return (0.0, true);
+        }
+
+        let order_factor = (1u64 << self.method_order) as Value - 1.0; // 2^p - 1
+        let mut max_lte = 0.0_f64;
+
+        for (&full, &half) in x_full.iter().zip(x_half.iter()) {
+            // Richardson extrapolation error estimate
+            let richardson_error = (half - full).abs() / order_factor;
+            
+            // Normalize by value magnitude
+            let normalized = if half.abs() > 1e-12 {
+                richardson_error / half.abs().max(1.0)
+            } else {
+                richardson_error
+            };
+            
+            max_lte = max_lte.max(normalized);
+        }
+
+        let accept = max_lte <= self.tolerance;
+        (max_lte, accept)
+    }
+
     /// Get recommended timestep scaling factor based on LTE
+    /// Uses method order for proper scaling exponent
     pub fn recommend_scale(&self, lte: Value) -> Value {
         if lte < 1e-15 {
             2.0 // Error negligible, can increase
         } else {
-            // For trapezoidal (order 2), optimal scaling is (tol/lte)^(1/3)
+            // Optimal scaling: (tol/lte)^(1/(p+1)) where p is method order
+            // For order 2: exponent = 1/3, for order 1: exponent = 1/2
+            let exponent = 1.0 / (self.method_order as Value + 1.0);
             let ratio = self.tolerance / lte;
-            ratio.powf(1.0 / 3.0).clamp(0.25, 2.0)
+            ratio.powf(exponent).clamp(0.25, 2.0)
         }
     }
 
@@ -396,7 +462,122 @@ impl LteEstimator {
     pub fn reset(&mut self) {
         self.prev_solution.clear();
         self.prev_prev_solution.clear();
+        self.prev_prev_prev_solution.clear();
         self.history_count = 0;
+    }
+}
+
+//=============================================================================
+// Companion Model Coefficients for Integration Methods
+//=============================================================================
+
+/// Companion model coefficients for numerical integration
+/// 
+/// Each integration method converts differential elements (C, L) into
+/// equivalent conductances and current/voltage sources using these coefficients.
+#[derive(Debug, Clone, Copy)]
+pub struct CompanionCoefficients {
+    /// Equivalent conductance coefficient: G_eq = coeff_g * C / dt
+    pub coeff_g: Value,
+    /// History coefficient for v_n (most recent)
+    pub coeff_v_n: Value,
+    /// History coefficient for v_{n-1}
+    pub coeff_v_n_minus_1: Value,
+    /// Whether v_{n-1} history is needed
+    pub needs_two_history: bool,
+}
+
+impl CompanionCoefficients {
+    /// Get coefficients for Backward Euler (first order, unconditionally stable)
+    /// 
+    /// C·dv/dt = i  →  C·(v_{n+1} - v_n)/dt = i_{n+1}
+    /// Companion: G_eq = C/dt, I_eq = G_eq·v_n
+    #[inline]
+    pub fn backward_euler() -> Self {
+        Self {
+            coeff_g: 1.0,
+            coeff_v_n: 1.0,
+            coeff_v_n_minus_1: 0.0,
+            needs_two_history: false,
+        }
+    }
+
+    /// Get coefficients for Trapezoidal rule (second order, A-stable)
+    /// 
+    /// Uses average of derivatives at n and n+1:
+    /// C·(v_{n+1} - v_n)/dt = 0.5·(i_{n+1} + i_n)
+    /// Companion: G_eq = 2C/dt, I_eq = G_eq·v_n + i_n
+    #[inline]
+    pub fn trapezoidal() -> Self {
+        Self {
+            coeff_g: 2.0,
+            coeff_v_n: 2.0,
+            coeff_v_n_minus_1: 0.0,
+            needs_two_history: false,
+        }
+    }
+
+    /// Get coefficients for Gear2/BDF2 (second order, L-stable, good for stiff)
+    /// 
+    /// Uses backward difference formula:
+    /// (3·v_{n+1} - 4·v_n + v_{n-1}) / (2·dt) = f_{n+1}
+    /// Companion: G_eq = 3C/(2·dt), I_eq = (4C·v_n - C·v_{n-1})/(2·dt)
+    #[inline]
+    pub fn gear2() -> Self {
+        Self {
+            coeff_g: 1.5,            // 3/2
+            coeff_v_n: 2.0,          // 4/2 = 2
+            coeff_v_n_minus_1: -0.5, // -1/2
+            needs_two_history: true,
+        }
+    }
+
+    /// Get coefficients for the specified integration method
+    #[inline]
+    pub fn for_method(method: IntegrationMethod) -> Self {
+        match method {
+            IntegrationMethod::BackwardEuler => Self::backward_euler(),
+            IntegrationMethod::Trapezoidal => Self::trapezoidal(),
+            IntegrationMethod::Gear2 => Self::gear2(),
+            IntegrationMethod::TrapGear => Self::trapezoidal(), // Default, actual method chosen dynamically
+        }
+    }
+
+    /// Calculate equivalent conductance for a capacitor
+    #[inline]
+    pub fn capacitor_geq(&self, capacitance: Value, dt: Value) -> Value {
+        self.coeff_g * capacitance / dt
+    }
+
+    /// Calculate equivalent current source for a capacitor
+    /// v_n is current voltage, v_n_minus_1 is previous voltage (for Gear2)
+    #[inline]
+    pub fn capacitor_ieq(&self, capacitance: Value, dt: Value, v_n: Value, v_n_minus_1: Value) -> Value {
+        let base = self.coeff_v_n * capacitance * v_n / dt;
+        if self.needs_two_history {
+            base + self.coeff_v_n_minus_1 * capacitance * v_n_minus_1 / dt
+        } else {
+            base
+        }
+    }
+
+    /// Calculate equivalent resistance for an inductor
+    #[inline]
+    pub fn inductor_req(&self, inductance: Value, dt: Value) -> Value {
+        self.coeff_g * inductance / dt
+    }
+
+    /// Calculate equivalent voltage source for an inductor
+    /// i_n is current current, i_n_minus_1 is previous current (for Gear2)
+    #[inline]
+    pub fn inductor_veq(&self, inductance: Value, dt: Value, i_n: Value, i_n_minus_1: Value, v_n: Value) -> Value {
+        let base = self.coeff_g * inductance * i_n / dt + v_n;
+        if self.needs_two_history {
+            // For BDF2 inductor: V_eq = R_eq·i_n + (4/3)·L·i_n/dt - (1/3)·L·i_{n-1}/dt
+            base + self.coeff_v_n_minus_1 * inductance * i_n_minus_1 / dt
+        } else {
+            base
+        }
     }
 }
 
@@ -650,6 +831,124 @@ mod tests {
             trapgear.update(&[i as f64], 1e-6);
         }
         assert_eq!(trapgear.current_method(), IntegrationMethod::Trapezoidal);
+    }
+
+    #[test]
+    fn test_companion_coefficients_backward_euler() {
+        let coeff = CompanionCoefficients::backward_euler();
+        
+        // G_eq = C/dt
+        let geq = coeff.capacitor_geq(1e-6, 1e-9);
+        assert!((geq - 1e3).abs() < 1e-6, "G_eq = {} (expected 1000)", geq);
+        
+        // I_eq = G_eq * v_n = 1000 * 5.0 = 5000
+        let ieq = coeff.capacitor_ieq(1e-6, 1e-9, 5.0, 0.0);
+        assert!((ieq - 5000.0).abs() < 1e-6, "I_eq = {} (expected 5000)", ieq);
+    }
+
+    #[test]
+    fn test_companion_coefficients_trapezoidal() {
+        let coeff = CompanionCoefficients::trapezoidal();
+        
+        // G_eq = 2C/dt
+        let geq = coeff.capacitor_geq(1e-6, 1e-9);
+        assert!((geq - 2e3).abs() < 1e-6, "G_eq = {} (expected 2000)", geq);
+        
+        // I_eq = 2 * C * v_n / dt = 2 * 1e-6 * 5.0 / 1e-9 = 10000
+        let ieq = coeff.capacitor_ieq(1e-6, 1e-9, 5.0, 0.0);
+        assert!((ieq - 10000.0).abs() < 1e-6, "I_eq = {} (expected 10000)", ieq);
+    }
+
+    #[test]
+    fn test_companion_coefficients_gear2() {
+        let coeff = CompanionCoefficients::gear2();
+        
+        // G_eq = 1.5 * C / dt = 1.5 * 1e-6 / 1e-9 = 1500
+        let geq = coeff.capacitor_geq(1e-6, 1e-9);
+        assert!((geq - 1500.0).abs() < 1e-6, "G_eq = {} (expected 1500)", geq);
+        
+        // I_eq = (4*C*v_n - C*v_{n-1}) / (2*dt)
+        // = (4*1e-6*5.0 - 1e-6*3.0) / (2*1e-9)
+        // = (20e-6 - 3e-6) / 2e-9 = 17e-6 / 2e-9 = 8500
+        // With our coefficients: 2.0*C*v_n/dt + (-0.5)*C*v_{n-1}/dt
+        // = 2.0*1e-6*5.0/1e-9 + (-0.5)*1e-6*3.0/1e-9
+        // = 10000 - 1500 = 8500
+        let ieq = coeff.capacitor_ieq(1e-6, 1e-9, 5.0, 3.0);
+        assert!((ieq - 8500.0).abs() < 1e-6, "I_eq = {} (expected 8500)", ieq);
+        
+        assert!(coeff.needs_two_history);
+    }
+
+    #[test]
+    fn test_companion_for_method() {
+        let be = CompanionCoefficients::for_method(IntegrationMethod::BackwardEuler);
+        assert!((be.coeff_g - 1.0).abs() < 1e-10);
+        
+        let trap = CompanionCoefficients::for_method(IntegrationMethod::Trapezoidal);
+        assert!((trap.coeff_g - 2.0).abs() < 1e-10);
+        
+        let gear = CompanionCoefficients::for_method(IntegrationMethod::Gear2);
+        assert!((gear.coeff_g - 1.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_lte_method_order_scaling() {
+        let mut lte = LteEstimator::new(1e-3);
+        
+        // Test order 1 (Backward Euler): exponent = 1/2
+        lte.set_method_order(1);
+        let scale = lte.recommend_scale(1e-5);
+        // (1e-3 / 1e-5)^(1/2) = 100^0.5 = 10, clamped to 2.0
+        assert!((scale - 2.0).abs() < 1e-10);
+        
+        // Test order 2 (Trapezoidal, Gear2): exponent = 1/3  
+        lte.set_method_order(2);
+        let scale = lte.recommend_scale(1e-6);
+        // (1e-3 / 1e-6)^(1/3) = 1000^0.333 ≈ 10, clamped to 2.0
+        assert!((scale - 2.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_richardson_extrapolation() {
+        // Use tolerance of 0.01 since our test data produces LTE ~0.0097
+        let lte = LteEstimator::new(0.01);
+        
+        // Simulate full step and half-step results
+        // For order 2 method: error factor = 2^2 - 1 = 3
+        let x_full = vec![1.0, 2.0, 3.0];
+        let x_half = vec![1.03, 2.06, 3.09]; // Small difference
+        
+        let (lte_est, accept) = lte.richardson_estimate(&x_full, &x_half);
+        
+        // LTE ≈ |x_half - x_full| / 3
+        // max(|0.03|, |0.06|, |0.09|) / 3 = 0.09 / 3 = 0.03
+        // Normalized by value: 0.03 / 3.09 ≈ 0.0097
+        assert!((lte_est - 0.00971).abs() < 0.001, "LTE should be ~0.0097, got {}", lte_est);
+        assert!(accept, "Should accept: LTE {} <= tolerance 0.01", lte_est);
+        
+        // Also test rejection with tighter tolerance
+        let lte_tight = LteEstimator::new(0.001);
+        let (_, accept_tight) = lte_tight.richardson_estimate(&x_full, &x_half);
+        assert!(!accept_tight, "Should reject with tight tolerance");
+    }
+
+    #[test]
+    fn test_lte_history_tracking() {
+        let mut lte = LteEstimator::new(1e-3);
+        
+        // Record 3 solution points
+        lte.record(&[1.0, 2.0], 1e-9);
+        assert_eq!(lte.history_count, 1);
+        
+        lte.record(&[1.1, 2.2], 1e-9);
+        assert_eq!(lte.history_count, 2);
+        
+        lte.record(&[1.2, 2.4], 1e-9);
+        assert_eq!(lte.history_count, 3);
+        
+        // Reset should clear all history
+        lte.reset();
+        assert_eq!(lte.history_count, 0);
     }
 }
 
