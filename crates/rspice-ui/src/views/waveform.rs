@@ -1137,67 +1137,148 @@ fn parse_hex_color(hex: &str) -> [f32; 4] {
     }
 }
 
-/// Y-axis labels with actual values
+/// Y-axis labels with actual values - positioned at grid lines
 #[component]
 fn YAxisLabels(view: ViewState) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
 
-    let labels = generate_axis_labels(view.y_min, view.y_max, 5);
+    // Use same nice step calculation as GPU gridlines
+    let y_range = view.y_max - view.y_min;
+    let y_step = calculate_nice_grid_step(y_range);
+
+    // Generate labels at grid line positions
+    let mut labels: Vec<(f64, String)> = Vec::new();
+    let y_start = (view.y_min / y_step).floor() * y_step;
+    let mut y = y_start;
+    while y <= view.y_max + y_step * 0.01 {
+        if y >= view.y_min - y_step * 0.01 {
+            let pct = (1.0 - (y - view.y_min) / y_range) * 100.0;
+            if pct >= -5.0 && pct <= 105.0 {
+                labels.push((pct, format!("{:.2}V", y)));
+            }
+        }
+        y += y_step;
+    }
 
     rsx! {
         div {
             class: "y-axis",
             style: "
                 width: 60px;
-                display: flex;
-                flex-direction: column;
-                justify-content: space-between;
-                padding: {Theme::SPACING_SM} {Theme::SPACING_XS};
+                position: relative;
                 font-family: {Theme::FONT_MONO};
                 font-size: 10px;
                 color: {th.text_muted()};
-                text-align: right;
                 border-right: 1px solid {th.border()};
             ",
-            for label in labels.iter().rev() {
-                span { "{label}" }
+            for (pct, label) in labels.iter() {
+                span {
+                    style: "
+                        position: absolute;
+                        right: 4px;
+                        top: {pct}%;
+                        transform: translateY(-50%);
+                        white-space: nowrap;
+                    ",
+                    "{label}"
+                }
             }
         }
     }
 }
 
-/// X-axis labels with actual values
+/// X-axis labels with actual values - positioned at grid lines
 #[component]
 fn XAxisLabels(view: ViewState) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
 
-    let labels = generate_time_labels(view.x_min, view.x_max, 6);
+    // Use same nice step calculation as GPU gridlines
+    let x_range = view.x_max - view.x_min;
+    let x_step = calculate_nice_grid_step(x_range);
+
+    // Determine SI prefix for time display
+    let (scale, suffix) = if x_range < 1e-6 {
+        (1e9, "ns")
+    } else if x_range < 1e-3 {
+        (1e6, "µs")
+    } else if x_range < 1.0 {
+        (1e3, "ms")
+    } else {
+        (1.0, "s")
+    };
+
+    // Generate labels at grid line positions
+    let mut labels: Vec<(f64, String)> = Vec::new();
+    let x_start = (view.x_min / x_step).floor() * x_step;
+    let mut x = x_start;
+    while x <= view.x_max + x_step * 0.01 {
+        if x >= view.x_min - x_step * 0.01 {
+            let pct = (x - view.x_min) / x_range * 100.0;
+            if pct >= -5.0 && pct <= 105.0 {
+                labels.push((pct, format!("{:.1}{}", x * scale, suffix)));
+            }
+        }
+        x += x_step;
+    }
 
     rsx! {
         div {
             class: "x-axis",
             style: "
-                display: flex;
-                justify-content: space-between;
-                padding: {Theme::SPACING_XS} {Theme::SPACING_MD};
-                padding-left: 70px;
-                padding-right: 130px;
+                position: relative;
+                height: 24px;
+                margin-left: 60px;
+                margin-right: 120px;
                 font-family: {Theme::FONT_MONO};
                 font-size: 10px;
                 color: {th.text_muted()};
                 border-top: 1px solid {th.border()};
                 background: {th.bg_tertiary()};
             ",
-            for label in labels.iter() {
-                span { "{label}" }
+            for (pct, label) in labels.iter() {
+                span {
+                    style: "
+                        position: absolute;
+                        left: {pct}%;
+                        top: 4px;
+                        transform: translateX(-50%);
+                        white-space: nowrap;
+                    ",
+                    "{label}"
+                }
             }
         }
     }
 }
 
-/// Generate axis labels
+/// Calculate a nice step size for grid lines (matches GPU gridlines)
+fn calculate_nice_grid_step(range: f64) -> f64 {
+    let target_divisions = 6.0;
+    let raw_step = range / target_divisions;
+    if raw_step <= 0.0 || !raw_step.is_finite() {
+        return 1.0;
+    }
+
+    let magnitude = 10f64.powf(raw_step.log10().floor());
+    let normalized = raw_step / magnitude;
+
+    let nice = if normalized < 1.5 {
+        1.0
+    } else if normalized < 3.5 {
+        2.0
+    } else if normalized < 7.5 {
+        5.0
+    } else {
+        10.0
+    };
+
+    nice * magnitude
+}
+
+/// Generate axis labels (legacy, kept for compatibility)
+#[allow(dead_code)]
 fn generate_axis_labels(min: f64, max: f64, count: usize) -> Vec<String> {
     let step = (max - min) / (count - 1) as f64;
     (0..count)
@@ -1208,7 +1289,8 @@ fn generate_axis_labels(min: f64, max: f64, count: usize) -> Vec<String> {
         .collect()
 }
 
-/// Generate time labels with appropriate SI prefix
+/// Generate time labels with appropriate SI prefix (legacy, kept for compatibility)
+#[allow(dead_code)]
 fn generate_time_labels(min: f64, max: f64, count: usize) -> Vec<String> {
     let range = max - min;
     let (scale, suffix) = if range < 1e-6 {

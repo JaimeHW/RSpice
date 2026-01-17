@@ -265,52 +265,58 @@ impl WaveformPainter {
         let x_range = state.x_max - state.x_min;
         let y_range = state.y_max - state.y_min;
 
-        // Use same linear spacing as axis labels (6 x-divisions, 5 y-divisions)
-        let x_count = 6;
-        let y_count = 5;
-        let x_step = x_range / (x_count - 1) as f64;
-        let y_step = y_range / (y_count - 1) as f64;
+        // Use "nice" step values - gridlines at fixed data coordinates that scroll with pan
+        let x_step = calculate_grid_step(x_range);
+        let y_step = calculate_grid_step(y_range);
 
-        // Vertical gridlines (X axis divisions)
-        for i in 0..x_count {
-            let x = state.x_min + i as f64 * x_step;
-            let vertices = vec![
-                WaveformVertex {
-                    position: [x as f32, state.y_min as f32],
-                    color: grid_color,
-                },
-                WaveformVertex {
-                    position: [x as f32, state.y_max as f32],
-                    color: grid_color,
-                },
-            ];
-            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Grid Vertical"),
-                contents: bytemuck::cast_slice(&vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-            self.vertex_buffers.push((buffer, vertices.len() as u32));
+        // Vertical gridlines at fixed X values (e.g., 0ms, 1ms, 2ms)
+        let x_start = (state.x_min / x_step).floor() * x_step;
+        let mut x = x_start;
+        while x <= state.x_max + x_step * 0.01 {
+            if x >= state.x_min {
+                let vertices = vec![
+                    WaveformVertex {
+                        position: [x as f32, state.y_min as f32],
+                        color: grid_color,
+                    },
+                    WaveformVertex {
+                        position: [x as f32, state.y_max as f32],
+                        color: grid_color,
+                    },
+                ];
+                let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Grid Vertical"),
+                    contents: bytemuck::cast_slice(&vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                self.vertex_buffers.push((buffer, vertices.len() as u32));
+            }
+            x += x_step;
         }
 
-        // Horizontal gridlines (Y axis divisions)
-        for i in 0..y_count {
-            let y = state.y_min + i as f64 * y_step;
-            let vertices = vec![
-                WaveformVertex {
-                    position: [state.x_min as f32, y as f32],
-                    color: grid_color,
-                },
-                WaveformVertex {
-                    position: [state.x_max as f32, y as f32],
-                    color: grid_color,
-                },
-            ];
-            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Grid Horizontal"),
-                contents: bytemuck::cast_slice(&vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-            self.vertex_buffers.push((buffer, vertices.len() as u32));
+        // Horizontal gridlines at fixed Y values (e.g., -1V, 0V, 1V)
+        let y_start = (state.y_min / y_step).floor() * y_step;
+        let mut y = y_start;
+        while y <= state.y_max + y_step * 0.01 {
+            if y >= state.y_min {
+                let vertices = vec![
+                    WaveformVertex {
+                        position: [state.x_min as f32, y as f32],
+                        color: grid_color,
+                    },
+                    WaveformVertex {
+                        position: [state.x_max as f32, y as f32],
+                        color: grid_color,
+                    },
+                ];
+                let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Grid Horizontal"),
+                    contents: bytemuck::cast_slice(&vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                self.vertex_buffers.push((buffer, vertices.len() as u32));
+            }
+            y += y_step;
         }
 
         // Then add waveform traces
