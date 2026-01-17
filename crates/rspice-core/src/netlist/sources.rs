@@ -1,0 +1,197 @@
+//! Source specification parsing for SPICE netlists
+//!
+//! Parses source waveform specifications:
+//! - DC: Simple DC value
+//! - AC: Magnitude and phase for AC analysis
+//! - PULSE: Pulse waveform with timing parameters
+//! - SIN: Sinusoidal with damping
+//! - PWL: Piecewise linear time-value pairs  
+//! - EXP: Exponential rise/fall
+
+use super::helpers::{expect_value, expect_value_default, skip_commas, try_value};
+use super::lexer::{TokenKind, TokenStream};
+use super::{ParamContext, ParseError, SourceSpec};
+
+/// Parse source specification (DC, AC, PULSE, SIN, PWL, EXP)
+pub fn parse_source_spec(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<SourceSpec, ParseError> {
+    skip_commas(stream);
+
+    if stream.is_eof() || matches!(stream.peek().kind, TokenKind::Newline) {
+        return Err(ParseError::MissingParameter(
+            "source specification".to_string(),
+        ));
+    }
+
+    // Check for keywords
+    match &stream.peek().kind {
+        TokenKind::Ident(s) => {
+            let upper = s.to_uppercase();
+            match upper.as_str() {
+                "DC" => {
+                    stream.advance();
+                    let value = expect_value(stream, line_num, params)?;
+                    return Ok(SourceSpec::Dc(value));
+                }
+                "AC" => {
+                    stream.advance();
+                    let magnitude = expect_value(stream, line_num, params)?;
+                    let phase = try_value(stream, params).unwrap_or(0.0);
+                    return Ok(SourceSpec::Ac { magnitude, phase });
+                }
+                "PULSE" => {
+                    stream.advance();
+                    return parse_pulse_spec(stream, params);
+                }
+                "SIN" => {
+                    stream.advance();
+                    return parse_sin_spec(stream, params);
+                }
+                "PWL" => {
+                    stream.advance();
+                    return parse_pwl_spec(stream, params);
+                }
+                "EXP" => {
+                    stream.advance();
+                    return parse_exp_spec(stream, params);
+                }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+
+    // Default: try to parse as DC value
+    let value = expect_value(stream, line_num, params)?;
+    Ok(SourceSpec::Dc(value))
+}
+
+/// Parse PULSE specification: PULSE(V1 V2 TD TR TF PW PER)
+fn parse_pulse_spec(
+    stream: &mut TokenStream,
+    params: &ParamContext,
+) -> Result<SourceSpec, ParseError> {
+    // Consume opening paren if present
+    let has_paren = stream.consume(&TokenKind::LParen);
+
+    let v1 = expect_value_default(stream, params, 0.0);
+    let v2 = expect_value_default(stream, params, 1.0);
+    let delay = expect_value_default(stream, params, 0.0);
+    let rise = expect_value_default(stream, params, 1e-9);
+    let fall = expect_value_default(stream, params, 1e-9);
+    let width = expect_value_default(stream, params, 1e-6);
+    let period = expect_value_default(stream, params, 2e-6);
+
+    if has_paren {
+        stream.consume(&TokenKind::RParen);
+    }
+
+    Ok(SourceSpec::Pulse {
+        v1,
+        v2,
+        delay,
+        rise,
+        fall,
+        width,
+        period,
+    })
+}
+
+/// Parse SIN specification: SIN(VO VA FREQ TD THETA PHASE)
+fn parse_sin_spec(
+    stream: &mut TokenStream,
+    params: &ParamContext,
+) -> Result<SourceSpec, ParseError> {
+    let has_paren = stream.consume(&TokenKind::LParen);
+
+    let offset = expect_value_default(stream, params, 0.0);
+    let amplitude = expect_value_default(stream, params, 1.0);
+    let frequency = expect_value_default(stream, params, 1e3);
+    let delay = expect_value_default(stream, params, 0.0);
+    let damping = expect_value_default(stream, params, 0.0);
+    let phase = expect_value_default(stream, params, 0.0);
+
+    if has_paren {
+        stream.consume(&TokenKind::RParen);
+    }
+
+    Ok(SourceSpec::Sin {
+        offset,
+        amplitude,
+        frequency,
+        delay,
+        damping,
+        phase,
+    })
+}
+
+/// Parse PWL specification: PWL(T1 V1 T2 V2 ...)
+fn parse_pwl_spec(
+    stream: &mut TokenStream,
+    params: &ParamContext,
+) -> Result<SourceSpec, ParseError> {
+    let has_paren = stream.consume(&TokenKind::LParen);
+
+    let mut points = Vec::new();
+    while !stream.is_eof() {
+        skip_commas(stream);
+
+        if matches!(
+            stream.peek().kind,
+            TokenKind::RParen | TokenKind::Newline | TokenKind::Eof
+        ) {
+            break;
+        }
+
+        if let Some(time) = try_value(stream, params) {
+            if let Some(value) = try_value(stream, params) {
+                points.push((time, value));
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    if has_paren {
+        stream.consume(&TokenKind::RParen);
+    }
+
+    if points.is_empty() {
+        points.push((0.0, 0.0));
+    }
+
+    Ok(SourceSpec::Pwl { points })
+}
+
+/// Parse EXP specification: EXP(V1 V2 TD1 TAU1 TD2 TAU2)
+fn parse_exp_spec(
+    stream: &mut TokenStream,
+    params: &ParamContext,
+) -> Result<SourceSpec, ParseError> {
+    let has_paren = stream.consume(&TokenKind::LParen);
+
+    let v1 = expect_value_default(stream, params, 0.0);
+    let v2 = expect_value_default(stream, params, 1.0);
+    let td1 = expect_value_default(stream, params, 0.0);
+    let tau1 = expect_value_default(stream, params, 1e-6);
+    let td2 = expect_value_default(stream, params, 0.0);
+    let tau2 = expect_value_default(stream, params, 1e-6);
+
+    if has_paren {
+        stream.consume(&TokenKind::RParen);
+    }
+
+    Ok(SourceSpec::Exp {
+        v1,
+        v2,
+        td1,
+        tau1,
+        td2,
+        tau2,
+    })
+}

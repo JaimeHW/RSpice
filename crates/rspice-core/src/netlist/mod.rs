@@ -12,18 +12,17 @@
 //! - Subcircuits with parameter passing
 
 mod ast;
-mod flattener;
-pub mod lexer;
 pub mod expr;
-mod parser;
+mod flattener;
 pub mod include;
+pub mod lexer;
+mod parser;
 
 pub use ast::*;
-pub use flattener::{flatten_netlist, Flattener, FlattenerConfig};
-pub use parser::*;
 pub use expr::ParamContext;
+pub use flattener::{Flattener, FlattenerConfig, flatten_netlist};
 pub use include::{IncludeProcessor, parse_include_directive, parse_lib_directive};
-
+pub use parser::*;
 
 use thiserror::Error;
 
@@ -52,6 +51,7 @@ pub enum ParseError {
     Io(#[from] std::io::Error),
 }
 
+use crate::analysis::MeasureStatement;
 use std::collections::HashSet;
 
 /// Represents a parsed netlist ready for circuit construction
@@ -73,6 +73,8 @@ pub struct Netlist {
     pub initial_conditions: Vec<InitialCondition>,
     /// Global nodes from .GLOBAL (not renamed in subcircuits)
     pub global_nodes: HashSet<String>,
+    /// Measurement statements from .MEAS commands
+    pub measurements: Vec<MeasureStatement>,
 }
 
 impl Netlist {
@@ -109,7 +111,7 @@ impl Default for Netlist {
             params: ParamContext::new(),
             initial_conditions: Vec::new(),
             global_nodes: HashSet::new(),
+            measurements: Vec::new(),
         }
     }
 }
-

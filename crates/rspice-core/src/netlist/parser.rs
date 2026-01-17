@@ -7,7 +7,7 @@
 //! - Subcircuit definitions and instances
 
 use super::expr::eval_expression;
-use super::lexer::{LexError, TokenKind, TokenStream, parse_spice_value, tokenize};
+use super::lexer::{LexError, TokenKind, TokenStream, tokenize};
 use super::{
     AnalysisCommand, Element, ElementKind, FreqVariation, InitialCondition, ModelDef, Netlist,
     ParamContext, ParseError, SourceSpec, StepCommand, StepSweep, StepTarget, SubcircuitDef,
@@ -119,6 +119,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
         params,
         initial_conditions,
         global_nodes: std::collections::HashSet::new(),
+        measurements: Vec::new(),
     })
 }
 
@@ -978,7 +979,7 @@ fn parse_source_spec(
 
 fn parse_pulse_spec(
     stream: &mut TokenStream,
-    line_num: usize,
+    _line_num: usize,
     params: &ParamContext,
 ) -> Result<SourceSpec, ParseError> {
     // Consume opening paren if present
@@ -1009,7 +1010,7 @@ fn parse_pulse_spec(
 
 fn parse_sin_spec(
     stream: &mut TokenStream,
-    line_num: usize,
+    _line_num: usize,
     params: &ParamContext,
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
@@ -1037,7 +1038,7 @@ fn parse_sin_spec(
 
 fn parse_pwl_spec(
     stream: &mut TokenStream,
-    line_num: usize,
+    _line_num: usize,
     params: &ParamContext,
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
@@ -1077,7 +1078,7 @@ fn parse_pwl_spec(
 
 fn parse_exp_spec(
     stream: &mut TokenStream,
-    line_num: usize,
+    _line_num: usize,
     params: &ParamContext,
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
@@ -1890,6 +1891,7 @@ fn parse_ic_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::netlist::lexer::parse_spice_value;
 
     #[test]
     fn test_parse_value() {

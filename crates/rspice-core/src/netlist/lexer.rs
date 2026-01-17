@@ -6,16 +6,6 @@
 //! - Parenthesized expressions (PULSE(...), SIN(...))
 //! - Parameter expressions ({value+1k})
 
-use nom::{
-    IResult,
-    branch::alt,
-    bytes::complete::{tag, tag_no_case, take_while, take_while1},
-    character::complete::{char, multispace0, one_of, satisfy},
-    combinator::{map, opt, recognize, value, all_consuming, peek},
-    multi::{many0, many1},
-    sequence::{delimited, pair, preceded, tuple},
-};
-
 use crate::Value;
 
 //=============================================================================
@@ -115,37 +105,37 @@ impl<'a> Lexer<'a> {
     /// Tokenize the entire input
     pub fn tokenize(&mut self) -> Result<Vec<Token>, LexError> {
         let mut tokens = Vec::new();
-        
+
         while self.pos < self.input.len() {
             // Skip horizontal whitespace (not newlines)
             self.skip_whitespace();
-            
+
             if self.pos >= self.input.len() {
                 break;
             }
-            
+
             let remaining = &self.input[self.pos..];
             let start_pos = self.pos;
             let start_line = self.line;
-            
+
             // Try to match a token
             let (kind, consumed) = self.next_token(remaining)?;
-            
+
             let span = Span {
                 start: start_pos,
                 end: start_pos + consumed,
                 line: start_line,
             };
-            
+
             // Track newlines for line counting
             if matches!(kind, TokenKind::Newline) {
                 self.line += 1;
             }
-            
+
             tokens.push(Token { kind, span });
             self.pos += consumed;
         }
-        
+
         // Add EOF token
         tokens.push(Token {
             kind: TokenKind::Eof,
@@ -155,7 +145,7 @@ impl<'a> Lexer<'a> {
                 line: self.line,
             },
         });
-        
+
         Ok(tokens)
     }
 
@@ -174,7 +164,7 @@ impl<'a> Lexer<'a> {
     /// Parse the next token, returning (TokenKind, bytes_consumed)
     fn next_token(&self, input: &str) -> Result<(TokenKind, usize), LexError> {
         let c = input.chars().next().unwrap();
-        
+
         match c {
             '\n' => Ok((TokenKind::Newline, 1)),
             '=' => Ok((TokenKind::Equals, 1)),
@@ -227,7 +217,7 @@ impl<'a> Lexer<'a> {
                 break;
             }
         }
-        
+
         let ident = &input[..end];
         Ok((TokenKind::Ident(ident.to_uppercase()), end))
     }
@@ -238,18 +228,18 @@ impl<'a> Lexer<'a> {
         // Examples: 1N4148, 2N2222, 2SA1015
         let chars: Vec<char> = input.chars().collect();
         let mut i = 0;
-        
+
         // Skip optional leading sign
         if i < chars.len() && (chars[i] == '-' || chars[i] == '+') {
             i += 1;
         }
-        
+
         // Skip digits
         let digit_start = i;
         while i < chars.len() && chars[i].is_ascii_digit() {
             i += 1;
         }
-        
+
         // If followed by a letter that's NOT a valid SPICE suffix start or E (exponent),
         // it's likely a model name like 1N4148
         if i < chars.len() && i > digit_start {
@@ -276,7 +266,7 @@ impl<'a> Lexer<'a> {
                         }
                         _ => false,
                     };
-                    
+
                     if !could_be_suffix {
                         // It's a model name - parse as identifier
                         return self.parse_ident(input);
@@ -284,7 +274,7 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
-        
+
         // Not a model name, parse as number
         self.parse_number(input)
     }
@@ -292,29 +282,29 @@ impl<'a> Lexer<'a> {
     /// Parse a numeric value with optional SPICE suffix
     fn parse_number(&self, input: &str) -> Result<(TokenKind, usize), LexError> {
         let mut end = 0;
-        let mut has_dot = false;
+        let mut _has_dot = false;
         let mut has_exp = false;
         let chars: Vec<char> = input.chars().collect();
-        
+
         // Optional leading sign
         if end < chars.len() && (chars[end] == '-' || chars[end] == '+') {
             end += 1;
         }
-        
+
         // Integer part
         while end < chars.len() && chars[end].is_ascii_digit() {
             end += 1;
         }
-        
+
         // Decimal part
         if end < chars.len() && chars[end] == '.' {
-            has_dot = true;
+            _has_dot = true;
             end += 1;
             while end < chars.len() && chars[end].is_ascii_digit() {
                 end += 1;
             }
         }
-        
+
         // Exponent part (e or E)
         if end < chars.len() && (chars[end] == 'e' || chars[end] == 'E') {
             has_exp = true;
@@ -333,28 +323,34 @@ impl<'a> Lexer<'a> {
                 return Err(LexError::InvalidNumber(input[..end].to_string(), self.line));
             }
         }
-        
+
         // Calculate byte position
         let num_end_bytes: usize = chars[..end].iter().map(|c| c.len_utf8()).sum();
         let num_str = &input[..num_end_bytes];
-        
+
         // Parse the numeric part
-        let base: Value = if num_str.is_empty() || num_str == "." || num_str == "-" || num_str == "+" {
-            return Err(LexError::InvalidNumber(num_str.to_string(), self.line));
-        } else {
-            num_str.parse().map_err(|_| LexError::InvalidNumber(num_str.to_string(), self.line))?
-        };
-        
+        let base: Value =
+            if num_str.is_empty() || num_str == "." || num_str == "-" || num_str == "+" {
+                return Err(LexError::InvalidNumber(num_str.to_string(), self.line));
+            } else {
+                num_str
+                    .parse()
+                    .map_err(|_| LexError::InvalidNumber(num_str.to_string(), self.line))?
+            };
+
         // Check for SPICE suffix (only if no scientific notation was used)
         let (multiplier, suffix_len) = if !has_exp && end < chars.len() {
             parse_spice_suffix(&chars[end..])
         } else {
             (1.0, 0)
         };
-        
-        let suffix_bytes: usize = chars[end..end + suffix_len].iter().map(|c| c.len_utf8()).sum();
+
+        let suffix_bytes: usize = chars[end..end + suffix_len]
+            .iter()
+            .map(|c| c.len_utf8())
+            .sum();
         let total_bytes = num_end_bytes + suffix_bytes;
-        
+
         Ok((TokenKind::Number(base * multiplier), total_bytes))
     }
 
@@ -362,7 +358,7 @@ impl<'a> Lexer<'a> {
     fn parse_expression(&self, input: &str) -> Result<(TokenKind, usize), LexError> {
         let mut depth = 0;
         let mut end = 0;
-        
+
         for c in input.chars() {
             end += c.len_utf8();
             if c == '{' {
@@ -374,11 +370,11 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
-        
+
         if depth != 0 {
             return Err(LexError::UnterminatedExpression(self.line));
         }
-        
+
         // Extract content without braces
         let content = &input[1..end - 1];
         Ok((TokenKind::Expression(content.to_string()), end))
@@ -389,7 +385,7 @@ impl<'a> Lexer<'a> {
         let mut end = 1; // Skip opening quote
         let mut content = String::new();
         let chars: Vec<char> = input.chars().collect();
-        
+
         while end < chars.len() {
             let c = chars[end];
             if c == '"' {
@@ -405,7 +401,7 @@ impl<'a> Lexer<'a> {
                 end += 1;
             }
         }
-        
+
         let byte_len: usize = chars[..end].iter().map(|c| c.len_utf8()).sum();
         Ok((TokenKind::StringLit(content), byte_len))
     }
@@ -430,7 +426,7 @@ fn parse_spice_suffix(chars: &[char]) -> (Value, usize) {
     if chars.is_empty() {
         return (1.0, 0);
     }
-    
+
     // Try multi-char suffixes first
     if chars.len() >= 3 {
         let three: String = chars[..3].iter().collect();
@@ -442,14 +438,14 @@ fn parse_spice_suffix(chars: &[char]) -> (Value, usize) {
             return (25.4e-6, 3); // mil = 1/1000 inch
         }
     }
-    
+
     // Single char suffixes
     let c = chars[0].to_ascii_uppercase();
     match c {
         'T' => (1e12, 1),
         'G' => (1e9, 1),
         'K' => (1e3, 1),
-        'M' => (1e-3, 1),  // milli (MEG already handled above)
+        'M' => (1e-3, 1), // milli (MEG already handled above)
         'U' => (1e-6, 1),
         'N' => (1e-9, 1),
         'P' => (1e-12, 1),
@@ -509,7 +505,7 @@ pub fn parse_spice_value(s: &str) -> Result<Value, LexError> {
     if s.is_empty() {
         return Err(LexError::InvalidNumber("empty".to_string(), 0));
     }
-    
+
     let lexer = Lexer::new(s);
     match lexer.parse_number(s) {
         Ok((TokenKind::Number(v), _)) => Ok(v),
@@ -638,7 +634,7 @@ mod tests {
     fn test_tokenize_basic() {
         let input = "R1 1 0 1k";
         let tokens = tokenize(input).unwrap();
-        
+
         assert!(matches!(tokens[0].kind, TokenKind::Ident(ref s) if s == "R1"));
         assert!(matches!(tokens[1].kind, TokenKind::Number(v) if (v - 1.0).abs() < 1e-10));
         assert!(matches!(tokens[2].kind, TokenKind::Number(v) if v.abs() < 1e-10));
@@ -678,7 +674,7 @@ mod tests {
     fn test_tokenize_with_equals() {
         let input = "R1 1 0 R=1k temp=27";
         let tokens = tokenize(input).unwrap();
-        
+
         // R1 1 0 R = 1k temp = 27
         assert!(matches!(tokens[0].kind, TokenKind::Ident(ref s) if s == "R1"));
         assert!(matches!(tokens[1].kind, TokenKind::Number(_)));
@@ -692,7 +688,7 @@ mod tests {
     fn test_tokenize_commas() {
         let input = "R1 1 0 1k, temp=27";
         let tokens = tokenize(input).unwrap();
-        
+
         // Comma is tokenized, parser can skip it
         let has_comma = tokens.iter().any(|t| matches!(t.kind, TokenKind::Comma));
         assert!(has_comma);
@@ -702,7 +698,7 @@ mod tests {
     fn test_tokenize_expression() {
         let input = "R1 1 0 {1k+500}";
         let tokens = tokenize(input).unwrap();
-        
+
         assert!(matches!(tokens[3].kind, TokenKind::Expression(ref s) if s == "1k+500"));
     }
 
@@ -710,7 +706,7 @@ mod tests {
     fn test_tokenize_parentheses() {
         let input = "PULSE(0 5 0 1n 1n)";
         let tokens = tokenize(input).unwrap();
-        
+
         assert!(matches!(tokens[0].kind, TokenKind::Ident(ref s) if s == "PULSE"));
         assert!(matches!(tokens[1].kind, TokenKind::LParen));
         assert!(matches!(tokens[2].kind, TokenKind::Number(v) if v.abs() < 1e-10));
@@ -721,7 +717,7 @@ mod tests {
         let input = "R1 1 0 1k";
         let tokens = tokenize(input).unwrap();
         let mut stream = TokenStream::new(tokens);
-        
+
         assert!(matches!(stream.peek().kind, TokenKind::Ident(_)));
         stream.advance();
         assert!(matches!(stream.peek().kind, TokenKind::Number(_)));
@@ -731,8 +727,11 @@ mod tests {
     fn test_multiline() {
         let input = "R1 1 0 1k\nR2 2 0 2k";
         let tokens = tokenize(input).unwrap();
-        
-        let newline_count = tokens.iter().filter(|t| matches!(t.kind, TokenKind::Newline)).count();
+
+        let newline_count = tokens
+            .iter()
+            .filter(|t| matches!(t.kind, TokenKind::Newline))
+            .count();
         assert_eq!(newline_count, 1);
     }
 }

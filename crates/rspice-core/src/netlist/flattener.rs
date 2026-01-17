@@ -6,9 +6,9 @@
 //! 3. Mapping external ports to instance connections
 //! 4. Recursively handling nested subcircuits
 
-use std::collections::HashMap;
-use super::{Element, ElementKind, Netlist, SubcircuitDef, ParseError};
+use super::{Element, ElementKind, Netlist, ParseError, SubcircuitDef};
 use crate::Value;
+use std::collections::HashMap;
 
 //=============================================================================
 // Flattener Configuration
@@ -31,7 +31,7 @@ impl Default for FlattenerConfig {
     fn default() -> Self {
         Self {
             max_depth: 100,
-            preserve_hierarchy: true,  // Default to full path for debugging
+            preserve_hierarchy: true, // Default to full path for debugging
             hierarchy_separator: '.',
         }
     }
@@ -46,7 +46,7 @@ impl FlattenerConfig {
             hierarchy_separator: '.',
         }
     }
-    
+
     /// Create a config optimized for performance (shorter names)
     pub fn production() -> Self {
         Self {
@@ -66,6 +66,7 @@ pub struct Flattener<'a> {
     /// Subcircuit definitions indexed by name
     subcircuits: HashMap<&'a str, &'a SubcircuitDef>,
     /// Counter for generating unique node names (when not preserving hierarchy)
+    #[allow(dead_code)]
     node_counter: usize,
     /// Configuration options
     config: FlattenerConfig,
@@ -79,11 +80,8 @@ impl<'a> Flattener<'a> {
 
     /// Create a flattener with custom configuration
     pub fn with_config(subcircuits: &'a [SubcircuitDef], config: FlattenerConfig) -> Self {
-        let subcircuits = subcircuits
-            .iter()
-            .map(|s| (s.name.as_str(), s))
-            .collect();
-        
+        let subcircuits = subcircuits.iter().map(|s| (s.name.as_str(), s)).collect();
+
         Self {
             subcircuits,
             node_counter: 0,
@@ -94,11 +92,11 @@ impl<'a> Flattener<'a> {
     /// Flatten a netlist, expanding all subcircuit instances
     pub fn flatten(&mut self, netlist: &Netlist) -> Result<Vec<Element>, ParseError> {
         let mut flat_elements = Vec::new();
-        
+
         for element in &netlist.elements {
             self.flatten_element(element, "", &HashMap::new(), 0, &mut flat_elements)?;
         }
-        
+
         Ok(flat_elements)
     }
 
@@ -114,13 +112,27 @@ impl<'a> Flattener<'a> {
         if depth > self.config.max_depth {
             return Err(ParseError::Syntax {
                 line: 0,
-                message: format!("Subcircuit recursion depth exceeded (max {})", self.config.max_depth),
+                message: format!(
+                    "Subcircuit recursion depth exceeded (max {})",
+                    self.config.max_depth
+                ),
             });
         }
 
         match &element.kind {
-            ElementKind::Subcircuit { subckt_name, params } => {
-                self.expand_subcircuit(element, subckt_name, params, prefix, node_map, depth, output)?;
+            ElementKind::Subcircuit {
+                subckt_name,
+                params,
+            } => {
+                self.expand_subcircuit(
+                    element,
+                    subckt_name,
+                    params,
+                    prefix,
+                    node_map,
+                    depth,
+                    output,
+                )?;
             }
             _ => {
                 // Regular element - remap nodes and add to output
@@ -144,12 +156,13 @@ impl<'a> Flattener<'a> {
         output: &mut Vec<Element>,
     ) -> Result<(), ParseError> {
         // Look up subcircuit definition
-        let subckt = self.subcircuits.get(subckt_name).ok_or_else(|| {
-            ParseError::Syntax {
+        let subckt = self
+            .subcircuits
+            .get(subckt_name)
+            .ok_or_else(|| ParseError::Syntax {
                 line: 0,
                 message: format!("Undefined subcircuit: {}", subckt_name),
-            }
-        })?;
+            })?;
 
         // Build new prefix for this instance
         let new_prefix = if prefix.is_empty() {
@@ -160,7 +173,7 @@ impl<'a> Flattener<'a> {
 
         // Build node map: subcircuit port -> instance connection
         let mut node_map = HashMap::new();
-        
+
         // Map ports to external connections
         for (i, port) in subckt.ports.iter().enumerate() {
             if i < instance.nodes.len() {
@@ -170,11 +183,12 @@ impl<'a> Flattener<'a> {
         }
 
         // Build parameter map for value substitution
-        let mut param_map: HashMap<&str, Value> = subckt.params
+        let mut param_map: HashMap<&str, Value> = subckt
+            .params
             .iter()
             .map(|(k, v)| (k.as_str(), *v))
             .collect();
-        
+
         // Instance parameters override definition defaults
         for (name, value) in instance_params {
             param_map.insert(name.as_str(), *value);
@@ -204,14 +218,18 @@ impl<'a> Flattener<'a> {
             format!("{}.{}", prefix, element.name)
         };
 
-        let new_nodes: Vec<String> = element.nodes
+        let new_nodes: Vec<String> = element
+            .nodes
             .iter()
             .map(|n| self.remap_node(n, prefix, node_map))
             .collect();
 
         // Remap the element kind, handling CCCS/CCVS control element names
         let new_kind = match &element.kind {
-            ElementKind::Cccs { gain, control_element } => {
+            ElementKind::Cccs {
+                gain,
+                control_element,
+            } => {
                 // Remap control element name with prefix (like element names)
                 let new_ctrl = if prefix.is_empty() {
                     control_element.clone()
@@ -223,7 +241,10 @@ impl<'a> Flattener<'a> {
                     control_element: new_ctrl,
                 }
             }
-            ElementKind::Ccvs { transresistance, control_element } => {
+            ElementKind::Ccvs {
+                transresistance,
+                control_element,
+            } => {
                 let new_ctrl = if prefix.is_empty() {
                     control_element.clone()
                 } else {
@@ -246,12 +267,7 @@ impl<'a> Flattener<'a> {
     }
 
     /// Remap a single node name
-    fn remap_node(
-        &self,
-        node: &str,
-        prefix: &str,
-        node_map: &HashMap<String, String>,
-    ) -> String {
+    fn remap_node(&self, node: &str, prefix: &str, node_map: &HashMap<String, String>) -> String {
         // Ground is never renamed
         if node == "0" || node.eq_ignore_ascii_case("gnd") {
             return "0".to_string();
@@ -271,7 +287,7 @@ impl<'a> Flattener<'a> {
     }
 
     /// Substitute parameters in element values
-    /// 
+    ///
     /// Replaces parameter references in element values with values from param_map.
     /// Parameter values can be:
     /// - Direct numeric values (already resolved, no substitution needed)
@@ -279,34 +295,33 @@ impl<'a> Flattener<'a> {
     ///
     /// Since our current AST stores resolved f64 values, we substitute
     /// by scaling/replacing values based on parameter lookups.
-    fn substitute_params(
-        &self,
-        element: &Element,
-        param_map: &HashMap<&str, Value>,
-    ) -> Element {
+    fn substitute_params(&self, element: &Element, param_map: &HashMap<&str, Value>) -> Element {
         let new_kind = match &element.kind {
             // Passive components
-            ElementKind::Resistor { value } => {
-                ElementKind::Resistor { value: *value }
-            }
-            ElementKind::Capacitor { value, initial_voltage } => {
-                ElementKind::Capacitor { 
-                    value: *value, 
-                    initial_voltage: *initial_voltage 
-                }
-            }
-            ElementKind::Inductor { value, initial_current } => {
-                ElementKind::Inductor { 
-                    value: *value, 
-                    initial_current: *initial_current 
-                }
-            }
-            
+            ElementKind::Resistor { value } => ElementKind::Resistor { value: *value },
+            ElementKind::Capacitor {
+                value,
+                initial_voltage,
+            } => ElementKind::Capacitor {
+                value: *value,
+                initial_voltage: *initial_voltage,
+            },
+            ElementKind::Inductor {
+                value,
+                initial_current,
+            } => ElementKind::Inductor {
+                value: *value,
+                initial_current: *initial_current,
+            },
+
             // Nested subcircuit - propagate parameters
-            ElementKind::Subcircuit { subckt_name, params: instance_params } => {
+            ElementKind::Subcircuit {
+                subckt_name,
+                params: instance_params,
+            } => {
                 // Merge: instance params override those in param_map
                 let mut merged_params: Vec<(String, Value)> = instance_params.clone();
-                
+
                 // Substitute any parameter references in instance params
                 for (name, value) in &mut merged_params {
                     // If the value matches a known parameter name (sentinel value),
@@ -319,39 +334,43 @@ impl<'a> Flattener<'a> {
                         }
                     }
                 }
-                
+
                 ElementKind::Subcircuit {
                     subckt_name: subckt_name.clone(),
                     params: merged_params,
                 }
             }
-            
+
             // Controlled sources
-            ElementKind::Vcvs { gain, control_nodes } => {
-                ElementKind::Vcvs { 
-                    gain: *gain, 
-                    control_nodes: control_nodes.clone() 
-                }
-            }
-            ElementKind::Vccs { transconductance, control_nodes } => {
-                ElementKind::Vccs { 
-                    transconductance: *transconductance, 
-                    control_nodes: control_nodes.clone() 
-                }
-            }
-            ElementKind::Cccs { gain, control_element } => {
-                ElementKind::Cccs { 
-                    gain: *gain, 
-                    control_element: control_element.clone() 
-                }
-            }
-            ElementKind::Ccvs { transresistance, control_element } => {
-                ElementKind::Ccvs { 
-                    transresistance: *transresistance, 
-                    control_element: control_element.clone() 
-                }
-            }
-            
+            ElementKind::Vcvs {
+                gain,
+                control_nodes,
+            } => ElementKind::Vcvs {
+                gain: *gain,
+                control_nodes: control_nodes.clone(),
+            },
+            ElementKind::Vccs {
+                transconductance,
+                control_nodes,
+            } => ElementKind::Vccs {
+                transconductance: *transconductance,
+                control_nodes: control_nodes.clone(),
+            },
+            ElementKind::Cccs {
+                gain,
+                control_element,
+            } => ElementKind::Cccs {
+                gain: *gain,
+                control_element: control_element.clone(),
+            },
+            ElementKind::Ccvs {
+                transresistance,
+                control_element,
+            } => ElementKind::Ccvs {
+                transresistance: *transresistance,
+                control_element: control_element.clone(),
+            },
+
             // All other element types - clone as-is
             other => other.clone(),
         };
@@ -389,13 +408,19 @@ R3 2 0 1k
 "#;
         let netlist = parse_netlist(netlist_str).unwrap();
         let flat = flatten_netlist(&netlist).unwrap();
-        
+
         // Should have: V1, R3, X1.R1, X1.R2
         assert_eq!(flat.len(), 4, "Expected 4 elements, got {}", flat.len());
-        
+
         // Check that internal node was renamed
-        let r1 = flat.iter().find(|e| e.name == "X1.R1").expect("Missing X1.R1");
-        assert!(r1.nodes.contains(&"X1.MID".to_string()), "Expected X1.MID node");
+        let r1 = flat
+            .iter()
+            .find(|e| e.name == "X1.R1")
+            .expect("Missing X1.R1");
+        assert!(
+            r1.nodes.contains(&"X1.MID".to_string()),
+            "Expected X1.MID node"
+        );
     }
 
     #[test]
@@ -414,13 +439,19 @@ V1 1 0 5
 "#;
         let netlist = parse_netlist(netlist_str).unwrap();
         let flat = flatten_netlist(&netlist).unwrap();
-        
+
         // Should have: V1, X1.X1.R1, X1.X2.R1
         assert_eq!(flat.len(), 3, "Expected 3 elements, got {}", flat.len());
-        
+
         // Check nested naming
-        assert!(flat.iter().any(|e| e.name == "X1.X1.R1"), "Missing X1.X1.R1");
-        assert!(flat.iter().any(|e| e.name == "X1.X2.R1"), "Missing X1.X2.R1");
+        assert!(
+            flat.iter().any(|e| e.name == "X1.X1.R1"),
+            "Missing X1.X1.R1"
+        );
+        assert!(
+            flat.iter().any(|e| e.name == "X1.X2.R1"),
+            "Missing X1.X2.R1"
+        );
     }
 
     #[test]
@@ -435,9 +466,15 @@ V1 1 0 5
 "#;
         let netlist = parse_netlist(netlist_str).unwrap();
         let flat = flatten_netlist(&netlist).unwrap();
-        
-        let r1 = flat.iter().find(|e| e.name == "X1.R1").expect("Missing X1.R1");
-        assert!(r1.nodes.contains(&"0".to_string()), "Ground should remain as 0");
+
+        let r1 = flat
+            .iter()
+            .find(|e| e.name == "X1.R1")
+            .expect("Missing X1.R1");
+        assert!(
+            r1.nodes.contains(&"0".to_string()),
+            "Ground should remain as 0"
+        );
     }
 
     #[test]
@@ -451,16 +488,22 @@ V1 1 0 10
 .end
 "#;
         let netlist = parse_netlist(netlist_str).unwrap();
-        
+
         // Check that subcircuit definition has default params
-        let subckt = netlist.subcircuits.iter().find(|s| s.name == "RESISTOR_PAR")
+        let subckt = netlist
+            .subcircuits
+            .iter()
+            .find(|s| s.name == "RESISTOR_PAR")
             .expect("Missing subcircuit definition");
         assert!(!subckt.params.is_empty(), "Expected default parameters");
-        
+
         // Check R parameter
         let r_param = subckt.params.iter().find(|(n, _)| n == "R");
         assert!(r_param.is_some(), "Expected R parameter");
-        assert!((r_param.unwrap().1 - 1000.0).abs() < 1e-10, "R should be 1k");
+        assert!(
+            (r_param.unwrap().1 - 1000.0).abs() < 1e-10,
+            "R should be 1k"
+        );
     }
 
     #[test]
@@ -474,17 +517,23 @@ V1 1 0 10
 .end
 "#;
         let netlist = parse_netlist(netlist_str).unwrap();
-        
+
         // Find the subcircuit instance
-        let x1 = netlist.elements.iter().find(|e| e.name == "X1")
+        let x1 = netlist
+            .elements
+            .iter()
+            .find(|e| e.name == "X1")
             .expect("Missing X1 instance");
-        
+
         // Check it has instance parameters
         if let ElementKind::Subcircuit { params, .. } = &x1.kind {
             assert!(!params.is_empty(), "Expected instance parameters");
             let r_param = params.iter().find(|(n, _)| n == "R");
             assert!(r_param.is_some(), "Expected R parameter");
-            assert!((r_param.unwrap().1 - 2000.0).abs() < 1e-10, "R should be 2k");
+            assert!(
+                (r_param.unwrap().1 - 2000.0).abs() < 1e-10,
+                "R should be 2k"
+            );
         } else {
             panic!("Expected Subcircuit element");
         }
@@ -501,8 +550,11 @@ X1 1 2 RES
 .end
 "#;
         let netlist = parse_netlist(netlist_str).unwrap();
-        
-        let subckt = netlist.subcircuits.iter().find(|s| s.name == "RES")
+
+        let subckt = netlist
+            .subcircuits
+            .iter()
+            .find(|s| s.name == "RES")
             .expect("Missing subcircuit definition");
         assert_eq!(subckt.params.len(), 2, "Expected 2 default parameters");
     }
@@ -521,9 +573,8 @@ V1 1 0 5
 "#;
         let netlist = parse_netlist(netlist_str).unwrap();
         let flat = flatten_netlist(&netlist).unwrap();
-        
+
         // Verify flattening still works: V1 + X1.R1 + X1.R2 = 3 elements
         assert_eq!(flat.len(), 3);
     }
 }
-

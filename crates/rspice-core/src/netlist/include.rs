@@ -199,7 +199,7 @@ impl IncludeProcessor {
     /// .ENDL [section_name]
     /// ```
     fn extract_section(&self, content: &str, section: &str) -> Result<String, ParseError> {
-        let section_upper = section.to_uppercase();
+        let _section_upper = section.to_uppercase();
         let mut in_section = false;
         let mut section_content = Vec::new();
         let mut found = false;
