@@ -299,7 +299,7 @@ fn WaveformPlaceholder() -> Element {
     let th = theme.read();
 
     // Generate a demo sine wave path
-    let path = generate_sine_wave_path(100, 200.0, 50.0);
+    let path = generate_sine_wave_path(100);
 
     rsx! {
         svg {
@@ -309,21 +309,24 @@ fn WaveformPlaceholder() -> Element {
                 width: 100%;
                 height: 100%;
             ",
+            view_box: "0 0 100 100",
+            preserve_aspect_ratio: "none",
 
             path {
                 d: "{path}",
                 fill: "none",
                 stroke: "{th.trace_color(0)}",
-                stroke_width: "2",
+                stroke_width: "1",
                 stroke_linecap: "round",
                 stroke_linejoin: "round",
+                vector_effect: "non-scaling-stroke",
             }
         }
     }
 }
 
-/// Generate SVG path for a sine wave
-fn generate_sine_wave_path(points: usize, _width: f64, _height: f64) -> String {
+/// Generate SVG path for a sine wave (coordinates in 0-100 range)
+fn generate_sine_wave_path(points: usize) -> String {
     let mut path = String::with_capacity(points * 20);
 
     for i in 0..points {
@@ -378,14 +381,17 @@ fn WaveformTrace(x: Vec<f64>, y: Vec<f64>, color: String) -> Element {
                 width: 100%;
                 height: 100%;
             ",
+            view_box: "0 0 100 100",
+            preserve_aspect_ratio: "none",
 
             path {
                 d: "{path}",
                 fill: "none",
                 stroke: "{color}",
-                stroke_width: "2",
+                stroke_width: "1",
                 stroke_linecap: "round",
                 stroke_linejoin: "round",
+                vector_effect: "non-scaling-stroke",
             }
         }
     }
