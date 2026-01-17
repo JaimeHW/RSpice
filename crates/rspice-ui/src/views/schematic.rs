@@ -237,7 +237,7 @@ pub fn Schematic() -> Element {
                     },
 
                     onkeydown: move |evt| {
-                        // Handle Ctrl+Z (Undo) and Ctrl+Y (Redo)
+                        // Handle Ctrl+key shortcuts
                         if evt.modifiers().ctrl() {
                             match evt.key() {
                                 Key::Character(c) if c == "z" || c == "Z" => {
@@ -252,6 +252,18 @@ pub fn Schematic() -> Element {
                                         history.write().redo();
                                         schematic.set(history.read().current().clone());
                                     }
+                                    return;
+                                }
+                                Key::Character(c) if c == "c" || c == "C" => {
+                                    // Copy selection to clipboard
+                                    schematic.write().copy_selection();
+                                    return;
+                                }
+                                Key::Character(c) if c == "v" || c == "V" => {
+                                    // Paste at current mouse position
+                                    let gp = *mouse_grid.read();
+                                    schematic.write().paste_at(gp);
+                                    history.write().push(schematic.read().clone(), "Paste");
                                     return;
                                 }
                                 _ => {}

@@ -357,6 +357,17 @@ pub struct WireDrawing {
     pub active: bool,
 }
 
+/// Clipboard data for copy/paste operations
+#[derive(Debug, Clone, Default)]
+pub struct ClipboardData {
+    /// Copied components (stored with relative positions)
+    pub components: Vec<Component>,
+    /// Copied wires (stored with relative positions)
+    pub wires: Vec<Wire>,
+    /// Origin point (center of copied selection)
+    pub origin: Point,
+}
+
 /// Main schematic state
 #[derive(Debug, Clone)]
 pub struct SchematicState {
@@ -389,6 +400,9 @@ pub struct SchematicState {
 
     /// Component counters for auto-naming (R1, R2, etc.)
     component_counters: HashMap<&'static str, u32>,
+
+    /// Clipboard for copy/paste operations
+    pub clipboard: ClipboardData,
 }
 
 impl Default for SchematicState {
@@ -404,6 +418,7 @@ impl Default for SchematicState {
             pan: (0.0, 0.0),
             next_id: 1,
             component_counters: HashMap::new(),
+            clipboard: ClipboardData::default(),
         }
     }
 }
@@ -538,5 +553,109 @@ impl SchematicState {
     pub fn cancel_wire(&mut self) {
         self.wire_drawing.active = false;
         self.wire_drawing.points.clear();
+    }
+
+    /// Copy selected components and wires to clipboard
+    pub fn copy_selection(&mut self) {
+        if self.selection.is_empty() {
+            return;
+        }
+
+        // Get selected components
+        let selected_comps: Vec<Component> = self
+            .components
+            .iter()
+            .filter(|c| self.selection.has_component(c.id))
+            .cloned()
+            .collect();
+
+        // Get selected wires
+        let selected_wires: Vec<Wire> = self
+            .wires
+            .iter()
+            .filter(|w| self.selection.has_wire(w.id))
+            .cloned()
+            .collect();
+
+        // Calculate center of selection
+        let mut cx = 0i32;
+        let mut cy = 0i32;
+        let mut count = 0;
+        for comp in &selected_comps {
+            cx += comp.pos.x;
+            cy += comp.pos.y;
+            count += 1;
+        }
+        for wire in &selected_wires {
+            if let Some(first) = wire.points.first() {
+                cx += first.x;
+                cy += first.y;
+                count += 1;
+            }
+        }
+        let origin = if count > 0 {
+            Point::new(cx / count, cy / count)
+        } else {
+            Point::new(0, 0)
+        };
+
+        self.clipboard = ClipboardData {
+            components: selected_comps,
+            wires: selected_wires,
+            origin,
+        };
+    }
+
+    /// Check if clipboard has content
+    pub fn can_paste(&self) -> bool {
+        !self.clipboard.components.is_empty() || !self.clipboard.wires.is_empty()
+    }
+
+    /// Paste clipboard contents at the given position
+    pub fn paste_at(&mut self, pos: Point) {
+        if !self.can_paste() {
+            return;
+        }
+
+        // Clone clipboard data to avoid borrow issues
+        let clipboard_components = self.clipboard.components.clone();
+        let clipboard_wires = self.clipboard.wires.clone();
+        let origin = self.clipboard.origin;
+
+        // Calculate offset from clipboard origin to paste position
+        let offset_x = pos.x - origin.x;
+        let offset_y = pos.y - origin.y;
+
+        // Clear current selection
+        self.selection.clear();
+
+        // Paste components with new IDs
+        for comp in clipboard_components {
+            let new_id = self.next_id();
+            let mut new_comp = comp;
+            new_comp.id = new_id;
+            new_comp.pos.x += offset_x;
+            new_comp.pos.y += offset_y;
+            // Generate new name for pasted component
+            new_comp.name = self.generate_name(new_comp.kind);
+            self.components.push(new_comp);
+            self.selection.components.push(new_id);
+        }
+
+        // Paste wires with new IDs
+        for wire in clipboard_wires {
+            let new_id = self.next_id();
+            let new_points: Vec<Point> = wire
+                .points
+                .iter()
+                .map(|p| Point::new(p.x + offset_x, p.y + offset_y))
+                .collect();
+            let new_wire = Wire {
+                id: new_id,
+                points: new_points,
+            };
+            self.wires.push(new_wire);
+            self.selection.wires.push(new_id);
+        }
     }
 }
