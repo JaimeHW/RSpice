@@ -75,6 +75,8 @@ pub struct Netlist {
     pub global_nodes: HashSet<String>,
     /// Measurement statements from .MEAS commands
     pub measurements: Vec<MeasureStatement>,
+    /// Simulation options from .OPTIONS commands
+    pub options: SimulationOptions,
 }
 
 impl Netlist {
@@ -112,6 +114,7 @@ impl Default for Netlist {
             initial_conditions: Vec::new(),
             global_nodes: HashSet::new(),
             measurements: Vec::new(),
+            options: SimulationOptions::default(),
         }
     }
 }

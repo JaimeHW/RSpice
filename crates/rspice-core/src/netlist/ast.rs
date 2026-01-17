@@ -479,6 +479,99 @@ pub struct NodeSet {
 }
 
 //=============================================================================
+// Simulation Options
+//=============================================================================
+
+/// Simulation options from .OPTIONS command
+///
+/// Controls numerical parameters for simulation accuracy and convergence.
+/// All fields are optional - unspecified values use engine defaults.
+#[derive(Debug, Clone, Default)]
+pub struct SimulationOptions {
+    /// Relative tolerance for convergence (default: 1e-3)
+    pub reltol: Option<Value>,
+    /// Absolute current tolerance (default: 1e-12 A)
+    pub abstol: Option<Value>,
+    /// Absolute voltage tolerance (default: 1e-6 V)
+    pub vntol: Option<Value>,
+    /// Minimum conductance (default: 1e-12 S)
+    pub gmin: Option<Value>,
+    /// Integration method: "TRAP", "GEAR", "TRAPGEAR"
+    pub method: Option<String>,
+    /// Transient error tolerance factor (default: 7.0)
+    pub trtol: Option<Value>,
+    /// Maximum Newton-Raphson iterations (default: 150)
+    pub itl1: Option<usize>,
+    /// DC transfer curve iterations (default: 50)
+    pub itl2: Option<usize>,
+    /// Transient analysis iterations (default: 10)
+    pub itl4: Option<usize>,
+    /// Source stepping max iterations (default: 500)
+    pub itl6: Option<usize>,
+    /// Charge tolerance for capacitors (default: 1e-14 C)
+    pub chgtol: Option<Value>,
+    /// Pivot tolerance for matrix operations (default: 1e-13)
+    pub pivtol: Option<Value>,
+    /// Temperature in Celsius (default: 27)
+    pub temp: Option<Value>,
+    /// Nominal temperature in Celsius (default: 27)
+    pub tnom: Option<Value>,
+}
+
+impl SimulationOptions {
+    /// Create empty options (all defaults)
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Merge another options set, preferring values from `other`
+    pub fn merge(&mut self, other: &SimulationOptions) {
+        if other.reltol.is_some() {
+            self.reltol = other.reltol;
+        }
+        if other.abstol.is_some() {
+            self.abstol = other.abstol;
+        }
+        if other.vntol.is_some() {
+            self.vntol = other.vntol;
+        }
+        if other.gmin.is_some() {
+            self.gmin = other.gmin;
+        }
+        if other.method.is_some() {
+            self.method = other.method.clone();
+        }
+        if other.trtol.is_some() {
+            self.trtol = other.trtol;
+        }
+        if other.itl1.is_some() {
+            self.itl1 = other.itl1;
+        }
+        if other.itl2.is_some() {
+            self.itl2 = other.itl2;
+        }
+        if other.itl4.is_some() {
+            self.itl4 = other.itl4;
+        }
+        if other.itl6.is_some() {
+            self.itl6 = other.itl6;
+        }
+        if other.chgtol.is_some() {
+            self.chgtol = other.chgtol;
+        }
+        if other.pivtol.is_some() {
+            self.pivtol = other.pivtol;
+        }
+        if other.temp.is_some() {
+            self.temp = other.temp;
+        }
+        if other.tnom.is_some() {
+            self.tnom = other.tnom;
+        }
+    }
+}
+
+//=============================================================================
 // Model and Subcircuit Definitions
 //=============================================================================
 

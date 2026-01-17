@@ -120,6 +120,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
         initial_conditions,
         global_nodes: std::collections::HashSet::new(),
         measurements: Vec::new(),
+        options: super::SimulationOptions::default(),
     })
 }
 
@@ -353,6 +354,11 @@ fn parse_command(
         ".FUNC" => {
             // Parse user-defined function: .FUNC name(arg1, arg2, ...) = expression
             parse_func_statement(stream, line_num, params)?;
+        }
+        ".OPTIONS" | ".OPTION" | ".OPT" => {
+            // .OPTIONS are parsed but stored in Netlist, not here
+            // Just consume the line - parsing happens at higher level
+            log::debug!(".OPTIONS found at line {}", line_num);
         }
         _ => {
             // Ignore unknown commands
