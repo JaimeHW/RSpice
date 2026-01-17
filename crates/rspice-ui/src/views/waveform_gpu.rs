@@ -265,14 +265,15 @@ impl WaveformPainter {
         let x_range = state.x_max - state.x_min;
         let y_range = state.y_max - state.y_min;
 
-        // Calculate nice grid intervals (5-10 lines typically)
-        let x_step = calculate_grid_step(x_range);
-        let y_step = calculate_grid_step(y_range);
+        // Use same linear spacing as axis labels (6 x-divisions, 5 y-divisions)
+        let x_count = 6;
+        let y_count = 5;
+        let x_step = x_range / (x_count - 1) as f64;
+        let y_step = y_range / (y_count - 1) as f64;
 
         // Vertical gridlines (X axis divisions)
-        let x_start = (state.x_min / x_step).ceil() * x_step;
-        let mut x = x_start;
-        while x <= state.x_max {
+        for i in 0..x_count {
+            let x = state.x_min + i as f64 * x_step;
             let vertices = vec![
                 WaveformVertex {
                     position: [x as f32, state.y_min as f32],
@@ -289,13 +290,11 @@ impl WaveformPainter {
                 usage: wgpu::BufferUsages::VERTEX,
             });
             self.vertex_buffers.push((buffer, vertices.len() as u32));
-            x += x_step;
         }
 
         // Horizontal gridlines (Y axis divisions)
-        let y_start = (state.y_min / y_step).ceil() * y_step;
-        let mut y = y_start;
-        while y <= state.y_max {
+        for i in 0..y_count {
+            let y = state.y_min + i as f64 * y_step;
             let vertices = vec![
                 WaveformVertex {
                     position: [state.x_min as f32, y as f32],
@@ -312,7 +311,6 @@ impl WaveformPainter {
                 usage: wgpu::BufferUsages::VERTEX,
             });
             self.vertex_buffers.push((buffer, vertices.len() as u32));
-            y += y_step;
         }
 
         // Then add waveform traces

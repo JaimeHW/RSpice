@@ -1396,11 +1396,42 @@ fn ControlButton(
     }
 }
 
-/// Grid lines for the waveform plot
+/// Grid lines for the waveform plot - aligned with axis values
 #[component]
 fn WaveformGrid() -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
+    let view_state: Signal<ViewState> = use_context();
+    let vs = view_state.read();
+
+    // Calculate nice grid steps based on data range
+    let x_range = vs.x_max - vs.x_min;
+    let y_range = vs.y_max - vs.y_min;
+    let x_step = calculate_nice_step(x_range, 6);
+    let y_step = calculate_nice_step(y_range, 5);
+
+    // Calculate grid line positions as percentages
+    let mut x_lines = Vec::new();
+    let x_start = (vs.x_min / x_step).ceil() * x_step;
+    let mut x = x_start;
+    while x <= vs.x_max {
+        let pct = (x - vs.x_min) / x_range * 100.0;
+        if pct >= 0.0 && pct <= 100.0 {
+            x_lines.push(pct);
+        }
+        x += x_step;
+    }
+
+    let mut y_lines = Vec::new();
+    let y_start = (vs.y_min / y_step).ceil() * y_step;
+    let mut y = y_start;
+    while y <= vs.y_max {
+        let pct = (1.0 - (y - vs.y_min) / y_range) * 100.0; // Inverted for screen coords
+        if pct >= 0.0 && pct <= 100.0 {
+            y_lines.push(pct);
+        }
+        y += y_step;
+    }
 
     rsx! {
         svg {
@@ -1409,43 +1440,59 @@ fn WaveformGrid() -> Element {
                 inset: 0;
                 width: 100%;
                 height: 100%;
+                pointer-events: none;
             ",
 
-            // Horizontal grid lines
-            for i in 0..5 {
+            // Horizontal grid lines (Y axis divisions)
+            for pct in y_lines.iter() {
                 line {
                     x1: "0",
-                    y1: "{i as f64 * 25.0}%",
+                    y1: "{pct}%",
                     x2: "100%",
-                    y2: "{i as f64 * 25.0}%",
+                    y2: "{pct}%",
                     stroke: "{th.border_subtle()}",
                     stroke_width: "1",
+                    stroke_opacity: "0.5",
                 }
             }
 
-            // Vertical grid lines
-            for i in 0..7 {
+            // Vertical grid lines (X axis divisions)
+            for pct in x_lines.iter() {
                 line {
-                    x1: "{i as f64 * 16.67}%",
+                    x1: "{pct}%",
                     y1: "0",
-                    x2: "{i as f64 * 16.67}%",
+                    x2: "{pct}%",
                     y2: "100%",
                     stroke: "{th.border_subtle()}",
                     stroke_width: "1",
+                    stroke_opacity: "0.5",
                 }
-            }
-
-            // Center line (0V reference)
-            line {
-                x1: "0",
-                y1: "50%",
-                x2: "100%",
-                y2: "50%",
-                stroke: "{th.border()}",
-                stroke_width: "1",
             }
         }
     }
+}
+
+/// Calculate a nice step size for grid lines
+fn calculate_nice_step(range: f64, target_divisions: usize) -> f64 {
+    let raw_step = range / target_divisions as f64;
+    if raw_step <= 0.0 || !raw_step.is_finite() {
+        return 1.0;
+    }
+
+    let magnitude = 10f64.powf(raw_step.log10().floor());
+    let normalized = raw_step / magnitude;
+
+    let nice = if normalized < 1.5 {
+        1.0
+    } else if normalized < 3.5 {
+        2.0
+    } else if normalized < 7.5 {
+        5.0
+    } else {
+        10.0
+    };
+
+    nice * magnitude
 }
 
 /// Placeholder demo waveform
