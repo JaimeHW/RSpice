@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 
 use super::button::{Button, ButtonVariant};
 use super::icons::{Icon, IconType};
-use crate::state::SimulationState;
+use crate::state::{run_simulation, ConsoleMessage, SimulationState, WaveformData};
 use crate::theme::Theme;
 
 /// Main application toolbar
@@ -102,8 +102,50 @@ pub fn Toolbar() -> Element {
                         variant: ButtonVariant::Success,
                         icon: rsx! { Icon { icon: IconType::Play, size: 16, color: "#ffffff".to_string() } },
                         onclick: move |_| {
+                            // Get netlist content from state
+                            let netlist_content = sim_state.read().netlist_content.clone();
+
+                            // Run simulation
                             sim_state.write().is_running = true;
-                            log::info!("Simulation started");
+                            sim_state.write().console_messages.clear();
+                            sim_state.write().console_messages.push(ConsoleMessage::info("Starting simulation..."));
+
+                            let result = run_simulation(&netlist_content);
+
+                            // Update state with results
+                            let mut state = sim_state.write();
+                            state.is_running = false;
+
+                            if result.success {
+                                // Clear old waveforms and add new ones
+                                state.waveforms.clear();
+
+                                if let Some(tran) = result.transient {
+                                    for (idx, (name, values)) in tran.voltages.into_iter().enumerate() {
+                                        state.waveforms.push(WaveformData {
+                                            name,
+                                            x: tran.time.clone(),
+                                            y: values,
+                                            color: Theme::trace_color_static(idx).to_string(),
+                                            visible: true,
+                                        });
+                                    }
+                                }
+
+                                state.console_messages.push(ConsoleMessage::success(
+                                    format!("Simulation complete! {} points, {:.1}ms",
+                                        result.stats.num_points,
+                                        result.stats.sim_time_ms
+                                    )
+                                ));
+                                log::info!("Simulation completed: {} points in {:.1}ms",
+                                    result.stats.num_points, result.stats.sim_time_ms);
+                            } else {
+                                state.console_messages.push(ConsoleMessage::error(
+                                    result.error.unwrap_or_else(|| "Unknown error".to_string())
+                                ));
+                                log::error!("Simulation failed");
+                            }
                         },
                         "Run"
                     }

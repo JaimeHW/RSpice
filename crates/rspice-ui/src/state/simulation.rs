@@ -3,6 +3,7 @@
 //! Manages simulation execution state and results.
 
 use rspice_core::Value;
+use std::path::PathBuf;
 
 /// Simulation execution state
 #[derive(Debug, Clone, Default)]
@@ -21,6 +22,15 @@ pub struct SimulationState {
 
     /// Console log messages
     pub console_messages: Vec<ConsoleMessage>,
+
+    /// Current netlist content (from editor)
+    pub netlist_content: String,
+
+    /// Current file path (if opened/saved)
+    pub current_file: Option<PathBuf>,
+
+    /// Whether the editor content has unsaved changes
+    pub is_dirty: bool,
 }
 
 /// Waveform trace data

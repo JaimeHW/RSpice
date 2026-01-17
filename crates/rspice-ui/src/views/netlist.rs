@@ -4,15 +4,22 @@
 
 use dioxus::prelude::*;
 
+use crate::state::SimulationState;
 use crate::theme::Theme;
 
 /// Netlist text editor
 #[component]
 pub fn Netlist() -> Element {
     let theme: Signal<Theme> = use_context();
+    let mut sim_state: Signal<SimulationState> = use_context();
     let th = theme.read();
 
-    let mut content = use_signal(|| DEFAULT_NETLIST.to_string());
+    // Initialize default content if empty
+    if sim_state.read().netlist_content.is_empty() {
+        sim_state.write().netlist_content = DEFAULT_NETLIST.to_string();
+    }
+
+    let content = sim_state.read().netlist_content.clone();
 
     rsx! {
         div {
@@ -92,7 +99,7 @@ pub fn Netlist() -> Element {
                         border-right: 1px solid {th.border()};
                     ",
                     {
-                        let line_count = content.read().lines().count().max(1);
+                        let line_count = content.lines().count().max(1);
                         (1..=line_count)
                             .map(|n| rsx! { div { "{n}" } })
                     }
@@ -115,7 +122,9 @@ pub fn Netlist() -> Element {
                         overflow: auto;
                     ",
                     value: "{content}",
-                    oninput: move |e| content.set(e.value()),
+                    oninput: move |e| {
+                        sim_state.write().netlist_content = e.value();
+                    },
                     spellcheck: "false",
                 }
             }

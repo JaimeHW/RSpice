@@ -169,8 +169,22 @@ impl Theme {
 
     /// Get trace color by index (wraps around)
     pub fn trace_color(&self, index: usize) -> &'static str {
-        let colors = self.trace_colors();
-        colors[index % colors.len()]
+        Self::trace_color_static(index)
+    }
+
+    /// Get trace color by index (static version)
+    pub fn trace_color_static(index: usize) -> &'static str {
+        const COLORS: &[&str] = &[
+            "#3b82f6", // Blue
+            "#22c55e", // Green
+            "#ef4444", // Red
+            "#eab308", // Yellow
+            "#a855f7", // Purple
+            "#06b6d4", // Cyan
+            "#f97316", // Orange
+            "#ec4899", // Pink
+        ];
+        COLORS[index % COLORS.len()]
     }
 
     //=========================================================================
