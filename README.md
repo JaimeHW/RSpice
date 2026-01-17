@@ -15,9 +15,9 @@ RSpice is a modern circuit simulation engine that provides accurate analog circu
 - **DC Analysis** - Operating point and DC sweep
 - **AC Analysis** - Small-signal frequency response
 - **Transient Analysis** - Time-domain simulation with adaptive timestep
-- **Noise Analysis** - Thermal, shot, and flicker noise
+- **Noise Analysis** - Thermal, shot, flicker, and burst (popcorn) noise
 - **Fourier Analysis** - THD and harmonic distortion
-- **Monte Carlo** - Statistical variation analysis
+- **Monte Carlo** - Statistical variation analysis with parallel execution
 - **Sensitivity Analysis** - Component sensitivity
 - **S-Parameter** - RF network analysis
 
@@ -27,6 +27,7 @@ RSpice is a modern circuit simulation engine that provides accurate analog circu
 - **Sources** - DC, AC, PULSE, SIN, PWL, EXP waveforms
 - **Controlled Sources** - VCVS, CCCS, VCCS, CCVS
 - **Advanced** - Transmission lines, coupled inductors, behavioral sources
+- **External Models** - FFI support for C/C++ device models via `libloading`
 
 ### Technical Highlights
 - **C1-Continuous Models** - Smooth region transitions for robust Newton-Raphson convergence
@@ -142,6 +143,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `.INCLUDE` | File inclusion |
 | `.STEP` | Parametric sweep |
 | `.MEAS` | Measurement statements |
+| `.OPTIONS` | Simulation configuration (RELTOL, ABSTOL, GMIN, etc.) |
 
 ## Performance
 
@@ -160,6 +162,9 @@ cargo build --release --features parallel
 
 # Build for WebAssembly
 cargo build --target wasm32-unknown-unknown --features wasm
+
+# Enable external C model loading
+cargo build --release --features ffi
 ```
 
 ## Contributing
