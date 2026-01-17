@@ -114,10 +114,13 @@ pub struct WaveformPainter {
     uniform_bind_group: Option<wgpu::BindGroup>,
     /// Vertex buffers (one per trace)
     vertex_buffers: Vec<(wgpu::Buffer, u32)>,
-    /// Render texture
+    /// Render texture (resolve target for MSAA)
     texture: Option<wgpu::Texture>,
     texture_view: Option<wgpu::TextureView>,
     texture_size: (u32, u32),
+    /// MSAA multisampled texture (render target)
+    msaa_texture: Option<wgpu::Texture>,
+    msaa_texture_view: Option<wgpu::TextureView>,
 }
 
 impl WaveformPainter {
@@ -133,6 +136,8 @@ impl WaveformPainter {
             texture: None,
             texture_view: None,
             texture_size: (0, 0),
+            msaa_texture: None,
+            msaa_texture_view: None,
         }
     }
 
@@ -236,7 +241,11 @@ impl WaveformPainter {
                 conservative: false,
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: 4, // 4x MSAA for smooth lines
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
             multiview: None,
             cache: None,
         });
@@ -338,6 +347,26 @@ impl WaveformPainter {
             self.texture_view = Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
             self.texture = Some(texture);
             self.texture_size = (width, height);
+
+            // Create MSAA multisampled texture (4x samples for smooth lines)
+            let msaa_texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Waveform MSAA Texture"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 4, // 4x MSAA
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+
+            self.msaa_texture_view =
+                Some(msaa_texture.create_view(&wgpu::TextureViewDescriptor::default()));
+            self.msaa_texture = Some(msaa_texture);
         }
     }
 
@@ -366,6 +395,7 @@ impl WaveformPainter {
         self.update_uniforms(&queue);
 
         let texture_view = self.texture_view.as_ref()?;
+        let msaa_view = self.msaa_texture_view.as_ref()?;
         let pipeline = self.pipeline.as_ref()?;
         let bind_group = self.uniform_bind_group.as_ref()?;
 
@@ -374,13 +404,13 @@ impl WaveformPainter {
             label: Some("Waveform Render Encoder"),
         });
 
-        // Render pass
+        // Render pass with MSAA - render to multisampled texture, resolve to regular texture
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Waveform Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: texture_view,
-                    resolve_target: None,
+                    view: msaa_view,                    // Render to MSAA texture
+                    resolve_target: Some(texture_view), // Resolve to regular texture for readback
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
                             r: 0.08,
