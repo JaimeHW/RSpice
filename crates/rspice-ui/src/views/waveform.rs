@@ -43,6 +43,11 @@ impl CursorState {
         }
     }
 
+    /// Get frequency (1/delta)
+    fn frequency(&self) -> Option<f64> {
+        self.delta().map(|d| if d > 0.0 { 1.0 / d } else { 0.0 })
+    }
+
     /// Place a cursor at the given time
     fn place(&mut self, time: f64) {
         if self.next_cursor == 0 || self.cursor1.is_none() {
@@ -52,6 +57,96 @@ impl CursorState {
             self.cursor2 = Some(time);
             self.next_cursor = 0;
         }
+    }
+
+    /// Clear all cursors
+    fn clear(&mut self) {
+        self.cursor1 = None;
+        self.cursor2 = None;
+        self.next_cursor = 0;
+    }
+}
+
+/// Waveform measurements
+#[derive(Debug, Clone, Default)]
+struct WaveformMeasurements {
+    vpp: f64,  // Peak-to-peak voltage
+    vmax: f64, // Maximum voltage
+    vmin: f64, // Minimum voltage
+    vavg: f64, // Average voltage
+    vrms: f64, // RMS voltage
+}
+
+impl WaveformMeasurements {
+    /// Calculate measurements from Y data
+    fn from_data(y: &[f64]) -> Self {
+        if y.is_empty() {
+            return Self::default();
+        }
+
+        let vmax = y.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let vmin = y.iter().cloned().fold(f64::INFINITY, f64::min);
+        let vpp = vmax - vmin;
+        let vavg = y.iter().sum::<f64>() / y.len() as f64;
+        let vrms = (y.iter().map(|v| v * v).sum::<f64>() / y.len() as f64).sqrt();
+
+        Self {
+            vpp,
+            vmax,
+            vmin,
+            vavg,
+            vrms,
+        }
+    }
+}
+
+/// Interpolate Y value at a given X position
+fn interpolate_y(x: &[f64], y: &[f64], target_x: f64) -> Option<f64> {
+    if x.len() < 2 || y.len() < 2 || x.len() != y.len() {
+        return None;
+    }
+
+    // Find the two points surrounding target_x
+    for i in 0..x.len() - 1 {
+        if x[i] <= target_x && target_x <= x[i + 1] {
+            // Linear interpolation
+            let t = (target_x - x[i]) / (x[i + 1] - x[i]);
+            return Some(y[i] + t * (y[i + 1] - y[i]));
+        }
+    }
+    None
+}
+
+/// Format frequency with appropriate SI prefix
+fn format_frequency(f: f64) -> String {
+    if f >= 1e9 {
+        format!("{:.2} GHz", f / 1e9)
+    } else if f >= 1e6 {
+        format!("{:.2} MHz", f / 1e6)
+    } else if f >= 1e3 {
+        format!("{:.2} kHz", f / 1e3)
+    } else if f >= 1.0 {
+        format!("{:.2} Hz", f)
+    } else if f >= 1e-3 {
+        format!("{:.2} mHz", f * 1e3)
+    } else {
+        format!("{:.4} Hz", f)
+    }
+}
+
+/// Format voltage with appropriate SI prefix
+fn format_voltage(v: f64) -> String {
+    let abs_v = v.abs();
+    if abs_v >= 1e3 {
+        format!("{:.3} kV", v / 1e3)
+    } else if abs_v >= 1.0 {
+        format!("{:.3} V", v)
+    } else if abs_v >= 1e-3 {
+        format!("{:.3} mV", v * 1e3)
+    } else if abs_v >= 1e-6 {
+        format!("{:.3} µV", v * 1e6)
+    } else {
+        format!("{:.3} nV", v * 1e9)
     }
 }
 
@@ -373,30 +468,52 @@ fn WaveformPlotArea(
                         position: absolute;
                         top: 8px;
                         right: 8px;
-                        background: rgba(0, 0, 0, 0.8);
+                        background: rgba(0, 0, 0, 0.85);
                         padding: 8px 12px;
-                        border-radius: 4px;
+                        border-radius: 6px;
                         font-family: {Theme::FONT_MONO};
                         font-size: 11px;
-                        pointer-events: none;
+                        min-width: 100px;
+                        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
                     ",
+
+                    // Title
+                    div {
+                        style: "color: #9ca3af; font-size: 10px; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;",
+                        "Cursors"
+                    }
 
                     if let Some(c1) = cursors.cursor1 {
                         div {
-                            style: "color: #eab308; margin-bottom: 4px;",
-                            "C1: {format_time(c1)}"
+                            style: "color: #eab308; margin-bottom: 3px; display: flex; justify-content: space-between;",
+                            span { "C1:" }
+                            span { style: "margin-left: 8px;", "{format_time(c1)}" }
                         }
                     }
                     if let Some(c2) = cursors.cursor2 {
                         div {
-                            style: "color: #06b6d4; margin-bottom: 4px;",
-                            "C2: {format_time(c2)}"
+                            style: "color: #06b6d4; margin-bottom: 3px; display: flex; justify-content: space-between;",
+                            span { "C2:" }
+                            span { style: "margin-left: 8px;", "{format_time(c2)}" }
                         }
                     }
+
+                    // Delta and frequency
                     if let Some(delta) = cursors.delta() {
                         div {
-                            style: "color: #22c55e;",
-                            "Δt: {format_time(delta)}"
+                            style: "border-top: 1px solid #374151; margin-top: 4px; padding-top: 4px;",
+                            div {
+                                style: "color: #22c55e; margin-bottom: 3px; display: flex; justify-content: space-between;",
+                                span { "Δt:" }
+                                span { style: "margin-left: 8px;", "{format_time(delta)}" }
+                            }
+                            if let Some(freq) = cursors.frequency() {
+                                div {
+                                    style: "color: #a78bfa; display: flex; justify-content: space-between;",
+                                    span { "1/Δt:" }
+                                    span { style: "margin-left: 8px;", "{format_frequency(freq)}" }
+                                }
+                            }
                         }
                     }
                 }
