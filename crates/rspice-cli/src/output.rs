@@ -1,4 +1,8 @@
 //! Output formatters for simulation results
+//!
+//! These functions are kept for future CLI output format support.
+
+#![allow(dead_code)]
 
 use rspice_core::solver::SimulationResult;
 use std::io::Write;
@@ -6,6 +10,7 @@ use std::path::Path;
 
 /// Output format types
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub enum OutputFormat {
     /// SPICE raw format (binary)
     Raw,
@@ -41,7 +46,7 @@ pub fn write_results(
     format: OutputFormat,
 ) -> std::io::Result<()> {
     let mut file = std::fs::File::create(path)?;
-    
+
     match format {
         OutputFormat::Csv => write_csv(&mut file, result),
         OutputFormat::Json => write_json(&mut file, result),
@@ -57,7 +62,7 @@ fn write_csv<W: Write>(writer: &mut W, result: &SimulationResult) -> std::io::Re
             write!(writer, ",V({})", i)?;
         }
         writeln!(writer)?;
-        
+
         // Data
         for (t_idx, &time) in result.time_points.iter().enumerate() {
             write!(writer, "{:.9e}", time)?;
@@ -75,35 +80,43 @@ fn write_csv<W: Write>(writer: &mut W, result: &SimulationResult) -> std::io::Re
             writeln!(writer, "{},{:.9e}", i, v)?;
         }
     }
-    
+
     Ok(())
 }
 
 fn write_json<W: Write>(writer: &mut W, result: &SimulationResult) -> std::io::Result<()> {
     writeln!(writer, "{{")?;
-    
+
     // Node voltages
     writeln!(writer, "  \"node_voltages\": [")?;
     for (i, &v) in result.node_voltages.iter().enumerate() {
-        let comma = if i < result.node_voltages.len() - 1 { "," } else { "" };
+        let comma = if i < result.node_voltages.len() - 1 {
+            ","
+        } else {
+            ""
+        };
         writeln!(writer, "    {:.9e}{}", v, comma)?;
     }
     writeln!(writer, "  ],")?;
-    
+
     // Time points (if any)
     if !result.time_points.is_empty() {
         writeln!(writer, "  \"time_points\": [")?;
         for (i, &t) in result.time_points.iter().enumerate() {
-            let comma = if i < result.time_points.len() - 1 { "," } else { "" };
+            let comma = if i < result.time_points.len() - 1 {
+                ","
+            } else {
+                ""
+            };
             writeln!(writer, "    {:.9e}{}", t, comma)?;
         }
         writeln!(writer, "  ]")?;
     } else {
         writeln!(writer, "  \"time_points\": []")?;
     }
-    
+
     writeln!(writer, "}}")?;
-    
+
     Ok(())
 }
 
@@ -116,14 +129,14 @@ fn write_raw<W: Write>(writer: &mut W, result: &SimulationResult) -> std::io::Re
     writeln!(writer, "No. Variables: {}", result.node_voltages.len())?;
     writeln!(writer, "No. Points: {}", result.time_points.len().max(1))?;
     writeln!(writer, "Variables:")?;
-    
+
     writeln!(writer, "\t0\ttime\ttime")?;
     for i in 1..result.node_voltages.len() {
         writeln!(writer, "\t{}\tV({})\tvoltage", i, i)?;
     }
-    
+
     writeln!(writer, "Values:")?;
-    
+
     if result.time_points.is_empty() {
         // DC operating point
         writeln!(writer, "0")?;
@@ -143,7 +156,7 @@ fn write_raw<W: Write>(writer: &mut W, result: &SimulationResult) -> std::io::Re
             }
         }
     }
-    
+
     Ok(())
 }
 
