@@ -6,6 +6,7 @@
 use dioxus::prelude::*;
 
 use crate::components::component_edit::ComponentEditModal;
+use crate::components::component_library::ComponentLibrary;
 use crate::components::context_menu::{schematic_context_menu, canvas_context_menu, ContextMenu, MenuAction};
 use crate::state::{ComponentType, Point, SchematicState, Tool, SchematicHistory};
 use crate::theme::Theme;
@@ -71,9 +72,17 @@ pub fn Schematic() -> Element {
 
             SchematicToolbar { schematic: schematic }
 
+            // Main content area with library sidebar and canvas
             div {
-                class: "schematic-canvas-wrapper",
-                style: "flex: 1 1 auto; position: relative; overflow: hidden;",
+                style: "display: flex; flex: 1 1 auto; overflow: hidden;",
+                
+                // Component Library sidebar
+                ComponentLibrary { schematic: schematic }
+
+                // Canvas area
+                div {
+                    class: "schematic-canvas-wrapper",
+                    style: "flex: 1 1 auto; position: relative; overflow: hidden;",
 
                 // Pure SVG canvas
                 svg {
@@ -411,6 +420,19 @@ pub fn Schematic() -> Element {
                                 selected: schematic.read().selection.has_component(comp.id),
                             }
                         }
+                        
+                        // Drag preview ghost - shows where component will move to
+                        if drag.read().active {
+                            if let Some(comp_id) = drag.read().component_id {
+                                if let Some(comp) = schematic.read().components.iter().find(|c| c.id == comp_id) {
+                                    PreviewSvg {
+                                        kind: comp.kind,
+                                        pos: *mouse_grid.read(),
+                                        grid_size: schematic.read().grid_size,
+                                    }
+                                }
+                            }
+                        }
 
                         // Net Labels
                         for label in schematic.read().net_labels.iter() {
@@ -482,6 +504,7 @@ pub fn Schematic() -> Element {
                     }
                 }
             }
+        }
 
             // Component Edit Modal
             if let Some(edit_comp_id) = editing.read().component_id {

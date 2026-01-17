@@ -4,6 +4,7 @@
 
 mod button;
 pub mod component_edit;
+pub mod component_library;
 pub mod context_menu;
 mod icons;
 mod panel;
@@ -12,6 +13,7 @@ mod toolbar;
 
 pub use button::Button;
 pub use component_edit::ComponentEditModal;
+pub use component_library::ComponentLibrary;
 pub use context_menu::{ContextMenu, MenuAction, MenuItem};
 pub use panel::Panel;
 pub use tabs::{Tab, TabBar};
