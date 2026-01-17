@@ -13,7 +13,9 @@ pub mod semiconductor;
 // Other devices (kept at root level)
 pub mod behavioral;
 pub mod controlled;
+pub mod ffi;
 pub mod opamp;
+pub mod pwl_file;
 mod sources;
 mod switch;
 mod traits;
