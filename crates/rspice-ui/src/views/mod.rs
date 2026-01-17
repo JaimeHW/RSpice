@@ -4,6 +4,7 @@
 
 mod console;
 mod netlist;
+pub mod syntax;
 mod waveform;
 
 pub use console::Console;

@@ -4,10 +4,11 @@
 
 use dioxus::prelude::*;
 
+use super::syntax::{tokenize_line, Token};
 use crate::state::SimulationState;
 use crate::theme::Theme;
 
-/// Netlist text editor
+/// Netlist text editor with syntax highlighting
 #[component]
 pub fn Netlist() -> Element {
     let theme: Signal<Theme> = use_context();
@@ -75,7 +76,7 @@ pub fn Netlist() -> Element {
                 }
             }
 
-            // Editor content
+            // Editor content with highlighting
             div {
                 style: "
                     flex: 1;
@@ -105,27 +106,90 @@ pub fn Netlist() -> Element {
                     }
                 }
 
-                // Text area
-                textarea {
+                // Code area with overlay highlighting
+                div {
                     style: "
                         flex: 1;
-                        padding: {Theme::SPACING_MD};
-                        background: transparent;
-                        color: {th.text_primary()};
-                        font-family: {Theme::FONT_MONO};
-                        font-size: {Theme::FONT_SIZE_SM};
-                        line-height: 1.6;
-                        border: none;
-                        outline: none;
-                        resize: none;
-                        white-space: pre;
+                        position: relative;
                         overflow: auto;
                     ",
-                    value: "{content}",
-                    oninput: move |e| {
-                        sim_state.write().netlist_content = e.value();
-                    },
-                    spellcheck: "false",
+
+                    // Highlighted code layer (underneath)
+                    pre {
+                        style: "
+                            position: absolute;
+                            top: 0;
+                            left: 0;
+                            right: 0;
+                            padding: {Theme::SPACING_MD};
+                            margin: 0;
+                            font-family: {Theme::FONT_MONO};
+                            font-size: {Theme::FONT_SIZE_SM};
+                            line-height: 1.6;
+                            white-space: pre;
+                            pointer-events: none;
+                            color: transparent;
+                        ",
+
+                        // Render highlighted lines
+                        for line in content.lines() {
+                            HighlightedLine { line: line.to_string() }
+                        }
+                        // Handle trailing newline
+                        if content.ends_with('\n') {
+                            div { " " }
+                        }
+                    }
+
+                    // Editable textarea (on top, transparent)
+                    textarea {
+                        style: "
+                            position: absolute;
+                            top: 0;
+                            left: 0;
+                            width: 100%;
+                            height: 100%;
+                            padding: {Theme::SPACING_MD};
+                            background: transparent;
+                            color: transparent;
+                            caret-color: {th.text_primary()};
+                            font-family: {Theme::FONT_MONO};
+                            font-size: {Theme::FONT_SIZE_SM};
+                            line-height: 1.6;
+                            border: none;
+                            outline: none;
+                            resize: none;
+                            white-space: pre;
+                            overflow: hidden;
+                        ",
+                        value: "{content}",
+                        oninput: move |e| {
+                            sim_state.write().netlist_content = e.value();
+                        },
+                        spellcheck: "false",
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render a single highlighted line
+#[component]
+fn HighlightedLine(line: String) -> Element {
+    let tokens = tokenize_line(&line);
+
+    rsx! {
+        div {
+            style: "min-height: 1.6em;",
+            if tokens.is_empty() {
+                " "
+            } else {
+                for token in tokens {
+                    span {
+                        style: "color: {token.token_type.color()};",
+                        "{token.text}"
+                    }
                 }
             }
         }
