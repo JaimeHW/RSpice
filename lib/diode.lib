@@ -1,0 +1,223 @@
+* RSpice Diode Library
+* Common diode models for circuit simulation
+*
+* Usage: .INCLUDE diode.lib
+*        D1 anode cathode 1N4148
+*
+* Models included:
+*   1N4148  - High-speed switching diode
+*   1N4007  - General purpose rectifier (1000V, 1A)
+*   1N4001  - General purpose rectifier (50V, 1A)
+*   1N5817  - Schottky diode (20V, 1A)
+*   1N5819  - Schottky diode (40V, 1A)
+*   1N5822  - Schottky diode (40V, 3A)
+*   1N751A  - 5.1V Zener diode
+*   1N4733A - 5.1V Zener diode (1W)
+*   1N4742A - 12V Zener diode (1W)
+*   1N5231B - 5.1V Zener diode
+*   LED_RED - Generic red LED (~1.8V)
+*   LED_GRN - Generic green LED (~2.0V)
+*   LED_BLU - Generic blue LED (~3.2V)
+*
+
+*=============================================================================
+* High-Speed Switching Diodes
+*=============================================================================
+
+* 1N4148 - High-speed switching diode
+* Vf = 0.72V @ 10mA, trr = 4ns, Vr = 100V
+.MODEL 1N4148 D(
++ IS=2.52E-9     ; Saturation current
++ N=1.752        ; Emission coefficient
++ RS=0.568       ; Series resistance
++ BV=100         ; Reverse breakdown voltage
++ IBV=100E-6     ; Current at breakdown
++ CJO=4E-12      ; Zero-bias junction capacitance
++ VJ=0.5         ; Junction potential
++ M=0.4          ; Grading coefficient
++ TT=5.77E-9     ; Transit time
++ EG=1.11        ; Bandgap
++ XTI=3.0        ; IS temperature coefficient
++ )
+
+* 1N914 - High-speed switching (equivalent to 1N4148)
+.MODEL 1N914 D(
++ IS=2.52E-9 N=1.752 RS=0.568 BV=100 IBV=100E-6
++ CJO=4E-12 VJ=0.5 M=0.4 TT=5.77E-9 EG=1.11 XTI=3.0
++ )
+
+*=============================================================================
+* General Purpose Rectifiers (1N400x series)
+*=============================================================================
+
+* 1N4001 - 50V, 1A rectifier
+.MODEL 1N4001 D(
++ IS=14.11E-9    ; Saturation current
++ N=1.984        ; Emission coefficient
++ RS=33.89E-3    ; Series resistance
++ BV=50          ; Reverse breakdown voltage
++ IBV=5E-6       ; Current at breakdown
++ CJO=25.89E-12  ; Zero-bias junction capacitance
++ VJ=0.3245      ; Junction potential
++ M=0.44         ; Grading coefficient
++ TT=5.76E-6     ; Transit time (slow recovery)
++ EG=1.11
++ XTI=3.0
++ )
+
+* 1N4002 - 100V, 1A rectifier
+.MODEL 1N4002 D(
++ IS=14.11E-9 N=1.984 RS=33.89E-3
++ BV=100 IBV=5E-6
++ CJO=25E-12 VJ=0.3245 M=0.44 TT=5.76E-6
++ EG=1.11 XTI=3.0
++ )
+
+* 1N4004 - 400V, 1A rectifier
+.MODEL 1N4004 D(
++ IS=14.11E-9 N=1.984 RS=33.89E-3
++ BV=400 IBV=5E-6
++ CJO=20E-12 VJ=0.3245 M=0.44 TT=5.76E-6
++ EG=1.11 XTI=3.0
++ )
+
+* 1N4007 - 1000V, 1A rectifier
+.MODEL 1N4007 D(
++ IS=7.02E-9     ; Saturation current
++ N=1.77         ; Emission coefficient
++ RS=42.31E-3    ; Series resistance
++ BV=1000        ; Reverse breakdown voltage
++ IBV=5E-6       ; Current at breakdown
++ CJO=17.87E-12  ; Zero-bias junction capacitance
++ VJ=0.3905      ; Junction potential
++ M=0.448        ; Grading coefficient
++ TT=4.32E-6     ; Transit time
++ EG=1.11
++ XTI=3.0
++ )
+
+*=============================================================================
+* Schottky Diodes (1N581x / 1N582x series)
+*=============================================================================
+
+* 1N5817 - 20V, 1A Schottky (very low Vf)
+.MODEL 1N5817 D(
++ IS=31.7E-6     ; High saturation current (Schottky)
++ N=1.016        ; Low emission coefficient
++ RS=51.3E-3     ; Series resistance
++ BV=20          ; Low reverse voltage
++ IBV=1E-3       ; Current at breakdown
++ CJO=110E-12    ; Higher capacitance
++ VJ=0.34        ; Low junction potential
++ M=0.5          ; Grading coefficient
++ TT=7.2E-9      ; Fast switching
++ EG=0.69        ; Schottky barrier (lower than silicon)
++ XTI=2.0
++ )
+
+* 1N5819 - 40V, 1A Schottky
+.MODEL 1N5819 D(
++ IS=31.7E-6 N=1.016 RS=51.3E-3
++ BV=40 IBV=1E-3
++ CJO=100E-12 VJ=0.34 M=0.5 TT=7.2E-9
++ EG=0.69 XTI=2.0
++ )
+
+* 1N5822 - 40V, 3A Schottky (power)
+.MODEL 1N5822 D(
++ IS=1.08E-4     ; Very high Is
++ N=1.02
++ RS=20E-3       ; Low series resistance
++ BV=40 IBV=10E-3
++ CJO=350E-12    ; High capacitance (large die)
++ VJ=0.34 M=0.5 TT=7.2E-9
++ EG=0.69 XTI=2.0
++ )
+
+*=============================================================================
+* Zener Diodes
+*=============================================================================
+
+* 1N751A - 5.1V Zener, 500mW
+.MODEL 1N751A D(
++ IS=1E-14       ; Low saturation current
++ N=1.7
++ RS=10          ; Higher series resistance
++ BV=5.1         ; Zener voltage
++ IBV=20E-3      ; Test current
++ CJO=100E-12 VJ=0.75 M=0.33
++ EG=1.11 XTI=3.0
++ )
+
+* 1N4733A - 5.1V Zener, 1W
+.MODEL 1N4733A D(
++ IS=1E-14 N=1.7 RS=5
++ BV=5.1 IBV=49E-3
++ CJO=150E-12 VJ=0.75 M=0.33
++ EG=1.11 XTI=3.0
++ )
+
+* 1N4742A - 12V Zener, 1W
+.MODEL 1N4742A D(
++ IS=1E-14 N=1.7 RS=5
++ BV=12 IBV=21E-3
++ CJO=70E-12 VJ=0.75 M=0.33
++ EG=1.11 XTI=3.0
++ )
+
+* 1N5231B - 5.1V Zener, 500mW
+.MODEL 1N5231B D(
++ IS=1E-14 N=1.7 RS=8
++ BV=5.1 IBV=20E-3
++ CJO=100E-12 VJ=0.75 M=0.33
++ EG=1.11 XTI=3.0
++ )
+
+* 1N5239B - 9.1V Zener, 500mW
+.MODEL 1N5239B D(
++ IS=1E-14 N=1.7 RS=8
++ BV=9.1 IBV=14E-3
++ CJO=80E-12 VJ=0.75 M=0.33
++ EG=1.11 XTI=3.0
++ )
+
+*=============================================================================
+* LEDs (Light Emitting Diodes)
+*=============================================================================
+
+* Generic Red LED (~1.8V forward, 2V typical)
+.MODEL LED_RED D(
++ IS=1E-20       ; Very low saturation current
++ N=1.5          ; Higher emission coefficient
++ RS=2           ; Series resistance
++ BV=5           ; Low reverse breakdown
++ IBV=1E-6
++ CJO=15E-12 VJ=1.8 M=0.5
++ EG=1.8         ; Bandgap determines color
++ )
+
+* Generic Green LED (~2.0V forward)
+.MODEL LED_GRN D(
++ IS=1E-21 N=1.5 RS=2
++ BV=5 IBV=1E-6
++ CJO=15E-12 VJ=2.0 M=0.5
++ EG=2.2
++ )
+
+* Generic Blue LED (~3.2V forward)
+.MODEL LED_BLU D(
++ IS=1E-24 N=1.8 RS=3
++ BV=5 IBV=1E-6
++ CJO=15E-12 VJ=3.2 M=0.5
++ EG=3.3
++ )
+
+* White LED (based on blue + phosphor, ~3.0V)
+.MODEL LED_WHT D(
++ IS=1E-23 N=1.7 RS=2.5
++ BV=5 IBV=1E-6
++ CJO=15E-12 VJ=3.0 M=0.5
++ EG=3.1
++ )
+
+.END

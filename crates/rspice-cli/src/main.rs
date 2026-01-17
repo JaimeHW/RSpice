@@ -247,9 +247,51 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                                 println!("  @ {:e} Hz: |V(1)| = {:.4}", last.frequency, last.voltage_magnitude(1));
                             }
                         }
+                        // Bode plot CSV export
+                        if let Some(ref output_path) = args.output {
+                            if args.format == "csv" {
+                                use std::io::Write;
+                                let mut file = std::fs::File::create(output_path)?;
+                                writeln!(file, "Frequency_Hz,Magnitude_dB,Phase_deg")?;
+                                for r in &results {
+                                    let mag_db = 20.0 * r.voltage_magnitude(1).log10();
+                                    let phase_deg = r.voltage_phase(1) * 180.0 / std::f64::consts::PI;
+                                    writeln!(file, "{:e},{:.4},{:.2}", r.frequency, mag_db, phase_deg)?;
+                                }
+                                if !args.quiet {
+                                    println!("  Bode plot exported to: {}", output_path.display());
+                                }
+                            }
+                        }
                     }
                     Err(e) => {
                         eprintln!("AC analysis failed: {}", e);
+                    }
+                }
+            }
+            AnalysisCommand::Noise { output_node, input_source, variation: _, points, start_freq, stop_freq, .. } => {
+                if !args.quiet {
+                    println!("Running Noise analysis on {} from {} to {} Hz ({} points)...", 
+                        output_node, start_freq, stop_freq, points);
+                }
+                
+                // Generate frequency points (decade sweep)
+                let frequencies: Vec<f64> = (0..*points)
+                    .map(|i| start_freq * (stop_freq / start_freq).powf(i as f64 / (*points as f64 - 1.0)))
+                    .collect();
+                
+                match engine.run_ac(&netlist, &frequencies) {
+                    Ok(_ac_results) => {
+                        if !args.quiet {
+                            println!("Noise Analysis: {} frequency points", frequencies.len());
+                            println!("  Output node: {}", output_node);
+                            println!("  Input source: {}", input_source);
+                            // TODO: Integrate with NoiseAnalysis engine for actual noise calculation
+                            println!("  (Noise spectral density calculation pending full integration)");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Noise analysis failed: {}", e);
                     }
                 }
             }

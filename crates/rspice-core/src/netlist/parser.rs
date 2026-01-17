@@ -6,13 +6,13 @@
 //! - .PARAM statements with expression evaluation
 //! - Subcircuit definitions and instances
 
+use super::expr::eval_expression;
+use super::lexer::{LexError, TokenKind, TokenStream, parse_spice_value, tokenize};
 use super::{
-    AnalysisCommand, Element, ElementKind, FreqVariation, ModelDef, Netlist, ParseError,
-    SourceSpec, SubcircuitDef, ParamContext, SwitchState, StepCommand, StepTarget, StepSweep,
-    InitialCondition,
+    AnalysisCommand, Element, ElementKind, FreqVariation, InitialCondition, ModelDef, Netlist,
+    ParamContext, ParseError, SourceSpec, StepCommand, StepSweep, StepTarget, SubcircuitDef,
+    SwitchState,
 };
-use super::lexer::{TokenKind, TokenStream, tokenize, parse_spice_value, LexError};
-use super::expr::{eval_expression};
 use crate::Value;
 
 //=============================================================================
@@ -22,65 +22,81 @@ use crate::Value;
 /// Parse a complete netlist from string
 pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
     let lines: Vec<&str> = input.lines().collect();
-    
+
     if lines.is_empty() {
         return Ok(Netlist::default());
     }
 
     // First line is the title
     let title = lines[0].to_string();
-    
+
     let mut elements = Vec::new();
     let mut analyses = Vec::new();
     let mut models = Vec::new();
     let mut subcircuits = Vec::new();
     let mut params = ParamContext::new();
-    
+
     // State for tracking subcircuit blocks
     let mut in_subcircuit = false;
     let mut current_subckt: Option<SubcircuitDef> = None;
-    
+
     let mut line_num = 1;
     let mut continuation = String::new();
-    
+
     for line in lines.iter().skip(1) {
         line_num += 1;
-        
+
         // Skip empty lines and comments
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('*') {
             continue;
         }
-        
+
         // Handle line continuation (+ at start of line)
         if trimmed.starts_with('+') {
             continuation.push(' ');
             continuation.push_str(&trimmed[1..]);
             continue;
         }
-        
+
         // Process previous continued line if exists
         if !continuation.is_empty() {
-            process_line(&continuation, line_num - 1, 
-                        &mut elements, &mut analyses, &mut models, &mut subcircuits,
-                        &mut in_subcircuit, &mut current_subckt, &mut params)?;
+            process_line(
+                &continuation,
+                line_num - 1,
+                &mut elements,
+                &mut analyses,
+                &mut models,
+                &mut subcircuits,
+                &mut in_subcircuit,
+                &mut current_subckt,
+                &mut params,
+            )?;
             continuation.clear();
         }
-        
+
         // Check for .END
         if trimmed.eq_ignore_ascii_case(".end") {
             break;
         }
-        
+
         // Start new continuation or process line
         continuation = trimmed.to_string();
     }
-    
+
     // Process final line
     if !continuation.is_empty() {
-        process_line(&continuation, line_num,
-                    &mut elements, &mut analyses, &mut models, &mut subcircuits,
-                    &mut in_subcircuit, &mut current_subckt, &mut params)?;
+        process_line(
+            &continuation,
+            line_num,
+            &mut elements,
+            &mut analyses,
+            &mut models,
+            &mut subcircuits,
+            &mut in_subcircuit,
+            &mut current_subckt,
+            &mut params,
+        )?;
     }
 
     // Extract initial conditions from params (they were stored as IC_nodename)
@@ -118,7 +134,7 @@ fn process_line(
     params: &mut ParamContext,
 ) -> Result<(), ParseError> {
     let upper = line.to_uppercase();
-    
+
     // Check for .SUBCKT start
     if upper.starts_with(".SUBCKT") {
         let subckt = parse_subckt_def(line, line_num)?;
@@ -126,7 +142,7 @@ fn process_line(
         *current_subckt = Some(subckt);
         return Ok(());
     }
-    
+
     // Check for .ENDS
     if upper.starts_with(".ENDS") {
         if let Some(subckt) = current_subckt.take() {
@@ -135,17 +151,24 @@ fn process_line(
         *in_subcircuit = false;
         return Ok(());
     }
-    
+
     // If inside subcircuit, add elements to subcircuit
     if *in_subcircuit {
         if let Some(subckt) = current_subckt {
             let mut subckt_elements = Vec::new();
-            parse_line(line, line_num, &mut subckt_elements, analyses, models, params)?;
+            parse_line(
+                line,
+                line_num,
+                &mut subckt_elements,
+                analyses,
+                models,
+                params,
+            )?;
             subckt.elements.extend(subckt_elements);
         }
         return Ok(());
     }
-    
+
     // Normal element/command parsing
     parse_line(line, line_num, elements, analyses, models, params)
 }
@@ -161,24 +184,26 @@ fn parse_line(
     // Tokenize the line
     let tokens = tokenize(line).map_err(|e| lex_to_parse_error(e, line_num))?;
     let mut stream = TokenStream::new(tokens);
-    
+
     // Skip leading whitespace/newlines
     stream.skip_newlines();
-    
+
     if stream.is_eof() {
         return Ok(());
     }
-    
+
     let first = match &stream.peek().kind {
         TokenKind::Ident(s) => s.clone(),
-        _ => return Err(ParseError::Syntax {
-            line: line_num,
-            message: "Expected identifier at start of line".to_string(),
-        }),
+        _ => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: "Expected identifier at start of line".to_string(),
+            });
+        }
     };
-    
+
     let first_char = first.chars().next().unwrap_or(' ');
-    
+
     match first_char {
         '.' => parse_command(&mut stream, line_num, analyses, models, params),
         'R' => parse_resistor(&mut stream, line_num, elements, params),
@@ -219,7 +244,7 @@ fn parse_command(
     params: &mut ParamContext,
 ) -> Result<(), ParseError> {
     let cmd = expect_ident(stream, line_num)?;
-    
+
     match cmd.as_str() {
         ".OP" => {
             analyses.push(AnalysisCommand::Op);
@@ -229,8 +254,13 @@ fn parse_command(
             let start = expect_value(stream, line_num, params)?;
             let stop = expect_value(stream, line_num, params)?;
             let step = expect_value(stream, line_num, params)?;
-            
-            analyses.push(AnalysisCommand::Dc { source, start, stop, step });
+
+            analyses.push(AnalysisCommand::Dc {
+                source,
+                start,
+                stop,
+                step,
+            });
         }
         ".AC" => {
             let var_str = expect_ident(stream, line_num)?;
@@ -238,31 +268,47 @@ fn parse_command(
                 "LIN" => FreqVariation::Lin,
                 "OCT" => FreqVariation::Oct,
                 "DEC" => FreqVariation::Dec,
-                _ => return Err(ParseError::Syntax {
-                    line: line_num,
-                    message: format!("Unknown frequency variation: {}", var_str),
-                }),
+                _ => {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!("Unknown frequency variation: {}", var_str),
+                    });
+                }
             };
             let points = expect_value(stream, line_num, params)? as usize;
             let start_freq = expect_value(stream, line_num, params)?;
             let stop_freq = expect_value(stream, line_num, params)?;
-            
-            analyses.push(AnalysisCommand::Ac { variation, points, start_freq, stop_freq });
+
+            analyses.push(AnalysisCommand::Ac {
+                variation,
+                points,
+                start_freq,
+                stop_freq,
+            });
         }
         ".TRAN" => {
             let step = expect_value(stream, line_num, params)?;
             let stop = expect_value(stream, line_num, params)?;
             let start = try_value(stream, params);
             let max_step = try_value(stream, params);
-            
-            analyses.push(AnalysisCommand::Tran { step, stop, start, max_step });
+
+            analyses.push(AnalysisCommand::Tran {
+                step,
+                stop,
+                start,
+                max_step,
+            });
         }
         ".MODEL" => {
             let name = expect_ident(stream, line_num)?;
             let model_type = expect_ident(stream, line_num)?;
             let model_params = parse_model_params(stream, params)?;
-            
-            models.push(ModelDef { name, model_type, params: model_params });
+
+            models.push(ModelDef {
+                name,
+                model_type,
+                params: model_params,
+            });
         }
         ".PARAM" => {
             parse_param_statement(stream, line_num, params)?;
@@ -303,12 +349,16 @@ fn parse_command(
             // Library directives are handled in a preprocessing pass
             log::debug!("Library directive found: line {}", line_num);
         }
+        ".FUNC" => {
+            // Parse user-defined function: .FUNC name(arg1, arg2, ...) = expression
+            parse_func_statement(stream, line_num, params)?;
+        }
         _ => {
             // Ignore unknown commands
             log::debug!("Ignoring unknown command: {}", cmd);
         }
     }
-    
+
     Ok(())
 }
 
@@ -321,13 +371,13 @@ fn parse_param_statement(
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline) {
         // Skip commas
         while stream.consume(&TokenKind::Comma) {}
-        
+
         if stream.is_eof() || matches!(stream.peek().kind, TokenKind::Newline) {
             break;
         }
-        
+
         let name = expect_ident(stream, line_num)?;
-        
+
         // Expect = sign
         if !stream.consume(&TokenKind::Equals) {
             return Err(ParseError::Syntax {
@@ -335,12 +385,105 @@ fn parse_param_statement(
                 message: format!("Expected '=' after parameter name '{}'", name),
             });
         }
-        
+
         // Get the value (could be number or expression)
         let value = expect_value(stream, line_num, params)?;
         params.set(&name, value);
     }
-    
+
+    Ok(())
+}
+
+/// Parse .FUNC statement: .FUNC name(arg1, arg2, ...) = expression
+/// or: .FUNC name(arg1, arg2, ...) {expression}
+fn parse_func_statement(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &mut ParamContext,
+) -> Result<(), ParseError> {
+    // Get function name
+    let func_name = expect_ident(stream, line_num)?;
+
+    // Expect opening paren for arguments
+    if !stream.consume(&TokenKind::LParen) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(".FUNC {} requires argument list in parentheses", func_name),
+        });
+    }
+
+    // Parse argument names
+    let mut args = Vec::new();
+    if !stream.consume(&TokenKind::RParen) {
+        loop {
+            let arg_name = expect_ident(stream, line_num)?;
+            args.push(arg_name);
+
+            // Skip comma
+            if !stream.consume(&TokenKind::Comma) {
+                break;
+            }
+        }
+
+        if !stream.consume(&TokenKind::RParen) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: "Expected ')' after function arguments".to_string(),
+            });
+        }
+    }
+
+    // Check for = sign or Expression (which is {expression})
+    let body: String;
+
+    if stream.consume(&TokenKind::Equals) {
+        // Standard syntax: .FUNC name(args) = expression
+        // Collect the rest of the line as the expression body
+        let mut body_parts = Vec::new();
+        while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
+        {
+            match &stream.peek().kind {
+                TokenKind::Ident(s) => body_parts.push(s.clone()),
+                TokenKind::Number(n) => body_parts.push(format!("{}", n)),
+                TokenKind::Expression(e) => body_parts.push(e.clone()),
+                TokenKind::LParen => body_parts.push("(".to_string()),
+                TokenKind::RParen => body_parts.push(")".to_string()),
+                TokenKind::Comma => body_parts.push(",".to_string()),
+                TokenKind::Plus => body_parts.push("+".to_string()),
+                TokenKind::Minus => body_parts.push("-".to_string()),
+                TokenKind::Star => body_parts.push("*".to_string()),
+                TokenKind::Slash => body_parts.push("/".to_string()),
+                TokenKind::Equals => body_parts.push("=".to_string()),
+                _ => {}
+            }
+            stream.advance();
+        }
+        body = body_parts.join("");
+    } else if let TokenKind::Expression(expr) = &stream.peek().kind {
+        // LTspice-style: .FUNC name(args) {expression}
+        body = expr.clone();
+        stream.advance();
+    } else {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Expected '=' or '{{expression}}' after .FUNC {}(...)",
+                func_name
+            ),
+        });
+    }
+
+    if body.is_empty() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(".FUNC {} requires an expression body", func_name),
+        });
+    }
+
+    // Register the function
+    params.define_function(&func_name, args, &body);
+    log::debug!("Defined function: {}(...) = {}", func_name, body);
+
     Ok(())
 }
 
@@ -357,18 +500,18 @@ fn parse_resistor(
     let name = expect_ident(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
-    
+
     // Skip optional parameter names (R=)
     skip_optional_param_name(stream, "R");
-    
+
     let value = expect_value(stream, line_num, params)?;
-    
+
     elements.push(Element {
         name,
         kind: ElementKind::Resistor { value },
         nodes: vec![node_pos, node_neg],
     });
-    
+
     Ok(())
 }
 
@@ -381,17 +524,20 @@ fn parse_capacitor(
     let name = expect_ident(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
-    
+
     skip_optional_param_name(stream, "C");
     let value = expect_value(stream, line_num, params)?;
     let initial_voltage = try_value_with_param(stream, params, "IC");
-    
+
     elements.push(Element {
         name,
-        kind: ElementKind::Capacitor { value, initial_voltage },
+        kind: ElementKind::Capacitor {
+            value,
+            initial_voltage,
+        },
         nodes: vec![node_pos, node_neg],
     });
-    
+
     Ok(())
 }
 
@@ -404,17 +550,20 @@ fn parse_inductor(
     let name = expect_ident(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
-    
+
     skip_optional_param_name(stream, "L");
     let value = expect_value(stream, line_num, params)?;
     let initial_current = try_value_with_param(stream, params, "IC");
-    
+
     elements.push(Element {
         name,
-        kind: ElementKind::Inductor { value, initial_current },
+        kind: ElementKind::Inductor {
+            value,
+            initial_current,
+        },
         nodes: vec![node_pos, node_neg],
     });
-    
+
     Ok(())
 }
 
@@ -427,15 +576,15 @@ fn parse_voltage_source(
     let name = expect_ident(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
-    
+
     let source_spec = parse_source_spec(stream, line_num, params)?;
-    
+
     elements.push(Element {
         name,
         kind: ElementKind::VoltageSource(source_spec),
         nodes: vec![node_pos, node_neg],
     });
-    
+
     Ok(())
 }
 
@@ -448,15 +597,15 @@ fn parse_current_source(
     let name = expect_ident(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
-    
+
     let source_spec = parse_source_spec(stream, line_num, params)?;
-    
+
     elements.push(Element {
         name,
         kind: ElementKind::CurrentSource(source_spec),
         nodes: vec![node_pos, node_neg],
     });
-    
+
     Ok(())
 }
 
@@ -469,13 +618,13 @@ fn parse_diode(
     let anode = expect_node(stream, line_num)?;
     let cathode = expect_node(stream, line_num)?;
     let model = expect_ident(stream, line_num)?;
-    
+
     elements.push(Element {
         name,
         kind: ElementKind::Diode { model },
         nodes: vec![anode, cathode],
     });
-    
+
     Ok(())
 }
 
@@ -489,7 +638,7 @@ fn parse_bjt(
     let base = expect_node(stream, line_num)?;
     let emitter = expect_node(stream, line_num)?;
     let model = expect_ident(stream, line_num)?;
-    
+
     elements.push(Element {
         name,
         kind: ElementKind::Bjt {
@@ -498,7 +647,7 @@ fn parse_bjt(
         },
         nodes: vec![collector, base, emitter],
     });
-    
+
     Ok(())
 }
 
@@ -513,7 +662,7 @@ fn parse_mosfet(
     let source = expect_node(stream, line_num)?;
     let bulk = expect_node(stream, line_num)?;
     let model = expect_ident(stream, line_num)?;
-    
+
     elements.push(Element {
         name,
         kind: ElementKind::Mosfet {
@@ -522,7 +671,7 @@ fn parse_mosfet(
         },
         nodes: vec![drain, gate, source, bulk],
     });
-    
+
     Ok(())
 }
 
@@ -533,50 +682,50 @@ fn parse_subcircuit_instance(
     elements: &mut Vec<Element>,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
-    
+
     // Collect nodes until we hit a non-node identifier (the subcircuit name)
     let mut nodes = Vec::new();
     let mut subckt_name = String::new();
-    
+
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
-        
+
         if stream.is_eof() || matches!(stream.peek().kind, TokenKind::Newline) {
             break;
         }
-        
+
         // If we see an equals sign ahead, stop collecting nodes
         if matches!(stream.peek_n(1).kind, TokenKind::Equals) {
             break;
         }
-        
+
         let node_or_name = expect_node(stream, line_num)?;
-        
+
         // The last identifier before any parameters is the subcircuit name
         if !subckt_name.is_empty() {
             nodes.push(subckt_name);
         }
         subckt_name = node_or_name;
     }
-    
+
     if subckt_name.is_empty() {
         return Err(ParseError::Syntax {
             line: line_num,
             message: "Subcircuit instance requires name and subcircuit reference".to_string(),
         });
     }
-    
+
     // Parse instance parameters: PARAM=value pairs
     let mut params = Vec::new();
     let params_ctx = ParamContext::new();
-    
+
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
-        
+
         if stream.is_eof() || matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
             break;
         }
-        
+
         // Skip PARAMS: keyword if present
         if let TokenKind::Ident(s) = &stream.peek().kind {
             let upper = s.to_uppercase();
@@ -585,11 +734,11 @@ fn parse_subcircuit_instance(
                 continue;
             }
         }
-        
+
         if let TokenKind::Ident(param_name) = &stream.peek().kind {
             let param_name = param_name.clone();
             stream.advance();
-            
+
             if stream.consume(&TokenKind::Equals) {
                 if let Some(value) = try_value(stream, &params_ctx) {
                     params.push((param_name, value));
@@ -599,7 +748,7 @@ fn parse_subcircuit_instance(
             stream.advance(); // Skip unknown token
         }
     }
-    
+
     elements.push(Element {
         name,
         kind: ElementKind::Subcircuit {
@@ -608,7 +757,7 @@ fn parse_subcircuit_instance(
         },
         nodes,
     });
-    
+
     Ok(())
 }
 
@@ -624,7 +773,7 @@ fn parse_vcvs(
     let ctrl_pos = expect_node(stream, line_num)?;
     let ctrl_neg = expect_node(stream, line_num)?;
     let gain = expect_value(stream, line_num, params)?;
-    
+
     elements.push(Element {
         name,
         kind: ElementKind::Vcvs {
@@ -633,7 +782,7 @@ fn parse_vcvs(
         },
         nodes: vec![node_pos, node_neg],
     });
-    
+
     Ok(())
 }
 
@@ -648,13 +797,16 @@ fn parse_cccs(
     let node_neg = expect_node(stream, line_num)?;
     let control_element = expect_ident(stream, line_num)?;
     let gain = expect_value(stream, line_num, params)?;
-    
+
     elements.push(Element {
         name,
-        kind: ElementKind::Cccs { gain, control_element },
+        kind: ElementKind::Cccs {
+            gain,
+            control_element,
+        },
         nodes: vec![node_pos, node_neg],
     });
-    
+
     Ok(())
 }
 
@@ -670,7 +822,7 @@ fn parse_vccs(
     let ctrl_pos = expect_node(stream, line_num)?;
     let ctrl_neg = expect_node(stream, line_num)?;
     let transconductance = expect_value(stream, line_num, params)?;
-    
+
     elements.push(Element {
         name,
         kind: ElementKind::Vccs {
@@ -679,7 +831,7 @@ fn parse_vccs(
         },
         nodes: vec![node_pos, node_neg],
     });
-    
+
     Ok(())
 }
 
@@ -694,13 +846,16 @@ fn parse_ccvs(
     let node_neg = expect_node(stream, line_num)?;
     let control_element = expect_ident(stream, line_num)?;
     let transresistance = expect_value(stream, line_num, params)?;
-    
+
     elements.push(Element {
         name,
-        kind: ElementKind::Ccvs { transresistance, control_element },
+        kind: ElementKind::Ccvs {
+            transresistance,
+            control_element,
+        },
         nodes: vec![node_pos, node_neg],
     });
-    
+
     Ok(())
 }
 
@@ -712,13 +867,13 @@ fn parse_behavioral(
     let name = expect_ident(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
-    
+
     // Look for V= or I=
     let spec = expect_ident(stream, line_num)?;
-    
+
     // Consume = if present
     stream.consume(&TokenKind::Equals);
-    
+
     // The rest is the expression
     let mut expr_parts = Vec::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
@@ -726,34 +881,38 @@ fn parse_behavioral(
         stream.advance();
     }
     let expression = expr_parts.join(" ");
-    
+
     let kind = if spec.starts_with('V') {
         let expr_content = if spec.len() > 1 && spec.starts_with("V=") {
             format!("{}{}", &spec[2..], expression)
         } else {
             expression
         };
-        ElementKind::BehavioralVoltage { expression: expr_content }
+        ElementKind::BehavioralVoltage {
+            expression: expr_content,
+        }
     } else if spec.starts_with('I') {
         let expr_content = if spec.len() > 1 && spec.starts_with("I=") {
             format!("{}{}", &spec[2..], expression)
         } else {
             expression
         };
-        ElementKind::BehavioralCurrent { expression: expr_content }
+        ElementKind::BehavioralCurrent {
+            expression: expr_content,
+        }
     } else {
         return Err(ParseError::Syntax {
             line: line_num,
             message: "Behavioral source must have V=expr or I=expr".to_string(),
         });
     };
-    
+
     elements.push(Element {
         name,
         kind,
         nodes: vec![node_pos, node_neg],
     });
-    
+
     Ok(())
 }
 
@@ -767,11 +926,13 @@ fn parse_source_spec(
     params: &ParamContext,
 ) -> Result<SourceSpec, ParseError> {
     skip_commas(stream);
-    
+
     if stream.is_eof() || matches!(stream.peek().kind, TokenKind::Newline) {
-        return Err(ParseError::MissingParameter("source specification".to_string()));
+        return Err(ParseError::MissingParameter(
+            "source specification".to_string(),
+        ));
     }
-    
+
     // Check for keywords
     match &stream.peek().kind {
         TokenKind::Ident(s) => {
@@ -809,7 +970,7 @@ fn parse_source_spec(
         }
         _ => {}
     }
-    
+
     // Default: try to parse as DC value
     let value = expect_value(stream, line_num, params)?;
     Ok(SourceSpec::Dc(value))
@@ -822,7 +983,7 @@ fn parse_pulse_spec(
 ) -> Result<SourceSpec, ParseError> {
     // Consume opening paren if present
     let has_paren = stream.consume(&TokenKind::LParen);
-    
+
     let v1 = expect_value_default(stream, params, 0.0);
     let v2 = expect_value_default(stream, params, 1.0);
     let delay = expect_value_default(stream, params, 0.0);
@@ -830,12 +991,20 @@ fn parse_pulse_spec(
     let fall = expect_value_default(stream, params, 1e-9);
     let width = expect_value_default(stream, params, 1e-6);
     let period = expect_value_default(stream, params, 2e-6);
-    
+
     if has_paren {
         stream.consume(&TokenKind::RParen);
     }
-    
-    Ok(SourceSpec::Pulse { v1, v2, delay, rise, fall, width, period })
+
+    Ok(SourceSpec::Pulse {
+        v1,
+        v2,
+        delay,
+        rise,
+        fall,
+        width,
+        period,
+    })
 }
 
 fn parse_sin_spec(
@@ -844,19 +1013,26 @@ fn parse_sin_spec(
     params: &ParamContext,
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
-    
+
     let offset = expect_value_default(stream, params, 0.0);
     let amplitude = expect_value_default(stream, params, 1.0);
     let frequency = expect_value_default(stream, params, 1e3);
     let delay = expect_value_default(stream, params, 0.0);
     let damping = expect_value_default(stream, params, 0.0);
     let phase = expect_value_default(stream, params, 0.0);
-    
+
     if has_paren {
         stream.consume(&TokenKind::RParen);
     }
-    
-    Ok(SourceSpec::Sin { offset, amplitude, frequency, delay, damping, phase })
+
+    Ok(SourceSpec::Sin {
+        offset,
+        amplitude,
+        frequency,
+        delay,
+        damping,
+        phase,
+    })
 }
 
 fn parse_pwl_spec(
@@ -865,15 +1041,18 @@ fn parse_pwl_spec(
     params: &ParamContext,
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
-    
+
     let mut points = Vec::new();
     while !stream.is_eof() {
         skip_commas(stream);
-        
-        if matches!(stream.peek().kind, TokenKind::RParen | TokenKind::Newline | TokenKind::Eof) {
+
+        if matches!(
+            stream.peek().kind,
+            TokenKind::RParen | TokenKind::Newline | TokenKind::Eof
+        ) {
             break;
         }
-        
+
         if let Some(time) = try_value(stream, params) {
             if let Some(value) = try_value(stream, params) {
                 points.push((time, value));
@@ -884,15 +1063,15 @@ fn parse_pwl_spec(
             break;
         }
     }
-    
+
     if has_paren {
         stream.consume(&TokenKind::RParen);
     }
-    
+
     if points.is_empty() {
         points.push((0.0, 0.0));
     }
-    
+
     Ok(SourceSpec::Pwl { points })
 }
 
@@ -902,19 +1081,26 @@ fn parse_exp_spec(
     params: &ParamContext,
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
-    
+
     let v1 = expect_value_default(stream, params, 0.0);
     let v2 = expect_value_default(stream, params, 1.0);
     let td1 = expect_value_default(stream, params, 0.0);
     let tau1 = expect_value_default(stream, params, 1e-6);
     let td2 = expect_value_default(stream, params, 0.0);
     let tau2 = expect_value_default(stream, params, 1e-6);
-    
+
     if has_paren {
         stream.consume(&TokenKind::RParen);
     }
-    
-    Ok(SourceSpec::Exp { v1, v2, td1, tau1, td2, tau2 })
+
+    Ok(SourceSpec::Exp {
+        v1,
+        v2,
+        td1,
+        tau1,
+        td2,
+        tau2,
+    })
 }
 
 //=============================================================================
@@ -925,24 +1111,24 @@ fn parse_exp_spec(
 fn parse_subckt_def(line: &str, line_num: usize) -> Result<SubcircuitDef, ParseError> {
     let tokens = tokenize(line).map_err(|e| lex_to_parse_error(e, line_num))?;
     let mut stream = TokenStream::new(tokens);
-    
+
     // Skip .SUBCKT
     stream.advance();
-    
+
     let name = expect_ident(&mut stream, line_num)?;
-    
+
     // Collect ports until we hit = (parameter) or PARAMS keyword or end of line
     let mut ports = Vec::new();
     let params_ctx = ParamContext::new();
-    
+
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(&mut stream);
-        
+
         // Check if next token is followed by = (indicating parameter, not port)
         if matches!(stream.peek_n(1).kind, TokenKind::Equals) {
             break;
         }
-        
+
         // Check for PARAMS: keyword
         if let TokenKind::Ident(s) = &stream.peek().kind {
             let upper = s.to_uppercase();
@@ -957,28 +1143,28 @@ fn parse_subckt_def(line: &str, line_num: usize) -> Result<SubcircuitDef, ParseE
                 break;
             }
         }
-        
+
         if stream.is_eof() || matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
             break;
         }
-        
+
         ports.push(expect_node(&mut stream, line_num)?);
     }
-    
+
     // Parse default parameters: NAME=VALUE pairs
     let mut params = Vec::new();
-    
+
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(&mut stream);
-        
+
         if stream.is_eof() || matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
             break;
         }
-        
+
         if let TokenKind::Ident(param_name) = &stream.peek().kind {
             let param_name = param_name.clone();
             stream.advance();
-            
+
             if stream.consume(&TokenKind::Equals) {
                 if let Some(value) = try_value(&mut stream, &params_ctx) {
                     params.push((param_name, value));
@@ -988,7 +1174,7 @@ fn parse_subckt_def(line: &str, line_num: usize) -> Result<SubcircuitDef, ParseE
             stream.advance(); // Skip unknown token
         }
     }
-    
+
     Ok(SubcircuitDef {
         name,
         ports,
@@ -1006,22 +1192,25 @@ fn parse_model_params(
     params: &ParamContext,
 ) -> Result<Vec<(String, Value)>, ParseError> {
     let mut model_params = Vec::new();
-    
+
     // Skip optional opening paren
     stream.consume(&TokenKind::LParen);
-    
+
     while !stream.is_eof() {
         skip_commas(stream);
-        
-        if matches!(stream.peek().kind, TokenKind::RParen | TokenKind::Newline | TokenKind::Eof) {
+
+        if matches!(
+            stream.peek().kind,
+            TokenKind::RParen | TokenKind::Newline | TokenKind::Eof
+        ) {
             break;
         }
-        
+
         // Look for NAME=VALUE
         if let TokenKind::Ident(name) = &stream.peek().kind {
             let name = name.clone();
             stream.advance();
-            
+
             if stream.consume(&TokenKind::Equals) {
                 if let Some(value) = try_value(stream, params) {
                     model_params.push((name, value));
@@ -1031,10 +1220,10 @@ fn parse_model_params(
             stream.advance(); // Skip unknown token
         }
     }
-    
+
     // Skip optional closing paren
     stream.consume(&TokenKind::RParen);
-    
+
     Ok(model_params)
 }
 
@@ -1044,7 +1233,7 @@ fn parse_model_params(
 
 fn expect_ident(stream: &mut TokenStream, line_num: usize) -> Result<String, ParseError> {
     skip_commas(stream);
-    
+
     match &stream.peek().kind {
         TokenKind::Ident(s) => {
             let s = s.clone();
@@ -1060,7 +1249,7 @@ fn expect_ident(stream: &mut TokenStream, line_num: usize) -> Result<String, Par
 
 fn expect_node(stream: &mut TokenStream, line_num: usize) -> Result<String, ParseError> {
     skip_commas(stream);
-    
+
     match &stream.peek().kind {
         TokenKind::Ident(s) => {
             let s = s.clone();
@@ -1086,7 +1275,7 @@ fn expect_value(
     params: &ParamContext,
 ) -> Result<Value, ParseError> {
     skip_commas(stream);
-    
+
     match &stream.peek().kind {
         TokenKind::Number(v) => {
             let v = *v;
@@ -1119,7 +1308,7 @@ fn expect_value(
 
 fn try_value(stream: &mut TokenStream, params: &ParamContext) -> Option<Value> {
     skip_commas(stream);
-    
+
     match &stream.peek().kind {
         TokenKind::Number(v) => {
             let v = *v;
@@ -1154,7 +1343,7 @@ fn try_value_with_param(
     param_name: &str,
 ) -> Option<Value> {
     skip_commas(stream);
-    
+
     // Check if next token is the param name followed by =
     if let TokenKind::Ident(s) = &stream.peek().kind {
         if s == param_name {
@@ -1164,7 +1353,7 @@ fn try_value_with_param(
             }
         }
     }
-    
+
     try_value(stream, params)
 }
 
@@ -1200,17 +1389,17 @@ fn parse_coupling(
     params: &ParamContext,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
-    
+
     // Collect inductor names until we hit a number (the coefficient)
     let mut inductors = Vec::new();
-    
+
     loop {
         skip_commas(stream);
-        
+
         if stream.is_eof() || matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
             break;
         }
-        
+
         match &stream.peek().kind {
             TokenKind::Ident(s) if s.starts_with('L') || s.starts_with('l') => {
                 inductors.push(s.clone());
@@ -1230,25 +1419,28 @@ fn parse_coupling(
             }
         }
     }
-    
+
     if inductors.len() < 2 {
         return Err(ParseError::Syntax {
             line: line_num,
             message: "Coupling requires at least two inductors".to_string(),
         });
     }
-    
+
     let coefficient = expect_value(stream, line_num, params)?;
-    
+
     // Clamp coefficient to valid range
     let coefficient = coefficient.abs().min(1.0);
-    
+
     elements.push(Element {
         name,
-        kind: ElementKind::Coupling { inductors, coefficient },
+        kind: ElementKind::Coupling {
+            inductors,
+            coefficient,
+        },
         nodes: vec![], // Coupling doesn't have direct node connections
     });
-    
+
     Ok(())
 }
 
@@ -1264,10 +1456,10 @@ fn parse_vswitch(
     let control_pos = expect_node(stream, line_num)?;
     let control_neg = expect_node(stream, line_num)?;
     let model = expect_ident(stream, line_num)?;
-    
+
     // Optional initial state
     let initial_state = parse_switch_state(stream);
-    
+
     elements.push(Element {
         name,
         kind: ElementKind::VSwitch {
@@ -1278,7 +1470,7 @@ fn parse_vswitch(
         },
         nodes: vec![node_pos, node_neg],
     });
-    
+
     Ok(())
 }
 
@@ -1293,10 +1485,10 @@ fn parse_iswitch(
     let node_neg = expect_node(stream, line_num)?;
     let control_element = expect_ident(stream, line_num)?;
     let model = expect_ident(stream, line_num)?;
-    
+
     // Optional initial state
     let initial_state = parse_switch_state(stream);
-    
+
     elements.push(Element {
         name,
         kind: ElementKind::ISwitch {
@@ -1306,14 +1498,14 @@ fn parse_iswitch(
         },
         nodes: vec![node_pos, node_neg],
     });
-    
+
     Ok(())
 }
 
 /// Parse switch initial state (ON/OFF)
 fn parse_switch_state(stream: &mut TokenStream) -> Option<SwitchState> {
     skip_commas(stream);
-    
+
     if let TokenKind::Ident(s) = &stream.peek().kind {
         let upper = s.to_uppercase();
         match upper.as_str() {
@@ -1344,23 +1536,23 @@ fn parse_transmission_line(
     let port1_neg = expect_node(stream, line_num)?;
     let port2_pos = expect_node(stream, line_num)?;
     let port2_neg = expect_node(stream, line_num)?;
-    
+
     // Parse parameters (Z0, TD, F, NL)
     let mut z0: Option<Value> = None;
     let mut td: Option<Value> = None;
     let mut freq: Option<Value> = None;
     let mut nl: Option<Value> = None;
-    
+
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
-        
+
         if let TokenKind::Ident(param) = &stream.peek().kind {
             let param_upper = param.to_uppercase();
             stream.advance();
-            
+
             // Consume = if present
             stream.consume(&TokenKind::Equals);
-            
+
             match param_upper.as_str() {
                 "Z0" | "ZO" => {
                     z0 = try_value(stream, params);
@@ -1390,18 +1582,18 @@ fn parse_transmission_line(
             stream.advance(); // Skip unknown token
         }
     }
-    
+
     let z0 = z0.ok_or_else(|| ParseError::Syntax {
         line: line_num,
         message: "Transmission line requires Z0".to_string(),
     })?;
-    
+
     elements.push(Element {
         name,
         kind: ElementKind::TransmissionLine { z0, td, freq, nl },
         nodes: vec![port1_pos, port1_neg, port2_pos, port2_neg],
     });
-    
+
     Ok(())
 }
 
@@ -1421,11 +1613,11 @@ fn parse_step_command(
     params: &ParamContext,
 ) -> Result<StepCommand, ParseError> {
     skip_commas(stream);
-    
+
     // Check for sweep type prefix
     let first = expect_ident(stream, line_num)?;
     let first_upper = first.to_uppercase();
-    
+
     let (sweep_prefix, target_str, name) = match first_upper.as_str() {
         "DEC" | "OCT" | "LIN" => {
             let target = expect_ident(stream, line_num)?;
@@ -1441,14 +1633,14 @@ fn parse_step_command(
             (None, "DEVICE".to_string(), first)
         }
     };
-    
+
     let target = match target_str.as_str() {
         "PARAM" => StepTarget::Param,
         "MODEL" => StepTarget::Model,
         "TEMP" => StepTarget::Temp,
         _ => StepTarget::Device,
     };
-    
+
     // Check for LIST keyword
     skip_commas(stream);
     let is_list = if let TokenKind::Ident(s) = &stream.peek().kind {
@@ -1461,7 +1653,7 @@ fn parse_step_command(
     } else {
         false
     };
-    
+
     let sweep = if is_list {
         // Parse list of values
         let mut values = Vec::new();
@@ -1480,7 +1672,7 @@ fn parse_step_command(
         let start = expect_value(stream, line_num, params)?;
         let stop = expect_value(stream, line_num, params)?;
         let step_or_points = expect_value(stream, line_num, params)?;
-        
+
         match sweep_prefix.as_deref() {
             Some("DEC") => StepSweep::Decade {
                 points_per_decade: step_or_points as usize,
@@ -1499,7 +1691,7 @@ fn parse_step_command(
             },
         }
     };
-    
+
     Ok(StepCommand {
         target,
         name,
@@ -1514,15 +1706,15 @@ fn parse_temp_command(
     params: &ParamContext,
 ) -> Result<Vec<Value>, ParseError> {
     let mut temperatures = Vec::new();
-    
+
     while let Some(v) = try_value(stream, params) {
         temperatures.push(v);
     }
-    
+
     if temperatures.is_empty() {
         temperatures.push(27.0); // Default room temperature
     }
-    
+
     Ok(temperatures)
 }
 
@@ -1533,7 +1725,7 @@ fn parse_four_command(
     params: &ParamContext,
 ) -> Result<(Value, Vec<String>), ParseError> {
     let fundamental = expect_value(stream, line_num, params)?;
-    
+
     let mut outputs = Vec::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
@@ -1544,14 +1736,14 @@ fn parse_four_command(
             break;
         }
     }
-    
+
     if outputs.is_empty() {
         return Err(ParseError::Syntax {
             line: line_num,
             message: ".FOUR requires at least one output".to_string(),
         });
     }
-    
+
     Ok((fundamental, outputs))
 }
 
@@ -1563,13 +1755,13 @@ fn parse_noise_command(
 ) -> Result<AnalysisCommand, ParseError> {
     // Parse output specification V(node) or V(node,ref)
     let output_spec = expect_ident(stream, line_num)?;
-    
+
     // Parse the output node from V(node) format
     let (output_node, reference_node) = parse_voltage_reference(&output_spec)?;
-    
+
     // Input source
     let input_source = expect_ident(stream, line_num)?;
-    
+
     // Frequency sweep type
     let var_str = expect_ident(stream, line_num)?;
     let variation = match var_str.to_uppercase().as_str() {
@@ -1578,11 +1770,11 @@ fn parse_noise_command(
         "DEC" => FreqVariation::Dec,
         _ => FreqVariation::Dec, // Default
     };
-    
+
     let points = expect_value(stream, line_num, params)? as usize;
     let start_freq = expect_value(stream, line_num, params)?;
     let stop_freq = expect_value(stream, line_num, params)?;
-    
+
     Ok(AnalysisCommand::Noise {
         output_node,
         reference_node,
@@ -1597,25 +1789,26 @@ fn parse_noise_command(
 /// Parse voltage reference like V(out) or V(out,0)
 fn parse_voltage_reference(spec: &str) -> Result<(String, Option<String>), ParseError> {
     let spec_upper = spec.to_uppercase();
-    
+
     if !spec_upper.starts_with("V(") {
         return Ok((spec.to_string(), None));
     }
-    
+
     // Remove V( prefix and ) suffix
-    let inner = spec.trim_start_matches(|c: char| c == 'V' || c == 'v')
+    let inner = spec
+        .trim_start_matches(|c: char| c == 'V' || c == 'v')
         .trim_start_matches('(')
         .trim_end_matches(')');
-    
+
     let parts: Vec<&str> = inner.split(',').collect();
-    
+
     let node = parts[0].trim().to_string();
     let reference = if parts.len() > 1 {
         Some(parts[1].trim().to_string())
     } else {
         None
     };
-    
+
     Ok((node, reference))
 }
 
@@ -1627,14 +1820,14 @@ fn parse_nodeset_command(
 ) -> Result<(), ParseError> {
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
-        
+
         if let TokenKind::Ident(s) = &stream.peek().kind {
             let spec = s.clone();
             stream.advance();
-            
+
             // Consume = if present
             stream.consume(&TokenKind::Equals);
-            
+
             if let Some(v) = try_value(stream, params) {
                 // Store as NODESET_nodename parameter
                 let param_name = format!("NODESET_{}", spec.replace("V(", "").replace(")", ""));
@@ -1644,12 +1837,12 @@ fn parse_nodeset_command(
             stream.advance();
         }
     }
-    
+
     Ok(())
 }
 
 /// Parse .IC command: .IC V(node1)=val V(node2)=val...
-/// 
+///
 /// Initial conditions set the starting voltages for transient analysis.
 /// Format: .IC V(node)=voltage [V(node2)=voltage2] ...
 fn parse_ic_command(
@@ -1659,14 +1852,14 @@ fn parse_ic_command(
 ) -> Result<(), ParseError> {
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
-        
+
         if let TokenKind::Ident(s) = &stream.peek().kind {
             let spec = s.clone();
             stream.advance();
-            
+
             // Consume = if present
             stream.consume(&TokenKind::Equals);
-            
+
             if let Some(v) = try_value(stream, params) {
                 // Extract node name from V(node) syntax
                 let node_name = spec
@@ -1675,7 +1868,7 @@ fn parse_ic_command(
                     .replace(")", "")
                     .trim()
                     .to_string();
-                
+
                 if !node_name.is_empty() {
                     // Store as IC_nodename parameter for later use by engine
                     let param_name = format!("IC_{}", node_name);
@@ -1686,14 +1879,13 @@ fn parse_ic_command(
             stream.advance();
         }
     }
-    
+
     Ok(())
 }
 
 //=============================================================================
 // Tests
 //=============================================================================
-
 
 #[cfg(test)]
 mod tests {
@@ -1703,10 +1895,10 @@ mod tests {
     fn test_parse_value() {
         let v = parse_spice_value("1k").unwrap();
         assert!((v - 1000.0).abs() < 1e-10);
-        
+
         let v = parse_spice_value("1u").unwrap();
         assert!((v - 1e-6).abs() < 1e-20);
-        
+
         let v = parse_spice_value("1MEG").unwrap();
         assert!((v - 1e6).abs() < 1e-10);
     }
@@ -1750,7 +1942,15 @@ V1 1 0 PULSE(0 5 0 1n 1n 1u 2u)
 "#;
         let result = parse_netlist(netlist).unwrap();
         match &result.elements[0].kind {
-            ElementKind::VoltageSource(SourceSpec::Pulse { v1, v2, delay, rise, fall, width, period }) => {
+            ElementKind::VoltageSource(SourceSpec::Pulse {
+                v1,
+                v2,
+                delay,
+                rise,
+                fall,
+                width,
+                period,
+            }) => {
                 assert!((*v1 - 0.0).abs() < 1e-10);
                 assert!((*v2 - 5.0).abs() < 1e-10);
                 assert!((*delay - 0.0).abs() < 1e-10);
@@ -1771,7 +1971,12 @@ V1 1 0 SIN(0 1 1k)
 "#;
         let result = parse_netlist(netlist).unwrap();
         match &result.elements[0].kind {
-            ElementKind::VoltageSource(SourceSpec::Sin { offset, amplitude, frequency, .. }) => {
+            ElementKind::VoltageSource(SourceSpec::Sin {
+                offset,
+                amplitude,
+                frequency,
+                ..
+            }) => {
                 assert!((*offset - 0.0).abs() < 1e-10);
                 assert!((*amplitude - 1.0).abs() < 1e-10);
                 assert!((*frequency - 1000.0).abs() < 1e-10);
@@ -1790,7 +1995,7 @@ R1 1 0 {R}
         let result = parse_netlist(netlist).unwrap();
         assert!(result.params.get("R").is_some());
         assert!((result.params.get("R").unwrap() - 1000.0).abs() < 1e-10);
-        
+
         match &result.elements[0].kind {
             ElementKind::Resistor { value } => {
                 assert!((value - 1000.0).abs() < 1e-10);
@@ -1918,9 +2123,12 @@ K1 L1 L2 0.99
 "#;
         let result = parse_netlist(netlist).unwrap();
         assert_eq!(result.elements.len(), 3);
-        
+
         match &result.elements[2].kind {
-            ElementKind::Coupling { inductors, coefficient } => {
+            ElementKind::Coupling {
+                inductors,
+                coefficient,
+            } => {
                 assert_eq!(inductors.len(), 2);
                 assert_eq!(inductors[0], "L1");
                 assert_eq!(inductors[1], "L2");
@@ -1938,7 +2146,12 @@ S1 out 0 ctrl 0 SW1 OFF
 "#;
         let result = parse_netlist(netlist).unwrap();
         match &result.elements[0].kind {
-            ElementKind::VSwitch { control_pos, control_neg, model, initial_state } => {
+            ElementKind::VSwitch {
+                control_pos,
+                control_neg,
+                model,
+                initial_state,
+            } => {
                 // Note: lexer uppercases identifiers
                 assert!(control_pos.eq_ignore_ascii_case("ctrl"));
                 assert_eq!(control_neg, "0");
@@ -1957,7 +2170,11 @@ W1 out 0 V1 CSW ON
 "#;
         let result = parse_netlist(netlist).unwrap();
         match &result.elements[0].kind {
-            ElementKind::ISwitch { control_element, model, initial_state } => {
+            ElementKind::ISwitch {
+                control_element,
+                model,
+                initial_state,
+            } => {
                 assert_eq!(control_element, "V1");
                 assert_eq!(model, "CSW");
                 assert_eq!(*initial_state, Some(SwitchState::On));
@@ -1999,7 +2216,7 @@ R1 1 0 1k
 "#;
         let result = parse_netlist(netlist).unwrap();
         assert_eq!(result.analyses.len(), 1);
-        
+
         match &result.analyses[0] {
             AnalysisCommand::Step(cmd) => {
                 assert_eq!(cmd.target, StepTarget::Param);
@@ -2024,19 +2241,17 @@ R1 1 0 1k
 .END
 "#;
         let result = parse_netlist(netlist).unwrap();
-        
+
         match &result.analyses[0] {
-            AnalysisCommand::Step(cmd) => {
-                match &cmd.sweep {
-                    StepSweep::List(values) => {
-                        assert_eq!(values.len(), 3);
-                        assert!((values[0] - 1e-9).abs() < 1e-20);
-                        assert!((values[1] - 10e-9).abs() < 1e-18);
-                        assert!((values[2] - 100e-9).abs() < 1e-17);
-                    }
-                    _ => panic!("Expected List sweep"),
+            AnalysisCommand::Step(cmd) => match &cmd.sweep {
+                StepSweep::List(values) => {
+                    assert_eq!(values.len(), 3);
+                    assert!((values[0] - 1e-9).abs() < 1e-20);
+                    assert!((values[1] - 10e-9).abs() < 1e-18);
+                    assert!((values[2] - 100e-9).abs() < 1e-17);
                 }
-            }
+                _ => panic!("Expected List sweep"),
+            },
             _ => panic!("Expected Step command"),
         }
     }
@@ -2048,7 +2263,7 @@ R1 1 0 1k
 .END
 "#;
         let result = parse_netlist(netlist).unwrap();
-        
+
         match &result.analyses[0] {
             AnalysisCommand::Temp { temperatures } => {
                 assert_eq!(temperatures.len(), 4);
@@ -2069,9 +2284,13 @@ R1 1 0 1k
 .END
 "#;
         let result = parse_netlist(netlist).unwrap();
-        
+
         match &result.analyses[0] {
-            AnalysisCommand::Four { fundamental, outputs, .. } => {
+            AnalysisCommand::Four {
+                fundamental,
+                outputs,
+                ..
+            } => {
                 assert!((*fundamental - 1000.0).abs() < 1e-10);
                 assert!(!outputs.is_empty());
             }
@@ -2087,9 +2306,17 @@ R1 1 0 1k
 .END
 "#;
         let result = parse_netlist(netlist).unwrap();
-        
+
         match &result.analyses[0] {
-            AnalysisCommand::Noise { output_node, input_source, variation, points, start_freq, stop_freq, .. } => {
+            AnalysisCommand::Noise {
+                output_node,
+                input_source,
+                variation,
+                points,
+                start_freq,
+                stop_freq,
+                ..
+            } => {
                 assert_eq!(output_node, "OUT");
                 assert_eq!(input_source, "V1");
                 assert_eq!(*variation, FreqVariation::Dec);
@@ -2109,11 +2336,10 @@ R1 1 0 1k
 .END
 "#;
         let result = parse_netlist(netlist).unwrap();
-        
+
         // IC values stored as parameters with IC_ prefix
         assert!(result.params.get("IC_N1").is_some());
         assert!((result.params.get("IC_N1").unwrap() - 5.0).abs() < 1e-10);
         assert!((result.params.get("IC_N2").unwrap() - 2.5).abs() < 1e-10);
     }
 }
-
