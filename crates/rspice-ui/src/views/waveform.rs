@@ -7,13 +7,13 @@ use dioxus::prelude::*;
 use crate::state::SimulationState;
 use crate::theme::Theme;
 
-/// View state for zoom and pan
+/// View state for zoom and pan (shared X-axis across all panes)
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct ViewState {
-    /// X-axis range (time or frequency)
+    /// X-axis range (time or frequency) - shared across all panes
     x_min: f64,
     x_max: f64,
-    /// Y-axis range
+    /// Y-axis range (default for single pane mode)
     y_min: f64,
     y_max: f64,
     /// Whether we're currently panning
@@ -21,6 +21,62 @@ struct ViewState {
     /// Last mouse position during pan
     pan_start_x: f64,
     pan_start_y: f64,
+}
+
+/// State for a single waveform pane (independent Y-axis)
+#[derive(Debug, Clone, PartialEq)]
+struct PaneState {
+    /// Unique pane ID
+    id: u32,
+    /// Y-axis range for this pane
+    y_min: f64,
+    y_max: f64,
+    /// Waveform indices assigned to this pane
+    waveform_indices: Vec<usize>,
+    /// Pane height ratio (1.0 = equal share)
+    height_ratio: f64,
+}
+
+impl Default for PaneState {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            y_min: -1.5,
+            y_max: 1.5,
+            waveform_indices: Vec::new(),
+            height_ratio: 1.0,
+        }
+    }
+}
+
+impl PaneState {
+    fn new(id: u32) -> Self {
+        Self {
+            id,
+            ..Default::default()
+        }
+    }
+
+    /// Fit Y-axis to waveforms in this pane
+    fn fit_to_waveforms(&mut self, waveforms: &[crate::state::WaveformData]) {
+        let mut y_min = f64::INFINITY;
+        let mut y_max = f64::NEG_INFINITY;
+
+        for &idx in &self.waveform_indices {
+            if let Some(wf) = waveforms.get(idx) {
+                for &y in &wf.y {
+                    y_min = y_min.min(y);
+                    y_max = y_max.max(y);
+                }
+            }
+        }
+
+        if y_min.is_finite() && y_max.is_finite() {
+            let margin = (y_max - y_min).max(0.1) * 0.1;
+            self.y_min = y_min - margin;
+            self.y_max = y_max + margin;
+        }
+    }
 }
 
 /// Cursor state for measurements
