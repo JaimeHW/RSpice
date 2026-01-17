@@ -9,6 +9,17 @@ use super::icons::{Icon, IconType};
 use crate::state::{run_simulation, ConsoleMessage, SimulationState, WaveformData};
 use crate::theme::Theme;
 
+/// Default content for new files
+const DEFAULT_NEW_FILE: &str = r#"* RSpice Circuit
+* New Circuit
+
+V1 1 0 DC 5
+R1 1 0 1k
+
+.OP
+.END
+"#;
+
 /// Main application toolbar
 #[component]
 pub fn Toolbar() -> Element {
@@ -51,16 +62,91 @@ pub fn Toolbar() -> Element {
                 Button {
                     variant: ButtonVariant::Ghost,
                     icon: rsx! { Icon { icon: IconType::File, size: 16 } },
+                    onclick: move |_| {
+                        // New file - clear editor
+                        let mut state = sim_state.write();
+                        state.netlist_content = DEFAULT_NEW_FILE.to_string();
+                        state.current_file = None;
+                        state.is_dirty = false;
+                        state.waveforms.clear();
+                        state.console_messages.clear();
+                        state.console_messages.push(ConsoleMessage::info("New file created"));
+                    },
                     "New"
                 }
                 Button {
                     variant: ButtonVariant::Ghost,
                     icon: rsx! { Icon { icon: IconType::FolderOpen, size: 16 } },
+                    onclick: move |_| {
+                        // Open file dialog
+                        spawn(async move {
+                            if let Some(path) = rfd::AsyncFileDialog::new()
+                                .add_filter("SPICE Netlist", &["cir", "sp", "spice", "net"])
+                                .add_filter("All Files", &["*"])
+                                .pick_file()
+                                .await
+                            {
+                                match std::fs::read_to_string(path.path()) {
+                                    Ok(content) => {
+                                        let mut state = sim_state.write();
+                                        state.netlist_content = content;
+                                        state.current_file = Some(path.path().to_path_buf());
+                                        state.is_dirty = false;
+                                        state.waveforms.clear();
+                                        state.console_messages.push(ConsoleMessage::success(
+                                            format!("Opened: {}", path.path().display())
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        sim_state.write().console_messages.push(
+                                            ConsoleMessage::error(format!("Failed to open file: {}", e))
+                                        );
+                                    }
+                                }
+                            }
+                        });
+                    },
                     "Open"
                 }
                 Button {
                     variant: ButtonVariant::Ghost,
                     icon: rsx! { Icon { icon: IconType::Save, size: 16 } },
+                    onclick: move |_| {
+                        let content = sim_state.read().netlist_content.clone();
+                        let current_path = sim_state.read().current_file.clone();
+
+                        spawn(async move {
+                            let save_path = if let Some(path) = current_path {
+                                Some(path)
+                            } else {
+                                // Save as dialog
+                                rfd::AsyncFileDialog::new()
+                                    .add_filter("SPICE Netlist", &["cir"])
+                                    .set_file_name("circuit.cir")
+                                    .save_file()
+                                    .await
+                                    .map(|f| f.path().to_path_buf())
+                            };
+
+                            if let Some(path) = save_path {
+                                match std::fs::write(&path, &content) {
+                                    Ok(_) => {
+                                        let mut state = sim_state.write();
+                                        state.current_file = Some(path.clone());
+                                        state.is_dirty = false;
+                                        state.console_messages.push(ConsoleMessage::success(
+                                            format!("Saved: {}", path.display())
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        sim_state.write().console_messages.push(
+                                            ConsoleMessage::error(format!("Failed to save: {}", e))
+                                        );
+                                    }
+                                }
+                            }
+                        });
+                    },
                     "Save"
                 }
             }
