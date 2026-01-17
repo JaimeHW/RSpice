@@ -33,12 +33,12 @@ pub mod netlist;
 pub mod solver;
 
 // Re-export primary types for convenience
-pub use analysis::{AcAnalysis, DcAnalysis, TransientAnalysis};
-pub use circuit::{CircuitData, Circuit, Node, NodeId};
+pub use analysis::{AcAnalysis, DcAnalysis, MeasureEngine, TransientAnalysis};
+pub use circuit::{Circuit, CircuitData, Node, NodeId};
 pub use device::{Device, DeviceModel};
 pub use engine::{Engine, SimulationConfig, SimulationError};
 pub use netlist::Netlist;
-pub use solver::{SimulationResult, Simulator, TripletMatrix, SparseLuSolver, StaticMatrix};
+pub use solver::{SimulationResult, Simulator, SparseLuSolver, StaticMatrix, TripletMatrix};
 
 /// Error types for the simulation engine
 pub mod error {
