@@ -324,6 +324,354 @@ impl ParallelStamp for DiodeParallelStamper {
 }
 
 //=============================================================================
+// Parallel Stamping for BJTs
+//=============================================================================
+
+/// Parallel-safe BJT stamping data
+/// 
+/// Holds pre-computed indices for O(1) atomic stamping of 3-terminal BJT.
+/// Uses Ebers-Moll model with linearized conductances.
+#[cfg(feature = "parallel")]
+#[derive(Debug, Clone)]
+pub struct BjtParallelStamper {
+    /// Device name for debugging
+    pub name: String,
+    /// BJT type (NPN or PNP)
+    pub is_npn: bool,
+    /// Collector node ID
+    pub node_collector: usize,
+    /// Base node ID
+    pub node_base: usize,
+    /// Emitter node ID
+    pub node_emitter: usize,
+    /// Saturation current
+    pub is: Value,
+    /// Forward beta
+    pub bf: Value,
+    /// Reverse beta
+    pub br: Value,
+    /// Forward emission coefficient
+    pub nf: Value,
+    /// Reverse emission coefficient
+    pub nr: Value,
+    /// Thermal voltage
+    pub vt: Value,
+    /// Pre-computed matrix indices (9 for 3x3)
+    pub idx_cc: Option<usize>,
+    pub idx_cb: Option<usize>,
+    pub idx_ce: Option<usize>,
+    pub idx_bc: Option<usize>,
+    pub idx_bb: Option<usize>,
+    pub idx_be: Option<usize>,
+    pub idx_ec: Option<usize>,
+    pub idx_eb: Option<usize>,
+    pub idx_ee: Option<usize>,
+}
+
+#[cfg(feature = "parallel")]
+impl BjtParallelStamper {
+    /// Create from a Bjt device with linked indices
+    pub fn from_bjt(b: &crate::device::bjt::Bjt) -> Self {
+        use crate::device::bjt::BjtType;
+        Self {
+            name: b.name.clone(),
+            is_npn: matches!(b.bjt_type, BjtType::Npn),
+            node_collector: b.node_collector,
+            node_base: b.node_base,
+            node_emitter: b.node_emitter,
+            is: b.is,
+            bf: b.bf,
+            br: b.br,
+            nf: b.nf,
+            nr: b.nr,
+            vt: b.vt,
+            idx_cc: b.indices.cc.map(|i| i.0),
+            idx_cb: b.indices.cb.map(|i| i.0),
+            idx_ce: b.indices.ce.map(|i| i.0),
+            idx_bc: b.indices.bc.map(|i| i.0),
+            idx_bb: b.indices.bb.map(|i| i.0),
+            idx_be: b.indices.be.map(|i| i.0),
+            idx_ec: b.indices.ec.map(|i| i.0),
+            idx_eb: b.indices.eb.map(|i| i.0),
+            idx_ee: b.indices.ee.map(|i| i.0),
+        }
+    }
+
+    /// Get polarity multiplier
+    #[inline]
+    fn polarity(&self) -> Value {
+        if self.is_npn { 1.0 } else { -1.0 }
+    }
+
+    /// Diode current
+    #[inline]
+    fn diode_current(&self, v: Value, n: Value) -> Value {
+        let v_limited = v.min(80.0 * n * self.vt);
+        self.is * ((v_limited / (n * self.vt)).exp() - 1.0)
+    }
+
+    /// Diode conductance
+    #[inline]
+    fn diode_conductance(&self, v: Value, n: Value) -> Value {
+        let v_limited = v.min(80.0 * n * self.vt);
+        (self.is / (n * self.vt)) * (v_limited / (n * self.vt)).exp()
+    }
+}
+
+#[cfg(feature = "parallel")]
+impl ParallelStamp for BjtParallelStamper {
+    fn stamp_atomic(&self, matrix: &AtomicMatrix, voltages: &[Value], rhs: &AtomicRhs) {
+        let vc = if self.node_collector == 0 { 0.0 } else { voltages[self.node_collector - 1] };
+        let vb = if self.node_base == 0 { 0.0 } else { voltages[self.node_base - 1] };
+        let ve = if self.node_emitter == 0 { 0.0 } else { voltages[self.node_emitter - 1] };
+        
+        let p = self.polarity();
+        let vbe = p * (vb - ve);
+        let vbc = p * (vb - vc);
+        
+        // Forward and reverse diode currents
+        let if_diode = self.diode_current(vbe, self.nf);
+        let ir_diode = self.diode_current(vbc, self.nr);
+        
+        // Junction conductances
+        let gbe = self.diode_conductance(vbe, self.nf) / self.bf;
+        let gbc = self.diode_conductance(vbc, self.nr) / self.br;
+        let gm = self.diode_conductance(vbe, self.nf);
+        
+        // Currents
+        let ic = p * (if_diode - ir_diode / self.br);
+        let ib = p * (if_diode / self.bf + ir_diode / self.br);
+        let ie = -(ic + ib);
+        
+        // Equivalent currents
+        let ic_eq = ic - gm * vbe + gbc * vbc;
+        let ib_eq = ib - gbe * vbe - gbc * vbc;
+        let ie_eq = ie + (gm + gbe) * vbe;
+        
+        // Atomic matrix stamping - Collector row
+        if let Some(idx) = self.idx_cc { matrix.add(idx, gbc); }
+        if let Some(idx) = self.idx_cb { matrix.add(idx, gm - gbc); }
+        if let Some(idx) = self.idx_ce { matrix.add(idx, -gm); }
+        
+        // Base row
+        if let Some(idx) = self.idx_bc { matrix.add(idx, -gbc); }
+        if let Some(idx) = self.idx_bb { matrix.add(idx, gbe + gbc); }
+        if let Some(idx) = self.idx_be { matrix.add(idx, -gbe); }
+        
+        // Emitter row
+        if let Some(idx) = self.idx_ec { matrix.add(idx, 0.0); }
+        if let Some(idx) = self.idx_eb { matrix.add(idx, -(gm + gbe)); }
+        if let Some(idx) = self.idx_ee { matrix.add(idx, gm + gbe); }
+        
+        // Atomic RHS stamping
+        if self.node_collector > 0 { rhs.add(self.node_collector - 1, -ic_eq); }
+        if self.node_base > 0 { rhs.add(self.node_base - 1, -ib_eq); }
+        if self.node_emitter > 0 { rhs.add(self.node_emitter - 1, -ie_eq); }
+    }
+}
+
+//=============================================================================
+// Parallel Stamping for MOSFETs
+//=============================================================================
+
+/// Parallel-safe MOSFET stamping data
+/// 
+/// Holds pre-computed indices for O(1) atomic stamping of 4-terminal MOSFET.
+/// Only Drain and Source rows are stamped (Gate draws no DC current).
+#[cfg(feature = "parallel")]
+#[derive(Debug, Clone)]
+pub struct MosfetParallelStamper {
+    /// Device name for debugging
+    pub name: String,
+    /// MOSFET type (true = NMOS)
+    pub is_nmos: bool,
+    /// Drain node ID
+    pub node_drain: usize,
+    /// Gate node ID
+    pub node_gate: usize,
+    /// Source node ID
+    pub node_source: usize,
+    /// Bulk node ID
+    pub node_bulk: usize,
+    /// Threshold voltage
+    pub vto: Value,
+    /// Transconductance parameter (KP)
+    pub kp: Value,
+    /// Channel width
+    pub w: Value,
+    /// Channel length
+    pub l: Value,
+    /// Body effect coefficient
+    pub gamma: Value,
+    /// Surface potential
+    pub phi: Value,
+    /// Channel length modulation
+    pub lambda: Value,
+    /// Pre-computed matrix indices (8 for D and S rows)
+    pub idx_dd: Option<usize>,
+    pub idx_dg: Option<usize>,
+    pub idx_ds: Option<usize>,
+    pub idx_db: Option<usize>,
+    pub idx_sd: Option<usize>,
+    pub idx_sg: Option<usize>,
+    pub idx_ss: Option<usize>,
+    pub idx_sb: Option<usize>,
+}
+
+#[cfg(feature = "parallel")]
+impl MosfetParallelStamper {
+    /// Create from a Mosfet device with linked indices
+    pub fn from_mosfet(m: &crate::device::mosfet::Mosfet) -> Self {
+        use crate::device::mosfet::MosType;
+        Self {
+            name: m.name.clone(),
+            is_nmos: matches!(m.mos_type, MosType::Nmos),
+            node_drain: m.node_drain,
+            node_gate: m.node_gate,
+            node_source: m.node_source,
+            node_bulk: m.node_bulk,
+            vto: m.vto,
+            kp: m.kp,
+            w: m.w,
+            l: m.l,
+            gamma: m.gamma,
+            phi: m.phi,
+            lambda: m.lambda,
+            idx_dd: m.indices.dd.map(|i| i.0),
+            idx_dg: m.indices.dg.map(|i| i.0),
+            idx_ds: m.indices.ds.map(|i| i.0),
+            idx_db: m.indices.db.map(|i| i.0),
+            idx_sd: m.indices.sd.map(|i| i.0),
+            idx_sg: m.indices.sg.map(|i| i.0),
+            idx_ss: m.indices.ss.map(|i| i.0),
+            idx_sb: m.indices.sb.map(|i| i.0),
+        }
+    }
+
+    /// Get polarity multiplier
+    #[inline]
+    fn polarity(&self) -> Value {
+        if self.is_nmos { 1.0 } else { -1.0 }
+    }
+
+    /// Calculate beta = KP * W/L
+    #[inline]
+    fn beta(&self) -> Value {
+        self.kp * self.w / self.l
+    }
+
+    /// Calculate threshold voltage with body effect
+    #[inline]
+    fn vth(&self, vbs: Value) -> Value {
+        let p = self.polarity();
+        let vbs_eff = p * vbs;
+        let phi_vbs = (self.phi - vbs_eff).max(0.0);
+        self.vto + self.gamma * (phi_vbs.sqrt() - self.phi.sqrt())
+    }
+
+    /// Smooth positive (for cutoff transition)
+    #[inline]
+    fn smooth_positive(x: Value) -> Value {
+        let width = 0.05;
+        0.5 * (x + (x * x + width * width).sqrt())
+    }
+
+    /// Calculate drain current
+    fn calculate_id(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
+        let p = self.polarity();
+        let vgs_eff = p * vgs;
+        let vds_eff = Self::smooth_positive(p * vds);
+        let vth = self.vth(vbs);
+        
+        let vgt = Self::smooth_positive(vgs_eff - vth);
+        let vdsat = vgt.min(vds_eff);
+        
+        let id_core = self.beta() * (vgt * vdsat - 0.5 * vdsat * vdsat);
+        p * id_core * (1.0 + self.lambda * vds_eff)
+    }
+
+    /// Calculate transconductance gm
+    fn gm(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
+        let p = self.polarity();
+        let vgs_eff = p * vgs;
+        let vds_eff = Self::smooth_positive(p * vds);
+        let vth = self.vth(vbs);
+        
+        let vgt = Self::smooth_positive(vgs_eff - vth);
+        let vdsat = vgt.min(vds_eff);
+        
+        self.beta() * vdsat * (1.0 + self.lambda * vds_eff)
+    }
+
+    /// Calculate output conductance gds
+    fn gds(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
+        let p = self.polarity();
+        let vgs_eff = p * vgs;
+        let vds_eff = Self::smooth_positive(p * vds);
+        let vth = self.vth(vbs);
+        
+        let vgt = Self::smooth_positive(vgs_eff - vth);
+        let vdsat = vgt.min(vds_eff);
+        
+        let id_core = self.beta() * (vgt * vdsat - 0.5 * vdsat * vdsat);
+        let gds_linear = if vds_eff < vgt {
+            self.beta() * (vgt - vdsat) * (1.0 + self.lambda * vds_eff)
+        } else {
+            0.0
+        };
+        (gds_linear + id_core * self.lambda).max(1e-12)
+    }
+
+    /// Calculate body transconductance gmb
+    fn gmb(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
+        let p = self.polarity();
+        let vbs_eff = p * vbs;
+        let gm = self.gm(vgs, vds, vbs);
+        let phi_vbs = (self.phi - vbs_eff).max(0.01);
+        gm * self.gamma / (2.0 * phi_vbs.sqrt())
+    }
+}
+
+#[cfg(feature = "parallel")]
+impl ParallelStamp for MosfetParallelStamper {
+    fn stamp_atomic(&self, matrix: &AtomicMatrix, voltages: &[Value], rhs: &AtomicRhs) {
+        let vd = if self.node_drain == 0 { 0.0 } else { voltages[self.node_drain - 1] };
+        let vg = if self.node_gate == 0 { 0.0 } else { voltages[self.node_gate - 1] };
+        let vs = if self.node_source == 0 { 0.0 } else { voltages[self.node_source - 1] };
+        let vb = if self.node_bulk == 0 { 0.0 } else { voltages[self.node_bulk - 1] };
+        
+        let vgs = vg - vs;
+        let vds = vd - vs;
+        let vbs = vb - vs;
+        
+        // Conductances
+        let gm = self.gm(vgs, vds, vbs);
+        let gds = self.gds(vgs, vds, vbs);
+        let gmb = self.gmb(vgs, vds, vbs);
+        
+        // Drain current and equivalent source
+        let id = self.calculate_id(vgs, vds, vbs);
+        let id_eq = id - gm * vgs - gds * vds - gmb * vbs;
+        
+        // Atomic matrix stamping - Drain row
+        if let Some(idx) = self.idx_dd { matrix.add(idx, gds); }
+        if let Some(idx) = self.idx_dg { matrix.add(idx, gm); }
+        if let Some(idx) = self.idx_ds { matrix.add(idx, -(gm + gds + gmb)); }
+        if let Some(idx) = self.idx_db { matrix.add(idx, gmb); }
+        
+        // Source row
+        if let Some(idx) = self.idx_sd { matrix.add(idx, -gds); }
+        if let Some(idx) = self.idx_sg { matrix.add(idx, -gm); }
+        if let Some(idx) = self.idx_ss { matrix.add(idx, gm + gds + gmb); }
+        if let Some(idx) = self.idx_sb { matrix.add(idx, -gmb); }
+        
+        // Atomic RHS stamping
+        if self.node_drain > 0 { rhs.add(self.node_drain - 1, -id_eq); }
+        if self.node_source > 0 { rhs.add(self.node_source - 1, id_eq); }
+    }
+}
+
+//=============================================================================
 // Circuit-Level Parallel Stamping
 //=============================================================================
 

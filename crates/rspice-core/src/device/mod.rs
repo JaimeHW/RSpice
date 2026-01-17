@@ -16,6 +16,8 @@ mod bjt;
 mod mosfet;
 mod vdmos;
 mod jfet;
+mod ekv;
+pub mod opamp;
 pub mod behavioral;
 pub mod controlled;
 
@@ -33,6 +35,7 @@ pub use bjt::{Bjt, BjtType};
 pub use mosfet::{Mosfet, MosType, MosRegion};
 pub use vdmos::{Vdmos, VdmosType, VdmosRegion};
 pub use jfet::{Jfet, JfetType, JfetParams};
+pub use ekv::EkvMosfet;
 pub use behavioral::{BehavioralVoltageSource, BehavioralCurrentSource, BehavioralSources};
 pub use controlled::{Vcvs, Vccs, Cccs, Ccvs};
 

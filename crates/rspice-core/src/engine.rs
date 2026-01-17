@@ -38,6 +38,8 @@ pub struct SimulationConfig {
     pub max_timestep: Value,
     /// Temperature in Kelvin
     pub temperature: Value,
+    /// Integration method for transient analysis
+    pub integration_method: crate::analysis::IntegrationMethod,
 }
 
 impl Default for SimulationConfig {
@@ -48,6 +50,7 @@ impl Default for SimulationConfig {
             min_timestep: 1e-15,
             max_timestep: 1e-3,
             temperature: 300.0, // Room temperature
+            integration_method: crate::analysis::IntegrationMethod::TrapGear,
         }
     }
 }
@@ -821,14 +824,19 @@ impl Engine {
 
     /// Run transient time-domain analysis
     /// 
-    /// Uses trapezoidal integration with adaptive timestep control.
+    /// Uses adaptive integration with automatic method switching (TrapGear).
+    /// Trapezoidal integration is used normally for efficiency, but switches
+    /// to Gear2/BDF2 when oscillations are detected for stability.
     pub fn run_tran(
         &self,
         netlist: &Netlist,
         tstop: Value,
         max_step: Value,
     ) -> Result<TransientResult, SimulationError> {
-        use crate::analysis::transient::{TimestepController, BreakpointManager, LteEstimator};
+        use crate::analysis::transient::{
+            TimestepController, BreakpointManager, LteEstimator,
+            TrapGearController, CompanionCoefficients, IntegrationMethod,
+        };
         
         let mut circuit = self.build_circuit(netlist)?;
         let mut matrix = self.build_matrix(&circuit)?;
@@ -850,6 +858,17 @@ impl Engine {
         let mut breakpoints = BreakpointManager::new();
         let mut lte_estimator = LteEstimator::new(self.config.tolerance);
         
+        // Initialize TrapGear controller for automatic method switching
+        let mut trapgear = TrapGearController::new();
+        
+        // Track integration method order for LTE scaling
+        let method_order = |method: IntegrationMethod| -> u32 {
+            match method {
+                IntegrationMethod::BackwardEuler => 1,
+                _ => 2, // Trapezoidal and Gear2 are both order 2
+            }
+        };
+        
         // Initialize result storage
         let mut result = TransientResult {
             time: vec![0.0],
@@ -859,6 +878,36 @@ impl Engine {
         
         let mut solution = dc_solution;
         let mut t = 0.0;
+        
+        // Initialize capacitor voltage history from DC solution
+        for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
+            let np = cap.pp.row;
+            let nn = cap.nn.row;
+            let v_dc = if np == 0 { 0.0 } else { solution[np - 1] }
+                     - if nn == 0 { 0.0 } else { solution[nn - 1] };
+            circuit.capacitors.v_prev[cap_idx] = v_dc;
+            circuit.capacitors.v_prev_prev[cap_idx] = v_dc;
+        }
+        
+        // Initialize inductor current and voltage history from DC solution
+        for l_idx in 0..circuit.inductors.names.len() {
+            let np = circuit.inductors.node_pos[l_idx];
+            let nn = circuit.inductors.node_neg[l_idx];
+            let br = circuit.inductors.branch_indices[l_idx];
+            
+            // Initialize voltage across inductor from DC solution
+            let v_dc = if np == 0 { 0.0 } else { solution[np - 1] }
+                     - if nn == 0 { 0.0 } else { solution[nn - 1] };
+            circuit.inductors.v_prev[l_idx] = v_dc;
+            
+            // Initialize branch currents from DC solution
+            if br > 0 {
+                let br_idx = circuit.num_nodes() + br - 1;
+                let i_dc = solution[br_idx];
+                circuit.inductors.i_prev[l_idx] = i_dc;
+                circuit.inductors.i_prev_prev[l_idx] = i_dc;
+            }
+        }
         
         // Main transient loop
         while t < tstop {
@@ -883,17 +932,24 @@ impl Engine {
                 // Stamp linear devices (R, V, I)
                 circuit.stamp_dc_direct(&mut matrix, &mut rhs);
                 
+                // Get current integration method from TrapGear controller
+                let current_method = trapgear.current_method();
+                let coeff = CompanionCoefficients::for_method(current_method);
+                
                 // Stamp capacitor companion models for transient
-                // For trapezoidal: Geq = 2C/dt, Ieq = Geq*v_prev + i_prev
+                // Uses CompanionCoefficients for method-adaptive integration
                 for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
                     let capacitance = circuit.capacitors.capacitances[cap_idx];
-                    let geq = 2.0 * capacitance / dt;
                     let np = cap.pp.row;
                     let nn = cap.nn.row;
                     
-                    // Get voltage across capacitor from previous solution
-                    let v_prev = if np == 0 { 0.0 } else { solution[np - 1] }
-                               - if nn == 0 { 0.0 } else { solution[nn - 1] };
+                    // Get voltage history from stored values
+                    let v_n = circuit.capacitors.v_prev[cap_idx];
+                    let v_n_minus_1 = circuit.capacitors.v_prev_prev[cap_idx];
+                    
+                    // Calculate equivalent conductance and current using coefficients
+                    let geq = coeff.capacitor_geq(capacitance, dt);
+                    let ieq = coeff.capacitor_ieq(capacitance, dt, v_n, v_n_minus_1);
                     
                     // Stamp conductance
                     if np > 0 {
@@ -905,26 +961,27 @@ impl Engine {
                         matrix.add(nn - 1, nn - 1, geq);
                     }
                     
-                    // Calculate Ieq: for trapezoidal, Ieq = Geq*v_prev + i_prev
-                    // Since we're starting from DC, initial current is 0
-                    // For subsequent steps, i_prev ≈ Geq*v_prev from last iteration
-                    let ieq = geq * v_prev;
-                    
+                    // Stamp equivalent current source
                     if np > 0 { rhs[np - 1] += ieq; }
                     if nn > 0 { rhs[nn - 1] -= ieq; }
                 }
                 
                 // Stamp inductor companion models for transient
-                // For trapezoidal: Req = 2L/dt, Veq = Req*i_prev + v_prev
+                // Uses CompanionCoefficients for method-adaptive integration
                 for l_idx in 0..circuit.inductors.names.len() {
                     let np = circuit.inductors.node_pos[l_idx];
                     let nn = circuit.inductors.node_neg[l_idx];
                     let br = circuit.inductors.branch_indices[l_idx];
                     let inductance = circuit.inductors.inductances[l_idx];
-                    let req = 2.0 * inductance / dt;
-                    let i_prev = circuit.inductors.i_prev[l_idx];
-                    let v_prev = circuit.inductors.v_prev[l_idx];
-                    let veq = req * i_prev + v_prev;
+                    
+                    // Get current history from stored values
+                    let i_n = circuit.inductors.i_prev[l_idx];
+                    let i_n_minus_1 = circuit.inductors.i_prev_prev[l_idx];
+                    let v_n = circuit.inductors.v_prev[l_idx];
+                    
+                    // Calculate equivalent resistance and voltage using coefficients
+                    let req = coeff.inductor_req(inductance, dt);
+                    let veq = coeff.inductor_veq(inductance, dt, i_n, i_n_minus_1, v_n);
                     
                     // MNA stamp: V(n+) - V(n-) - Req*I = Veq
                     if np > 0 && br > 0 {
@@ -985,6 +1042,41 @@ impl Engine {
             // Accept this timestep
             t += dt;
             lte_estimator.record(&new_solution, dt);
+            
+            // Update LTE estimator with current method order
+            lte_estimator.set_method_order(method_order(trapgear.current_method()));
+            
+            // Feed solution to TrapGear controller for oscillation detection
+            trapgear.update(&new_solution, dt);
+            
+            // Update capacitor voltage history (shift: v_n -> v_prev, v_prev -> v_prev_prev)
+            for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
+                let np = cap.pp.row;
+                let nn = cap.nn.row;
+                let v_new = if np == 0 { 0.0 } else { new_solution[np - 1] }
+                          - if nn == 0 { 0.0 } else { new_solution[nn - 1] };
+                circuit.capacitors.v_prev_prev[cap_idx] = circuit.capacitors.v_prev[cap_idx];
+                circuit.capacitors.v_prev[cap_idx] = v_new;
+            }
+            
+            // Update inductor current history (shift: i_n -> i_prev, i_prev -> i_prev_prev)
+            for l_idx in 0..circuit.inductors.names.len() {
+                let br = circuit.inductors.branch_indices[l_idx];
+                if br > 0 {
+                    let br_idx = circuit.num_nodes() + br - 1;
+                    let i_new = new_solution[br_idx];
+                    circuit.inductors.i_prev_prev[l_idx] = circuit.inductors.i_prev[l_idx];
+                    circuit.inductors.i_prev[l_idx] = i_new;
+                    
+                    // Also update voltage for Gear2 companion
+                    let np = circuit.inductors.node_pos[l_idx];
+                    let nn = circuit.inductors.node_neg[l_idx];
+                    let v_new = if np == 0 { 0.0 } else { new_solution[np - 1] }
+                              - if nn == 0 { 0.0 } else { new_solution[nn - 1] };
+                    circuit.inductors.v_prev[l_idx] = v_new;
+                }
+            }
+            
             solution = new_solution;
             
             // Store results
@@ -1053,6 +1145,36 @@ impl Engine {
         let mut solution = dc_solution;
         let mut t = 0.0;
         
+        // Initialize capacitor voltage history from DC solution
+        for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
+            let np = cap.pp.row;
+            let nn = cap.nn.row;
+            let v_dc = if np == 0 { 0.0 } else { solution[np - 1] }
+                     - if nn == 0 { 0.0 } else { solution[nn - 1] };
+            circuit.capacitors.v_prev[cap_idx] = v_dc;
+            circuit.capacitors.v_prev_prev[cap_idx] = v_dc;
+        }
+        
+        // Initialize inductor current and voltage history from DC solution
+        for l_idx in 0..circuit.inductors.names.len() {
+            let np = circuit.inductors.node_pos[l_idx];
+            let nn = circuit.inductors.node_neg[l_idx];
+            let br = circuit.inductors.branch_indices[l_idx];
+            
+            // Initialize voltage across inductor from DC solution
+            let v_dc = if np == 0 { 0.0 } else { solution[np - 1] }
+                     - if nn == 0 { 0.0 } else { solution[nn - 1] };
+            circuit.inductors.v_prev[l_idx] = v_dc;
+            
+            // Initialize branch currents from DC solution
+            if br > 0 {
+                let br_idx = circuit.num_nodes() + br - 1;
+                let i_dc = solution[br_idx];
+                circuit.inductors.i_prev[l_idx] = i_dc;
+                circuit.inductors.i_prev_prev[l_idx] = i_dc;
+            }
+        }
+        
         // Main transient loop
         while t < tstop {
             let (dt, _at_breakpoint) = breakpoints.limit_step(t, timestep.dt());
@@ -1076,15 +1198,15 @@ impl Engine {
                 // Stamp linear devices (R, V, I)
                 circuit.stamp_dc_direct(&mut matrix, &mut rhs);
                 
-                // Stamp capacitor companion models
+                // Stamp capacitor companion models (using stored history)
                 for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
                     let capacitance = circuit.capacitors.capacitances[cap_idx];
                     let geq = 2.0 * capacitance / dt;
                     let np = cap.pp.row;
                     let nn = cap.nn.row;
                     
-                    let v_prev = if np == 0 { 0.0 } else { solution[np - 1] }
-                               - if nn == 0 { 0.0 } else { solution[nn - 1] };
+                    // Use stored voltage history
+                    let v_prev = circuit.capacitors.v_prev[cap_idx];
                     
                     if np > 0 {
                         matrix.add(np - 1, np - 1, geq);
@@ -1169,6 +1291,28 @@ impl Engine {
             // Accept this timestep
             t += dt;
             lte_estimator.record(&new_solution, dt);
+            
+            // Update capacitor voltage history
+            for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
+                let np = cap.pp.row;
+                let nn = cap.nn.row;
+                let v_new = if np == 0 { 0.0 } else { new_solution[np - 1] }
+                          - if nn == 0 { 0.0 } else { new_solution[nn - 1] };
+                circuit.capacitors.v_prev_prev[cap_idx] = circuit.capacitors.v_prev[cap_idx];
+                circuit.capacitors.v_prev[cap_idx] = v_new;
+            }
+            
+            // Update inductor current history
+            for l_idx in 0..circuit.inductors.names.len() {
+                let br = circuit.inductors.branch_indices[l_idx];
+                if br > 0 {
+                    let br_idx = circuit.num_nodes() + br - 1;
+                    let i_new = new_solution[br_idx];
+                    circuit.inductors.i_prev_prev[l_idx] = circuit.inductors.i_prev[l_idx];
+                    circuit.inductors.i_prev[l_idx] = i_new;
+                }
+            }
+            
             solution = new_solution;
             
             // Record to compressed waveform

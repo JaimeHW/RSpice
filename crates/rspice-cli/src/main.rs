@@ -44,6 +44,22 @@ struct Args {
     /// Print version information
     #[arg(long)]
     print_version: bool,
+
+    /// Print .MEAS measurement results
+    #[arg(long)]
+    meas: bool,
+
+    /// Quiet mode - suppress progress output (for scripting)
+    #[arg(short, long)]
+    quiet: bool,
+
+    /// Show progress bar with ETA for transient simulation
+    #[arg(long)]
+    progress: bool,
+
+    /// Print node names in output (if available from netlist)
+    #[arg(long)]
+    node_names: bool,
 }
 
 fn main() -> ExitCode {
@@ -102,15 +118,19 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         
         match analysis {
             AnalysisCommand::Op => {
-                println!("Running DC operating point...");
+                if !args.quiet {
+                    println!("Running DC operating point...");
+                }
                 match engine.run_dc_op(&netlist) {
                     Ok(result) => {
-                        println!("DC Operating Point:");
-                        for i in 1..=result.node_voltages.len().min(10) {
-                            println!("  V({}) = {:.6} V", i, result.voltage(i));
-                        }
-                        if result.node_voltages.len() > 10 {
-                            println!("  ... ({} more nodes)", result.node_voltages.len() - 10);
+                        if !args.quiet {
+                            println!("DC Operating Point:");
+                            for i in 1..=result.node_voltages.len().min(10) {
+                                println!("  V({}) = {:.6} V", i, result.voltage(i));
+                            }
+                            if result.node_voltages.len() > 10 {
+                                println!("  ... ({} more nodes)", result.node_voltages.len() - 10);
+                            }
                         }
                     }
                     Err(e) => {
@@ -154,19 +174,38 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 
                 // Progress indicator for transient simulation
                 use indicatif::{ProgressBar, ProgressStyle};
-                let pb = ProgressBar::new_spinner();
-                pb.set_style(ProgressStyle::default_spinner()
-                    .template("{spinner:.green} {msg}")
-                    .unwrap());
-                pb.set_message(format!("Running transient: {} to {} (step {})...", tstart, stop, step));
-                pb.enable_steady_tick(std::time::Duration::from_millis(100));
+                
+                let pb = if args.quiet {
+                    ProgressBar::hidden()
+                } else if args.progress {
+                    // Full progress bar with ETA
+                    let eta_steps = ((stop - tstart) / step) as u64;
+                    let pb = ProgressBar::new(eta_steps);
+                    pb.set_style(ProgressStyle::default_bar()
+                        .template("{spinner:.green} [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
+                        .unwrap()
+                        .progress_chars("#>-"));
+                    pb.set_message(format!("Transient: {} to {}", tstart, stop));
+                    pb
+                } else {
+                    // Simple spinner
+                    let pb = ProgressBar::new_spinner();
+                    pb.set_style(ProgressStyle::default_spinner()
+                        .template("{spinner:.green} {msg}")
+                        .unwrap());
+                    pb.set_message(format!("Running transient: {} to {} (step {})...", tstart, stop, step));
+                    pb.enable_steady_tick(std::time::Duration::from_millis(100));
+                    pb
+                };
                 
                 let result = engine.run_tran(&netlist, *stop, *step);
                 pb.finish_and_clear();
                 
                 match result {
                     Ok(result) => {
-                        println!("✓ Transient complete: {} time points computed", result.time.len());
+                        if !args.quiet {
+                            println!("✓ Transient complete: {} time points computed", result.time.len());
+                        }
                         
                         // Export if output path specified
                         if let Some(ref output_path) = args.output {
@@ -177,7 +216,9 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                                 rspice_core::analysis::RawFormat::Binary 
                             };
                             rspice_core::analysis::export_transient(output_path, &result.time, &node_names, &result.voltages, format)?;
-                            println!("  Results exported to: {}", output_path.display());
+                            if !args.quiet {
+                                println!("  Results exported to: {}", output_path.display());
+                            }
                         }
                     }
                     Err(e) => {
@@ -186,7 +227,9 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             AnalysisCommand::Ac { variation: _, points, start_freq, stop_freq } => {
-                println!("Running AC analysis: {} to {} Hz ({} points)...", start_freq, stop_freq, points);
+                if !args.quiet {
+                    println!("Running AC analysis: {} to {} Hz ({} points)...", start_freq, stop_freq, points);
+                }
                 
                 // Generate frequency points (decade sweep)
                 let frequencies: Vec<f64> = (0..*points)
@@ -195,12 +238,14 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 
                 match engine.run_ac(&netlist, &frequencies) {
                     Ok(results) => {
-                        println!("AC Analysis: {} frequency points", results.len());
-                        if args.verbose && !results.is_empty() {
-                            let first = &results[0];
-                            let last = results.last().unwrap();
-                            println!("  @ {:e} Hz: |V(1)| = {:.4}", first.frequency, first.voltage_magnitude(1));
-                            println!("  @ {:e} Hz: |V(1)| = {:.4}", last.frequency, last.voltage_magnitude(1));
+                        if !args.quiet {
+                            println!("AC Analysis: {} frequency points", results.len());
+                            if args.verbose && !results.is_empty() {
+                                let first = &results[0];
+                                let last = results.last().unwrap();
+                                println!("  @ {:e} Hz: |V(1)| = {:.4}", first.frequency, first.voltage_magnitude(1));
+                                println!("  @ {:e} Hz: |V(1)| = {:.4}", last.frequency, last.voltage_magnitude(1));
+                            }
                         }
                     }
                     Err(e) => {
@@ -209,19 +254,25 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             _ => {
-                println!("Analysis type {:?} not yet fully supported", analysis);
+                if !args.quiet {
+                    println!("Analysis type {:?} not yet fully supported", analysis);
+                }
             }
         }
     }
 
     if netlist.analyses.is_empty() {
         // Default: run DC operating point
-        println!("No analysis commands - running default DC OP...");
+        if !args.quiet {
+            println!("No analysis commands - running default DC OP...");
+        }
         match engine.run_dc_op(&netlist) {
             Ok(result) => {
-                println!("DC Operating Point:");
-                for i in 1..=result.node_voltages.len().min(10) {
-                    println!("  V({}) = {:.6} V", i, result.voltage(i));
+                if !args.quiet {
+                    println!("DC Operating Point:");
+                    for i in 1..=result.node_voltages.len().min(10) {
+                        println!("  V({}) = {:.6} V", i, result.voltage(i));
+                    }
                 }
             }
             Err(e) => {
@@ -230,7 +281,9 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!("\nSimulation complete.");
+    if !args.quiet {
+        println!("\nSimulation complete.");
+    }
     Ok(())
 }
 

@@ -194,10 +194,14 @@ impl Resistors {
 #[derive(Debug, Default)]
 pub struct Capacitors {
     pub names: Vec<String>,
+    /// Pre-computed stamps for the capacitor matrix entries
     pub stamps: Vec<TwoTerminalStamp>,
+    /// Capacitance values in Farads
     pub capacitances: Vec<Value>,
-    /// Previous voltage for trapezoidal integration
+    /// Previous timestep voltage (t - dt)
     pub v_prev: Vec<Value>,
+    /// Voltage from 2 steps ago (t - 2*dt) for Gear2/BDF2
+    pub v_prev_prev: Vec<Value>,
     /// Equivalent current source
     pub i_eq: Vec<Value>,
     /// Initial condition voltage (IC=)
@@ -214,6 +218,7 @@ impl Capacitors {
         self.stamps.push(TwoTerminalStamp::new(node_pos, node_neg));
         self.capacitances.push(capacitance);
         self.v_prev.push(0.0);
+        self.v_prev_prev.push(0.0);
         self.i_eq.push(0.0);
         self.ic.push(None);
     }
@@ -223,6 +228,7 @@ impl Capacitors {
         self.stamps.push(TwoTerminalStamp::new(node_pos, node_neg));
         self.capacitances.push(capacitance);
         self.v_prev.push(ic);  // Initialize v_prev to IC
+        self.v_prev_prev.push(ic);  // Initialize v_prev_prev to IC as well
         self.i_eq.push(0.0);
         self.ic.push(Some(ic));
     }
@@ -471,9 +477,11 @@ pub struct Inductors {
     pub node_neg: Vec<NodeId>,
     pub branch_indices: Vec<NodeId>,
     pub inductances: Vec<Value>,
-    /// Previous current for trapezoidal companion
+    /// Previous current (t - dt) for companion model
     pub i_prev: Vec<Value>,
-    /// Previous voltage for trapezoidal companion
+    /// Current from 2 steps ago (t - 2*dt) for Gear2/BDF2
+    pub i_prev_prev: Vec<Value>,
+    /// Previous voltage for companion model
     pub v_prev: Vec<Value>,
     /// Initial condition current (IC=)
     pub ic: Vec<Option<Value>>,
@@ -491,6 +499,7 @@ impl Inductors {
         self.branch_indices.push(branch_idx);
         self.inductances.push(inductance);
         self.i_prev.push(0.0);
+        self.i_prev_prev.push(0.0);
         self.v_prev.push(0.0);
         self.ic.push(None);
     }
@@ -502,6 +511,7 @@ impl Inductors {
         self.branch_indices.push(branch_idx);
         self.inductances.push(inductance);
         self.i_prev.push(ic);  // Initialize i_prev to IC
+        self.i_prev_prev.push(ic);  // Initialize i_prev_prev to IC as well
         self.v_prev.push(0.0);
         self.ic.push(Some(ic));
     }
