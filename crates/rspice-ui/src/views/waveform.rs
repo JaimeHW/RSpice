@@ -3,9 +3,11 @@
 //! Canvas-based waveform plotting with zoom, pan, and cursor support.
 //! Supports GPU-accelerated rendering when available.
 
+use dioxus::html::input_data::keyboard_types::Key;
 use dioxus::prelude::*;
 use std::sync::{Arc, Mutex};
 
+use crate::state::waveform_math;
 use crate::state::SimulationState;
 use crate::theme::Theme;
 use crate::views::waveform_gpu::{
@@ -451,6 +453,38 @@ pub fn Waveform() -> Element {
                 },
                 on_zoom_out: move |_| {
                     view_state.write().zoom(1.25, 0.5, 0.5);
+                },
+                on_add_trace: move |expr: String| {
+                    // Build signal map from existing waveforms
+                    let state = sim_state.read();
+                    let signals: std::collections::HashMap<String, (Vec<f64>, Vec<f64>)> =
+                        state.waveforms.iter()
+                            .map(|wf| (wf.name.clone(), (wf.x.clone(), wf.y.clone())))
+                            .collect();
+                    drop(state);
+
+                    // Try to evaluate the expression
+                    match waveform_math::eval_expression(&expr, &signals) {
+                        Ok((x_data, y_data)) => {
+                            // Generate a color for the new trace
+                            let trace_count = sim_state.read().waveforms.len();
+                            let theme: Signal<Theme> = use_context();
+                            let color = theme.read().trace_color(trace_count).to_string();
+
+                            // Add the computed waveform
+                            sim_state.write().waveforms.push(crate::state::WaveformData {
+                                name: expr,
+                                x: x_data,
+                                y: y_data,
+                                color,
+                                visible: true,
+                            });
+                        }
+                        Err(e) => {
+                            // Log error (in a real app would show in UI)
+                            eprintln!("Expression error: {}", e);
+                        }
+                    }
                 },
             }
 
@@ -1045,15 +1079,18 @@ fn generate_time_labels(min: f64, max: f64, count: usize) -> Vec<String> {
         .collect()
 }
 
-/// Waveform header with controls
+/// Waveform header with controls and expression input
 #[component]
 fn WaveformHeader(
     on_fit: EventHandler<MouseEvent>,
     on_zoom_in: EventHandler<MouseEvent>,
     on_zoom_out: EventHandler<MouseEvent>,
+    on_add_trace: EventHandler<String>,
 ) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
+    let mut expr_input = use_signal(|| String::new());
+    let mut error_msg = use_signal(|| Option::<String>::None);
 
     rsx! {
         div {
@@ -1074,6 +1111,76 @@ fn WaveformHeader(
                     color: {th.text_secondary()};
                 ",
                 "Waveform Viewer"
+            }
+
+            // Expression input
+            div {
+                style: "
+                    display: flex;
+                    align-items: center;
+                    gap: {Theme::SPACING_XS};
+                    flex: 1;
+                    max-width: 300px;
+                ",
+
+                input {
+                    r#type: "text",
+                    placeholder: "Add trace: V(out), I(R1)*1000, db(V(out))...",
+                    value: "{expr_input}",
+                    style: "
+                        flex: 1;
+                        padding: 4px 8px;
+                        background: {th.bg_primary()};
+                        border: 1px solid {th.border()};
+                        border-radius: {Theme::RADIUS_SM};
+                        color: {th.text_primary()};
+                        font-size: 11px;
+                        font-family: {Theme::FONT_MONO};
+                        outline: none;
+                    ",
+                    oninput: move |e| {
+                        expr_input.set(e.value().clone());
+                        error_msg.set(None);
+                    },
+                    onkeydown: move |e| {
+                        if e.key() == Key::Enter {
+                            let expr = expr_input.read().clone();
+                            if !expr.trim().is_empty() {
+                                on_add_trace.call(expr.clone());
+                                expr_input.set(String::new());
+                            }
+                        }
+                    },
+                }
+
+                // Add button
+                button {
+                    style: "
+                        padding: 4px 8px;
+                        background: #3b82f6;
+                        border: none;
+                        border-radius: {Theme::RADIUS_SM};
+                        color: white;
+                        font-size: 11px;
+                        cursor: pointer;
+                    ",
+                    onclick: move |_| {
+                        let expr = expr_input.read().clone();
+                        if !expr.trim().is_empty() {
+                            on_add_trace.call(expr.clone());
+                            expr_input.set(String::new());
+                        }
+                    },
+                    "Add"
+                }
+            }
+
+            // Error message
+            if let Some(err) = error_msg.read().as_ref() {
+                span {
+                    style: "color: #ef4444; font-size: 10px;",
+                    "{err}"
+                }
             }
 
             // Spacer
