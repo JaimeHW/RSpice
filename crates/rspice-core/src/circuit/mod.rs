@@ -6,9 +6,9 @@
 //! - Separation of topology (static) from values (mutable)
 
 use crate::Value;
-use crate::solver::{TripletMatrix, StaticMatrix, CscIndex};
-use crate::device::{Diode, Bjt, Mosfet, MatrixStamper, Vcvs, Vccs, Cccs, Ccvs};
 use crate::device::behavioral::BehavioralSources;
+use crate::device::{Bjt, Cccs, Ccvs, Diode, MatrixStamper, Mosfet, Vccs, Vcvs};
+use crate::solver::{CscIndex, StaticMatrix, TripletMatrix};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -70,10 +70,22 @@ pub struct TwoTerminalStamp {
 impl TwoTerminalStamp {
     pub fn new(node_pos: NodeId, node_neg: NodeId) -> Self {
         Self {
-            pp: StampLocation { row: node_pos, col: node_pos },
-            pn: StampLocation { row: node_pos, col: node_neg },
-            np: StampLocation { row: node_neg, col: node_pos },
-            nn: StampLocation { row: node_neg, col: node_neg },
+            pp: StampLocation {
+                row: node_pos,
+                col: node_pos,
+            },
+            pn: StampLocation {
+                row: node_pos,
+                col: node_neg,
+            },
+            np: StampLocation {
+                row: node_neg,
+                col: node_pos,
+            },
+            nn: StampLocation {
+                row: node_neg,
+                col: node_neg,
+            },
             csc_pp: None,
             csc_pn: None,
             csc_np: None,
@@ -223,12 +235,19 @@ impl Capacitors {
         self.ic.push(None);
     }
 
-    pub fn add_with_ic(&mut self, name: String, node_pos: NodeId, node_neg: NodeId, capacitance: Value, ic: Value) {
+    pub fn add_with_ic(
+        &mut self,
+        name: String,
+        node_pos: NodeId,
+        node_neg: NodeId,
+        capacitance: Value,
+        ic: Value,
+    ) {
         self.names.push(name);
         self.stamps.push(TwoTerminalStamp::new(node_pos, node_neg));
         self.capacitances.push(capacitance);
-        self.v_prev.push(ic);  // Initialize v_prev to IC
-        self.v_prev_prev.push(ic);  // Initialize v_prev_prev to IC as well
+        self.v_prev.push(ic); // Initialize v_prev to IC
+        self.v_prev_prev.push(ic); // Initialize v_prev_prev to IC as well
         self.i_eq.push(0.0);
         self.ic.push(Some(ic));
     }
@@ -264,7 +283,7 @@ impl Capacitors {
             // Trapezoidal companion model: geq = 2C/dt
             let geq = 2.0 * self.capacitances[i] / dt;
             stamp.stamp_conductance(matrix, geq);
-            
+
             // Current source contribution
             let i_eq = self.i_eq[i];
             if stamp.pp.row != 0 {
@@ -294,7 +313,14 @@ impl VoltageSources {
         Self::default()
     }
 
-    pub fn add(&mut self, name: String, node_pos: NodeId, node_neg: NodeId, branch_idx: NodeId, dc_value: Value) {
+    pub fn add(
+        &mut self,
+        name: String,
+        node_pos: NodeId,
+        node_neg: NodeId,
+        branch_idx: NodeId,
+        dc_value: Value,
+    ) {
         self.names.push(name);
         self.node_pos.push(node_pos);
         self.node_neg.push(node_neg);
@@ -317,7 +343,7 @@ impl VoltageSources {
             let np = self.node_pos[i];
             let nn = self.node_neg[i];
             let br = get_branch_idx(self.branch_indices[i]);
-            
+
             // br->np and np->br
             if np > 0 {
                 self.csc_indices[i][0] = matrix.get_index(br - 1, np - 1);
@@ -333,11 +359,16 @@ impl VoltageSources {
 
     /// Stamp all voltage sources using pre-baked CSC indices
     #[inline]
-    pub fn stamp_all_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value], get_branch_idx: impl Fn(usize) -> usize) {
+    pub fn stamp_all_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        get_branch_idx: impl Fn(usize) -> usize,
+    ) {
         for i in 0..self.names.len() {
             let br = get_branch_idx(self.branch_indices[i]);
             let v = self.dc_values[i];
-            
+
             // Stamp matrix entries using pre-baked indices
             if let Some(idx) = self.csc_indices[i][0] {
                 matrix.stamp_direct(idx, 1.0);
@@ -351,18 +382,24 @@ impl VoltageSources {
             if let Some(idx) = self.csc_indices[i][3] {
                 matrix.stamp_direct(idx, -1.0);
             }
-            
+
             rhs[br - 1] = v;
         }
     }
 
     /// Stamp voltage sources with scaled values (for source stepping)
     #[inline]
-    pub fn stamp_all_direct_scaled(&self, matrix: &mut StaticMatrix, rhs: &mut [Value], scale: Value, get_branch_idx: impl Fn(usize) -> usize) {
+    pub fn stamp_all_direct_scaled(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        scale: Value,
+        get_branch_idx: impl Fn(usize) -> usize,
+    ) {
         for i in 0..self.names.len() {
             let br = get_branch_idx(self.branch_indices[i]);
             let v = self.dc_values[i] * scale;
-            
+
             if let Some(idx) = self.csc_indices[i][0] {
                 matrix.stamp_direct(idx, 1.0);
             }
@@ -375,7 +412,7 @@ impl VoltageSources {
             if let Some(idx) = self.csc_indices[i][3] {
                 matrix.stamp_direct(idx, -1.0);
             }
-            
+
             rhs[br - 1] = v;
         }
     }
@@ -388,7 +425,7 @@ impl VoltageSources {
             let nn = self.node_neg[i];
             let br = self.branch_indices[i];
             let v = self.dc_values[i];
-            
+
             // MNA stamp: add branch equation V(n+) - V(n-) = Vs
             if br > 0 && np > 0 {
                 matrix.push(br - 1, np - 1, 1.0);
@@ -441,7 +478,7 @@ impl CurrentSources {
             let np = self.node_pos[i];
             let nn = self.node_neg[i];
             let current = self.dc_values[i];
-            
+
             if np > 0 {
                 rhs[np - 1] -= current;
             }
@@ -458,7 +495,7 @@ impl CurrentSources {
             let np = self.node_pos[i];
             let nn = self.node_neg[i];
             let current = self.dc_values[i] * scale;
-            
+
             if np > 0 {
                 rhs[np - 1] -= current;
             }
@@ -492,7 +529,14 @@ impl Inductors {
         Self::default()
     }
 
-    pub fn add(&mut self, name: String, node_pos: NodeId, node_neg: NodeId, branch_idx: NodeId, inductance: Value) {
+    pub fn add(
+        &mut self,
+        name: String,
+        node_pos: NodeId,
+        node_neg: NodeId,
+        branch_idx: NodeId,
+        inductance: Value,
+    ) {
         self.names.push(name);
         self.node_pos.push(node_pos);
         self.node_neg.push(node_neg);
@@ -504,14 +548,22 @@ impl Inductors {
         self.ic.push(None);
     }
 
-    pub fn add_with_ic(&mut self, name: String, node_pos: NodeId, node_neg: NodeId, branch_idx: NodeId, inductance: Value, ic: Value) {
+    pub fn add_with_ic(
+        &mut self,
+        name: String,
+        node_pos: NodeId,
+        node_neg: NodeId,
+        branch_idx: NodeId,
+        inductance: Value,
+        ic: Value,
+    ) {
         self.names.push(name);
         self.node_pos.push(node_pos);
         self.node_neg.push(node_neg);
         self.branch_indices.push(branch_idx);
         self.inductances.push(inductance);
-        self.i_prev.push(ic);  // Initialize i_prev to IC
-        self.i_prev_prev.push(ic);  // Initialize i_prev_prev to IC as well
+        self.i_prev.push(ic); // Initialize i_prev to IC
+        self.i_prev_prev.push(ic); // Initialize i_prev_prev to IC as well
         self.v_prev.push(0.0);
         self.ic.push(Some(ic));
     }
@@ -573,16 +625,24 @@ impl Inductors {
             let np = self.node_pos[i];
             let nn = self.node_neg[i];
             let br = self.branch_indices[i];
-            
-            let v_pos = if np == 0 { 0.0 } else { voltages.get(np - 1).copied().unwrap_or(0.0) };
-            let v_neg = if nn == 0 { 0.0 } else { voltages.get(nn - 1).copied().unwrap_or(0.0) };
+
+            let v_pos = if np == 0 {
+                0.0
+            } else {
+                voltages.get(np - 1).copied().unwrap_or(0.0)
+            };
+            let v_neg = if nn == 0 {
+                0.0
+            } else {
+                voltages.get(nn - 1).copied().unwrap_or(0.0)
+            };
             let v = v_pos - v_neg;
-            
+
             // Update current: i = i_prev + (dt / 2L) * (v + v_prev)
             let l = self.inductances[i];
             self.i_prev[i] = self.i_prev[i] + (dt / (2.0 * l)) * (v + self.v_prev[i]);
             self.v_prev[i] = v;
-            
+
             // Also get branch current from solution for accuracy
             if br > 0 {
                 if let Some(&i_br) = currents.get(br - 1) {
@@ -629,7 +689,12 @@ impl Diodes {
     }
 
     /// Stamp all diodes into matrix for Newton iteration
-    pub fn stamp_all(&self, matrix: &mut impl MatrixStamper, rhs: &mut [Value], voltages: &[Value]) {
+    pub fn stamp_all(
+        &self,
+        matrix: &mut impl MatrixStamper,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
         use crate::device::NonlinearDevice;
         for d in &self.devices {
             d.stamp_nonlinear(voltages, matrix, rhs);
@@ -650,7 +715,12 @@ impl Diodes {
     }
 
     /// Stamp all diodes using O(1) direct indexing
-    pub fn stamp_all_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value], voltages: &[Value]) {
+    pub fn stamp_all_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
         for d in &self.devices {
             d.stamp_direct(matrix, rhs, voltages);
         }
@@ -689,7 +759,12 @@ impl Bjts {
     }
 
     /// Stamp all BJTs into matrix for Newton iteration
-    pub fn stamp_all(&self, matrix: &mut impl MatrixStamper, rhs: &mut [Value], voltages: &[Value]) {
+    pub fn stamp_all(
+        &self,
+        matrix: &mut impl MatrixStamper,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
         use crate::device::NonlinearDevice;
         for d in &self.devices {
             d.stamp_nonlinear(voltages, matrix, rhs);
@@ -710,7 +785,12 @@ impl Bjts {
     }
 
     /// Stamp all BJTs using O(1) direct indexing
-    pub fn stamp_all_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value], voltages: &[Value]) {
+    pub fn stamp_all_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
         for d in &self.devices {
             d.stamp_direct(matrix, rhs, voltages);
         }
@@ -749,7 +829,12 @@ impl Mosfets {
     }
 
     /// Stamp all MOSFETs into matrix for Newton iteration
-    pub fn stamp_all(&self, matrix: &mut impl MatrixStamper, rhs: &mut [Value], voltages: &[Value]) {
+    pub fn stamp_all(
+        &self,
+        matrix: &mut impl MatrixStamper,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
         use crate::device::NonlinearDevice;
         for d in &self.devices {
             d.stamp_nonlinear(voltages, matrix, rhs);
@@ -770,7 +855,12 @@ impl Mosfets {
     }
 
     /// Stamp all MOSFETs using O(1) direct indexing
-    pub fn stamp_all_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value], voltages: &[Value]) {
+    pub fn stamp_all_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
         for d in &self.devices {
             d.stamp_direct(matrix, rhs, voltages);
         }
@@ -793,37 +883,37 @@ pub struct CircuitData {
     num_nodes: usize,
     /// Number of branch current variables (voltage sources, inductors)
     num_branches: usize,
-    
+
     // Linear device storage (SoA for cache efficiency)
     pub resistors: Resistors,
     pub capacitors: Capacitors,
     pub inductors: Inductors,
     pub voltage_sources: VoltageSources,
     pub current_sources: CurrentSources,
-    
+
     // Nonlinear device storage (require Newton-Raphson iteration)
     pub diodes: Diodes,
     pub bjts: Bjts,
     pub mosfets: Mosfets,
-    
+
     // Controlled sources
     pub vcvs: Vcvs,
     pub vccs: Vccs,
     pub cccs: Cccs,
     pub ccvs: Ccvs,
-    
+
     // Pending control element resolutions (element name -> CCCS/CCVS indices)
     /// CCCS elements pending control branch resolution: (cccs_index, control_element_name)
     pending_cccs: Vec<(usize, String)>,
     /// CCVS elements pending control branch resolution: (ccvs_index, control_element_name)
     pending_ccvs: Vec<(usize, String)>,
-    
+
     // Advanced device storage
     pub vswitches: Vec<crate::device::VoltageSwitch>,
     pub iswitches: Vec<crate::device::CurrentSwitch>,
     pub tlines: Vec<crate::device::TransmissionLine>,
     pub couplings: Vec<crate::device::InductorCoupling>,
-    
+
     // Behavioral sources (expression-based B-elements)
     pub behavioral_sources: BehavioralSources,
 }
@@ -835,7 +925,7 @@ impl CircuitData {
         node_map.insert("0".to_string(), 0);
         node_map.insert("gnd".to_string(), 0);
         node_map.insert("GND".to_string(), 0);
-        
+
         Self {
             node_map,
             branch_names: HashMap::new(),
@@ -865,14 +955,183 @@ impl CircuitData {
     }
 
     /// Get or create a node ID for the given name
+    /// Node "0" is always ground (NodeId 0) - this is the SPICE standard
     pub fn get_or_create_node(&mut self, name: &str) -> NodeId {
+        // Node "0" is always ground - return 0 immediately
+        if name == "0" {
+            self.node_map.insert("0".to_string(), 0);
+            return 0;
+        }
+
         if let Some(&id) = self.node_map.get(name) {
             return id;
         }
-        
+
         self.num_nodes += 1;
         self.node_map.insert(name.to_string(), self.num_nodes);
         self.num_nodes
+    }
+
+    /// Check if any device in the circuit actually uses ground (node 0)
+    /// This is different from just having "0" in the node map - we need to check
+    /// if any device terminal is connected to node 0
+    pub fn has_ground_node(&self) -> bool {
+        // Check resistors
+        for stamp in &self.resistors.stamps {
+            if stamp.pp.row == 0
+                || stamp.pp.col == 0
+                || stamp.pn.row == 0
+                || stamp.pn.col == 0
+                || stamp.np.row == 0
+                || stamp.np.col == 0
+                || stamp.nn.row == 0
+                || stamp.nn.col == 0
+            {
+                return true;
+            }
+        }
+
+        // Check voltage sources
+        for i in 0..self.voltage_sources.len() {
+            if self.voltage_sources.node_pos[i] == 0 || self.voltage_sources.node_neg[i] == 0 {
+                return true;
+            }
+        }
+
+        // Check current sources
+        for i in 0..self.current_sources.len() {
+            if self.current_sources.node_pos[i] == 0 || self.current_sources.node_neg[i] == 0 {
+                return true;
+            }
+        }
+
+        // Check capacitors
+        for stamp in &self.capacitors.stamps {
+            if stamp.pp.row == 0 || stamp.nn.row == 0 {
+                return true;
+            }
+        }
+
+        // Check inductors
+        for i in 0..self.inductors.len() {
+            if self.inductors.node_pos[i] == 0 || self.inductors.node_neg[i] == 0 {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Ensure a ground reference exists. If no explicit node "0" was specified,
+    /// pick the first node connected to a voltage source's negative terminal
+    /// as the reference (LTspice-compatible behavior).
+    /// This should be called after all elements are added but before simulation.
+    pub fn ensure_ground_reference(&mut self) {
+        if self.has_ground_node() {
+            return; // Already have explicit ground
+        }
+
+        // No explicit ground - pick first voltage source's negative terminal
+        // This matches LTspice behavior
+        if !self.voltage_sources.is_empty() {
+            let ref_node_id = self.voltage_sources.node_neg[0];
+            if ref_node_id > 0 {
+                // Find the name of this node and remap it to 0
+                let mut ref_node_name = None;
+                for (name, &id) in &self.node_map {
+                    if id == ref_node_id {
+                        ref_node_name = Some(name.clone());
+                        break;
+                    }
+                }
+
+                if let Some(name) = ref_node_name {
+                    // Remap this node to ground (0)
+                    self.remap_node_to_ground(ref_node_id);
+                    log::info!(
+                        "Auto-selected node '{}' as ground reference (LTspice-compatible)",
+                        name
+                    );
+                }
+            }
+        }
+    }
+
+    /// Remap all occurrences of old_node_id to ground (0) and shift all higher
+    /// node IDs down by 1 to maintain contiguous matrix indices
+    fn remap_node_to_ground(&mut self, old_node_id: NodeId) {
+        // Helper closure to remap a single node ID
+        let remap = |id: NodeId| -> NodeId {
+            if id == old_node_id {
+                0
+            } else if id > old_node_id {
+                id - 1 // Shift down to fill the gap
+            } else {
+                id
+            }
+        };
+
+        // Update node map
+        for (_, id) in self.node_map.iter_mut() {
+            *id = remap(*id);
+        }
+
+        // Update all device node references
+        // Resistors
+        for stamp in &mut self.resistors.stamps {
+            Self::remap_stamp_full(stamp, old_node_id);
+        }
+
+        // Capacitors
+        for stamp in &mut self.capacitors.stamps {
+            Self::remap_stamp_full(stamp, old_node_id);
+        }
+
+        // Voltage sources
+        for i in 0..self.voltage_sources.len() {
+            self.voltage_sources.node_pos[i] = remap(self.voltage_sources.node_pos[i]);
+            self.voltage_sources.node_neg[i] = remap(self.voltage_sources.node_neg[i]);
+        }
+
+        // Current sources
+        for i in 0..self.current_sources.len() {
+            self.current_sources.node_pos[i] = remap(self.current_sources.node_pos[i]);
+            self.current_sources.node_neg[i] = remap(self.current_sources.node_neg[i]);
+        }
+
+        // Inductors
+        for i in 0..self.inductors.len() {
+            self.inductors.node_pos[i] = remap(self.inductors.node_pos[i]);
+            self.inductors.node_neg[i] = remap(self.inductors.node_neg[i]);
+        }
+
+        // Decrement num_nodes since one node is now ground
+        if self.num_nodes > 0 {
+            self.num_nodes -= 1;
+        }
+    }
+
+    /// Helper to remap a two-terminal stamp with full shifting
+    fn remap_stamp_full(stamp: &mut TwoTerminalStamp, old_id: NodeId) {
+        // Helper to remap a single node ID
+        let remap = |id: NodeId| -> NodeId {
+            if id == old_id {
+                0
+            } else if id > old_id {
+                id - 1 // Shift down to fill the gap
+            } else {
+                id
+            }
+        };
+
+        stamp.pp.row = remap(stamp.pp.row);
+        stamp.pp.col = remap(stamp.pp.col);
+        stamp.pn.row = remap(stamp.pn.row);
+        stamp.pn.col = remap(stamp.pn.col);
+        stamp.np.row = remap(stamp.np.row);
+        stamp.np.col = remap(stamp.np.col);
+        stamp.nn.row = remap(stamp.nn.row);
+        stamp.nn.col = remap(stamp.nn.col);
     }
 
     /// Allocate a branch current variable - returns branch ordinal (1-indexed)
@@ -880,7 +1139,7 @@ impl CircuitData {
     /// Use get_branch_matrix_index() to get the actual matrix row/column.
     pub fn allocate_branch(&mut self) -> NodeId {
         self.num_branches += 1;
-        self.num_branches  // Return branch ordinal (1, 2, 3...)
+        self.num_branches // Return branch ordinal (1, 2, 3...)
     }
 
     /// Allocate a branch and register it with the given element name
@@ -896,7 +1155,8 @@ impl CircuitData {
     /// Look up a branch ordinal by element name (for CCCS/CCVS control element)
     /// Returns None if the element is not found
     pub fn get_branch_by_name(&self, name: &str) -> Option<NodeId> {
-        self.branch_names.get(name)
+        self.branch_names
+            .get(name)
             .or_else(|| self.branch_names.get(&name.to_uppercase()))
             .copied()
     }
@@ -918,26 +1178,30 @@ impl CircuitData {
     pub fn resolve_control_elements(&mut self) -> Result<(), CircuitError> {
         // Resolve CCCS control branches
         for (cccs_idx, control_name) in self.pending_cccs.drain(..).collect::<Vec<_>>() {
-            let branch = self.get_branch_by_name(&control_name)
-                .ok_or_else(|| CircuitError::InvalidComponent(
-                    format!("CCCS control element not found: {}", control_name)
-                ))?;
+            let branch = self.get_branch_by_name(&control_name).ok_or_else(|| {
+                CircuitError::InvalidComponent(format!(
+                    "CCCS control element not found: {}",
+                    control_name
+                ))
+            })?;
             if cccs_idx < self.cccs.ctrl_branch.len() {
                 self.cccs.ctrl_branch[cccs_idx] = branch;
             }
         }
-        
+
         // Resolve CCVS control branches
         for (ccvs_idx, control_name) in self.pending_ccvs.drain(..).collect::<Vec<_>>() {
-            let branch = self.get_branch_by_name(&control_name)
-                .ok_or_else(|| CircuitError::InvalidComponent(
-                    format!("CCVS control element not found: {}", control_name)
-                ))?;
+            let branch = self.get_branch_by_name(&control_name).ok_or_else(|| {
+                CircuitError::InvalidComponent(format!(
+                    "CCVS control element not found: {}",
+                    control_name
+                ))
+            })?;
             if ccvs_idx < self.ccvs.ctrl_branch.len() {
                 self.ccvs.ctrl_branch[ccvs_idx] = branch;
             }
         }
-        
+
         Ok(())
     }
 
@@ -999,8 +1263,9 @@ impl CircuitData {
         self.resistors.link_indices(matrix);
         self.capacitors.link_indices(matrix);
         let num_nodes = self.num_nodes;
-        self.voltage_sources.link_indices(matrix, |br_ordinal| num_nodes + br_ordinal);
-        
+        self.voltage_sources
+            .link_indices(matrix, |br_ordinal| num_nodes + br_ordinal);
+
         // Nonlinear devices
         self.diodes.link_all(matrix);
         self.bjts.link_all(matrix);
@@ -1011,19 +1276,27 @@ impl CircuitData {
     pub fn stamp_dc_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
         self.resistors.stamp_all_direct(matrix);
         let num_nodes = self.num_nodes;
-        self.voltage_sources.stamp_all_direct(matrix, rhs, |br_ordinal| num_nodes + br_ordinal);
+        self.voltage_sources
+            .stamp_all_direct(matrix, rhs, |br_ordinal| num_nodes + br_ordinal);
         self.current_sources.stamp_all(rhs);
-        
+
         // Stamp controlled sources
-        self.vcvs.stamp_all_direct(matrix, |br_ordinal| num_nodes + br_ordinal);
+        self.vcvs
+            .stamp_all_direct(matrix, |br_ordinal| num_nodes + br_ordinal);
         self.vccs.stamp_all_direct(matrix);
     }
 
     /// Stamp all devices with scaled source values (for source stepping)
-    pub fn stamp_dc_direct_scaled(&self, matrix: &mut StaticMatrix, rhs: &mut [Value], scale: Value) {
+    pub fn stamp_dc_direct_scaled(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        scale: Value,
+    ) {
         self.resistors.stamp_all_direct(matrix);
         let num_nodes = self.num_nodes;
-        self.voltage_sources.stamp_all_direct_scaled(matrix, rhs, scale, |br_ordinal| num_nodes + br_ordinal);
+        self.voltage_sources
+            .stamp_all_direct_scaled(matrix, rhs, scale, |br_ordinal| num_nodes + br_ordinal);
         self.current_sources.stamp_all_scaled(rhs, scale);
     }
 
@@ -1047,7 +1320,12 @@ impl CircuitData {
     }
 
     /// Stamp all nonlinear devices into matrix using O(1) direct indexing
-    pub fn stamp_nonlinear(&self, matrix: &mut StaticMatrix, rhs: &mut [Value], voltages: &[Value]) {
+    pub fn stamp_nonlinear(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
         self.diodes.stamp_all_direct(matrix, rhs, voltages);
         self.bjts.stamp_all_direct(matrix, rhs, voltages);
         self.mosfets.stamp_all_direct(matrix, rhs, voltages);
@@ -1055,7 +1333,7 @@ impl CircuitData {
 
     /// Check if all nonlinear devices have converged
     pub fn nonlinear_converged(&self, tolerance: Value) -> bool {
-        self.diodes.all_converged(tolerance) 
+        self.diodes.all_converged(tolerance)
             && self.bjts.all_converged(tolerance)
             && self.mosfets.all_converged(tolerance)
     }
@@ -1111,7 +1389,7 @@ mod tests {
         let mut circuit = CircuitData::new();
         let n1 = circuit.get_or_create_node("1");
         let n2 = circuit.get_or_create_node("2");
-        
+
         assert_eq!(n1, 1);
         assert_eq!(n2, 2);
         assert_eq!(circuit.num_nodes(), 2);
@@ -1122,12 +1400,12 @@ mod tests {
         let mut circuit = CircuitData::new();
         let n1 = circuit.get_or_create_node("1");
         let n2 = circuit.get_or_create_node("2");
-        
+
         circuit.resistors.add("R1".to_string(), n1, n2, 1000.0);
-        
+
         let mut matrix = circuit.create_matrix();
         circuit.resistors.stamp_all(&mut matrix);
-        
+
         assert_eq!(matrix.nnz(), 4); // 4 stamp entries
     }
 
@@ -1137,7 +1415,7 @@ mod tests {
         let gnd = circuit.get_or_create_node("0");
         let gnd2 = circuit.get_or_create_node("gnd");
         let gnd3 = circuit.get_or_create_node("GND");
-        
+
         assert_eq!(gnd, 0);
         assert_eq!(gnd2, 0);
         assert_eq!(gnd3, 0);

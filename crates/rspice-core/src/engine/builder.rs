@@ -268,6 +268,10 @@ impl Engine {
             .resolve_control_elements()
             .map_err(|e| SimulationError::Circuit(e.to_string()))?;
 
+        // Ensure ground reference exists (LTspice-compatible behavior)
+        // If no node "0" was specified, auto-select a reference node
+        circuit.ensure_ground_reference();
+
         Ok(circuit)
     }
 }
