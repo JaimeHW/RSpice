@@ -26,6 +26,9 @@ struct ViewState {
     /// Last mouse position during pan
     pan_start_x: f64,
     pan_start_y: f64,
+    /// Plot area dimensions (updated on mouse events)
+    plot_width: f64,
+    plot_height: f64,
 }
 
 /// State for a single waveform pane (independent Y-axis)
@@ -221,6 +224,8 @@ impl Default for ViewState {
             is_panning: false,
             pan_start_x: 0.0,
             pan_start_y: 0.0,
+            plot_width: 800.0, // Default, updated dynamically on mouse events
+            plot_height: 400.0,
         }
     }
 }
@@ -391,7 +396,7 @@ pub fn Waveform() -> Element {
 /// Plot area with mouse interaction for zoom/pan
 #[component]
 fn WaveformPlotArea(
-    view_state: Signal<ViewState>,
+    mut view_state: Signal<ViewState>,
     mut cursor_state: Signal<CursorState>,
     waveforms: Vec<crate::state::WaveformData>,
 ) -> Element {
@@ -411,6 +416,16 @@ fn WaveformPlotArea(
                 cursor: grab;
             ",
 
+            // Get actual element dimensions on mount
+            onmounted: move |e| {
+                spawn(async move {
+                    if let Ok(rect) = e.data().get_client_rect().await {
+                        view_state.write().plot_width = rect.width().max(100.0);
+                        view_state.write().plot_height = rect.height().max(100.0);
+                    }
+                });
+            },
+
             // Mouse wheel zoom
             onwheel: move |e| {
                 let delta = e.delta();
@@ -424,11 +439,14 @@ fn WaveformPlotArea(
                 view_state.write().zoom(factor, 0.5, 0.5);
             },
 
-            // Pan with mouse drag
+            // Pan with mouse drag - capture element bounds at start
             onmousedown: move |e| {
-                view_state.write().is_panning = true;
-                view_state.write().pan_start_x = e.client_coordinates().x;
-                view_state.write().pan_start_y = e.client_coordinates().y;
+                // Use element-relative coordinates for consistent pan tracking
+                let elem = e.element_coordinates();
+                let mut vs = view_state.write();
+                vs.is_panning = true;
+                vs.pan_start_x = elem.x;
+                vs.pan_start_y = elem.y;
             },
 
             onmouseup: move |_| {
@@ -442,16 +460,29 @@ fn WaveformPlotArea(
             onmousemove: move |e| {
                 if view_state.read().is_panning {
                     let vs = *view_state.read();
-                    let dx = (e.client_coordinates().x - vs.pan_start_x) / 500.0; // Scaled sensitivity
-                    let dy = (e.client_coordinates().y - vs.pan_start_y) / 500.0;
+                    let elem = e.element_coordinates();
+
+                    // Calculate pixel deltas using element-relative coordinates
+                    let pixel_dx = elem.x - vs.pan_start_x;
+                    let pixel_dy = elem.y - vs.pan_start_y;
+
+                    // Use stored plot dimensions (set by onmounted)
+                    let plot_width = vs.plot_width.max(100.0);
+                    let plot_height = vs.plot_height.max(100.0);
 
                     let x_range = vs.x_max - vs.x_min;
                     let y_range = vs.y_max - vs.y_min;
 
+                    // Convert pixel movement to data coordinate movement
+                    // Negative for X because dragging right should move view left (show earlier data)
+                    // Positive for Y because screen Y increases downward but data Y increases upward
+                    let data_dx = -(pixel_dx / plot_width) * x_range;
+                    let data_dy = (pixel_dy / plot_height) * y_range;
+
                     let mut new_vs = view_state.write();
-                    new_vs.pan(-dx * x_range, dy * y_range);
-                    new_vs.pan_start_x = e.client_coordinates().x;
-                    new_vs.pan_start_y = e.client_coordinates().y;
+                    new_vs.pan(data_dx, data_dy);
+                    new_vs.pan_start_x = elem.x;
+                    new_vs.pan_start_y = elem.y;
                 }
             },
 
