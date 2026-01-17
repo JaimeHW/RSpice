@@ -18,14 +18,14 @@ pub enum Instruction {
     LoadVoltage(usize),
     /// Load branch current by index
     LoadCurrent(usize),
-    
+
     // Binary ops (pop 2, push 1)
     Add,
     Sub,
     Mul,
     Div,
     Pow,
-    
+
     // Comparison (pop 2, push 1)
     Lt,
     Le,
@@ -33,15 +33,15 @@ pub enum Instruction {
     Ge,
     Eq,
     Ne,
-    
+
     // Logical (pop 2, push 1)
     And,
     Or,
-    
+
     // Unary ops (pop 1, push 1)
     Neg,
     Not,
-    
+
     // Built-in functions
     Abs,
     Sqrt,
@@ -54,16 +54,24 @@ pub enum Instruction {
     Asin,
     Acos,
     Atan,
+    Atan2, // atan2(y, x)
     Sinh,
     Cosh,
     Tanh,
-    
+    Floor,
+    Ceil,
+    Round,
+
     // Multi-arg functions
     Min,
     Max,
     Pwr,
     Limit,
-    
+    Sign,
+    Uramp,
+    Stp,
+    Mod,
+
     /// Conditional: if top > 0, keep second, else keep third
     IfElse,
 }
@@ -171,7 +179,7 @@ impl Vm {
                 Instruction::PushConst(v) => self.stack.push(*v),
                 Instruction::PushTime => self.stack.push(ctx.time),
                 Instruction::PushFreq => self.stack.push(ctx.frequency),
-                
+
                 Instruction::LoadVoltage(idx) => {
                     let v = ctx.voltages.get(*idx).copied().unwrap_or(0.0);
                     self.stack.push(v);
@@ -187,18 +195,26 @@ impl Vm {
                 Instruction::Mul => self.binary_op(|a, b| a * b),
                 Instruction::Div => self.binary_op(|a, b| if b != 0.0 { a / b } else { 0.0 }),
                 Instruction::Pow => self.binary_op(|a, b| a.powf(b)),
-                
+
                 // Comparisons
                 Instruction::Lt => self.binary_op(|a, b| if a < b { 1.0 } else { 0.0 }),
                 Instruction::Le => self.binary_op(|a, b| if a <= b { 1.0 } else { 0.0 }),
                 Instruction::Gt => self.binary_op(|a, b| if a > b { 1.0 } else { 0.0 }),
                 Instruction::Ge => self.binary_op(|a, b| if a >= b { 1.0 } else { 0.0 }),
-                Instruction::Eq => self.binary_op(|a, b| if (a - b).abs() < 1e-12 { 1.0 } else { 0.0 }),
-                Instruction::Ne => self.binary_op(|a, b| if (a - b).abs() >= 1e-12 { 1.0 } else { 0.0 }),
-                
+                Instruction::Eq => {
+                    self.binary_op(|a, b| if (a - b).abs() < 1e-12 { 1.0 } else { 0.0 })
+                }
+                Instruction::Ne => {
+                    self.binary_op(|a, b| if (a - b).abs() >= 1e-12 { 1.0 } else { 0.0 })
+                }
+
                 // Logical
-                Instruction::And => self.binary_op(|a, b| if a != 0.0 && b != 0.0 { 1.0 } else { 0.0 }),
-                Instruction::Or => self.binary_op(|a, b| if a != 0.0 || b != 0.0 { 1.0 } else { 0.0 }),
+                Instruction::And => {
+                    self.binary_op(|a, b| if a != 0.0 && b != 0.0 { 1.0 } else { 0.0 })
+                }
+                Instruction::Or => {
+                    self.binary_op(|a, b| if a != 0.0 || b != 0.0 { 1.0 } else { 0.0 })
+                }
 
                 // Unary operations
                 Instruction::Neg => self.unary_op(|a| -a),
@@ -216,15 +232,31 @@ impl Vm {
                 Instruction::Asin => self.unary_op(|a| a.clamp(-1.0, 1.0).asin()),
                 Instruction::Acos => self.unary_op(|a| a.clamp(-1.0, 1.0).acos()),
                 Instruction::Atan => self.unary_op(|a| a.atan()),
+                Instruction::Atan2 => self.binary_op(|y, x| y.atan2(x)),
                 Instruction::Sinh => self.unary_op(|a| a.sinh()),
                 Instruction::Cosh => self.unary_op(|a| a.cosh()),
                 Instruction::Tanh => self.unary_op(|a| a.tanh()),
+                Instruction::Floor => self.unary_op(|a| a.floor()),
+                Instruction::Ceil => self.unary_op(|a| a.ceil()),
+                Instruction::Round => self.unary_op(|a| a.round()),
+                Instruction::Sign => self.unary_op(|a| {
+                    if a > 0.0 {
+                        1.0
+                    } else if a < 0.0 {
+                        -1.0
+                    } else {
+                        0.0
+                    }
+                }),
+                Instruction::Uramp => self.unary_op(|a| a.max(0.0)),
+                Instruction::Stp => self.unary_op(|a| if a >= 0.0 { 1.0 } else { 0.0 }),
 
                 // Multi-arg functions
                 Instruction::Min => self.binary_op(|a, b| a.min(b)),
                 Instruction::Max => self.binary_op(|a, b| a.max(b)),
                 Instruction::Pwr => self.binary_op(|a, b| a.abs().powf(b)),
-                
+                Instruction::Mod => self.binary_op(|a, b| if b != 0.0 { a % b } else { 0.0 }),
+
                 Instruction::Limit => {
                     // limit(x, lo, hi) - pop 3, push 1
                     if self.stack.len() >= 3 {
@@ -241,7 +273,8 @@ impl Vm {
                         let else_val = self.stack.pop().unwrap();
                         let then_val = self.stack.pop().unwrap();
                         let cond = self.stack.pop().unwrap();
-                        self.stack.push(if cond != 0.0 { then_val } else { else_val });
+                        self.stack
+                            .push(if cond != 0.0 { then_val } else { else_val });
                     }
                 }
             }
@@ -293,7 +326,7 @@ mod tests {
     fn test_vm_voltage_reference() {
         let mut program = CompiledExpr::new();
         let node_idx = program.get_or_create_node("2");
-        
+
         // V(2) * 2
         program.instructions = vec![
             Instruction::LoadVoltage(node_idx),
@@ -304,7 +337,7 @@ mod tests {
         let voltages_unused = [0.0, 5.0]; // Node 2 is at index 1 (assuming mapping)
         let mut vm = Vm::new();
         let _ctx = Context::dc(&voltages_unused, &[]);
-        
+
         // Since our mapping puts "2" -> 0, we need voltage at index 0
         let voltages = [5.0];
         let ctx = Context::dc(&voltages, &[]);

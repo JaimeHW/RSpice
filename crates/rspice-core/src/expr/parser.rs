@@ -3,7 +3,7 @@
 //! Parses expressions like `V(2)*I(L1)+sin(TIME)` into AST.
 //! Uses a simple recursive descent parser with operator precedence.
 
-use super::ast::{Expr, BinaryOp, UnaryOp, Function};
+use super::ast::{BinaryOp, Expr, Function, UnaryOp};
 use std::iter::Peekable;
 use std::str::Chars;
 
@@ -17,18 +17,18 @@ pub enum Token {
     Minus,
     Star,
     Slash,
-    Caret,      // ^
+    Caret, // ^
     // Comparison
     Lt,
     Le,
     Gt,
     Ge,
-    Eq,         // ==
-    Ne,         // !=
+    Eq, // ==
+    Ne, // !=
     // Logical
-    And,        // &&
-    Or,         // ||
-    Not,        // !
+    And, // &&
+    Or,  // ||
+    Not, // !
     // Delimiters
     LParen,
     RParen,
@@ -62,7 +62,15 @@ impl<'a> Lexer<'a> {
     fn read_number(&mut self) -> f64 {
         let mut s = String::new();
         while let Some(&c) = self.chars.peek() {
-            if c.is_ascii_digit() || c == '.' || c == 'e' || c == 'E' || c == '-' && s.ends_with('e') || c == '-' && s.ends_with('E') || c == '+' && s.ends_with('e') || c == '+' && s.ends_with('E') {
+            if c.is_ascii_digit()
+                || c == '.'
+                || c == 'e'
+                || c == 'E'
+                || c == '-' && s.ends_with('e')
+                || c == '-' && s.ends_with('E')
+                || c == '+' && s.ends_with('e')
+                || c == '+' && s.ends_with('E')
+            {
                 s.push(self.chars.next().unwrap());
             } else {
                 break;
@@ -91,14 +99,38 @@ impl<'a> Lexer<'a> {
             Some(&c) => match c {
                 '0'..='9' | '.' => Token::Number(self.read_number()),
                 'a'..='z' | 'A'..='Z' | '_' => Token::Ident(self.read_ident()),
-                '+' => { self.chars.next(); Token::Plus }
-                '-' => { self.chars.next(); Token::Minus }
-                '*' => { self.chars.next(); Token::Star }
-                '/' => { self.chars.next(); Token::Slash }
-                '^' => { self.chars.next(); Token::Caret }
-                '(' => { self.chars.next(); Token::LParen }
-                ')' => { self.chars.next(); Token::RParen }
-                ',' => { self.chars.next(); Token::Comma }
+                '+' => {
+                    self.chars.next();
+                    Token::Plus
+                }
+                '-' => {
+                    self.chars.next();
+                    Token::Minus
+                }
+                '*' => {
+                    self.chars.next();
+                    Token::Star
+                }
+                '/' => {
+                    self.chars.next();
+                    Token::Slash
+                }
+                '^' => {
+                    self.chars.next();
+                    Token::Caret
+                }
+                '(' => {
+                    self.chars.next();
+                    Token::LParen
+                }
+                ')' => {
+                    self.chars.next();
+                    Token::RParen
+                }
+                ',' => {
+                    self.chars.next();
+                    Token::Comma
+                }
                 '<' => {
                     self.chars.next();
                     if self.chars.peek() == Some(&'=') {
@@ -149,8 +181,11 @@ impl<'a> Lexer<'a> {
                     }
                     Token::Or
                 }
-                _ => { self.chars.next(); self.next_token() } // Skip unknown
-            }
+                _ => {
+                    self.chars.next();
+                    self.next_token()
+                } // Skip unknown
+            },
         }
     }
 }
@@ -395,7 +430,7 @@ impl<'a> Parser<'a> {
         if self.current == Token::LParen {
             self.advance();
             let mut args = Vec::new();
-            
+
             if self.current != Token::RParen {
                 args.push(self.parse());
                 while self.current == Token::Comma {
@@ -417,14 +452,22 @@ impl<'a> Parser<'a> {
                 "ASIN" | "ARCSIN" => Some(Function::Asin),
                 "ACOS" | "ARCCOS" => Some(Function::Acos),
                 "ATAN" | "ARCTAN" => Some(Function::Atan),
+                "ATAN2" => Some(Function::Atan2),
                 "SINH" => Some(Function::Sinh),
                 "COSH" => Some(Function::Cosh),
                 "TANH" => Some(Function::Tanh),
+                "FLOOR" | "INT" => Some(Function::Floor),
+                "CEIL" | "CEILING" => Some(Function::Ceil),
+                "ROUND" | "NINT" => Some(Function::Round),
                 "MIN" => Some(Function::Min),
                 "MAX" => Some(Function::Max),
                 "PWR" => Some(Function::Pwr),
                 "PWRS" => Some(Function::Pwrs),
                 "LIMIT" => Some(Function::Limit),
+                "SIGN" | "SGN" => Some(Function::Sign),
+                "URAMP" => Some(Function::Uramp),
+                "STP" | "STEP" | "U" => Some(Function::Stp),
+                "MOD" | "FMOD" => Some(Function::Mod),
                 "IF" => Some(Function::If),
                 _ => None,
             };
@@ -470,7 +513,9 @@ mod tests {
     fn test_parse_binary() {
         let expr = parse_expression("V(1) + V(2)");
         match expr {
-            Expr::Binary { op: BinaryOp::Add, .. } => (),
+            Expr::Binary {
+                op: BinaryOp::Add, ..
+            } => (),
             _ => panic!("Expected addition"),
         }
     }
@@ -479,7 +524,9 @@ mod tests {
     fn test_parse_multiply() {
         let expr = parse_expression("2 * V(1)");
         match expr {
-            Expr::Binary { op: BinaryOp::Mul, .. } => (),
+            Expr::Binary {
+                op: BinaryOp::Mul, ..
+            } => (),
             _ => panic!("Expected multiplication"),
         }
     }
@@ -489,10 +536,16 @@ mod tests {
         // 2 + 3 * 4 should parse as 2 + (3 * 4)
         let expr = parse_expression("2 + 3 * 4");
         match expr {
-            Expr::Binary { op: BinaryOp::Add, left, right } => {
+            Expr::Binary {
+                op: BinaryOp::Add,
+                left,
+                right,
+            } => {
                 assert_eq!(*left, Expr::Const(2.0));
                 match *right {
-                    Expr::Binary { op: BinaryOp::Mul, .. } => (),
+                    Expr::Binary {
+                        op: BinaryOp::Mul, ..
+                    } => (),
                     _ => panic!("Expected multiplication on right"),
                 }
             }
@@ -504,7 +557,10 @@ mod tests {
     fn test_parse_function() {
         let expr = parse_expression("sin(V(1))");
         match expr {
-            Expr::Function { func: Function::Sin, args } => {
+            Expr::Function {
+                func: Function::Sin,
+                args,
+            } => {
                 assert_eq!(args.len(), 1);
             }
             _ => panic!("Expected function call"),
@@ -522,7 +578,9 @@ mod tests {
         // V(2) * 2 + sin(TIME)
         let expr = parse_expression("V(2) * 2 + sin(TIME)");
         match expr {
-            Expr::Binary { op: BinaryOp::Add, .. } => (),
+            Expr::Binary {
+                op: BinaryOp::Add, ..
+            } => (),
             _ => panic!("Expected addition at top"),
         }
     }

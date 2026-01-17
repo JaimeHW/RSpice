@@ -20,15 +20,9 @@ pub enum Expr {
         right: Box<Expr>,
     },
     /// Unary operation
-    Unary {
-        op: UnaryOp,
-        operand: Box<Expr>,
-    },
+    Unary { op: UnaryOp, operand: Box<Expr> },
     /// Function call
-    Function {
-        func: Function,
-        args: Vec<Expr>,
-    },
+    Function { func: Function, args: Vec<Expr> },
     /// Time variable (for transient)
     Time,
     /// Frequency variable (for AC)
@@ -65,29 +59,39 @@ pub enum UnaryOp {
 /// Built-in functions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Function {
-    // Math
+    // Basic math
     Abs,
     Sqrt,
     Exp,
     Log,
     Log10,
+    // Trigonometric
     Sin,
     Cos,
     Tan,
     Asin,
     Acos,
     Atan,
+    Atan2, // atan2(y, x) - two-argument arctangent
     Sinh,
     Cosh,
     Tanh,
+    // Rounding
+    Floor,
+    Ceil,
+    Round,
     // SPICE-specific
-    Pwr,    // pwr(x, y) = |x|^y
-    Pwrs,   // pwrs(x, y) = sign(x) * |x|^y
-    Limit,  // limit(x, lo, hi)
+    Pwr,   // pwr(x, y) = |x|^y
+    Pwrs,  // pwrs(x, y) = sign(x) * |x|^y
+    Limit, // limit(x, lo, hi)
     Min,
     Max,
+    Sign,  // sign(x) = -1, 0, or 1
+    Uramp, // uramp(x) = max(0, x) - positive ramp
+    Stp,   // stp(x) = 0 if x<0, 1 if x>=0 - step function
+    Mod,   // mod(x, y) = x % y - modulo
     // Conditional
-    If,     // if(cond, then, else)
+    If, // if(cond, then, else)
 }
 
 impl Expr {
@@ -157,13 +161,12 @@ mod tests {
 
     #[test]
     fn test_expr_construction() {
-        let expr = Expr::mul(
-            Expr::voltage("2"),
-            Expr::constant(2.0),
-        );
-        
+        let expr = Expr::mul(Expr::voltage("2"), Expr::constant(2.0));
+
         match expr {
-            Expr::Binary { op: BinaryOp::Mul, .. } => (),
+            Expr::Binary {
+                op: BinaryOp::Mul, ..
+            } => (),
             _ => panic!("Expected multiplication"),
         }
     }
