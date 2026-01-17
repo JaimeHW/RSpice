@@ -14,4 +14,4 @@ pub use console::Console;
 pub use netlist::Netlist;
 pub use schematic::Schematic;
 pub use waveform::Waveform;
-pub use waveform_gpu::{decimate, WaveformRenderer};
+pub use waveform_gpu::{decimate, WaveformGpuState, WaveformPainter, WaveformTrace};

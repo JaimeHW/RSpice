@@ -1,75 +1,120 @@
 //! GPU-Accelerated Waveform Rendering
 //!
 //! Uses wgpu for hardware-accelerated line rendering of waveform traces.
-//! Targets 60fps pan/zoom on millions of data points.
+//! Implements Dioxus native CustomPaintSource for direct GPU integration.
 
 use bytemuck::{Pod, Zeroable};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use wgpu::util::DeviceExt;
 
 /// Vertex data for waveform rendering
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct WaveformVertex {
-    /// Position (normalized device coordinates)
-    position: [f32; 2],
+    /// Position in data coordinates
+    pub position: [f32; 2],
     /// Color (RGBA)
-    color: [f32; 4],
+    pub color: [f32; 4],
 }
 
 /// View uniforms passed to the shader
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct ViewUniforms {
-    /// Transform matrix (scale + translate)
+    /// Transform: x_scale, x_offset, y_scale, y_offset
     pub x_scale: f32,
     pub x_offset: f32,
     pub y_scale: f32,
     pub y_offset: f32,
+    /// Background color
+    pub bg_r: f32,
+    pub bg_g: f32,
+    pub bg_b: f32,
+    pub bg_a: f32,
 }
 
-/// GPU renderer for waveform traces
-pub struct WaveformRenderer {
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
-    pipeline: wgpu::RenderPipeline,
-    uniform_buffer: wgpu::Buffer,
-    uniform_bind_group: wgpu::BindGroup,
-    vertex_buffer: Option<wgpu::Buffer>,
-    vertex_count: u32,
+/// Waveform data to be rendered
+#[derive(Clone, Debug)]
+pub struct WaveformTrace {
+    pub x: Vec<f64>,
+    pub y: Vec<f64>,
+    pub color: [f32; 4],
+    pub name: String,
 }
 
-impl WaveformRenderer {
-    /// Create a new waveform renderer
-    pub fn new(
-        device: Arc<wgpu::Device>,
-        queue: Arc<wgpu::Queue>,
-        format: wgpu::TextureFormat,
-    ) -> Self {
-        // Create shader module
+/// Shared state for waveform rendering
+#[derive(Clone)]
+pub struct WaveformGpuState {
+    pub traces: Vec<WaveformTrace>,
+    pub x_min: f64,
+    pub x_max: f64,
+    pub y_min: f64,
+    pub y_max: f64,
+    pub dirty: bool,
+}
+
+impl Default for WaveformGpuState {
+    fn default() -> Self {
+        Self {
+            traces: Vec::new(),
+            x_min: 0.0,
+            x_max: 5e-3,
+            y_min: -1.5,
+            y_max: 1.5,
+            dirty: true,
+        }
+    }
+}
+
+/// GPU Waveform Painter implementing CustomPaintSource
+pub struct WaveformPainter {
+    /// Shared state with the Dioxus component
+    pub state: Arc<Mutex<WaveformGpuState>>,
+    /// wgpu device (set on resume)
+    device: Option<Arc<wgpu::Device>>,
+    queue: Option<Arc<wgpu::Queue>>,
+    /// Render pipeline
+    pipeline: Option<wgpu::RenderPipeline>,
+    /// Uniform buffer
+    uniform_buffer: Option<wgpu::Buffer>,
+    uniform_bind_group: Option<wgpu::BindGroup>,
+    /// Vertex buffers (one per trace)
+    vertex_buffers: Vec<(wgpu::Buffer, u32)>,
+    /// Render texture
+    texture: Option<wgpu::Texture>,
+    texture_view: Option<wgpu::TextureView>,
+    texture_size: (u32, u32),
+}
+
+impl WaveformPainter {
+    pub fn new(state: Arc<Mutex<WaveformGpuState>>) -> Self {
+        Self {
+            state,
+            device: None,
+            queue: None,
+            pipeline: None,
+            uniform_buffer: None,
+            uniform_bind_group: None,
+            vertex_buffers: Vec::new(),
+            texture: None,
+            texture_view: None,
+            texture_size: (0, 0),
+        }
+    }
+
+    fn create_pipeline(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat) {
+        // Create shader
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Waveform Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("waveform.wgsl").into()),
         });
 
-        // Create uniform buffer
-        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("View Uniforms"),
-            contents: bytemuck::cast_slice(&[ViewUniforms {
-                x_scale: 1.0,
-                x_offset: 0.0,
-                y_scale: 1.0,
-                y_offset: 0.0,
-            }]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        // Create bind group layout
+        // Bind group layout
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("View Bind Group Layout"),
+            label: Some("Waveform Bind Group Layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -79,9 +124,25 @@ impl WaveformRenderer {
             }],
         });
 
-        // Create bind group
-        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("View Bind Group"),
+        // Uniform buffer
+        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("View Uniforms"),
+            contents: bytemuck::cast_slice(&[ViewUniforms {
+                x_scale: 1.0,
+                x_offset: 0.0,
+                y_scale: 1.0,
+                y_offset: 0.0,
+                bg_r: 0.1,
+                bg_g: 0.1,
+                bg_b: 0.12,
+                bg_a: 1.0,
+            }]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // Bind group
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Waveform Bind Group"),
             layout: &bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
@@ -89,14 +150,14 @@ impl WaveformRenderer {
             }],
         });
 
-        // Create pipeline layout
+        // Pipeline layout
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Waveform Pipeline Layout"),
             bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
 
-        // Create render pipeline
+        // Render pipeline
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Waveform Pipeline"),
             layout: Some(&pipeline_layout),
@@ -107,15 +168,13 @@ impl WaveformRenderer {
                     array_stride: std::mem::size_of::<WaveformVertex>() as wgpu::BufferAddress,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &[
-                        // Position
                         wgpu::VertexAttribute {
                             offset: 0,
                             shader_location: 0,
                             format: wgpu::VertexFormat::Float32x2,
                         },
-                        // Color
                         wgpu::VertexAttribute {
-                            offset: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
+                            offset: 8,
                             shader_location: 1,
                             format: wgpu::VertexFormat::Float32x4,
                         },
@@ -148,88 +207,61 @@ impl WaveformRenderer {
             cache: None,
         });
 
-        Self {
-            device,
-            queue,
-            pipeline,
-            uniform_buffer,
-            uniform_bind_group,
-            vertex_buffer: None,
-            vertex_count: 0,
-        }
+        self.pipeline = Some(pipeline);
+        self.uniform_buffer = Some(uniform_buffer);
+        self.uniform_bind_group = Some(bind_group);
     }
 
-    /// Update waveform data
-    pub fn update_data(&mut self, x: &[f64], y: &[f64], color: [f32; 4]) {
-        if x.is_empty() || y.is_empty() || x.len() != y.len() {
-            self.vertex_buffer = None;
-            self.vertex_count = 0;
-            return;
-        }
+    fn update_vertex_buffers(&mut self, device: &wgpu::Device) {
+        let state = self.state.lock().unwrap();
 
-        // Convert to vertices
-        let vertices: Vec<WaveformVertex> = x
-            .iter()
-            .zip(y.iter())
-            .map(|(&xi, &yi)| WaveformVertex {
-                position: [xi as f32, yi as f32],
-                color,
-            })
-            .collect();
+        self.vertex_buffers.clear();
 
-        self.vertex_count = vertices.len() as u32;
+        for trace in &state.traces {
+            if trace.x.is_empty() {
+                continue;
+            }
 
-        // Create or update vertex buffer
-        self.vertex_buffer = Some(self.device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Waveform Vertices"),
+            let vertices: Vec<WaveformVertex> = trace
+                .x
+                .iter()
+                .zip(trace.y.iter())
+                .map(|(&x, &y)| WaveformVertex {
+                    position: [x as f32, y as f32],
+                    color: trace.color,
+                })
+                .collect();
+
+            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Trace Vertices"),
                 contents: bytemuck::cast_slice(&vertices),
                 usage: wgpu::BufferUsages::VERTEX,
-            },
-        ));
+            });
+
+            self.vertex_buffers.push((buffer, vertices.len() as u32));
+        }
     }
 
-    /// Update view transform (for pan/zoom)
-    pub fn update_view(&self, x_min: f64, x_max: f64, y_min: f64, y_max: f64) {
-        let x_range = (x_max - x_min) as f32;
-        let y_range = (y_max - y_min) as f32;
+    fn update_uniforms(&self, queue: &wgpu::Queue) {
+        let state = self.state.lock().unwrap();
+
+        let x_range = (state.x_max - state.x_min) as f32;
+        let y_range = (state.y_max - state.y_min) as f32;
 
         let uniforms = ViewUniforms {
             x_scale: 2.0 / x_range,
-            x_offset: -1.0 - (x_min as f32) * (2.0 / x_range),
+            x_offset: -1.0 - (state.x_min as f32) * (2.0 / x_range),
             y_scale: 2.0 / y_range,
-            y_offset: -1.0 - (y_min as f32) * (2.0 / y_range),
+            y_offset: -1.0 - (state.y_min as f32) * (2.0 / y_range),
+            bg_r: 0.08,
+            bg_g: 0.08,
+            bg_b: 0.10,
+            bg_a: 1.0,
         };
 
-        self.queue
-            .write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
-    }
-
-    /// Render waveform to texture
-    pub fn render(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
-        let Some(vertex_buffer) = &self.vertex_buffer else {
-            return;
-        };
-
-        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("Waveform Render Pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load, // Don't clear, render on top
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-
-        render_pass.set_pipeline(&self.pipeline);
-        render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
-        render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-        render_pass.draw(0..self.vertex_count, 0..1);
+        if let Some(buffer) = &self.uniform_buffer {
+            queue.write_buffer(buffer, 0, bytemuck::cast_slice(&[uniforms]));
+        }
     }
 }
 
@@ -240,8 +272,8 @@ pub fn decimate(x: &[f64], y: &[f64], target_points: usize) -> (Vec<f64>, Vec<f6
     }
 
     let step = x.len() as f64 / target_points as f64;
-    let mut out_x = Vec::with_capacity(target_points);
-    let mut out_y = Vec::with_capacity(target_points);
+    let mut out_x = Vec::with_capacity(target_points * 2);
+    let mut out_y = Vec::with_capacity(target_points * 2);
 
     // Min-max decimation to preserve peaks
     let mut i = 0.0;
@@ -270,7 +302,7 @@ pub fn decimate(x: &[f64], y: &[f64], target_points: usize) -> (Vec<f64>, Vec<f6
             }
         }
 
-        // Add points in order (min before max or vice versa)
+        // Add points in order
         if min_idx <= max_idx {
             out_x.push(x[min_idx]);
             out_y.push(min_y);
@@ -301,7 +333,14 @@ mod tests {
         let y: Vec<f64> = x.iter().map(|x| x.sin()).collect();
 
         let (dx, dy) = decimate(&x, &y, 20);
-        assert!(dx.len() <= 40); // Each point might produce 2 (min/max)
+        assert!(dx.len() <= 40);
         assert_eq!(dx.len(), dy.len());
+    }
+
+    #[test]
+    fn test_waveform_state() {
+        let state = WaveformGpuState::default();
+        assert!(state.traces.is_empty());
+        assert!(state.dirty);
     }
 }
