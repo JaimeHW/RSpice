@@ -659,9 +659,11 @@ fn format_time(t: f64) -> String {
 fn GpuWaveformCanvas(view: ViewState, waveforms: Vec<crate::state::WaveformData>) -> Element {
     // Build traces from waveform data
     let traces: Vec<WaveformTrace> = if waveforms.is_empty() {
-        // Demo waveform
+        // Demo waveform - generate X values covering current view
         let n = 1000;
-        let x: Vec<f64> = (0..n).map(|i| i as f64 * 5e-6).collect();
+        let x_range = view.x_max - view.x_min;
+        let step = x_range / (n - 1) as f64;
+        let x: Vec<f64> = (0..n).map(|i| view.x_min + i as f64 * step).collect();
         let y: Vec<f64> = x
             .iter()
             .map(|t| (2.0 * std::f64::consts::PI * 1000.0 * t).sin())
