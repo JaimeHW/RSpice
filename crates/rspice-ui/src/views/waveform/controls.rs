@@ -1,0 +1,345 @@
+//! Waveform viewer control components.
+//!
+//! Header toolbar, control buttons, and legend items for the waveform viewer.
+
+use dioxus::html::input_data::keyboard_types::Key;
+use dioxus::prelude::*;
+
+use crate::theme::Theme;
+
+/// Waveform header with controls and expression input.
+#[component]
+pub fn WaveformHeader(
+    on_fit: EventHandler<MouseEvent>,
+    on_zoom_in: EventHandler<MouseEvent>,
+    on_zoom_out: EventHandler<MouseEvent>,
+    on_add_trace: EventHandler<String>,
+    #[props(default)] on_toggle_measurements: EventHandler<MouseEvent>,
+    #[props(default)] on_toggle_fft: EventHandler<MouseEvent>,
+    #[props(default)] on_toggle_sweep: EventHandler<MouseEvent>,
+    #[props(default)] on_toggle_export: EventHandler<MouseEvent>,
+    #[props(default)] measurements_active: bool,
+    #[props(default)] fft_active: bool,
+    #[props(default)] sweep_active: bool,
+    #[props(default)] export_active: bool,
+) -> Element {
+    let theme: Signal<Theme> = use_context();
+    let th = theme.read();
+    let mut expr_input = use_signal(|| String::new());
+    let mut error_msg = use_signal(|| Option::<String>::None);
+
+    rsx! {
+        div {
+            style: "
+                display: flex;
+                align-items: center;
+                padding: {Theme::SPACING_XS} {Theme::SPACING_MD};
+                background: {th.bg_tertiary()};
+                border-bottom: 1px solid {th.border()};
+                gap: {Theme::SPACING_MD};
+            ",
+
+            // Title
+            span {
+                style: "
+                    font-size: {Theme::FONT_SIZE_SM};
+                    font-weight: 600;
+                    color: {th.text_secondary()};
+                ",
+                "Waveform Viewer"
+            }
+
+            // Expression input
+            div {
+                style: "
+                    display: flex;
+                    align-items: center;
+                    gap: {Theme::SPACING_XS};
+                    flex: 1;
+                    max-width: 300px;
+                ",
+
+                input {
+                    r#type: "text",
+                    placeholder: "Add trace: V(out), I(R1)*1000, db(V(out))...",
+                    value: "{expr_input}",
+                    style: "
+                        flex: 1;
+                        padding: 4px 8px;
+                        background: {th.bg_primary()};
+                        border: 1px solid {th.border()};
+                        border-radius: {Theme::RADIUS_SM};
+                        color: {th.text_primary()};
+                        font-size: 11px;
+                        font-family: {Theme::FONT_MONO};
+                        outline: none;
+                    ",
+                    oninput: move |e| {
+                        expr_input.set(e.value().clone());
+                        error_msg.set(None);
+                    },
+                    onkeydown: move |e| {
+                        if e.key() == Key::Enter {
+                            let expr = expr_input.read().clone();
+                            if !expr.trim().is_empty() {
+                                on_add_trace.call(expr.clone());
+                                expr_input.set(String::new());
+                            }
+                        }
+                    },
+                }
+
+                // Add button
+                button {
+                    style: "
+                        padding: 4px 8px;
+                        background: #3b82f6;
+                        border: none;
+                        border-radius: {Theme::RADIUS_SM};
+                        color: white;
+                        font-size: 11px;
+                        cursor: pointer;
+                    ",
+                    onclick: move |_| {
+                        let expr = expr_input.read().clone();
+                        if !expr.trim().is_empty() {
+                            on_add_trace.call(expr.clone());
+                            expr_input.set(String::new());
+                        }
+                    },
+                    "Add"
+                }
+            }
+
+            // Error message
+            if let Some(err) = error_msg.read().as_ref() {
+                span {
+                    style: "color: #ef4444; font-size: 10px;",
+                    "{err}"
+                }
+            }
+
+            // Spacer
+            div { style: "flex: 1;" }
+
+            // View controls
+            div {
+                style: "
+                    display: flex;
+                    gap: {Theme::SPACING_XS};
+                ",
+
+                ControlButton { label: "⊕", title: "Zoom In", onclick: on_zoom_in }
+                ControlButton { label: "⊖", title: "Zoom Out", onclick: on_zoom_out }
+                ControlButton { label: "⊡", title: "Fit", onclick: on_fit }
+                ControlButton { label: "│", title: "Cursor 1" }
+                ControlButton { label: "┃", title: "Cursor 2" }
+            }
+
+            // Analysis toggles
+            div {
+                style: "
+                    display: flex;
+                    gap: {Theme::SPACING_XS};
+                    margin-left: {Theme::SPACING_SM};
+                    padding-left: {Theme::SPACING_SM};
+                    border-left: 1px solid {th.border()};
+                ",
+
+                ToggleButton {
+                    label: "📊",
+                    title: "Measurements",
+                    active: measurements_active,
+                    onclick: on_toggle_measurements,
+                }
+                ToggleButton {
+                    label: "📈",
+                    title: "FFT View",
+                    active: fft_active,
+                    onclick: on_toggle_fft,
+                }
+                ToggleButton {
+                    label: "🔄",
+                    title: "Sweep",
+                    active: sweep_active,
+                    onclick: on_toggle_sweep,
+                }
+                ToggleButton {
+                    label: "💾",
+                    title: "Export",
+                    active: export_active,
+                    onclick: on_toggle_export,
+                }
+            }
+        }
+    }
+}
+
+/// Small control button.
+#[component]
+pub fn ControlButton(
+    label: &'static str,
+    title: &'static str,
+    #[props(default)] onclick: EventHandler<MouseEvent>,
+) -> Element {
+    let theme: Signal<Theme> = use_context();
+    let th = theme.read();
+    let mut hovered = use_signal(|| false);
+
+    let bg = if *hovered.read() {
+        th.surface_hover()
+    } else {
+        th.surface()
+    };
+
+    rsx! {
+        button {
+            title: "{title}",
+            style: "
+                width: 24px;
+                height: 24px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: {bg};
+                border: none;
+                border-radius: {Theme::RADIUS_SM};
+                color: {th.text_primary()};
+                font-size: 12px;
+                cursor: pointer;
+                transition: background {Theme::TRANSITION_FAST};
+            ",
+            onmouseenter: move |_| hovered.set(true),
+            onmouseleave: move |_| hovered.set(false),
+            onclick: move |e| onclick.call(e),
+            "{label}"
+        }
+    }
+}
+
+/// Toggle button with active state indicator.
+#[component]
+pub fn ToggleButton(
+    label: &'static str,
+    title: &'static str,
+    #[props(default)] active: bool,
+    #[props(default)] onclick: EventHandler<MouseEvent>,
+) -> Element {
+    let theme: Signal<Theme> = use_context();
+    let th = theme.read();
+    let mut hovered = use_signal(|| false);
+
+    let bg = if active {
+        th.accent_primary()
+    } else if *hovered.read() {
+        th.surface_hover()
+    } else {
+        th.surface()
+    };
+
+    let text_color = if active { "#ffffff" } else { th.text_primary() };
+
+    rsx! {
+        button {
+            title: "{title}",
+            style: "
+                height: 24px;
+                padding: 0 8px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 4px;
+                background: {bg};
+                border: none;
+                border-radius: {Theme::RADIUS_SM};
+                color: {text_color};
+                font-size: 11px;
+                cursor: pointer;
+                transition: all {Theme::TRANSITION_FAST};
+            ",
+            onmouseenter: move |_| hovered.set(true),
+            onmouseleave: move |_| hovered.set(false),
+            onclick: move |e| onclick.call(e),
+            "{label}"
+        }
+    }
+}
+
+/// Legend item with visibility toggle.
+#[component]
+pub fn LegendItem(
+    name: String,
+    color: String,
+    visible: bool,
+    on_toggle: EventHandler<MouseEvent>,
+) -> Element {
+    let theme: Signal<Theme> = use_context();
+    let th = theme.read();
+    let mut hovered = use_signal(|| false);
+
+    let opacity = if visible { "1" } else { "0.4" };
+    let bg = if *hovered.read() {
+        th.surface_hover()
+    } else {
+        "transparent"
+    };
+    let checkbox_bg = if visible { "#3b82f6" } else { "transparent" };
+
+    rsx! {
+        div {
+            style: "
+                display: flex;
+                align-items: center;
+                gap: {Theme::SPACING_XS};
+                padding: 4px 6px;
+                margin: 0 -6px;
+                font-size: {Theme::FONT_SIZE_SM};
+                cursor: pointer;
+                border-radius: {Theme::RADIUS_SM};
+                background: {bg};
+                opacity: {opacity};
+                transition: all {Theme::TRANSITION_FAST};
+            ",
+            onmouseenter: move |_| hovered.set(true),
+            onmouseleave: move |_| hovered.set(false),
+            onclick: move |e| on_toggle.call(e),
+
+            // Visibility checkbox
+            div {
+                style: "
+                    width: 14px;
+                    height: 14px;
+                    border: 1px solid {th.border()};
+                    border-radius: 3px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    background: {checkbox_bg};
+                    transition: background {Theme::TRANSITION_FAST};
+                ",
+                if visible {
+                    span {
+                        style: "color: white; font-size: 10px; font-weight: bold;",
+                        "✓"
+                    }
+                }
+            }
+
+            // Color swatch
+            div {
+                style: "
+                    width: 12px;
+                    height: 3px;
+                    background: {color};
+                    border-radius: 1px;
+                "
+            }
+
+            // Name
+            span {
+                style: "color: {th.text_primary()}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
+                "{name}"
+            }
+        }
+    }
+}
