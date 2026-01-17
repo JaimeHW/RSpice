@@ -204,6 +204,21 @@ pub fn Schematic() -> Element {
                                 if s.wire_drawing.active { s.extend_wire(gp); }
                                 else { s.start_wire(gp); }
                             }
+                            Tool::Probe => {
+                                // Find what we're probing
+                                if let Some(comp_id) = s.component_at(gp) {
+                                    // Get the component name for probing
+                                    if let Some(comp) = s.components.iter().find(|c| c.id == comp_id) {
+                                        let probe_name = format!("V({})", comp.name);
+                                        // Log for now - will integrate with SimulationState
+                                        println!("Probe: {}", probe_name);
+                                    }
+                                } else if s.wire_at(gp).is_some() {
+                                    // For wires, we'd need to identify the net name
+                                    let probe_name = format!("V(net_{})", gp.x * 1000 + gp.y);
+                                    println!("Probe: {}", probe_name);
+                                }
+                            }
                         }
                     },
 
@@ -369,7 +384,7 @@ pub fn Schematic() -> Element {
                 // Status bar
                 div {
                     style: "position: absolute; bottom: 0; left: 0; right: 0; display: flex; justify-content: space-between; padding: 4px 8px; background: {th.bg_tertiary()}dd; font-size: 11px; color: {th.text_muted()}; font-family: monospace;",
-                    span { {match schematic.read().tool { Tool::Select => "Select | Del: delete | R: rotate | Ctrl+Z/Y: undo/redo", Tool::Wire => "Wire | Click: add points | DblClick: finish", Tool::Place(_) => "Place | Click: place | Esc: cancel" }} }
+                    span { {match schematic.read().tool { Tool::Select => "Select | Del: delete | R: rotate | Ctrl+Z/Y: undo/redo", Tool::Wire => "Wire | Click: add points | DblClick: finish", Tool::Place(_) => "Place | Click: place | Esc: cancel", Tool::Probe => "Probe | Click node/wire to add voltage trace" }} }
                     span { {format!("({}, {}) | {:.0}%", mouse_grid.read().x, mouse_grid.read().y, *zoom.read() * 100.0)} }
                 }
 
@@ -435,6 +450,7 @@ fn SchematicToolbar(schematic: Signal<SchematicState>) -> Element {
             style: "display: flex; align-items: center; height: 32px; padding: 0 8px; background: {th.bg_tertiary()}; border-bottom: 1px solid {th.border()}; gap: 4px;",
             ToolBtn { label: "↖ Select", active: matches!(tool, Tool::Select), onclick: move |_| schematic.write().tool = Tool::Select }
             ToolBtn { label: "— Wire", active: matches!(tool, Tool::Wire), onclick: move |_| schematic.write().tool = Tool::Wire }
+            ToolBtn { label: "⚡ Probe", active: matches!(tool, Tool::Probe), onclick: move |_| schematic.write().tool = Tool::Probe }
             div { style: "width: 1px; height: 18px; background: {th.border()}; margin: 0 4px;" }
             button { style: "padding: 4px 8px; background: {th.surface()}; border: 1px solid {th.border()}; border-radius: 4px; color: {th.text_primary()}; font-size: 12px; cursor: pointer;", onclick: move |_| schematic.write().rotate_selection(), "⟳ Rotate" }
             button { style: "padding: 4px 8px; background: {th.surface()}; border: 1px solid {th.border()}; border-radius: 4px; color: {th.text_primary()}; font-size: 12px; cursor: pointer;", onclick: move |_| schematic.write().delete_selection(), "🗑 Delete" }

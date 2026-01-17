@@ -345,6 +345,9 @@ pub enum Tool {
 
     /// Place a specific component type
     Place(ComponentType),
+
+    /// Probe voltage/current at nodes
+    Probe,
 }
 
 /// Wire drawing state
