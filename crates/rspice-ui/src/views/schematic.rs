@@ -210,11 +210,14 @@ pub fn Schematic() -> Element {
                     // Context menu on right-click
                     oncontextmenu: move |evt| {
                         evt.prevent_default();
-                        let c = evt.element_coordinates();
+                        // Use client coordinates for menu position (fixed positioning)
+                        let client = evt.client_coordinates();
+                        // Use element coordinates for grid position calculation
+                        let elem = evt.element_coordinates();
                         let (px, py) = *pan.read();
                         let z = *zoom.read();
                         let gs = schematic.read().grid_size;
-                        let gp = Point::from_pixels((c.x - px) / z, (c.y - py) / z, gs);
+                        let gp = Point::from_pixels((elem.x - px) / z, (elem.y - py) / z, gs);
                         
                         let s = schematic.read();
                         let comp = s.component_at(gp);
@@ -222,7 +225,7 @@ pub fn Schematic() -> Element {
                         
                         context_menu.set(ContextMenuState {
                             visible: true,
-                            position: (c.x, c.y),
+                            position: (client.x, client.y),
                             target_component: comp,
                             target_wire: wire,
                         });
