@@ -8,6 +8,8 @@ use once_cell::sync::Lazy;
 use std::sync::{Arc, Mutex};
 use wgpu::util::DeviceExt;
 
+use super::waveform::axis::calculate_nice_grid_step;
+
 /// Global GPU device and queue (lazily initialized)
 static GPU_CONTEXT: Lazy<Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)>> = Lazy::new(|| {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
@@ -266,8 +268,8 @@ impl WaveformPainter {
         let y_range = state.y_max - state.y_min;
 
         // Use "nice" step values - gridlines at fixed data coordinates that scroll with pan
-        let x_step = calculate_grid_step(x_range);
-        let y_step = calculate_grid_step(y_range);
+        let x_step = calculate_nice_grid_step(x_range);
+        let y_step = calculate_nice_grid_step(y_range);
 
         // Vertical gridlines at fixed X values (e.g., 0ms, 1ms, 2ms)
         let x_start = (state.x_min / x_step).floor() * x_step;
@@ -567,29 +569,6 @@ impl WaveformPainter {
         let b64 = base64::engine::general_purpose::STANDARD.encode(&png_data);
         Some(format!("data:image/png;base64,{}", b64))
     }
-}
-
-/// Calculate a nice grid step size for the given range (targets 5-10 divisions)
-fn calculate_grid_step(range: f64) -> f64 {
-    let target_divisions = 6.0;
-    let raw_step = range / target_divisions;
-
-    // Find the order of magnitude
-    let magnitude = 10f64.powf(raw_step.log10().floor());
-    let normalized = raw_step / magnitude;
-
-    // Round to nearest nice value (1, 2, 5)
-    let nice = if normalized < 1.5 {
-        1.0
-    } else if normalized < 3.5 {
-        2.0
-    } else if normalized < 7.5 {
-        5.0
-    } else {
-        10.0
-    };
-
-    nice * magnitude
 }
 
 /// Decimate waveform data for efficient rendering at different zoom levels

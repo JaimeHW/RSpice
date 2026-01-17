@@ -6,7 +6,7 @@
 use dioxus::prelude::*;
 
 use crate::components::{Panel, Toolbar};
-use crate::state::{ComponentType, SchematicState, SimulationState, Tool};
+use crate::state::{SchematicState, SimulationState};
 use crate::theme::Theme;
 use crate::views::{Console, Netlist, Schematic, Waveform};
 
@@ -221,136 +221,6 @@ fn EditorTabButton(
             ",
             onclick: move |evt| onclick.call(evt),
             "{label}"
-        }
-    }
-}
-
-/// Component library sidebar content
-#[component]
-fn ComponentLibrary() -> Element {
-    let theme: Signal<Theme> = use_context();
-    let schematic: Signal<SchematicState> = use_context();
-    let th = theme.read();
-
-    let categories: &[(&str, &[(&str, ComponentType)])] = &[
-        (
-            "Basic",
-            &[
-                ("Resistor", ComponentType::Resistor),
-                ("Capacitor", ComponentType::Capacitor),
-                ("Inductor", ComponentType::Inductor),
-            ],
-        ),
-        (
-            "Semiconductors",
-            &[
-                ("Diode", ComponentType::Diode),
-                ("NPN BJT", ComponentType::NpnBjt),
-                ("PNP BJT", ComponentType::PnpBjt),
-                ("NMOS", ComponentType::Nmos),
-                ("PMOS", ComponentType::Pmos),
-            ],
-        ),
-        (
-            "Sources",
-            &[
-                ("V DC", ComponentType::VoltageSource),
-                ("I DC", ComponentType::CurrentSource),
-                ("V AC", ComponentType::VoltageSourceAc),
-                ("V Pulse", ComponentType::VoltageSourcePulse),
-                ("V Sin", ComponentType::VoltageSourceSin),
-            ],
-        ),
-        ("Special", &[("Ground", ComponentType::Ground)]),
-    ];
-
-    rsx! {
-        div {
-            style: "padding: {Theme::SPACING_SM};",
-
-            // Search box
-            input {
-                r#type: "text",
-                placeholder: "Search components...",
-                style: "
-                    width: 100%;
-                    padding: {Theme::SPACING_SM};
-                    background: {th.surface()};
-                    border: 1px solid {th.border()};
-                    border-radius: {Theme::RADIUS_SM};
-                    color: {th.text_primary()};
-                    font-size: {Theme::FONT_SIZE_SM};
-                    outline: none;
-                    margin-bottom: {Theme::SPACING_MD};
-                "
-            }
-
-            // Category tree
-            for (category, items) in categories.iter() {
-                div {
-                    style: "margin-bottom: {Theme::SPACING_MD};",
-
-                    // Category header
-                    div {
-                        style: "
-                            font-weight: 600;
-                            color: {th.text_secondary()};
-                            font-size: {Theme::FONT_SIZE_SM};
-                            text-transform: uppercase;
-                            letter-spacing: 0.5px;
-                            margin-bottom: {Theme::SPACING_XS};
-                        ",
-                        "{category}"
-                    }
-
-                    // Items
-                    for (name, comp_type) in items.iter() {
-                        ComponentLibraryItem {
-                            name: *name,
-                            comp_type: *comp_type,
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Single component library item
-#[component]
-fn ComponentLibraryItem(name: &'static str, comp_type: ComponentType) -> Element {
-    let theme: Signal<Theme> = use_context();
-    let mut schematic: Signal<SchematicState> = use_context();
-    let th = theme.read();
-
-    let current_tool = schematic.read().tool;
-    let is_active = matches!(current_tool, Tool::Place(t) if t == comp_type);
-
-    let bg = if is_active {
-        th.surface_hover()
-    } else {
-        "transparent"
-    };
-    let color = if is_active {
-        th.accent_primary()
-    } else {
-        th.text_primary()
-    };
-
-    rsx! {
-        div {
-            style: "
-                padding: {Theme::SPACING_XS} {Theme::SPACING_SM};
-                border-radius: {Theme::RADIUS_SM};
-                cursor: pointer;
-                transition: background {Theme::TRANSITION_FAST};
-                background: {bg};
-                color: {color};
-            ",
-            onclick: move |_| {
-                schematic.write().tool = Tool::Place(comp_type);
-            },
-            "{name}"
         }
     }
 }

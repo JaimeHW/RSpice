@@ -10,12 +10,14 @@ fn main() {
     log::info!("Starting RSpice UI...");
 
     // Configure window to be visible and centered
-    let config = Config::new().with_window(
-        WindowBuilder::new()
-            .with_title("RSpice - Circuit Simulator")
-            .with_inner_size(dioxus::desktop::LogicalSize::new(1400.0, 900.0))
-            .with_position(dioxus::desktop::LogicalPosition::new(100.0, 100.0)),
-    );
+    let config = Config::new()
+        .with_menu(None) // Disable default menu bar
+        .with_window(
+            WindowBuilder::new()
+                .with_title("RSpice - Circuit Simulator")
+                .with_inner_size(dioxus::desktop::LogicalSize::new(1400.0, 900.0))
+                .with_position(dioxus::desktop::LogicalPosition::new(100.0, 100.0)),
+        );
 
     // Launch desktop application
     dioxus::LaunchBuilder::desktop()
