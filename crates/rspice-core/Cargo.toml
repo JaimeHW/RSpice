@@ -11,6 +11,7 @@ rust-version.workspace = true
 default = []
 wasm = ["wasm-bindgen"]
 parallel = ["rayon", "portable-atomic"]
+ffi = ["libloading"]
 
 [dependencies]
 faer.workspace = true
@@ -26,6 +27,9 @@ portable-atomic = { workspace = true, optional = true }
 
 # WASM support (optional)
 wasm-bindgen = { version = "0.2", optional = true }
+
+# FFI support (optional)
+libloading = { version = "0.8", optional = true }
 
 [dev-dependencies]
 approx.workspace = true

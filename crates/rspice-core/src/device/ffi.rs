@@ -58,6 +58,10 @@ pub struct FfiContext {
     pub stamp_current: Option<extern "C" fn(row: usize, value: Value)>,
 }
 
+// SAFETY: FfiContext is only used within a single thread during simulation
+unsafe impl Send for FfiContext {}
+unsafe impl Sync for FfiContext {}
+
 impl Default for FfiContext {
     fn default() -> Self {
         Self {
@@ -89,6 +93,38 @@ impl FfiContext {
         self.node_voltages = voltages.as_ptr();
         self
     }
+}
+
+//=============================================================================
+// C Function Type Definitions
+//=============================================================================
+
+/// C function pointer types for external device interface
+pub mod ffi_types {
+    use super::*;
+    use std::ffi::c_char;
+    use std::os::raw::c_void;
+
+    /// Create device: (name, num_nodes) -> device_ptr
+    pub type CreateDeviceFn = unsafe extern "C" fn(*const c_char, usize) -> *mut c_void;
+
+    /// Destroy device: (device_ptr) -> ()
+    pub type DestroyDeviceFn = unsafe extern "C" fn(*mut c_void);
+
+    /// Stamp device: (device_ptr, context_ptr) -> ()
+    pub type StampDeviceFn = unsafe extern "C" fn(*mut c_void, *const FfiContext);
+
+    /// Update device: (device_ptr, context_ptr) -> ()
+    pub type UpdateDeviceFn = unsafe extern "C" fn(*mut c_void, *const FfiContext);
+
+    /// Reset device: (device_ptr) -> ()
+    pub type ResetDeviceFn = unsafe extern "C" fn(*mut c_void);
+
+    /// Get parameter: (device_ptr, name) -> value
+    pub type GetParamFn = unsafe extern "C" fn(*mut c_void, *const c_char) -> Value;
+
+    /// Set parameter: (device_ptr, name, value) -> success
+    pub type SetParamFn = unsafe extern "C" fn(*mut c_void, *const c_char, Value) -> i32;
 }
 
 //=============================================================================
@@ -140,6 +176,251 @@ pub trait FfiMatrixStamper {
 }
 
 //=============================================================================
+// Dynamic Library Loading (requires 'ffi' feature)
+//=============================================================================
+
+#[cfg(feature = "ffi")]
+mod dynamic {
+    use super::*;
+    use libloading::{Library, Symbol};
+    use std::ffi::{CStr, CString};
+    use std::os::raw::c_void;
+    use std::sync::Arc;
+
+    /// A dynamically loaded library containing external device models
+    pub struct DynamicLibrary {
+        /// The loaded library (kept alive)
+        _library: Arc<Library>,
+        /// Library path for debugging
+        path: String,
+        /// Loaded function pointers
+        create_fn: ffi_types::CreateDeviceFn,
+        destroy_fn: ffi_types::DestroyDeviceFn,
+        stamp_fn: Option<ffi_types::StampDeviceFn>,
+        update_fn: Option<ffi_types::UpdateDeviceFn>,
+        reset_fn: Option<ffi_types::ResetDeviceFn>,
+        get_param_fn: Option<ffi_types::GetParamFn>,
+        set_param_fn: Option<ffi_types::SetParamFn>,
+    }
+
+    impl std::fmt::Debug for DynamicLibrary {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("DynamicLibrary")
+                .field("path", &self.path)
+                .finish()
+        }
+    }
+
+    impl DynamicLibrary {
+        /// Load a dynamic library from the given path
+        ///
+        /// # Arguments
+        /// * `path` - Path to the library (.dll, .so, or .dylib)
+        /// * `create_symbol` - Name of the create_device function
+        /// * `destroy_symbol` - Name of the destroy_device function
+        ///
+        /// # Safety
+        /// The library must contain valid C functions matching the expected signatures.
+        pub unsafe fn load(
+            path: &Path,
+            create_symbol: &str,
+            destroy_symbol: &str,
+        ) -> Result<Self, FfiError> {
+            let library = Library::new(path).map_err(|e| {
+                FfiError::LibraryError(format!("Failed to load {}: {}", path.display(), e))
+            })?;
+
+            let library = Arc::new(library);
+
+            // Load required functions
+            let create_fn: Symbol<ffi_types::CreateDeviceFn> = library
+                .get(create_symbol.as_bytes())
+                .map_err(|e| FfiError::SymbolError(format!("{}: {}", create_symbol, e)))?;
+            let create_fn = *create_fn;
+
+            let destroy_fn: Symbol<ffi_types::DestroyDeviceFn> = library
+                .get(destroy_symbol.as_bytes())
+                .map_err(|e| FfiError::SymbolError(format!("{}: {}", destroy_symbol, e)))?;
+            let destroy_fn = *destroy_fn;
+
+            // Load optional functions
+            let stamp_fn = library
+                .get::<ffi_types::StampDeviceFn>(b"stamp_device")
+                .ok()
+                .map(|s| *s);
+
+            let update_fn = library
+                .get::<ffi_types::UpdateDeviceFn>(b"update_device")
+                .ok()
+                .map(|s| *s);
+
+            let reset_fn = library
+                .get::<ffi_types::ResetDeviceFn>(b"reset_device")
+                .ok()
+                .map(|s| *s);
+
+            let get_param_fn = library
+                .get::<ffi_types::GetParamFn>(b"get_param")
+                .ok()
+                .map(|s| *s);
+
+            let set_param_fn = library
+                .get::<ffi_types::SetParamFn>(b"set_param")
+                .ok()
+                .map(|s| *s);
+
+            Ok(Self {
+                _library: library,
+                path: path.display().to_string(),
+                create_fn,
+                destroy_fn,
+                stamp_fn,
+                update_fn,
+                reset_fn,
+                get_param_fn,
+                set_param_fn,
+            })
+        }
+
+        /// Create a device instance from this library
+        pub fn create_device(
+            &self,
+            name: &str,
+            terminals: Vec<usize>,
+        ) -> Result<DynamicExternalDevice, FfiError> {
+            let c_name = CString::new(name).map_err(|_| {
+                FfiError::ParameterError("Device name contains null byte".to_string())
+            })?;
+
+            let handle = unsafe { (self.create_fn)(c_name.as_ptr(), terminals.len()) };
+
+            if handle.is_null() {
+                return Err(FfiError::InvalidHandle);
+            }
+
+            Ok(DynamicExternalDevice {
+                name: name.to_string(),
+                terminals,
+                handle,
+                destroy_fn: self.destroy_fn,
+                stamp_fn: self.stamp_fn,
+                update_fn: self.update_fn,
+                reset_fn: self.reset_fn,
+                get_param_fn: self.get_param_fn,
+                set_param_fn: self.set_param_fn,
+            })
+        }
+
+        /// Get the library path
+        pub fn path(&self) -> &str {
+            &self.path
+        }
+    }
+
+    /// An external device loaded from a dynamic library
+    pub struct DynamicExternalDevice {
+        name: String,
+        terminals: Vec<usize>,
+        handle: *mut c_void,
+        destroy_fn: ffi_types::DestroyDeviceFn,
+        stamp_fn: Option<ffi_types::StampDeviceFn>,
+        update_fn: Option<ffi_types::UpdateDeviceFn>,
+        reset_fn: Option<ffi_types::ResetDeviceFn>,
+        get_param_fn: Option<ffi_types::GetParamFn>,
+        set_param_fn: Option<ffi_types::SetParamFn>,
+    }
+
+    impl std::fmt::Debug for DynamicExternalDevice {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("DynamicExternalDevice")
+                .field("name", &self.name)
+                .field("terminals", &self.terminals)
+                .finish()
+        }
+    }
+
+    // SAFETY: The C library is responsible for thread safety.
+    // We assume external devices are used single-threaded per simulation.
+    unsafe impl Send for DynamicExternalDevice {}
+    unsafe impl Sync for DynamicExternalDevice {}
+
+    impl Drop for DynamicExternalDevice {
+        fn drop(&mut self) {
+            if !self.handle.is_null() {
+                unsafe { (self.destroy_fn)(self.handle) };
+            }
+        }
+    }
+
+    impl ExternalDevice for DynamicExternalDevice {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn num_terminals(&self) -> usize {
+            self.terminals.len()
+        }
+
+        fn terminals(&self) -> &[usize] {
+            &self.terminals
+        }
+
+        fn stamp(&self, ctx: &FfiContext, _matrix: &mut dyn FfiMatrixStamper, _rhs: &mut [Value]) {
+            if let Some(stamp_fn) = self.stamp_fn {
+                unsafe { stamp_fn(self.handle, ctx as *const FfiContext) };
+            }
+        }
+
+        fn update(&mut self, ctx: &FfiContext) {
+            if let Some(update_fn) = self.update_fn {
+                unsafe { update_fn(self.handle, ctx as *const FfiContext) };
+            }
+        }
+
+        fn reset(&mut self) {
+            if let Some(reset_fn) = self.reset_fn {
+                unsafe { reset_fn(self.handle) };
+            }
+        }
+
+        fn get_param(&self, name: &str) -> Option<Value> {
+            if let Some(get_fn) = self.get_param_fn {
+                let c_name = CString::new(name).ok()?;
+                let value = unsafe { get_fn(self.handle, c_name.as_ptr()) };
+                if value.is_nan() { None } else { Some(value) }
+            } else {
+                None
+            }
+        }
+
+        fn set_param(&mut self, name: &str, value: Value) -> bool {
+            if let Some(set_fn) = self.set_param_fn {
+                if let Ok(c_name) = CString::new(name) {
+                    let result = unsafe { set_fn(self.handle, c_name.as_ptr(), value) };
+                    return result != 0;
+                }
+            }
+            false
+        }
+    }
+
+    /// Load a library from the given path
+    ///
+    /// # Safety
+    /// Caller must ensure the library contains valid C functions.
+    pub unsafe fn load_library(
+        path: &Path,
+        create_symbol: &str,
+        destroy_symbol: &str,
+    ) -> Result<DynamicLibrary, FfiError> {
+        DynamicLibrary::load(path, create_symbol, destroy_symbol)
+    }
+}
+
+#[cfg(feature = "ffi")]
+pub use dynamic::{DynamicExternalDevice, DynamicLibrary, load_library};
+
+//=============================================================================
 // FFI Model Registry
 //=============================================================================
 
@@ -157,8 +438,10 @@ pub struct FfiModelFactory {
     pub name: String,
     /// Library path
     pub library_path: String,
-    /// Entry point function name
-    pub entry_point: String,
+    /// Entry point function name for create
+    pub create_entry: String,
+    /// Entry point function name for destroy
+    pub destroy_entry: String,
     /// Model parameters
     pub params: HashMap<String, Value>,
 }
@@ -187,6 +470,30 @@ impl FfiModelRegistry {
     /// List all registered model names
     pub fn list_models(&self) -> Vec<&str> {
         self.factories.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Load a model from a library path and register it
+    #[cfg(feature = "ffi")]
+    pub unsafe fn load_from_path(
+        &mut self,
+        name: &str,
+        library_path: &Path,
+        create_entry: &str,
+        destroy_entry: &str,
+    ) -> Result<(), FfiError> {
+        // Verify the library can be loaded
+        let _lib = load_library(library_path, create_entry, destroy_entry)?;
+
+        let factory = FfiModelFactory {
+            name: name.to_string(),
+            library_path: library_path.display().to_string(),
+            create_entry: create_entry.to_string(),
+            destroy_entry: destroy_entry.to_string(),
+            params: HashMap::new(),
+        };
+
+        self.register(name, factory);
+        Ok(())
     }
 }
 
@@ -387,7 +694,8 @@ mod tests {
         let factory = FfiModelFactory {
             name: "TestModel".to_string(),
             library_path: "test.dll".to_string(),
-            entry_point: "create_test".to_string(),
+            create_entry: "create_test".to_string(),
+            destroy_entry: "destroy_test".to_string(),
             params: HashMap::new(),
         };
 
@@ -396,5 +704,20 @@ mod tests {
         assert!(registry.contains("testmodel"));
         assert!(registry.get("testmodel").is_some());
         assert_eq!(registry.list_models(), vec!["TESTMODEL"]);
+    }
+
+    #[test]
+    fn test_ffi_factory_fields() {
+        let factory = FfiModelFactory {
+            name: "MyDevice".to_string(),
+            library_path: "/path/to/lib.so".to_string(),
+            create_entry: "my_create".to_string(),
+            destroy_entry: "my_destroy".to_string(),
+            params: HashMap::new(),
+        };
+
+        assert_eq!(factory.name, "MyDevice");
+        assert_eq!(factory.create_entry, "my_create");
+        assert_eq!(factory.destroy_entry, "my_destroy");
     }
 }
