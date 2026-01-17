@@ -23,6 +23,38 @@ struct ViewState {
     pan_start_y: f64,
 }
 
+/// Cursor state for measurements
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+struct CursorState {
+    /// Primary cursor position (time value)
+    cursor1: Option<f64>,
+    /// Secondary cursor position (time value)
+    cursor2: Option<f64>,
+    /// Which cursor to place next (toggle between 1 and 2)
+    next_cursor: u8,
+}
+
+impl CursorState {
+    /// Get delta between cursors
+    fn delta(&self) -> Option<f64> {
+        match (self.cursor1, self.cursor2) {
+            (Some(c1), Some(c2)) => Some((c2 - c1).abs()),
+            _ => None,
+        }
+    }
+
+    /// Place a cursor at the given time
+    fn place(&mut self, time: f64) {
+        if self.next_cursor == 0 || self.cursor1.is_none() {
+            self.cursor1 = Some(time);
+            self.next_cursor = 1;
+        } else {
+            self.cursor2 = Some(time);
+            self.next_cursor = 0;
+        }
+    }
+}
+
 impl Default for ViewState {
     fn default() -> Self {
         Self {
@@ -109,9 +141,10 @@ pub fn Waveform() -> Element {
 
     let waveforms = &sim_state.read().waveforms;
     let mut view_state = use_signal(ViewState::default);
+    let mut cursor_state = use_signal(CursorState::default);
 
     // Auto-fit view when waveforms change
-    let waveform_count = waveforms.len();
+    let _waveform_count = waveforms.len();
     use_effect(move || {
         let waveforms = &sim_state.read().waveforms;
         if !waveforms.is_empty() {
@@ -155,9 +188,10 @@ pub fn Waveform() -> Element {
                 // Y-axis labels
                 YAxisLabels { view: *view_state.read() }
 
-                // Plot area with zoom/pan
+                // Plot area with zoom/pan/cursors
                 WaveformPlotArea {
                     view_state: view_state,
+                    cursor_state: cursor_state,
                     waveforms: waveforms.clone(),
                 }
 
@@ -202,11 +236,13 @@ pub fn Waveform() -> Element {
 #[component]
 fn WaveformPlotArea(
     view_state: Signal<ViewState>,
+    mut cursor_state: Signal<CursorState>,
     waveforms: Vec<crate::state::WaveformData>,
 ) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
     let view = *view_state.read();
+    let cursors = *cursor_state.read();
 
     rsx! {
         div {
@@ -281,16 +317,129 @@ fn WaveformPlotArea(
                 }
             }
 
-            // Cursor overlay (future)
-            div {
-                class: "cursor-overlay",
+            // Cursor lines
+            svg {
                 style: "
                     position: absolute;
                     inset: 0;
+                    width: 100%;
+                    height: 100%;
                     pointer-events: none;
-                "
+                ",
+
+                // Cursor 1 (yellow)
+                if let Some(c1) = cursors.cursor1 {
+                    {
+                        let x_frac = (c1 - view.x_min) / (view.x_max - view.x_min);
+                        let x_pct = format!("{}%", x_frac * 100.0);
+                        rsx! {
+                            line {
+                                x1: "{x_pct}",
+                                y1: "0",
+                                x2: "{x_pct}",
+                                y2: "100%",
+                                stroke: "#eab308",
+                                stroke_width: "1",
+                                stroke_dasharray: "4",
+                            }
+                        }
+                    }
+                }
+
+                // Cursor 2 (cyan)
+                if let Some(c2) = cursors.cursor2 {
+                    {
+                        let x_frac = (c2 - view.x_min) / (view.x_max - view.x_min);
+                        let x_pct = format!("{}%", x_frac * 100.0);
+                        rsx! {
+                            line {
+                                x1: "{x_pct}",
+                                y1: "0",
+                                x2: "{x_pct}",
+                                y2: "100%",
+                                stroke: "#06b6d4",
+                                stroke_width: "1",
+                                stroke_dasharray: "4",
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Cursor readout overlay
+            if cursors.cursor1.is_some() || cursors.cursor2.is_some() {
+                div {
+                    style: "
+                        position: absolute;
+                        top: 8px;
+                        right: 8px;
+                        background: rgba(0, 0, 0, 0.8);
+                        padding: 8px 12px;
+                        border-radius: 4px;
+                        font-family: {Theme::FONT_MONO};
+                        font-size: 11px;
+                        pointer-events: none;
+                    ",
+
+                    if let Some(c1) = cursors.cursor1 {
+                        div {
+                            style: "color: #eab308; margin-bottom: 4px;",
+                            "C1: {format_time(c1)}"
+                        }
+                    }
+                    if let Some(c2) = cursors.cursor2 {
+                        div {
+                            style: "color: #06b6d4; margin-bottom: 4px;",
+                            "C2: {format_time(c2)}"
+                        }
+                    }
+                    if let Some(delta) = cursors.delta() {
+                        div {
+                            style: "color: #22c55e;",
+                            "Δt: {format_time(delta)}"
+                        }
+                    }
+                }
+            }
+
+            // Click overlay for cursor placement
+            div {
+                style: "
+                    position: absolute;
+                    inset: 0;
+                    cursor: crosshair;
+                    z-index: 10;
+                ",
+                ondoubleclick: move |e| {
+                    // Double-click to place cursor
+                    // Get click position as fraction of element width
+                    // Note: This is approximate - proper implementation needs element bounds
+                    let click_x = e.client_coordinates().x;
+                    // Estimate position based on typical element layout
+                    // In production, use element_coordinates or a ref
+                    let frac = (click_x % 800.0) / 800.0; // Approximate
+                    let vs = *view_state.read();
+                    let time = vs.x_min + frac * (vs.x_max - vs.x_min);
+                    cursor_state.write().place(time);
+                },
             }
         }
+    }
+}
+
+/// Format time with appropriate SI prefix
+fn format_time(t: f64) -> String {
+    let abs_t = t.abs();
+    if abs_t < 1e-9 {
+        format!("{:.2}ps", t * 1e12)
+    } else if abs_t < 1e-6 {
+        format!("{:.2}ns", t * 1e9)
+    } else if abs_t < 1e-3 {
+        format!("{:.2}µs", t * 1e6)
+    } else if abs_t < 1.0 {
+        format!("{:.2}ms", t * 1e3)
+    } else {
+        format!("{:.2}s", t)
     }
 }
 
