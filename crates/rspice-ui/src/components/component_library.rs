@@ -4,7 +4,7 @@
 
 use dioxus::prelude::*;
 
-use crate::state::{ComponentType, SchematicState, Tool};
+use crate::state::{use_canvas_focus, ComponentType, Rotation, SchematicState, Tool};
 use crate::theme::Theme;
 
 /// Component category for organization
@@ -246,6 +246,7 @@ pub fn ComponentLibrary(props: ComponentLibraryProps) -> Element {
 fn ComponentItem(kind: ComponentType, schematic: Signal<SchematicState>) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
+    let canvas_focus = use_canvas_focus(); // Get canvas focus at component level
 
     let (name, _desc, shortcut) = component_info(kind);
     let is_active = matches!(schematic.read().tool, Tool::Place(k) if k == kind);
@@ -278,6 +279,9 @@ fn ComponentItem(kind: ComponentType, schematic: Signal<SchematicState>) -> Elem
             ",
             onclick: move |_| {
                 schematic.write().tool = Tool::Place(kind);
+                schematic.write().preview_rotation = Rotation::R0;  // Reset rotation for new component
+                // Focus canvas so keyboard shortcuts work immediately
+                canvas_focus.read().focus();
             },
             span {
                 style: "flex: 1; font-size: 12px; color: {text_color};",

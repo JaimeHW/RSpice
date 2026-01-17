@@ -8,7 +8,7 @@ use dioxus::prelude::*;
 use crate::components::component_edit::ComponentEditModal;
 use crate::components::component_library::ComponentLibrary;
 use crate::components::context_menu::{schematic_context_menu, canvas_context_menu, ContextMenu, MenuAction};
-use crate::state::{ComponentType, Point, SchematicState, Tool, SchematicHistory};
+use crate::state::{CanvasFocusState, ComponentType, Point, Rotation, SchematicState, Tool, SchematicHistory};
 use crate::theme::Theme;
 
 /// Drag operation state
@@ -64,6 +64,10 @@ pub fn Schematic() -> Element {
 
     // Component editing state
     let mut editing = use_signal(EditingState::default);
+    
+    // Canvas focus context - shared with other components for focus management
+    let mut canvas_focus = use_signal(CanvasFocusState::new);
+    use_context_provider(|| canvas_focus);
 
     rsx! {
         div {
@@ -79,13 +83,109 @@ pub fn Schematic() -> Element {
                 // Component Library sidebar
                 ComponentLibrary { schematic: schematic }
 
-                // Canvas area
+                // Canvas area - wrapper div is focusable for keyboard events
                 div {
+                    id: "schematic-canvas-wrapper",
                     class: "schematic-canvas-wrapper",
-                    style: "flex: 1 1 auto; position: relative; overflow: hidden;",
+                    style: "flex: 1 1 auto; position: relative; overflow: hidden; outline: none;",
+                    tabindex: "0",
+                    onmounted: move |evt| {
+                        canvas_focus.write().set_element(evt.data());
+                    },
+                    onkeydown: move |evt| {
+                        // Handle Ctrl+key shortcuts
+                        if evt.modifiers().ctrl() {
+                            match evt.key() {
+                                Key::Character(c) if c == "z" || c == "Z" => {
+                                    if history.read().can_undo() {
+                                        history.write().undo();
+                                        schematic.set(history.read().current().clone());
+                                    }
+                                    return;
+                                }
+                                Key::Character(c) if c == "y" || c == "Y" => {
+                                    if history.read().can_redo() {
+                                        history.write().redo();
+                                        schematic.set(history.read().current().clone());
+                                    }
+                                    return;
+                                }
+                                Key::Character(c) if c == "c" || c == "C" => {
+                                    schematic.write().copy_selection();
+                                    return;
+                                }
+                                Key::Character(c) if c == "v" || c == "V" => {
+                                    let gp = *mouse_grid.read();
+                                    schematic.write().paste_at(gp);
+                                    history.write().push(schematic.read().clone(), "Paste");
+                                    return;
+                                }
+                                _ => {}
+                            }
+                        }
+                        
+                        let mut s = schematic.write();
+                        match evt.key() {
+                            Key::Escape => { s.tool = Tool::Select; s.cancel_wire(); }
+                            Key::Delete => {
+                                s.delete_selection();
+                                drop(s);
+                                history.write().push(schematic.read().clone(), "Delete selection");
+                            }
+                            Key::Character(c) if c == "r" || c == "R" => {
+                                if matches!(s.tool, Tool::Place(_)) {
+                                    s.preview_rotation = s.preview_rotation.rotate_cw();
+                                } else {
+                                    s.rotate_selection();
+                                    drop(s);
+                                    history.write().push(schematic.read().clone(), "Rotate selection");
+                                }
+                            }
+                            Key::Character(c) if c == "w" || c == "W" => s.tool = Tool::Wire,
+                            Key::Character(c) if c == " " => {
+                                if s.wire_drawing.active {
+                                    s.toggle_wire_routing();
+                                }
+                            }
+                            Key::Character(c) if c == "g" || c == "G" => {
+                                s.tool = Tool::Place(ComponentType::Ground);
+                                s.preview_rotation = Rotation::R0;
+                            }
+                            Key::Character(c) if c == "v" || c == "V" => {
+                                s.tool = Tool::Place(ComponentType::VoltageSource);
+                                s.preview_rotation = Rotation::R0;
+                            }
+                            Key::Character(c) if c == "i" => {
+                                s.tool = Tool::Place(ComponentType::CurrentSource);
+                                s.preview_rotation = Rotation::R0;
+                            }
+                            Key::Character(c) if c == "c" => {
+                                s.tool = Tool::Place(ComponentType::Capacitor);
+                                s.preview_rotation = Rotation::R0;
+                            }
+                            Key::Character(c) if c == "l" || c == "L" => {
+                                s.tool = Tool::Place(ComponentType::Inductor);
+                                s.preview_rotation = Rotation::R0;
+                            }
+                            Key::Character(c) if c == "d" => {
+                                s.tool = Tool::Place(ComponentType::Diode);
+                                s.preview_rotation = Rotation::R0;
+                            }
+                            Key::Character(c) if c == "q" || c == "Q" => {
+                                s.tool = Tool::Place(ComponentType::NpnBjt);
+                                s.preview_rotation = Rotation::R0;
+                            }
+                            Key::Character(c) if c == "m" => {
+                                s.tool = Tool::Place(ComponentType::Nmos);
+                                s.preview_rotation = Rotation::R0;
+                            }
+                            _ => {}
+                        }
+                    },
 
                 // Pure SVG canvas
                 svg {
+                    id: "schematic-canvas",
                     style: "position: absolute; inset: 0; width: 100%; height: 100%; background: {th.bg_primary()};",
 
                     onmousemove: move |evt| {
@@ -114,6 +214,11 @@ pub fn Schematic() -> Element {
                                 current_grid: gp,
                                 ..d
                             });
+                        }
+                        
+                        // Update wire preview position for orthogonal routing
+                        if schematic.read().wire_drawing.active {
+                            schematic.write().update_wire_preview(gp);
                         }
                         
                         last_mouse.set((c.x, c.y));
@@ -223,8 +328,13 @@ pub fn Schematic() -> Element {
                                 history.write().push(schematic.read().clone(), format!("Add {:?}", k));
                             }
                             Tool::Wire => {
-                                if s.wire_drawing.active { s.extend_wire(gp); }
-                                else { s.start_wire(gp); }
+                                if s.wire_drawing.active {
+                                    // Additional clicks add vertices (multi-segment wires)
+                                    s.extend_wire(gp);
+                                } else {
+                                    // First click starts wire
+                                    s.start_wire(gp);
+                                }
                             }
                             Tool::Probe => {
                                 // Find what we're probing
@@ -264,6 +374,14 @@ pub fn Schematic() -> Element {
                         let gs = schematic.read().grid_size;
                         let gp = Point::from_pixels((elem.x - px) / z, (elem.y - py) / z, gs);
                         
+                        // If drawing a wire, right-click finishes it
+                        if schematic.read().wire_drawing.active {
+                            if schematic.write().finish_wire().is_some() {
+                                history.write().push(schematic.read().clone(), "Add wire".to_string());
+                            }
+                            return;
+                        }
+                        
                         let s = schematic.read();
                         let comp = s.component_at(gp);
                         let wire = s.wire_at(gp);
@@ -284,77 +402,25 @@ pub fn Schematic() -> Element {
                         let gs = schematic.read().grid_size;
                         let gp = Point::from_pixels((c.x - px) / z, (c.y - py) / z, gs);
                         
+                        // Check if we're finishing a wire
+                        if schematic.read().tool == Tool::Wire && schematic.read().wire_drawing.active {
+                            // Don't add the double-click point, just finish
+                            if schematic.write().finish_wire().is_some() {
+                                history.write().push(schematic.read().clone(), "Add wire".to_string());
+                            }
+                            return;
+                        }
+                        
                         let s = schematic.read();
-                        // Check if double-clicked on a component
+                        // Check if double-clicked on a component to edit it
                         if let Some(comp_id) = s.component_at(gp) {
                             // Open edit modal
                             let client = evt.client_coordinates();
                             drop(s);
                             editing.write().component_id = Some(comp_id);
                             editing.write().position = (client.x, client.y);
-                        } else if s.tool == Tool::Wire && s.wire_drawing.active {
-                            drop(s);
-                            schematic.write().finish_wire();
                         }
                     },
-
-                    onkeydown: move |evt| {
-                        // Handle Ctrl+key shortcuts
-                        if evt.modifiers().ctrl() {
-                            match evt.key() {
-                                Key::Character(c) if c == "z" || c == "Z" => {
-                                    if history.read().can_undo() {
-                                        history.write().undo();
-                                        schematic.set(history.read().current().clone());
-                                    }
-                                    return;
-                                }
-                                Key::Character(c) if c == "y" || c == "Y" => {
-                                    if history.read().can_redo() {
-                                        history.write().redo();
-                                        schematic.set(history.read().current().clone());
-                                    }
-                                    return;
-                                }
-                                Key::Character(c) if c == "c" || c == "C" => {
-                                    // Copy selection to clipboard
-                                    schematic.write().copy_selection();
-                                    return;
-                                }
-                                Key::Character(c) if c == "v" || c == "V" => {
-                                    // Paste at current mouse position
-                                    let gp = *mouse_grid.read();
-                                    schematic.write().paste_at(gp);
-                                    history.write().push(schematic.read().clone(), "Paste");
-                                    return;
-                                }
-                                _ => {}
-                            }
-                        }
-                        
-                        let mut s = schematic.write();
-                        match evt.key() {
-                            Key::Escape => { s.tool = Tool::Select; s.wire_drawing.active = false; }
-                            Key::Delete => {
-                                // Make the change FIRST
-                                s.delete_selection();
-                                // Then push to history AFTER
-                                drop(s);
-                                history.write().push(schematic.read().clone(), "Delete selection");
-                            }
-                            Key::Character(c) if c == "r" || c == "R" => {
-                                // Make the change FIRST
-                                s.rotate_selection();
-                                // Then push to history AFTER
-                                drop(s);
-                                history.write().push(schematic.read().clone(), "Rotate selection");
-                            }
-                            Key::Character(c) if c == "w" || c == "W" => s.tool = Tool::Wire,
-                            _ => {}
-                        }
-                    },
-
-                    tabindex: "0",
 
                     // Definitions for patterns
                     defs {
@@ -407,6 +473,20 @@ pub fn Schematic() -> Element {
                                 selected: schematic.read().selection.has_wire(wire.id),
                             }
                         }
+                        
+                        // Wire being drawn - show committed segments
+                        if schematic.read().wire_drawing.active {
+                            WireSvg {
+                                points: schematic.read().wire_drawing.points.clone(),
+                                grid_size: schematic.read().grid_size,
+                                selected: false,
+                            }
+                            
+                            // Wire preview - orthogonal path from last point to cursor
+                            WirePreviewSvg {
+                                schematic: schematic,
+                            }
+                        }
 
                         // Components
                         for comp in schematic.read().components.iter() {
@@ -429,6 +509,7 @@ pub fn Schematic() -> Element {
                                         kind: comp.kind,
                                         pos: *mouse_grid.read(),
                                         grid_size: schematic.read().grid_size,
+                                        rotation: comp.rotation,
                                     }
                                 }
                             }
@@ -444,8 +525,14 @@ pub fn Schematic() -> Element {
                         }
 
                         // Placement preview
-                        if let Tool::Place(k) = schematic.read().tool {
-                            PreviewSvg { kind: k, pos: *mouse_grid.read(), grid_size: schematic.read().grid_size }
+                        {
+                            let tool = schematic.read().tool;
+                            let rot = schematic.read().preview_rotation;
+                            if let Tool::Place(k) = tool {
+                                rsx! { PreviewSvg { kind: k, pos: *mouse_grid.read(), grid_size: schematic.read().grid_size, rotation: rot } }
+                            } else {
+                                rsx! {}
+                            }
                         }
                     }
                 }
@@ -453,7 +540,7 @@ pub fn Schematic() -> Element {
                 // Status bar
                 div {
                     style: "position: absolute; bottom: 0; left: 0; right: 0; display: flex; justify-content: space-between; padding: 4px 8px; background: {th.bg_tertiary()}dd; font-size: 11px; color: {th.text_muted()}; font-family: monospace;",
-                    span { {match schematic.read().tool { Tool::Select => "Select | Del: delete | R: rotate | Ctrl+Z/Y: undo/redo", Tool::Wire => "Wire | Click: add points | DblClick: finish", Tool::Place(_) => "Place | Click: place | Esc: cancel", Tool::Probe => "Probe | Click node/wire to add voltage trace", Tool::Label => "Label | Click to place net label | DblClick to edit" }} }
+                    span { {match schematic.read().tool { Tool::Select => "Select | Del: delete | R: rotate | Ctrl+Z/Y: undo/redo | G/V/C/L/D: place", Tool::Wire => "Wire | Click: add points | Space: toggle route | DblClick/RightClick: finish", Tool::Place(_) => "Place | Click: place | R: rotate | Esc: cancel", Tool::Probe => "Probe | Click node/wire to add voltage trace", Tool::Label => "Label | Click to place net label | DblClick to edit" }} }
                     span { {format!("({}, {}) | {:.0}%", mouse_grid.read().x, mouse_grid.read().y, *zoom.read() * 100.0)} }
                 }
 
@@ -625,13 +712,14 @@ fn CompSvg(
 }
 
 #[component]
-fn PreviewSvg(kind: ComponentType, pos: Point, grid_size: i32) -> Element {
+fn PreviewSvg(kind: ComponentType, pos: Point, grid_size: i32, rotation: Rotation) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
     let (cx, cy) = pos.to_pixels(grid_size);
     let path = symbol_path(kind);
+    let rot_deg = rotation.degrees();
     rsx! {
-        g { transform: "translate({cx},{cy})", opacity: "0.6",
+        g { transform: "translate({cx},{cy}) rotate({rot_deg})", opacity: "0.6",
             circle { cx: "0", cy: "0", r: "20", fill: "{th.accent_primary()}30", stroke: "{th.accent_primary()}", stroke_dasharray: "4,2" }
             path { d: "{path}", stroke: "{th.accent_primary()}", stroke_width: "2", fill: "none" }
         }
@@ -644,7 +732,7 @@ fn symbol_path(k: ComponentType) -> &'static str {
         ComponentType::Capacitor => "M-20 0 L-4 0 M-4-12 L-4 12 M4-12 L4 12 M4 0 L20 0",
         ComponentType::Inductor => "M-20 0 C-15 0-15-10-10-10 C-5-10-5 0 0 0 C5 0 5-10 10-10 C15-10 15 0 20 0",
         ComponentType::Diode => "M-20 0 L-8 0 M-8-10 L-8 10 L8 0 Z M8-10 L8 10 M8 0 L20 0",
-        ComponentType::Ground => "M0-15 L0 0 M-12 0 L12 0 M-8 5 L8 5 M-4 10 L4 10",
+        ComponentType::Ground => "M0-20 L0 0 M-12 0 L12 0 M-8 5 L8 5 M-4 10 L4 10",
         ComponentType::VoltageSource | ComponentType::VoltageSourceAc | ComponentType::VoltageSourcePulse | ComponentType::VoltageSourceSin => 
             "M0-20 L0-12 M0 12 L0 20 M0 0 m-12 0 a12 12 0 1 0 24 0 a12 12 0 1 0-24 0 M-4-4 L4-4 M0-8 L0 0",
         ComponentType::CurrentSource => "M0-20 L0-12 M0 12 L0 20 M0 0 m-12 0 a12 12 0 1 0 24 0 a12 12 0 1 0-24 0 M0-6 L0 6 M-3 3 L0 6 L3 3",
@@ -681,6 +769,58 @@ fn NetLabelSvg(pos: Point, name: String, grid_size: i32) -> Element {
             rect { x: "2", y: "-22", width: "{text_width}", height: "14", rx: "2", stroke: "{th.accent_primary()}", stroke_width: "1", fill: "none" }
             // Net name text
             text { x: "6", y: "-12", font_size: "10", fill: "{th.accent_primary()}", font_weight: "600", font_family: "monospace", "{name}" }
+        }
+    }
+}
+
+/// Wire preview SVG - shows orthogonal preview path from last point to cursor
+#[component]
+fn WirePreviewSvg(schematic: Signal<crate::state::SchematicState>) -> Element {
+    let theme: Signal<Theme> = use_context();
+    let th = theme.read();
+    
+    let s = schematic.read();
+    let preview_path = s.wire_drawing.get_preview_path();
+    let gs = s.grid_size;
+    
+    if preview_path.len() < 2 {
+        return rsx! {};
+    }
+    
+    // Build SVG path data for orthogonal wire preview
+    let path_data: String = preview_path.iter().enumerate()
+        .map(|(i, p)| {
+            let (px, py) = p.to_pixels(gs);
+            if i == 0 { format!("M{px},{py}") } else { format!("L{px},{py}") }
+        })
+        .collect();
+    
+    let stroke_color = th.accent_primary();
+    
+    rsx! {
+        path {
+            d: "{path_data}",
+            stroke: "{stroke_color}",
+            stroke_width: "2",
+            stroke_dasharray: "4,2",
+            fill: "none",
+            opacity: "0.7",
+        }
+        // Show corner junction if path has 3 points (L-shaped)
+        if preview_path.len() == 3 {
+            {
+                let corner = preview_path[1];
+                let (cx, cy) = corner.to_pixels(gs);
+                rsx! {
+                    circle {
+                        cx: "{cx}",
+                        cy: "{cy}",
+                        r: "3",
+                        fill: "{stroke_color}",
+                        opacity: "0.5",
+                    }
+                }
+            }
         }
     }
 }
