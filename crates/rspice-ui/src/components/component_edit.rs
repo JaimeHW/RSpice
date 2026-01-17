@@ -1,6 +1,6 @@
 //! Component Edit Modal
 //!
-//! Modal popup for editing component properties (name, value, parameters).
+//! Modal popup for editing component properties with type-specific fields.
 
 use dioxus::html::input_data::keyboard_types::Key;
 use dioxus::prelude::*;
@@ -21,6 +21,114 @@ pub struct ComponentEditProps {
     pub on_cancel: EventHandler<()>,
     /// Schematic state for reading component data
     pub schematic: Signal<SchematicState>,
+}
+
+/// Get field labels and placeholders for each component type
+fn get_type_fields(
+    comp_type: ComponentType,
+) -> (&'static str, &'static str, &'static str, &'static str, bool) {
+    // Returns: (value_label, value_placeholder, params_label, params_placeholder, show_params)
+    match comp_type {
+        // Passive components - show Value field
+        ComponentType::Resistor => (
+            "Resistance",
+            "1k, 10k, 4.7M",
+            "Tolerance / TC",
+            "tol=5% tc=100ppm",
+            true,
+        ),
+        ComponentType::Capacitor => (
+            "Capacitance",
+            "1u, 100n, 47p",
+            "Initial Condition",
+            "ic=0",
+            true,
+        ),
+        ComponentType::Inductor => (
+            "Inductance",
+            "1m, 100u, 10n",
+            "Series Resistance",
+            "rser=0.1",
+            true,
+        ),
+
+        // Semiconductors - show Model field
+        ComponentType::Diode => (
+            "Model",
+            "1N4148, 1N4007, BAT54",
+            "Area Factor",
+            "area=1",
+            true,
+        ),
+        ComponentType::NpnBjt | ComponentType::PnpBjt => {
+            ("Model", "2N2222, 2N3904, BC547", "Multiplier", "m=1", true)
+        }
+        ComponentType::Nmos | ComponentType::Pmos => (
+            "Model",
+            "2N7000, IRF530, BSS138",
+            "W / L",
+            "W=10u L=1u",
+            true,
+        ),
+
+        // Voltage sources - show complex parameters
+        ComponentType::VoltageSource => {
+            ("DC Value", "5, 3.3, 12", "Source Type", "DC, AC 1", false)
+        }
+        ComponentType::VoltageSourceAc => (
+            "AC Amplitude",
+            "1, 5, 10V",
+            "Frequency",
+            "1k, 100k, 1MEG",
+            true,
+        ),
+        ComponentType::VoltageSourceSin => (
+            "Amplitude",
+            "5",
+            "SIN Parameters",
+            "0 5 1k (offset amp freq)",
+            true,
+        ),
+        ComponentType::VoltageSourcePulse => (
+            "High Level",
+            "5",
+            "PULSE Parameters",
+            "0 5 0 1n 1n 1u 2u",
+            true,
+        ),
+
+        // Current source
+        ComponentType::CurrentSource => (
+            "DC Current",
+            "1m, 10u, 100n",
+            "Source Type",
+            "DC, AC 1m",
+            false,
+        ),
+
+        // Ground - minimal editing
+        ComponentType::Ground => ("(no value)", "", "", "", false),
+    }
+}
+
+/// Get a friendly type name
+fn get_type_name(comp_type: ComponentType) -> &'static str {
+    match comp_type {
+        ComponentType::Resistor => "Resistor",
+        ComponentType::Capacitor => "Capacitor",
+        ComponentType::Inductor => "Inductor",
+        ComponentType::Diode => "Diode",
+        ComponentType::NpnBjt => "NPN Transistor",
+        ComponentType::PnpBjt => "PNP Transistor",
+        ComponentType::Nmos => "N-Channel MOSFET",
+        ComponentType::Pmos => "P-Channel MOSFET",
+        ComponentType::VoltageSource => "DC Voltage Source",
+        ComponentType::VoltageSourceAc => "AC Voltage Source",
+        ComponentType::VoltageSourceSin => "Sine Voltage Source",
+        ComponentType::VoltageSourcePulse => "Pulse Voltage Source",
+        ComponentType::CurrentSource => "Current Source",
+        ComponentType::Ground => "Ground",
+    }
 }
 
 /// Modal popup for editing component properties
@@ -47,6 +155,14 @@ pub fn ComponentEditModal(props: ComponentEditProps) -> Element {
     };
     drop(schematic);
 
+    // Get type-specific field configuration
+    let (value_label, value_placeholder, params_label, params_placeholder, show_params) = comp_type
+        .map(get_type_fields)
+        .unwrap_or(("Value", "", "Parameters", "", true));
+
+    let type_name = comp_type.map(get_type_name).unwrap_or("Component");
+    let is_ground = matches!(comp_type, Some(ComponentType::Ground));
+
     // Local state for editing
     let mut name = use_signal(|| initial_name.clone());
     let mut value = use_signal(|| initial_value.clone());
@@ -56,9 +172,6 @@ pub fn ComponentEditModal(props: ComponentEditProps) -> Element {
     let (x, y) = props.position;
     let left = (x - 150.0).max(10.0);
     let top = (y + 20.0).max(10.0);
-
-    // Get type label
-    let type_label = comp_type.map(|t| format!("{:?}", t)).unwrap_or_default();
 
     rsx! {
         // Backdrop
@@ -82,7 +195,7 @@ pub fn ComponentEditModal(props: ComponentEditProps) -> Element {
                 border: 1px solid {th.border()};
                 border-radius: 8px;
                 padding: 16px;
-                min-width: 280px;
+                min-width: 300px;
                 box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
                 z-index: 1001;
             ",
@@ -103,7 +216,7 @@ pub fn ComponentEditModal(props: ComponentEditProps) -> Element {
                 }
             },
 
-            // Header
+            // Header with component type
             div {
                 style: "
                     display: flex;
@@ -115,11 +228,7 @@ pub fn ComponentEditModal(props: ComponentEditProps) -> Element {
                 ",
                 span {
                     style: "font-weight: 600; color: {th.text_primary()}; font-size: 14px;",
-                    "Edit Component"
-                }
-                span {
-                    style: "font-size: 11px; color: {th.text_muted()}; background: {th.bg_tertiary()}; padding: 2px 6px; border-radius: 4px;",
-                    "{type_label}"
+                    "Edit {type_name}"
                 }
             }
 
@@ -127,7 +236,7 @@ pub fn ComponentEditModal(props: ComponentEditProps) -> Element {
             div {
                 style: "display: flex; flex-direction: column; gap: 12px;",
 
-                // Name field
+                // Name field (always shown)
                 div {
                     label {
                         style: "display: block; font-size: 11px; color: {th.text_muted()}; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;",
@@ -154,55 +263,59 @@ pub fn ComponentEditModal(props: ComponentEditProps) -> Element {
                     }
                 }
 
-                // Value field
-                div {
-                    label {
-                        style: "display: block; font-size: 11px; color: {th.text_muted()}; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;",
-                        "Value"
-                    }
-                    input {
-                        r#type: "text",
-                        value: "{value}",
-                        placeholder: "1k, 10u, 5V, etc.",
-                        style: "
-                            width: 100%;
-                            padding: 8px 10px;
-                            background: {th.bg_primary()};
-                            border: 1px solid {th.border()};
-                            border-radius: 6px;
-                            color: {th.text_primary()};
-                            font-size: 13px;
-                            font-family: {Theme::FONT_MONO};
-                            outline: none;
-                            box-sizing: border-box;
-                        ",
-                        oninput: move |e| value.set(e.value().clone()),
+                // Value/Model field (not shown for Ground)
+                if !is_ground {
+                    div {
+                        label {
+                            style: "display: block; font-size: 11px; color: {th.text_muted()}; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;",
+                            "{value_label}"
+                        }
+                        input {
+                            r#type: "text",
+                            value: "{value}",
+                            placeholder: "{value_placeholder}",
+                            style: "
+                                width: 100%;
+                                padding: 8px 10px;
+                                background: {th.bg_primary()};
+                                border: 1px solid {th.border()};
+                                border-radius: 6px;
+                                color: {th.text_primary()};
+                                font-size: 13px;
+                                font-family: {Theme::FONT_MONO};
+                                outline: none;
+                                box-sizing: border-box;
+                            ",
+                            oninput: move |e| value.set(e.value().clone()),
+                        }
                     }
                 }
 
-                // Parameters field
-                div {
-                    label {
-                        style: "display: block; font-size: 11px; color: {th.text_muted()}; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;",
-                        "SPICE Parameters"
-                    }
-                    input {
-                        r#type: "text",
-                        value: "{params}",
-                        placeholder: "model=xxx, tc=0.01, etc.",
-                        style: "
-                            width: 100%;
-                            padding: 8px 10px;
-                            background: {th.bg_primary()};
-                            border: 1px solid {th.border()};
-                            border-radius: 6px;
-                            color: {th.text_primary()};
-                            font-size: 13px;
-                            font-family: {Theme::FONT_MONO};
-                            outline: none;
-                            box-sizing: border-box;
-                        ",
-                        oninput: move |e| params.set(e.value().clone()),
+                // Parameters field (conditionally shown)
+                if show_params && !is_ground {
+                    div {
+                        label {
+                            style: "display: block; font-size: 11px; color: {th.text_muted()}; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;",
+                            "{params_label}"
+                        }
+                        input {
+                            r#type: "text",
+                            value: "{params}",
+                            placeholder: "{params_placeholder}",
+                            style: "
+                                width: 100%;
+                                padding: 8px 10px;
+                                background: {th.bg_primary()};
+                                border: 1px solid {th.border()};
+                                border-radius: 6px;
+                                color: {th.text_primary()};
+                                font-size: 13px;
+                                font-family: {Theme::FONT_MONO};
+                                outline: none;
+                                box-sizing: border-box;
+                            ",
+                            oninput: move |e| params.set(e.value().clone()),
+                        }
                     }
                 }
             }
@@ -235,7 +348,7 @@ pub fn ComponentEditModal(props: ComponentEditProps) -> Element {
                 button {
                     style: "
                         padding: 8px 16px;
-                        background: #3b82f6;
+                        background: {th.accent_primary()};
                         border: none;
                         border-radius: 6px;
                         color: white;
