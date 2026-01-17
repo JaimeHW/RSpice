@@ -34,7 +34,7 @@ pub struct SimulationState {
 }
 
 /// Waveform trace data
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WaveformData {
     /// Trace name (e.g., "V(out)")
     pub name: String,
