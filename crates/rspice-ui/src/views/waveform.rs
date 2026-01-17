@@ -31,6 +31,8 @@ struct ViewState {
     /// Plot area dimensions (updated on mouse events)
     plot_width: f64,
     plot_height: f64,
+    /// True if mouse actually moved during pan/drag (prevents click on drag end)
+    did_drag: bool,
 }
 
 /// State for a single waveform pane (independent Y-axis)
@@ -100,6 +102,26 @@ struct CursorState {
     next_cursor: u8,
 }
 
+/// Cursor value at a specific time for a single trace
+#[derive(Debug, Clone, Default)]
+struct CursorValue {
+    /// Trace name
+    name: String,
+    /// Trace color for display
+    color: String,
+    /// Interpolated Y value at cursor X
+    value: f64,
+}
+
+/// Cursor values for all traces at a cursor position
+#[derive(Debug, Clone, Default)]
+struct CursorValues {
+    /// X position (time)
+    x: f64,
+    /// Values per trace
+    traces: Vec<CursorValue>,
+}
+
 impl CursorState {
     /// Get delta between cursors
     fn delta(&self) -> Option<f64> {
@@ -132,6 +154,62 @@ impl CursorState {
         self.cursor2 = None;
         self.next_cursor = 0;
     }
+}
+
+/// Interpolate Y value at a specific X position
+fn interpolate_y_at_x(x_data: &[f64], y_data: &[f64], target_x: f64) -> Option<f64> {
+    if x_data.len() != y_data.len() || x_data.is_empty() {
+        return None;
+    }
+
+    // Find the two points bracketing target_x
+    let mut left_idx = 0;
+    for (i, &x) in x_data.iter().enumerate() {
+        if x <= target_x {
+            left_idx = i;
+        } else {
+            break;
+        }
+    }
+
+    // Handle edge cases
+    if left_idx >= x_data.len() - 1 {
+        return Some(y_data[y_data.len() - 1]);
+    }
+
+    let right_idx = left_idx + 1;
+    let x0 = x_data[left_idx];
+    let x1 = x_data[right_idx];
+    let y0 = y_data[left_idx];
+    let y1 = y_data[right_idx];
+
+    // Linear interpolation
+    if (x1 - x0).abs() < 1e-15 {
+        return Some(y0);
+    }
+
+    let t = (target_x - x0) / (x1 - x0);
+    Some(y0 + t * (y1 - y0))
+}
+
+/// Get cursor values for all visible traces at a given X position
+fn get_cursor_values(x_pos: f64, waveforms: &[crate::state::WaveformData]) -> CursorValues {
+    let mut values = CursorValues {
+        x: x_pos,
+        traces: Vec::new(),
+    };
+
+    for wf in waveforms.iter().filter(|w| w.visible) {
+        if let Some(y_val) = interpolate_y_at_x(&wf.x, &wf.y, x_pos) {
+            values.traces.push(CursorValue {
+                name: wf.name.clone(),
+                color: wf.color.clone(),
+                value: y_val,
+            });
+        }
+    }
+
+    values
 }
 
 /// Box selection for zoom-to-region feature
@@ -342,6 +420,7 @@ impl Default for ViewState {
             pan_start_y: 0.0,
             plot_width: 800.0, // Default, updated dynamically on mouse events
             plot_height: 400.0,
+            did_drag: false,
         }
     }
 }
@@ -574,6 +653,13 @@ fn WaveformPlotArea(
     let cursors = *cursor_state.read();
     let box_sel = *box_selection.read();
 
+    // Determine cursor style based on pan state
+    let cursor_style = if view.is_panning {
+        "grabbing"
+    } else {
+        "crosshair"
+    };
+
     rsx! {
         div {
             class: "plot-area",
@@ -582,7 +668,9 @@ fn WaveformPlotArea(
                 position: relative;
                 background: {th.bg_primary()};
                 overflow: hidden;
-                cursor: grab;
+                cursor: {cursor_style};
+                user-select: none;
+                -webkit-user-select: none;
             ",
 
             // Get actual element dimensions on mount
@@ -610,6 +698,9 @@ fn WaveformPlotArea(
 
             // Pan with mouse drag, or box zoom with shift+drag
             onmousedown: move |e| {
+                // Prevent native browser drag behavior
+                e.prevent_default();
+
                 let elem = e.element_coordinates();
                 let vs = *view_state.read();
 
@@ -628,6 +719,7 @@ fn WaveformPlotArea(
                     vs.is_panning = true;
                     vs.pan_start_x = elem.x;
                     vs.pan_start_y = elem.y;
+                    vs.did_drag = false; // Reset drag flag
                 }
             },
 
@@ -647,6 +739,27 @@ fn WaveformPlotArea(
             onmouseleave: move |_| {
                 box_selection.write().cancel();
                 view_state.write().is_panning = false;
+            },
+
+            // Click to place cursor (only if not dragging)
+            onclick: move |e| {
+                // Skip cursor placement if we just finished a drag
+                if view_state.read().did_drag {
+                    view_state.write().did_drag = false;
+                    return;
+                }
+
+                let elem = e.element_coordinates();
+                let vs = *view_state.read();
+                let plot_width = vs.plot_width.max(100.0);
+
+                // Convert element X to data X (time)
+                let data_x = vs.x_min + (elem.x / plot_width) * (vs.x_max - vs.x_min);
+
+                // Don't place cursor if we're in a selection operation
+                if !box_selection.read().is_selecting {
+                    cursor_state.write().place(data_x);
+                }
             },
 
             onmousemove: move |e| {
@@ -676,6 +789,7 @@ fn WaveformPlotArea(
                     new_vs.pan(data_dx, data_dy);
                     new_vs.pan_start_x = elem.x;
                     new_vs.pan_start_y = elem.y;
+                    new_vs.did_drag = true; // Mark that a drag occurred
                 }
             },
 
@@ -810,84 +924,96 @@ fn WaveformPlotArea(
                 }
             }
 
-            // Cursor readout overlay
+            // Cursor readout overlay with per-trace values
             if cursors.cursor1.is_some() || cursors.cursor2.is_some() {
-                div {
-                    style: "
-                        position: absolute;
-                        top: 8px;
-                        right: 8px;
-                        background: rgba(0, 0, 0, 0.85);
-                        padding: 8px 12px;
-                        border-radius: 6px;
-                        font-family: {Theme::FONT_MONO};
-                        font-size: 11px;
-                        min-width: 100px;
-                        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-                    ",
+                {
+                    // Compute cursor values for each cursor
+                    let c1_values = cursors.cursor1.map(|t| get_cursor_values(t, &waveforms));
+                    let c2_values = cursors.cursor2.map(|t| get_cursor_values(t, &waveforms));
 
-                    // Title
-                    div {
-                        style: "color: #9ca3af; font-size: 10px; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;",
-                        "Cursors"
-                    }
+                    rsx! {
+                        div {
+                            style: "
+                                position: absolute;
+                                top: 8px;
+                                right: 8px;
+                                background: rgba(0, 0, 0, 0.9);
+                                padding: 10px 14px;
+                                border-radius: 8px;
+                                font-family: {Theme::FONT_MONO};
+                                font-size: 11px;
+                                min-width: 180px;
+                                max-width: 280px;
+                                box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+                                border: 1px solid rgba(255,255,255,0.1);
+                                z-index: 30;
+                            ",
 
-                    if let Some(c1) = cursors.cursor1 {
-                        div {
-                            style: "color: #eab308; margin-bottom: 3px; display: flex; justify-content: space-between;",
-                            span { "C1:" }
-                            span { style: "margin-left: 8px;", "{format_time(c1)}" }
-                        }
-                    }
-                    if let Some(c2) = cursors.cursor2 {
-                        div {
-                            style: "color: #06b6d4; margin-bottom: 3px; display: flex; justify-content: space-between;",
-                            span { "C2:" }
-                            span { style: "margin-left: 8px;", "{format_time(c2)}" }
-                        }
-                    }
-
-                    // Delta and frequency
-                    if let Some(delta) = cursors.delta() {
-                        div {
-                            style: "border-top: 1px solid #374151; margin-top: 4px; padding-top: 4px;",
+                            // Title
                             div {
-                                style: "color: #22c55e; margin-bottom: 3px; display: flex; justify-content: space-between;",
-                                span { "Δt:" }
-                                span { style: "margin-left: 8px;", "{format_time(delta)}" }
+                                style: "color: #9ca3af; font-size: 10px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px;",
+                                "Cursor Readout"
                             }
-                            if let Some(freq) = cursors.frequency() {
+
+                            // Cursor 1 section
+                            if let Some(ref vals) = c1_values {
                                 div {
-                                    style: "color: #a78bfa; display: flex; justify-content: space-between;",
-                                    span { "1/Δt:" }
-                                    span { style: "margin-left: 8px;", "{format_frequency(freq)}" }
+                                    style: "margin-bottom: 8px;",
+                                    div {
+                                        style: "color: #eab308; font-weight: 600; margin-bottom: 4px; display: flex; justify-content: space-between;",
+                                        span { "C1:" }
+                                        span { "{format_time(vals.x)}" }
+                                    }
+                                    for tv in vals.traces.iter() {
+                                        div {
+                                            style: "display: flex; justify-content: space-between; padding: 1px 0; color: {tv.color};",
+                                            span { style: "opacity: 0.8;", "{tv.name}:" }
+                                            span { style: "font-weight: 500;", "{format_voltage(tv.value)}" }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Cursor 2 section
+                            if let Some(ref vals) = c2_values {
+                                div {
+                                    style: "margin-bottom: 8px;",
+                                    div {
+                                        style: "color: #06b6d4; font-weight: 600; margin-bottom: 4px; display: flex; justify-content: space-between;",
+                                        span { "C2:" }
+                                        span { "{format_time(vals.x)}" }
+                                    }
+                                    for tv in vals.traces.iter() {
+                                        div {
+                                            style: "display: flex; justify-content: space-between; padding: 1px 0; color: {tv.color};",
+                                            span { style: "opacity: 0.8;", "{tv.name}:" }
+                                            span { style: "font-weight: 500;", "{format_voltage(tv.value)}" }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Delta and frequency
+                            if let Some(delta) = cursors.delta() {
+                                div {
+                                    style: "border-top: 1px solid rgba(255,255,255,0.1); margin-top: 4px; padding-top: 6px;",
+                                    div {
+                                        style: "color: #22c55e; margin-bottom: 2px; display: flex; justify-content: space-between;",
+                                        span { "Δt:" }
+                                        span { style: "font-weight: 500;", "{format_time(delta)}" }
+                                    }
+                                    if let Some(freq) = cursors.frequency() {
+                                        div {
+                                            style: "color: #a78bfa; display: flex; justify-content: space-between;",
+                                            span { "Freq:" }
+                                            span { style: "font-weight: 500;", "{format_frequency(freq)}" }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-
-            // Click overlay for cursor placement
-            div {
-                style: "
-                    position: absolute;
-                    inset: 0;
-                    cursor: crosshair;
-                    z-index: 10;
-                ",
-                ondoubleclick: move |e| {
-                    // Double-click to place cursor
-                    // Get click position as fraction of element width
-                    // Note: This is approximate - proper implementation needs element bounds
-                    let click_x = e.client_coordinates().x;
-                    // Estimate position based on typical element layout
-                    // In production, use element_coordinates or a ref
-                    let frac = (click_x % 800.0) / 800.0; // Approximate
-                    let vs = *view_state.read();
-                    let time = vs.x_min + frac * (vs.x_max - vs.x_min);
-                    cursor_state.write().place(time);
-                },
             }
         }
     }

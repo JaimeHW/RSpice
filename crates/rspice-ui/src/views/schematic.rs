@@ -5,6 +5,7 @@
 
 use dioxus::prelude::*;
 
+use crate::components::component_edit::ComponentEditModal;
 use crate::components::context_menu::{schematic_context_menu, canvas_context_menu, ContextMenu, MenuAction};
 use crate::state::{ComponentType, Point, SchematicState, Tool, SchematicHistory};
 use crate::theme::Theme;
@@ -25,6 +26,15 @@ struct ContextMenuState {
     position: (f64, f64),
     target_component: Option<u64>,
     target_wire: Option<u64>,
+}
+
+/// Component editing state
+#[derive(Clone, Default)]
+struct EditingState {
+    /// Component being edited
+    component_id: Option<u64>,
+    /// Screen position for popup
+    position: (f64, f64),
 }
 
 /// Main schematic editor component - Pure SVG
