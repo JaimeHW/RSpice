@@ -57,7 +57,8 @@ pub fn App() -> Element {
                 // Left sidebar - Component library
                 Panel {
                     title: "Components",
-                    width: "240px",
+                    width: "250px",
+                    position: "left",
                     ComponentLibrary {}
                 }
 
@@ -96,7 +97,8 @@ pub fn App() -> Element {
                 // Right sidebar - Properties (future)
                 Panel {
                     title: "Properties",
-                    width: "280px",
+                    width: "250px",
+                    position: "right",
                     PropertiesPanel {}
                 }
             }

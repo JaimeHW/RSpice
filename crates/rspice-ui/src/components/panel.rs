@@ -14,11 +14,20 @@ pub fn Panel(
     /// Panel width (CSS value)
     #[props(default = "auto".to_string())]
     width: String,
+    /// Position: "left" or "right" - controls border side
+    #[props(default = "left".to_string())]
+    position: String,
     /// Panel content
     children: Element,
 ) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
+
+    let border = if position == "right" {
+        format!("border-left: 1px solid {};", th.border())
+    } else {
+        format!("border-right: 1px solid {};", th.border())
+    };
 
     rsx! {
         div {
@@ -29,7 +38,7 @@ pub fn Panel(
                 width: {width};
                 min-width: {width};
                 background: {th.bg_secondary()};
-                border-right: 1px solid {th.border()};
+                {border}
             ",
 
             // Panel header
