@@ -26,6 +26,7 @@
 
 pub mod analysis;
 pub mod circuit;
+pub mod compat;
 pub mod device;
 pub mod engine;
 pub mod expr;
