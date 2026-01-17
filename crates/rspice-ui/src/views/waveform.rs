@@ -124,6 +124,7 @@ impl CursorState {
     }
 
     /// Clear all cursors
+    #[allow(dead_code)]
     fn clear(&mut self) {
         self.cursor1 = None;
         self.cursor2 = None;
@@ -131,8 +132,121 @@ impl CursorState {
     }
 }
 
+/// Box selection for zoom-to-region feature
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+struct BoxSelection {
+    /// Whether currently dragging to select
+    is_selecting: bool,
+    /// Start point (in data coordinates: x=time, y=voltage)
+    start_x: f64,
+    start_y: f64,
+    /// Current end point (in data coordinates)
+    end_x: f64,
+    end_y: f64,
+    /// Start point in element coordinates for drawing
+    start_elem_x: f64,
+    start_elem_y: f64,
+}
+
+impl BoxSelection {
+    /// Start a box selection at the given data coordinates
+    fn start(&mut self, x: f64, y: f64, elem_x: f64, elem_y: f64) {
+        self.is_selecting = true;
+        self.start_x = x;
+        self.start_y = y;
+        self.end_x = x;
+        self.end_y = y;
+        self.start_elem_x = elem_x;
+        self.start_elem_y = elem_y;
+    }
+
+    /// Update the end point during drag
+    fn update(&mut self, x: f64, y: f64) {
+        self.end_x = x;
+        self.end_y = y;
+    }
+
+    /// Finish selection and return the selected region (x_min, x_max, y_min, y_max)
+    fn finish(&mut self) -> Option<(f64, f64, f64, f64)> {
+        if !self.is_selecting {
+            return None;
+        }
+        self.is_selecting = false;
+
+        // Normalize coordinates (ensure min < max)
+        let x_min = self.start_x.min(self.end_x);
+        let x_max = self.start_x.max(self.end_x);
+        let y_min = self.start_y.min(self.end_y);
+        let y_max = self.start_y.max(self.end_y);
+
+        // Only return if selection has meaningful size
+        let x_range = x_max - x_min;
+        let y_range = y_max - y_min;
+        if x_range > 1e-12 && y_range > 1e-12 {
+            Some((x_min, x_max, y_min, y_max))
+        } else {
+            None
+        }
+    }
+
+    fn cancel(&mut self) {
+        self.is_selecting = false;
+    }
+}
+
+/// State for multi-pane waveform viewer
+#[derive(Debug, Clone, Default)]
+struct WaveformViewerState {
+    /// Pane configurations (each pane has its own Y-axis range)
+    panes: Vec<PaneState>,
+    /// Which trace indices are assigned to which pane
+    trace_pane_map: Vec<usize>,
+    /// Active pane index (for keyboard focus)
+    active_pane: usize,
+}
+
+impl WaveformViewerState {
+    /// Create with a single default pane
+    fn new() -> Self {
+        Self {
+            panes: vec![PaneState::default()],
+            trace_pane_map: Vec::new(),
+            active_pane: 0,
+        }
+    }
+
+    /// Add a new pane and return its index
+    fn add_pane(&mut self) -> usize {
+        let id = self.panes.len() as u32;
+        self.panes.push(PaneState::new(id));
+        self.panes.len() - 1
+    }
+
+    /// Assign a trace to a pane
+    fn assign_trace_to_pane(&mut self, trace_idx: usize, pane_idx: usize) {
+        // Extend trace_pane_map if needed
+        while self.trace_pane_map.len() <= trace_idx {
+            self.trace_pane_map.push(0); // Default to first pane
+        }
+        self.trace_pane_map[trace_idx] = pane_idx;
+
+        // Update pane's waveform_indices
+        if let Some(pane) = self.panes.get_mut(pane_idx) {
+            if !pane.waveform_indices.contains(&trace_idx) {
+                pane.waveform_indices.push(trace_idx);
+            }
+        }
+    }
+
+    /// Get pane index for a trace (defaults to 0)
+    fn get_trace_pane(&self, trace_idx: usize) -> usize {
+        self.trace_pane_map.get(trace_idx).copied().unwrap_or(0)
+    }
+}
+
 /// Waveform measurements
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 struct WaveformMeasurements {
     vpp: f64,  // Peak-to-peak voltage
     vmax: f64, // Maximum voltage
@@ -297,12 +411,14 @@ impl ViewState {
 #[component]
 pub fn Waveform() -> Element {
     let theme: Signal<Theme> = use_context();
-    let sim_state: Signal<SimulationState> = use_context();
+    let mut sim_state: Signal<SimulationState> = use_context();
     let th = theme.read();
 
     let waveforms = &sim_state.read().waveforms;
     let mut view_state = use_signal(ViewState::default);
-    let mut cursor_state = use_signal(CursorState::default);
+    let cursor_state = use_signal(CursorState::default);
+    let box_selection = use_signal(BoxSelection::default);
+    let _viewer_state = use_signal(WaveformViewerState::new);
 
     // Auto-fit view when waveforms change
     let _waveform_count = waveforms.len();
@@ -349,10 +465,11 @@ pub fn Waveform() -> Element {
                 // Y-axis labels
                 YAxisLabels { view: *view_state.read() }
 
-                // Plot area with zoom/pan/cursors
+                // Plot area with zoom/pan/cursors/box selection
                 WaveformPlotArea {
                     view_state: view_state,
                     cursor_state: cursor_state,
+                    box_selection: box_selection,
                     waveforms: waveforms.clone(),
                 }
 
@@ -378,10 +495,26 @@ pub fn Waveform() -> Element {
 
                     if waveforms.is_empty() {
                         // Demo legend
-                        LegendItem { name: "V(out)".to_string(), color: th.trace_color(0).to_string() }
+                        LegendItem {
+                            name: "V(out)".to_string(),
+                            color: th.trace_color(0).to_string(),
+                            visible: true,
+                            on_toggle: move |_| {}, // Demo, no toggle
+                        }
                     } else {
-                        for wf in waveforms.iter() {
-                            LegendItem { name: wf.name.clone(), color: wf.color.clone() }
+                        for (idx, wf) in waveforms.iter().enumerate() {
+                            LegendItem {
+                                key: "{wf.name}-{idx}",
+                                name: wf.name.clone(),
+                                color: wf.color.clone(),
+                                visible: wf.visible,
+                                on_toggle: move |_| {
+                                    // Toggle visibility in SimulationState
+                                    if let Some(wf) = sim_state.write().waveforms.get_mut(idx) {
+                                        wf.visible = !wf.visible;
+                                    }
+                                },
+                            }
                         }
                     }
                 }
@@ -398,12 +531,14 @@ pub fn Waveform() -> Element {
 fn WaveformPlotArea(
     mut view_state: Signal<ViewState>,
     mut cursor_state: Signal<CursorState>,
+    mut box_selection: Signal<BoxSelection>,
     waveforms: Vec<crate::state::WaveformData>,
 ) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
     let view = *view_state.read();
     let cursors = *cursor_state.read();
+    let box_sel = *box_selection.read();
 
     rsx! {
         div {
@@ -439,43 +574,67 @@ fn WaveformPlotArea(
                 view_state.write().zoom(factor, 0.5, 0.5);
             },
 
-            // Pan with mouse drag - capture element bounds at start
+            // Pan with mouse drag, or box zoom with shift+drag
             onmousedown: move |e| {
-                // Use element-relative coordinates for consistent pan tracking
                 let elem = e.element_coordinates();
-                let mut vs = view_state.write();
-                vs.is_panning = true;
-                vs.pan_start_x = elem.x;
-                vs.pan_start_y = elem.y;
+                let vs = *view_state.read();
+
+                // Convert element coords to data coords for box selection
+                let plot_width = vs.plot_width.max(100.0);
+                let plot_height = vs.plot_height.max(100.0);
+                let data_x = vs.x_min + (elem.x / plot_width) * (vs.x_max - vs.x_min);
+                let data_y = vs.y_max - (elem.y / plot_height) * (vs.y_max - vs.y_min);
+
+                if e.modifiers().shift() {
+                    // Shift+drag = box zoom selection
+                    box_selection.write().start(data_x, data_y, elem.x, elem.y);
+                } else {
+                    // Normal drag = pan
+                    let mut vs = view_state.write();
+                    vs.is_panning = true;
+                    vs.pan_start_x = elem.x;
+                    vs.pan_start_y = elem.y;
+                }
             },
 
             onmouseup: move |_| {
+                // Finish box selection if active
+                if let Some((x_min, x_max, y_min, y_max)) = box_selection.write().finish() {
+                    // Zoom to selected region
+                    let mut vs = view_state.write();
+                    vs.x_min = x_min;
+                    vs.x_max = x_max;
+                    vs.y_min = y_min;
+                    vs.y_max = y_max;
+                }
                 view_state.write().is_panning = false;
             },
 
             onmouseleave: move |_| {
+                box_selection.write().cancel();
                 view_state.write().is_panning = false;
             },
 
             onmousemove: move |e| {
-                if view_state.read().is_panning {
-                    let vs = *view_state.read();
-                    let elem = e.element_coordinates();
+                let elem = e.element_coordinates();
+                let vs = *view_state.read();
+                let plot_width = vs.plot_width.max(100.0);
+                let plot_height = vs.plot_height.max(100.0);
 
+                // Update box selection if active
+                if box_selection.read().is_selecting {
+                    let data_x = vs.x_min + (elem.x / plot_width) * (vs.x_max - vs.x_min);
+                    let data_y = vs.y_max - (elem.y / plot_height) * (vs.y_max - vs.y_min);
+                    box_selection.write().update(data_x, data_y);
+                } else if vs.is_panning {
                     // Calculate pixel deltas using element-relative coordinates
                     let pixel_dx = elem.x - vs.pan_start_x;
                     let pixel_dy = elem.y - vs.pan_start_y;
-
-                    // Use stored plot dimensions (set by onmounted)
-                    let plot_width = vs.plot_width.max(100.0);
-                    let plot_height = vs.plot_height.max(100.0);
 
                     let x_range = vs.x_max - vs.x_min;
                     let y_range = vs.y_max - vs.y_min;
 
                     // Convert pixel movement to data coordinate movement
-                    // Negative for X because dragging right should move view left (show earlier data)
-                    // Positive for Y because screen Y increases downward but data Y increases upward
                     let data_dx = -(pixel_dx / plot_width) * x_range;
                     let data_dy = (pixel_dy / plot_height) * y_range;
 
@@ -525,7 +684,7 @@ fn WaveformPlotArea(
                         }
                     }
                 } else {
-                    for wf in waveforms.iter() {
+                    for wf in waveforms.iter().filter(|w| w.visible) {
                         WaveformTraceView {
                             key: "{wf.name}",
                             x: wf.x.clone(),
@@ -581,6 +740,37 @@ fn WaveformPlotArea(
                                 stroke_width: "1",
                                 stroke_dasharray: "4",
                             }
+                        }
+                    }
+                }
+            }
+
+            // Box selection overlay (during Shift+drag)
+            if box_sel.is_selecting {
+                {
+                    let x1_frac = ((box_sel.start_x - view.x_min) / (view.x_max - view.x_min)).clamp(0.0, 1.0);
+                    let x2_frac = ((box_sel.end_x - view.x_min) / (view.x_max - view.x_min)).clamp(0.0, 1.0);
+                    let y1_frac = ((view.y_max - box_sel.start_y) / (view.y_max - view.y_min)).clamp(0.0, 1.0);
+                    let y2_frac = ((view.y_max - box_sel.end_y) / (view.y_max - view.y_min)).clamp(0.0, 1.0);
+
+                    let x_pct = x1_frac.min(x2_frac) * 100.0;
+                    let y_pct = y1_frac.min(y2_frac) * 100.0;
+                    let w_pct = (x1_frac - x2_frac).abs() * 100.0;
+                    let h_pct = (y1_frac - y2_frac).abs() * 100.0;
+
+                    rsx! {
+                        div {
+                            style: "
+                                position: absolute;
+                                left: {x_pct}%;
+                                top: {y_pct}%;
+                                width: {w_pct}%;
+                                height: {h_pct}%;
+                                background: rgba(59, 130, 246, 0.2);
+                                border: 2px solid #3b82f6;
+                                pointer-events: none;
+                                z-index: 20;
+                            "
                         }
                     }
                 }
@@ -1106,11 +1296,25 @@ fn WaveformTraceView(x: Vec<f64>, y: Vec<f64>, color: String, view: ViewState) -
     }
 }
 
-/// Legend item
+/// Legend item with visibility toggle
 #[component]
-fn LegendItem(name: String, color: String) -> Element {
+fn LegendItem(
+    name: String,
+    color: String,
+    visible: bool,
+    on_toggle: EventHandler<MouseEvent>,
+) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
+    let mut hovered = use_signal(|| false);
+
+    let opacity = if visible { "1" } else { "0.4" };
+    let bg = if *hovered.read() {
+        th.surface_hover()
+    } else {
+        "transparent"
+    };
+    let checkbox_bg = if visible { "#3b82f6" } else { "transparent" };
 
     rsx! {
         div {
@@ -1118,9 +1322,39 @@ fn LegendItem(name: String, color: String) -> Element {
                 display: flex;
                 align-items: center;
                 gap: {Theme::SPACING_XS};
-                padding: 4px 0;
+                padding: 4px 6px;
+                margin: 0 -6px;
                 font-size: {Theme::FONT_SIZE_SM};
+                cursor: pointer;
+                border-radius: {Theme::RADIUS_SM};
+                background: {bg};
+                opacity: {opacity};
+                transition: all {Theme::TRANSITION_FAST};
             ",
+            onmouseenter: move |_| hovered.set(true),
+            onmouseleave: move |_| hovered.set(false),
+            onclick: move |e| on_toggle.call(e),
+
+            // Visibility checkbox
+            div {
+                style: "
+                    width: 14px;
+                    height: 14px;
+                    border: 1px solid {th.border()};
+                    border-radius: 3px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    background: {checkbox_bg};
+                    transition: background {Theme::TRANSITION_FAST};
+                ",
+                if visible {
+                    span {
+                        style: "color: white; font-size: 10px; font-weight: bold;",
+                        "✓"
+                    }
+                }
+            }
 
             // Color swatch
             div {
@@ -1134,7 +1368,7 @@ fn LegendItem(name: String, color: String) -> Element {
 
             // Name
             span {
-                style: "color: {th.text_primary()};",
+                style: "color: {th.text_primary()}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
                 "{name}"
             }
         }
