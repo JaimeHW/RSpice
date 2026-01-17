@@ -469,9 +469,10 @@ fn WaveformPlotArea(
                         .map(|t| (2.0 * std::f64::consts::PI * 1000.0 * t).sin())
                         .collect();
 
+                    let demo_name = "demo";
                     rsx! {
                         WaveformTraceView {
-                            key: "demo",
+                            key: "{demo_name}",
                             x: demo_x,
                             y: demo_y,
                             color: "#22c55e".to_string(),

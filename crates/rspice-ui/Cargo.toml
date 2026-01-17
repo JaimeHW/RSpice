@@ -8,11 +8,12 @@ authors = ["RSpice Contributors"]
 [features]
 default = ["desktop"]
 desktop = ["dioxus/desktop"]
+native = ["dioxus/native"]
 web = ["dioxus/web"]
 
 [dependencies]
-# Dioxus framework
-dioxus = { version = "0.6", features = ["router"] }
+# Dioxus framework (0.7 with native wgpu support)
+dioxus = { version = "0.7", features = ["router"] }
 
 # RSpice core simulation engine
 rspice-core = { path = "../rspice-core" }
@@ -35,6 +36,10 @@ rustfft = "6.2"
 wgpu = "23"
 bytemuck = { version = "1.14", features = ["derive"] }
 pollster = "0.4"
+
+# Image encoding for GPU output
+png = "0.17"
+base64 = "0.22"
 
 # Native file dialogs (desktop only)
 rfd = "0.15"
