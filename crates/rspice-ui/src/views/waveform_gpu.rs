@@ -260,6 +260,62 @@ impl WaveformPainter {
 
         self.vertex_buffers.clear();
 
+        // Create gridlines first (so they render behind traces)
+        let grid_color = [0.25f32, 0.25, 0.30, 1.0]; // Subtle grey
+        let x_range = state.x_max - state.x_min;
+        let y_range = state.y_max - state.y_min;
+
+        // Calculate nice grid intervals (5-10 lines typically)
+        let x_step = calculate_grid_step(x_range);
+        let y_step = calculate_grid_step(y_range);
+
+        // Vertical gridlines (X axis divisions)
+        let x_start = (state.x_min / x_step).ceil() * x_step;
+        let mut x = x_start;
+        while x <= state.x_max {
+            let vertices = vec![
+                WaveformVertex {
+                    position: [x as f32, state.y_min as f32],
+                    color: grid_color,
+                },
+                WaveformVertex {
+                    position: [x as f32, state.y_max as f32],
+                    color: grid_color,
+                },
+            ];
+            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Grid Vertical"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+            self.vertex_buffers.push((buffer, vertices.len() as u32));
+            x += x_step;
+        }
+
+        // Horizontal gridlines (Y axis divisions)
+        let y_start = (state.y_min / y_step).ceil() * y_step;
+        let mut y = y_start;
+        while y <= state.y_max {
+            let vertices = vec![
+                WaveformVertex {
+                    position: [state.x_min as f32, y as f32],
+                    color: grid_color,
+                },
+                WaveformVertex {
+                    position: [state.x_max as f32, y as f32],
+                    color: grid_color,
+                },
+            ];
+            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Grid Horizontal"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+            self.vertex_buffers.push((buffer, vertices.len() as u32));
+            y += y_step;
+        }
+
+        // Then add waveform traces
         for trace in &state.traces {
             if trace.x.is_empty() {
                 continue;
@@ -507,6 +563,29 @@ impl WaveformPainter {
         let b64 = base64::engine::general_purpose::STANDARD.encode(&png_data);
         Some(format!("data:image/png;base64,{}", b64))
     }
+}
+
+/// Calculate a nice grid step size for the given range (targets 5-10 divisions)
+fn calculate_grid_step(range: f64) -> f64 {
+    let target_divisions = 6.0;
+    let raw_step = range / target_divisions;
+
+    // Find the order of magnitude
+    let magnitude = 10f64.powf(raw_step.log10().floor());
+    let normalized = raw_step / magnitude;
+
+    // Round to nearest nice value (1, 2, 5)
+    let nice = if normalized < 1.5 {
+        1.0
+    } else if normalized < 3.5 {
+        2.0
+    } else if normalized < 7.5 {
+        5.0
+    } else {
+        10.0
+    };
+
+    nice * magnitude
 }
 
 /// Decimate waveform data for efficient rendering at different zoom levels
