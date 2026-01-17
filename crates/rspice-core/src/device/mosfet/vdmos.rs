@@ -25,9 +25,9 @@
 //! | TT | Body diode transit time | 50ns |
 //! | BV | Breakdown voltage | 100V |
 
-use crate::{circuit::NodeId, Value};
-use crate::solver::{StaticMatrix, CscIndex};
-use super::traits::{NonlinearDevice, MatrixStamper};
+use crate::device::traits::{MatrixStamper, NonlinearDevice};
+use crate::solver::{CscIndex, StaticMatrix};
+use crate::{Value, circuit::NodeId};
 
 //=============================================================================
 // Types
@@ -67,7 +67,7 @@ pub struct VdmosIndices {
     // Internal drain node (after Rd)
     pub d_d: Option<CscIndex>,
     pub d_di: Option<CscIndex>,
-    // Internal source node (after Rs)  
+    // Internal source node (after Rs)
     pub s_s: Option<CscIndex>,
     pub s_si: Option<CscIndex>,
     // MOS channel stamps (between di and si)
@@ -90,12 +90,12 @@ pub struct VdmosIndices {
 //=============================================================================
 
 /// VDMOS Power MOSFET device
-/// 
+///
 /// Terminal connections:
 /// - Drain (D): External drain terminal
 /// - Gate (G): Gate terminal  
 /// - Source (S): External source terminal
-/// 
+///
 /// Internal nodes:
 /// - Di: Internal drain (after Rd)
 /// - Si: Internal source (after Rs)
@@ -105,20 +105,19 @@ pub struct Vdmos {
     pub name: String,
     /// Device type (N or P channel)
     pub vdmos_type: VdmosType,
-    
+
     // Terminal node IDs
     pub drain: NodeId,
     pub gate: NodeId,
     pub source: NodeId,
-    
+
     // Internal node IDs (assigned during circuit elaboration)
     pub drain_int: Option<NodeId>,
     pub source_int: Option<NodeId>,
-    
+
     //=========================================================================
     // Model Parameters
     //=========================================================================
-    
     /// Threshold voltage (V)
     pub vth: Value,
     /// Transconductance coefficient (A/V²)
@@ -137,12 +136,11 @@ pub struct Vdmos {
     pub rq: Value,
     /// Quasi-saturation onset voltage (V)
     pub vq: Value,
-    
+
     //=========================================================================
     // Nonlinear Capacitance Parameters
     // Uses junction capacitance model: C = C0 / (1 - V/Pb)^M
     //=========================================================================
-    
     /// Zero-bias gate-source capacitance (F)
     pub cgs0: Value,
     /// Zero-bias gate-drain (Miller) capacitance (F)  
@@ -159,7 +157,7 @@ pub struct Vdmos {
     pub fc: Value,
     /// Drain-source capacitance (F) - typically fixed
     pub cds: Value,
-    
+
     // Body diode parameters
     /// Saturation current (A)
     pub is: Value,
@@ -169,11 +167,10 @@ pub struct Vdmos {
     pub tt: Value,
     /// Breakdown voltage (V)
     pub bv: Value,
-    
+
     //=========================================================================
     // Operating State
     //=========================================================================
-    
     /// Current operating region
     pub region: VdmosRegion,
     /// Drain current
@@ -183,7 +180,7 @@ pub struct Vdmos {
     /// Previous voltages for convergence
     prev_vgs: Value,
     prev_vds: Value,
-    
+
     /// Pre-computed stamp indices
     indices: VdmosIndices,
 }
@@ -200,7 +197,13 @@ impl Vdmos {
     }
 
     /// Create a new VDMOS with specified type
-    pub fn new(name: String, vdmos_type: VdmosType, drain: NodeId, gate: NodeId, source: NodeId) -> Self {
+    pub fn new(
+        name: String,
+        vdmos_type: VdmosType,
+        drain: NodeId,
+        gate: NodeId,
+        source: NodeId,
+    ) -> Self {
         Self {
             name,
             vdmos_type,
@@ -209,7 +212,7 @@ impl Vdmos {
             source,
             drain_int: None,
             source_int: None,
-            
+
             // Default power MOSFET parameters (typical values)
             vth: 2.0,
             kp: 2.0,
@@ -220,67 +223,115 @@ impl Vdmos {
             mtriode: 1.5,
             rq: 0.5,
             vq: 5.0,
-            
+
             // Nonlinear capacitance defaults (typical power MOSFET)
-            cgs0: 1e-9,        // 1nF zero-bias Cgs
-            cgd0: 100e-12,     // 100pF zero-bias Cgd (Miller)
-            cgs_pb: 0.8,       // Gate-source junction potential
-            cgd_pb: 0.8,       // Gate-drain junction potential
-            cgs_m: 0.5,        // Grading coefficient
-            cgd_m: 0.5,        // Grading coefficient
-            fc: 0.5,           // Forward bias limit coefficient
-            cds: 50e-12,       // Drain-source capacitance (fixed)
-            
+            cgs0: 1e-9,    // 1nF zero-bias Cgs
+            cgd0: 100e-12, // 100pF zero-bias Cgd (Miller)
+            cgs_pb: 0.8,   // Gate-source junction potential
+            cgd_pb: 0.8,   // Gate-drain junction potential
+            cgs_m: 0.5,    // Grading coefficient
+            cgd_m: 0.5,    // Grading coefficient
+            fc: 0.5,       // Forward bias limit coefficient
+            cds: 50e-12,   // Drain-source capacitance (fixed)
+
             is: 1e-14,
             n: 1.5,
             tt: 50e-9,
             bv: 100.0,
-            
+
             region: VdmosRegion::Cutoff,
             id: 0.0,
             id_diode: 0.0,
             prev_vgs: 0.0,
             prev_vds: 0.0,
-            
+
             indices: VdmosIndices::default(),
         }
     }
 
     /// Set model parameters from a parameter map
     pub fn with_params(mut self, params: &std::collections::HashMap<String, Value>) -> Self {
-        if let Some(&v) = params.get("VTH") { self.vth = v; }
-        if let Some(&v) = params.get("VTO") { self.vth = v; } // Alias
-        if let Some(&v) = params.get("KP") { self.kp = v; }
-        if let Some(&v) = params.get("RD") { self.rd = v; }
-        if let Some(&v) = params.get("RS") { self.rs = v; }
-        if let Some(&v) = params.get("RG") { self.rg = v; }
-        if let Some(&v) = params.get("LAMBDA") { self.lambda = v; }
-        if let Some(&v) = params.get("MTRIODE") { self.mtriode = v; }
-        if let Some(&v) = params.get("RQ") { self.rq = v; }
-        if let Some(&v) = params.get("VQ") { self.vq = v; }
+        if let Some(&v) = params.get("VTH") {
+            self.vth = v;
+        }
+        if let Some(&v) = params.get("VTO") {
+            self.vth = v;
+        } // Alias
+        if let Some(&v) = params.get("KP") {
+            self.kp = v;
+        }
+        if let Some(&v) = params.get("RD") {
+            self.rd = v;
+        }
+        if let Some(&v) = params.get("RS") {
+            self.rs = v;
+        }
+        if let Some(&v) = params.get("RG") {
+            self.rg = v;
+        }
+        if let Some(&v) = params.get("LAMBDA") {
+            self.lambda = v;
+        }
+        if let Some(&v) = params.get("MTRIODE") {
+            self.mtriode = v;
+        }
+        if let Some(&v) = params.get("RQ") {
+            self.rq = v;
+        }
+        if let Some(&v) = params.get("VQ") {
+            self.vq = v;
+        }
         // Capacitance parameters - support both old and new names
-        if let Some(&v) = params.get("CGS") { self.cgs0 = v; }
-        if let Some(&v) = params.get("CGS0") { self.cgs0 = v; }
-        if let Some(&v) = params.get("CGD") { self.cgd0 = v; }
-        if let Some(&v) = params.get("CGD0") { self.cgd0 = v; }
-        if let Some(&v) = params.get("PB") { 
-            self.cgs_pb = v; 
-            self.cgd_pb = v; 
+        if let Some(&v) = params.get("CGS") {
+            self.cgs0 = v;
         }
-        if let Some(&v) = params.get("CGSPB") { self.cgs_pb = v; }
-        if let Some(&v) = params.get("CGDPB") { self.cgd_pb = v; }
-        if let Some(&v) = params.get("M") { 
-            self.cgs_m = v; 
-            self.cgd_m = v; 
+        if let Some(&v) = params.get("CGS0") {
+            self.cgs0 = v;
         }
-        if let Some(&v) = params.get("CGSM") { self.cgs_m = v; }
-        if let Some(&v) = params.get("CGDM") { self.cgd_m = v; }
-        if let Some(&v) = params.get("FC") { self.fc = v; }
-        if let Some(&v) = params.get("CDS") { self.cds = v; }
-        if let Some(&v) = params.get("IS") { self.is = v; }
-        if let Some(&v) = params.get("N") { self.n = v; }
-        if let Some(&v) = params.get("TT") { self.tt = v; }
-        if let Some(&v) = params.get("BV") { self.bv = v; }
+        if let Some(&v) = params.get("CGD") {
+            self.cgd0 = v;
+        }
+        if let Some(&v) = params.get("CGD0") {
+            self.cgd0 = v;
+        }
+        if let Some(&v) = params.get("PB") {
+            self.cgs_pb = v;
+            self.cgd_pb = v;
+        }
+        if let Some(&v) = params.get("CGSPB") {
+            self.cgs_pb = v;
+        }
+        if let Some(&v) = params.get("CGDPB") {
+            self.cgd_pb = v;
+        }
+        if let Some(&v) = params.get("M") {
+            self.cgs_m = v;
+            self.cgd_m = v;
+        }
+        if let Some(&v) = params.get("CGSM") {
+            self.cgs_m = v;
+        }
+        if let Some(&v) = params.get("CGDM") {
+            self.cgd_m = v;
+        }
+        if let Some(&v) = params.get("FC") {
+            self.fc = v;
+        }
+        if let Some(&v) = params.get("CDS") {
+            self.cds = v;
+        }
+        if let Some(&v) = params.get("IS") {
+            self.is = v;
+        }
+        if let Some(&v) = params.get("N") {
+            self.n = v;
+        }
+        if let Some(&v) = params.get("TT") {
+            self.tt = v;
+        }
+        if let Some(&v) = params.get("BV") {
+            self.bv = v;
+        }
         self
     }
 
@@ -343,7 +394,7 @@ impl Vdmos {
                 // Solve: Id = Id_sat / (1 + Id * Rq / (Vds - Vq))
                 // This requires iteration, use simplified model:
                 let vexcess = vds_eff - self.vq;
-                let id_drift = vexcess / self.rq;
+                let _id_drift = vexcess / self.rq;
                 let id = id_sat.min(id_sat / (1.0 + id_sat * self.rq / vexcess.max(0.001)));
                 (p * id, VdmosRegion::QuasiSaturation)
             } else {
@@ -386,59 +437,47 @@ impl Vdmos {
     //=========================================================================
 
     /// Calculate gate-source capacitance Cgs(Vgs)
-    /// 
+    ///
     /// Uses junction capacitance model with forward bias extrapolation.
     /// For VDMOS, Cgs increases slightly with positive Vgs as the channel
     /// inverts and the effective oxide area increases.
     #[inline]
     pub fn cgs_effective(&self, vgs: Value) -> Value {
-        self.junction_capacitance(
-            self.cgs0,
-            vgs,
-            self.cgs_pb,
-            self.cgs_m,
-            self.fc,
-        )
+        self.junction_capacitance(self.cgs0, vgs, self.cgs_pb, self.cgs_m, self.fc)
     }
 
     /// Calculate gate-drain (Miller) capacitance Cgd(Vgd)
-    /// 
+    ///
     /// This is the critical nonlinear capacitance in power MOSFETs.
     /// - When Vgd > 0 (drain below gate): Large capacitance (overlap + depletion)
     /// - When Vgd < 0 (drain above gate): Capacitance drops dramatically
     ///   as the depletion region extends into the lightly-doped drift region
-    /// 
+    ///
     /// The "Miller plateau" during switching occurs when Cgd is charging/discharging.
     #[inline]
     pub fn cgd_effective(&self, vgd: Value) -> Value {
-        self.junction_capacitance(
-            self.cgd0,
-            vgd,
-            self.cgd_pb,
-            self.cgd_m,
-            self.fc,
-        )
+        self.junction_capacitance(self.cgd0, vgd, self.cgd_pb, self.cgd_m, self.fc)
     }
 
     /// Calculate all three capacitances for given terminal voltages
-    /// 
+    ///
     /// Returns (Cgs, Cgd, Cds) for transient analysis stamping.
     pub fn capacitances(&self, vgs: Value, vds: Value) -> (Value, Value, Value) {
         let vgd = vgs - vds; // Gate-to-drain voltage
-        
+
         let cgs = self.cgs_effective(vgs);
         let cgd = self.cgd_effective(vgd);
         let cds = self.cds; // Fixed for now, could be voltage-dependent
-        
+
         (cgs, cgd, cds)
     }
 
     /// Generic junction capacitance calculation
-    /// 
+    ///
     /// Implements the standard SPICE model:
     /// - For V ≤ Fc*Pb: C = C0 / (1 - V/Pb)^M
     /// - For V > Fc*Pb: Linear extrapolation to avoid infinity
-    /// 
+    ///
     /// # Arguments
     /// * `c0` - Zero-bias capacitance
     /// * `v` - Junction voltage (positive = forward bias)
@@ -450,9 +489,9 @@ impl Vdmos {
         if pb <= 0.0 {
             return c0; // Fallback for invalid parameters
         }
-        
+
         let fc_pb = fc * pb;
-        
+
         if v <= fc_pb {
             // Standard reverse/low-forward bias model
             let denominator = (1.0 - v / pb).max(1e-6);
@@ -512,9 +551,9 @@ impl Vdmos {
         let si = self.source_int.unwrap_or(s);
 
         // Get voltages
-        let vd = if d > 0 { voltages[d - 1] } else { 0.0 };
+        let _vd = if d > 0 { voltages[d - 1] } else { 0.0 };
         let vg = if g > 0 { voltages[g - 1] } else { 0.0 };
-        let vs = if s > 0 { voltages[s - 1] } else { 0.0 };
+        let _vs = if s > 0 { voltages[s - 1] } else { 0.0 };
         let vdi = if di > 0 { voltages[di - 1] } else { 0.0 };
         let vsi = if si > 0 { voltages[si - 1] } else { 0.0 };
 
@@ -529,17 +568,29 @@ impl Vdmos {
         // Stamp drain resistance (between d and di)
         if self.rd > 1e-12 && di != d {
             let gd = 1.0 / self.rd;
-            if let Some(idx) = self.indices.d_d { matrix.stamp_direct(idx, gd); }
-            if let Some(idx) = self.indices.d_di { matrix.stamp_direct(idx, -gd); }
-            if let Some(idx) = self.indices.di_d { matrix.stamp_direct(idx, -gd); }
+            if let Some(idx) = self.indices.d_d {
+                matrix.stamp_direct(idx, gd);
+            }
+            if let Some(idx) = self.indices.d_di {
+                matrix.stamp_direct(idx, -gd);
+            }
+            if let Some(idx) = self.indices.di_d {
+                matrix.stamp_direct(idx, -gd);
+            }
         }
 
         // Stamp source resistance (between s and si)
         if self.rs > 1e-12 && si != s {
             let gs = 1.0 / self.rs;
-            if let Some(idx) = self.indices.s_s { matrix.stamp_direct(idx, gs); }
-            if let Some(idx) = self.indices.s_si { matrix.stamp_direct(idx, -gs); }
-            if let Some(idx) = self.indices.si_s { matrix.stamp_direct(idx, -gs); }
+            if let Some(idx) = self.indices.s_s {
+                matrix.stamp_direct(idx, gs);
+            }
+            if let Some(idx) = self.indices.s_si {
+                matrix.stamp_direct(idx, -gs);
+            }
+            if let Some(idx) = self.indices.si_s {
+                matrix.stamp_direct(idx, -gs);
+            }
         }
 
         // Stamp MOS channel (linearized: Id = Id0 + gm*(Vgs-Vgs0) + gds*(Vds-Vds0))
@@ -548,10 +599,18 @@ impl Vdmos {
 
         // Stamp conductances
         // gds stamps (di-si)
-        if let Some(idx) = self.indices.di_di { matrix.stamp_direct(idx, gds); }
-        if let Some(idx) = self.indices.di_si { matrix.stamp_direct(idx, -gds); }
-        if let Some(idx) = self.indices.si_di { matrix.stamp_direct(idx, -gds); }
-        if let Some(idx) = self.indices.si_si { matrix.stamp_direct(idx, gds); }
+        if let Some(idx) = self.indices.di_di {
+            matrix.stamp_direct(idx, gds);
+        }
+        if let Some(idx) = self.indices.di_si {
+            matrix.stamp_direct(idx, -gds);
+        }
+        if let Some(idx) = self.indices.si_di {
+            matrix.stamp_direct(idx, -gds);
+        }
+        if let Some(idx) = self.indices.si_si {
+            matrix.stamp_direct(idx, gds);
+        }
 
         // gm stamps (controlled by Vgs = Vg - Vsi)
         // Id increases when Vg increases (for NMOS), so positive gm to di from g
@@ -562,10 +621,14 @@ impl Vdmos {
 
         // RHS contributions
         if let Some(di_idx) = self.indices.rhs_di {
-            if di_idx > 0 { rhs[di_idx - 1] -= ieq; }
+            if di_idx > 0 {
+                rhs[di_idx - 1] -= ieq;
+            }
         }
         if let Some(si_idx) = self.indices.rhs_si {
-            if si_idx > 0 { rhs[si_idx - 1] += ieq; }
+            if si_idx > 0 {
+                rhs[si_idx - 1] += ieq;
+            }
         }
     }
 }
@@ -625,7 +688,7 @@ impl NonlinearDevice for Vdmos {
 
         // Stamp internal resistances
         if self.rd > 1e-12 && di != d {
-            let vd = if d > 0 { voltages[d - 1] } else { 0.0 };
+            let _vd = if d > 0 { voltages[d - 1] } else { 0.0 };
             let gd = 1.0 / self.rd;
             matrix.stamp(d, d, gd);
             matrix.stamp(d, di, -gd);
@@ -634,7 +697,7 @@ impl NonlinearDevice for Vdmos {
         }
 
         if self.rs > 1e-12 && si != s {
-            let vs = if s > 0 { voltages[s - 1] } else { 0.0 };
+            let _vs = if s > 0 { voltages[s - 1] } else { 0.0 };
             let gs = 1.0 / self.rs;
             matrix.stamp(s, s, gs);
             matrix.stamp(s, si, -gs);
@@ -660,14 +723,18 @@ impl NonlinearDevice for Vdmos {
         matrix.stamp(si, si, gm);
 
         // RHS
-        if di > 0 { rhs[di - 1] -= ieq; }
-        if si > 0 { rhs[si - 1] += ieq; }
+        if di > 0 {
+            rhs[di - 1] -= ieq;
+        }
+        if si > 0 {
+            rhs[si - 1] += ieq;
+        }
     }
 
-    fn is_converged(&self, tolerance: Value) -> bool {
-        let di = self.drain_int.unwrap_or(self.drain);
-        let si = self.source_int.unwrap_or(self.source);
-        
+    fn is_converged(&self, _tolerance: Value) -> bool {
+        let _di = self.drain_int.unwrap_or(self.drain);
+        let _si = self.source_int.unwrap_or(self.source);
+
         // Simple convergence check based on current stability
         // In practice, convergence is checked globally
         true
@@ -712,7 +779,10 @@ mod tests {
         let (id, region) = vdmos.calculate_id(5.0, 10.0);
         assert!(id > 0.0);
         // Could be Saturation or QuasiSaturation depending on parameters
-        assert!(matches!(region, VdmosRegion::Saturation | VdmosRegion::QuasiSaturation));
+        assert!(matches!(
+            region,
+            VdmosRegion::Saturation | VdmosRegion::QuasiSaturation
+        ));
     }
 
     #[test]
@@ -729,7 +799,7 @@ mod tests {
         let mut vdmos = Vdmos::new_nvdmos("M1".to_string(), 1, 2, 3);
         vdmos.rq = 0.1; // Lower Rq to trigger quasi-sat at lower Vds
         vdmos.vq = 3.0;
-        
+
         // With high Vgs and high Vds, should be in quasi-saturation
         let (id, region) = vdmos.calculate_id(10.0, 20.0);
         assert!(id > 0.0);
@@ -754,61 +824,72 @@ mod tests {
     fn test_pvdmos_polarity() {
         let pvdmos = Vdmos::new_pvdmos("M1".to_string(), 1, 2, 3);
         assert_eq!(pvdmos.polarity(), -1.0);
-        
+
         // P-VDMOS with negative Vgs should conduct
-        let (id, region) = pvdmos.calculate_id(-5.0, -5.0);
+        let (id, _region) = pvdmos.calculate_id(-5.0, -5.0);
         assert!(id < 0.0); // Current flows opposite direction
     }
 
     #[test]
     fn test_vdmos_cgs_voltage_dependence() {
         let vdmos = Vdmos::new_nvdmos("M1".to_string(), 1, 2, 3);
-        
+
         // Cgs at zero bias should equal cgs0
         let cgs_zero = vdmos.cgs_effective(0.0);
         assert!((cgs_zero - vdmos.cgs0).abs() < 1e-15);
-        
+
         // Cgs should increase with forward bias (positive Vgs)
         let cgs_forward = vdmos.cgs_effective(0.3);
-        assert!(cgs_forward > cgs_zero, "Cgs should increase with forward bias");
-        
+        assert!(
+            cgs_forward > cgs_zero,
+            "Cgs should increase with forward bias"
+        );
+
         // Cgs should decrease with reverse bias (negative Vgs)
         let cgs_reverse = vdmos.cgs_effective(-5.0);
-        assert!(cgs_reverse < cgs_zero, "Cgs should decrease with reverse bias");
+        assert!(
+            cgs_reverse < cgs_zero,
+            "Cgs should decrease with reverse bias"
+        );
     }
 
     #[test]
     fn test_vdmos_cgd_miller_cliff() {
         let vdmos = Vdmos::new_nvdmos("M1".to_string(), 1, 2, 3);
-        
+
         // Cgd at zero bias
         let cgd_zero = vdmos.cgd_effective(0.0);
-        
+
         // When drain is high (Vgd < 0), Cgd should drop dramatically
         // This is the "Miller cliff" effect
         let cgd_reverse = vdmos.cgd_effective(-10.0);
-        assert!(cgd_reverse < cgd_zero * 0.5, 
-            "Miller capacitance should drop at high Vds: {} vs {}", 
-            cgd_reverse, cgd_zero);
-        
+        assert!(
+            cgd_reverse < cgd_zero * 0.5,
+            "Miller capacitance should drop at high Vds: {} vs {}",
+            cgd_reverse,
+            cgd_zero
+        );
+
         // Even more reduction at higher Vds
         let cgd_high_reverse = vdmos.cgd_effective(-50.0);
-        assert!(cgd_high_reverse < cgd_reverse,
-            "Miller capacitance should continue dropping");
+        assert!(
+            cgd_high_reverse < cgd_reverse,
+            "Miller capacitance should continue dropping"
+        );
     }
 
     #[test]
     fn test_vdmos_capacitances() {
         let vdmos = Vdmos::new_nvdmos("M1".to_string(), 1, 2, 3);
-        
+
         // Get all capacitances at typical operating point
         let (cgs, cgd, cds) = vdmos.capacitances(5.0, 20.0);
-        
+
         assert!(cgs > 0.0);
         assert!(cgd > 0.0);
         assert!(cds > 0.0);
         assert_eq!(cds, vdmos.cds); // Cds is fixed
-        
+
         // At high Vds, Cgd should be much smaller than Cgs
         assert!(cgd < cgs, "Cgd should be less than Cgs at high Vds");
     }
@@ -816,7 +897,7 @@ mod tests {
     #[test]
     fn test_vdmos_forward_bias_capping() {
         let vdmos = Vdmos::new_nvdmos("M1".to_string(), 1, 2, 3);
-        
+
         // Forward bias beyond Fc*Pb should use linear extrapolation
         // and never go to infinity
         let c_high = vdmos.junction_capacitance(1e-9, 0.9, 0.8, 0.5, 0.5);

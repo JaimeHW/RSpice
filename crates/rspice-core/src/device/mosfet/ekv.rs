@@ -9,8 +9,8 @@
 //! Reference: EKV v2.6 documentation (EPFL)
 
 use crate::{circuit::NodeId, Value};
-use crate::solver::{StaticMatrix, CscIndex};
-use super::traits::{NonlinearDevice, MatrixStamper};
+use crate::solver::StaticMatrix;
+use crate::device::traits::{NonlinearDevice, MatrixStamper};
 use super::mosfet::{MosType, MosRegion, MosfetIndices};
 
 //=============================================================================
@@ -251,7 +251,7 @@ impl EkvMosfet {
         let p = self.polarity();
         let vgs_eff = p * vgs;
         let vds_eff = p * vds;
-        let vbs_eff = p * vbs;
+        let _vbs_eff = p * vbs;
         
         // Pinch-off voltage
         let vp = self.vp(vgs, vbs);

@@ -248,7 +248,7 @@ impl Jfet {
     /// - Ids: drain-source current
     /// - gm: transconductance ∂Ids/∂Vgs
     /// - gds: output conductance ∂Ids/∂Vds
-    pub fn calculate(&self, vgs: Value, vds: Value, temp: Value) -> (Value, Value, Value) {
+    pub fn calculate(&self, vgs: Value, vds: Value, _temp: Value) -> (Value, Value, Value) {
         let pol = self.jfet_type.polarity();
         
         // Apply polarity for P-JFET

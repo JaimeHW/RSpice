@@ -1,43 +1,42 @@
 //! Device models module
 //!
-//! Provides behavioral models for circuit components.
+//! Provides behavioral models for circuit components, organized into:
+//! - `passive/` - Resistors, capacitors, inductors
+//! - `semiconductor/` - Diodes, BJTs
+//! - `mosfet/` - MOSFETs, VDMOSFETs, JFETs, BSIM4, EKV
 
-mod traits;
-mod resistor;
-mod capacitor;
-mod inductor;
-mod saturable_inductor;
-mod coupled_inductors;
-mod switch;
-mod transmission_line;
-mod sources;
-mod diode;
-mod bjt;
-mod mosfet;
-mod vdmos;
-mod jfet;
-mod ekv;
-pub mod opamp;
+// Organized device subdirectories
+pub mod mosfet;
+pub mod passive;
+pub mod semiconductor;
+
+// Other devices (kept at root level)
 pub mod behavioral;
 pub mod controlled;
+pub mod opamp;
+mod sources;
+mod switch;
+mod traits;
+mod transmission_line;
 
+// Re-export from subdirectories for backwards compatibility
+pub use mosfet::{
+    Bsim4, Bsim4Params, Bsim4Type, EkvMosfet, Jfet, JfetParams, JfetType, MosParams, MosRegion,
+    MosType, Mosfet, MosfetIndices, Vdmos, VdmosRegion, VdmosType,
+};
+pub use passive::{
+    Capacitor, CoupledInductorPair, Inductor, InductorCoupling, MultiWindingTransformer, Resistor,
+    SaturableInductor,
+};
+pub use semiconductor::{Bjt, BjtType, Diode};
+
+// Re-export from root-level modules
+pub use behavioral::{BehavioralCurrentSource, BehavioralSources, BehavioralVoltageSource};
+pub use controlled::{Cccs, Ccvs, Vccs, Vcvs};
+pub use sources::{CurrentSource, VoltageSource};
+pub use switch::{CurrentSwitch, SwitchState, VoltageSwitch};
 pub use traits::*;
-pub use resistor::Resistor;
-pub use capacitor::Capacitor;
-pub use inductor::Inductor;
-pub use saturable_inductor::SaturableInductor;
-pub use coupled_inductors::{InductorCoupling, CoupledInductorPair, MultiWindingTransformer};
-pub use switch::{VoltageSwitch, CurrentSwitch, SwitchState};
-pub use transmission_line::{TransmissionLine, LossyTransmissionLine};
-pub use sources::{VoltageSource, CurrentSource};
-pub use diode::Diode;
-pub use bjt::{Bjt, BjtType};
-pub use mosfet::{Mosfet, MosType, MosRegion};
-pub use vdmos::{Vdmos, VdmosType, VdmosRegion};
-pub use jfet::{Jfet, JfetType, JfetParams};
-pub use ekv::EkvMosfet;
-pub use behavioral::{BehavioralVoltageSource, BehavioralCurrentSource, BehavioralSources};
-pub use controlled::{Vcvs, Vccs, Cccs, Ccvs};
+pub use transmission_line::{LossyTransmissionLine, TransmissionLine};
 
 use crate::Value;
 

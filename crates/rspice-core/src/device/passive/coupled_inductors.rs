@@ -38,7 +38,7 @@
 //! where [L] is the inductance matrix with Lij = k*sqrt(Li*Lj) for i≠j.
 
 use crate::{circuit::NodeId, Value};
-use super::traits::{DynamicDevice, MatrixStamper};
+use crate::device::traits::{DynamicDevice, MatrixStamper};
 
 //=============================================================================
 // Coupling Coefficient
@@ -228,7 +228,7 @@ impl DynamicDevice for CoupledInductorPair {
         matrix.stamp_rhs(branch2, v2_eq);
     }
 
-    fn step(&mut self, voltages: &[Value], dt: Value) {
+    fn step(&mut self, voltages: &[Value], _dt: Value) {
         // Get node voltages
         let v1_pos = if self.node1_pos == 0 { 0.0 } else { voltages[self.node1_pos - 1] };
         let v1_neg = if self.node1_neg == 0 { 0.0 } else { voltages[self.node1_neg - 1] };
@@ -256,8 +256,8 @@ impl DynamicDevice for CoupledInductorPair {
             let inv_det = 1.0 / det;
             
             // di/dt = [L]^-1 * [v]
-            let di1_dt = inv_det * (self.l2 * v1 - self.m * v2);
-            let di2_dt = inv_det * (-self.m * v1 + self.l1 * v2);
+            let _di1_dt = inv_det * (self.l2 * v1 - self.m * v2);
+            let _di2_dt = inv_det * (-self.m * v1 + self.l1 * v2);
             
             // Trapezoidal update (simplified, using average of old and new di/dt)
             // For better accuracy, we'd need to iterate

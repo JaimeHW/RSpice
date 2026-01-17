@@ -5,7 +5,7 @@
 
 use crate::{circuit::NodeId, Value};
 use crate::solver::{StaticMatrix, CscIndex};
-use super::traits::{NonlinearDevice, MatrixStamper};
+use crate::device::traits::{NonlinearDevice, MatrixStamper};
 
 /// BJT transistor type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

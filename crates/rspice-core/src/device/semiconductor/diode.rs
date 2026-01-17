@@ -2,7 +2,7 @@
 
 use crate::{circuit::NodeId, Value};
 use crate::solver::{StaticMatrix, CscIndex};
-use super::traits::{NonlinearDevice, MatrixStamper};
+use crate::device::traits::{NonlinearDevice, MatrixStamper};
 
 /// Pre-computed stamp indices for O(1) matrix access (2-terminal device)
 #[derive(Debug, Clone, Default)]

@@ -8,7 +8,7 @@
 //! - Input bias current
 //! - Common-mode rejection
 
-use crate::{circuit::NodeId, Value};
+use crate::{Value, circuit::NodeId};
 
 //=============================================================================
 // OpAmp Model Parameters
@@ -45,17 +45,17 @@ impl Default for OpAmpParams {
     fn default() -> Self {
         // Generic OpAmp defaults (similar to TL071)
         Self {
-            aol: 200_000.0,      // 106 dB
-            gbw: 3e6,            // 3 MHz
-            slew_rate: 13.0,     // 13 V/μs
-            rin: 1e12,           // 1 TΩ (JFET input)
-            rout: 75.0,          // 75Ω
-            ibias: 30e-12,       // 30 pA
-            vos: 3e-3,           // 3 mV typical
-            cmrr_db: 100.0,      // 100 dB
-            psrr_db: 100.0,      // 100 dB
-            vout_max: 13.5,      // +13.5V with ±15V supplies
-            vout_min: -13.5,     // -13.5V
+            aol: 200_000.0,  // 106 dB
+            gbw: 3e6,        // 3 MHz
+            slew_rate: 13.0, // 13 V/μs
+            rin: 1e12,       // 1 TΩ (JFET input)
+            rout: 75.0,      // 75Ω
+            ibias: 30e-12,   // 30 pA
+            vos: 3e-3,       // 3 mV typical
+            cmrr_db: 100.0,  // 100 dB
+            psrr_db: 100.0,  // 100 dB
+            vout_max: 13.5,  // +13.5V with ±15V supplies
+            vout_min: -13.5, // -13.5V
         }
     }
 }
@@ -64,15 +64,15 @@ impl OpAmpParams {
     /// Create LM741 parameters (classic BJT opamp)
     pub fn lm741() -> Self {
         Self {
-            aol: 200_000.0,      // 106 dB
-            gbw: 1e6,            // 1 MHz
-            slew_rate: 0.5,      // 0.5 V/μs
-            rin: 2e6,            // 2 MΩ (BJT input)
-            rout: 75.0,          // 75Ω
-            ibias: 80e-9,        // 80 nA
-            vos: 2e-3,           // 2 mV typical
-            cmrr_db: 90.0,       // 90 dB
-            psrr_db: 90.0,       // 90 dB
+            aol: 200_000.0, // 106 dB
+            gbw: 1e6,       // 1 MHz
+            slew_rate: 0.5, // 0.5 V/μs
+            rin: 2e6,       // 2 MΩ (BJT input)
+            rout: 75.0,     // 75Ω
+            ibias: 80e-9,   // 80 nA
+            vos: 2e-3,      // 2 mV typical
+            cmrr_db: 90.0,  // 90 dB
+            psrr_db: 90.0,  // 90 dB
             vout_max: 13.0,
             vout_min: -13.0,
         }
@@ -81,15 +81,15 @@ impl OpAmpParams {
     /// Create TL072 parameters (JFET input, dual opamp)
     pub fn tl072() -> Self {
         Self {
-            aol: 200_000.0,      // 106 dB
-            gbw: 3e6,            // 3 MHz
-            slew_rate: 13.0,     // 13 V/μs
-            rin: 1e12,           // 1 TΩ (JFET input)
-            rout: 100.0,         // 100Ω
-            ibias: 30e-12,       // 30 pA
-            vos: 3e-3,           // 3 mV typical
-            cmrr_db: 100.0,      // 100 dB
-            psrr_db: 100.0,      // 100 dB
+            aol: 200_000.0,  // 106 dB
+            gbw: 3e6,        // 3 MHz
+            slew_rate: 13.0, // 13 V/μs
+            rin: 1e12,       // 1 TΩ (JFET input)
+            rout: 100.0,     // 100Ω
+            ibias: 30e-12,   // 30 pA
+            vos: 3e-3,       // 3 mV typical
+            cmrr_db: 100.0,  // 100 dB
+            psrr_db: 100.0,  // 100 dB
             vout_max: 13.5,
             vout_min: -13.5,
         }
@@ -98,32 +98,32 @@ impl OpAmpParams {
     /// Create LM324 parameters (single supply, quad opamp)
     pub fn lm324() -> Self {
         Self {
-            aol: 100_000.0,      // 100 dB
-            gbw: 1e6,            // 1 MHz
-            slew_rate: 0.5,      // 0.5 V/μs
-            rin: 2e6,            // 2 MΩ
-            rout: 100.0,         // 100Ω
-            ibias: 45e-9,        // 45 nA
-            vos: 2e-3,           // 2 mV
-            cmrr_db: 85.0,       // 85 dB
-            psrr_db: 100.0,      // 100 dB
-            vout_max: 3.5,       // Within 1.5V of Vcc
-            vout_min: 0.005,     // Down to 5mV above Vee
+            aol: 100_000.0,  // 100 dB
+            gbw: 1e6,        // 1 MHz
+            slew_rate: 0.5,  // 0.5 V/μs
+            rin: 2e6,        // 2 MΩ
+            rout: 100.0,     // 100Ω
+            ibias: 45e-9,    // 45 nA
+            vos: 2e-3,       // 2 mV
+            cmrr_db: 85.0,   // 85 dB
+            psrr_db: 100.0,  // 100 dB
+            vout_max: 3.5,   // Within 1.5V of Vcc
+            vout_min: 0.005, // Down to 5mV above Vee
         }
     }
 
     /// Create OP27 parameters (precision, low noise)
     pub fn op27() -> Self {
         Self {
-            aol: 1_500_000.0,    // 124 dB
-            gbw: 8e6,            // 8 MHz
-            slew_rate: 2.8,      // 2.8 V/μs
-            rin: 4e6,            // 4 MΩ
-            rout: 70.0,          // 70Ω
-            ibias: 15e-9,        // 15 nA
-            vos: 30e-6,          // 30 μV (precision)
-            cmrr_db: 126.0,      // 126 dB
-            psrr_db: 120.0,      // 120 dB
+            aol: 1_500_000.0, // 124 dB
+            gbw: 8e6,         // 8 MHz
+            slew_rate: 2.8,   // 2.8 V/μs
+            rin: 4e6,         // 4 MΩ
+            rout: 70.0,       // 70Ω
+            ibias: 15e-9,     // 15 nA
+            vos: 30e-6,       // 30 μV (precision)
+            cmrr_db: 126.0,   // 126 dB
+            psrr_db: 120.0,   // 120 dB
             vout_max: 13.0,
             vout_min: -13.0,
         }
@@ -132,32 +132,32 @@ impl OpAmpParams {
     /// Create LM358 parameters (dual, single or split supply)
     pub fn lm358() -> Self {
         Self {
-            aol: 100_000.0,      // 100 dB
-            gbw: 1e6,            // 1 MHz
-            slew_rate: 0.6,      // 0.6 V/μs
-            rin: 2e6,            // 2 MΩ
-            rout: 100.0,         // 100Ω
-            ibias: 45e-9,        // 45 nA
-            vos: 3e-3,           // 3 mV
-            cmrr_db: 85.0,       // 85 dB
-            psrr_db: 100.0,      // 100 dB
+            aol: 100_000.0, // 100 dB
+            gbw: 1e6,       // 1 MHz
+            slew_rate: 0.6, // 0.6 V/μs
+            rin: 2e6,       // 2 MΩ
+            rout: 100.0,    // 100Ω
+            ibias: 45e-9,   // 45 nA
+            vos: 3e-3,      // 3 mV
+            cmrr_db: 85.0,  // 85 dB
+            psrr_db: 100.0, // 100 dB
             vout_max: 13.5,
-            vout_min: 0.0,       // Output goes to ground
+            vout_min: 0.0, // Output goes to ground
         }
     }
 
     /// Create OPA2134 parameters (high-performance audio)
     pub fn opa2134() -> Self {
         Self {
-            aol: 1_000_000.0,    // 120 dB
-            gbw: 8e6,            // 8 MHz
-            slew_rate: 20.0,     // 20 V/μs
-            rin: 1e13,           // 10 TΩ (FET input)
-            rout: 50.0,          // 50Ω
-            ibias: 5e-12,        // 5 pA
-            vos: 500e-6,         // 0.5 mV
-            cmrr_db: 110.0,      // 110 dB
-            psrr_db: 110.0,      // 110 dB
+            aol: 1_000_000.0, // 120 dB
+            gbw: 8e6,         // 8 MHz
+            slew_rate: 20.0,  // 20 V/μs
+            rin: 1e13,        // 10 TΩ (FET input)
+            rout: 50.0,       // 50Ω
+            ibias: 5e-12,     // 5 pA
+            vos: 500e-6,      // 0.5 mV
+            cmrr_db: 110.0,   // 110 dB
+            psrr_db: 110.0,   // 110 dB
             vout_max: 13.5,
             vout_min: -13.5,
         }
@@ -166,15 +166,15 @@ impl OpAmpParams {
     /// Create NE5532 parameters (low-noise audio)
     pub fn ne5532() -> Self {
         Self {
-            aol: 100_000.0,      // 100 dB
-            gbw: 10e6,           // 10 MHz
-            slew_rate: 9.0,      // 9 V/μs
-            rin: 300e3,          // 300 kΩ (BJT input)
-            rout: 30.0,          // 30Ω
-            ibias: 200e-9,       // 200 nA
-            vos: 500e-6,         // 0.5 mV
-            cmrr_db: 100.0,      // 100 dB
-            psrr_db: 100.0,      // 100 dB
+            aol: 100_000.0, // 100 dB
+            gbw: 10e6,      // 10 MHz
+            slew_rate: 9.0, // 9 V/μs
+            rin: 300e3,     // 300 kΩ (BJT input)
+            rout: 30.0,     // 30Ω
+            ibias: 200e-9,  // 200 nA
+            vos: 500e-6,    // 0.5 mV
+            cmrr_db: 100.0, // 100 dB
+            psrr_db: 100.0, // 100 dB
             vout_max: 13.0,
             vout_min: -13.0,
         }
@@ -191,27 +191,28 @@ impl OpAmpParams {
 /// - Single-pole frequency response (GBW product)
 /// - Output limiting
 /// - Input resistance
-/// 
+///
 /// The transfer function is: Vout = A * (V+ - V-) / (1 + s/ω_p)
 /// where A is DC gain and ω_p = GBW/A is the dominant pole.
 #[derive(Debug, Clone)]
 pub struct OpAmpMacromodel {
     pub name: String,
     pub params: OpAmpParams,
-    
+
     // Node connections
     pub node_out: NodeId,
-    pub node_inp: NodeId,   // non-inverting (+)
-    pub node_inm: NodeId,   // inverting (-)
-    pub node_vcc: Option<NodeId>,  // positive supply
-    pub node_vee: Option<NodeId>,  // negative supply
-    
+    pub node_inp: NodeId,         // non-inverting (+)
+    pub node_inm: NodeId,         // inverting (-)
+    pub node_vcc: Option<NodeId>, // positive supply
+    pub node_vee: Option<NodeId>, // negative supply
+
     // State for slew rate limiting
     vout_prev: Value,
+    #[allow(dead_code)]
     time_prev: Value,
-    
+
     // Calculated values
-    dominant_pole: Value,  // ω_p in rad/s
+    dominant_pole: Value, // ω_p in rad/s
 }
 
 impl OpAmpMacromodel {
@@ -263,7 +264,7 @@ impl OpAmpMacromodel {
     pub fn calculate_vout(&self, vp: Value, vm: Value) -> Value {
         let vdiff = vp - vm + self.params.vos;
         let vout_ideal = self.params.aol * vdiff;
-        
+
         // Output limiting
         vout_ideal.clamp(self.params.vout_min, self.params.vout_max)
     }
@@ -271,19 +272,19 @@ impl OpAmpMacromodel {
     /// Calculate output with slew rate limiting
     pub fn calculate_vout_slewed(&mut self, vp: Value, vm: Value, dt: Value) -> Value {
         let vout_ideal = self.calculate_vout(vp, vm);
-        
+
         // Slew rate limiting
         if dt > 0.0 {
             let slew_rate_vs = self.params.slew_rate * 1e6; // Convert to V/s
             let max_change = slew_rate_vs * dt;
             let delta = vout_ideal - self.vout_prev;
-            
+
             let vout_slewed = if delta.abs() > max_change {
                 self.vout_prev + max_change * delta.signum()
             } else {
                 vout_ideal
             };
-            
+
             self.vout_prev = vout_slewed;
             vout_slewed
         } else {
@@ -324,12 +325,12 @@ impl OpAmpMacromodel {
 //=============================================================================
 
 /// Generate SPICE subcircuit definition for an opamp
-/// 
+///
 /// This creates a behavioral macromodel that can be used in netlists.
 /// The subcircuit uses a VCVS (E source) for gain and RC for frequency response.
 pub fn generate_spice_subcircuit(name: &str, params: &OpAmpParams) -> String {
     let tau = params.aol / (2.0 * std::f64::consts::PI * params.gbw);
-    
+
     format!(
         r#"* {} OpAmp Macromodel
 * A_OL = {:.0} V/V ({:.1} dB)
@@ -389,14 +390,7 @@ pub fn get_opamp_params(name: &str) -> Option<OpAmpParams> {
 /// List available opamp models
 pub fn list_available_opamps() -> Vec<&'static str> {
     vec![
-        "LM741",
-        "TL072",
-        "TL074",
-        "LM324",
-        "LM358",
-        "OP27",
-        "OPA2134",
-        "NE5532",
+        "LM741", "TL072", "TL074", "LM324", "LM358", "OP27", "OPA2134", "NE5532",
     ]
 }
 
@@ -425,11 +419,11 @@ mod tests {
     #[test]
     fn test_opamp_macromodel() {
         let opamp = OpAmpMacromodel::lm741("U1".to_string(), 3, 1, 2);
-        
+
         // Test gain
         let vout = opamp.calculate_vout(0.0001, 0.0); // 100uV differential
         assert!(vout > 0.0);
-        
+
         // Test limiting
         let vout_big = opamp.calculate_vout(1.0, 0.0);
         assert!(vout_big <= opamp.params.vout_max);
@@ -438,11 +432,11 @@ mod tests {
     #[test]
     fn test_frequency_response() {
         let opamp = OpAmpMacromodel::tl072("U1".to_string(), 3, 1, 2);
-        
+
         // At DC
         let gain_dc = opamp.gain_at_frequency(0.0);
         assert!((gain_dc - opamp.params.aol).abs() / opamp.params.aol < 0.01);
-        
+
         // At GBW, gain should be close to 1
         let gain_gbw = opamp.gain_at_frequency(opamp.params.gbw);
         assert!(gain_gbw < 10.0); // Should be approximately 1
@@ -460,7 +454,7 @@ mod tests {
     fn test_spice_subcircuit() {
         let params = OpAmpParams::lm741();
         let subckt = generate_spice_subcircuit("LM741", &params);
-        
+
         assert!(subckt.contains(".SUBCKT LM741"));
         assert!(subckt.contains(".ENDS LM741"));
         assert!(subckt.contains("RIN"));

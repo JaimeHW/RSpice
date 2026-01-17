@@ -28,7 +28,7 @@
 //! | IC | Initial current | 0.0 |
 
 use crate::{circuit::NodeId, Value};
-use super::traits::{DynamicDevice, MatrixStamper, NonlinearDevice};
+use crate::device::traits::{DynamicDevice, MatrixStamper, NonlinearDevice};
 
 //=============================================================================
 // Saturable Inductor
@@ -269,8 +269,8 @@ impl NonlinearDevice for SaturableInductor {
 
     fn stamp_nonlinear(
         &self,
-        voltages: &[Value],
-        matrix: &mut impl MatrixStamper,
+        _voltages: &[Value],
+        _matrix: &mut impl MatrixStamper,
         _rhs: &mut [Value],
     ) {
         // The nonlinear stamp handles the current-dependent inductance
@@ -280,7 +280,7 @@ impl NonlinearDevice for SaturableInductor {
         // This method can be used for additional nonlinear corrections if needed
     }
 
-    fn is_converged(&self, tolerance: Value) -> bool {
+    fn is_converged(&self, _tolerance: Value) -> bool {
         // Convergence is typically checked globally
         // But we can add inductor-specific checks if needed
         true

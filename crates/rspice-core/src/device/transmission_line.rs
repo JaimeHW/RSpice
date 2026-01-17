@@ -23,7 +23,7 @@
 //! Uses delay buffers to store past values and interpolates for accurate delays.
 //! The transmission line is modeled as dependent sources with delay.
 
-use crate::{circuit::NodeId, Value};
+use crate::{Value, circuit::NodeId};
 use std::collections::VecDeque;
 
 //=============================================================================
@@ -35,11 +35,11 @@ use std::collections::VecDeque;
 struct Sample {
     time: Value,
     value: Value,
-    slope: Value,  // dv/dt at this point
+    slope: Value, // dv/dt at this point
 }
 
 /// Circular buffer for storing time history with cubic Hermite interpolation
-/// 
+///
 /// Uses cubic Hermite splines for smooth C1-continuous interpolation,
 /// which preserves high-frequency content better than linear interpolation.
 /// This is critical for transmission line simulation where linear interpolation
@@ -48,7 +48,7 @@ struct Sample {
 struct DelayBuffer {
     /// Samples with time, value, and slope
     data: VecDeque<Sample>,
-    /// Maximum storage time 
+    /// Maximum storage time
     max_time: Value,
     /// Previous value for slope estimation
     prev_value: Value,
@@ -62,7 +62,7 @@ impl DelayBuffer {
             data: VecDeque::new(),
             max_time,
             prev_value: 0.0,
-            prev_time: -1e30,  // Very negative so first slope is ~0
+            prev_time: -1e30, // Very negative so first slope is ~0
         }
     }
 
@@ -75,12 +75,12 @@ impl DelayBuffer {
         } else {
             0.0
         };
-        
+
         self.data.push_back(Sample { time, value, slope });
-        
+
         self.prev_value = value;
         self.prev_time = time;
-        
+
         // Remove old samples
         while let Some(s) = self.data.front() {
             if time - s.time > self.max_time * 1.5 {
@@ -92,22 +92,22 @@ impl DelayBuffer {
     }
 
     /// Get interpolated value at time (time - delay) using cubic Hermite spline
-    /// 
+    ///
     /// Cubic Hermite provides C1 continuity and better preserves:
     /// - High frequency signal content
     /// - Sharp transitions in digital signals
     /// - Phase accuracy at RF frequencies
     fn get_delayed(&self, current_time: Value, delay: Value) -> Value {
         let target_time = current_time - delay;
-        
+
         if self.data.is_empty() {
             return 0.0;
         }
-        
+
         // Binary search would be faster for large buffers, but linear is fine
         // for typical transmission line delays (< 100 samples)
         let mut prev: Option<&Sample> = None;
-        
+
         for s in self.data.iter() {
             if s.time >= target_time {
                 if let Some(p) = prev {
@@ -117,17 +117,17 @@ impl DelayBuffer {
             }
             prev = Some(s);
         }
-        
+
         // Target time is beyond buffer, return last value
         self.data.back().map(|s| s.value).unwrap_or(0.0)
     }
 
     /// Cubic Hermite spline interpolation between two samples
-    /// 
+    ///
     /// Given points p0 and p1 with values v0, v1 and slopes m0, m1,
     /// interpolates smoothly with continuous first derivative.
-    /// 
-    /// H(t) = (2t³ - 3t² + 1)v0 + (t³ - 2t² + t)Δt·m0 
+    ///
+    /// H(t) = (2t³ - 3t² + 1)v0 + (t³ - 2t² + t)Δt·m0
     ///      + (-2t³ + 3t²)v1 + (t³ - t²)Δt·m1
     #[inline]
     fn cubic_hermite(p0: &Sample, p1: &Sample, t: Value) -> Value {
@@ -135,18 +135,18 @@ impl DelayBuffer {
         if dt.abs() < 1e-18 {
             return p1.value;
         }
-        
+
         // Normalized parameter s ∈ [0, 1]
         let s = (t - p0.time) / dt;
         let s2 = s * s;
         let s3 = s2 * s;
-        
+
         // Hermite basis functions
-        let h00 = 2.0 * s3 - 3.0 * s2 + 1.0;  // Position at p0
-        let h10 = s3 - 2.0 * s2 + s;           // Tangent at p0
-        let h01 = -2.0 * s3 + 3.0 * s2;        // Position at p1
-        let h11 = s3 - s2;                     // Tangent at p1
-        
+        let h00 = 2.0 * s3 - 3.0 * s2 + 1.0; // Position at p0
+        let h10 = s3 - 2.0 * s2 + s; // Tangent at p0
+        let h01 = -2.0 * s3 + 3.0 * s2; // Position at p1
+        let h11 = s3 - s2; // Tangent at p1
+
         // Interpolated value
         h00 * p0.value + h10 * dt * p0.slope + h01 * p1.value + h11 * dt * p1.slope
     }
@@ -168,15 +168,15 @@ impl DelayBuffer {
 pub struct TransmissionLine {
     /// Instance name
     pub name: String,
-    
+
     // Port 1 nodes
     pub node1_pos: NodeId,
     pub node1_neg: NodeId,
-    
+
     // Port 2 nodes
     pub node2_pos: NodeId,
     pub node2_neg: NodeId,
-    
+
     // Parameters
     /// Characteristic impedance (Ω)
     pub z0: Value,
@@ -186,18 +186,18 @@ pub struct TransmissionLine {
     pub freq: Option<Value>,
     /// Normalized length (optional)
     pub nl: Option<Value>,
-    
+
     // Internal state
     /// Branch indices for current variables
     branch1: Option<NodeId>,
     branch2: Option<NodeId>,
-    
+
     // History buffers for delayed values
     /// V1 + Z0*I1 history
     history_forward: DelayBuffer,
     /// V2 + Z0*I2 history  
     history_backward: DelayBuffer,
-    
+
     /// Current simulation time
     current_time: Value,
 }
@@ -244,7 +244,7 @@ impl TransmissionLine {
     ) -> Self {
         // TD = NL / freq (number of wavelengths at frequency)
         let td = nl / freq;
-        
+
         let mut tl = Self::new(name, node1_pos, node1_neg, node2_pos, node2_neg, z0, td);
         tl.freq = Some(freq);
         tl.nl = Some(nl);
@@ -284,10 +284,10 @@ impl TransmissionLine {
     /// Update history buffers with current state
     pub fn update_history(&mut self, time: Value, v1: Value, i1: Value, v2: Value, i2: Value) {
         self.current_time = time;
-        
+
         // Forward wave: V1 + Z0*I1 propagates to port 2
         self.history_forward.push(time, v1 + self.z0 * i1);
-        
+
         // Backward wave: V2 + Z0*I2 propagates to port 1
         self.history_backward.push(time, v2 + self.z0 * i2);
     }
@@ -299,7 +299,8 @@ impl TransmissionLine {
 
     /// Get delayed backward wave (arrives at port 1)
     pub fn delayed_backward(&self) -> Value {
-        self.history_backward.get_delayed(self.current_time, self.td)
+        self.history_backward
+            .get_delayed(self.current_time, self.td)
     }
 
     /// Reset for new simulation
@@ -325,7 +326,7 @@ impl TransmissionLine {
 pub struct LossyTransmissionLine {
     /// Base lossless line
     pub base: TransmissionLine,
-    
+
     // Loss parameters (per unit length, normalized)
     /// DC resistance (Ω)
     pub r: Value,
@@ -333,7 +334,7 @@ pub struct LossyTransmissionLine {
     pub g: Value,
     /// Skin effect resistance (Ω/√Hz)
     pub rs: Value,
-    
+
     /// Attenuation factor
     attenuation: Value,
 }
@@ -352,12 +353,12 @@ impl LossyTransmissionLine {
         g: Value,
     ) -> Self {
         let base = TransmissionLine::new(name, node1_pos, node1_neg, node2_pos, node2_neg, z0, td);
-        
+
         // Calculate attenuation: exp(-(R/2Z0 + G*Z0/2) * length)
         // For normalized line, use TD as proxy for length
         let alpha = r / (2.0 * z0) + g * z0 / 2.0;
         let attenuation = (-alpha * td / 1e-9).exp().max(0.001).min(1.0);
-        
+
         Self {
             base,
             r,
@@ -388,14 +389,28 @@ impl LossyTransmissionLine {
 //=============================================================================
 
 /// Create an open-circuited stub
-pub fn open_stub(name: String, node_pos: NodeId, node_neg: NodeId, z0: Value, td: Value) -> TransmissionLine {
+#[allow(dead_code)]
+pub fn open_stub(
+    name: String,
+    node_pos: NodeId,
+    node_neg: NodeId,
+    z0: Value,
+    td: Value,
+) -> TransmissionLine {
     // Open stub has infinite impedance at the far end
     // Use the same node for both ends of port 2 effectively makes it open
     TransmissionLine::new(name, node_pos, node_neg, 0, 0, z0, td)
 }
 
 /// Create a short-circuited stub  
-pub fn short_stub(name: String, node_pos: NodeId, node_neg: NodeId, z0: Value, td: Value) -> TransmissionLine {
+#[allow(dead_code)]
+pub fn short_stub(
+    name: String,
+    node_pos: NodeId,
+    node_neg: NodeId,
+    z0: Value,
+    td: Value,
+) -> TransmissionLine {
     // For a shorted stub, we'd need to add a short at the far end
     // This is a simplified version - in practice, add a very low resistance
     TransmissionLine::new(name, node_pos, node_neg, 0, 0, z0, td)
@@ -413,11 +428,14 @@ mod tests {
     fn test_tline_creation() {
         let tl = TransmissionLine::new(
             "T1".to_string(),
-            1, 0, 2, 0,
-            50.0,   // 50Ω
-            1e-9,   // 1ns delay
+            1,
+            0,
+            2,
+            0,
+            50.0, // 50Ω
+            1e-9, // 1ns delay
         );
-        
+
         assert_eq!(tl.z0, 50.0);
         assert_eq!(tl.td, 1e-9);
         assert_eq!(tl.conductance(), 0.02);
@@ -426,14 +444,14 @@ mod tests {
     #[test]
     fn test_delay_buffer() {
         let mut buf = DelayBuffer::new(1e-9);
-        
+
         // Add samples
         buf.push(0.0, 0.0);
         buf.push(0.5e-9, 0.5);
         buf.push(1.0e-9, 1.0);
         buf.push(1.5e-9, 1.5);
         buf.push(2.0e-9, 2.0);
-        
+
         // Get delayed value (1ns delay from current time 2ns -> target 1ns)
         let v = buf.get_delayed(2.0e-9, 1.0e-9);
         assert!((v - 1.0).abs() < 0.01);
@@ -442,7 +460,7 @@ mod tests {
     #[test]
     fn test_delay_interpolation() {
         let mut buf = DelayBuffer::new(1e-9);
-        
+
         // Need more points for cubic Hermite to work properly
         // Cubic interpolation uses slopes, so we need consistent data
         buf.push(0.0, 0.0);
@@ -450,7 +468,7 @@ mod tests {
         buf.push(0.5e-9, 0.5);
         buf.push(0.75e-9, 0.75);
         buf.push(1.0e-9, 1.0);
-        
+
         // Get value at 0.5ns - with linear ramp, cubic should match closely
         let v = buf.get_delayed(1.0e-9, 0.5e-9);
         // With linear data, cubic Hermite interpolation should give close to 0.5
@@ -459,19 +477,14 @@ mod tests {
 
     #[test]
     fn test_history_update() {
-        let mut tl = TransmissionLine::new(
-            "T1".to_string(),
-            1, 0, 2, 0,
-            50.0,
-            1e-9,
-        );
-        
+        let mut tl = TransmissionLine::new("T1".to_string(), 1, 0, 2, 0, 50.0, 1e-9);
+
         // V + Z0*I at port 1 = 1 + 50*0.01 = 1.5
         tl.update_history(0.0, 1.0, 0.01, 0.0, 0.0);
         tl.update_history(0.5e-9, 1.0, 0.01, 0.0, 0.0);
         tl.update_history(1.0e-9, 1.0, 0.01, 0.0, 0.0);
         tl.update_history(1.5e-9, 1.0, 0.01, 0.0, 0.0);
-        
+
         // After 1ns delay, the forward wave should arrive at port 2
         let delayed = tl.delayed_forward();
         assert!((delayed - 1.5).abs() < 0.1);
@@ -481,13 +494,16 @@ mod tests {
     fn test_lossy_tline() {
         let tl = LossyTransmissionLine::new(
             "T1".to_string(),
-            1, 0, 2, 0,
+            1,
+            0,
+            2,
+            0,
             50.0,
             1e-9,
-            1.0,    // 1Ω series resistance
-            0.001,  // 1mS shunt conductance
+            1.0,   // 1Ω series resistance
+            0.001, // 1mS shunt conductance
         );
-        
+
         // Should have some attenuation
         assert!(tl.attenuation() < 1.0);
         assert!(tl.attenuation() > 0.0);
@@ -497,28 +513,26 @@ mod tests {
     fn test_from_frequency() {
         let tl = TransmissionLine::from_frequency(
             "T1".to_string(),
-            1, 0, 2, 0,
+            1,
+            0,
+            2,
+            0,
             50.0,
-            1e9,    // 1GHz
-            0.25,   // Quarter wavelength
+            1e9,  // 1GHz
+            0.25, // Quarter wavelength
         );
-        
+
         // TD = NL/freq = 0.25 / 1e9 = 0.25ns
         assert!((tl.td - 0.25e-9).abs() < 1e-12);
     }
 
     #[test]
     fn test_tline_reset() {
-        let mut tl = TransmissionLine::new(
-            "T1".to_string(),
-            1, 0, 2, 0,
-            50.0,
-            1e-9,
-        );
-        
+        let mut tl = TransmissionLine::new("T1".to_string(), 1, 0, 2, 0, 50.0, 1e-9);
+
         tl.update_history(0.0, 1.0, 0.01, 0.0, 0.0);
         tl.reset();
-        
+
         // After reset, delayed values should be 0
         let delayed = tl.delayed_forward();
         assert_eq!(delayed, 0.0);
