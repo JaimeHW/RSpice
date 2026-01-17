@@ -263,6 +263,202 @@ impl WaveformPainter {
             queue.write_buffer(buffer, 0, bytemuck::cast_slice(&[uniforms]));
         }
     }
+
+    /// Ensure GPU resources are initialized
+    fn ensure_resources(&mut self, width: u32, height: u32) {
+        // Initialize device if needed
+        if self.device.is_none() {
+            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+            let adapter =
+                pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::HighPerformance,
+                    compatible_surface: None,
+                    force_fallback_adapter: false,
+                }))
+                .expect("Failed to find GPU adapter");
+
+            let (device, queue) = pollster::block_on(adapter.request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("Waveform GPU"),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: wgpu::Limits::default(),
+                    memory_hints: Default::default(),
+                },
+                None,
+            ))
+            .expect("Failed to create device");
+
+            self.device = Some(Arc::new(device));
+            self.queue = Some(Arc::new(queue));
+        }
+
+        let device = self.device.clone().unwrap();
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+
+        // Create pipeline if needed
+        if self.pipeline.is_none() {
+            self.create_pipeline(&device, format);
+        }
+
+        // Create/resize texture if needed
+        if self.texture.is_none() || self.texture_size != (width, height) {
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Waveform Render Texture"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+
+            self.texture_view = Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
+            self.texture = Some(texture);
+            self.texture_size = (width, height);
+        }
+    }
+
+    /// Render waveforms to base64 PNG data URL
+    pub fn render_to_base64(&mut self, width: u32, height: u32) -> Option<String> {
+        if width == 0 || height == 0 {
+            return None;
+        }
+
+        self.ensure_resources(width, height);
+
+        // Clone Arc references to avoid borrow issues
+        let device = self.device.clone()?;
+        let queue = self.queue.clone()?;
+
+        // Update data if dirty
+        {
+            let state = self.state.lock().unwrap();
+            if state.dirty {
+                drop(state);
+                self.update_vertex_buffers(&device);
+                self.state.lock().unwrap().dirty = false;
+            }
+        }
+
+        self.update_uniforms(&queue);
+
+        let texture_view = self.texture_view.as_ref()?;
+        let pipeline = self.pipeline.as_ref()?;
+        let bind_group = self.uniform_bind_group.as_ref()?;
+
+        // Create command encoder
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Waveform Render Encoder"),
+        });
+
+        // Render pass
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Waveform Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: texture_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.08,
+                            g: 0.08,
+                            b: 0.10,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, bind_group, &[]);
+
+            for (buffer, count) in &self.vertex_buffers {
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                pass.draw(0..*count, 0..1);
+            }
+        }
+
+        // Create buffer to read pixels
+        let bytes_per_row = (width * 4 + 255) & !255; // Align to 256
+        let buffer_size = (bytes_per_row * height) as u64;
+
+        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Pixel Readback Buffer"),
+            size: buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        encoder.copy_texture_to_buffer(
+            wgpu::ImageCopyTexture {
+                texture: self.texture.as_ref()?,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::ImageCopyBuffer {
+                buffer: &output_buffer,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        queue.submit(std::iter::once(encoder.finish()));
+
+        // Map buffer and read pixels
+        let buffer_slice = output_buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+            tx.send(result).unwrap();
+        });
+        device.poll(wgpu::Maintain::Wait);
+        rx.recv().ok()?.ok()?;
+
+        let data = buffer_slice.get_mapped_range();
+
+        // Extract actual pixel data (removing padding)
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+        for y in 0..height {
+            let start = (y * bytes_per_row) as usize;
+            let end = start + (width * 4) as usize;
+            pixels.extend_from_slice(&data[start..end]);
+        }
+
+        drop(data);
+        output_buffer.unmap();
+
+        // Encode as PNG
+        let mut png_data = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut png_data, width, height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().ok()?;
+            writer.write_image_data(&pixels).ok()?;
+        }
+
+        // Convert to base64 data URL
+        use base64::Engine;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&png_data);
+        Some(format!("data:image/png;base64,{}", b64))
+    }
 }
 
 /// Decimate waveform data for efficient rendering at different zoom levels
