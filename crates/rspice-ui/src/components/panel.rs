@@ -48,7 +48,8 @@ pub fn Panel(
                     display: flex;
                     align-items: center;
                     justify-content: space-between;
-                    padding: {Theme::SPACING_SM} {Theme::SPACING_MD};
+                    height: 32px;
+                    padding: 0 {Theme::SPACING_MD};
                     background: {th.bg_tertiary()};
                     border-bottom: 1px solid {th.border()};
                     font-size: {Theme::FONT_SIZE_SM};

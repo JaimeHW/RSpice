@@ -4,7 +4,7 @@
 
 use dioxus::prelude::*;
 
-use super::syntax::{tokenize_line, Token};
+use super::syntax::tokenize_line;
 use crate::state::SimulationState;
 use crate::theme::Theme;
 
@@ -38,7 +38,8 @@ pub fn Netlist() -> Element {
                 style: "
                     display: flex;
                     align-items: center;
-                    padding: {Theme::SPACING_XS} {Theme::SPACING_SM};
+                    height: 32px;
+                    padding: 0 {Theme::SPACING_SM};
                     background: {th.bg_tertiary()};
                     border-bottom: 1px solid {th.border()};
                     gap: 2px;
