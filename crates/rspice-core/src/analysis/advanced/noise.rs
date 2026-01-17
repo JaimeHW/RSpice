@@ -45,6 +45,9 @@ pub enum NoiseSourceType {
     Shot,
     /// Flicker (1/f) noise: KF * I^AF / f
     Flicker,
+    /// Burst (popcorn) noise: KB * I^AB / (1 + (f/FB)^2)
+    /// Lorentzian spectrum with corner frequency FB
+    Burst,
 }
 
 /// A noise source in the circuit
@@ -62,8 +65,10 @@ pub struct NoiseSource {
     pub parameter: Value,
     /// Flicker noise exponent (AF, typically 1.0)
     pub af: Value,
-    /// Current for flicker noise (only used for flicker type)
+    /// Current for flicker/burst noise
     pub current: Value,
+    /// Corner frequency for burst noise (FB, Hz)
+    pub corner_freq: Value,
 }
 
 impl NoiseSource {
@@ -82,6 +87,7 @@ impl NoiseSource {
             parameter: resistance,
             af: 1.0,
             current: 0.0,
+            corner_freq: 1.0,
         }
     }
 
@@ -95,6 +101,7 @@ impl NoiseSource {
             parameter: current.abs(),
             af: 1.0,
             current: 0.0,
+            corner_freq: 1.0,
         }
     }
 
@@ -115,6 +122,33 @@ impl NoiseSource {
             parameter: kf,
             af,
             current,
+            corner_freq: 1.0,
+        }
+    }
+
+    /// Create a burst (popcorn) noise source
+    ///
+    /// Burst noise has a Lorentzian spectrum: Si = KB * I^AB / (1 + (f/FB)^2)
+    /// where KB is the burst noise coefficient, AB is the exponent (typically 2),
+    /// and FB is the corner frequency.
+    pub fn burst(
+        device_name: String,
+        node_pos: usize,
+        node_neg: usize,
+        kb: Value,
+        ab: Value,
+        current: Value,
+        corner_freq: Value,
+    ) -> Self {
+        Self {
+            device_name,
+            noise_type: NoiseSourceType::Burst,
+            node_pos,
+            node_neg,
+            parameter: kb,
+            af: ab, // Reuse af field for AB exponent
+            current,
+            corner_freq,
         }
     }
 
@@ -141,6 +175,15 @@ impl NoiseSource {
                 } else {
                     0.0 // Avoid division by zero
                 }
+            }
+            NoiseSourceType::Burst => {
+                // Burst (popcorn) noise: Si = KB * I^AB / (1 + (f/FB)^2)
+                // Lorentzian spectrum with corner frequency FB
+                let kb = self.parameter;
+                let ab = self.af;
+                let fb = self.corner_freq;
+                let f_ratio = frequency / fb;
+                kb * self.current.abs().powf(ab) / (1.0 + f_ratio * f_ratio)
             }
         }
     }

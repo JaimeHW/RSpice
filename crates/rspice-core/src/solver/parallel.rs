@@ -34,7 +34,7 @@ use std::sync::atomic::Ordering;
 //=============================================================================
 
 /// Thread-safe matrix that allows concurrent stamping from multiple threads
-/// 
+///
 /// Uses atomic f64 operations to allow lock-free parallel device stamping.
 /// Each device can atomically add its contribution to matrix entries.
 #[cfg(feature = "parallel")]
@@ -50,7 +50,10 @@ impl AtomicMatrix {
     /// Create a new atomic matrix with given capacity
     pub fn new(capacity: usize) -> Self {
         let values = (0..capacity).map(|_| AtomicF64::new(0.0)).collect();
-        Self { values, len: capacity }
+        Self {
+            values,
+            len: capacity,
+        }
     }
 
     /// Create from a static matrix (copies structure, zeros values)
@@ -68,7 +71,7 @@ impl AtomicMatrix {
     }
 
     /// Atomically add a value at the given index
-    /// 
+    ///
     /// Uses fetch_add for lock-free concurrent writes.
     /// Multiple threads can safely call this on the same index.
     #[inline]
@@ -203,13 +206,13 @@ unsafe impl Send for AtomicRhs {}
 //=============================================================================
 
 /// Stamp multiple devices in parallel using rayon
-/// 
+///
 /// # Arguments
 /// * `devices` - Slice of devices implementing ParallelStamp
 /// * `matrix` - Atomic matrix to stamp into
 /// * `voltages` - Current voltage solution
 /// * `rhs` - Atomic RHS vector
-/// 
+///
 /// # Notes
 /// Only beneficial for large circuits (10k+ devices).
 /// For smaller circuits, sequential stamping is faster due to atomic overhead.
@@ -221,14 +224,14 @@ pub fn stamp_devices_parallel<D: ParallelStamp>(
     rhs: &AtomicRhs,
 ) {
     use rayon::prelude::*;
-    
+
     devices.par_iter().for_each(|device| {
         device.stamp_atomic(matrix, voltages, rhs);
     });
 }
 
 /// Determine if parallel stamping is beneficial
-/// 
+///
 /// Based on empirical testing:
 /// - Atomic adds have ~10x overhead
 /// - Rayon parallel iteration has startup cost ~10μs
@@ -243,7 +246,7 @@ pub fn should_use_parallel(num_devices: usize) -> bool {
 //=============================================================================
 
 /// Parallel-safe diode stamping data
-/// 
+///
 /// Holds pre-computed indices for O(1) atomic stamping without locks.
 #[cfg(feature = "parallel")]
 #[derive(Debug, Clone)]
@@ -270,7 +273,7 @@ pub struct DiodeParallelStamper {
 #[cfg(feature = "parallel")]
 impl DiodeParallelStamper {
     /// Create from a Diode device with linked indices
-    pub fn from_diode(d: &crate::device::diode::Diode) -> Self {
+    pub fn from_diode(d: &crate::device::Diode) -> Self {
         Self {
             name: d.name.clone(),
             node_anode: d.node_anode,
@@ -303,23 +306,43 @@ impl DiodeParallelStamper {
 #[cfg(feature = "parallel")]
 impl ParallelStamp for DiodeParallelStamper {
     fn stamp_atomic(&self, matrix: &AtomicMatrix, voltages: &[Value], rhs: &AtomicRhs) {
-        let va = if self.node_anode == 0 { 0.0 } else { voltages[self.node_anode - 1] };
-        let vc = if self.node_cathode == 0 { 0.0 } else { voltages[self.node_cathode - 1] };
+        let va = if self.node_anode == 0 {
+            0.0
+        } else {
+            voltages[self.node_anode - 1]
+        };
+        let vc = if self.node_cathode == 0 {
+            0.0
+        } else {
+            voltages[self.node_cathode - 1]
+        };
         let vd = va - vc;
-        
+
         let id = self.current(vd);
         let gd = self.conductance(vd);
         let ieq = id - gd * vd;
-        
+
         // Atomic matrix stamping
-        if let Some(idx) = self.idx_aa { matrix.add(idx, gd); }
-        if let Some(idx) = self.idx_ac { matrix.add(idx, -gd); }
-        if let Some(idx) = self.idx_ca { matrix.add(idx, -gd); }
-        if let Some(idx) = self.idx_cc { matrix.add(idx, gd); }
-        
+        if let Some(idx) = self.idx_aa {
+            matrix.add(idx, gd);
+        }
+        if let Some(idx) = self.idx_ac {
+            matrix.add(idx, -gd);
+        }
+        if let Some(idx) = self.idx_ca {
+            matrix.add(idx, -gd);
+        }
+        if let Some(idx) = self.idx_cc {
+            matrix.add(idx, gd);
+        }
+
         // Atomic RHS stamping
-        if self.node_anode > 0 { rhs.add(self.node_anode - 1, -ieq); }
-        if self.node_cathode > 0 { rhs.add(self.node_cathode - 1, ieq); }
+        if self.node_anode > 0 {
+            rhs.add(self.node_anode - 1, -ieq);
+        }
+        if self.node_cathode > 0 {
+            rhs.add(self.node_cathode - 1, ieq);
+        }
     }
 }
 
@@ -328,7 +351,7 @@ impl ParallelStamp for DiodeParallelStamper {
 //=============================================================================
 
 /// Parallel-safe BJT stamping data
-/// 
+///
 /// Holds pre-computed indices for O(1) atomic stamping of 3-terminal BJT.
 /// Uses Ebers-Moll model with linearized conductances.
 #[cfg(feature = "parallel")]
@@ -371,8 +394,8 @@ pub struct BjtParallelStamper {
 #[cfg(feature = "parallel")]
 impl BjtParallelStamper {
     /// Create from a Bjt device with linked indices
-    pub fn from_bjt(b: &crate::device::bjt::Bjt) -> Self {
-        use crate::device::bjt::BjtType;
+    pub fn from_bjt(b: &crate::device::Bjt) -> Self {
+        use crate::device::BjtType;
         Self {
             name: b.name.clone(),
             is_npn: matches!(b.bjt_type, BjtType::Npn),
@@ -421,52 +444,88 @@ impl BjtParallelStamper {
 #[cfg(feature = "parallel")]
 impl ParallelStamp for BjtParallelStamper {
     fn stamp_atomic(&self, matrix: &AtomicMatrix, voltages: &[Value], rhs: &AtomicRhs) {
-        let vc = if self.node_collector == 0 { 0.0 } else { voltages[self.node_collector - 1] };
-        let vb = if self.node_base == 0 { 0.0 } else { voltages[self.node_base - 1] };
-        let ve = if self.node_emitter == 0 { 0.0 } else { voltages[self.node_emitter - 1] };
-        
+        let vc = if self.node_collector == 0 {
+            0.0
+        } else {
+            voltages[self.node_collector - 1]
+        };
+        let vb = if self.node_base == 0 {
+            0.0
+        } else {
+            voltages[self.node_base - 1]
+        };
+        let ve = if self.node_emitter == 0 {
+            0.0
+        } else {
+            voltages[self.node_emitter - 1]
+        };
+
         let p = self.polarity();
         let vbe = p * (vb - ve);
         let vbc = p * (vb - vc);
-        
+
         // Forward and reverse diode currents
         let if_diode = self.diode_current(vbe, self.nf);
         let ir_diode = self.diode_current(vbc, self.nr);
-        
+
         // Junction conductances
         let gbe = self.diode_conductance(vbe, self.nf) / self.bf;
         let gbc = self.diode_conductance(vbc, self.nr) / self.br;
         let gm = self.diode_conductance(vbe, self.nf);
-        
+
         // Currents
         let ic = p * (if_diode - ir_diode / self.br);
         let ib = p * (if_diode / self.bf + ir_diode / self.br);
         let ie = -(ic + ib);
-        
+
         // Equivalent currents
         let ic_eq = ic - gm * vbe + gbc * vbc;
         let ib_eq = ib - gbe * vbe - gbc * vbc;
         let ie_eq = ie + (gm + gbe) * vbe;
-        
+
         // Atomic matrix stamping - Collector row
-        if let Some(idx) = self.idx_cc { matrix.add(idx, gbc); }
-        if let Some(idx) = self.idx_cb { matrix.add(idx, gm - gbc); }
-        if let Some(idx) = self.idx_ce { matrix.add(idx, -gm); }
-        
+        if let Some(idx) = self.idx_cc {
+            matrix.add(idx, gbc);
+        }
+        if let Some(idx) = self.idx_cb {
+            matrix.add(idx, gm - gbc);
+        }
+        if let Some(idx) = self.idx_ce {
+            matrix.add(idx, -gm);
+        }
+
         // Base row
-        if let Some(idx) = self.idx_bc { matrix.add(idx, -gbc); }
-        if let Some(idx) = self.idx_bb { matrix.add(idx, gbe + gbc); }
-        if let Some(idx) = self.idx_be { matrix.add(idx, -gbe); }
-        
+        if let Some(idx) = self.idx_bc {
+            matrix.add(idx, -gbc);
+        }
+        if let Some(idx) = self.idx_bb {
+            matrix.add(idx, gbe + gbc);
+        }
+        if let Some(idx) = self.idx_be {
+            matrix.add(idx, -gbe);
+        }
+
         // Emitter row
-        if let Some(idx) = self.idx_ec { matrix.add(idx, 0.0); }
-        if let Some(idx) = self.idx_eb { matrix.add(idx, -(gm + gbe)); }
-        if let Some(idx) = self.idx_ee { matrix.add(idx, gm + gbe); }
-        
+        if let Some(idx) = self.idx_ec {
+            matrix.add(idx, 0.0);
+        }
+        if let Some(idx) = self.idx_eb {
+            matrix.add(idx, -(gm + gbe));
+        }
+        if let Some(idx) = self.idx_ee {
+            matrix.add(idx, gm + gbe);
+        }
+
         // Atomic RHS stamping
-        if self.node_collector > 0 { rhs.add(self.node_collector - 1, -ic_eq); }
-        if self.node_base > 0 { rhs.add(self.node_base - 1, -ib_eq); }
-        if self.node_emitter > 0 { rhs.add(self.node_emitter - 1, -ie_eq); }
+        if self.node_collector > 0 {
+            rhs.add(self.node_collector - 1, -ic_eq);
+        }
+        if self.node_base > 0 {
+            rhs.add(self.node_base - 1, -ib_eq);
+        }
+        if self.node_emitter > 0 {
+            rhs.add(self.node_emitter - 1, -ie_eq);
+        }
     }
 }
 
@@ -475,7 +534,7 @@ impl ParallelStamp for BjtParallelStamper {
 //=============================================================================
 
 /// Parallel-safe MOSFET stamping data
-/// 
+///
 /// Holds pre-computed indices for O(1) atomic stamping of 4-terminal MOSFET.
 /// Only Drain and Source rows are stamped (Gate draws no DC current).
 #[cfg(feature = "parallel")]
@@ -582,10 +641,10 @@ impl MosfetParallelStamper {
         let vgs_eff = p * vgs;
         let vds_eff = Self::smooth_positive(p * vds);
         let vth = self.vth(vbs);
-        
+
         let vgt = Self::smooth_positive(vgs_eff - vth);
         let vdsat = vgt.min(vds_eff);
-        
+
         let id_core = self.beta() * (vgt * vdsat - 0.5 * vdsat * vdsat);
         p * id_core * (1.0 + self.lambda * vds_eff)
     }
@@ -596,10 +655,10 @@ impl MosfetParallelStamper {
         let vgs_eff = p * vgs;
         let vds_eff = Self::smooth_positive(p * vds);
         let vth = self.vth(vbs);
-        
+
         let vgt = Self::smooth_positive(vgs_eff - vth);
         let vdsat = vgt.min(vds_eff);
-        
+
         self.beta() * vdsat * (1.0 + self.lambda * vds_eff)
     }
 
@@ -609,10 +668,10 @@ impl MosfetParallelStamper {
         let vgs_eff = p * vgs;
         let vds_eff = Self::smooth_positive(p * vds);
         let vth = self.vth(vbs);
-        
+
         let vgt = Self::smooth_positive(vgs_eff - vth);
         let vdsat = vgt.min(vds_eff);
-        
+
         let id_core = self.beta() * (vgt * vdsat - 0.5 * vdsat * vdsat);
         let gds_linear = if vds_eff < vgt {
             self.beta() * (vgt - vdsat) * (1.0 + self.lambda * vds_eff)
@@ -635,39 +694,75 @@ impl MosfetParallelStamper {
 #[cfg(feature = "parallel")]
 impl ParallelStamp for MosfetParallelStamper {
     fn stamp_atomic(&self, matrix: &AtomicMatrix, voltages: &[Value], rhs: &AtomicRhs) {
-        let vd = if self.node_drain == 0 { 0.0 } else { voltages[self.node_drain - 1] };
-        let vg = if self.node_gate == 0 { 0.0 } else { voltages[self.node_gate - 1] };
-        let vs = if self.node_source == 0 { 0.0 } else { voltages[self.node_source - 1] };
-        let vb = if self.node_bulk == 0 { 0.0 } else { voltages[self.node_bulk - 1] };
-        
+        let vd = if self.node_drain == 0 {
+            0.0
+        } else {
+            voltages[self.node_drain - 1]
+        };
+        let vg = if self.node_gate == 0 {
+            0.0
+        } else {
+            voltages[self.node_gate - 1]
+        };
+        let vs = if self.node_source == 0 {
+            0.0
+        } else {
+            voltages[self.node_source - 1]
+        };
+        let vb = if self.node_bulk == 0 {
+            0.0
+        } else {
+            voltages[self.node_bulk - 1]
+        };
+
         let vgs = vg - vs;
         let vds = vd - vs;
         let vbs = vb - vs;
-        
+
         // Conductances
         let gm = self.gm(vgs, vds, vbs);
         let gds = self.gds(vgs, vds, vbs);
         let gmb = self.gmb(vgs, vds, vbs);
-        
+
         // Drain current and equivalent source
         let id = self.calculate_id(vgs, vds, vbs);
         let id_eq = id - gm * vgs - gds * vds - gmb * vbs;
-        
+
         // Atomic matrix stamping - Drain row
-        if let Some(idx) = self.idx_dd { matrix.add(idx, gds); }
-        if let Some(idx) = self.idx_dg { matrix.add(idx, gm); }
-        if let Some(idx) = self.idx_ds { matrix.add(idx, -(gm + gds + gmb)); }
-        if let Some(idx) = self.idx_db { matrix.add(idx, gmb); }
-        
+        if let Some(idx) = self.idx_dd {
+            matrix.add(idx, gds);
+        }
+        if let Some(idx) = self.idx_dg {
+            matrix.add(idx, gm);
+        }
+        if let Some(idx) = self.idx_ds {
+            matrix.add(idx, -(gm + gds + gmb));
+        }
+        if let Some(idx) = self.idx_db {
+            matrix.add(idx, gmb);
+        }
+
         // Source row
-        if let Some(idx) = self.idx_sd { matrix.add(idx, -gds); }
-        if let Some(idx) = self.idx_sg { matrix.add(idx, -gm); }
-        if let Some(idx) = self.idx_ss { matrix.add(idx, gm + gds + gmb); }
-        if let Some(idx) = self.idx_sb { matrix.add(idx, -gmb); }
-        
+        if let Some(idx) = self.idx_sd {
+            matrix.add(idx, -gds);
+        }
+        if let Some(idx) = self.idx_sg {
+            matrix.add(idx, -gm);
+        }
+        if let Some(idx) = self.idx_ss {
+            matrix.add(idx, gm + gds + gmb);
+        }
+        if let Some(idx) = self.idx_sb {
+            matrix.add(idx, -gmb);
+        }
+
         // Atomic RHS stamping
-        if self.node_drain > 0 { rhs.add(self.node_drain - 1, -id_eq); }
-        if self.node_source > 0 { rhs.add(self.node_source - 1, id_eq); }
+        if self.node_drain > 0 {
+            rhs.add(self.node_drain - 1, -id_eq);
+        }
+        if self.node_source > 0 {
+            rhs.add(self.node_source - 1, id_eq);
+        }
     }
 }
 
@@ -712,11 +807,11 @@ mod tests {
     #[test]
     fn test_atomic_matrix_basic() {
         let matrix = AtomicMatrix::new(10);
-        
+
         matrix.add(0, 1.0);
         matrix.add(0, 2.0);
         matrix.add(5, 3.0);
-        
+
         assert!((matrix.get(0) - 3.0).abs() < 1e-10);
         assert!((matrix.get(5) - 3.0).abs() < 1e-10);
         assert!((matrix.get(1) - 0.0).abs() < 1e-10);
@@ -725,11 +820,11 @@ mod tests {
     #[test]
     fn test_atomic_matrix_clear() {
         let matrix = AtomicMatrix::new(5);
-        
+
         matrix.add(0, 10.0);
         matrix.add(1, 20.0);
         matrix.clear();
-        
+
         assert!((matrix.get(0) - 0.0).abs() < 1e-10);
         assert!((matrix.get(1) - 0.0).abs() < 1e-10);
     }
@@ -737,25 +832,25 @@ mod tests {
     #[test]
     fn test_atomic_rhs_basic() {
         let rhs = AtomicRhs::new(5);
-        
+
         rhs.add(0, 1.0);
         rhs.add(0, 2.0);
-        
+
         assert!((rhs.get(0) - 3.0).abs() < 1e-10);
     }
 
     #[test]
     fn test_parallel_stamping() {
         use rayon::prelude::*;
-        
+
         let matrix = AtomicMatrix::new(10);
-        
+
         // Simulate parallel stamping
         let indices: Vec<usize> = (0..100).collect();
         indices.par_iter().for_each(|_| {
             matrix.add(0, 0.1);
         });
-        
+
         // Should sum to 10.0 (100 * 0.1)
         assert!((matrix.get(0) - 10.0).abs() < 1e-10);
     }
@@ -766,10 +861,10 @@ mod tests {
         matrix.add(0, 1.0);
         matrix.add(1, 2.0);
         matrix.add(2, 3.0);
-        
+
         let mut dest = vec![0.0; 3];
         matrix.copy_to(&mut dest);
-        
+
         assert!((dest[0] - 1.0).abs() < 1e-10);
         assert!((dest[1] - 2.0).abs() < 1e-10);
         assert!((dest[2] - 3.0).abs() < 1e-10);
@@ -788,7 +883,7 @@ mod tests {
         let config = ParallelStampConfig::default();
         assert_eq!(config.min_devices, 1000);
         assert!(!config.force_parallel);
-        
+
         assert!(!config.should_use(500));
         assert!(config.should_use(1000));
         assert!(config.should_use(5000));
@@ -800,7 +895,7 @@ mod tests {
             min_devices: 1000,
             force_parallel: true,
         };
-        
+
         // Should always use parallel when forced
         assert!(config.should_use(1));
         assert!(config.should_use(100));
@@ -822,11 +917,11 @@ mod tests {
             idx_ca: None,
             idx_cc: None,
         };
-        
+
         // Forward bias should give positive current
         let id_forward = stamper.current(0.7);
         assert!(id_forward > 0.0);
-        
+
         // Reverse bias should give ~-Is
         let id_reverse = stamper.current(-1.0);
         assert!(id_reverse.abs() < 1e-8);
@@ -836,7 +931,7 @@ mod tests {
     fn test_diode_parallel_stamper_atomic() {
         let matrix = AtomicMatrix::new(5);
         let rhs = AtomicRhs::new(3);
-        
+
         let stamper = DiodeParallelStamper {
             name: "D1".to_string(),
             node_anode: 1,
@@ -849,15 +944,15 @@ mod tests {
             idx_ca: Some(2),
             idx_cc: Some(3),
         };
-        
+
         // Stamp with voltages [0V, 0.7V, 0V]
         let voltages = vec![0.7, 0.0, 0.0];
         stamper.stamp_atomic(&matrix, &voltages, &rhs);
-        
+
         // Conductance should be stamped
         let gd = matrix.get(0);
         assert!(gd > 0.0, "Conductance should be positive, got {}", gd);
-        
+
         // RHS should have current contributions
         assert!(rhs.get(0).abs() > 0.0 || rhs.get(1).abs() > 0.0);
     }

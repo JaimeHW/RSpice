@@ -39,23 +39,29 @@ pub struct OpAmpParams {
     pub vout_max: Value,
     /// Negative output swing voltage
     pub vout_min: Value,
+    /// Maximum output source current (A)
+    pub iout_source: Value,
+    /// Maximum output sink current (A)
+    pub iout_sink: Value,
 }
 
 impl Default for OpAmpParams {
     fn default() -> Self {
         // Generic OpAmp defaults (similar to TL071)
         Self {
-            aol: 200_000.0,  // 106 dB
-            gbw: 3e6,        // 3 MHz
-            slew_rate: 13.0, // 13 V/μs
-            rin: 1e12,       // 1 TΩ (JFET input)
-            rout: 75.0,      // 75Ω
-            ibias: 30e-12,   // 30 pA
-            vos: 3e-3,       // 3 mV typical
-            cmrr_db: 100.0,  // 100 dB
-            psrr_db: 100.0,  // 100 dB
-            vout_max: 13.5,  // +13.5V with ±15V supplies
-            vout_min: -13.5, // -13.5V
+            aol: 200_000.0,     // 106 dB
+            gbw: 3e6,           // 3 MHz
+            slew_rate: 13.0,    // 13 V/μs
+            rin: 1e12,          // 1 TΩ (JFET input)
+            rout: 75.0,         // 75Ω
+            ibias: 30e-12,      // 30 pA
+            vos: 3e-3,          // 3 mV typical
+            cmrr_db: 100.0,     // 100 dB
+            psrr_db: 100.0,     // 100 dB
+            vout_max: 13.5,     // +13.5V with ±15V supplies
+            vout_min: -13.5,    // -13.5V
+            iout_source: 25e-3, // 25mA source
+            iout_sink: 25e-3,   // 25mA sink
         }
     }
 }
@@ -75,6 +81,8 @@ impl OpAmpParams {
             psrr_db: 90.0,  // 90 dB
             vout_max: 13.0,
             vout_min: -13.0,
+            iout_source: 25e-3,
+            iout_sink: 25e-3,
         }
     }
 
@@ -92,6 +100,8 @@ impl OpAmpParams {
             psrr_db: 100.0,  // 100 dB
             vout_max: 13.5,
             vout_min: -13.5,
+            iout_source: 20e-3,
+            iout_sink: 20e-3,
         }
     }
 
@@ -109,6 +119,8 @@ impl OpAmpParams {
             psrr_db: 100.0,  // 100 dB
             vout_max: 3.5,   // Within 1.5V of Vcc
             vout_min: 0.005, // Down to 5mV above Vee
+            iout_source: 20e-3,
+            iout_sink: 20e-3,
         }
     }
 
@@ -126,6 +138,8 @@ impl OpAmpParams {
             psrr_db: 120.0,   // 120 dB
             vout_max: 13.0,
             vout_min: -13.0,
+            iout_source: 30e-3,
+            iout_sink: 30e-3,
         }
     }
 
@@ -143,6 +157,8 @@ impl OpAmpParams {
             psrr_db: 100.0, // 100 dB
             vout_max: 13.5,
             vout_min: 0.0, // Output goes to ground
+            iout_source: 20e-3,
+            iout_sink: 20e-3,
         }
     }
 
@@ -160,6 +176,8 @@ impl OpAmpParams {
             psrr_db: 110.0,   // 110 dB
             vout_max: 13.5,
             vout_min: -13.5,
+            iout_source: 35e-3,
+            iout_sink: 35e-3,
         }
     }
 
@@ -177,6 +195,8 @@ impl OpAmpParams {
             psrr_db: 100.0, // 100 dB
             vout_max: 13.0,
             vout_min: -13.0,
+            iout_source: 38e-3,
+            iout_sink: 38e-3,
         }
     }
 }

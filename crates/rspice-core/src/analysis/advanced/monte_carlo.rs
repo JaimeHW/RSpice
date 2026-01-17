@@ -552,6 +552,89 @@ impl MonteCarloRunner {
             num_failures,
         }
     }
+
+    /// Run Monte Carlo analysis in parallel using rayon
+    ///
+    /// This method distributes simulation runs across threads for better performance
+    /// on multi-core systems. Each thread gets its own RNG state derived from the
+    /// base seed to ensure reproducibility.
+    ///
+    /// # Arguments
+    /// * `run_simulation` - Thread-safe closure that runs one simulation
+    ///
+    /// # Returns
+    /// `MonteCarloResult` with statistics for all output variables
+    #[cfg(feature = "parallel")]
+    pub fn run_parallel<F, E>(&self, run_simulation: F) -> MonteCarloResult
+    where
+        F: Fn(&VariationSet) -> Result<HashMap<String, Value>, E> + Sync,
+    {
+        use rayon::prelude::*;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let base_seed = self.config.seed.unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(12345)
+        });
+
+        let num_failures = AtomicUsize::new(0);
+
+        // Pre-generate all variation sets (required for parallel iteration)
+        let variation_sets: Vec<_> = (0..self.config.num_runs)
+            .map(|run_idx| {
+                // Create per-run RNG with unique seed
+                let run_seed = base_seed.wrapping_add(run_idx as u64 * 0x9E3779B97F4A7C15);
+                let mut rng = Xorshift128Plus::new(run_seed);
+
+                // Generate lot-level variations for this run
+                let lot_values = self.generate_lot_variations(&mut rng);
+
+                // Generate device-level variations
+                self.generate_variations(&mut rng, &lot_values)
+            })
+            .collect();
+
+        // Run simulations in parallel and collect results
+        let results: Vec<_> = variation_sets
+            .par_iter()
+            .filter_map(|variations| match run_simulation(variations) {
+                Ok(outputs) => Some(outputs),
+                Err(_) => {
+                    num_failures.fetch_add(1, Ordering::Relaxed);
+                    None
+                }
+            })
+            .collect();
+
+        // Aggregate results
+        let mut all_outputs: HashMap<String, Vec<Value>> = HashMap::new();
+        for outputs in results {
+            for (name, value) in outputs {
+                all_outputs.entry(name).or_default().push(value);
+            }
+        }
+
+        // Compute statistics
+        let variables: HashMap<String, VariableStatistics> = all_outputs
+            .into_iter()
+            .map(|(name, samples)| {
+                let stats =
+                    VariableStatistics::from_samples(&name, samples, self.config.histogram_bins);
+                (name, stats)
+            })
+            .collect();
+
+        let failures = num_failures.load(Ordering::Relaxed);
+
+        MonteCarloResult {
+            num_runs: self.config.num_runs,
+            variables,
+            all_converged: failures == 0,
+            num_failures: failures,
+        }
+    }
 }
 
 //=============================================================================
