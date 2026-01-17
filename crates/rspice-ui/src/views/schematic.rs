@@ -232,6 +232,14 @@ pub fn Schematic() -> Element {
                                     println!("Probe: {}", probe_name);
                                 }
                             }
+                            Tool::Label => {
+                                // Place a net label at clicked position
+                                // For now use a default name, can be edited via double-click
+                                let label_num = s.net_labels.len() + 1;
+                                s.add_net_label(gp, format!("NET{}", label_num));
+                                drop(s);
+                                history.write().push(schematic.read().clone(), "Add label".to_string());
+                            }
                         }
                     },
 
@@ -404,6 +412,15 @@ pub fn Schematic() -> Element {
                             }
                         }
 
+                        // Net Labels
+                        for label in schematic.read().net_labels.iter() {
+                            NetLabelSvg {
+                                pos: label.pos,
+                                name: label.name.clone(),
+                                grid_size: schematic.read().grid_size,
+                            }
+                        }
+
                         // Placement preview
                         if let Tool::Place(k) = schematic.read().tool {
                             PreviewSvg { kind: k, pos: *mouse_grid.read(), grid_size: schematic.read().grid_size }
@@ -414,7 +431,7 @@ pub fn Schematic() -> Element {
                 // Status bar
                 div {
                     style: "position: absolute; bottom: 0; left: 0; right: 0; display: flex; justify-content: space-between; padding: 4px 8px; background: {th.bg_tertiary()}dd; font-size: 11px; color: {th.text_muted()}; font-family: monospace;",
-                    span { {match schematic.read().tool { Tool::Select => "Select | Del: delete | R: rotate | Ctrl+Z/Y: undo/redo", Tool::Wire => "Wire | Click: add points | DblClick: finish", Tool::Place(_) => "Place | Click: place | Esc: cancel", Tool::Probe => "Probe | Click node/wire to add voltage trace" }} }
+                    span { {match schematic.read().tool { Tool::Select => "Select | Del: delete | R: rotate | Ctrl+Z/Y: undo/redo", Tool::Wire => "Wire | Click: add points | DblClick: finish", Tool::Place(_) => "Place | Click: place | Esc: cancel", Tool::Probe => "Probe | Click node/wire to add voltage trace", Tool::Label => "Label | Click to place net label | DblClick to edit" }} }
                     span { {format!("({}, {}) | {:.0}%", mouse_grid.read().x, mouse_grid.read().y, *zoom.read() * 100.0)} }
                 }
 
@@ -502,6 +519,7 @@ fn SchematicToolbar(schematic: Signal<SchematicState>) -> Element {
             ToolBtn { label: "↖ Select", active: matches!(tool, Tool::Select), onclick: move |_| schematic.write().tool = Tool::Select }
             ToolBtn { label: "— Wire", active: matches!(tool, Tool::Wire), onclick: move |_| schematic.write().tool = Tool::Wire }
             ToolBtn { label: "⚡ Probe", active: matches!(tool, Tool::Probe), onclick: move |_| schematic.write().tool = Tool::Probe }
+            ToolBtn { label: "🏷 Label", active: matches!(tool, Tool::Label), onclick: move |_| schematic.write().tool = Tool::Label }
             div { style: "width: 1px; height: 18px; background: {th.border()}; margin: 0 4px;" }
             button { style: "padding: 4px 8px; background: {th.surface()}; border: 1px solid {th.border()}; border-radius: 4px; color: {th.text_primary()}; font-size: 12px; cursor: pointer;", onclick: move |_| schematic.write().rotate_selection(), "⟳ Rotate" }
             button { style: "padding: 4px 8px; background: {th.surface()}; border: 1px solid {th.border()}; border-radius: 4px; color: {th.text_primary()}; font-size: 12px; cursor: pointer;", onclick: move |_| schematic.write().delete_selection(), "🗑 Delete" }
@@ -611,5 +629,30 @@ fn symbol_path(k: ComponentType) -> &'static str {
         ComponentType::PnpBjt => "M-15 0 L-5 0 M-5-12 L-5 12 M-5-6 L10-15 M-5 6 L10 15 M-2 4 L-5 6 L0 10",
         ComponentType::Nmos => "M-15 0 L-8 0 M-8-10 L-8 10 M-4-8 L-4-4 M-4-2 L-4 2 M-4 4 L-4 8 M-4 0 L10 0 M-4-6 L10-6 L10-15 M-4 6 L10 6 L10 15",
         ComponentType::Pmos => "M-15 0 L-8 0 M-8-10 L-8 10 M-4-8 L-4-4 M-4-2 L-4 2 M-4 4 L-4 8 M-4 0 L10 0 M-4-6 L10-6 L10-15 M-4 6 L10 6 L10 15",
+    }
+}
+
+/// Net label SVG component - flag symbol with name
+#[component]
+fn NetLabelSvg(pos: Point, name: String, grid_size: i32) -> Element {
+    let theme: Signal<Theme> = use_context();
+    let th = theme.read();
+    let (cx, cy) = pos.to_pixels(grid_size);
+    
+    // Calculate text width for background (approximate)
+    let text_width = (name.len() * 7) as i32 + 10;
+    
+    rsx! {
+        g { transform: "translate({cx},{cy})",
+            // Connection point circle
+            circle { cx: "0", cy: "0", r: "3", fill: "{th.accent_primary()}" }
+            // Flag pole
+            line { x1: "0", y1: "0", x2: "0", y2: "-15", stroke: "{th.accent_primary()}", stroke_width: "2" }
+            // Flag background
+            rect { x: "2", y: "-22", width: "{text_width}", height: "14", rx: "2", fill: "{th.accent_primary()}", opacity: "0.15" }
+            rect { x: "2", y: "-22", width: "{text_width}", height: "14", rx: "2", stroke: "{th.accent_primary()}", stroke_width: "1", fill: "none" }
+            // Net name text
+            text { x: "6", y: "-12", font_size: "10", fill: "{th.accent_primary()}", font_weight: "600", font_family: "monospace", "{name}" }
+        }
     }
 }

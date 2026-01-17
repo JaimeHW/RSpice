@@ -348,6 +348,9 @@ pub enum Tool {
 
     /// Probe voltage/current at nodes
     Probe,
+
+    /// Place net labels
+    Label,
 }
 
 /// Wire drawing state
@@ -358,6 +361,17 @@ pub struct WireDrawing {
 
     /// Whether currently drawing
     pub active: bool,
+}
+
+/// Net label for naming nodes in the schematic
+#[derive(Debug, Clone)]
+pub struct NetLabel {
+    /// Unique identifier
+    pub id: u64,
+    /// Position on grid
+    pub pos: Point,
+    /// Net name (e.g., "VCC", "GND", "OUT")
+    pub name: String,
 }
 
 /// Clipboard data for copy/paste operations
@@ -406,6 +420,9 @@ pub struct SchematicState {
 
     /// Clipboard for copy/paste operations
     pub clipboard: ClipboardData,
+
+    /// Net labels for naming nodes
+    pub net_labels: Vec<NetLabel>,
 }
 
 impl Default for SchematicState {
@@ -422,6 +439,7 @@ impl Default for SchematicState {
             next_id: 1,
             component_counters: HashMap::new(),
             clipboard: ClipboardData::default(),
+            net_labels: Vec::new(),
         }
     }
 }
@@ -474,6 +492,13 @@ impl SchematicState {
         let id = self.next_id();
         self.wires.push(Wire::new(id, points));
         Some(id)
+    }
+
+    /// Add a net label at the given position
+    pub fn add_net_label(&mut self, pos: Point, name: String) -> u64 {
+        let id = self.next_id();
+        self.net_labels.push(NetLabel { id, pos, name });
+        id
     }
 
     /// Remove selected components and wires
