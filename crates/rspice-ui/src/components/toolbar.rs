@@ -149,6 +149,64 @@ pub fn Toolbar() -> Element {
                     },
                     "Save"
                 }
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    icon: rsx! { Icon { icon: IconType::FolderOpen, size: 16 } },
+                    onclick: move |_| {
+                        // Import LTspice .raw waveform file
+                        spawn(async move {
+                            if let Some(path) = rfd::AsyncFileDialog::new()
+                                .add_filter("LTspice Raw", &["raw"])
+                                .add_filter("All Files", &["*"])
+                                .pick_file()
+                                .await
+                            {
+                                match rspice_core::compat::parse_raw_file(path.path()) {
+                                    Ok(waveform_data) => {
+                                        let mut state = sim_state.write();
+                                        state.waveforms.clear();
+
+                                        // Convert raw waveforms to UI format
+                                        // Skip the first variable (time/frequency) - it's used as x-axis
+                                        for (idx, wf) in waveform_data.waveforms.iter().enumerate().skip(1) {
+                                            if let Some(values) = if wf.y_imag.is_some() {
+                                                // For complex data (AC analysis), use magnitude
+                                                Some(wf.y.iter().zip(wf.y_imag.as_ref().unwrap())
+                                                    .map(|(r, i)| (r * r + i * i).sqrt())
+                                                    .collect::<Vec<_>>())
+                                            } else {
+                                                Some(wf.y.clone())
+                                            } {
+                                                if !wf.x.is_empty() && wf.x.len() == values.len() {
+                                                    state.waveforms.push(WaveformData {
+                                                        name: wf.name.clone(),
+                                                        x: wf.x.clone(),
+                                                        y: values,
+                                                        color: crate::theme::Theme::trace_color_static(idx - 1).to_string(),
+                                                        visible: true,
+                                                    });
+                                                }
+                                            }
+                                        }
+
+                                        let trace_count = state.waveforms.len();
+                                        state.console_messages.push(ConsoleMessage::success(
+                                            format!("Imported {} traces from: {}",
+                                                trace_count,
+                                                path.path().display())
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        sim_state.write().console_messages.push(
+                                            ConsoleMessage::error(format!("Failed to import .raw file: {}", e))
+                                        );
+                                    }
+                                }
+                            }
+                        });
+                    },
+                    "Import"
+                }
             }
 
             // Divider
