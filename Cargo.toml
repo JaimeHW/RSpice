@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/rspice-core",
     "crates/rspice-cli",
+    "crates/rspice-ui",
 ]
 
 [workspace.package]
