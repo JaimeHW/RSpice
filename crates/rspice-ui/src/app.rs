@@ -65,14 +65,6 @@ pub fn App() -> Element {
                     overflow: hidden;
                 ",
 
-                // Left sidebar - Component library
-                Panel {
-                    title: "Components",
-                    width: "250px",
-                    position: "left",
-                    ComponentLibrary {}
-                }
-
                 // Center - Editor area with tabs
                 div {
                     class: "editor-area",

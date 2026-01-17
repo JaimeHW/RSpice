@@ -648,10 +648,14 @@ fn symbol_path(k: ComponentType) -> &'static str {
         ComponentType::VoltageSource | ComponentType::VoltageSourceAc | ComponentType::VoltageSourcePulse | ComponentType::VoltageSourceSin => 
             "M0-20 L0-12 M0 12 L0 20 M0 0 m-12 0 a12 12 0 1 0 24 0 a12 12 0 1 0-24 0 M-4-4 L4-4 M0-8 L0 0",
         ComponentType::CurrentSource => "M0-20 L0-12 M0 12 L0 20 M0 0 m-12 0 a12 12 0 1 0 24 0 a12 12 0 1 0-24 0 M0-6 L0 6 M-3 3 L0 6 L3 3",
-        ComponentType::NpnBjt => "M-15 0 L-5 0 M-5-12 L-5 12 M-5-6 L10-15 M-5 6 L10 15 M5 10 L10 15 L8 8",
-        ComponentType::PnpBjt => "M-15 0 L-5 0 M-5-12 L-5 12 M-5-6 L10-15 M-5 6 L10 15 M-2 4 L-5 6 L0 10",
-        ComponentType::Nmos => "M-15 0 L-8 0 M-8-10 L-8 10 M-4-8 L-4-4 M-4-2 L-4 2 M-4 4 L-4 8 M-4 0 L10 0 M-4-6 L10-6 L10-15 M-4 6 L10 6 L10 15",
-        ComponentType::Pmos => "M-15 0 L-8 0 M-8-10 L-8 10 M-4-8 L-4-4 M-4-2 L-4 2 M-4 4 L-4 8 M-4 0 L10 0 M-4-6 L10-6 L10-15 M-4 6 L10 6 L10 15",
+        // NPN BJT: base line, vertical emitter bar, collector line, emitter line with arrow pointing OUT
+        ComponentType::NpnBjt => "M-15 0 L-5 0 M-5-12 L-5 12 M-5-5 L10-15 L10-20 M-5 5 L10 15 L10 20 M7 11 L10 15 L5 14",
+        // PNP BJT: base line, vertical emitter bar, collector line, emitter line with arrow pointing IN  
+        ComponentType::PnpBjt => "M-15 0 L-5 0 M-5-12 L-5 12 M-5-5 L10-15 L10-20 M-5 5 L10 15 L10 20 M-2 2 L-5 5 L-1 8",
+        // NMOS: gate terminal, gate line, channel segments, source, drain
+        ComponentType::Nmos => "M-15 0 L-10 0 M-10-10 L-10 10 M-6-8 L-6-3 M-6-1 L-6 1 M-6 3 L-6 8 M-6 0 L10 0 L10 20 M-6-5 L10-5 L10-20 M4 0 L10 0 M6-2 L10 0 L6 2",
+        // PMOS: same as NMOS but with circle on gate
+        ComponentType::Pmos => "M-15 0 L-12 0 M-10 0 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0-4 0 M-10-10 L-10 10 M-6-8 L-6-3 M-6-1 L-6 1 M-6 3 L-6 8 M-6 0 L10 0 L10 20 M-6-5 L10-5 L10-20",
     }
 }
 
