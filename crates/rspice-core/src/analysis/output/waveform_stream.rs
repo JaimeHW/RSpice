@@ -21,7 +21,7 @@
 
 use crate::Value;
 use std::fs::File;
-use std::io::{self, BufWriter, Write, Seek};
+use std::io::{self, BufWriter, Write};
 use std::path::Path;
 
 //=============================================================================
@@ -29,7 +29,7 @@ use std::path::Path;
 //=============================================================================
 
 /// Disk-backed waveform writer for long simulations
-/// 
+///
 /// Buffers data in memory and flushes to disk when the buffer is full.
 /// Uses binary format for efficient storage: [time, v0, v1, ...] as f64s.
 #[derive(Debug)]
@@ -52,12 +52,12 @@ pub struct StreamingWaveformWriter {
 
 impl StreamingWaveformWriter {
     /// Create a new streaming writer
-    /// 
+    ///
     /// # Arguments
     /// * `path` - Output file path
     /// * `channel_names` - Names of signal channels
     /// * `buffer_size` - Number of points to buffer before flushing
-    /// 
+    ///
     /// # Returns
     /// The writer, or an IO error
     pub fn new<P: AsRef<Path>>(
@@ -67,13 +67,13 @@ impl StreamingWaveformWriter {
     ) -> io::Result<Self> {
         let file = File::create(path)?;
         let writer = BufWriter::with_capacity(65536, file);
-        
+
         let names: Vec<String> = channel_names.iter().map(|s| s.to_string()).collect();
         let num_channels = names.len();
-        
+
         // Buffer holds (time + channels) * buffer_size values
         let buffer_capacity = (num_channels + 1) * buffer_size;
-        
+
         let mut this = Self {
             writer,
             num_channels,
@@ -83,10 +83,10 @@ impl StreamingWaveformWriter {
             points_written: 0,
             binary: true,
         };
-        
+
         // Write header
         this.write_header()?;
-        
+
         Ok(this)
     }
 
@@ -120,25 +120,25 @@ impl StreamingWaveformWriter {
         } else {
             writeln!(self.writer, "Values:")?;
         }
-        
+
         Ok(())
     }
 
     /// Write a time point with all channel values
-    /// 
+    ///
     /// Values are buffered; use `flush()` to force disk write.
     #[inline]
     pub fn write_point(&mut self, time: Value, values: &[Value]) -> io::Result<()> {
         debug_assert_eq!(values.len(), self.num_channels);
-        
+
         self.buffer.push(time);
         self.buffer.extend_from_slice(values);
-        
+
         // Check if flush needed
         if self.buffer.len() >= self.buffer_capacity {
             self.flush_buffer()?;
         }
-        
+
         self.points_written += 1;
         Ok(())
     }
@@ -148,9 +148,9 @@ impl StreamingWaveformWriter {
         if self.buffer.is_empty() {
             return Ok(());
         }
-        
+
         let row_size = self.num_channels + 1;
-        
+
         if self.binary {
             // Write as binary f64 values
             for chunk in self.buffer.chunks(row_size) {
@@ -170,7 +170,7 @@ impl StreamingWaveformWriter {
                 row += 1;
             }
         }
-        
+
         self.buffer.clear();
         Ok(())
     }
@@ -185,11 +185,11 @@ impl StreamingWaveformWriter {
     pub fn finalize(mut self) -> io::Result<usize> {
         self.flush_buffer()?;
         self.writer.flush()?;
-        
+
         // Note: Updating the header with final point count would require
         // seeking back, which complicates things. For simplicity, we leave
         // the header as-is and the reader can count points.
-        
+
         Ok(self.points_written)
     }
 
@@ -226,39 +226,35 @@ pub struct StreamingWaveformReader {
 
 impl StreamingWaveformReader {
     /// Load a binary waveform file
-    pub fn load_binary<P: AsRef<Path>>(
-        path: P,
-        num_channels: usize,
-    ) -> io::Result<Self> {
+    pub fn load_binary<P: AsRef<Path>>(path: P, num_channels: usize) -> io::Result<Self> {
         use std::io::Read;
-        
+
         let mut file = File::open(path)?;
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes)?;
-        
+
         // Skip header (find "Binary:" marker)
         let header_end = bytes
             .windows(7)
             .position(|w| w == b"Binary:")
             .map(|p| p + 8) // Skip past "Binary:\n"
             .unwrap_or(0);
-        
+
         let data_bytes = &bytes[header_end..];
         let num_columns = num_channels + 1;
         let num_values = data_bytes.len() / 8;
         let num_points = num_values / num_columns;
-        
+
         let mut data = Vec::with_capacity(num_values);
         for chunk in data_bytes.chunks(8) {
             if chunk.len() == 8 {
                 let val = f64::from_le_bytes([
-                    chunk[0], chunk[1], chunk[2], chunk[3],
-                    chunk[4], chunk[5], chunk[6], chunk[7],
+                    chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7],
                 ]);
                 data.push(val);
             }
         }
-        
+
         Ok(Self {
             data,
             num_columns,
@@ -296,32 +292,29 @@ impl StreamingWaveformReader {
 mod tests {
     use super::*;
     use std::io::Read;
-    
+
     #[test]
     fn test_streaming_writer_basic() {
         let temp_dir = std::env::temp_dir();
         let path = temp_dir.join("test_waveform.raw");
-        
+
         {
-            let mut writer = StreamingWaveformWriter::new(
-                &path,
-                &["V(out)", "I(R1)"],
-                100,
-            ).unwrap();
-            
+            let mut writer =
+                StreamingWaveformWriter::new(&path, &["V(out)", "I(R1)"], 100).unwrap();
+
             for i in 0..1000 {
                 let t = i as f64 * 1e-9;
                 writer.write_point(t, &[t.sin(), t.cos()]).unwrap();
             }
-            
+
             let points = writer.finalize().unwrap();
             assert_eq!(points, 1000);
         }
-        
+
         // Verify file exists and has content
         let metadata = std::fs::metadata(&path).unwrap();
         assert!(metadata.len() > 0);
-        
+
         std::fs::remove_file(&path).ok();
     }
 
@@ -329,27 +322,26 @@ mod tests {
     fn test_streaming_writer_ascii() {
         let temp_dir = std::env::temp_dir();
         let path = temp_dir.join("test_waveform_ascii.raw");
-        
+
         {
-            let mut writer = StreamingWaveformWriter::new_ascii(
-                &path,
-                &["V(out)"],
-                10,
-            ).unwrap();
-            
+            let mut writer = StreamingWaveformWriter::new_ascii(&path, &["V(out)"], 10).unwrap();
+
             for i in 0..50 {
                 let t = i as f64 * 1e-6;
                 writer.write_point(t, &[t * 1000.0]).unwrap();
             }
-            
+
             writer.finalize().unwrap();
         }
-        
+
         // Verify it's readable ASCII
         let mut content = String::new();
-        File::open(&path).unwrap().read_to_string(&mut content).unwrap();
+        File::open(&path)
+            .unwrap()
+            .read_to_string(&mut content)
+            .unwrap();
         assert!(content.contains("V(out)"));
-        
+
         std::fs::remove_file(&path).ok();
     }
 
@@ -357,23 +349,24 @@ mod tests {
     fn test_flush_behavior() {
         let temp_dir = std::env::temp_dir();
         let path = temp_dir.join("test_flush.raw");
-        
+
         {
             let mut writer = StreamingWaveformWriter::new(
                 &path,
                 &["V(n1)"],
                 10, // Small buffer for testing
-            ).unwrap();
-            
+            )
+            .unwrap();
+
             // Write more than buffer size to trigger auto-flush
             for i in 0..100 {
                 writer.write_point(i as f64, &[i as f64 * 2.0]).unwrap();
             }
-            
+
             writer.flush().unwrap();
             writer.finalize().unwrap();
         }
-        
+
         std::fs::remove_file(&path).ok();
     }
 }

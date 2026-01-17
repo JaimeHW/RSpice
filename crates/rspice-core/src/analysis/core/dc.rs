@@ -1,7 +1,7 @@
 //! DC Operating Point and DC Sweep Analysis
 
 use crate::Value;
-use super::AnalysisConfig;
+use crate::analysis::AnalysisConfig;
 
 /// DC Analysis engine
 #[derive(Debug)]
@@ -55,7 +55,7 @@ impl DcSweep {
     pub fn points(&self) -> Vec<Value> {
         let mut points = Vec::new();
         let mut v = self.start;
-        
+
         if self.step > 0.0 {
             while v <= self.stop {
                 points.push(v);
@@ -67,7 +67,7 @@ impl DcSweep {
                 v += self.step;
             }
         }
-        
+
         points
     }
 }
@@ -80,7 +80,7 @@ mod tests {
     fn test_dc_sweep_points() {
         let sweep = DcSweep::new("V1".to_string(), 0.0, 5.0, 1.0);
         let points = sweep.points();
-        
+
         assert_eq!(points.len(), 6);
         assert_eq!(points[0], 0.0);
         assert_eq!(points[5], 5.0);

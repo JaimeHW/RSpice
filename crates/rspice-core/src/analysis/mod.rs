@@ -15,41 +15,56 @@
 //! - S-parameter analysis
 //! - Pole-zero analysis
 
-pub mod dc;
-pub mod ac;
-pub mod transient;
-pub mod noise;
-pub mod parametric;
-pub mod temperature;
-pub mod fourier;
-pub mod waveform;
-pub mod measure;
-pub mod monte_carlo;
-pub mod transfer;
-pub mod sensitivity;
-pub mod s_param;
-pub mod pole_zero;
-pub mod laplace;
-pub mod waveform_stream;
-pub mod raw_export;
+// Subdirectories
+mod advanced;
+mod core;
+mod output;
 
-pub use dc::{DcAnalysis, DcSweep};
-pub use ac::{AcAnalysis, AcResult};
-pub use transient::{TransientAnalysis, TimestepController, BreakpointManager, LteEstimator, TrapGearController, CompanionCoefficients, IntegrationMethod};
-pub use noise::{NoiseAnalysis, NoiseResult, NoiseSource, NoiseSourceType, IntegratedNoise};
-pub use parametric::{ParametricSweep, StepSpec, StepType, StepTarget, ParametricResults};
-pub use temperature::{TemperatureContext, ResistorTempCoeffs, JunctionTempScaling, MosfetTempScaling};
-pub use fourier::{FourierAnalysis, FourierConfig, FourierResult, HarmonicComponent};
-pub use waveform::{WaveformRecorder, CompressionConfig, TransientResultCompressed};
-pub use measure::{MeasureEngine, MeasureStatement, MeasureType, MeasureResult, EdgeType, TrigSpec};
-pub use monte_carlo::{MonteCarloConfig, MonteCarloRunner, MonteCarloResult, Distribution, Tolerance, VariableStatistics, VariationSet};
-pub use transfer::{TransferFunctionResult, TransferFunctionConfig, TransferAnalyzer};
-pub use sensitivity::{SensitivityResult, Sensitivity, SensitivityAnalyzer, ElementType, ElementDesc};
-pub use s_param::{SParameterResult, SParameterConfig, SParameterAnalyzer, SMatrix, Port, FrequencySweep};
-pub use pole_zero::{PoleZeroResult, PoleZeroConfig, PoleZeroAnalyzer, Matrix as PzMatrix};
-pub use laplace::{TransferFunction, DiscreteFilter};
-pub use waveform_stream::{StreamingWaveformWriter, StreamingWaveformReader};
-pub use raw_export::{RawExporter, RawFormat, RawVariable, VariableType, export_transient, export_dc_sweep};
+// Re-export submodules for backwards-compatible paths (crate::analysis::ac etc)
+pub use advanced::fourier;
+pub use advanced::measure;
+pub use advanced::monte_carlo;
+pub use advanced::noise;
+pub use advanced::parametric;
+pub use advanced::pole_zero;
+pub use advanced::s_param;
+pub use advanced::sensitivity;
+pub use advanced::transfer;
+pub use core::ac;
+pub use core::dc;
+pub use core::laplace;
+pub use core::temperature;
+pub use core::transient;
+pub use output::raw_export;
+pub use output::waveform;
+pub use output::waveform_stream;
+
+// Re-export key types from core
+pub use core::{
+    AcAnalysis, AcResult, BreakpointManager, CompanionCoefficients, DcAnalysis, DcSweep,
+    DiscreteFilter, IntegrationMethod, JunctionTempScaling, LteEstimator, MosfetTempScaling,
+    ResistorTempCoeffs, TemperatureContext, TimestepController, TransferFunction,
+    TransientAnalysis, TrapGearController,
+};
+
+// Re-export key types from advanced
+pub use advanced::{
+    Distribution, EdgeType, ElementDesc, ElementType, FourierAnalysis, FourierConfig,
+    FourierResult, FrequencySweep, HarmonicComponent, IntegratedNoise, MeasureEngine,
+    MeasureResult, MeasureStatement, MeasureType, MonteCarloConfig, MonteCarloResult,
+    MonteCarloRunner, NoiseAnalysis, NoiseResult, NoiseSource, NoiseSourceType, ParametricResults,
+    ParametricSweep, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult, Port, PzMatrix, SMatrix,
+    SParameterAnalyzer, SParameterConfig, SParameterResult, Sensitivity, SensitivityAnalyzer,
+    SensitivityResult, StepSpec, StepTarget, StepType, Tolerance, TransferAnalyzer,
+    TransferFunctionConfig, TransferFunctionResult, TrigSpec, VariableStatistics, VariationSet,
+};
+
+// Re-export key types from output
+pub use output::{
+    CompressionConfig, RawExporter, RawFormat, RawVariable, StreamingWaveformReader,
+    StreamingWaveformWriter, TransientResultCompressed, VariableType, WaveformRecorder,
+    export_dc_sweep, export_transient,
+};
 
 use crate::Value;
 

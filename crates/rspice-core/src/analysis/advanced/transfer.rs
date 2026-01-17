@@ -73,7 +73,7 @@ pub struct TransferFunctionConfig {
 
 impl TransferFunctionConfig {
     /// Create config for voltage-to-voltage transfer function
-    /// 
+    ///
     /// Example: `.TF V(out) Vin`
     pub fn voltage_gain(output_node: &str, input_source: &str) -> Self {
         Self {
@@ -108,12 +108,13 @@ impl TransferFunctionConfig {
 }
 
 /// Transfer function analyzer
-/// 
+///
 /// Operates on a linearized circuit (small-signal model at DC operating point)
 pub struct TransferAnalyzer {
     /// Number of nodes (excluding ground)
     num_nodes: usize,
     /// Number of voltage source branches
+    #[allow(dead_code)]
     num_branches: usize,
     /// Conductance matrix (linearized at OP)
     g_matrix: Vec<Vec<Value>>,
@@ -176,7 +177,8 @@ impl TransferAnalyzer {
         }
 
         // Augmented matrix [G | b]
-        let mut aug: Vec<Vec<Value>> = self.g_matrix
+        let mut aug: Vec<Vec<Value>> = self
+            .g_matrix
             .iter()
             .zip(b.iter())
             .map(|(row, &bi)| {
@@ -247,7 +249,7 @@ impl TransferAnalyzer {
         input_node: usize,
     ) -> Option<(Value, Value, Value)> {
         let n = self.num_nodes;
-        
+
         if output_node >= n || input_node >= n {
             return None;
         }
@@ -256,21 +258,25 @@ impl TransferAnalyzer {
         // Inject 1A current at input node, measure voltage at output
         let mut b_gain = vec![0.0; n];
         b_gain[input_node] = 1.0;
-        
+
         let v_gain = self.solve(&b_gain)?;
-        
+
         let v_out = match ref_node {
             Some(r) if r < n => v_gain[output_node] - v_gain[r],
             _ => v_gain[output_node],
         };
         let v_in = v_gain[input_node];
-        
+
         // Gain = V(out) / V(in) when I(in) = 1A
         // Since we inject 1A, V(in) is the input impedance
         // and V(out) is the transimpedance
         // For voltage source input: gain = V(out)/V(in)
-        let gain = if v_in.abs() > 1e-15 { v_out / v_in } else { 0.0 };
-        
+        let gain = if v_in.abs() > 1e-15 {
+            v_out / v_in
+        } else {
+            0.0
+        };
+
         // Input impedance = V(in) / I(in) = V(in) / 1A = V(in)
         let z_in = v_in;
 
@@ -285,7 +291,7 @@ impl TransferAnalyzer {
         }
 
         let v_out_test = self.solve(&b_out)?;
-        
+
         // Output impedance = V(out) / I(out) = V(out) / 1A
         let z_out = match ref_node {
             Some(r) if r < n => v_out_test[output_node] - v_out_test[r],
@@ -296,16 +302,15 @@ impl TransferAnalyzer {
     }
 
     /// Analyze with node names
-    pub fn analyze_named(
-        &self,
-        config: &TransferFunctionConfig,
-    ) -> Option<TransferFunctionResult> {
+    pub fn analyze_named(&self, config: &TransferFunctionConfig) -> Option<TransferFunctionResult> {
         let output_idx = self.node_index(&config.output_node)?;
         let ref_idx = config.output_ref.as_ref().and_then(|r| self.node_index(r));
-        
+
         // For now, assume input source is at a single node
         // In full implementation, would look up branch index
-        let input_idx = self.source_map.get(&config.input_source)
+        let input_idx = self
+            .source_map
+            .get(&config.input_source)
             .copied()
             .or_else(|| self.node_index(&config.input_source))?;
 
@@ -342,37 +347,46 @@ mod tests {
     fn resistor_divider_matrix() -> Vec<Vec<Value>> {
         let g1 = 1.0 / 1000.0; // 1/R1
         let g2 = 1.0 / 1000.0; // 1/R2
-        
-        vec![
-            vec![g1, -g1],
-            vec![-g1, g1 + g2],
-        ]
+
+        vec![vec![g1, -g1], vec![-g1, g1 + g2]]
     }
 
     #[test]
     fn test_resistor_divider_gain() {
         let g = resistor_divider_matrix();
         let analyzer = TransferAnalyzer::from_conductance(g);
-        
+
         // Input at node 0 (external node 1), output at node 1 (external node 2)
         let result = analyzer.analyze(1, None, 0);
         assert!(result.is_some());
-        
+
         let (gain, zin, zout) = result.unwrap();
-        
+
         // For equal resistors: gain = R2/(R1+R2) = 0.5
-        assert!((gain - 0.5).abs() < 1e-10, "Expected gain=0.5, got {}", gain);
-        
+        assert!(
+            (gain - 0.5).abs() < 1e-10,
+            "Expected gain=0.5, got {}",
+            gain
+        );
+
         // Input impedance looking into node 1 = R1 + R2 = 2k (R1 in series with R2 to ground)
-        assert!((zin - 2000.0).abs() < 1e-6, "Expected Zin=2000, got {}", zin);
-        
+        assert!(
+            (zin - 2000.0).abs() < 1e-6,
+            "Expected Zin=2000, got {}",
+            zin
+        );
+
         // Output impedance looking into node 2:
         // With the conductance matrix, injecting 1A at node 2 gives V2 = 1/(g1+g2) = R1||R2 = 500Ω
         // However, our matrix G has node 2 connected to ground via R2 and to node 1 via R1
         // The impedance at node 2 with node 1 floating is given by the matrix solve
         // G·V = I where I=[0, 1]ᵀ gives V[1] = 1000 (the R1||R2 would need input shorted)
         // So the actual Zout from the matrix is 1000Ω
-        assert!((zout - 1000.0).abs() < 1e-6, "Expected Zout=1000, got {}", zout);
+        assert!(
+            (zout - 1000.0).abs() < 1e-6,
+            "Expected Zout=1000, got {}",
+            zout
+        );
     }
 
     #[test]
@@ -380,15 +394,15 @@ mod tests {
         // Single resistor: node 1 to ground through R=1k
         let g = vec![vec![1.0 / 1000.0]];
         let analyzer = TransferAnalyzer::from_conductance(g);
-        
+
         let result = analyzer.analyze(0, None, 0);
         assert!(result.is_some());
-        
+
         let (gain, zin, zout) = result.unwrap();
-        
+
         // Self-loop: gain = 1 (output = input)
         assert!((gain - 1.0).abs() < 1e-10);
-        
+
         // Impedance = R = 1k
         assert!((zin - 1000.0).abs() < 1e-6);
         assert!((zout - 1000.0).abs() < 1e-6);
@@ -402,24 +416,21 @@ mod tests {
         let g1 = 1.0 / 1000.0;
         let g2 = 1.0 / 2000.0;
         let g3 = 1.0 / 1000.0;
-        
-        let g = vec![
-            vec![g1 + g2, -g2],
-            vec![-g2, g2 + g3],
-        ];
-        
+
+        let g = vec![vec![g1 + g2, -g2], vec![-g2, g2 + g3]];
+
         let analyzer = TransferAnalyzer::from_conductance(g);
-        
+
         // Measure voltage at node 2 with input at node 1
         let result = analyzer.analyze(1, None, 0);
         assert!(result.is_some());
-        
+
         let (gain, _zin, _zout) = result.unwrap();
-        
+
         // V2/V1 = (R3)/(R2+R3) = 1k/(2k+1k) = 1/3
         // But V1 depends on the source...
         // Actually with current injection:
-        // V1 = I * (R1 || (R2 + R3)) 
+        // V1 = I * (R1 || (R2 + R3))
         // This is more complex - skip exact verification
         assert!(gain > 0.0 && gain < 1.0);
     }
@@ -427,7 +438,7 @@ mod tests {
     #[test]
     fn test_gain_db() {
         let result = TransferFunctionResult::new("V(out)", "Vin", 0.5, 2000.0, 500.0);
-        
+
         // 0.5 in dB = 20*log10(0.5) ≈ -6.02 dB
         let db = result.gain_db();
         assert!((db - (-6.0206)).abs() < 0.01);
@@ -441,8 +452,7 @@ mod tests {
         assert!(!config.input_is_current);
         assert!(!config.output_is_current);
 
-        let config = TransferFunctionConfig::transconductance("Rload", "Iin")
-            .with_reference("ref");
+        let config = TransferFunctionConfig::transconductance("Rload", "Iin").with_reference("ref");
         assert!(config.output_is_current);
         assert_eq!(config.output_ref, Some("ref".to_string()));
     }

@@ -19,7 +19,7 @@
 //! This computes noise at output node referenced to input source Vin.
 
 use crate::Value;
-use super::AnalysisConfig;
+use crate::analysis::AnalysisConfig;
 
 //=============================================================================
 // Constants
@@ -68,7 +68,12 @@ pub struct NoiseSource {
 
 impl NoiseSource {
     /// Create a thermal noise source (resistor)
-    pub fn thermal(device_name: String, node_pos: usize, node_neg: usize, resistance: Value) -> Self {
+    pub fn thermal(
+        device_name: String,
+        node_pos: usize,
+        node_neg: usize,
+        resistance: Value,
+    ) -> Self {
         Self {
             device_name,
             noise_type: NoiseSourceType::Thermal,
@@ -200,7 +205,7 @@ impl NoiseAnalysis {
         let stop_log = stop.log10();
         let num_decades = stop_log - start_log;
         let total_points = (num_decades * points_per_decade as f64).ceil() as usize;
-        
+
         self.frequencies = (0..=total_points)
             .map(|i| {
                 let log_f = start_log + (stop_log - start_log) * (i as f64) / (total_points as f64);
@@ -291,7 +296,8 @@ impl NoiseResult {
     /// Get the dominant noise source
     pub fn dominant_source(&self) -> Option<&NoiseContribution> {
         self.contributions.iter().max_by(|a, b| {
-            a.output_contribution.partial_cmp(&b.output_contribution)
+            a.output_contribution
+                .partial_cmp(&b.output_contribution)
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
     }
@@ -327,7 +333,7 @@ impl IntegratedNoise {
             let f2 = self.results[i].frequency;
             let s1 = self.results[i - 1].output_noise_density;
             let s2 = self.results[i].output_noise_density;
-            
+
             // Trapezoidal integration
             total += 0.5 * (s1 + s2) * (f2 - f1);
         }
@@ -347,7 +353,7 @@ impl IntegratedNoise {
             let f2 = self.results[i].frequency;
             let s1 = self.results[i - 1].input_referred_density;
             let s2 = self.results[i].input_referred_density;
-            
+
             total += 0.5 * (s1 + s2) * (f2 - f1);
         }
 
@@ -359,7 +365,8 @@ impl IntegratedNoise {
         self.results
             .iter()
             .max_by(|a, b| {
-                a.output_noise_density.partial_cmp(&b.output_noise_density)
+                a.output_noise_density
+                    .partial_cmp(&b.output_noise_density)
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
             .map(|r| r.frequency)
@@ -438,7 +445,7 @@ mod tests {
     fn test_noise_source_thermal() {
         let source = NoiseSource::thermal("R1".to_string(), 1, 0, 1000.0);
         let density = source.spectral_density(1000.0, 300.0);
-        
+
         // Should be 4kT/R = 4 * 1.38e-23 * 300 / 1000 ≈ 1.66e-23 A²/Hz
         assert!((density - 1.66e-23).abs() < 1e-24);
     }
@@ -447,7 +454,7 @@ mod tests {
     fn test_noise_source_shot() {
         let source = NoiseSource::shot("D1".to_string(), 1, 0, 1e-3);
         let density = source.spectral_density(1000.0, 300.0);
-        
+
         // Should be 2qI = 2 * 1.6e-19 * 1e-3 ≈ 3.2e-22 A²/Hz
         assert!((density - 3.2e-22).abs() < 1e-23);
     }
@@ -455,12 +462,12 @@ mod tests {
     #[test]
     fn test_noise_source_flicker() {
         let source = NoiseSource::flicker("Q1".to_string(), 1, 0, 1e-15, 1.0, 1e-3);
-        
+
         // At 100Hz with KF=1e-15, AF=1, I=1mA:
         // Si = 1e-15 * 1e-3 / 100 = 1e-20 A²/Hz
         let density = source.spectral_density(100.0, 300.0);
         assert!((density - 1e-20).abs() < 1e-22);
-        
+
         // At 1000Hz, should be 10x lower
         let density_1k = source.spectral_density(1000.0, 300.0);
         assert!((density / density_1k - 10.0).abs() < 0.01);
@@ -470,7 +477,7 @@ mod tests {
     fn test_decade_sweep() {
         let mut noise = NoiseAnalysis::default();
         noise.decade_sweep(1.0, 1e6, 10);
-        
+
         let freqs = noise.frequencies();
         assert!(freqs[0] >= 1.0 - 1e-10);
         assert!(*freqs.last().unwrap() <= 1e6 + 1.0);
@@ -480,11 +487,11 @@ mod tests {
     fn test_noise_result_rms() {
         let result = NoiseResult {
             frequency: 1000.0,
-            output_noise_density: 1e-18,  // V²/Hz
+            output_noise_density: 1e-18, // V²/Hz
             input_referred_density: 1e-18,
             contributions: vec![],
         };
-        
+
         // RMS should be sqrt of density
         assert!((result.output_noise_rms() - 1e-9).abs() < 1e-15);
     }
@@ -494,26 +501,26 @@ mod tests {
         // Create white noise results (constant spectral density)
         let results: Vec<NoiseResult> = (0..100)
             .map(|i| NoiseResult {
-                frequency: (i + 1) as f64 * 100.0,  // 100Hz to 10kHz
-                output_noise_density: 1e-18,  // Constant V²/Hz
+                frequency: (i + 1) as f64 * 100.0, // 100Hz to 10kHz
+                output_noise_density: 1e-18,       // Constant V²/Hz
                 input_referred_density: 1e-18,
                 contributions: vec![],
             })
             .collect();
-        
+
         let integrated = IntegratedNoise::new(results);
         let total = integrated.total_output_noise();
-        
+
         // Total should be sqrt(density * bandwidth) = sqrt(1e-18 * 9900) ≈ 3.15e-8 V
         let expected = (1e-18_f64 * (10000.0 - 100.0)).sqrt();
-        assert!((total - expected).abs() / expected < 0.02);  // 2% tolerance
+        assert!((total - expected).abs() / expected < 0.02); // 2% tolerance
     }
 
     #[test]
     fn test_noise_analysis_temperature() {
         let mut noise = NoiseAnalysis::default();
         assert_eq!(noise.temperature(), 300.0);
-        
+
         noise.set_temperature(400.0);
         assert_eq!(noise.temperature(), 400.0);
     }

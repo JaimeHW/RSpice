@@ -26,7 +26,6 @@
 //! ```
 
 use crate::Value;
-use std::collections::HashMap;
 
 //=============================================================================
 // Data Structures
@@ -127,9 +126,7 @@ impl SensitivityResult {
     /// Get top N most sensitive elements by absolute normalized sensitivity
     pub fn top_sensitive(&self, n: usize) -> Vec<&Sensitivity> {
         let mut sorted: Vec<_> = self.sensitivities.iter().collect();
-        sorted.sort_by(|a, b| {
-            b.normalized.abs().partial_cmp(&a.normalized.abs()).unwrap()
-        });
+        sorted.sort_by(|a, b| b.normalized.abs().partial_cmp(&a.normalized.abs()).unwrap());
         sorted.into_iter().take(n).collect()
     }
 
@@ -165,7 +162,12 @@ pub struct ElementDesc {
 
 impl ElementDesc {
     /// Create resistor element
-    pub fn resistor(name: &str, n_pos: Option<usize>, n_neg: Option<usize>, resistance: Value) -> Self {
+    pub fn resistor(
+        name: &str,
+        n_pos: Option<usize>,
+        n_neg: Option<usize>,
+        resistance: Value,
+    ) -> Self {
         Self {
             name: name.to_string(),
             element_type: ElementType::Resistor,
@@ -176,7 +178,12 @@ impl ElementDesc {
     }
 
     /// Create capacitor element  
-    pub fn capacitor(name: &str, n_pos: Option<usize>, n_neg: Option<usize>, capacitance: Value) -> Self {
+    pub fn capacitor(
+        name: &str,
+        n_pos: Option<usize>,
+        n_neg: Option<usize>,
+        capacitance: Value,
+    ) -> Self {
         Self {
             name: name.to_string(),
             element_type: ElementType::Capacitor,
@@ -251,9 +258,10 @@ impl SensitivityAnalyzer {
 
         // Solve using Gaussian elimination
         let n = self.num_nodes;
-        
+
         // Augmented matrix [G | e]
-        let mut aug: Vec<Vec<Value>> = self.g_matrix
+        let mut aug: Vec<Vec<Value>> = self
+            .g_matrix
             .iter()
             .zip(e.iter())
             .map(|(row, &ei)| {
@@ -350,7 +358,11 @@ impl SensitivityAnalyzer {
     /// # Arguments
     /// * `output_node` - Node index for output voltage
     /// * `output_ref` - Reference node (None = ground)
-    pub fn analyze(&mut self, output_node: usize, output_ref: Option<usize>) -> Option<SensitivityResult> {
+    pub fn analyze(
+        &mut self,
+        output_node: usize,
+        output_ref: Option<usize>,
+    ) -> Option<SensitivityResult> {
         // Get output value
         let output_value = match output_ref {
             Some(r) if r < self.num_nodes => self.solution[output_node] - self.solution[r],
@@ -367,12 +379,12 @@ impl SensitivityAnalyzer {
             if ref_node < self.num_nodes {
                 // Save current adjoint
                 let adj_output = self.adjoint.clone();
-                
+
                 // Solve for reference node
                 if !self.solve_adjoint(ref_node) {
                     return None;
                 }
-                
+
                 // Combine: λ = λ_output - λ_ref
                 for i in 0..self.num_nodes {
                     self.adjoint[i] = adj_output[i] - self.adjoint[i];
@@ -380,10 +392,7 @@ impl SensitivityAnalyzer {
             }
         }
 
-        let mut result = SensitivityResult::new(
-            &format!("V({})", output_node + 1),
-            output_value,
-        );
+        let mut result = SensitivityResult::new(&format!("V({})", output_node + 1), output_value);
 
         // Compute sensitivity for each element
         for elem in &self.elements {
@@ -414,11 +423,7 @@ impl SensitivityAnalyzer {
 //=============================================================================
 
 /// Verify sensitivity using finite difference (for testing)
-pub fn finite_difference_sensitivity<F>(
-    nominal: Value,
-    delta: Value,
-    compute_output: F,
-) -> Value
+pub fn finite_difference_sensitivity<F>(nominal: Value, delta: Value, compute_output: F) -> Value
 where
     F: Fn(Value) -> Value,
 {
@@ -437,15 +442,13 @@ mod tests {
 
     /// Build voltage divider circuit:
     /// Vin (node 1) -- R1 -- node 2 -- R2 -- ground
+    #[allow(dead_code)]
     fn voltage_divider(r1: Value, r2: Value) -> (Vec<Vec<Value>>, Vec<Value>, Vec<ElementDesc>) {
         let g1 = 1.0 / r1;
         let g2 = 1.0 / r2;
 
         // G matrix for 2 nodes
-        let g = vec![
-            vec![g1, -g1],
-            vec![-g1, g1 + g2],
-        ];
+        let g = vec![vec![g1, -g1], vec![-g1, g1 + g2]];
 
         // Solve with Vin = 10V at node 1 (inject current g1*10 at node 1)
         // Actually, for sensitivity we just need the relative solution
@@ -470,28 +473,26 @@ mod tests {
         // V = I * R, so ∂V/∂R = I = V/R (for I=1)
         let r = 1000.0;
         let g = 1.0 / r;
-        
+
         // G matrix: single node with R to ground
         let g_matrix = vec![vec![g]];
-        
+
         // With 1A injected: V = 1 * R = 1000V
         let solution = vec![r]; // V[0] = R (since I=1)
-        
-        let elements = vec![
-            ElementDesc::resistor("R1", Some(0), None, r),
-        ];
+
+        let elements = vec![ElementDesc::resistor("R1", Some(0), None, r)];
 
         let mut analyzer = SensitivityAnalyzer::new(g_matrix, solution, elements);
-        
+
         // Sensitivity of V(0) to R1
         let result = analyzer.analyze(0, None);
         assert!(result.is_some());
-        
+
         let result = result.unwrap();
         assert_eq!(result.sensitivities.len(), 1);
 
         let sens_r1 = result.get("R1").unwrap();
-        
+
         // For V = I*R with I=1: ∂V/∂R = 1 (positive, proportional)
         // Using adjoint: sensitivity = (1/R²) * λ_diff * v_diff
         // With single node to ground: v_diff = V - 0 = R = 1000
@@ -527,7 +528,7 @@ mod tests {
 
         // Normalized = (R/V) * ∂V/∂R = (1000/5) * (-0.0025) = -0.5
         assert!((sens.normalized - (-0.5)).abs() < 1e-10);
-        
+
         // Percent per percent = -50%
         assert!((sens.percent_per_percent() - (-50.0)).abs() < 1e-10);
     }
@@ -535,10 +536,31 @@ mod tests {
     #[test]
     fn test_top_sensitive() {
         let mut result = SensitivityResult::new("V(out)", 5.0);
-        
-        result.add(Sensitivity::new("R1", ElementType::Resistor, "value", 1000.0, 0.001, 5.0));
-        result.add(Sensitivity::new("R2", ElementType::Resistor, "value", 2000.0, 0.005, 5.0));
-        result.add(Sensitivity::new("R3", ElementType::Resistor, "value", 500.0, 0.002, 5.0));
+
+        result.add(Sensitivity::new(
+            "R1",
+            ElementType::Resistor,
+            "value",
+            1000.0,
+            0.001,
+            5.0,
+        ));
+        result.add(Sensitivity::new(
+            "R2",
+            ElementType::Resistor,
+            "value",
+            2000.0,
+            0.005,
+            5.0,
+        ));
+        result.add(Sensitivity::new(
+            "R3",
+            ElementType::Resistor,
+            "value",
+            500.0,
+            0.002,
+            5.0,
+        ));
 
         let top = result.top_sensitive(2);
         assert_eq!(top.len(), 2);

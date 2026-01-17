@@ -1,7 +1,7 @@
 //! Transient Time-Domain Analysis
 
 use crate::Value;
-use super::AnalysisConfig;
+use crate::analysis::AnalysisConfig;
 
 /// Transient Analysis engine
 #[derive(Debug)]
@@ -65,12 +65,12 @@ impl TransientAnalysis {
     }
 
     /// Enable Use Initial Conditions (UIC) mode
-    /// 
+    ///
     /// When UIC is enabled:
     /// - Skip DC operating point calculation at t=0
     /// - Use IC= values on capacitors (voltage) and inductors (current)
     /// - Unspecified nodes start at 0V
-    /// 
+    ///
     /// This is useful for:
     /// - Oscillators (no stable DC OP)
     /// - Circuits where you want to specify exact starting conditions
@@ -142,7 +142,7 @@ impl TimestepController {
     pub fn adjust(&mut self, lte_estimate: Value) -> Value {
         // Calculate new timestep using LTE estimate
         // For trapezoidal: LTE ~ O(dt^3), so dt_new = dt * (target_lte / lte_estimate)^(1/3)
-        
+
         if lte_estimate < 1e-15 {
             // Error too small, increase timestep
             self.prev_dt = self.current_dt;
@@ -150,14 +150,14 @@ impl TimestepController {
         } else {
             let ratio = self.target_lte / lte_estimate;
             let factor = ratio.powf(1.0 / 3.0);
-            
+
             // Limit growth/shrink rate
             let factor = factor.clamp(0.5, 2.0);
-            
+
             self.prev_dt = self.current_dt;
             self.current_dt = (self.current_dt * factor).clamp(self.min_dt, self.max_dt);
         }
-        
+
         self.current_dt
     }
 
@@ -180,7 +180,7 @@ const MIN_STEP_AFTER_BREAKPOINT: Value = 1e-12;
 const BREAKPOINT_TOLERANCE: Value = 1e-15;
 
 /// Breakpoint manager for handling discontinuities
-/// 
+///
 /// Ensures solver lands exactly on breakpoints and restarts with minimal timestep
 /// immediately after, preventing numerical ringing from stepping over discontinuities.
 #[derive(Debug, Default)]
@@ -201,10 +201,14 @@ impl BreakpointManager {
     /// Add a breakpoint time (deduplicates automatically)
     pub fn add(&mut self, time: Value) {
         // Check for duplicates within tolerance
-        if self.breakpoints.iter().any(|&t| (t - time).abs() < BREAKPOINT_TOLERANCE) {
+        if self
+            .breakpoints
+            .iter()
+            .any(|&t| (t - time).abs() < BREAKPOINT_TOLERANCE)
+        {
             return;
         }
-        
+
         // Insert in sorted order
         let pos = self.breakpoints.iter().position(|&t| t > time);
         match pos {
@@ -224,7 +228,8 @@ impl BreakpointManager {
 
     /// Get next breakpoint after given time
     pub fn next_after(&self, time: Value) -> Option<Value> {
-        self.breakpoints.iter()
+        self.breakpoints
+            .iter()
             .skip(self.current_index)
             .copied()
             .find(|&t| t > time + BREAKPOINT_TOLERANCE)
@@ -232,18 +237,19 @@ impl BreakpointManager {
 
     /// Check if current time is exactly at a breakpoint
     pub fn at_breakpoint(&self, time: Value) -> bool {
-        self.breakpoints.iter()
+        self.breakpoints
+            .iter()
             .any(|&bp| (time - bp).abs() < BREAKPOINT_TOLERANCE)
     }
 
     /// Limit timestep to land exactly on next breakpoint
-    /// 
+    ///
     /// Returns (adjusted_dt, will_land_on_breakpoint)
     pub fn limit_step(&mut self, current_time: Value, proposed_dt: Value) -> (Value, bool) {
         match self.next_after(current_time) {
             Some(bp) => {
                 let time_to_bp = bp - current_time;
-                
+
                 if proposed_dt >= time_to_bp {
                     // Force landing exactly on breakpoint
                     self.just_passed_breakpoint = false; // Will be set after solving at BP
@@ -263,8 +269,8 @@ impl BreakpointManager {
     /// Returns the recommended minimal timestep for restart
     pub fn mark_breakpoint_solved(&mut self, time: Value) -> Value {
         // Advance current_index past this breakpoint
-        while self.current_index < self.breakpoints.len() 
-            && self.breakpoints[self.current_index] <= time + BREAKPOINT_TOLERANCE 
+        while self.current_index < self.breakpoints.len()
+            && self.breakpoints[self.current_index] <= time + BREAKPOINT_TOLERANCE
         {
             self.current_index += 1;
         }
@@ -300,11 +306,11 @@ impl BreakpointManager {
 }
 
 /// Local Truncation Error (LTE) estimator for adaptive timestep
-/// 
+///
 /// Uses difference between predicted and calculated values to estimate
 /// the integration error. This allows rejecting timesteps that converge
 /// numerically but are physically inaccurate.
-/// 
+///
 /// Supports both standard extrapolation and Richardson extrapolation for
 /// higher accuracy LTE estimates.
 #[derive(Debug)]
@@ -377,7 +383,7 @@ impl LteEstimator {
         // We approximate by comparing predicted (linear extrapolation) vs actual
         for (i, &curr_val) in current.iter().enumerate() {
             let prev_val = self.prev_solution[i];
-            
+
             // Linear prediction: v_pred = v_prev + (v_prev - v_prev_prev) * dt / prev_dt
             let predicted = if self.history_count >= 2 && self.prev_dt > 0.0 {
                 let prev_prev_val = self.prev_prev_solution[i];
@@ -389,14 +395,14 @@ impl LteEstimator {
 
             // LTE estimate: |actual - predicted|
             let lte = (curr_val - predicted).abs();
-            
+
             // Normalize by value magnitude to avoid small absolute errors on small values
             let normalized_lte = if curr_val.abs() > 1e-12 {
                 lte / curr_val.abs().max(1.0)
             } else {
                 lte
             };
-            
+
             max_lte = max_lte.max(normalized_lte);
         }
 
@@ -405,17 +411,17 @@ impl LteEstimator {
     }
 
     /// Richardson extrapolation LTE estimate (more accurate)
-    /// 
+    ///
     /// Uses solutions computed with steps h and h/2 to estimate the true error:
     /// `LTE ≈ (x_h - x_{h/2}) / (2^p - 1)` where p is the method order.
-    /// 
+    ///
     /// This provides a more accurate LTE estimate by exploiting the known
     /// convergence order of the integration method.
-    /// 
+    ///
     /// # Arguments
     /// * `x_full` - Solution computed with full timestep h
     /// * `x_half` - Solution computed with two half-steps h/2
-    /// 
+    ///
     /// # Returns
     /// (lte_estimate, should_accept)
     pub fn richardson_estimate(&self, x_full: &[Value], x_half: &[Value]) -> (Value, bool) {
@@ -429,14 +435,14 @@ impl LteEstimator {
         for (&full, &half) in x_full.iter().zip(x_half.iter()) {
             // Richardson extrapolation error estimate
             let richardson_error = (half - full).abs() / order_factor;
-            
+
             // Normalize by value magnitude
             let normalized = if half.abs() > 1e-12 {
                 richardson_error / half.abs().max(1.0)
             } else {
                 richardson_error
             };
-            
+
             max_lte = max_lte.max(normalized);
         }
 
@@ -472,7 +478,7 @@ impl LteEstimator {
 //=============================================================================
 
 /// Companion model coefficients for numerical integration
-/// 
+///
 /// Each integration method converts differential elements (C, L) into
 /// equivalent conductances and current/voltage sources using these coefficients.
 #[derive(Debug, Clone, Copy)]
@@ -489,7 +495,7 @@ pub struct CompanionCoefficients {
 
 impl CompanionCoefficients {
     /// Get coefficients for Backward Euler (first order, unconditionally stable)
-    /// 
+    ///
     /// C·dv/dt = i  →  C·(v_{n+1} - v_n)/dt = i_{n+1}
     /// Companion: G_eq = C/dt, I_eq = G_eq·v_n
     #[inline]
@@ -503,7 +509,7 @@ impl CompanionCoefficients {
     }
 
     /// Get coefficients for Trapezoidal rule (second order, A-stable)
-    /// 
+    ///
     /// Uses average of derivatives at n and n+1:
     /// C·(v_{n+1} - v_n)/dt = 0.5·(i_{n+1} + i_n)
     /// Companion: G_eq = 2C/dt, I_eq = G_eq·v_n + i_n
@@ -518,7 +524,7 @@ impl CompanionCoefficients {
     }
 
     /// Get coefficients for Gear2/BDF2 (second order, L-stable, good for stiff)
-    /// 
+    ///
     /// Uses backward difference formula:
     /// (3·v_{n+1} - 4·v_n + v_{n-1}) / (2·dt) = f_{n+1}
     /// Companion: G_eq = 3C/(2·dt), I_eq = (4C·v_n - C·v_{n-1})/(2·dt)
@@ -552,7 +558,13 @@ impl CompanionCoefficients {
     /// Calculate equivalent current source for a capacitor
     /// v_n is current voltage, v_n_minus_1 is previous voltage (for Gear2)
     #[inline]
-    pub fn capacitor_ieq(&self, capacitance: Value, dt: Value, v_n: Value, v_n_minus_1: Value) -> Value {
+    pub fn capacitor_ieq(
+        &self,
+        capacitance: Value,
+        dt: Value,
+        v_n: Value,
+        v_n_minus_1: Value,
+    ) -> Value {
         let base = self.coeff_v_n * capacitance * v_n / dt;
         if self.needs_two_history {
             base + self.coeff_v_n_minus_1 * capacitance * v_n_minus_1 / dt
@@ -570,7 +582,14 @@ impl CompanionCoefficients {
     /// Calculate equivalent voltage source for an inductor
     /// i_n is current current, i_n_minus_1 is previous current (for Gear2)
     #[inline]
-    pub fn inductor_veq(&self, inductance: Value, dt: Value, i_n: Value, i_n_minus_1: Value, v_n: Value) -> Value {
+    pub fn inductor_veq(
+        &self,
+        inductance: Value,
+        dt: Value,
+        i_n: Value,
+        i_n_minus_1: Value,
+        v_n: Value,
+    ) -> Value {
         let base = self.coeff_g * inductance * i_n / dt + v_n;
         if self.needs_two_history {
             // For BDF2 inductor: V_eq = R_eq·i_n + (4/3)·L·i_n/dt - (1/3)·L·i_{n-1}/dt
@@ -582,10 +601,10 @@ impl CompanionCoefficients {
 }
 
 /// TrapGear Controller for automatic integration method switching
-/// 
+///
 /// This implements the hybrid Trapezoidal/Gear-2 method used by LTspice
 /// to suppress numerical oscillation (ringing) at switching transitions.
-/// 
+///
 /// # Algorithm
 /// - Track solution derivative sign changes for each node
 /// - When 3+ consecutive sign changes detected (oscillation), switch to Gear-2
@@ -661,7 +680,7 @@ impl TrapGearController {
             let prev = self.prev_values[i];
             let derivative = curr - prev;
             let curr_sign = derivative >= 0.0;
-            
+
             // Check for sign change in derivative
             if curr_sign != self.prev_signs[i] && derivative.abs() > 1e-12 {
                 self.sign_change_count[i] += 1;
@@ -670,7 +689,7 @@ impl TrapGearController {
                 // Reset count on smooth behavior
                 self.sign_change_count[i] = 0;
             }
-            
+
             max_sign_changes = max_sign_changes.max(self.sign_change_count[i]);
             self.prev_signs[i] = curr_sign;
             self.prev_values[i] = curr;
@@ -681,7 +700,7 @@ impl TrapGearController {
             oscillation_detected = true;
             self.smooth_steps = 0;
             self.current_method = IntegrationMethod::Gear2;
-            
+
             // Reset sign change counts after detecting oscillation
             for count in &mut self.sign_change_count {
                 *count = 0;
@@ -692,7 +711,7 @@ impl TrapGearController {
         } else {
             // Truly smooth - no sign changes
             self.smooth_steps += 1;
-            
+
             // Return to Trapezoidal after sufficient smooth steps
             if self.smooth_steps >= self.recovery_steps && !self.at_breakpoint {
                 self.current_method = IntegrationMethod::Trapezoidal;
@@ -741,7 +760,6 @@ pub struct TrapGearStats {
     pub max_sign_changes: usize,
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -749,13 +767,13 @@ mod tests {
     #[test]
     fn test_timestep_controller() {
         let mut ctrl = TimestepController::new(1e-6, 1e-12, 1e-3);
-        
+
         assert_eq!(ctrl.dt(), 1e-6);
-        
+
         // Large error - should decrease step
         ctrl.adjust(1e-1);
         assert!(ctrl.dt() < 1e-6);
-        
+
         // Small error - should increase step
         ctrl.adjust(1e-20);
         assert!(ctrl.dt() > 1e-12);
@@ -767,7 +785,7 @@ mod tests {
         mgr.add(1e-3);
         mgr.add(5e-4);
         mgr.add(2e-3);
-        
+
         assert_eq!(mgr.next_after(0.0), Some(5e-4));
         assert_eq!(mgr.next_after(6e-4), Some(1e-3));
     }
@@ -775,27 +793,27 @@ mod tests {
     #[test]
     fn test_trapgear_smooth_signal() {
         let mut trapgear = TrapGearController::new();
-        
+
         // Smooth monotonic signal should stay in Trapezoidal
         for i in 0..10 {
             let value = i as f64 * 0.1;
             trapgear.update(&[value], 1e-6);
         }
-        
+
         assert_eq!(trapgear.current_method(), IntegrationMethod::Trapezoidal);
     }
 
     #[test]
     fn test_trapgear_oscillation_detection() {
         let mut trapgear = TrapGearController::new();
-        
+
         // Oscillating signal: up, down, up, down...
         let oscillating = [0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0];
-        
+
         for &value in &oscillating {
             trapgear.update(&[value], 1e-6);
         }
-        
+
         // Should have switched to Gear2 after detecting oscillation
         assert_eq!(trapgear.current_method(), IntegrationMethod::Gear2);
     }
@@ -803,13 +821,13 @@ mod tests {
     #[test]
     fn test_trapgear_recovery() {
         let mut trapgear = TrapGearController::new();
-        
+
         // First, cause oscillation
         for &value in &[0.0, 1.0, 0.0, 1.0, 0.0, 1.0] {
             trapgear.update(&[value], 1e-6);
         }
         assert_eq!(trapgear.current_method(), IntegrationMethod::Gear2);
-        
+
         // Now, smooth signal - should recover to Trapezoidal
         for i in 0..5 {
             trapgear.update(&[i as f64 * 0.1], 1e-6);
@@ -820,11 +838,11 @@ mod tests {
     #[test]
     fn test_trapgear_breakpoint() {
         let mut trapgear = TrapGearController::new();
-        
+
         // At breakpoint, should switch to Gear2
         trapgear.set_at_breakpoint(true);
         assert_eq!(trapgear.current_method(), IntegrationMethod::Gear2);
-        
+
         // Clear breakpoint and smooth signal, should return to Trapezoidal
         trapgear.set_at_breakpoint(false);
         for i in 0..5 {
@@ -836,37 +854,49 @@ mod tests {
     #[test]
     fn test_companion_coefficients_backward_euler() {
         let coeff = CompanionCoefficients::backward_euler();
-        
+
         // G_eq = C/dt
         let geq = coeff.capacitor_geq(1e-6, 1e-9);
         assert!((geq - 1e3).abs() < 1e-6, "G_eq = {} (expected 1000)", geq);
-        
+
         // I_eq = G_eq * v_n = 1000 * 5.0 = 5000
         let ieq = coeff.capacitor_ieq(1e-6, 1e-9, 5.0, 0.0);
-        assert!((ieq - 5000.0).abs() < 1e-6, "I_eq = {} (expected 5000)", ieq);
+        assert!(
+            (ieq - 5000.0).abs() < 1e-6,
+            "I_eq = {} (expected 5000)",
+            ieq
+        );
     }
 
     #[test]
     fn test_companion_coefficients_trapezoidal() {
         let coeff = CompanionCoefficients::trapezoidal();
-        
+
         // G_eq = 2C/dt
         let geq = coeff.capacitor_geq(1e-6, 1e-9);
         assert!((geq - 2e3).abs() < 1e-6, "G_eq = {} (expected 2000)", geq);
-        
+
         // I_eq = 2 * C * v_n / dt = 2 * 1e-6 * 5.0 / 1e-9 = 10000
         let ieq = coeff.capacitor_ieq(1e-6, 1e-9, 5.0, 0.0);
-        assert!((ieq - 10000.0).abs() < 1e-6, "I_eq = {} (expected 10000)", ieq);
+        assert!(
+            (ieq - 10000.0).abs() < 1e-6,
+            "I_eq = {} (expected 10000)",
+            ieq
+        );
     }
 
     #[test]
     fn test_companion_coefficients_gear2() {
         let coeff = CompanionCoefficients::gear2();
-        
+
         // G_eq = 1.5 * C / dt = 1.5 * 1e-6 / 1e-9 = 1500
         let geq = coeff.capacitor_geq(1e-6, 1e-9);
-        assert!((geq - 1500.0).abs() < 1e-6, "G_eq = {} (expected 1500)", geq);
-        
+        assert!(
+            (geq - 1500.0).abs() < 1e-6,
+            "G_eq = {} (expected 1500)",
+            geq
+        );
+
         // I_eq = (4*C*v_n - C*v_{n-1}) / (2*dt)
         // = (4*1e-6*5.0 - 1e-6*3.0) / (2*1e-9)
         // = (20e-6 - 3e-6) / 2e-9 = 17e-6 / 2e-9 = 8500
@@ -874,8 +904,12 @@ mod tests {
         // = 2.0*1e-6*5.0/1e-9 + (-0.5)*1e-6*3.0/1e-9
         // = 10000 - 1500 = 8500
         let ieq = coeff.capacitor_ieq(1e-6, 1e-9, 5.0, 3.0);
-        assert!((ieq - 8500.0).abs() < 1e-6, "I_eq = {} (expected 8500)", ieq);
-        
+        assert!(
+            (ieq - 8500.0).abs() < 1e-6,
+            "I_eq = {} (expected 8500)",
+            ieq
+        );
+
         assert!(coeff.needs_two_history);
     }
 
@@ -883,10 +917,10 @@ mod tests {
     fn test_companion_for_method() {
         let be = CompanionCoefficients::for_method(IntegrationMethod::BackwardEuler);
         assert!((be.coeff_g - 1.0).abs() < 1e-10);
-        
+
         let trap = CompanionCoefficients::for_method(IntegrationMethod::Trapezoidal);
         assert!((trap.coeff_g - 2.0).abs() < 1e-10);
-        
+
         let gear = CompanionCoefficients::for_method(IntegrationMethod::Gear2);
         assert!((gear.coeff_g - 1.5).abs() < 1e-10);
     }
@@ -894,14 +928,14 @@ mod tests {
     #[test]
     fn test_lte_method_order_scaling() {
         let mut lte = LteEstimator::new(1e-3);
-        
+
         // Test order 1 (Backward Euler): exponent = 1/2
         lte.set_method_order(1);
         let scale = lte.recommend_scale(1e-5);
         // (1e-3 / 1e-5)^(1/2) = 100^0.5 = 10, clamped to 2.0
         assert!((scale - 2.0).abs() < 1e-10);
-        
-        // Test order 2 (Trapezoidal, Gear2): exponent = 1/3  
+
+        // Test order 2 (Trapezoidal, Gear2): exponent = 1/3
         lte.set_method_order(2);
         let scale = lte.recommend_scale(1e-6);
         // (1e-3 / 1e-6)^(1/3) = 1000^0.333 ≈ 10, clamped to 2.0
@@ -912,20 +946,24 @@ mod tests {
     fn test_richardson_extrapolation() {
         // Use tolerance of 0.01 since our test data produces LTE ~0.0097
         let lte = LteEstimator::new(0.01);
-        
+
         // Simulate full step and half-step results
         // For order 2 method: error factor = 2^2 - 1 = 3
         let x_full = vec![1.0, 2.0, 3.0];
         let x_half = vec![1.03, 2.06, 3.09]; // Small difference
-        
+
         let (lte_est, accept) = lte.richardson_estimate(&x_full, &x_half);
-        
+
         // LTE ≈ |x_half - x_full| / 3
         // max(|0.03|, |0.06|, |0.09|) / 3 = 0.09 / 3 = 0.03
         // Normalized by value: 0.03 / 3.09 ≈ 0.0097
-        assert!((lte_est - 0.00971).abs() < 0.001, "LTE should be ~0.0097, got {}", lte_est);
+        assert!(
+            (lte_est - 0.00971).abs() < 0.001,
+            "LTE should be ~0.0097, got {}",
+            lte_est
+        );
         assert!(accept, "Should accept: LTE {} <= tolerance 0.01", lte_est);
-        
+
         // Also test rejection with tighter tolerance
         let lte_tight = LteEstimator::new(0.001);
         let (_, accept_tight) = lte_tight.richardson_estimate(&x_full, &x_half);
@@ -935,20 +973,19 @@ mod tests {
     #[test]
     fn test_lte_history_tracking() {
         let mut lte = LteEstimator::new(1e-3);
-        
+
         // Record 3 solution points
         lte.record(&[1.0, 2.0], 1e-9);
         assert_eq!(lte.history_count, 1);
-        
+
         lte.record(&[1.1, 2.2], 1e-9);
         assert_eq!(lte.history_count, 2);
-        
+
         lte.record(&[1.2, 2.4], 1e-9);
         assert_eq!(lte.history_count, 3);
-        
+
         // Reset should clear all history
         lte.reset();
         assert_eq!(lte.history_count, 0);
     }
 }
-

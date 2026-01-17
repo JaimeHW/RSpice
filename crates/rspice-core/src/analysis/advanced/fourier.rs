@@ -81,11 +81,11 @@ impl FourierAnalysis {
     }
 
     /// Perform Fourier analysis on a waveform
-    /// 
+    ///
     /// # Arguments
     /// * `time` - Time points
     /// * `values` - Waveform values at each time point
-    /// 
+    ///
     /// # Returns
     /// FourierResult with harmonic components and THD
     pub fn analyze(&self, time: &[Value], values: &[Value]) -> FourierResult {
@@ -94,14 +94,14 @@ impl FourierAnalysis {
         }
 
         // Find analysis window (last periods of waveform)
-        let period = self.config.period();
+        let _period = self.config.period();
         let window_duration = self.config.window_duration();
         let t_end = time[time.len() - 1];
         let t_start = (t_end - window_duration).max(time[0]);
 
         // Find indices for analysis window
         let (start_idx, end_idx) = find_window_indices(time, t_start, t_end);
-        
+
         if end_idx <= start_idx + 1 {
             return FourierResult::empty(self.config.num_harmonics);
         }
@@ -112,11 +112,11 @@ impl FourierAnalysis {
 
         // Compute Fourier coefficients using DFT
         let mut harmonics = Vec::with_capacity(self.config.num_harmonics + 1);
-        
+
         for n in 0..=self.config.num_harmonics {
             let freq = n as f64 * self.config.fundamental_freq;
             let (mag, phase) = self.compute_harmonic(&window_time, &window_values, freq);
-            
+
             harmonics.push(HarmonicComponent {
                 harmonic_number: n,
                 frequency: freq,
@@ -128,12 +128,13 @@ impl FourierAnalysis {
         // Calculate THD
         let dc = harmonics[0].magnitude;
         let fundamental = harmonics.get(1).map(|h| h.magnitude).unwrap_or(0.0);
-        
-        let harmonic_sum_sq: Value = harmonics.iter()
-            .skip(2)  // Skip DC and fundamental
+
+        let harmonic_sum_sq: Value = harmonics
+            .iter()
+            .skip(2) // Skip DC and fundamental
             .map(|h| h.magnitude * h.magnitude)
             .sum();
-        
+
         let thd = if fundamental > 1e-15 {
             harmonic_sum_sq.sqrt() / fundamental * 100.0
         } else {
@@ -157,7 +158,7 @@ impl FourierAnalysis {
         let t_start = time[0];
         let t_end = time[time.len() - 1];
         let duration = t_end - t_start;
-        
+
         if duration <= 0.0 {
             return (0.0, 0.0);
         }
@@ -171,15 +172,17 @@ impl FourierAnalysis {
         // Compute a_n and b_n using trapezoidal integration
         // a_n = (2/T) * integral(f(t) * cos(2*pi*n*f*t) dt)
         // b_n = (2/T) * integral(f(t) * sin(2*pi*n*f*t) dt)
-        
+
         let omega = 2.0 * PI * freq;
-        
-        let cos_values: Vec<Value> = time.iter()
+
+        let cos_values: Vec<Value> = time
+            .iter()
             .zip(values.iter())
             .map(|(&t, &v)| v * (omega * (t - t_start)).cos())
             .collect();
-        
-        let sin_values: Vec<Value> = time.iter()
+
+        let sin_values: Vec<Value> = time
+            .iter()
             .zip(values.iter())
             .map(|(&t, &v)| v * (omega * (t - t_start)).sin())
             .collect();
@@ -188,7 +191,7 @@ impl FourierAnalysis {
         let b_n = 2.0 / duration * trapezoidal_integrate(time, &sin_values);
 
         let magnitude = (a_n * a_n + b_n * b_n).sqrt();
-        let phase = (-b_n).atan2(a_n) * 180.0 / PI;  // Convert to degrees
+        let phase = (-b_n).atan2(a_n) * 180.0 / PI; // Convert to degrees
 
         (magnitude, phase)
     }
@@ -196,14 +199,13 @@ impl FourierAnalysis {
 
 /// Find start and end indices for time window
 fn find_window_indices(time: &[Value], t_start: Value, t_end: Value) -> (usize, usize) {
-    let start_idx = time.iter()
-        .position(|&t| t >= t_start)
-        .unwrap_or(0);
-    
-    let end_idx = time.iter()
+    let start_idx = time.iter().position(|&t| t >= t_start).unwrap_or(0);
+
+    let end_idx = time
+        .iter()
         .rposition(|&t| t <= t_end)
         .unwrap_or(time.len() - 1);
-    
+
     (start_idx, end_idx)
 }
 
@@ -212,11 +214,11 @@ fn trapezoidal_integrate(time: &[Value], values: &[Value]) -> Value {
     if time.len() < 2 {
         return 0.0;
     }
-    
+
     let mut integral = 0.0;
     for i in 1..time.len() {
-        let dt = time[i] - time[i-1];
-        integral += 0.5 * (values[i] + values[i-1]) * dt;
+        let dt = time[i] - time[i - 1];
+        integral += 0.5 * (values[i] + values[i - 1]) * dt;
     }
     integral
 }
@@ -321,7 +323,7 @@ mod tests {
     #[test]
     fn test_fourier_config() {
         let config = FourierConfig::new(1000.0);
-        
+
         assert_eq!(config.fundamental_freq, 1000.0);
         assert_eq!(config.period(), 0.001);
         assert_eq!(config.num_harmonics, 9);
@@ -331,26 +333,27 @@ mod tests {
     fn test_pure_sine() {
         let config = FourierConfig::new(1000.0).with_harmonics(5);
         let analysis = FourierAnalysis::new(config);
-        
+
         // Generate 1kHz sine wave
         let num_points = 1000;
-        let duration = 0.002;  // 2 periods
+        let duration = 0.002; // 2 periods
         let time: Vec<Value> = (0..num_points)
             .map(|i| i as f64 * duration / (num_points - 1) as f64)
             .collect();
-        let values: Vec<Value> = time.iter()
+        let values: Vec<Value> = time
+            .iter()
             .map(|&t| (2.0 * PI * 1000.0 * t).sin())
             .collect();
-        
+
         let result = analysis.analyze(&time, &values);
-        
+
         // DC should be ~0
         assert!(result.dc_component.abs() < 0.01);
-        
+
         // Fundamental should be ~1.0
         let fund = result.fundamental().unwrap();
         assert!((fund.magnitude - 1.0).abs() < 0.05);
-        
+
         // THD should be very low (pure sine)
         assert!(result.thd < 1.0);
     }
@@ -359,31 +362,32 @@ mod tests {
     fn test_square_wave_thd() {
         let config = FourierConfig::new(1000.0).with_harmonics(9);
         let analysis = FourierAnalysis::new(config);
-        
+
         // Generate square wave
         let num_points = 2000;
         let duration = 0.002;
         let time: Vec<Value> = (0..num_points)
             .map(|i| i as f64 * duration / (num_points - 1) as f64)
             .collect();
-        let values: Vec<Value> = time.iter()
+        let values: Vec<Value> = time
+            .iter()
             .map(|&t| {
                 let phase = (t * 1000.0).fract();
                 if phase < 0.5 { 1.0 } else { -1.0 }
             })
             .collect();
-        
+
         let result = analysis.analyze(&time, &values);
-        
+
         // Square wave has significant odd harmonics -> high THD
-        assert!(result.thd > 40.0);  // Should be ~48% for ideal square
+        assert!(result.thd > 40.0); // Should be ~48% for ideal square
     }
 
     #[test]
     fn test_dc_component() {
         let config = FourierConfig::new(1000.0);
         let analysis = FourierAnalysis::new(config);
-        
+
         // Generate sine with DC offset
         let num_points = 1000;
         let duration = 0.001;
@@ -391,12 +395,13 @@ mod tests {
         let time: Vec<Value> = (0..num_points)
             .map(|i| i as f64 * duration / (num_points - 1) as f64)
             .collect();
-        let values: Vec<Value> = time.iter()
+        let values: Vec<Value> = time
+            .iter()
             .map(|&t| dc_offset + (2.0 * PI * 1000.0 * t).sin())
             .collect();
-        
+
         let result = analysis.analyze(&time, &values);
-        
+
         // DC component should be ~2.5
         assert!((result.dc_component - dc_offset).abs() < 0.1);
     }
@@ -409,7 +414,7 @@ mod tests {
             magnitude: 0.1,
             phase: 0.0,
         };
-        
+
         // 0.1 relative to 1.0 = -20dB
         let db = h.db(1.0);
         assert!((db - (-20.0)).abs() < 0.1);
@@ -421,9 +426,9 @@ mod tests {
             fundamental_freq: 1000.0,
             dc_component: 0.0,
             harmonics: vec![],
-            thd: 10.0,  // 10%
+            thd: 10.0, // 10%
         };
-        
+
         // 10% = 0.1 -> 20*log10(0.1) = -20dB
         let thd_db = result.thd_db();
         assert!((thd_db - (-20.0)).abs() < 0.1);
@@ -433,9 +438,9 @@ mod tests {
     fn test_empty_input() {
         let config = FourierConfig::new(1000.0);
         let analysis = FourierAnalysis::new(config);
-        
+
         let result = analysis.analyze(&[], &[]);
-        
+
         assert_eq!(result.thd, 0.0);
         assert_eq!(result.dc_component, 0.0);
     }

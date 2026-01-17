@@ -1,8 +1,8 @@
 //! AC Small-Signal Analysis
 
-use crate::Value;
 use crate::Complex64;
-use super::AnalysisConfig;
+use crate::Value;
+use crate::analysis::AnalysisConfig;
 
 /// AC Analysis engine
 #[derive(Debug)]
@@ -38,7 +38,7 @@ impl AcAnalysis {
         let stop_log = stop.log10();
         let num_decades = stop_log - start_log;
         let total_points = (num_decades * points_per_decade as f64).ceil() as usize;
-        
+
         self.frequencies = (0..=total_points)
             .map(|i| {
                 let log_f = start_log + (stop_log - start_log) * (i as f64) / (total_points as f64);
@@ -53,10 +53,11 @@ impl AcAnalysis {
         let stop_log2 = stop.log2();
         let num_octaves = stop_log2 - start_log2;
         let total_points = (num_octaves * points_per_octave as f64).ceil() as usize;
-        
+
         self.frequencies = (0..=total_points)
             .map(|i| {
-                let log_f = start_log2 + (stop_log2 - start_log2) * (i as f64) / (total_points as f64);
+                let log_f =
+                    start_log2 + (stop_log2 - start_log2) * (i as f64) / (total_points as f64);
                 2.0_f64.powf(log_f)
             })
             .collect();
@@ -113,7 +114,7 @@ mod tests {
     fn test_decade_sweep() {
         let mut ac = AcAnalysis::default();
         ac.decade_sweep(1.0, 1e6, 10);
-        
+
         let freqs = ac.frequencies();
         assert!(freqs[0] >= 1.0 - 1e-10);
         assert!(*freqs.last().unwrap() <= 1e6 + 1.0);
@@ -123,7 +124,7 @@ mod tests {
     fn test_linear_sweep() {
         let mut ac = AcAnalysis::default();
         ac.linear_sweep(0.0, 100.0, 11);
-        
+
         let freqs = ac.frequencies();
         assert_eq!(freqs.len(), 11);
         assert_eq!(freqs[0], 0.0);
