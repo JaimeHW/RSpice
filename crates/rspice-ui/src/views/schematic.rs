@@ -61,6 +61,9 @@ pub fn Schematic() -> Element {
     // Undo/Redo history (local for now, will integrate with SchematicHistory later)
     let mut history = use_signal(|| SchematicHistory::new(schematic.read().clone(), 100));
 
+    // Component editing state
+    let mut editing = use_signal(EditingState::default);
+
     rsx! {
         div {
             class: "schematic-container",
@@ -256,9 +259,26 @@ pub fn Schematic() -> Element {
                         });
                     },
 
-                    ondoubleclick: move |_| {
-                        let mut s = schematic.write();
-                        if s.tool == Tool::Wire && s.wire_drawing.active { s.finish_wire(); }
+                    ondoubleclick: move |evt| {
+                        let c = evt.element_coordinates();
+                        let px = pan.read().0;
+                        let py = pan.read().1;
+                        let z = *zoom.read();
+                        let gs = schematic.read().grid_size;
+                        let gp = Point::from_pixels((c.x - px) / z, (c.y - py) / z, gs);
+                        
+                        let s = schematic.read();
+                        // Check if double-clicked on a component
+                        if let Some(comp_id) = s.component_at(gp) {
+                            // Open edit modal
+                            let client = evt.client_coordinates();
+                            drop(s);
+                            editing.write().component_id = Some(comp_id);
+                            editing.write().position = (client.x, client.y);
+                        } else if s.tool == Tool::Wire && s.wire_drawing.active {
+                            drop(s);
+                            schematic.write().finish_wire();
+                        }
                     },
 
                     onkeydown: move |evt| {
@@ -445,6 +465,27 @@ pub fn Schematic() -> Element {
                     }
                 }
             }
+
+            // Component Edit Modal
+            if let Some(edit_comp_id) = editing.read().component_id {
+                ComponentEditModal {
+                    component_id: edit_comp_id,
+                    position: editing.read().position,
+                    schematic: schematic,
+                    on_save: move |(name, value, params)| {
+                        // Update component with new values
+                        if let Some(comp) = schematic.write().components.iter_mut().find(|c| c.id == edit_comp_id) {
+                            comp.name = name;
+                            comp.value = value;
+                            comp.params = params;
+                        }
+                        editing.write().component_id = None;
+                    },
+                    on_cancel: move |_| {
+                        editing.write().component_id = None;
+                    },
+                }
+            }
         }
     }
 }
@@ -509,7 +550,16 @@ fn WireSvg(points: Vec<Point>, grid_size: i32, selected: bool) -> Element {
 }
 
 #[component]
-fn CompSvg(kind: ComponentType, pos: Point, rotation: i32, name: String, value: String, grid_size: i32, selected: bool) -> Element {
+fn CompSvg(
+    kind: ComponentType,
+    pos: Point,
+    rotation: i32,
+    name: String,
+    value: String,
+    grid_size: i32,
+    selected: bool,
+    #[props(default)] ondoubleclick: EventHandler<MouseEvent>,
+) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
     let (cx, cy) = pos.to_pixels(grid_size);
@@ -517,8 +567,13 @@ fn CompSvg(kind: ComponentType, pos: Point, rotation: i32, name: String, value: 
     let sw = if selected { "2.5" } else { "2" };
     let path = symbol_path(kind);
     rsx! {
-        g { transform: "translate({cx},{cy}) rotate({rotation})",
+        g {
+            transform: "translate({cx},{cy}) rotate({rotation})",
+            style: "cursor: pointer;",
+            ondoubleclick: move |e| ondoubleclick.call(e),
             if selected { circle { cx: "0", cy: "0", r: "25", fill: "{th.accent_primary()}20", stroke: "{th.accent_primary()}", stroke_width: "1", stroke_dasharray: "3,2" } }
+            // Invisible hit area for clicks
+            rect { x: "-20", y: "-30", width: "40", height: "60", fill: "transparent", pointer_events: "all" }
             path { d: "{path}", stroke: "{col}", stroke_width: "{sw}", fill: "none", stroke_linecap: "round" }
             g { transform: "rotate({-rotation})",
                 text { x: "0", y: "-25", text_anchor: "middle", font_size: "10", fill: "{th.text_primary()}", font_weight: "600", "{name}" }
