@@ -399,7 +399,23 @@ fn WaveformPlotArea(
 
             // Waveform traces
             if waveforms.is_empty() {
-                WaveformPlaceholder {}
+                // Generate demo waveform data that respects the view transform
+                {
+                    let n = 200;
+                    let demo_x: Vec<f64> = (0..n).map(|i| i as f64 * 25e-6).collect(); // 0 to 5ms
+                    let demo_y: Vec<f64> = demo_x.iter()
+                        .map(|t| (2.0 * std::f64::consts::PI * 1000.0 * t).sin()) // 1kHz sine wave
+                        .collect();
+                    rsx! {
+                        WaveformTraceView {
+                            key: "demo",
+                            x: demo_x,
+                            y: demo_y,
+                            color: "#22c55e".to_string(),
+                            view: view,
+                        }
+                    }
+                }
             } else {
                 for wf in waveforms.iter() {
                     WaveformTraceView {
