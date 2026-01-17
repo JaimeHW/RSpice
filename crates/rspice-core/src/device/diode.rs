@@ -139,7 +139,7 @@ impl Diode {
         let vd = va - vc;
         
         // Linearize around current operating point
-        let id = self.diode_current(vd);
+        let id = self.current(vd);
         let gd = self.diode_conductance(vd);
         
         // Equivalent current source: ieq = id - gd * vd
@@ -157,7 +157,8 @@ impl Diode {
     }
 
     /// Shockley diode equation: I = Is * (exp(Vd / (N * Vt)) - 1)
-    fn diode_current(&self, vd: Value) -> Value {
+    /// Public for noise analysis (shot noise = 2qI)
+    pub fn current(&self, vd: Value) -> Value {
         // Limit voltage to prevent overflow
         let vd_limited = vd.min(80.0 * self.n * self.vt);
         self.is * ((vd_limited / (self.n * self.vt)).exp() - 1.0)
@@ -176,7 +177,7 @@ impl NonlinearDevice for Diode {
         let vc = if self.node_cathode == 0 { 0.0 } else { voltages[self.node_cathode - 1] };
         self.prev_vd_old = self.prev_vd;
         self.prev_vd = va - vc;
-        self.prev_id = self.diode_current(self.prev_vd);
+        self.prev_id = self.current(self.prev_vd);
     }
 
     fn stamp_nonlinear(
@@ -190,7 +191,7 @@ impl NonlinearDevice for Diode {
         let vd = va - vc;
         
         // Linearize around current operating point
-        let id = self.diode_current(vd);
+        let id = self.current(vd);
         let gd = self.diode_conductance(vd);
         
         // Equivalent current source: ieq = id - gd * vd
@@ -220,7 +221,7 @@ mod tests {
     fn test_diode_forward() {
         let d = Diode::new("D1".to_string(), 1, 0);
         // Forward bias at ~0.7V should give significant current
-        let id = d.diode_current(0.7);
+        let id = d.current(0.7);
         assert!(id > 0.001); // Should be in mA range
     }
 
@@ -228,7 +229,7 @@ mod tests {
     fn test_diode_reverse() {
         let d = Diode::new("D1".to_string(), 1, 0);
         // Reverse bias should give ~Is
-        let id = d.diode_current(-1.0);
+        let id = d.current(-1.0);
         assert!(id.abs() < 1e-8);
     }
 

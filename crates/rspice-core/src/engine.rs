@@ -1424,9 +1424,20 @@ impl Engine {
             }
         }
         
-        // Note: Shot noise from diodes/BJTs would require public current() methods
-        // or calculating current from voltage. For now, thermal noise captures
-        // the dominant noise contributor in most circuits.
+        // Shot noise from diodes (2qI)
+        for diode in &circuit.diodes.devices {
+            let vd = dc_solution.get(diode.node_anode.saturating_sub(1)).copied().unwrap_or(0.0)
+                   - dc_solution.get(diode.node_cathode.saturating_sub(1)).copied().unwrap_or(0.0);
+            let id = diode.current(vd);
+            if id.abs() > 1e-15 {
+                noise_sources.push(NoiseSource::shot(
+                    diode.name.clone(),
+                    diode.node_anode,
+                    diode.node_cathode,
+                    id,
+                ));
+            }
+        }
         
         // Now compute noise at each frequency
         let num_nodes = circuit.num_nodes();
@@ -1683,6 +1694,70 @@ impl Engine {
         );
         
         Ok(analyzer.analyze(&config))
+    }
+
+    /// Run sensitivity analysis
+    /// 
+    /// Computes ∂Vout/∂param using finite differences.
+    /// Useful for design optimization and tolerance analysis.
+    pub fn run_sensitivity(
+        &self,
+        netlist: &Netlist,
+        output_node: usize,
+        param_name: &str,
+        param_value: Value,
+        delta: Option<Value>,
+    ) -> Result<Value, SimulationError> {
+        // Use 1% relative delta by default
+        let h = delta.unwrap_or(param_value.abs() * 0.01).max(1e-12);
+        
+        // Create modified netlist with param + delta
+        let mut netlist_plus = netlist.clone();
+        netlist_plus.params.set(param_name, param_value + h);
+        
+        // Create modified netlist with param - delta  
+        let mut netlist_minus = netlist.clone();
+        netlist_minus.params.set(param_name, param_value - h);
+        
+        // Run DC OP at both points
+        let result_plus = self.run_dc_op(&netlist_plus)?;
+        let result_minus = self.run_dc_op(&netlist_minus)?;
+        
+        // Central difference: dV/dp ≈ (V+ - V-) / (2h)
+        let v_plus = result_plus.voltage(output_node);
+        let v_minus = result_minus.voltage(output_node);
+        
+        Ok((v_plus - v_minus) / (2.0 * h))
+    }
+
+    /// Run .STEP parametric sweep
+    /// 
+    /// Executes multiple simulations with different parameter values.
+    /// Returns all results indexed by step values.
+    pub fn run_step(
+        &self,
+        netlist: &Netlist,
+        param_name: &str,
+        values: &[Value],
+    ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
+        let mut results = Vec::with_capacity(values.len());
+        
+        for &value in values {
+            // Create netlist copy with modified parameter
+            let mut modified_netlist = netlist.clone();
+            modified_netlist.params.set(param_name, value);
+            
+            // Run DC OP for this parameter value
+            match self.run_dc_op(&modified_netlist) {
+                Ok(result) => results.push((value, result)),
+                Err(e) => {
+                    // Log error but continue sweep
+                    log::warn!("Step {} = {} failed: {}", param_name, value, e);
+                }
+            }
+        }
+        
+        Ok(results)
     }
 }
 
