@@ -6,7 +6,9 @@ use dioxus::prelude::*;
 
 use super::button::{Button, ButtonVariant};
 use super::icons::{Icon, IconType};
-use crate::state::{run_simulation, ConsoleMessage, SimulationState, WaveformData};
+use crate::state::{
+    generate_netlist, run_simulation, ConsoleMessage, SchematicState, SimulationState, WaveformData,
+};
 use crate::theme::Theme;
 
 /// Default content for new files
@@ -25,6 +27,7 @@ R1 1 0 1k
 pub fn Toolbar() -> Element {
     let theme: Signal<Theme> = use_context();
     let mut sim_state: Signal<SimulationState> = use_context();
+    let schematic: Signal<SchematicState> = use_context();
     let th = theme.read();
 
     let is_running = sim_state.read().is_running;
@@ -246,13 +249,40 @@ pub fn Toolbar() -> Element {
                         variant: ButtonVariant::Success,
                         icon: rsx! { Icon { icon: IconType::Play, size: 16, color: "#ffffff".to_string() } },
                         onclick: move |_| {
-                            // Get netlist content from state
-                            let netlist_content = sim_state.read().netlist_content.clone();
+                            // Generate netlist from schematic
+                            let schematic_state = schematic.read();
+                            let netlist_result = generate_netlist(&schematic_state);
+                            drop(schematic_state);
 
-                            // Run simulation
+                            // Check for errors in netlist generation
+                            if !netlist_result.errors.is_empty() {
+                                let mut state = sim_state.write();
+                                for err in &netlist_result.errors {
+                                    state.console_messages.push(ConsoleMessage::error(err.clone()));
+                                }
+                                return;
+                            }
+
+                            // Log warnings
+                            for warn in &netlist_result.warnings {
+                                sim_state.write().console_messages.push(ConsoleMessage::warning(warn.clone()));
+                            }
+
+                            // Update netlist content in sim state and run
+                            let netlist_content = netlist_result.netlist.clone();
+
+                            sim_state.write().netlist_content = netlist_content.clone();
                             sim_state.write().is_running = true;
-                            sim_state.write().console_messages.clear();
-                            sim_state.write().console_messages.push(ConsoleMessage::info("Starting simulation..."));
+
+                            // Log the generated netlist for debugging
+                            log::info!("Generated netlist:\n{}", netlist_content);
+                            for (net_name, _points) in &netlist_result.nets {
+                                log::info!("  Net: {}", net_name);
+                            }
+
+                            sim_state.write().console_messages.push(ConsoleMessage::info(
+                                format!("Generated netlist ({} nets)", netlist_result.nets.len())
+                            ));
 
                             let result = run_simulation(&netlist_content);
 
