@@ -399,13 +399,20 @@ fn WaveformPlotArea(
 
             // Waveform traces
             if waveforms.is_empty() {
-                // Generate demo waveform data that respects the view transform
+                // Generate demo waveform data that covers the visible view range
                 {
-                    let n = 200;
-                    let demo_x: Vec<f64> = (0..n).map(|i| i as f64 * 25e-6).collect(); // 0 to 5ms
+                    let n = 500; // More points for smoother curve
+                    let x_range = view.x_max - view.x_min;
+                    let step = x_range / (n - 1) as f64;
+
+                    // Generate X values covering the entire view
+                    let demo_x: Vec<f64> = (0..n).map(|i| view.x_min + i as f64 * step).collect();
+
+                    // Generate 1kHz sine wave
                     let demo_y: Vec<f64> = demo_x.iter()
-                        .map(|t| (2.0 * std::f64::consts::PI * 1000.0 * t).sin()) // 1kHz sine wave
+                        .map(|t| (2.0 * std::f64::consts::PI * 1000.0 * t).sin())
                         .collect();
+
                     rsx! {
                         WaveformTraceView {
                             key: "demo",
