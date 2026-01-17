@@ -1,11 +1,45 @@
 //! GPU-Accelerated Waveform Rendering
 //!
 //! Uses wgpu for hardware-accelerated line rendering of waveform traces.
-//! Implements Dioxus native CustomPaintSource for direct GPU integration.
+//! Device and queue are lazily initialized on first use.
 
 use bytemuck::{Pod, Zeroable};
+use once_cell::sync::Lazy;
 use std::sync::{Arc, Mutex};
 use wgpu::util::DeviceExt;
+
+/// Global GPU device and queue (lazily initialized)
+static GPU_CONTEXT: Lazy<Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)>> = Lazy::new(|| {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        compatible_surface: None,
+        force_fallback_adapter: false,
+    }))?;
+
+    let (device, queue) = pollster::block_on(adapter.request_device(
+        &wgpu::DeviceDescriptor {
+            label: Some("Waveform GPU"),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::default(),
+            memory_hints: Default::default(),
+        },
+        None,
+    ))
+    .ok()?;
+
+    Some((Arc::new(device), Arc::new(queue)))
+});
+
+/// Check if GPU is available
+pub fn is_gpu_available() -> bool {
+    GPU_CONTEXT.is_some()
+}
+
+/// Get the GPU device and queue (if available)
+pub fn get_gpu_context() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
+    GPU_CONTEXT.clone()
+}
 
 /// Vertex data for waveform rendering
 #[repr(C)]
@@ -266,30 +300,14 @@ impl WaveformPainter {
 
     /// Ensure GPU resources are initialized
     fn ensure_resources(&mut self, width: u32, height: u32) {
-        // Initialize device if needed
+        // Use global GPU context (lazily initialized)
         if self.device.is_none() {
-            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
-            let adapter =
-                pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                    power_preference: wgpu::PowerPreference::HighPerformance,
-                    compatible_surface: None,
-                    force_fallback_adapter: false,
-                }))
-                .expect("Failed to find GPU adapter");
-
-            let (device, queue) = pollster::block_on(adapter.request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("Waveform GPU"),
-                    required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::default(),
-                    memory_hints: Default::default(),
-                },
-                None,
-            ))
-            .expect("Failed to create device");
-
-            self.device = Some(Arc::new(device));
-            self.queue = Some(Arc::new(queue));
+            if let Some((device, queue)) = get_gpu_context() {
+                self.device = Some(device);
+                self.queue = Some(queue);
+            } else {
+                return; // GPU not available
+            }
         }
 
         let device = self.device.clone().unwrap();

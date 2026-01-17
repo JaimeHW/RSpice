@@ -1,11 +1,16 @@
 //! Waveform Viewer
 //!
 //! Canvas-based waveform plotting with zoom, pan, and cursor support.
+//! Supports GPU-accelerated rendering when available.
 
 use dioxus::prelude::*;
+use std::sync::{Arc, Mutex};
 
 use crate::state::SimulationState;
 use crate::theme::Theme;
+use crate::views::waveform_gpu::{
+    is_gpu_available, WaveformGpuState, WaveformPainter, WaveformTrace,
+};
 
 /// View state for zoom and pan (shared X-axis across all panes)
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -453,41 +458,44 @@ fn WaveformPlotArea(
             // Grid lines
             WaveformGrid {}
 
-            // Waveform traces
-            if waveforms.is_empty() {
-                // Generate demo waveform data that covers the visible view range
-                {
-                    let n = 500; // More points for smoother curve
-                    let x_range = view.x_max - view.x_min;
-                    let step = x_range / (n - 1) as f64;
-
-                    // Generate X values covering the entire view
-                    let demo_x: Vec<f64> = (0..n).map(|i| view.x_min + i as f64 * step).collect();
-
-                    // Generate 1kHz sine wave
-                    let demo_y: Vec<f64> = demo_x.iter()
-                        .map(|t| (2.0 * std::f64::consts::PI * 1000.0 * t).sin())
-                        .collect();
-
-                    let demo_name = "demo";
-                    rsx! {
-                        WaveformTraceView {
-                            key: "{demo_name}",
-                            x: demo_x,
-                            y: demo_y,
-                            color: "#22c55e".to_string(),
-                            view: view,
-                        }
-                    }
+            // Waveform traces - GPU or SVG rendering
+            if is_gpu_available() {
+                // GPU-accelerated rendering
+                GpuWaveformCanvas {
+                    view: view,
+                    waveforms: waveforms.clone(),
                 }
             } else {
-                for wf in waveforms.iter() {
-                    WaveformTraceView {
-                        key: "{wf.name}",
-                        x: wf.x.clone(),
-                        y: wf.y.clone(),
-                        color: wf.color.clone(),
-                        view: view,
+                // SVG fallback
+                if waveforms.is_empty() {
+                    {
+                        let n = 500;
+                        let x_range = view.x_max - view.x_min;
+                        let step = x_range / (n - 1) as f64;
+                        let demo_x: Vec<f64> = (0..n).map(|i| view.x_min + i as f64 * step).collect();
+                        let demo_y: Vec<f64> = demo_x.iter()
+                            .map(|t| (2.0 * std::f64::consts::PI * 1000.0 * t).sin())
+                            .collect();
+                        let demo_name = "demo";
+                        rsx! {
+                            WaveformTraceView {
+                                key: "{demo_name}",
+                                x: demo_x,
+                                y: demo_y,
+                                color: "#22c55e".to_string(),
+                                view: view,
+                            }
+                        }
+                    }
+                } else {
+                    for wf in waveforms.iter() {
+                        WaveformTraceView {
+                            key: "{wf.name}",
+                            x: wf.x.clone(),
+                            y: wf.y.clone(),
+                            color: wf.color.clone(),
+                            view: view,
+                        }
                     }
                 }
             }
@@ -637,6 +645,81 @@ fn format_time(t: f64) -> String {
         format!("{:.2}ms", t * 1e3)
     } else {
         format!("{:.2}s", t)
+    }
+}
+
+/// GPU-accelerated waveform canvas component
+#[component]
+fn GpuWaveformCanvas(view: ViewState, waveforms: Vec<crate::state::WaveformData>) -> Element {
+    // Build traces from waveform data
+    let traces: Vec<WaveformTrace> = if waveforms.is_empty() {
+        // Demo waveform
+        let n = 1000;
+        let x: Vec<f64> = (0..n).map(|i| i as f64 * 5e-6).collect();
+        let y: Vec<f64> = x
+            .iter()
+            .map(|t| (2.0 * std::f64::consts::PI * 1000.0 * t).sin())
+            .collect();
+        vec![WaveformTrace {
+            x,
+            y,
+            color: [0.133, 0.773, 0.369, 1.0], // #22c55e
+            name: "V(out)".to_string(),
+        }]
+    } else {
+        waveforms
+            .iter()
+            .map(|wf| {
+                let color = parse_hex_color(&wf.color);
+                WaveformTrace {
+                    x: wf.x.clone(),
+                    y: wf.y.clone(),
+                    color,
+                    name: wf.name.clone(),
+                }
+            })
+            .collect()
+    };
+
+    // Create GPU state and render
+    let gpu_state = Arc::new(Mutex::new(WaveformGpuState {
+        traces,
+        x_min: view.x_min,
+        x_max: view.x_max,
+        y_min: view.y_min,
+        y_max: view.y_max,
+        dirty: true,
+    }));
+
+    let mut painter = WaveformPainter::new(gpu_state);
+    let img_src = painter.render_to_base64(800, 400).unwrap_or_default();
+
+    rsx! {
+        if !img_src.is_empty() {
+            img {
+                style: "
+                    position: absolute;
+                    inset: 0;
+                    width: 100%;
+                    height: 100%;
+                    object-fit: fill;
+                ",
+                src: "{img_src}",
+            }
+        }
+    }
+}
+
+/// Parse hex color to RGBA floats
+fn parse_hex_color(hex: &str) -> [f32; 4] {
+    let hex = hex.trim_start_matches('#');
+    if hex.len() >= 6 {
+        let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(255) as f32 / 255.0;
+        let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(255) as f32 / 255.0;
+        let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(255) as f32 / 255.0;
+        [r, g, b, 1.0]
+    } else {
+        [1.0, 1.0, 1.0, 1.0]
     }
 }
 

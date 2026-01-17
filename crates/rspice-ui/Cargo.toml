@@ -41,6 +41,9 @@ pollster = "0.4"
 png = "0.17"
 base64 = "0.22"
 
+# Lazy initialization for GPU
+once_cell = "1.19"
+
 # Native file dialogs (desktop only)
 rfd = "0.15"
 
