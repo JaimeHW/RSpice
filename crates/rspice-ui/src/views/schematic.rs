@@ -648,14 +648,14 @@ fn symbol_path(k: ComponentType) -> &'static str {
         ComponentType::VoltageSource | ComponentType::VoltageSourceAc | ComponentType::VoltageSourcePulse | ComponentType::VoltageSourceSin => 
             "M0-20 L0-12 M0 12 L0 20 M0 0 m-12 0 a12 12 0 1 0 24 0 a12 12 0 1 0-24 0 M-4-4 L4-4 M0-8 L0 0",
         ComponentType::CurrentSource => "M0-20 L0-12 M0 12 L0 20 M0 0 m-12 0 a12 12 0 1 0 24 0 a12 12 0 1 0-24 0 M0-6 L0 6 M-3 3 L0 6 L3 3",
-        // NPN BJT: base bar, collector up-left, emitter down-left with arrow OUT
-        ComponentType::NpnBjt => "M-20 0 L-8 0 M-8-10 L-8 10 M-8-5 L8-18 L8-20 M-8 5 L8 18 L8 20 M4 14 L8 18 L3 17",
-        // PNP BJT: base bar, collector up-left, emitter down-left with arrow IN toward base
-        ComponentType::PnpBjt => "M-20 0 L-8 0 M-8-10 L-8 10 M-8-5 L8-18 L8-20 M-8 5 L8 18 L8 20 M-4 3 L-8 5 L-5 9",
-        // NMOS: gate vertical, gap, channel, source bottom, drain top, arrow on source pointing IN
-        ComponentType::Nmos => "M-20 0 L-10 0 M-10-12 L-10 12 M-6-10 L-6-4 M-6-2 L-6 2 M-6 4 L-6 10 M-6 0 L8 0 L8 20 M-6-7 L8-7 L8-20 M2 0 L8 0 M5-3 L8 0 L5 3",
-        // PMOS: gate with bubble, channel, source bottom, drain top, arrow on source pointing OUT
-        ComponentType::Pmos => "M-20 0 L-14 0 M-10 0 m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0-6 0 M-7-12 L-7 12 M-3-10 L-3-4 M-3-2 L-3 2 M-3 4 L-3 10 M-3 0 L8 0 L8 20 M-3-7 L8-7 L8-20",
+        // NPN BJT: horizontal base input, vertical bar, angled collector (up-right), angled emitter (down-right) with arrow OUT
+        ComponentType::NpnBjt => "M-20 0 L-5 0 M-5-10 L-5 10 M-5-4 L10-16 L10-20 M-5 4 L10 16 L10 20 M6 12 L10 16 L6 16",
+        // PNP BJT: same structure but arrow points IN on emitter  
+        ComponentType::PnpBjt => "M-20 0 L-5 0 M-5-10 L-5 10 M-5-4 L10-16 L10-20 M-5 4 L10 16 L10 20 M-1 6 L-5 4 L-1 8",
+        // NMOS: gate on left, vertical gate plate, channel with gaps, source (bottom) and drain (top) with body arrow IN
+        ComponentType::Nmos => "M-20 0 L-8 0 M-8-12 L-8 12 M-4-10 L-4-3 M-4 3 L-4 10 M-4-7 L10-7 L10-20 M-4 7 L10 7 L10 20 M-4 0 L10 0 M6-3 L10 0 L6 3",
+        // PMOS: same as NMOS but with inversion bubble on gate
+        ComponentType::Pmos => "M-20 0 L-12 0 M-8 0 m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0-6 0 M-5-12 L-5 12 M-1-10 L-1-3 M-1 3 L-1 10 M-1-7 L10-7 L10-20 M-1 7 L10 7 L10 20 M-1 0 L10 0",
     }
 }
 
