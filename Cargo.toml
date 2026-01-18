@@ -5,6 +5,7 @@ members = [
     "crates/rspice-cli",
     "crates/rspice-ui",
     "crates/rspice-wasm",
+    "crates/rspice-veriloga",
 ]
 
 [workspace.package]

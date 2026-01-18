@@ -1,0 +1,31 @@
+[package]
+name = "rspice-veriloga"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Verilog-A/AMS compiler for RSpice circuit simulator"
+
+[dependencies]
+# Core dependencies
+rspice-core = { path = "../rspice-core" }
+thiserror.workspace = true
+log.workspace = true
+
+# Parsing - using nom for professional-grade parsing
+nom.workspace = true
+
+# Data structures
+indexmap = "2.7"
+smol_str = "0.3"
+
+[dev-dependencies]
+approx.workspace = true
+env_logger.workspace = true
+
+[features]
+default = []
+# Enable Verilog-AMS mixed-signal support
+ams = []
