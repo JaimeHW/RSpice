@@ -142,35 +142,34 @@ fn Tab(
                 "{title}"
             }
 
-            // Close button (visible on hover or if dirty)
-            if *hovered.read() || is_dirty {
-                button {
-                    class: "tab-close",
-                    style: "
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        width: 16px;
-                        height: 16px;
-                        background: transparent;
-                        border: none;
-                        border-radius: 3px;
-                        color: {th.text_muted()};
-                        font-size: 12px;
-                        cursor: pointer;
-                        padding: 0;
-                        line-height: 1;
-                        transition: all 0.1s ease;
-                    ",
-                    title: "Close",
-                    onclick: move |evt| {
-                        evt.stop_propagation();
-                        on_close.call(evt);
-                    },
-                    if is_dirty && !*hovered.read() {
-                        // Show dot indicator for dirty state when not hovered
-                        "●"
-                    } else {
+            // Close button - always present to prevent layout shift
+            {
+                let close_opacity = if *hovered.read() || is_active { "1" } else { "0.4" };
+                rsx! {
+                    button {
+                        class: "tab-close",
+                        style: "
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            width: 16px;
+                            height: 16px;
+                            background: transparent;
+                            border: none;
+                            border-radius: 3px;
+                            color: {text_color};
+                            font-size: 12px;
+                            cursor: pointer;
+                            padding: 0;
+                            line-height: 1;
+                            opacity: {close_opacity};
+                            transition: opacity 0.1s ease;
+                        ",
+                        title: "Close",
+                        onclick: move |evt| {
+                            evt.stop_propagation();
+                            on_close.call(evt);
+                        },
                         "×"
                     }
                 }

@@ -107,6 +107,9 @@ pub fn Schematic() -> Element {
     
     // Close confirmation dialog state
     let mut close_confirm: Signal<Option<(usize, String)>> = use_signal(|| None);
+    
+    // Probe tool: wire IDs of the hovered net (entire electrically connected net)
+    let mut probe_hover_wires: Signal<std::collections::HashSet<u64>> = use_signal(std::collections::HashSet::new);
 
     // Undo/Redo history (local for now, will integrate with SchematicHistory later)
     let mut history = use_signal(|| SchematicHistory::new(schematic.read().clone(), 100));
@@ -373,9 +376,18 @@ pub fn Schematic() -> Element {
                     },
 
                 // Pure SVG canvas
-                svg {
-                    id: "schematic-canvas",
-                    style: "position: absolute; inset: 0; width: 100%; height: 100%; background: {th.bg_primary()};",
+                {
+                    let cursor = match schematic.read().tool {
+                        Tool::Probe => "crosshair",
+                        Tool::Wire => "crosshair",
+                        Tool::Place(_) => "copy",
+                        Tool::Label => "text",
+                        Tool::Select => "default",
+                    };
+                    rsx! {
+                        svg {
+                            id: "schematic-canvas",
+                            style: "position: absolute; inset: 0; width: 100%; height: 100%; background: {th.bg_primary()}; cursor: {cursor};",
 
                     onmousemove: move |evt| {
                         let c = evt.element_coordinates();
@@ -451,6 +463,60 @@ pub fn Schematic() -> Element {
                         // Update wire preview position for orthogonal routing
                         if schematic.read().wire_drawing.active {
                             schematic.write().update_wire_preview(gp);
+                        }
+                        
+                        // Probe tool: detect wire under cursor and highlight entire connected net
+                        if matches!(schematic.read().tool, Tool::Probe) {
+                            let s = schematic.read();
+                            
+                            // Check if cursor is near any wire segment (not just endpoints)
+                            let mut hit_wire_id: Option<u64> = None;
+                            'wire_loop: for wire in &s.wires {
+                                for i in 0..wire.points.len().saturating_sub(1) {
+                                    let p1 = wire.points[i];
+                                    let p2 = wire.points[i + 1];
+                                    // Point-to-segment distance check (in grid units)
+                                    let dist = point_to_segment_dist(gp, p1, p2);
+                                    if dist <= 1.5 {
+                                        hit_wire_id = Some(wire.id);
+                                        break 'wire_loop;
+                                    }
+                                }
+                            }
+                            
+                            if let Some(wire_id) = hit_wire_id {
+                                // Find all wires connected to this net using flood-fill
+                                let mut connected: std::collections::HashSet<u64> = std::collections::HashSet::new();
+                                let mut to_visit = vec![wire_id];
+                                
+                                while let Some(wid) = to_visit.pop() {
+                                    if connected.contains(&wid) { continue; }
+                                    connected.insert(wid);
+                                    
+                                    // Find this wire's endpoints
+                                    if let Some(wire) = s.wires.iter().find(|w| w.id == wid) {
+                                        for endpoint in [wire.points.first(), wire.points.last()].into_iter().flatten() {
+                                            // Find other wires sharing this endpoint
+                                            for other in &s.wires {
+                                                if connected.contains(&other.id) { continue; }
+                                                if other.points.contains(endpoint) {
+                                                    to_visit.push(other.id);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                probe_hover_wires.set(connected);
+                            } else {
+                                if !probe_hover_wires.read().is_empty() {
+                                    probe_hover_wires.set(std::collections::HashSet::new());
+                                }
+                            }
+                        } else {
+                            // Clear highlight when not in probe mode
+                            if !probe_hover_wires.read().is_empty() {
+                                probe_hover_wires.set(std::collections::HashSet::new());
+                            }
                         }
                         
                         last_mouse.set((c.x, c.y));
@@ -815,7 +881,9 @@ pub fn Schematic() -> Element {
                                     }
                                 } else {
                                     // No net found at this position - need to run simulation first
-                                    log::info!("Probe: No net found at ({}, {}). Run simulation first.", gp.x, gp.y);
+                                    sim_state.write().console_messages.push(
+                                        ConsoleMessage::warning("Run simulation first to probe nodes".to_string())
+                                    );
                                 }
                             }
                             Tool::Label => {
@@ -951,43 +1019,61 @@ pub fn Schematic() -> Element {
                             // Also check persisted junction highlight for after drag ends
                             let persisted_junction = *highlighted_junction.read();
                             let selection = schematic.read().selection.clone();
+                            let probe_wires = probe_hover_wires.read().clone();
                             
                             rsx! {
                                 for wire in schematic.read().wires.iter() {
-                                    // Calculate points based on drag type
-                                    if Some(wire.id) == wire_dragging_id {
-                                        // Wire drag - move all points
-                                        WireSvg {
-                                            points: wire.points.iter().map(|p| crate::state::Point::new(p.x + delta.x, p.y + delta.y)).collect(),
-                                            grid_size: gs,
-                                            selected: true,
-                                        }
-                                    } else if is_multi_drag && selection.has_wire(wire.id) {
-                                        // Multi-selection drag - move entire selected wire
-                                        WireSvg {
-                                            points: wire.points.iter().map(|p| crate::state::Point::new(p.x + delta.x, p.y + delta.y)).collect(),
-                                            grid_size: gs,
-                                            selected: true,
-                                        }
-                                    } else if junction_pos.is_some() {
-                                        // Junction/endpoint drag - move only points at junction position
-                                        WireSvg {
-                                            points: wire.points.iter().map(|p| {
-                                                if Some(*p) == junction_pos {
-                                                    crate::state::Point::new(p.x + delta.x, p.y + delta.y)
-                                                } else {
-                                                    *p
+                                    // Check if wire is in the highlighted net
+                                    {
+                                        let is_probe_highlighted = probe_wires.contains(&wire.id);
+                                        
+                                        // Calculate points based on drag type
+                                        if Some(wire.id) == wire_dragging_id {
+                                            // Wire drag - move all points
+                                            rsx! {
+                                                WireSvg {
+                                                    points: wire.points.iter().map(|p| crate::state::Point::new(p.x + delta.x, p.y + delta.y)).collect(),
+                                                    grid_size: gs,
+                                                    selected: true,
+                                                    probe_highlight: is_probe_highlighted,
                                                 }
-                                            }).collect(),
-                                            grid_size: gs,
-                                            selected: (wire.points.first() == junction_pos.as_ref() || wire.points.last() == junction_pos.as_ref()) || selection.has_wire(wire.id),
-                                        }
-                                    } else {
-                                        // Normal rendering - check persisted junction highlight OR selection
-                                        WireSvg {
-                                            points: schematic.read().get_wire_preview_points(wire, comp_dragging_id, delta),
-                                            grid_size: gs,
-                                            selected: (persisted_junction.is_some() && (wire.points.first() == persisted_junction.as_ref() || wire.points.last() == persisted_junction.as_ref())) || selection.has_wire(wire.id),
+                                            }
+                                        } else if is_multi_drag && selection.has_wire(wire.id) {
+                                            // Multi-selection drag - move entire selected wire
+                                            rsx! {
+                                                WireSvg {
+                                                    points: wire.points.iter().map(|p| crate::state::Point::new(p.x + delta.x, p.y + delta.y)).collect(),
+                                                    grid_size: gs,
+                                                    selected: true,
+                                                    probe_highlight: is_probe_highlighted,
+                                                }
+                                            }
+                                        } else if junction_pos.is_some() {
+                                            // Junction/endpoint drag - move only points at junction position
+                                            rsx! {
+                                                WireSvg {
+                                                    points: wire.points.iter().map(|p| {
+                                                        if Some(*p) == junction_pos {
+                                                            crate::state::Point::new(p.x + delta.x, p.y + delta.y)
+                                                        } else {
+                                                            *p
+                                                        }
+                                                    }).collect(),
+                                                    grid_size: gs,
+                                                    selected: (wire.points.first() == junction_pos.as_ref() || wire.points.last() == junction_pos.as_ref()) || selection.has_wire(wire.id),
+                                                    probe_highlight: is_probe_highlighted,
+                                                }
+                                            }
+                                        } else {
+                                            // Normal rendering - check persisted junction highlight OR selection
+                                            rsx! {
+                                                WireSvg {
+                                                    points: schematic.read().get_wire_preview_points(wire, comp_dragging_id, delta),
+                                                    grid_size: gs,
+                                                    selected: (persisted_junction.is_some() && (wire.points.first() == persisted_junction.as_ref() || wire.points.last() == persisted_junction.as_ref())) || selection.has_wire(wire.id),
+                                                    probe_highlight: is_probe_highlighted,
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1049,11 +1135,14 @@ pub fn Schematic() -> Element {
                                 crate::state::Point::new(0, 0)
                             };
                             let selection = schematic.read().selection.clone();
+                            let probe_wires = probe_hover_wires.read().clone();
                             
                             // Collect all unique wire endpoints with their display positions
-                            let mut endpoint_selected: std::collections::HashMap<Point, bool> = std::collections::HashMap::new();
+                            // Track: (selected, probe_highlighted)
+                            let mut endpoint_state: std::collections::HashMap<Point, (bool, bool)> = std::collections::HashMap::new();
                             for wire in schematic.read().wires.iter() {
                                 let wire_is_selected = selection.has_wire(wire.id);
+                                let wire_is_probed = probe_wires.contains(&wire.id);
                                 for pt in wire.points.iter() {
                                     // Apply drag delta based on drag type:
                                     // 1. Junction drag - offset point at junction
@@ -1079,28 +1168,38 @@ pub fn Schematic() -> Element {
                                         // Normal selection
                                         || wire_is_selected;
                                     
-                                    // Mark point as selected if any wire at this point is selected
-                                    let entry = endpoint_selected.entry(display_pt).or_insert(false);
-                                    *entry = *entry || is_selected;
+                                    // Mark point state - aggregate from all wires at this point
+                                    let entry = endpoint_state.entry(display_pt).or_insert((false, false));
+                                    entry.0 = entry.0 || is_selected;
+                                    entry.1 = entry.1 || wire_is_probed;
                                 }
                             }
                             
                             rsx! {
-                                // Render unselected dots first
-                                for (pt, sel) in endpoint_selected.iter() {
-                                    if !*sel {
+                                // Render unselected, non-probed dots first
+                                for (pt, (sel, probed)) in endpoint_state.iter() {
+                                    if !*sel && !*probed {
                                         {
                                             let (x, y) = pt.to_pixels(gs);
                                             rsx! { circle { cx: "{x}", cy: "{y}", r: "4", fill: "{normal_col}" } }
                                         }
                                     }
                                 }
-                                // Render selected dots on top
-                                for (pt, sel) in endpoint_selected.iter() {
-                                    if *sel {
+                                // Render selected dots
+                                for (pt, (sel, probed)) in endpoint_state.iter() {
+                                    if *sel && !*probed {
                                         {
                                             let (x, y) = pt.to_pixels(gs);
                                             rsx! { circle { cx: "{x}", cy: "{y}", r: "4", fill: "{selected_col}" } }
+                                        }
+                                    }
+                                }
+                                // Render probe-highlighted dots on top (orange)
+                                for (pt, (_, probed)) in endpoint_state.iter() {
+                                    if *probed {
+                                        {
+                                            let (x, y) = pt.to_pixels(gs);
+                                            rsx! { circle { cx: "{x}", cy: "{y}", r: "5", fill: "#ffa500" } }
                                         }
                                     }
                                 }
@@ -1197,8 +1296,10 @@ pub fn Schematic() -> Element {
                                 rsx! {}
                             }
                         }
+                        }
                     }
-                }
+                } // End svg rsx! block
+                } // End cursor block
 
                 // Status bar
                 div {
@@ -1373,7 +1474,11 @@ pub fn SchematicToolbar(schematic: Signal<SchematicState>) -> Element {
             style: "display: flex; align-items: center; height: 32px; padding: 0 8px; background: {th.bg_tertiary()}; border-bottom: 1px solid {th.border()}; gap: 4px;",
             ToolBtn { label: "↖ Select", active: matches!(tool, Tool::Select), onclick: move |_| schematic.write().tool = Tool::Select }
             ToolBtn { label: "— Wire", active: matches!(tool, Tool::Wire), onclick: move |_| schematic.write().tool = Tool::Wire }
-            ToolBtn { label: "⚡ Probe", active: matches!(tool, Tool::Probe), onclick: move |_| schematic.write().tool = Tool::Probe }
+            ToolBtn { label: "⚡ Probe", active: matches!(tool, Tool::Probe), onclick: move |_| {
+                let mut s = schematic.write();
+                s.selection.clear();
+                s.tool = Tool::Probe;
+            }}
             ToolBtn { label: "🏷 Label", active: matches!(tool, Tool::Label), onclick: move |_| schematic.write().tool = Tool::Label }
             div { style: "width: 1px; height: 18px; background: {th.border()}; margin: 0 4px;" }
             button { style: "padding: 4px 8px; background: {th.surface()}; border: 1px solid {th.border()}; border-radius: 4px; color: {th.text_primary()}; font-size: 12px; cursor: pointer;", onclick: move |_| schematic.write().rotate_selection(), "⟳ Rotate" }
@@ -1393,12 +1498,24 @@ fn ToolBtn(label: &'static str, active: bool, onclick: EventHandler<MouseEvent>)
 }
 
 #[component]
-fn WireSvg(points: Vec<Point>, grid_size: i32, selected: bool) -> Element {
+fn WireSvg(
+    points: Vec<Point>,
+    grid_size: i32,
+    selected: bool,
+    #[props(default)] probe_highlight: bool,
+) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
     if points.len() < 2 { return rsx! {}; }
-    let col = if selected { th.accent_primary() } else { th.accent_success() };
-    let sw = if selected { "3" } else { "2" };
+    
+    // Probe highlight takes priority, then selection, then normal
+    let (col, sw) = if probe_highlight {
+        ("#ffa500", "4") // Orange highlight for probe mode
+    } else if selected {
+        (th.accent_primary(), "3")
+    } else {
+        (th.accent_success(), "2")
+    };
     
     // Build path string properly
     let mut d = String::new();
@@ -1465,6 +1582,27 @@ fn PreviewSvg(kind: ComponentType, pos: Point, grid_size: i32, rotation: Rotatio
             path { d: "{path}", stroke: "{th.accent_primary()}", stroke_width: "2", fill: "none" }
         }
     }
+}
+
+/// Calculate distance from point to line segment (in grid units)
+fn point_to_segment_dist(p: Point, a: Point, b: Point) -> f64 {
+    let dx = (b.x - a.x) as f64;
+    let dy = (b.y - a.y) as f64;
+    let px = (p.x - a.x) as f64;
+    let py = (p.y - a.y) as f64;
+    
+    let len_sq = dx * dx + dy * dy;
+    if len_sq == 0.0 {
+        // Degenerate segment (point)
+        return (px * px + py * py).sqrt();
+    }
+    
+    // Project point onto line, clamped to segment
+    let t = ((px * dx + py * dy) / len_sq).clamp(0.0, 1.0);
+    let proj_x = t * dx;
+    let proj_y = t * dy;
+    
+    ((px - proj_x).powi(2) + (py - proj_y).powi(2)).sqrt()
 }
 
 fn symbol_path(k: ComponentType) -> &'static str {

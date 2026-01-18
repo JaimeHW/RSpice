@@ -69,6 +69,11 @@ pub fn SimulationDialog(props: SimulationDialogProps) -> Element {
     let dc_enabled = use_signal(|| props.config.dc_sweep.is_some());
     let op_enabled = use_signal(|| props.config.op.enabled);
 
+    // Draggable dialog state
+    let mut dialog_pos = use_signal(|| (100.0_f64, 100.0_f64)); // (x, y) in pixels
+    let mut dragging = use_signal(|| false);
+    let mut drag_offset = use_signal(|| (0.0_f64, 0.0_f64));
+
     // Form values - stored as strings for editing, parsed on confirm
     let tran_stop = use_signal(|| {
         format_value(
@@ -231,26 +236,42 @@ pub fn SimulationDialog(props: SimulationDialogProps) -> Element {
         preview_text
     };
 
+    let (pos_x, pos_y) = *dialog_pos.read();
+
     rsx! {
-        // Modal backdrop
+        // Positioned draggable dialog (no modal backdrop - allows interaction with schematic)
         div {
-            style: "position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; z-index: 1000;",
-            onclick: move |_| props.on_cancel.call(()),
+            style: "position: fixed; left: {pos_x}px; top: {pos_y}px; z-index: 1000;",
+            onmousemove: move |e| {
+                if *dragging.read() {
+                    let (ox, oy) = *drag_offset.read();
+                    let page = e.page_coordinates();
+                    dialog_pos.set((page.x - ox, page.y - oy));
+                }
+            },
+            onmouseup: move |_| dragging.set(false),
+            onmouseleave: move |_| dragging.set(false),
 
             // Dialog container
             div {
                 style: "background: {th.bg_secondary()}; border: 1px solid {th.border()}; border-radius: 8px; width: 520px; max-height: 80vh; overflow: hidden; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);",
-                onclick: move |e| e.stop_propagation(),
 
-                // Header
+                // Draggable header
                 div {
-                    style: "display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid {th.border()}; background: {th.bg_tertiary()};",
+                    style: "display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid {th.border()}; background: {th.bg_tertiary()}; cursor: move; user-select: none;",
+                    onmousedown: move |e| {
+                        let page = e.page_coordinates();
+                        let (px, py) = *dialog_pos.read();
+                        drag_offset.set((page.x - px, page.y - py));
+                        dragging.set(true);
+                    },
                     h2 {
                         style: "margin: 0; font-size: 16px; font-weight: 600; color: {th.text_primary()};",
                         "Edit Simulation Command"
                     }
                     button {
                         style: "background: none; border: none; color: {th.text_muted()}; font-size: 20px; cursor: pointer; padding: 4px; line-height: 1;",
+                        onmousedown: move |e| e.stop_propagation(),
                         onclick: move |_| props.on_cancel.call(()),
                         "×"
                     }
