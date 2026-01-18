@@ -57,13 +57,15 @@ impl Engine {
             }
         };
 
-        // Initialize result storage
+        // Initialize result storage with actual node names from netlist
+        let node_names = circuit.node_names_sorted();
         let mut result = TransientResult {
             time: vec![0.0],
             voltages: (0..num_nodes)
                 .map(|i| vec![dc_solution.get(i).copied().unwrap_or(0.0)])
                 .collect(),
             num_nodes,
+            node_names,
         };
 
         let mut solution = dc_solution;

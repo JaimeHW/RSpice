@@ -1226,6 +1226,28 @@ impl CircuitData {
         self.num_branches
     }
 
+    /// Get node names sorted by their node index (1, 2, 3, ...)
+    /// Returns a Vec where index i contains the name of node (i+1)
+    /// This is useful for waveform output labels like V(N001), V(N002)
+    pub fn node_names_sorted(&self) -> Vec<String> {
+        // Create a vec with one entry per non-ground node
+        let mut names: Vec<(NodeId, String)> = self
+            .node_map
+            .iter()
+            .filter(|(_, id)| **id > 0) // Exclude ground (id 0)
+            .map(|(name, id)| (*id, name.clone()))
+            .collect();
+
+        // Sort by node ID
+        names.sort_by_key(|(id, _)| *id);
+
+        // Remove duplicates (keep first occurrence for each ID - in case of aliases like GND/gnd/0)
+        names.dedup_by_key(|(id, _)| *id);
+
+        // Extract just the names in order
+        names.into_iter().map(|(_, name)| name).collect()
+    }
+
     /// Total device count (for parallel stamping threshold)
     pub fn device_count(&self) -> usize {
         self.resistors.len()

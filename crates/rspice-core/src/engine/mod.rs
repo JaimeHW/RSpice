@@ -90,6 +90,9 @@ pub struct TransientResult {
     pub voltages: Vec<Vec<Value>>,
     /// Number of nodes
     pub num_nodes: usize,
+    /// Node names from the netlist (maps index to original name like "N001", "out", etc.)
+    /// Index 0 corresponds to voltages[0], which is node 1 (not ground)
+    pub node_names: Vec<String>,
 }
 
 impl TransientResult {
@@ -124,10 +127,13 @@ impl TransientResult {
 
 impl From<TransientResultCompressed> for TransientResult {
     fn from(compressed: TransientResultCompressed) -> Self {
+        // Generate numeric fallback names - caller should override with actual names
+        let node_names = (1..=compressed.num_nodes).map(|i| i.to_string()).collect();
         Self {
             time: compressed.time,
             voltages: compressed.voltages,
             num_nodes: compressed.num_nodes,
+            node_names,
         }
     }
 }
