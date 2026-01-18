@@ -4,6 +4,7 @@ members = [
     "crates/rspice-core",
     "crates/rspice-cli",
     "crates/rspice-ui",
+    "crates/rspice-wasm",
 ]
 
 [workspace.package]
@@ -16,7 +17,7 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 # Core dependencies - faer for high-performance sparse linear algebra
-faer = "0.21"
+faer = { version = "0.23", default-features = false, features = ["std"] }
 thiserror = "2.0"
 log = "0.4"
 env_logger = "0.11"

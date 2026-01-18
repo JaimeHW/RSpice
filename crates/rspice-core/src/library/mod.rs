@@ -5,10 +5,10 @@
 //!
 //! # Usage
 //! ```rust
-//! use rspice_core::library::LibraryManager;
+//! use rspice_core::library::{LibraryManager, ModelType};
 //!
 //! let manager = LibraryManager::new();
-//! let diode_models = manager.models_by_type(ModelType::Diode);
+//! let diode_models = manager.models_of_type(ModelType::Diode);
 //! ```
 
 mod manager;

@@ -5,21 +5,30 @@ edition = "2021"
 description = "Modern circuit simulator GUI for RSpice"
 authors = ["RSpice Contributors"]
 
+# Library crate (required for web/WASM builds)
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# Desktop binary (uses cfg guards in main.rs for wasm32 compatibility)
+[[bin]]
+name = "rspice-ui"
+path = "src/main.rs"
+
 [features]
 default = ["desktop"]
-desktop = ["dioxus/desktop"]
-native = ["dioxus/native"]
-web = ["dioxus/web"]
+desktop = ["dioxus/desktop", "rfd", "tokio/rt-multi-thread"]
+native = ["dioxus/native", "rfd"]
+web = ["dioxus/web", "rspice-core/wasm", "getrandom/js"]
 
 [dependencies]
-# Dioxus framework (0.7 with native wgpu support)
+# Dioxus framework (0.7 with cross-platform support)
 dioxus = { version = "0.7", features = ["router"] }
 
 # RSpice core simulation engine
-rspice-core = { path = "../rspice-core" }
+rspice-core = { path = "../rspice-core", default-features = false }
 
 # Async runtime
-tokio = { version = "1", features = ["rt", "sync", "macros"] }
+tokio = { version = "1", features = ["sync", "macros"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -27,15 +36,13 @@ serde_json = "1"
 
 # Logging
 log = "0.4"
-env_logger = "0.11"
 
 # FFT for frequency analysis
 rustfft = "6.2"
 
-# GPU rendering
+# GPU rendering (works on web via WebGPU)
 wgpu = "23"
 bytemuck = { version = "1.14", features = ["derive"] }
-pollster = "0.4"
 
 # Image encoding for GPU output
 png = "0.17"
@@ -44,11 +51,39 @@ base64 = "0.22"
 # Lazy initialization for GPU
 once_cell = "1.19"
 
-# Native file dialogs (desktop only)
-rfd = "0.15"
+# getrandom for wasm support
+getrandom = { version = "0.2", optional = true }
 
+# === Desktop-only dependencies ===
+# Native file dialogs (desktop only)
+rfd = { version = "0.15", optional = true }
+
+# Blocking executor (desktop only - web uses async)
+pollster = { version = "0.4", optional = false }
+
+# Desktop logging
+env_logger = { version = "0.11", optional = true }
+
+# === Web-specific dependencies ===
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = "0.2"
-web-sys = { version = "0.3", features = ["Window", "Document", "Element"] }
+wasm-bindgen = "0.2.108"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = [
+    "Window", 
+    "Document", 
+    "Element",
+    "HtmlElement",
+    "Blob",
+    "Url",
+    "HtmlAnchorElement",
+    "Performance",
+] }
+console_error_panic_hook = "0.1"
+console_log = "1"
+async-channel = "2"
+gloo-timers = { version = "0.3", features = ["futures"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+env_logger = "0.11"
 
 [dev-dependencies]

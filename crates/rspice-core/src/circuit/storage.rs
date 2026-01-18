@@ -513,197 +513,103 @@ impl Inductors {
 // Nonlinear Device Storage
 //=============================================================================
 
-/// Diode storage for nonlinear Newton-Raphson iteration
-#[derive(Debug, Default)]
-pub struct Diodes {
-    pub devices: Vec<Diode>,
+use crate::device::NonlinearDevice;
+
+/// Macro to generate nonlinear device storage containers.
+///
+/// This reduces boilerplate while maintaining type safety and an explicit API.
+/// Each generated struct provides the standard Newton-Raphson iteration interface:
+/// - `new()`, `add()`, `len()`, `is_empty()` - basic container operations
+/// - `update_all()` - update device operating points from node voltages
+/// - `stamp_all()` - stamp linearized contributions into matrix/rhs
+/// - `all_converged()` - check if all devices have converged
+/// - `link_all()` - link CSC indices for direct stamping
+/// - `stamp_all_direct()` - O(1) stamping using pre-linked indices
+macro_rules! define_nonlinear_storage {
+    (
+        $(#[$meta:meta])*
+        $name:ident, $device:ty
+    ) => {
+        $(#[$meta])*
+        #[derive(Debug, Default)]
+        pub struct $name {
+            pub devices: Vec<$device>,
+        }
+
+        impl $name {
+            #[inline]
+            pub fn new() -> Self {
+                Self::default()
+            }
+
+            #[inline]
+            pub fn add(&mut self, device: $device) {
+                self.devices.push(device);
+            }
+
+            #[inline]
+            pub fn len(&self) -> usize {
+                self.devices.len()
+            }
+
+            #[inline]
+            pub fn is_empty(&self) -> bool {
+                self.devices.is_empty()
+            }
+
+            pub fn update_all(&mut self, voltages: &[Value]) {
+                for d in &mut self.devices {
+                    d.update(voltages);
+                }
+            }
+
+            pub fn stamp_all(
+                &self,
+                matrix: &mut impl MatrixStamper,
+                rhs: &mut [Value],
+                voltages: &[Value],
+            ) {
+                for d in &self.devices {
+                    d.stamp_nonlinear(voltages, matrix, rhs);
+                }
+            }
+
+            pub fn all_converged(&self, tolerance: Value) -> bool {
+                self.devices.iter().all(|d| d.is_converged(tolerance))
+            }
+
+            pub fn link_all(&mut self, matrix: &StaticMatrix) {
+                for d in &mut self.devices {
+                    d.link(matrix);
+                }
+            }
+
+            pub fn stamp_all_direct(
+                &self,
+                matrix: &mut StaticMatrix,
+                rhs: &mut [Value],
+                voltages: &[Value],
+            ) {
+                for d in &self.devices {
+                    d.stamp_direct(matrix, rhs, voltages);
+                }
+            }
+        }
+    };
 }
 
-impl Diodes {
-    pub fn new() -> Self {
-        Self::default()
-    }
+// Generate storage containers for all nonlinear device types
+define_nonlinear_storage!(
+    /// Diode storage for nonlinear Newton-Raphson iteration
+    Diodes, Diode
+);
 
-    pub fn add(&mut self, diode: Diode) {
-        self.devices.push(diode);
-    }
+define_nonlinear_storage!(
+    /// BJT storage for nonlinear Newton-Raphson iteration
+    Bjts, Bjt
+);
 
-    pub fn len(&self) -> usize {
-        self.devices.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.devices.is_empty()
-    }
-
-    pub fn update_all(&mut self, voltages: &[Value]) {
-        use crate::device::NonlinearDevice;
-        for d in &mut self.devices {
-            d.update(voltages);
-        }
-    }
-
-    pub fn stamp_all(
-        &self,
-        matrix: &mut impl MatrixStamper,
-        rhs: &mut [Value],
-        voltages: &[Value],
-    ) {
-        use crate::device::NonlinearDevice;
-        for d in &self.devices {
-            d.stamp_nonlinear(voltages, matrix, rhs);
-        }
-    }
-
-    pub fn all_converged(&self, tolerance: Value) -> bool {
-        use crate::device::NonlinearDevice;
-        self.devices.iter().all(|d| d.is_converged(tolerance))
-    }
-
-    pub fn link_all(&mut self, matrix: &StaticMatrix) {
-        for d in &mut self.devices {
-            d.link(matrix);
-        }
-    }
-
-    pub fn stamp_all_direct(
-        &self,
-        matrix: &mut StaticMatrix,
-        rhs: &mut [Value],
-        voltages: &[Value],
-    ) {
-        for d in &self.devices {
-            d.stamp_direct(matrix, rhs, voltages);
-        }
-    }
-}
-
-/// BJT storage for nonlinear Newton-Raphson iteration
-#[derive(Debug, Default)]
-pub struct Bjts {
-    pub devices: Vec<Bjt>,
-}
-
-impl Bjts {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn add(&mut self, bjt: Bjt) {
-        self.devices.push(bjt);
-    }
-
-    pub fn len(&self) -> usize {
-        self.devices.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.devices.is_empty()
-    }
-
-    pub fn update_all(&mut self, voltages: &[Value]) {
-        use crate::device::NonlinearDevice;
-        for d in &mut self.devices {
-            d.update(voltages);
-        }
-    }
-
-    pub fn stamp_all(
-        &self,
-        matrix: &mut impl MatrixStamper,
-        rhs: &mut [Value],
-        voltages: &[Value],
-    ) {
-        use crate::device::NonlinearDevice;
-        for d in &self.devices {
-            d.stamp_nonlinear(voltages, matrix, rhs);
-        }
-    }
-
-    pub fn all_converged(&self, tolerance: Value) -> bool {
-        use crate::device::NonlinearDevice;
-        self.devices.iter().all(|d| d.is_converged(tolerance))
-    }
-
-    pub fn link_all(&mut self, matrix: &StaticMatrix) {
-        for d in &mut self.devices {
-            d.link(matrix);
-        }
-    }
-
-    pub fn stamp_all_direct(
-        &self,
-        matrix: &mut StaticMatrix,
-        rhs: &mut [Value],
-        voltages: &[Value],
-    ) {
-        for d in &self.devices {
-            d.stamp_direct(matrix, rhs, voltages);
-        }
-    }
-}
-
-/// MOSFET storage for nonlinear Newton-Raphson iteration
-#[derive(Debug, Default)]
-pub struct Mosfets {
-    pub devices: Vec<Mosfet>,
-}
-
-impl Mosfets {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn add(&mut self, mosfet: Mosfet) {
-        self.devices.push(mosfet);
-    }
-
-    pub fn len(&self) -> usize {
-        self.devices.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.devices.is_empty()
-    }
-
-    pub fn update_all(&mut self, voltages: &[Value]) {
-        use crate::device::NonlinearDevice;
-        for d in &mut self.devices {
-            d.update(voltages);
-        }
-    }
-
-    pub fn stamp_all(
-        &self,
-        matrix: &mut impl MatrixStamper,
-        rhs: &mut [Value],
-        voltages: &[Value],
-    ) {
-        use crate::device::NonlinearDevice;
-        for d in &self.devices {
-            d.stamp_nonlinear(voltages, matrix, rhs);
-        }
-    }
-
-    pub fn all_converged(&self, tolerance: Value) -> bool {
-        use crate::device::NonlinearDevice;
-        self.devices.iter().all(|d| d.is_converged(tolerance))
-    }
-
-    pub fn link_all(&mut self, matrix: &StaticMatrix) {
-        for d in &mut self.devices {
-            d.link(matrix);
-        }
-    }
-
-    pub fn stamp_all_direct(
-        &self,
-        matrix: &mut StaticMatrix,
-        rhs: &mut [Value],
-        voltages: &[Value],
-    ) {
-        for d in &self.devices {
-            d.stamp_direct(matrix, rhs, voltages);
-        }
-    }
-}
+define_nonlinear_storage!(
+    /// MOSFET storage for nonlinear Newton-Raphson iteration
+    Mosfets, Mosfet
+);

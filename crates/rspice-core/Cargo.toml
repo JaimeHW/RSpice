@@ -8,12 +8,14 @@ license.workspace = true
 rust-version.workspace = true
 
 [features]
-default = []
-wasm = ["wasm-bindgen"]
+default = ["faer-parallel"]
+wasm = ["wasm-bindgen", "getrandom/js"]
 parallel = ["rayon", "portable-atomic"]
+faer-parallel = ["faer/rayon"]
 ffi = ["libloading"]
 
 [dependencies]
+# Faer for sparse linear algebra - workspace configures it with std only, faer-parallel feature adds rayon
 faer.workspace = true
 thiserror.workspace = true
 log.workspace = true
@@ -28,10 +30,14 @@ portable-atomic = { workspace = true, optional = true }
 # WASM support (optional)
 wasm-bindgen = { version = "0.2", optional = true }
 
+# getrandom for WASM - faer depends on this, needs explicit JS feature for wasm32
+getrandom = { version = "0.2", optional = true }
+
 # FFI support (optional)
 libloading = { version = "0.8", optional = true }
 
 [dev-dependencies]
 approx.workspace = true
 env_logger.workspace = true
+
 

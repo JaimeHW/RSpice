@@ -1,0 +1,13 @@
+[application]
+name = "rspice-ui"
+default_platform = "web"
+
+# For web builds, use the library crate (not the binary)
+[application.lib]
+name = "rspice_ui"
+
+[web.app]
+title = "RSpice Circuit Simulator"
+
+[web.watcher]
+index_on_404 = true
