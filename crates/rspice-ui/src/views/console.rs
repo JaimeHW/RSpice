@@ -11,7 +11,8 @@ use crate::theme::Theme;
 #[component]
 pub fn Console() -> Element {
     let theme: Signal<Theme> = use_context();
-    let sim_state: Signal<SimulationState> = use_context();
+    let mut sim_state: Signal<SimulationState> = use_context();
+    let mut console_visible: Signal<crate::app::ConsoleVisible> = use_context();
     let th = theme.read();
 
     let messages = &sim_state.read().console_messages;
@@ -22,7 +23,7 @@ pub fn Console() -> Element {
             style: "
                 display: flex;
                 flex-direction: column;
-                height: 120px;
+                height: 100%;
                 background: {th.bg_tertiary()};
                 border-top: 1px solid {th.border()};
             ",
@@ -52,8 +53,29 @@ pub fn Console() -> Element {
                         color: {th.text_muted()};
                         font-size: {Theme::FONT_SIZE_SM};
                         cursor: pointer;
+                        padding: 0 8px;
                     ",
+                    onclick: move |_| {
+                        sim_state.write().clear_console();
+                    },
                     "Clear"
+                }
+
+                // Close button
+                button {
+                    style: "
+                        background: transparent;
+                        border: none;
+                        color: {th.text_muted()};
+                        font-size: 16px;
+                        cursor: pointer;
+                        padding: 0 4px;
+                        line-height: 1;
+                    ",
+                    onclick: move |_| {
+                        console_visible.set(crate::app::ConsoleVisible(false));
+                    },
+                    "×"
                 }
             }
 

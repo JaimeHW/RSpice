@@ -43,6 +43,7 @@ use crate::views::waveform_gpu::is_gpu_available;
 pub fn Waveform() -> Element {
     let theme: Signal<Theme> = use_context();
     let mut sim_state: Signal<SimulationState> = use_context();
+    let mut waveform_visible: Signal<crate::app::WaveformVisible> = use_context();
     let th = theme.read();
 
     let waveforms = &sim_state.read().waveforms;
@@ -178,6 +179,9 @@ pub fn Waveform() -> Element {
                 on_toggle_export: move |_| {
                     let current = *show_export.read();
                     show_export.set(!current);
+                },
+                on_close: move |_| {
+                    waveform_visible.set(crate::app::WaveformVisible(false));
                 },
                 measurements_active: *show_measurements.read(),
                 fft_active: *show_fft.read(),

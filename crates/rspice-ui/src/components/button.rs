@@ -108,6 +108,7 @@ pub fn Button(
                 opacity: {opacity};
                 transition: background {Theme::TRANSITION_FAST};
                 outline: none;
+                white-space: nowrap;
             ",
             disabled: disabled,
             onmouseenter: move |_| is_hovered.set(true),

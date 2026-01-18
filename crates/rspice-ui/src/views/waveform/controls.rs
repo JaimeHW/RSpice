@@ -18,6 +18,7 @@ pub fn WaveformHeader(
     #[props(default)] on_toggle_fft: EventHandler<MouseEvent>,
     #[props(default)] on_toggle_sweep: EventHandler<MouseEvent>,
     #[props(default)] on_toggle_export: EventHandler<MouseEvent>,
+    #[props(default)] on_close: EventHandler<MouseEvent>,
     #[props(default)] measurements_active: bool,
     #[props(default)] fft_active: bool,
     #[props(default)] sweep_active: bool,
@@ -170,6 +171,23 @@ pub fn WaveformHeader(
                     active: export_active,
                     onclick: on_toggle_export,
                 }
+            }
+
+            // Close button
+            button {
+                style: "
+                    background: transparent;
+                    border: none;
+                    color: {th.text_muted()};
+                    font-size: 16px;
+                    cursor: pointer;
+                    padding: 0 4px;
+                    line-height: 1;
+                    margin-left: {Theme::SPACING_SM};
+                ",
+                title: "Close Waveform Viewer",
+                onclick: move |e| on_close.call(e),
+                "×"
             }
         }
     }

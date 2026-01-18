@@ -27,7 +27,9 @@ R1 1 0 1k
 pub fn Toolbar() -> Element {
     let theme: Signal<Theme> = use_context();
     let mut sim_state: Signal<SimulationState> = use_context();
-    let schematic: Signal<SchematicState> = use_context();
+    let mut schematic: Signal<SchematicState> = use_context();
+    let mut waveform_visible: Signal<crate::app::WaveformVisible> = use_context();
+    let mut console_visible: Signal<crate::app::ConsoleVisible> = use_context();
     let th = theme.read();
 
     let is_running = sim_state.read().is_running;
@@ -51,13 +53,48 @@ pub fn Toolbar() -> Element {
                     display: flex;
                     align-items: center;
                     gap: {Theme::SPACING_SM};
-                    font-size: {Theme::FONT_SIZE_LG};
-                    font-weight: 700;
-                    color: {th.accent_primary()};
                     padding-right: {Theme::SPACING_MD};
                     border-right: 1px solid {th.border()};
                 ",
-                "⚡ RSpice"
+                // Inline SVG logo
+                svg {
+                    width: "28",
+                    height: "28",
+                    view_box: "0 0 512 512",
+                    fill: "none",
+
+                    // Hexagon Background
+                    path {
+                        d: "M256 32 L464 140 V372 L256 480 L48 372 V140 Z",
+                        fill: "#2a2a3a"
+                    }
+
+                    // Inner Border Highlight
+                    path {
+                        d: "M256 32 L464 140 V372 L256 480 L48 372 V140 Z",
+                        stroke: "#FF5F15",
+                        stroke_opacity: "0.3",
+                        stroke_width: "12"
+                    }
+
+                    // Signal Pulse
+                    path {
+                        d: "M100 256 L160 256 L200 150 L256 360 L312 150 L352 256 L412 256",
+                        stroke: "#FF5F15",
+                        stroke_width: "28",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round"
+                    }
+                }
+
+                span {
+                    style: "
+                        font-size: {Theme::FONT_SIZE_LG};
+                        font-weight: 700;
+                        color: {th.text_primary()};
+                    ",
+                    "RSpice"
+                }
             }
 
             // File operations group
@@ -215,6 +252,83 @@ pub fn Toolbar() -> Element {
             // Divider
             ToolbarDivider {}
 
+            // Schematic file operations
+            ToolbarGroup {
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    icon: rsx! { Icon { icon: IconType::Save, size: 16 } },
+                    onclick: move |_| {
+                        let current_path = schematic.read().current_file.clone();
+                        let sch_state = schematic.read().clone();
+
+                        spawn(async move {
+                            // If we have a current file, save directly; otherwise show dialog
+                            let save_path = if let Some(path) = current_path {
+                                Some(path)
+                            } else {
+                                rfd::AsyncFileDialog::new()
+                                    .add_filter("RSpice Schematic", &["rsch"])
+                                    .set_file_name("circuit.rsch")
+                                    .save_file()
+                                    .await
+                                    .map(|f| f.path().to_path_buf())
+                            };
+
+                            if let Some(path) = save_path {
+                                match crate::state::schematic_file::save_schematic(&sch_state, &path) {
+                                    Ok(_) => {
+                                        schematic.write().current_file = Some(path.clone());
+                                        sim_state.write().console_messages.push(
+                                            ConsoleMessage::success(format!("Schematic saved: {}", path.display()))
+                                        );
+                                    }
+                                    Err(e) => {
+                                        sim_state.write().console_messages.push(
+                                            ConsoleMessage::error(format!("Failed to save schematic: {}", e))
+                                        );
+                                    }
+                                }
+                            }
+                        });
+                    },
+                    "Save Sch"
+                }
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    icon: rsx! { Icon { icon: IconType::FolderOpen, size: 16 } },
+                    onclick: move |_| {
+                        spawn(async move {
+                            if let Some(file) = rfd::AsyncFileDialog::new()
+                                .add_filter("RSpice Schematic", &["rsch"])
+                                .pick_file()
+                                .await
+                            {
+                                let file_path = file.path().to_path_buf();
+                                match crate::state::schematic_file::load_schematic(&file_path) {
+                                    Ok(mut loaded_state) => {
+                                        // Set the current file path so save knows where to write
+                                        loaded_state.current_file = Some(file_path.clone());
+                                        schematic.set(loaded_state);
+                                        sim_state.write().console_messages.push(
+                                            ConsoleMessage::success(format!("Schematic loaded: {}", file_path.display()))
+                                        );
+                                    }
+                                    Err(e) => {
+                                        sim_state.write().console_messages.push(
+                                            ConsoleMessage::error(format!("Failed to load schematic: {}", e))
+                                        );
+                                    }
+                                }
+                            }
+                        });
+                    },
+                    "Open Sch"
+                }
+            }
+
+            // Divider
+            ToolbarDivider {}
+
             // Edit operations
             ToolbarGroup {
                 Button {
@@ -295,7 +409,10 @@ pub fn Toolbar() -> Element {
                                 state.waveforms.clear();
 
                                 if let Some(tran) = result.transient {
+                                    log::info!("Transient data: {} time points, {} voltage traces",
+                                        tran.time.len(), tran.voltages.len());
                                     for (idx, (name, values)) in tran.voltages.into_iter().enumerate() {
+                                        log::info!("  Adding waveform: {} with {} points", name, values.len());
                                         state.waveforms.push(WaveformData {
                                             name,
                                             x: tran.time.clone(),
@@ -304,7 +421,11 @@ pub fn Toolbar() -> Element {
                                             visible: true,
                                         });
                                     }
+                                } else {
+                                    log::warn!("No transient data in simulation result");
                                 }
+
+                                log::info!("Total waveforms after simulation: {}", state.waveforms.len());
 
                                 state.console_messages.push(ConsoleMessage::success(
                                     format!("Simulation complete! {} points, {:.1}ms",
@@ -345,6 +466,35 @@ pub fn Toolbar() -> Element {
                     variant: ButtonVariant::Ghost,
                     icon: rsx! { Icon { icon: IconType::FitToScreen, size: 16 } },
                     ""
+                }
+            }
+
+            // View toggles
+            ToolbarGroup {
+                // Console toggle
+                Button {
+                    variant: if console_visible.read().0 { ButtonVariant::Primary } else { ButtonVariant::Ghost },
+                    onclick: move |_| {
+                        let current = console_visible.read().0;
+                        console_visible.set(crate::app::ConsoleVisible(!current));
+                    },
+                    "Console"
+                }
+                // Waveform toggle (only enabled when waveforms exist)
+                Button {
+                    variant: if waveform_visible.read().0 && !sim_state.read().waveforms.is_empty() {
+                        ButtonVariant::Primary
+                    } else {
+                        ButtonVariant::Ghost
+                    },
+                    disabled: sim_state.read().waveforms.is_empty(),
+                    onclick: move |_| {
+                        if !sim_state.read().waveforms.is_empty() {
+                            let current = waveform_visible.read().0;
+                            waveform_visible.set(crate::app::WaveformVisible(!current));
+                        }
+                    },
+                    "Waveform"
                 }
             }
 
