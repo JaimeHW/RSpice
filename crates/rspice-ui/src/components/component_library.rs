@@ -1,8 +1,12 @@
 //! Component Library Browser
 //!
 //! Searchable sidebar for browsing and placing components.
+//! Shows built-in component types and models from embedded SPICE libraries.
+
+use std::sync::Arc;
 
 use dioxus::prelude::*;
+use rspice_core::library::{LibraryManager, ModelType};
 
 use crate::state::{use_canvas_focus, ComponentType, Rotation, SchematicState, Tool};
 use crate::theme::Theme;
@@ -13,6 +17,7 @@ pub enum ComponentCategory {
     Passives,
     Semiconductors,
     Sources,
+    ControlledSources,
 }
 
 impl ComponentCategory {
@@ -21,14 +26,16 @@ impl ComponentCategory {
             ComponentCategory::Passives => "Passive Components",
             ComponentCategory::Semiconductors => "Semiconductors",
             ComponentCategory::Sources => "Sources",
+            ComponentCategory::ControlledSources => "Controlled Sources",
         }
     }
 
     fn icon(&self) -> &'static str {
         match self {
-            ComponentCategory::Passives => "⚡",
-            ComponentCategory::Semiconductors => "💎",
-            ComponentCategory::Sources => "🔋",
+            ComponentCategory::Passives => "",
+            ComponentCategory::Semiconductors => "",
+            ComponentCategory::Sources => "",
+            ComponentCategory::ControlledSources => "",
         }
     }
 
@@ -38,6 +45,7 @@ impl ComponentCategory {
                 ComponentType::Resistor,
                 ComponentType::Capacitor,
                 ComponentType::Inductor,
+                ComponentType::CoupledInductor,
             ],
             ComponentCategory::Semiconductors => &[
                 ComponentType::Diode,
@@ -45,6 +53,8 @@ impl ComponentCategory {
                 ComponentType::PnpBjt,
                 ComponentType::Nmos,
                 ComponentType::Pmos,
+                ComponentType::Njfet,
+                ComponentType::Pjfet,
             ],
             ComponentCategory::Sources => &[
                 ComponentType::VoltageSource,
@@ -53,6 +63,12 @@ impl ComponentCategory {
                 ComponentType::VoltageSourcePulse,
                 ComponentType::CurrentSource,
                 ComponentType::Ground,
+            ],
+            ComponentCategory::ControlledSources => &[
+                ComponentType::Vcvs,
+                ComponentType::Vccs,
+                ComponentType::Ccvs,
+                ComponentType::Cccs,
             ],
         }
     }
@@ -65,16 +81,23 @@ fn component_info(kind: ComponentType) -> (&'static str, &'static str, &'static 
         ComponentType::Resistor => ("Resistor", "R - Resistance element", "R"),
         ComponentType::Capacitor => ("Capacitor", "C - Stores charge", "C"),
         ComponentType::Inductor => ("Inductor", "L - Stores energy in magnetic field", "L"),
+        ComponentType::CoupledInductor => ("Coupled Inductor", "K - Transformer coupling", "K"),
         ComponentType::Diode => ("Diode", "D - Allows current in one direction", "D"),
         ComponentType::NpnBjt => ("NPN BJT", "Q - NPN Bipolar Junction Transistor", "Q"),
         ComponentType::PnpBjt => ("PNP BJT", "Q - PNP Bipolar Junction Transistor", ""),
         ComponentType::Nmos => ("N-MOSFET", "M - N-Channel MOSFET", "M"),
         ComponentType::Pmos => ("P-MOSFET", "M - P-Channel MOSFET", ""),
+        ComponentType::Njfet => ("N-JFET", "J - N-Channel JFET", "J"),
+        ComponentType::Pjfet => ("P-JFET", "J - P-Channel JFET", ""),
         ComponentType::VoltageSource => ("DC Voltage", "V - DC Voltage Source", "V"),
         ComponentType::VoltageSourceAc => ("AC Voltage", "V - AC Voltage Source", ""),
         ComponentType::VoltageSourceSin => ("Sine Source", "V - Sinusoidal Voltage", ""),
         ComponentType::VoltageSourcePulse => ("Pulse Source", "V - Pulse Voltage", ""),
         ComponentType::CurrentSource => ("Current Source", "I - Current Source", "I"),
+        ComponentType::Vcvs => ("VCVS", "E - Voltage-Controlled Voltage Source", "E"),
+        ComponentType::Vccs => ("VCCS", "G - Voltage-Controlled Current Source", ""),
+        ComponentType::Ccvs => ("CCVS", "H - Current-Controlled Voltage Source", ""),
+        ComponentType::Cccs => ("CCCS", "F - Current-Controlled Current Source", ""),
         ComponentType::Ground => ("Ground", "0 - Ground reference", "G"),
     }
 }
@@ -93,13 +116,19 @@ pub struct ComponentLibraryProps {
 #[component]
 pub fn ComponentLibrary(props: ComponentLibraryProps) -> Element {
     let theme: Signal<Theme> = use_context();
+    let library_manager: Signal<Arc<LibraryManager>> = use_context();
     let th = theme.read();
 
     // Search filter state
     let mut search = use_signal(String::new);
 
-    // Expanded category state
-    let mut expanded = use_signal(|| vec![true, true, true]); // All expanded by default
+    // Expanded category state: [Passives, Semiconductors, Sources, ControlledSources]
+    let mut expanded = use_signal(|| vec![true, true, true, true]);
+
+    // Library model categories expanded state (dynamically sized based on available model types)
+    let lib_manager = library_manager.read();
+    let model_types = lib_manager.available_types();
+    let mut lib_expanded = use_signal(|| vec![false; model_types.len()]); // Collapsed by default
 
     if !props.visible {
         return rsx! {};
@@ -110,6 +139,7 @@ pub fn ComponentLibrary(props: ComponentLibraryProps) -> Element {
         ComponentCategory::Passives,
         ComponentCategory::Semiconductors,
         ComponentCategory::Sources,
+        ComponentCategory::ControlledSources,
     ];
 
     rsx! {
@@ -224,6 +254,110 @@ pub fn ComponentLibrary(props: ComponentLibraryProps) -> Element {
                         }
                     }
                 }
+
+                // ═══════════════════════════════════════════════════════════════
+                // Library Models Section
+                // ═══════════════════════════════════════════════════════════════
+
+                // Section divider
+                div {
+                    style: "
+                        margin: 8px 12px;
+                        border-bottom: 1px solid {th.border()};
+                    "
+                }
+
+                // Library section header
+                div {
+                    style: "
+                        padding: 4px 12px 8px;
+                        font-size: 10px;
+                        font-weight: 600;
+                        color: {th.accent_primary()};
+                        text-transform: uppercase;
+                        letter-spacing: 0.5px;
+                    ",
+                    "Library Models"
+                }
+
+                // Library model categories
+                for (type_idx, model_type) in model_types.iter().enumerate() {
+                    {
+                        let models = lib_manager.models_of_type(*model_type);
+
+                        // Filter by search
+                        let filtered_models: Vec<_> = models
+                            .into_iter()
+                            .filter(|m| {
+                                search_lower.is_empty()
+                                    || m.name.to_lowercase().contains(&search_lower)
+                                    || m.description.as_ref()
+                                        .map(|d| d.to_lowercase().contains(&search_lower))
+                                        .unwrap_or(false)
+                            })
+                            .collect();
+
+                        if filtered_models.is_empty() && !search_lower.is_empty() {
+                            rsx! {}
+                        } else if !filtered_models.is_empty() {
+                            let is_expanded = *lib_expanded.read().get(type_idx).unwrap_or(&false);
+                            let type_name = model_type.display_name();
+                            let model_count = filtered_models.len();
+
+                            rsx! {
+                                // Model type category header
+                                div {
+                                    style: "
+                                        display: flex;
+                                        align-items: center;
+                                        padding: 6px 12px 6px 16px;
+                                        cursor: pointer;
+                                        user-select: none;
+                                        color: {th.text_secondary()};
+                                        font-size: 11px;
+                                        font-weight: 500;
+                                    ",
+                                    onclick: move |_| {
+                                        let mut exp = lib_expanded.write();
+                                        if let Some(v) = exp.get_mut(type_idx) {
+                                            *v = !*v;
+                                        }
+                                    },
+                                    span { style: "flex: 1;", "{type_name}" }
+                                    span {
+                                        style: "
+                                            font-size: 9px;
+                                            opacity: 0.5;
+                                            background: {th.bg_tertiary()};
+                                            padding: 1px 5px;
+                                            border-radius: 8px;
+                                            margin-right: 6px;
+                                        ",
+                                        "{model_count}"
+                                    }
+                                    span {
+                                        style: "font-size: 10px; opacity: 0.6;",
+                                        if is_expanded { "▼" } else { "▶" }
+                                    }
+                                }
+
+                                // Model list
+                                if is_expanded {
+                                    for model in filtered_models {
+                                        LibraryModelItem {
+                                            name: model.name.clone(),
+                                            model_type: *model_type,
+                                            description: model.description.clone(),
+                                            schematic: props.schematic,
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            rsx! {}
+                        }
+                    }
+                }
             }
 
             // Footer with tip
@@ -299,6 +433,75 @@ fn ComponentItem(kind: ComponentType, schematic: Signal<SchematicState>) -> Elem
                         font-family: monospace;
                     ",
                     "{shortcut}"
+                }
+            }
+        }
+    }
+}
+
+/// Library model item for placing models from embedded libraries
+#[component]
+fn LibraryModelItem(
+    name: String,
+    model_type: ModelType,
+    description: Option<String>,
+    schematic: Signal<SchematicState>,
+) -> Element {
+    let theme: Signal<Theme> = use_context();
+    let th = theme.read();
+    let canvas_focus = use_canvas_focus();
+
+    // Map model type to component type for placement
+    let component_type = match model_type {
+        ModelType::Diode => ComponentType::Diode,
+        ModelType::NpnBjt => ComponentType::NpnBjt,
+        ModelType::PnpBjt => ComponentType::PnpBjt,
+        ModelType::Nmos => ComponentType::Nmos,
+        ModelType::Pmos => ComponentType::Pmos,
+        _ => ComponentType::Diode, // Fallback for other types
+    };
+
+    let name_clone = name.clone();
+    let desc_text = description.clone().unwrap_or_default();
+
+    rsx! {
+        div {
+            style: "
+                display: flex;
+                flex-direction: column;
+                padding: 4px 12px 4px 28px;
+                cursor: pointer;
+                transition: background 0.1s;
+            ",
+            title: "{desc_text}",
+            onclick: move |_| {
+                // Set tool to place the component type with model reference
+                schematic.write().tool = Tool::Place(component_type);
+                schematic.write().preview_rotation = Rotation::R0;
+                // Store model name in pending_model for the component that will be placed
+                // The placed component will have this model set in its params
+                log::info!("Selected library model: {} ({})", name_clone, model_type.display_name());
+                canvas_focus.read().focus();
+            },
+
+            // Model name
+            span {
+                style: "font-size: 11px; color: {th.text_primary()};",
+                "{name}"
+            }
+
+            // Description (if available, truncated)
+            if !desc_text.is_empty() {
+                span {
+                    style: "
+                        font-size: 9px;
+                        color: {th.text_muted()};
+                        white-space: nowrap;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                        max-width: 160px;
+                    ",
+                    "{desc_text}"
                 }
             }
         }

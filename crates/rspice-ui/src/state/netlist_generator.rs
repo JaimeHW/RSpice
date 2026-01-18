@@ -377,6 +377,108 @@ fn generate_component_line(
                 ));
             }
         }
+
+        ComponentType::Njfet | ComponentType::Pjfet => {
+            if nodes.len() >= 3 {
+                let model = if comp.params.is_empty() {
+                    if comp.kind == ComponentType::Njfet {
+                        "NJF"
+                    } else {
+                        "PJF"
+                    }
+                } else {
+                    &comp.params
+                };
+                // JFET: Jname D G S model
+                format!(
+                    "{} {} {} {} {}",
+                    comp.name, nodes[1], nodes[0], nodes[2], model
+                )
+            } else {
+                return Err(format!("{}: JFET needs 3 terminals (D, G, S)", comp.name));
+            }
+        }
+
+        ComponentType::CoupledInductor => {
+            // K statement: Kname L1 L2 coupling_coefficient
+            // The value field should contain "L1 L2 0.99" format
+            format!("{} {}", comp.name, comp.value)
+        }
+
+        ComponentType::Vcvs => {
+            // VCVS: Ename out+ out- ctrl+ ctrl- gain
+            if nodes.len() >= 4 {
+                let gain = if comp.value.is_empty() {
+                    "1"
+                } else {
+                    &comp.value
+                };
+                format!(
+                    "{} {} {} {} {} {}",
+                    comp.name, nodes[0], nodes[1], nodes[2], nodes[3], gain
+                )
+            } else {
+                return Err(format!("{}: VCVS needs 4 terminals", comp.name));
+            }
+        }
+
+        ComponentType::Vccs => {
+            // VCCS: Gname out+ out- ctrl+ ctrl- transconductance
+            if nodes.len() >= 4 {
+                let gm = if comp.value.is_empty() {
+                    "1m"
+                } else {
+                    &comp.value
+                };
+                format!(
+                    "{} {} {} {} {} {}",
+                    comp.name, nodes[0], nodes[1], nodes[2], nodes[3], gm
+                )
+            } else {
+                return Err(format!("{}: VCCS needs 4 terminals", comp.name));
+            }
+        }
+
+        ComponentType::Ccvs => {
+            // CCVS: Hname out+ out- Vsense transresistance
+            if nodes.len() >= 2 {
+                let rm = if comp.value.is_empty() {
+                    "1k"
+                } else {
+                    &comp.value
+                };
+                let vsense = if comp.params.is_empty() {
+                    "Vsense"
+                } else {
+                    &comp.params
+                };
+                format!("{} {} {} {} {}", comp.name, nodes[0], nodes[1], vsense, rm)
+            } else {
+                return Err(format!("{}: CCVS needs 2 output terminals", comp.name));
+            }
+        }
+
+        ComponentType::Cccs => {
+            // CCCS: Fname out+ out- Vsense current_gain
+            if nodes.len() >= 2 {
+                let gain = if comp.value.is_empty() {
+                    "1"
+                } else {
+                    &comp.value
+                };
+                let vsense = if comp.params.is_empty() {
+                    "Vsense"
+                } else {
+                    &comp.params
+                };
+                format!(
+                    "{} {} {} {} {}",
+                    comp.name, nodes[0], nodes[1], vsense, gain
+                )
+            } else {
+                return Err(format!("{}: CCCS needs 2 output terminals", comp.name));
+            }
+        }
     };
 
     Ok(line)

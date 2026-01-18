@@ -106,6 +106,44 @@ fn get_type_fields(
             false,
         ),
 
+        // Semiconductors - JFETs
+        ComponentType::Njfet | ComponentType::Pjfet => {
+            ("Model", "J310, 2N5457, MPF102", "Multiplier", "m=1", true)
+        }
+
+        // Coupled inductor (transformer)
+        ComponentType::CoupledInductor => (
+            "Coupling",
+            "L1 L2 0.99",
+            "Coupling Coefficient",
+            "k=0.99",
+            true,
+        ),
+
+        // Controlled sources
+        ComponentType::Vcvs => (
+            "Gain",
+            "10, 100",
+            "Parameters",
+            "E=V(ctrl+, ctrl-)*gain",
+            false,
+        ),
+        ComponentType::Vccs => (
+            "Transconductance",
+            "1m, 10m",
+            "Parameters",
+            "gm in Siemens",
+            false,
+        ),
+        ComponentType::Ccvs => (
+            "Transresistance",
+            "1k, 10k",
+            "Control Source",
+            "Vsense",
+            true,
+        ),
+        ComponentType::Cccs => ("Current Gain", "10, 100", "Control Source", "Vsense", true),
+
         // Ground - minimal editing
         ComponentType::Ground => ("(no value)", "", "", "", false),
     }
@@ -127,6 +165,13 @@ fn get_type_name(comp_type: ComponentType) -> &'static str {
         ComponentType::VoltageSourceSin => "Sine Voltage Source",
         ComponentType::VoltageSourcePulse => "Pulse Voltage Source",
         ComponentType::CurrentSource => "Current Source",
+        ComponentType::Njfet => "N-JFET",
+        ComponentType::Pjfet => "P-JFET",
+        ComponentType::CoupledInductor => "Coupled Inductor",
+        ComponentType::Vcvs => "VCVS (E)",
+        ComponentType::Vccs => "VCCS (G)",
+        ComponentType::Ccvs => "CCVS (H)",
+        ComponentType::Cccs => "CCCS (F)",
         ComponentType::Ground => "Ground",
     }
 }

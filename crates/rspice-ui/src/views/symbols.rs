@@ -163,27 +163,69 @@ pub const CURRENT_SOURCE: Symbol = Symbol {
     ],
 };
 
-/// NPN BJT symbol
+/// NPN BJT symbol - professional encircled style
+/// Base on left, vertical bar inside circle, Emitter at top-right with arrow out, Collector at bottom-right
 pub const NPN_BJT: Symbol = Symbol {
-    path: "M -20 0 L -6 0 M -6 -10 L -6 10 M -6 -5 L 10 -15 L 10 -20 M -6 5 L 10 15 L 10 20 M 4 11 L 10 15 L 6 9",
+    // Circle: center at (0,0), radius 12
+    // Base line from left to circle edge
+    // Vertical bar inside circle
+    // Collector line from bar to bottom-right lead
+    // Emitter line from bar to top-right lead with outward arrow
+    path: "M -20 0 L -12 0 \
+           M 0 0 m -12 0 a 12 12 0 1 0 24 0 a 12 12 0 1 0 -24 0 \
+           M -4 -8 L -4 8 \
+           M -4 -4 L 8 -10 L 10 -20 \
+           M -4 4 L 8 10 L 10 20 \
+           M 4 7 L 8 10 L 5 11",
     size: (40, 44),
     fill: "",
     terminals: &[
-        TerminalDef { name: "B", x: -20, y: 0 },
-        TerminalDef { name: "C", x: 10, y: -20 },
-        TerminalDef { name: "E", x: 10, y: 20 },
+        TerminalDef {
+            name: "B",
+            x: -20,
+            y: 0,
+        },
+        TerminalDef {
+            name: "E",
+            x: 10,
+            y: -20,
+        },
+        TerminalDef {
+            name: "C",
+            x: 10,
+            y: 20,
+        },
     ],
 };
 
-/// PNP BJT symbol
+/// PNP BJT symbol - professional encircled style
+/// Base on left, vertical bar inside circle, Collector at top-right, Emitter at bottom-right with arrow in
 pub const PNP_BJT: Symbol = Symbol {
-    path: "M -20 0 L -6 0 M -6 -10 L -6 10 M -6 -5 L 10 -15 L 10 -20 M -6 5 L 10 15 L 10 20 M 0 1 L -6 5 L -2 9",
+    // Same structure as NPN but with arrow pointing inward on emitter
+    path: "M -20 0 L -12 0 \
+           M 0 0 m -12 0 a 12 12 0 1 0 24 0 a 12 12 0 1 0 -24 0 \
+           M -4 -8 L -4 8 \
+           M -4 -4 L 8 -10 L 10 -20 \
+           M -4 4 L 8 10 L 10 20 \
+           M -1 6 L -4 4 L -1 2",
     size: (40, 44),
     fill: "",
     terminals: &[
-        TerminalDef { name: "B", x: -20, y: 0 },
-        TerminalDef { name: "C", x: 10, y: 20 },
-        TerminalDef { name: "E", x: 10, y: -20 },
+        TerminalDef {
+            name: "B",
+            x: -20,
+            y: 0,
+        },
+        TerminalDef {
+            name: "C",
+            x: 10,
+            y: -20,
+        },
+        TerminalDef {
+            name: "E",
+            x: 10,
+            y: 20,
+        },
     ],
 };
 
@@ -283,6 +325,101 @@ pub const VOLTAGE_SOURCE_PULSE: Symbol = Symbol {
 /// Sinusoidal voltage source (same as AC for display)
 pub const VOLTAGE_SOURCE_SIN: Symbol = VOLTAGE_SOURCE_AC;
 
+/// N-JFET symbol (similar to MOSFET but with solid gate)
+pub const NJFET: Symbol = Symbol {
+    path: "M -20 0 L -6 0 M -6 -10 L -6 10 \
+           M -6 -5 L 10 -5 L 10 -20 M -6 5 L 10 5 L 10 20 \
+           M 4 2 L 10 0 L 4 -2",
+    size: (40, 44),
+    fill: "",
+    terminals: &[
+        TerminalDef {
+            name: "G",
+            x: -20,
+            y: 0,
+        },
+        TerminalDef {
+            name: "D",
+            x: 10,
+            y: -20,
+        },
+        TerminalDef {
+            name: "S",
+            x: 10,
+            y: 20,
+        },
+    ],
+};
+
+/// P-JFET symbol
+pub const PJFET: Symbol = Symbol {
+    path: "M -20 0 L -6 0 M -6 -10 L -6 10 \
+           M -6 -5 L 10 -5 L 10 -20 M -6 5 L 10 5 L 10 20 \
+           M -2 2 L -6 0 L -2 -2",
+    size: (40, 44),
+    fill: "",
+    terminals: &[
+        TerminalDef {
+            name: "G",
+            x: -20,
+            y: 0,
+        },
+        TerminalDef {
+            name: "D",
+            x: 10,
+            y: 20,
+        },
+        TerminalDef {
+            name: "S",
+            x: 10,
+            y: -20,
+        },
+    ],
+};
+
+/// Coupled inductor symbol (two inductors with coupling line)
+pub const COUPLED_INDUCTOR: Symbol = Symbol {
+    path: "M -15 -10 A 4 4 0 0 1 -7 -10 A 4 4 0 0 1 1 -10 A 4 4 0 0 1 9 -10 L 15 -10 \
+           M -15 10 A 4 4 0 0 1 -7 10 A 4 4 0 0 1 1 10 A 4 4 0 0 1 9 10 L 15 10 \
+           M 0 -6 L 0 6",
+    size: (40, 24),
+    fill: "",
+    terminals: &[],
+};
+
+/// VCVS symbol (diamond with E)
+pub const VCVS: Symbol = Symbol {
+    path: "M 0 -15 L 12 0 L 0 15 L -12 0 Z M -20 -10 L -12 -5 M -20 10 L -12 5 M 12 -5 L 20 -10 M 12 5 L 20 10",
+    size: (44, 34),
+    fill: "",
+    terminals: &[
+        TerminalDef { name: "O+", x: 20, y: -10 },
+        TerminalDef { name: "O-", x: 20, y: 10 },
+        TerminalDef { name: "C+", x: -20, y: -10 },
+        TerminalDef { name: "C-", x: -20, y: 10 },
+    ],
+};
+
+/// VCCS symbol (diamond with arrow)
+pub const VCCS: Symbol = Symbol {
+    path: "M 0 -15 L 12 0 L 0 15 L -12 0 Z M -20 -10 L -12 -5 M -20 10 L -12 5 M 12 -5 L 20 -10 M 12 5 L 20 10 \
+           M 0 -5 L 0 5 M -2 3 L 0 5 L 2 3",
+    size: (44, 34),
+    fill: "",
+    terminals: &[
+        TerminalDef { name: "O+", x: 20, y: -10 },
+        TerminalDef { name: "O-", x: 20, y: 10 },
+        TerminalDef { name: "C+", x: -20, y: -10 },
+        TerminalDef { name: "C-", x: -20, y: 10 },
+    ],
+};
+
+/// CCVS symbol (diamond with H)
+pub const CCVS: Symbol = VCVS;
+
+/// CCCS symbol (diamond with F)
+pub const CCCS: Symbol = VCCS;
+
 // =============================================================================
 // Symbol Lookup
 // =============================================================================
@@ -295,6 +432,7 @@ pub fn get_symbol(kind: ComponentType) -> &'static Symbol {
         ComponentType::Resistor => &RESISTOR,
         ComponentType::Capacitor => &CAPACITOR,
         ComponentType::Inductor => &INDUCTOR,
+        ComponentType::CoupledInductor => &COUPLED_INDUCTOR,
         ComponentType::Diode => &DIODE,
         ComponentType::Ground => &GROUND,
         ComponentType::VoltageSource => &VOLTAGE_SOURCE,
@@ -303,8 +441,14 @@ pub fn get_symbol(kind: ComponentType) -> &'static Symbol {
         ComponentType::PnpBjt => &PNP_BJT,
         ComponentType::Nmos => &NMOS,
         ComponentType::Pmos => &PMOS,
+        ComponentType::Njfet => &NJFET,
+        ComponentType::Pjfet => &PJFET,
         ComponentType::VoltageSourceAc => &VOLTAGE_SOURCE_AC,
         ComponentType::VoltageSourcePulse => &VOLTAGE_SOURCE_PULSE,
         ComponentType::VoltageSourceSin => &VOLTAGE_SOURCE_SIN,
+        ComponentType::Vcvs => &VCVS,
+        ComponentType::Vccs => &VCCS,
+        ComponentType::Ccvs => &CCVS,
+        ComponentType::Cccs => &CCCS,
     }
 }

@@ -16,8 +16,12 @@ use crate::theme::Theme;
 struct DragState {
     active: bool,
     component_id: Option<u64>,
+    wire_id: Option<u64>,
+    junction_point: Option<Point>, // For dragging junction points (moves all wires at that point)
     start_grid: Point,
     current_grid: Point,
+    /// When true, move ALL selected items (not just the one clicked)
+    multi_selection: bool,
 }
 
 /// Context menu state
@@ -27,6 +31,23 @@ struct ContextMenuState {
     position: (f64, f64),
     target_component: Option<u64>,
     target_wire: Option<u64>,
+}
+
+/// Rubber-band box selection state (for selecting multiple items by dragging)
+#[derive(Clone, Copy, PartialEq, Default)]
+struct BoxSelectionState {
+    /// Whether we're currently drawing a selection box
+    active: bool,
+    /// Start point in grid coordinates
+    start_grid: Point,
+    /// Current end point in grid coordinates
+    end_grid: Point,
+    /// Start point in pixel coordinates (for rendering)
+    start_px: (f64, f64),
+    /// Current end point in pixel coordinates
+    end_px: (f64, f64),
+    /// Set to true when box selection just completed (prevents onclick from clearing selection)
+    just_completed: bool,
 }
 
 /// Component editing state
@@ -55,9 +76,15 @@ pub fn Schematic() -> Element {
 
     // Drag-to-move state
     let mut drag = use_signal(DragState::default);
+    
+    // Highlighted junction point (persists after drag for selection highlighting)
+    let mut highlighted_junction: Signal<Option<Point>> = use_signal(|| None);
 
     // Context menu state
     let mut context_menu = use_signal(ContextMenuState::default);
+    
+    // Box selection state (rubber-band selection)
+    let mut box_selection = use_signal(BoxSelectionState::default);
 
     // Undo/Redo history (local for now, will integrate with SchematicHistory later)
     let mut history = use_signal(|| SchematicHistory::new(schematic.read().clone(), 100));
@@ -68,6 +95,45 @@ pub fn Schematic() -> Element {
     // Canvas focus context - shared with other components for focus management
     let mut canvas_focus = use_signal(CanvasFocusState::new);
     use_context_provider(|| canvas_focus);
+    
+    // Global keyboard shortcut handler - works regardless of which panel has focus
+    // Professional simulators use window-level shortcuts for consistent behavior
+    use_effect(move || {
+        // Set up window-level keydown listener via JavaScript
+        // This ensures hotkeys work even when focus is on console or properties panel
+        let _ = document::eval(r#"
+            if (!window.__rspice_keydown_handler) {
+                window.__rspice_keydown_handler = function(e) {
+                    var canvas = document.getElementById('schematic-canvas-wrapper');
+                    if (!canvas) return;
+                    
+                    // Only refocus if not in an input field
+                    var tag = document.activeElement ? document.activeElement.tagName : '';
+                    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+                    
+                    // If canvas doesn't have focus, focus it and re-dispatch the event
+                    if (document.activeElement !== canvas) {
+                        canvas.focus();
+                        // Dispatch a new keyboard event to the canvas so first keypress works
+                        var newEvent = new KeyboardEvent('keydown', {
+                            key: e.key,
+                            code: e.code,
+                            keyCode: e.keyCode,
+                            ctrlKey: e.ctrlKey,
+                            shiftKey: e.shiftKey,
+                            altKey: e.altKey,
+                            metaKey: e.metaKey,
+                            bubbles: true
+                        });
+                        canvas.dispatchEvent(newEvent);
+                        e.stopPropagation();
+                        e.preventDefault();
+                    }
+                };
+                window.addEventListener('keydown', window.__rspice_keydown_handler, true);
+            }
+        "#);
+    });
 
     rsx! {
         div {
@@ -91,6 +157,16 @@ pub fn Schematic() -> Element {
                     tabindex: "0",
                     onmounted: move |evt| {
                         canvas_focus.write().set_element(evt.data());
+                        // Auto-focus so keyboard shortcuts work immediately on startup
+                        canvas_focus.read().focus();
+                    },
+                    // Re-focus when clicking on the canvas to restore keyboard shortcuts
+                    onfocus: move |_| {
+                        // Focus is being gained, no extra action needed
+                    },
+                    // Ensure clicks bring focus back to the canvas
+                    onclick: move |_| {
+                        let _ = document::eval(r#"document.getElementById('schematic-canvas-wrapper').focus()"#);
                     },
                     onkeydown: move |evt| {
                         // Handle Ctrl+key shortcuts
@@ -141,41 +217,59 @@ pub fn Schematic() -> Element {
                                     history.write().push(schematic.read().clone(), "Rotate selection");
                                 }
                             }
-                            Key::Character(c) if c == "w" || c == "W" => s.tool = Tool::Wire,
+                            Key::Character(c) if c == "w" || c == "W" => {
+                                s.tool = Tool::Wire;
+                                s.selection.clear();
+                                highlighted_junction.set(None);
+                            }
+                            Key::Character(c) if c == "s" || c == "S" => {
+                                s.cancel_wire();
+                                s.tool = Tool::Select;
+                                s.selection.clear();
+                                highlighted_junction.set(None);
+                            }
                             Key::Character(c) if c == " " => {
                                 if s.wire_drawing.active {
                                     s.toggle_wire_routing();
                                 }
                             }
                             Key::Character(c) if c == "g" || c == "G" => {
+                                s.cancel_wire();
                                 s.tool = Tool::Place(ComponentType::Ground);
                                 s.preview_rotation = Rotation::R0;
                             }
                             Key::Character(c) if c == "v" || c == "V" => {
+                                s.cancel_wire();
                                 s.tool = Tool::Place(ComponentType::VoltageSource);
                                 s.preview_rotation = Rotation::R0;
                             }
                             Key::Character(c) if c == "i" => {
+                                s.cancel_wire();
                                 s.tool = Tool::Place(ComponentType::CurrentSource);
                                 s.preview_rotation = Rotation::R0;
                             }
                             Key::Character(c) if c == "c" => {
+                                s.cancel_wire();
                                 s.tool = Tool::Place(ComponentType::Capacitor);
                                 s.preview_rotation = Rotation::R0;
                             }
                             Key::Character(c) if c == "l" || c == "L" => {
+                                s.cancel_wire();
                                 s.tool = Tool::Place(ComponentType::Inductor);
                                 s.preview_rotation = Rotation::R0;
                             }
                             Key::Character(c) if c == "d" => {
+                                s.cancel_wire();
                                 s.tool = Tool::Place(ComponentType::Diode);
                                 s.preview_rotation = Rotation::R0;
                             }
                             Key::Character(c) if c == "q" || c == "Q" => {
+                                s.cancel_wire();
                                 s.tool = Tool::Place(ComponentType::NpnBjt);
                                 s.preview_rotation = Rotation::R0;
                             }
                             Key::Character(c) if c == "m" => {
+                                s.cancel_wire();
                                 s.tool = Tool::Place(ComponentType::Nmos);
                                 s.preview_rotation = Rotation::R0;
                             }
@@ -207,13 +301,54 @@ pub fn Schematic() -> Element {
                             pan.set((opx + c.x - lx, opy + c.y - ly));
                         }
                         
-                        // Handle component dragging
+                        // Handle component, wire, or junction dragging
                         let d = *drag.read();
-                        if d.active && d.component_id.is_some() {
+                        if d.active && (d.component_id.is_some() || d.wire_id.is_some() || d.junction_point.is_some()) {
                             drag.set(DragState {
                                 current_grid: gp,
                                 ..d
                             });
+                        }
+                        
+                        // Handle box selection update with live preview
+                        let bs = *box_selection.read();
+                        if bs.active {
+                            box_selection.set(BoxSelectionState {
+                                end_grid: gp,
+                                end_px: (c.x, c.y),
+                                ..bs
+                            });
+                            
+                            // Update selection in real-time for visual feedback
+                            let min_x = bs.start_grid.x.min(gp.x);
+                            let max_x = bs.start_grid.x.max(gp.x);
+                            let min_y = bs.start_grid.y.min(gp.y);
+                            let max_y = bs.start_grid.y.max(gp.y);
+                            
+                            // Collect IDs of items in box
+                            let comp_ids: Vec<u64> = schematic.read()
+                                .components.iter()
+                                .filter(|comp| {
+                                    comp.pos.x >= min_x && comp.pos.x <= max_x
+                                    && comp.pos.y >= min_y && comp.pos.y <= max_y
+                                })
+                                .map(|comp| comp.id)
+                                .collect();
+                            
+                            let wire_ids: Vec<u64> = schematic.read()
+                                .wires.iter()
+                                .filter(|wire| {
+                                    wire.points.iter().any(|p| {
+                                        p.x >= min_x && p.x <= max_x && p.y >= min_y && p.y <= max_y
+                                    })
+                                })
+                                .map(|wire| wire.id)
+                                .collect();
+                            
+                            // Update selection for live preview
+                            let mut s = schematic.write();
+                            s.selection.components = comp_ids;
+                            s.selection.wires = wire_ids;
                         }
                         
                         // Update wire preview position for orthogonal routing
@@ -225,6 +360,10 @@ pub fn Schematic() -> Element {
                     },
 
                     onmousedown: move |evt| {
+                        // Restore keyboard focus synchronously using JavaScript
+                        // The async spawn approach wasn't reliable
+                        let _ = document::eval(r#"document.getElementById('schematic-canvas-wrapper').focus()"#);
+                        
                         let c = evt.element_coordinates();
                         let (px, py) = *pan.read();
                         let z = *zoom.read();
@@ -237,16 +376,93 @@ pub fn Schematic() -> Element {
                             is_panning.set(true);
                             last_mouse.set((c.x, c.y));
                         }
-                        // Left click on component to start drag (in Select mode)
+                        // Left click on component, junction, endpoint, or wire to start drag (in Select mode)
                         else if evt.trigger_button() == Some(dioxus::html::input_data::MouseButton::Primary) {
-                            let s = schematic.read();
-                            if matches!(s.tool, Tool::Select) {
-                                if let Some(comp_id) = s.component_at(gp) {
+                            // First, collect data we need with an immutable borrow
+                            // Use wire_points_at to detect ALL points (including corners for dragging)
+                            let (tool_is_select, points_at_pos, comp_at, wire_at) = {
+                                let s = schematic.read();
+                                (
+                                    matches!(s.tool, Tool::Select),
+                                    s.wire_points_at(gp),
+                                    s.component_at(gp),
+                                    s.wire_at(gp),
+                                )
+                            };
+                            
+                            if tool_is_select {
+                                if points_at_pos.len() >= 1 {
+                                    // Junction (2+) or single endpoint (1) - start junction/endpoint drag
+                                    drag.set(DragState {
+                                        active: true,
+                                        component_id: None,
+                                        wire_id: None,
+                                        junction_point: Some(gp),
+                                        start_grid: gp,
+                                        current_grid: gp,
+                                        multi_selection: false,
+                                    });
+                                } else if let Some(comp_id) = comp_at {
+                                    // Component - check if already in selection for multi-move
+                                    highlighted_junction.set(None);
+                                    let sel = schematic.read().selection.clone();
+                                    let is_selected = sel.components.contains(&comp_id);
+                                    let total_selected = sel.components.len() + sel.wires.len();
+                                    // Use multi-selection if this component is already selected AND there are multiple items
+                                    let use_multi = is_selected && total_selected > 1;
+                                    
+                                    if !is_selected {
+                                        // Clear selection and select just this component
+                                        let mut s = schematic.write();
+                                        s.selection.clear();
+                                        s.selection.components.push(comp_id);
+                                    }
+                                    
                                     drag.set(DragState {
                                         active: true,
                                         component_id: Some(comp_id),
+                                        wire_id: None,
+                                        junction_point: None,
                                         start_grid: gp,
                                         current_grid: gp,
+                                        multi_selection: use_multi,
+                                    });
+                                } else if let Some(wire_id) = wire_at {
+                                    // Wire segment - check if already in selection for multi-move
+                                    highlighted_junction.set(None);
+                                    let sel = schematic.read().selection.clone();
+                                    let is_selected = sel.wires.contains(&wire_id);
+                                    let total_selected = sel.components.len() + sel.wires.len();
+                                    // Use multi-selection if this wire is already selected AND there are multiple items
+                                    let use_multi = is_selected && total_selected > 1;
+                                    
+                                    if !is_selected {
+                                        // Clear selection and select just this wire
+                                        let mut s = schematic.write();
+                                        s.selection.clear();
+                                        s.selection.wires.push(wire_id);
+                                    }
+                                    
+                                    drag.set(DragState {
+                                        active: true,
+                                        component_id: None,
+                                        wire_id: Some(wire_id),
+                                        junction_point: None,
+                                        start_grid: gp,
+                                        current_grid: gp,
+                                        multi_selection: use_multi,
+                                    });
+                                } else {
+                                    // Clicking on empty space - start box selection
+                                    highlighted_junction.set(None);
+                                    schematic.write().selection.clear();
+                                    box_selection.set(BoxSelectionState {
+                                        active: true,
+                                        start_grid: gp,
+                                        end_grid: gp,
+                                        start_px: (c.x, c.y),
+                                        end_px: (c.x, c.y),
+                                        just_completed: false,
                                     });
                                 }
                             }
@@ -256,24 +472,102 @@ pub fn Schematic() -> Element {
                     onmouseup: move |_| {
                         is_panning.set(false);
                         
+                        // Complete box selection if active
+                        let bs = *box_selection.read();
+                        if bs.active {
+                            // Calculate selection bounds (min/max in grid coordinates)
+                            let min_x = bs.start_grid.x.min(bs.end_grid.x);
+                            let max_x = bs.start_grid.x.max(bs.end_grid.x);
+                            let min_y = bs.start_grid.y.min(bs.end_grid.y);
+                            let max_y = bs.start_grid.y.max(bs.end_grid.y);
+                            
+                            // Only do selection if box has meaningful size
+                            if max_x > min_x || max_y > min_y {
+                                // Collect IDs first to avoid borrow conflict
+                                let comp_ids: Vec<u64> = schematic.read()
+                                    .components.iter()
+                                    .filter(|comp| {
+                                        comp.pos.x >= min_x && comp.pos.x <= max_x
+                                        && comp.pos.y >= min_y && comp.pos.y <= max_y
+                                    })
+                                    .map(|comp| comp.id)
+                                    .collect();
+                                
+                                let wire_ids: Vec<u64> = schematic.read()
+                                    .wires.iter()
+                                    .filter(|wire| {
+                                        wire.points.iter().any(|p| {
+                                            p.x >= min_x && p.x <= max_x && p.y >= min_y && p.y <= max_y
+                                        })
+                                    })
+                                    .map(|wire| wire.id)
+                                    .collect();
+                                
+                                // Now update selection
+                                let mut s = schematic.write();
+                                s.selection.clear();
+                                s.selection.components = comp_ids.clone();
+                                s.selection.wires = wire_ids.clone();
+                                
+                                // Set flag to prevent onclick from clearing selection
+                                let has_selection = !comp_ids.is_empty() || !wire_ids.is_empty();
+                                box_selection.set(BoxSelectionState {
+                                    just_completed: has_selection,
+                                    ..BoxSelectionState::default()
+                                });
+                            } else {
+                                box_selection.set(BoxSelectionState::default());
+                            }
+                        }
+                        
                         // Commit drag if active
                         let d = *drag.read();
                         if d.active {
-                            if let Some(comp_id) = d.component_id {
-                                let delta_x = d.current_grid.x - d.start_grid.x;
-                                let delta_y = d.current_grid.y - d.start_grid.y;
+                            let delta_x = d.current_grid.x - d.start_grid.x;
+                            let delta_y = d.current_grid.y - d.start_grid.y;
+                            
+                            if let Some(junction_pos) = d.junction_point {
+                                // Calculate final position
+                                let new_pos = crate::state::Point::new(
+                                    junction_pos.x + delta_x,
+                                    junction_pos.y + delta_y,
+                                );
                                 
                                 if delta_x != 0 || delta_y != 0 {
-                                    // Apply the move FIRST
-                                    {
-                                        let mut s = schematic.write();
-                                        if let Some(comp) = s.components.iter_mut().find(|c| c.id == comp_id) {
-                                            comp.pos.x += delta_x;
-                                            comp.pos.y += delta_y;
-                                        }
+                                    // Move junction - all wire endpoints at this position
+                                    schematic.write().move_junction(junction_pos, new_pos);
+                                    history.write().push(schematic.read().clone(), "Move junction");
+                                }
+                                
+                                // Set highlighted junction to persist selection after drag
+                                let final_pos = if delta_x != 0 || delta_y != 0 { new_pos } else { junction_pos };
+                                highlighted_junction.set(Some(final_pos));
+                                
+                                // Add all wires at the junction to the selection so Delete works
+                                // This matches professional simulator behavior
+                                let wire_points = schematic.read().wire_points_at(final_pos);
+                                let mut s = schematic.write();
+                                s.selection.clear();
+                                for (wire_id, _) in wire_points {
+                                    if !s.selection.wires.contains(&wire_id) {
+                                        s.selection.wires.push(wire_id);
                                     }
-                                    // Then save state AFTER the change
+                                }
+                            } else if delta_x != 0 || delta_y != 0 {
+                                let delta = crate::state::Point::new(delta_x, delta_y);
+                                
+                                if d.multi_selection {
+                                    // Move ALL selected components and wires using the unified method
+                                    schematic.write().move_selection(delta);
+                                    history.write().push(schematic.read().clone(), "Move selection");
+                                } else if let Some(comp_id) = d.component_id {
+                                    // Move single component WITH attached wires (rubber-banding)
+                                    schematic.write().move_component_with_wires(comp_id, delta);
                                     history.write().push(schematic.read().clone(), "Move component");
+                                } else if let Some(wire_id) = d.wire_id {
+                                    // Move single wire (all points)
+                                    schematic.write().move_wire(wire_id, delta);
+                                    history.write().push(schematic.read().clone(), "Move wire");
                                 }
                             }
                             drag.set(DragState::default());
@@ -304,6 +598,13 @@ pub fn Schematic() -> Element {
                         // Close context menu if open
                         if context_menu.read().visible {
                             context_menu.set(ContextMenuState::default());
+                            return;
+                        }
+                        
+                        // If box selection just completed, don't clear selection
+                        // (onclick fires after mouseup, which already set the selection)
+                        if box_selection.read().just_completed {
+                            box_selection.set(BoxSelectionState::default());
                             return;
                         }
                         
@@ -465,12 +766,65 @@ pub fn Schematic() -> Element {
                         line { x1: "-30", y1: "0", x2: "30", y2: "0", stroke: "{th.accent_primary()}", stroke_width: "1" }
                         line { x1: "0", y1: "-30", x2: "0", y2: "30", stroke: "{th.accent_primary()}", stroke_width: "1" }
 
-                        // Wires
-                        for wire in schematic.read().wires.iter() {
-                            WireSvg {
-                                points: wire.points.clone(),
-                                grid_size: schematic.read().grid_size,
-                                selected: schematic.read().selection.has_wire(wire.id),
+                        // Wires - render with preview positions during component or wire drag
+                        {
+                            let d = *drag.read();
+                            let comp_dragging_id = if d.active { d.component_id } else { None };
+                            let wire_dragging_id = if d.active { d.wire_id } else { None };
+                            let is_multi_drag = d.active && d.multi_selection;
+                            let delta = if d.active {
+                                crate::state::Point::new(
+                                    d.current_grid.x - d.start_grid.x,
+                                    d.current_grid.y - d.start_grid.y,
+                                )
+                            } else {
+                                crate::state::Point::new(0, 0)
+                            };
+                            let gs = schematic.read().grid_size;
+                            let junction_pos = if d.active { d.junction_point } else { None };
+                            // Also check persisted junction highlight for after drag ends
+                            let persisted_junction = *highlighted_junction.read();
+                            let selection = schematic.read().selection.clone();
+                            
+                            rsx! {
+                                for wire in schematic.read().wires.iter() {
+                                    // Calculate points based on drag type
+                                    if Some(wire.id) == wire_dragging_id {
+                                        // Wire drag - move all points
+                                        WireSvg {
+                                            points: wire.points.iter().map(|p| crate::state::Point::new(p.x + delta.x, p.y + delta.y)).collect(),
+                                            grid_size: gs,
+                                            selected: true,
+                                        }
+                                    } else if is_multi_drag && selection.has_wire(wire.id) {
+                                        // Multi-selection drag - move entire selected wire
+                                        WireSvg {
+                                            points: wire.points.iter().map(|p| crate::state::Point::new(p.x + delta.x, p.y + delta.y)).collect(),
+                                            grid_size: gs,
+                                            selected: true,
+                                        }
+                                    } else if junction_pos.is_some() {
+                                        // Junction/endpoint drag - move only points at junction position
+                                        WireSvg {
+                                            points: wire.points.iter().map(|p| {
+                                                if Some(*p) == junction_pos {
+                                                    crate::state::Point::new(p.x + delta.x, p.y + delta.y)
+                                                } else {
+                                                    *p
+                                                }
+                                            }).collect(),
+                                            grid_size: gs,
+                                            selected: (wire.points.first() == junction_pos.as_ref() || wire.points.last() == junction_pos.as_ref()) || selection.has_wire(wire.id),
+                                        }
+                                    } else {
+                                        // Normal rendering - check persisted junction highlight OR selection
+                                        WireSvg {
+                                            points: schematic.read().get_wire_preview_points(wire, comp_dragging_id, delta),
+                                            grid_size: gs,
+                                            selected: (persisted_junction.is_some() && (wire.points.first() == persisted_junction.as_ref() || wire.points.last() == persisted_junction.as_ref())) || selection.has_wire(wire.id),
+                                        }
+                                    }
+                                }
                             }
                         }
                         
@@ -487,29 +841,172 @@ pub fn Schematic() -> Element {
                                 schematic: schematic,
                             }
                         }
-
-                        // Components
-                        for comp in schematic.read().components.iter() {
-                            CompSvg {
-                                kind: comp.kind,
-                                pos: comp.pos,
-                                rotation: comp.rotation.degrees(),
-                                name: comp.name.clone(),
-                                value: comp.value.clone(),
-                                grid_size: schematic.read().grid_size,
-                                selected: schematic.read().selection.has_component(comp.id),
+                        
+                        // Junction dots - render after all wires for proper z-ordering
+                        // Dots are rendered separately from wires so selected dots appear on top
+                        {
+                            let d = *drag.read();
+                            let junction_pos = if d.active { d.junction_point } else { None };
+                            let persisted = *highlighted_junction.read();
+                            let gs = schematic.read().grid_size;
+                            let theme: Signal<Theme> = use_context();
+                            let th = theme.read();
+                            let selected_col = th.accent_primary();
+                            let normal_col = th.accent_success();
+                            
+                            // Calculate drag delta for junction points
+                            let drag_delta = if d.active && junction_pos.is_some() {
+                                crate::state::Point::new(
+                                    d.current_grid.x - d.start_grid.x,
+                                    d.current_grid.y - d.start_grid.y,
+                                )
+                            } else {
+                                crate::state::Point::new(0, 0)
+                            };
+                            
+                            // Collect all component terminal positions to exclude from junction circles
+                            // Professional simulators don't show junction circles at component terminals
+                            let terminal_positions: std::collections::HashSet<Point> = schematic.read()
+                                .components.iter()
+                                .flat_map(|comp| comp.terminal_positions())
+                                .map(|(_, pos)| pos)
+                                .collect();
+                            
+                            // For multi-selection, we need to know if wire is selected
+                            let is_multi_drag = d.active && d.multi_selection;
+                            let multi_delta = if is_multi_drag {
+                                crate::state::Point::new(
+                                    d.current_grid.x - d.start_grid.x,
+                                    d.current_grid.y - d.start_grid.y,
+                                )
+                            } else {
+                                crate::state::Point::new(0, 0)
+                            };
+                            let selection = schematic.read().selection.clone();
+                            
+                            // Collect all unique wire endpoints with their display positions
+                            let mut endpoint_selected: std::collections::HashMap<Point, bool> = std::collections::HashMap::new();
+                            for wire in schematic.read().wires.iter() {
+                                let wire_is_selected = selection.has_wire(wire.id);
+                                for pt in wire.points.iter() {
+                                    // Apply drag delta based on drag type:
+                                    // 1. Junction drag - offset point at junction
+                                    // 2. Multi-selection drag - offset all points of selected wires
+                                    let display_pt = if junction_pos.is_some() && Some(*pt) == junction_pos {
+                                        crate::state::Point::new(pt.x + drag_delta.x, pt.y + drag_delta.y)
+                                    } else if is_multi_drag && wire_is_selected {
+                                        crate::state::Point::new(pt.x + multi_delta.x, pt.y + multi_delta.y)
+                                    } else {
+                                        *pt
+                                    };
+                                    
+                                    // Skip points that are at component terminals
+                                    if terminal_positions.contains(&display_pt) {
+                                        continue;
+                                    }
+                                    
+                                    let is_selected = 
+                                        // During drag - check if point is at junction
+                                        (junction_pos.is_some() && (Some(*pt) == junction_pos || wire.points.first() == junction_pos.as_ref() || wire.points.last() == junction_pos.as_ref()))
+                                        // After drag - check persisted junction
+                                        || (persisted.is_some() && (wire.points.first() == persisted.as_ref() || wire.points.last() == persisted.as_ref()))
+                                        // Normal selection
+                                        || wire_is_selected;
+                                    
+                                    // Mark point as selected if any wire at this point is selected
+                                    let entry = endpoint_selected.entry(display_pt).or_insert(false);
+                                    *entry = *entry || is_selected;
+                                }
+                            }
+                            
+                            rsx! {
+                                // Render unselected dots first
+                                for (pt, sel) in endpoint_selected.iter() {
+                                    if !*sel {
+                                        {
+                                            let (x, y) = pt.to_pixels(gs);
+                                            rsx! { circle { cx: "{x}", cy: "{y}", r: "4", fill: "{normal_col}" } }
+                                        }
+                                    }
+                                }
+                                // Render selected dots on top
+                                for (pt, sel) in endpoint_selected.iter() {
+                                    if *sel {
+                                        {
+                                            let (x, y) = pt.to_pixels(gs);
+                                            rsx! { circle { cx: "{x}", cy: "{y}", r: "4", fill: "{selected_col}" } }
+                                        }
+                                    }
+                                }
                             }
                         }
                         
-                        // Drag preview ghost - shows where component will move to
-                        if drag.read().active {
-                            if let Some(comp_id) = drag.read().component_id {
-                                if let Some(comp) = schematic.read().components.iter().find(|c| c.id == comp_id) {
-                                    PreviewSvg {
+                        // Box selection rectangle (rubber-band selection visual)
+                        {
+                            let bs = *box_selection.read();
+                            let gs = schematic.read().grid_size;
+                            let theme: Signal<Theme> = use_context();
+                            let selection_color = theme.read().accent_primary();
+                            
+                            if bs.active {
+                                let (x1, y1) = bs.start_grid.to_pixels(gs);
+                                let (x2, y2) = bs.end_grid.to_pixels(gs);
+                                let x = x1.min(x2);
+                                let y = y1.min(y2);
+                                let w = (x2 - x1).abs();
+                                let h = (y2 - y1).abs();
+                                rsx! {
+                                    rect {
+                                        x: "{x}",
+                                        y: "{y}",
+                                        width: "{w}",
+                                        height: "{h}",
+                                        fill: "rgba(0, 180, 255, 0.1)",
+                                        stroke: "{selection_color}",
+                                        stroke_width: "1",
+                                        stroke_dasharray: "5,3",
+                                    }
+                                }
+                            } else {
+                                rsx! {}
+                            }
+                        }
+
+                        // Components - render at current position, or with drag offset if being dragged
+                        {
+                            // Pre-compute drag state before the for loop (RSX for doesn't allow let statements)
+                            let d = *drag.read();
+                            let dragging_id = if d.active { d.component_id } else { None };
+                            let is_multi_drag = d.active && d.multi_selection;
+                            // Calculate delta for offset-based dragging (no snap to cursor)
+                            let drag_delta = if d.active {
+                                crate::state::Point::new(
+                                    d.current_grid.x - d.start_grid.x,
+                                    d.current_grid.y - d.start_grid.y,
+                                )
+                            } else {
+                                crate::state::Point::new(0, 0)
+                            };
+                            let gs = schematic.read().grid_size;
+                            let selection = schematic.read().selection.clone();
+                            
+                            rsx! {
+                                for comp in schematic.read().components.iter() {
+                                    CompSvg {
                                         kind: comp.kind,
-                                        pos: *mouse_grid.read(),
-                                        grid_size: schematic.read().grid_size,
-                                        rotation: comp.rotation,
+                                        // Apply drag delta: to clicked component OR all selected components in multi-mode
+                                        pos: if Some(comp.id) == dragging_id { 
+                                            crate::state::Point::new(comp.pos.x + drag_delta.x, comp.pos.y + drag_delta.y)
+                                        } else if is_multi_drag && selection.has_component(comp.id) {
+                                            crate::state::Point::new(comp.pos.x + drag_delta.x, comp.pos.y + drag_delta.y)
+                                        } else { 
+                                            comp.pos 
+                                        },
+                                        rotation: comp.rotation.degrees(),
+                                        name: comp.name.clone(),
+                                        value: comp.value.clone(),
+                                        grid_size: gs,
+                                        selected: selection.has_component(comp.id),
                                     }
                                 }
                             }
@@ -666,14 +1163,10 @@ fn WireSvg(points: Vec<Point>, grid_size: i32, selected: bool) -> Element {
         }
     }
     
+    // Only render the wire path - endpoint dots are rendered separately
+    // to ensure proper z-ordering (selected dots on top)
     rsx! {
         path { d: "{d}", stroke: "{col}", stroke_width: "{sw}", fill: "none", stroke_linecap: "round" }
-        for p in points.iter() {
-            {
-                let (x, y) = p.to_pixels(grid_size);
-                rsx! { circle { cx: "{x}", cy: "{y}", r: "4", fill: "{col}" } }
-            }
-        }
     }
 }
 
@@ -731,20 +1224,26 @@ fn symbol_path(k: ComponentType) -> &'static str {
         ComponentType::Resistor => "M-20 0 L-15 0 L-12-8 L-6 8 L0-8 L6 8 L12-8 L15 0 L20 0",
         ComponentType::Capacitor => "M-20 0 L-4 0 M-4-12 L-4 12 M4-12 L4 12 M4 0 L20 0",
         ComponentType::Inductor => "M-20 0 C-15 0-15-10-10-10 C-5-10-5 0 0 0 C5 0 5-10 10-10 C15-10 15 0 20 0",
+        ComponentType::CoupledInductor => "M-15-10 C-10-10-10-20-5-20 C0-20 0-10 5-10 C10-10 10-20 15-20 M-15 10 C-10 10-10 0-5 0 C0 0 0 10 5 10 C10 10 10 0 15 0 M0-6 L0 6",
         ComponentType::Diode => "M-20 0 L-8 0 M-8-10 L-8 10 L8 0 Z M8-10 L8 10 M8 0 L20 0",
         ComponentType::Ground => "M0-20 L0 0 M-12 0 L12 0 M-8 5 L8 5 M-4 10 L4 10",
         ComponentType::VoltageSource | ComponentType::VoltageSourceAc | ComponentType::VoltageSourcePulse | ComponentType::VoltageSourceSin => 
             "M0-20 L0-12 M0 12 L0 20 M0 0 m-12 0 a12 12 0 1 0 24 0 a12 12 0 1 0-24 0 M-4-4 L4-4 M0-8 L0 0",
         ComponentType::CurrentSource => "M0-20 L0-12 M0 12 L0 20 M0 0 m-12 0 a12 12 0 1 0 24 0 a12 12 0 1 0-24 0 M0-6 L0 6 M-3 3 L0 6 L3 3",
-        // NPN BJT: base input, vertical bar, collector (angled up-right), emitter (angled down-right) with arrow pointing OUT from bar
-        // Arrow is midway on emitter line, pointing away from base
-        ComponentType::NpnBjt => "M-20 0 L-5 0 M-5-10 L-5 10 M-5-4 L10-16 L10-20 M-5 4 L10 16 L10 20 M2 10 L6 13 L2 13",
-        // PNP BJT: same structure, arrow on emitter pointing IN toward bar
-        ComponentType::PnpBjt => "M-20 0 L-5 0 M-5-10 L-5 10 M-5-4 L10-16 L10-20 M-5 4 L10 16 L10 20 M-2 6 L-5 4 L-5 7",
+        // NPN BJT: encircled, base on left, vertical bar, E top-right with arrow out, C bottom-right
+        ComponentType::NpnBjt => "M-20 0 L-12 0 M0 0 m-12 0 a12 12 0 1 0 24 0 a12 12 0 1 0-24 0 M-4-8 L-4 8 M-4-4 L8-10 L10-20 M-4 4 L8 10 L10 20 M4 7 L8 10 L5 11",
+        // PNP BJT: encircled, base on left, vertical bar, C top-right, E bottom-right with arrow in
+        ComponentType::PnpBjt => "M-20 0 L-12 0 M0 0 m-12 0 a12 12 0 1 0 24 0 a12 12 0 1 0-24 0 M-4-8 L-4 8 M-4-4 L8-10 L10-20 M-4 4 L8 10 L10 20 M-1 6 L-4 4 L-1 2",
         // NMOS: gate on left, vertical gate plate, channel with gaps, source (bottom) and drain (top) with body arrow IN
         ComponentType::Nmos => "M-20 0 L-8 0 M-8-12 L-8 12 M-4-10 L-4-3 M-4 3 L-4 10 M-4-7 L10-7 L10-20 M-4 7 L10 7 L10 20 M-4 0 L10 0 M6-3 L10 0 L6 3",
         // PMOS: same as NMOS but with inversion bubble on gate
         ComponentType::Pmos => "M-20 0 L-12 0 M-8 0 m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0-6 0 M-5-12 L-5 12 M-1-10 L-1-3 M-1 3 L-1 10 M-1-7 L10-7 L10-20 M-1 7 L10 7 L10 20 M-1 0 L10 0",
+        // JFETs: similar to MOSFETs but with solid bar (no gap)
+        ComponentType::Njfet => "M-20 0 L-6 0 M-6-10 L-6 10 M-6-5 L10-5 L10-20 M-6 5 L10 5 L10 20 M4 2 L10 0 L4-2",
+        ComponentType::Pjfet => "M-20 0 L-6 0 M-6-10 L-6 10 M-6-5 L10-5 L10-20 M-6 5 L10 5 L10 20 M-2 2 L-6 0 L-2-2",
+        // Controlled sources: diamond shape with control/output terminals
+        ComponentType::Vcvs | ComponentType::Vccs | ComponentType::Ccvs | ComponentType::Cccs => 
+            "M0-15 L12 0 L0 15 L-12 0 Z M-20-10 L-12-5 M-20 10 L-12 5 M12-5 L20-10 M12 5 L20 10",
     }
 }
 
