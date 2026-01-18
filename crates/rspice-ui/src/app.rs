@@ -13,15 +13,7 @@ use crate::components::{Panel, SimulationDialog, Toolbar};
 use crate::state::simulation_command::SimulationConfig;
 use crate::state::{DocumentManager, SchematicState, SimulationState};
 use crate::theme::Theme;
-use crate::views::{Console, Netlist, Schematic, Waveform};
-
-/// Active editor tab
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum EditorTab {
-    #[default]
-    Schematic,
-    Netlist,
-}
+use crate::views::{Console, Schematic, SchematicToolbar, Waveform};
 
 /// Wrapper type for waveform visibility (needed for distinct context type)
 #[derive(Clone, Copy)]
@@ -36,9 +28,8 @@ pub struct ConsoleVisible(pub bool);
 pub fn App() -> Element {
     // Initialize global state
     let theme = use_signal(|| Theme::DARK);
-    let sim_state = use_signal(SimulationState::default);
-    let schematic_state = use_signal(SchematicState::default);
-    let active_tab = use_signal(|| EditorTab::Schematic);
+    let mut sim_state = use_signal(SimulationState::default);
+    let mut schematic_state = use_signal(SchematicState::default);
 
     // Simulation configuration (from dialog)
     let mut sim_config = use_signal(SimulationConfig::default);
@@ -124,20 +115,6 @@ pub fn App() -> Element {
             // Top toolbar
             Toolbar {}
 
-            // Document tabs (MDI)
-            DocumentTabBar {
-                doc_manager: doc_manager,
-                on_tab_change: move |idx| {
-                    doc_manager.write().set_active(idx);
-                },
-                on_tab_close: move |idx| {
-                    doc_manager.write().close_document(idx);
-                },
-                on_new_document: move |_| {
-                    doc_manager.write().new_document();
-                },
-            }
-
             // Main content area
             div {
                 class: "main-content",
@@ -147,7 +124,7 @@ pub fn App() -> Element {
                     overflow: hidden;
                 ",
 
-                // Center - Editor area with tabs
+                // Center - Editor area (schematic + waveform)
                 div {
                     class: "editor-area",
                     style: "
@@ -157,71 +134,39 @@ pub fn App() -> Element {
                         overflow: hidden;
                     ",
 
-                    // Editor tabs header
-                    EditorTabBar {
-                        active_tab: active_tab,
+                    // Tool selection bar (Select, Wire, Probe, etc.)
+                    SchematicToolbar { schematic: schematic_state }
+
+                    // Schematic editor (main) - includes document tabs internally
+                    div {
+                        style: "flex: 1; overflow: hidden; min-height: 0;",
+                        Schematic {}
                     }
 
-                    // Editor content based on active tab
-                    match *active_tab.read() {
-                        EditorTab::Schematic => rsx! {
-                            // Schematic editor (main)
-                            div {
-                                style: "flex: 1; overflow: hidden; min-height: 0;",
-                                Schematic {}
-                            }
+                    // Only show waveform viewer when simulation results exist AND visible
+                    // This matches professional simulator behavior (LTspice)
+                    if !sim_state.read().waveforms.is_empty() && waveform_visible.read().0 {
+                        // Resizable divider for waveform pane
+                        div {
+                            style: "
+                                height: 6px;
+                                background: {th.border()};
+                                cursor: row-resize;
+                                transition: background 0.15s;
+                            ",
+                            onmouseenter: move |_| {},
+                            onmousedown: move |evt| {
+                                resize_dragging.set(Some("waveform"));
+                                resize_start_y.set(evt.page_coordinates().y);
+                                resize_start_height.set(*waveform_height.read());
+                            },
+                        }
 
-                            // Only show waveform viewer when simulation results exist AND visible
-                            // This matches professional simulator behavior (LTspice)
-                            if !sim_state.read().waveforms.is_empty() && waveform_visible.read().0 {
-                                // Resizable divider for waveform pane
-                                div {
-                                    style: "
-                                        height: 6px;
-                                        background: {th.border()};
-                                        cursor: row-resize;
-                                        transition: background 0.15s;
-                                    ",
-                                    onmouseenter: move |_| {},
-                                    onmousedown: move |evt| {
-                                        resize_dragging.set(Some("waveform"));
-                                        resize_start_y.set(evt.page_coordinates().y);
-                                        resize_start_height.set(*waveform_height.read());
-                                    },
-                                }
-
-                                // Waveform viewer (bottom) - dynamic height
-                                div {
-                                    style: "height: {waveform_height}px; min-height: 100px; overflow: hidden;",
-                                    Waveform {}
-                                }
-                            }
-                        },
-                        EditorTab::Netlist => rsx! {
-                            // Netlist editor (top)
-                            div {
-                                style: "flex: 1; min-height: 200px; overflow: hidden;",
-                                Netlist {}
-                            }
-
-                            // Only show waveform viewer when simulation results exist AND visible
-                            if !sim_state.read().waveforms.is_empty() && waveform_visible.read().0 {
-                                // Resizable divider
-                                div {
-                                    style: "
-                                        height: 4px;
-                                        background: {th.border()};
-                                        cursor: row-resize;
-                                    "
-                                }
-
-                                // Waveform viewer (bottom)
-                                div {
-                                    style: "flex: 1; min-height: 200px; overflow: hidden;",
-                                    Waveform {}
-                                }
-                            }
-                        },
+                        // Waveform viewer (bottom) - dynamic height
+                        div {
+                            style: "height: {waveform_height}px; min-height: 100px; overflow: hidden;",
+                            Waveform {}
+                        }
                     }
                 }
 
@@ -270,87 +215,6 @@ pub fn App() -> Element {
                     sim_dialog_visible.set(false);
                 },
             }
-        }
-    }
-}
-
-/// Editor tab bar component
-#[component]
-fn EditorTabBar(active_tab: Signal<EditorTab>) -> Element {
-    let theme: Signal<Theme> = use_context();
-    let th = theme.read();
-
-    rsx! {
-        div {
-            class: "editor-tab-bar",
-            style: "
-                display: flex;
-                align-items: center;
-                height: 32px;
-                padding: 0 {Theme::SPACING_SM};
-                background: {th.bg_tertiary()};
-                border-bottom: 1px solid {th.border()};
-                gap: 2px;
-            ",
-
-            // Schematic tab
-            EditorTabButton {
-                label: "Schematic",
-                active: *active_tab.read() == EditorTab::Schematic,
-                onclick: move |_| active_tab.set(EditorTab::Schematic),
-            }
-
-            // Netlist tab
-            EditorTabButton {
-                label: "Netlist",
-                active: *active_tab.read() == EditorTab::Netlist,
-                onclick: move |_| active_tab.set(EditorTab::Netlist),
-            }
-        }
-    }
-}
-
-/// Single editor tab button
-#[component]
-fn EditorTabButton(
-    label: &'static str,
-    active: bool,
-    onclick: EventHandler<MouseEvent>,
-) -> Element {
-    let theme: Signal<Theme> = use_context();
-    let th = theme.read();
-
-    let bg = if active {
-        th.bg_secondary()
-    } else {
-        "transparent"
-    };
-    let color = if active {
-        th.text_primary()
-    } else {
-        th.text_muted()
-    };
-    let border = if active {
-        format!("border-bottom: 2px solid {};", th.accent_primary())
-    } else {
-        "border-bottom: 2px solid transparent;".to_string()
-    };
-
-    rsx! {
-        button {
-            style: "
-                padding: {Theme::SPACING_XS} {Theme::SPACING_MD};
-                background: {bg};
-                color: {color};
-                font-size: {Theme::FONT_SIZE_SM};
-                border: none;
-                border-radius: {Theme::RADIUS_SM} {Theme::RADIUS_SM} 0 0;
-                {border}
-                cursor: pointer;
-                transition: all 0.15s ease;
-            ",
-            onclick: move |evt| onclick.call(evt),
-            "{label}"
         }
     }
 }

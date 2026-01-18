@@ -12,5 +12,5 @@ pub mod waveform_gpu;
 
 pub use console::Console;
 pub use netlist::Netlist;
-pub use schematic::Schematic;
+pub use schematic::{Schematic, SchematicToolbar};
 pub use waveform::Waveform;

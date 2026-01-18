@@ -9,7 +9,8 @@ use crate::app::WaveformVisible;
 use crate::components::component_edit::ComponentEditModal;
 use crate::components::component_library::ComponentLibrary;
 use crate::components::context_menu::{schematic_context_menu, canvas_context_menu, ContextMenu, MenuAction};
-use crate::state::{CanvasFocusState, ComponentType, ConsoleMessage, Point, Rotation, SchematicState, SimulationState, Tool, SchematicHistory};
+use crate::components::tab_bar::DocumentTabBar;
+use crate::state::{CanvasFocusState, ComponentType, ConsoleMessage, DocumentManager, Point, Rotation, SchematicState, SimulationState, Tool, SchematicHistory};
 use crate::theme::Theme;
 
 /// Drag operation state
@@ -70,12 +71,26 @@ pub fn Schematic() -> Element {
     let mut sim_state: Signal<SimulationState> = use_context();
     let mut waveform_visible: Signal<WaveformVisible> = use_context();
 
-    // Viewport state
-    let mut pan = use_signal(|| (400.0f64, 300.0f64));
-    let mut zoom = use_signal(|| 1.0f64);
+    // Viewport state - pan/zoom stored in SchematicState for per-document persistence
+    // Local signals mirror SchematicState and sync back on changes
+    let sch = schematic.read();
+    let mut pan = use_signal(|| sch.pan);
+    let mut zoom = use_signal(|| sch.zoom);
+    drop(sch);
     let mut is_panning = use_signal(|| false);
     let mut last_mouse = use_signal(|| (0.0f64, 0.0f64));
     let mut mouse_grid = use_signal(|| Point::new(0, 0));
+    
+    // Sync pan/zoom from SchematicState when it changes (e.g., tab switch)
+    {
+        let sch = schematic.read();
+        if *pan.read() != sch.pan {
+            pan.set(sch.pan);
+        }
+        if *zoom.read() != sch.zoom {
+            zoom.set(sch.zoom);
+        }
+    }
 
     // Drag-to-move state
     let mut drag = use_signal(DragState::default);
@@ -143,8 +158,6 @@ pub fn Schematic() -> Element {
             class: "schematic-container",
             style: "display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden;",
 
-            SchematicToolbar { schematic: schematic }
-
             // Main content area with library sidebar and canvas
             div {
                 style: "display: flex; flex: 1 1 auto; overflow: hidden;",
@@ -152,12 +165,64 @@ pub fn Schematic() -> Element {
                 // Component Library sidebar
                 ComponentLibrary { schematic: schematic }
 
-                // Canvas area - wrapper div is focusable for keyboard events
+                // Canvas container (tabs + canvas) - takes remaining width
                 div {
-                    id: "schematic-canvas-wrapper",
-                    class: "schematic-canvas-wrapper",
-                    style: "flex: 1 1 auto; position: relative; overflow: hidden; outline: none;",
-                    tabindex: "0",
+                    style: "display: flex; flex-direction: column; flex: 1 1 auto; overflow: hidden;",
+                    
+                    // Document tabs - only above canvas, not library
+                    {
+                        let mut doc_manager: Signal<DocumentManager> = use_context();
+                        let mut sim_state_ctx: Signal<SimulationState> = use_context();
+                        
+                        rsx! {
+                            DocumentTabBar {
+                                doc_manager: doc_manager,
+                                on_tab_change: move |idx| {
+                                    // Save current state to the currently active document before switching
+                                    {
+                                        let mut docs = doc_manager.write();
+                                        docs.active_mut().schematic = schematic.read().clone();
+                                        docs.active_mut().simulation = sim_state_ctx.read().clone();
+                                        docs.set_active(idx);
+                                    }
+                                    // Load state from the newly active document
+                                    let docs = doc_manager.read();
+                                    schematic.set(docs.active().schematic.clone());
+                                    sim_state_ctx.set(docs.active().simulation.clone());
+                                },
+                                on_tab_close: move |idx| {
+                                    let was_active = doc_manager.read().active_index == idx;
+                                    doc_manager.write().close_document(idx);
+                                    // If we closed the active tab, load state from the new active document
+                                    if was_active {
+                                        let docs = doc_manager.read();
+                                        schematic.set(docs.active().schematic.clone());
+                                        sim_state_ctx.set(docs.active().simulation.clone());
+                                    }
+                                },
+                                on_new_document: move |_| {
+                                    // Save current state before creating new document
+                                    {
+                                        let mut docs = doc_manager.write();
+                                        docs.active_mut().schematic = schematic.read().clone();
+                                        docs.active_mut().simulation = sim_state_ctx.read().clone();
+                                        docs.new_document();
+                                    }
+                                    // Load empty state for the new document
+                                    let docs = doc_manager.read();
+                                    schematic.set(docs.active().schematic.clone());
+                                    sim_state_ctx.set(docs.active().simulation.clone());
+                                },
+                            }
+                        }
+                    }
+                    
+                    // Canvas area - wrapper div is focusable for keyboard events
+                    div {
+                        id: "schematic-canvas-wrapper",
+                        class: "schematic-canvas-wrapper",
+                        style: "flex: 1 1 auto; position: relative; overflow: hidden; outline: none;",
+                        tabindex: "0",
                     onmounted: move |evt| {
                         canvas_focus.write().set_element(evt.data());
                         // Auto-focus so keyboard shortcuts work immediately on startup
@@ -302,6 +367,8 @@ pub fn Schematic() -> Element {
                             let (lx, ly) = *last_mouse.read();
                             let (opx, opy) = *pan.read();
                             pan.set((opx + c.x - lx, opy + c.y - ly));
+                            // Sync to SchematicState for per-document persistence
+                            schematic.write().pan = *pan.read();
                         }
                         
                         // Handle component, wire, or junction dragging
@@ -595,6 +662,12 @@ pub fn Schematic() -> Element {
                         let r = new_z / old_z;
                         pan.set((c.x - (c.x - opx) * r, c.y - (c.y - opy) * r));
                         zoom.set(new_z);
+                        // Sync to SchematicState for per-document persistence
+                        {
+                            let mut sch = schematic.write();
+                            sch.pan = *pan.read();
+                            sch.zoom = *zoom.read();
+                        }
                     },
 
                     onclick: move |evt| {
@@ -1177,11 +1250,13 @@ pub fn Schematic() -> Element {
                 }
             }
         }
+        // End canvas container (tabs + canvas)
+        }
     }
 }
 
 #[component]
-fn SchematicToolbar(schematic: Signal<SchematicState>) -> Element {
+pub fn SchematicToolbar(schematic: Signal<SchematicState>) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
     let tool = schematic.read().tool;
