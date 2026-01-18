@@ -43,7 +43,7 @@ pub fn GpuWaveformCanvas(view_state: Signal<ViewState>, waveforms: Vec<WaveformD
     let render_height = (height * 2).max(300);
 
     // Use fresh view prop for render key - ensures effect triggers on view changes
-    let render_key = format!(
+    let _render_key = format!(
         "{:.6}_{:.6}_{:.6}_{:.6}_{}_{}x{}",
         view.x_min,
         view.x_max,
@@ -90,7 +90,7 @@ pub fn GpuWaveformCanvas(view_state: Signal<ViewState>, waveforms: Vec<WaveformD
     };
 
     // Track the last render key to avoid redundant renders
-    let mut last_render_key = use_signal(String::new);
+    let _last_render_key = use_signal(String::new);
 
     // Platform-specific rendering
     #[cfg(target_arch = "wasm32")]
@@ -101,13 +101,13 @@ pub fn GpuWaveformCanvas(view_state: Signal<ViewState>, waveforms: Vec<WaveformD
 
         // Spawn async render directly on component render (not via use_effect)
         // This ensures we react to every render caused by signal changes
-        let key = render_key.clone();
-        let last_key = last_render_key.read().clone();
+        let key = _render_key.clone();
+        let last_key = _last_render_key.read().clone();
 
         // Throttle: only start new render if not already rendering and key changed
         if last_key != key && !*is_rendering.read() {
             log::info!("[GPU Canvas] new render key detected, spawning GPU render");
-            last_render_key.set(key.clone());
+            _last_render_key.set(key.clone());
 
             // Increment generation
             let current_gen = *render_generation.read() + 1;

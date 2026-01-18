@@ -64,13 +64,13 @@ pub fn SimulationDialog(props: SimulationDialogProps) -> Element {
 
     // Local state for editing (not committed until OK)
     let mut active_tab = use_signal(|| AnalysisTab::Transient);
-    let mut transient_enabled = use_signal(|| props.config.transient.is_some());
-    let mut ac_enabled = use_signal(|| props.config.ac.is_some());
-    let mut dc_enabled = use_signal(|| props.config.dc_sweep.is_some());
-    let mut op_enabled = use_signal(|| props.config.op.enabled);
+    let transient_enabled = use_signal(|| props.config.transient.is_some());
+    let ac_enabled = use_signal(|| props.config.ac.is_some());
+    let dc_enabled = use_signal(|| props.config.dc_sweep.is_some());
+    let op_enabled = use_signal(|| props.config.op.enabled);
 
     // Form values - stored as strings for editing, parsed on confirm
-    let mut tran_stop = use_signal(|| {
+    let tran_stop = use_signal(|| {
         format_value(
             props
                 .config
@@ -80,7 +80,7 @@ pub fn SimulationDialog(props: SimulationDialogProps) -> Element {
                 .unwrap_or(1e-3),
         )
     });
-    let mut tran_step = use_signal(|| {
+    let tran_step = use_signal(|| {
         format_value(
             props
                 .config
@@ -90,7 +90,7 @@ pub fn SimulationDialog(props: SimulationDialogProps) -> Element {
                 .unwrap_or(1e-6),
         )
     });
-    let mut tran_start = use_signal(|| {
+    let tran_start = use_signal(|| {
         format_value(
             props
                 .config
@@ -100,7 +100,7 @@ pub fn SimulationDialog(props: SimulationDialogProps) -> Element {
                 .unwrap_or(0.0),
         )
     });
-    let mut tran_max_step = use_signal(|| {
+    let tran_max_step = use_signal(|| {
         props
             .config
             .transient
@@ -110,7 +110,7 @@ pub fn SimulationDialog(props: SimulationDialogProps) -> Element {
             .unwrap_or_default()
     });
 
-    let mut ac_start = use_signal(|| {
+    let ac_start = use_signal(|| {
         format_value(
             props
                 .config
@@ -120,9 +120,9 @@ pub fn SimulationDialog(props: SimulationDialogProps) -> Element {
                 .unwrap_or(1.0),
         )
     });
-    let mut ac_stop =
+    let ac_stop =
         use_signal(|| format_value(props.config.ac.as_ref().map(|a| a.stop_freq).unwrap_or(1e6)));
-    let mut ac_points = use_signal(|| {
+    let ac_points = use_signal(|| {
         props
             .config
             .ac
@@ -131,7 +131,7 @@ pub fn SimulationDialog(props: SimulationDialogProps) -> Element {
             .unwrap_or(10)
             .to_string()
     });
-    let mut ac_sweep = use_signal(|| {
+    let ac_sweep = use_signal(|| {
         props
             .config
             .ac
@@ -140,7 +140,7 @@ pub fn SimulationDialog(props: SimulationDialogProps) -> Element {
             .unwrap_or_default()
     });
 
-    let mut dc_source = use_signal(|| {
+    let dc_source = use_signal(|| {
         props
             .config
             .dc_sweep
@@ -148,7 +148,7 @@ pub fn SimulationDialog(props: SimulationDialogProps) -> Element {
             .map(|d| d.source_name.clone())
             .unwrap_or_else(|| "V1".to_string())
     });
-    let mut dc_start = use_signal(|| {
+    let dc_start = use_signal(|| {
         format_value(
             props
                 .config
@@ -158,7 +158,7 @@ pub fn SimulationDialog(props: SimulationDialogProps) -> Element {
                 .unwrap_or(0.0),
         )
     });
-    let mut dc_stop = use_signal(|| {
+    let dc_stop = use_signal(|| {
         format_value(
             props
                 .config
@@ -168,7 +168,7 @@ pub fn SimulationDialog(props: SimulationDialogProps) -> Element {
                 .unwrap_or(5.0),
         )
     });
-    let mut dc_step = use_signal(|| {
+    let dc_step = use_signal(|| {
         format_value(
             props
                 .config

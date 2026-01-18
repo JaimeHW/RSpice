@@ -8,7 +8,6 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 use rspice_core::library::LibraryManager;
 
-use crate::components::tab_bar::DocumentTabBar;
 use crate::components::{Panel, SimulationDialog, Toolbar};
 use crate::state::simulation_command::SimulationConfig;
 use crate::state::{DocumentManager, SchematicState, SimulationState};
@@ -28,8 +27,8 @@ pub struct ConsoleVisible(pub bool);
 pub fn App() -> Element {
     // Initialize global state
     let theme = use_signal(|| Theme::DARK);
-    let mut sim_state = use_signal(SimulationState::default);
-    let mut schematic_state = use_signal(SchematicState::default);
+    let sim_state = use_signal(SimulationState::default);
+    let schematic_state = use_signal(SchematicState::default);
 
     // Simulation configuration (from dialog)
     let mut sim_config = use_signal(SimulationConfig::default);
@@ -52,7 +51,7 @@ pub fn App() -> Element {
     let library_manager = use_signal(|| Arc::new(LibraryManager::new()));
 
     // Multi-document interface: manage open documents
-    let mut doc_manager = use_signal(DocumentManager::default);
+    let doc_manager = use_signal(DocumentManager::default);
 
     // Provide contexts to all children
     use_context_provider(|| theme);
