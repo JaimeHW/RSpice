@@ -8,7 +8,8 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 use rspice_core::library::LibraryManager;
 
-use crate::components::{Panel, Toolbar};
+use crate::components::{Panel, SimulationDialog, Toolbar};
+use crate::state::simulation_command::SimulationConfig;
 use crate::state::{SchematicState, SimulationState};
 use crate::theme::Theme;
 use crate::views::{Console, Netlist, Schematic, Waveform};
@@ -38,6 +39,10 @@ pub fn App() -> Element {
     let schematic_state = use_signal(SchematicState::default);
     let active_tab = use_signal(|| EditorTab::Schematic);
 
+    // Simulation configuration (from dialog)
+    let mut sim_config = use_signal(SimulationConfig::default);
+    let mut sim_dialog_visible = use_signal(|| false);
+
     // Resizable pane heights (in pixels)
     let mut waveform_height = use_signal(|| 200.0_f64);
     let mut console_height = use_signal(|| 120.0_f64);
@@ -61,6 +66,8 @@ pub fn App() -> Element {
     use_context_provider(|| library_manager);
     use_context_provider(|| waveform_visible);
     use_context_provider(|| console_visible);
+    use_context_provider(|| sim_config);
+    use_context_provider(|| sim_dialog_visible);
 
     let th = theme.read();
 
@@ -230,6 +237,19 @@ pub fn App() -> Element {
                     style: "height: {console_height}px; min-height: 60px; overflow: hidden;",
                     Console {}
                 }
+            }
+
+            // Simulation setup dialog (modal, rendered on top)
+            SimulationDialog {
+                visible: *sim_dialog_visible.read(),
+                config: sim_config.read().clone(),
+                on_confirm: move |new_config| {
+                    sim_config.set(new_config);
+                    sim_dialog_visible.set(false);
+                },
+                on_cancel: move |_| {
+                    sim_dialog_visible.set(false);
+                },
             }
         }
     }

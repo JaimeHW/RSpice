@@ -9,6 +9,7 @@ pub mod netlist_generator;
 mod schematic;
 pub mod schematic_file;
 mod simulation;
+pub mod simulation_command;
 mod simulation_runner;
 pub mod waveform_math;
 
