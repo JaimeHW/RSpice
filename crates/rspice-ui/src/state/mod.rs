@@ -3,6 +3,7 @@
 //! Application state for simulation, project, and UI state.
 
 pub mod canvas_focus;
+pub mod document;
 pub mod fft;
 pub mod history;
 pub mod netlist_generator;
@@ -14,6 +15,7 @@ mod simulation_runner;
 pub mod waveform_math;
 
 pub use canvas_focus::{use_canvas_focus, CanvasFocus, CanvasFocusState};
+pub use document::{Document, DocumentManager};
 #[allow(unused_imports)]
 pub use fft::{compute_fft, FftResult, WindowFunction};
 pub use history::SchematicHistory;

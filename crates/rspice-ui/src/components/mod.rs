@@ -10,6 +10,7 @@ pub mod file_handlers;
 mod icons;
 mod panel;
 pub mod simulation_dialog;
+pub mod tab_bar;
 mod tabs;
 mod toolbar;
 

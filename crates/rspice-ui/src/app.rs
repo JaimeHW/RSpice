@@ -8,9 +8,10 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 use rspice_core::library::LibraryManager;
 
+use crate::components::tab_bar::DocumentTabBar;
 use crate::components::{Panel, SimulationDialog, Toolbar};
 use crate::state::simulation_command::SimulationConfig;
-use crate::state::{SchematicState, SimulationState};
+use crate::state::{DocumentManager, SchematicState, SimulationState};
 use crate::theme::Theme;
 use crate::views::{Console, Netlist, Schematic, Waveform};
 
@@ -59,6 +60,9 @@ pub fn App() -> Element {
     // Initialize component library manager (embedded libraries parsed at startup)
     let library_manager = use_signal(|| Arc::new(LibraryManager::new()));
 
+    // Multi-document interface: manage open documents
+    let mut doc_manager = use_signal(DocumentManager::default);
+
     // Provide contexts to all children
     use_context_provider(|| theme);
     use_context_provider(|| sim_state);
@@ -68,6 +72,7 @@ pub fn App() -> Element {
     use_context_provider(|| console_visible);
     use_context_provider(|| sim_config);
     use_context_provider(|| sim_dialog_visible);
+    use_context_provider(|| doc_manager);
 
     let th = theme.read();
 
@@ -118,6 +123,20 @@ pub fn App() -> Element {
 
             // Top toolbar
             Toolbar {}
+
+            // Document tabs (MDI)
+            DocumentTabBar {
+                doc_manager: doc_manager,
+                on_tab_change: move |idx| {
+                    doc_manager.write().set_active(idx);
+                },
+                on_tab_close: move |idx| {
+                    doc_manager.write().close_document(idx);
+                },
+                on_new_document: move |_| {
+                    doc_manager.write().new_document();
+                },
+            }
 
             // Main content area
             div {
