@@ -5,10 +5,11 @@
 
 use dioxus::prelude::*;
 
+use crate::app::WaveformVisible;
 use crate::components::component_edit::ComponentEditModal;
 use crate::components::component_library::ComponentLibrary;
 use crate::components::context_menu::{schematic_context_menu, canvas_context_menu, ContextMenu, MenuAction};
-use crate::state::{CanvasFocusState, ComponentType, Point, Rotation, SchematicState, Tool, SchematicHistory};
+use crate::state::{CanvasFocusState, ComponentType, ConsoleMessage, Point, Rotation, SchematicState, SimulationState, Tool, SchematicHistory};
 use crate::theme::Theme;
 
 /// Drag operation state
@@ -66,6 +67,8 @@ pub fn Schematic() -> Element {
     let th = theme.read();
 
     let mut schematic: Signal<SchematicState> = use_context();
+    let mut sim_state: Signal<SimulationState> = use_context();
+    let mut waveform_visible: Signal<WaveformVisible> = use_context();
 
     // Viewport state
     let mut pan = use_signal(|| (400.0f64, 300.0f64));
@@ -638,18 +641,81 @@ pub fn Schematic() -> Element {
                                 }
                             }
                             Tool::Probe => {
-                                // Find what we're probing
-                                if let Some(comp_id) = s.component_at(gp) {
-                                    // Get the component name for probing
-                                    if let Some(comp) = s.components.iter().find(|c| c.id == comp_id) {
-                                        let probe_name = format!("V({})", comp.name);
-                                        // Log for now - will integrate with SimulationState
-                                        println!("Probe: {}", probe_name);
-                                    }
+                                // Professional probe behavior: use cached net mapping
+                                // from netlist generation to find actual net names
+                                let probe_name = if let Some(comp_id) = s.component_at(gp) {
+                                    // Component probe - use component name
+                                    s.components.iter()
+                                        .find(|c| c.id == comp_id)
+                                        .map(|comp| format!("V({})", comp.name))
                                 } else if s.wire_at(gp).is_some() {
-                                    // For wires, we'd need to identify the net name
-                                    let probe_name = format!("V(net_{})", gp.x * 1000 + gp.y);
-                                    println!("Probe: {}", probe_name);
+                                    // Wire probe - look up net name from cached mapping
+                                    // This mapping is populated when netlist is generated
+                                    s.net_mapping.get(&gp)
+                                        .cloned()
+                                        .or_else(|| {
+                                            // Try nearby points (user may click slightly off)
+                                            for neighbor in gp.neighbors() {
+                                                if let Some(name) = s.net_mapping.get(&neighbor) {
+                                                    return Some(name.clone());
+                                                }
+                                            }
+                                            None
+                                        })
+                                        .map(|net| format!("V({})", net))
+                                } else {
+                                    None
+                                };
+                                
+                                // Release schematic lock before accessing sim_state
+                                drop(s);
+                                
+                                if let Some(name) = probe_name {
+                                    // Check if this is the ground node before toggle
+                                    let is_ground = {
+                                        let state = sim_state.read();
+                                        if let Some(ref ground) = state.ground_node {
+                                            let net_name = name
+                                                .trim_start_matches("V(")
+                                                .trim_end_matches(')');
+                                            ground.eq_ignore_ascii_case(net_name)
+                                        } else {
+                                            false
+                                        }
+                                    };
+                                    
+                                    if is_ground {
+                                        // Ground node - add informative console message
+                                        sim_state.write().console_messages.push(
+                                            ConsoleMessage::info(format!(
+                                                "{} is the ground reference (0V)",
+                                                name
+                                            ))
+                                        );
+                                        log::info!("{} is the ground reference", name);
+                                    } else {
+                                        // Try to toggle the waveform visibility
+                                        let found = sim_state.write().toggle_waveform_visibility(&name);
+                                        
+                                        if found {
+                                            // Show waveform panel if not already visible
+                                            if !waveform_visible.read().0 {
+                                                waveform_visible.set(WaveformVisible(true));
+                                            }
+                                        } else {
+                                            // No matching waveform found - add console message
+                                            sim_state.write().console_messages.push(
+                                                ConsoleMessage::warning(format!(
+                                                    "Probe: {} - no simulation data. Run simulation first.",
+                                                    name
+                                                ))
+                                            );
+                                            log::info!("Probe: {} - no simulation data available", name);
+                                        }
+                                    }
+                                } else {
+                                    // No net found at this position - need to run simulation first
+                                    log::info!("Probe: No net found at ({}, {}). Run simulation first.", gp.x, gp.y);
                                 }
                             }
                             Tool::Label => {

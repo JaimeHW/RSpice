@@ -6,6 +6,29 @@ use rspice_core::engine::{Engine, SimulationConfig, TransientResult};
 use rspice_core::netlist::AnalysisCommand;
 use rspice_core::Value;
 
+// =============================================================================
+// Platform-agnostic timing utilities
+// =============================================================================
+
+/// Get current time in milliseconds (for performance measurement)
+#[cfg(not(target_arch = "wasm32"))]
+fn now_ms() -> f64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs_f64() * 1000.0)
+        .unwrap_or(0.0)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn now_ms() -> f64 {
+    use wasm_bindgen::JsCast;
+    web_sys::window()
+        .and_then(|w| w.performance())
+        .map(|p| p.now())
+        .unwrap_or(0.0)
+}
+
 /// Result of a simulation run
 #[derive(Debug, Clone)]
 pub struct SimulationResult {
@@ -76,12 +99,10 @@ pub struct SimulationStats {
 ///
 /// This function parses the netlist, runs requested analyses, and extracts results.
 pub fn run_simulation(netlist_text: &str) -> SimulationResult {
-    use std::time::Instant;
-
     let mut stats = SimulationStats::default();
 
     // Parse the netlist
-    let parse_start = Instant::now();
+    let parse_start = now_ms();
     let netlist = match rspice_core::netlist::parse_netlist(netlist_text) {
         Ok(nl) => nl,
         Err(e) => {
@@ -94,7 +115,7 @@ pub fn run_simulation(netlist_text: &str) -> SimulationResult {
             };
         }
     };
-    stats.parse_time_ms = parse_start.elapsed().as_secs_f64() * 1000.0;
+    stats.parse_time_ms = now_ms() - parse_start;
 
     // Create engine with default config
     let engine = Engine::new(SimulationConfig::default());
@@ -113,7 +134,7 @@ pub fn run_simulation(netlist_text: &str) -> SimulationResult {
         .iter()
         .any(|a| matches!(a, AnalysisCommand::Op));
 
-    let sim_start = Instant::now();
+    let sim_start = now_ms();
 
     // Run transient if requested
     let transient = if let Some((tstep, tstop)) = tran_params {
@@ -121,12 +142,12 @@ pub fn run_simulation(netlist_text: &str) -> SimulationResult {
             Ok(result) => {
                 stats.num_points = result.time.len();
 
-                // Get node names from the circuit (we need to build it to get names)
-                // For now, generate generic names based on node count
-                let node_names: Vec<String> =
-                    (1..=result.num_nodes).map(|i| i.to_string()).collect();
-
-                Some(TransientData::from_result(result, &node_names))
+                // Use actual node names from the simulation result
+                // These are populated from the circuit's node_map (e.g., "N001", "N002")
+                Some(TransientData::from_result(
+                    result.clone(),
+                    &result.node_names,
+                ))
             }
             Err(e) => {
                 return SimulationResult {
@@ -173,7 +194,7 @@ pub fn run_simulation(netlist_text: &str) -> SimulationResult {
         None
     };
 
-    stats.sim_time_ms = sim_start.elapsed().as_secs_f64() * 1000.0;
+    stats.sim_time_ms = now_ms() - sim_start;
 
     SimulationResult {
         success: true,

@@ -568,6 +568,11 @@ pub struct SchematicState {
 
     /// Wire-to-terminal connections (for rubber-banding)
     pub connections: Vec<WireConnection>,
+
+    /// Cached point-to-net mapping from last netlist generation (for probe lookup)
+    /// Updated after each simulation run
+    #[serde(skip)]
+    pub net_mapping: HashMap<Point, String>,
 }
 
 impl Default for SchematicState {
@@ -588,6 +593,7 @@ impl Default for SchematicState {
             net_labels: Vec::new(),
             preview_rotation: Rotation::default(),
             connections: Vec::new(),
+            net_mapping: HashMap::new(),
         }
     }
 }
@@ -759,6 +765,7 @@ impl SchematicState {
 
     /// Start drawing a wire at position
     pub fn start_wire(&mut self, pos: Point) {
+        log::info!("[Wire] start_wire at {:?}", pos);
         self.wire_drawing.points.clear();
         self.wire_drawing.points.push(pos);
         self.wire_drawing.preview_pos = None;
@@ -780,12 +787,20 @@ impl SchematicState {
     /// Add a point to the current wire using orthogonal routing
     /// This commits the current preview path segment
     pub fn extend_wire(&mut self, pos: Point) {
+        log::info!(
+            "[Wire] extend_wire called with pos {:?}, active={}, points={:?}",
+            pos,
+            self.wire_drawing.active,
+            self.wire_drawing.points
+        );
         if !self.wire_drawing.active {
+            log::warn!("[Wire] extend_wire: not active, returning");
             return;
         }
 
         if let Some(last) = self.wire_drawing.points.last().copied() {
             if last == pos {
+                log::info!("[Wire] extend_wire: same point, skipping");
                 return; // Same point, skip
             }
 
@@ -793,17 +808,29 @@ impl SchematicState {
             if let Some(corner) = self.wire_drawing.get_route_corner(pos) {
                 // Only add corner if it's different from last and target
                 if corner != last && corner != pos {
+                    log::info!("[Wire] extend_wire: adding corner {:?}", corner);
                     self.wire_drawing.points.push(corner);
                 }
             }
 
+            log::info!("[Wire] extend_wire: adding point {:?}", pos);
             self.wire_drawing.points.push(pos);
         }
+        log::info!(
+            "[Wire] extend_wire: points now {:?}",
+            self.wire_drawing.points
+        );
     }
 
     /// Finish drawing the current wire
     pub fn finish_wire(&mut self) -> Option<u64> {
+        log::info!(
+            "[Wire] finish_wire called, active={}, points={:?}",
+            self.wire_drawing.active,
+            self.wire_drawing.points
+        );
         if !self.wire_drawing.active {
+            log::warn!("[Wire] finish_wire: not active, returning None");
             return None;
         }
         self.wire_drawing.active = false;
@@ -811,11 +838,14 @@ impl SchematicState {
 
         // Get the committed points
         let points = std::mem::take(&mut self.wire_drawing.points);
+        log::info!("[Wire] finish_wire: raw points = {:?}", points);
 
         // Simplify wire by removing collinear points
         let simplified = Self::simplify_wire_path(points);
+        log::info!("[Wire] finish_wire: simplified points = {:?}", simplified);
 
         if simplified.len() < 2 {
+            log::warn!("[Wire] finish_wire: too few points, returning None");
             return None;
         }
 
@@ -825,6 +855,7 @@ impl SchematicState {
         let mut last_wire_id = None;
         for i in 0..simplified.len() - 1 {
             let segment = vec![simplified[i], simplified[i + 1]];
+            log::info!("[Wire] finish_wire: adding segment {:?}", segment);
             if let Some(wire_id) = self.add_wire(segment) {
                 // Snap endpoints to nearby terminals and register connections
                 self.snap_wire_to_terminals(wire_id);
@@ -832,6 +863,10 @@ impl SchematicState {
             }
         }
 
+        log::info!(
+            "[Wire] finish_wire: created wire(s), last_id={:?}",
+            last_wire_id
+        );
         last_wire_id
     }
 

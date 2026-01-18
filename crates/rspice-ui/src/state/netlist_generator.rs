@@ -15,8 +15,11 @@ pub struct NetlistResult {
     /// The generated SPICE netlist text
     pub netlist: String,
 
-    /// Net name assignments for cross-probing
+    /// Net name assignments for cross-probing: net_name -> [points]
     pub nets: HashMap<String, Vec<Point>>,
+
+    /// Point to net name mapping for probe lookup: grid_point -> net_name
+    pub point_to_net: HashMap<Point, String>,
 
     /// Any warnings during generation
     pub warnings: Vec<String>,
@@ -70,6 +73,7 @@ pub fn generate_netlist(schematic: &SchematicState) -> NetlistResult {
     NetlistResult {
         netlist: lines.join("\n"),
         nets,
+        point_to_net,
         warnings,
         errors,
     }
