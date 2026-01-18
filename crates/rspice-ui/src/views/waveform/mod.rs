@@ -499,20 +499,14 @@ fn WaveformPlotArea(
             },
 
             // Grid lines
-            WaveformGrid {}
+            WaveformGrid { view: view }
 
             // Waveform traces - GPU or SVG rendering
             if is_gpu_available() {
-                // GPU-accelerated rendering - key forces re-render on view change
-                {
-                    let view_key = format!("{:.6}_{:.6}_{:.6}_{:.6}", view.x_min, view.x_max, view.y_min, view.y_max);
-                    rsx! {
-                        GpuWaveformCanvas {
-                            key: "{view_key}",
-                            view: view,
-                            waveforms: waveforms.clone(),
-                        }
-                    }
+                // GPU-accelerated rendering - pass Signal for reactivity
+                GpuWaveformCanvas {
+                    view_state: view_state,
+                    waveforms: waveforms.clone(),
                 }
             } else {
                 // SVG fallback

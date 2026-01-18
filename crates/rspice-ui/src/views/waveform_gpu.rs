@@ -2,45 +2,160 @@
 //!
 //! Uses wgpu for hardware-accelerated line rendering of waveform traces.
 //! Device and queue are lazily initialized on first use.
+//! Note: On web (wasm32), GPU context uses async initialization via WebGPU.
 
 use bytemuck::{Pod, Zeroable};
-use once_cell::sync::Lazy;
 use std::sync::{Arc, Mutex};
 use wgpu::util::DeviceExt;
 
 use super::waveform::axis::calculate_nice_grid_step;
 
-/// Global GPU device and queue (lazily initialized)
-static GPU_CONTEXT: Lazy<Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)>> = Lazy::new(|| {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        compatible_surface: None,
-        force_fallback_adapter: false,
-    }))?;
+// Desktop: use sync Lazy with pollster for blocking GPU init
+#[cfg(not(target_arch = "wasm32"))]
+mod gpu_init {
+    use once_cell::sync::Lazy;
+    use std::sync::Arc;
 
-    let (device, queue) = pollster::block_on(adapter.request_device(
-        &wgpu::DeviceDescriptor {
-            label: Some("Waveform GPU"),
-            required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::default(),
-            memory_hints: Default::default(),
-        },
-        None,
-    ))
-    .ok()?;
+    /// Global GPU device and queue (lazily initialized on desktop)
+    pub static GPU_CONTEXT: Lazy<Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)>> = Lazy::new(|| {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        }))?;
 
-    Some((Arc::new(device), Arc::new(queue)))
-});
+        let (device, queue) = pollster::block_on(adapter.request_device(
+            &wgpu::DeviceDescriptor {
+                label: Some("Waveform GPU"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                memory_hints: Default::default(),
+            },
+            None,
+        ))
+        .ok()?;
 
-/// Check if GPU is available
-pub fn is_gpu_available() -> bool {
-    GPU_CONTEXT.is_some()
+        Some((Arc::new(device), Arc::new(queue)))
+    });
 }
 
+// Web: GPU context uses thread-local storage since wgpu types aren't Send+Sync on WASM
+#[cfg(target_arch = "wasm32")]
+mod gpu_init {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    // Thread-local storage for GPU context (WASM is single-threaded)
+    thread_local! {
+        static WEB_GPU_CONTEXT: RefCell<Option<(Rc<wgpu::Device>, Rc<wgpu::Queue>)>> = const { RefCell::new(None) };
+    }
+
+    /// Check if GPU context is already initialized
+    pub fn is_initialized() -> bool {
+        WEB_GPU_CONTEXT.with(|ctx| ctx.borrow().is_some())
+    }
+
+    /// Get cached GPU context (returns None if not yet initialized)
+    pub fn gpu_context() -> Option<(Rc<wgpu::Device>, Rc<wgpu::Queue>)> {
+        WEB_GPU_CONTEXT.with(|ctx| ctx.borrow().clone())
+    }
+
+    /// Initialize GPU context asynchronously (called once at startup)
+    pub async fn init_gpu_async() -> Option<(Rc<wgpu::Device>, Rc<wgpu::Queue>)> {
+        // Return cached if already initialized
+        if let Some(ctx) = gpu_context() {
+            return Some(ctx);
+        }
+
+        // Create wgpu instance with WebGPU backend
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::BROWSER_WEBGPU,
+            ..Default::default()
+        });
+
+        // Request adapter
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            })
+            .await?;
+
+        // Request device with conservative limits for web
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("Waveform GPU (Web)"),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
+                    memory_hints: Default::default(),
+                },
+                None,
+            )
+            .await
+            .ok()?;
+
+        let ctx = (Rc::new(device), Rc::new(queue));
+
+        // Cache the context
+        WEB_GPU_CONTEXT.with(|cell| {
+            *cell.borrow_mut() = Some(ctx.clone());
+        });
+
+        Some(ctx)
+    }
+}
+
+/// Check if GPU rendering is available.
+/// On web, this returns true once async GPU initialization completes.
+pub fn is_gpu_available() -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        gpu_init::GPU_CONTEXT.is_some()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        gpu_init::is_initialized()
+    }
+}
+
+// =============================================================================
+// Platform-specific GPU context types
+// =============================================================================
+
+/// GPU context type - Arc on desktop, Rc on web (WASM is single-threaded)
+#[cfg(not(target_arch = "wasm32"))]
+pub type GpuContextPtr<T> = Arc<T>;
+
+#[cfg(target_arch = "wasm32")]
+pub type GpuContextPtr<T> = std::rc::Rc<T>;
+
 /// Get the GPU device and queue (if available)
-pub fn get_gpu_context() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
-    GPU_CONTEXT.clone()
+#[cfg(not(target_arch = "wasm32"))]
+pub fn get_gpu_context() -> Option<(GpuContextPtr<wgpu::Device>, GpuContextPtr<wgpu::Queue>)> {
+    gpu_init::GPU_CONTEXT.clone()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn get_gpu_context() -> Option<(GpuContextPtr<wgpu::Device>, GpuContextPtr<wgpu::Queue>)> {
+    gpu_init::gpu_context()
+}
+
+/// Initialize WebGPU asynchronously.
+/// On web: performs async WebGPU initialization and caches result.
+/// On desktop: no-op since GPU is initialized synchronously via Lazy.
+#[cfg(target_arch = "wasm32")]
+pub async fn init_web_gpu() -> Option<(GpuContextPtr<wgpu::Device>, GpuContextPtr<wgpu::Queue>)> {
+    gpu_init::init_gpu_async().await
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn init_web_gpu() -> Option<(GpuContextPtr<wgpu::Device>, GpuContextPtr<wgpu::Queue>)> {
+    // Desktop: GPU already initialized via Lazy static
+    get_gpu_context()
 }
 
 /// Vertex data for waveform rendering
@@ -106,9 +221,9 @@ impl Default for WaveformGpuState {
 pub struct WaveformPainter {
     /// Shared state with the Dioxus component
     pub state: Arc<Mutex<WaveformGpuState>>,
-    /// wgpu device (set on resume)
-    device: Option<Arc<wgpu::Device>>,
-    queue: Option<Arc<wgpu::Queue>>,
+    /// wgpu device (set on resume) - uses platform-specific pointer type
+    device: Option<GpuContextPtr<wgpu::Device>>,
+    queue: Option<GpuContextPtr<wgpu::Queue>>,
     /// Render pipeline
     pipeline: Option<wgpu::RenderPipeline>,
     /// Uniform buffer
@@ -540,6 +655,167 @@ impl WaveformPainter {
         });
         device.poll(wgpu::Maintain::Wait);
         rx.recv().ok()?.ok()?;
+
+        let data = buffer_slice.get_mapped_range();
+
+        // Extract actual pixel data (removing padding)
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+        for y in 0..height {
+            let start = (y * bytes_per_row) as usize;
+            let end = start + (width * 4) as usize;
+            pixels.extend_from_slice(&data[start..end]);
+        }
+
+        drop(data);
+        output_buffer.unmap();
+
+        // Encode as PNG
+        let mut png_data = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut png_data, width, height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().ok()?;
+            writer.write_image_data(&pixels).ok()?;
+        }
+
+        // Convert to base64 data URL
+        use base64::Engine;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&png_data);
+        Some(format!("data:image/png;base64,{}", b64))
+    }
+
+    /// Async render for WASM - uses non-blocking polling and async buffer mapping.
+    /// This prevents the browser from freezing during GPU operations.
+    #[cfg(target_arch = "wasm32")]
+    pub async fn render_to_base64_async(&mut self, width: u32, height: u32) -> Option<String> {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        use wasm_bindgen_futures::JsFuture;
+
+        if width == 0 || height == 0 {
+            return None;
+        }
+
+        self.ensure_resources(width, height);
+
+        // Clone Rc references for async usage
+        let device = self.device.clone()?;
+        let queue = self.queue.clone()?;
+
+        // Update data if dirty
+        {
+            let state = self.state.lock().unwrap();
+            if state.dirty {
+                drop(state);
+                self.update_vertex_buffers(&device);
+                self.state.lock().unwrap().dirty = false;
+            }
+        }
+
+        self.update_uniforms(&queue);
+
+        let texture_view = self.texture_view.as_ref()?;
+        let msaa_view = self.msaa_texture_view.as_ref()?;
+        let pipeline = self.pipeline.as_ref()?;
+        let bind_group = self.uniform_bind_group.as_ref()?;
+
+        // Create command encoder
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Waveform Render Encoder"),
+        });
+
+        // Render pass with MSAA
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Waveform Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: msaa_view,
+                    resolve_target: Some(texture_view),
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.08,
+                            g: 0.08,
+                            b: 0.10,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, bind_group, &[]);
+
+            for (buffer, count) in &self.vertex_buffers {
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                pass.draw(0..*count, 0..1);
+            }
+        }
+
+        // Create buffer to read pixels
+        let bytes_per_row = (width * 4 + 255) & !255; // Align to 256
+        let buffer_size = (bytes_per_row * height) as u64;
+
+        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Pixel Readback Buffer"),
+            size: buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        encoder.copy_texture_to_buffer(
+            wgpu::ImageCopyTexture {
+                texture: self.texture.as_ref()?,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::ImageCopyBuffer {
+                buffer: &output_buffer,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        queue.submit(std::iter::once(encoder.finish()));
+
+        // Async buffer mapping using a promise-like pattern
+        let buffer_slice = output_buffer.slice(..);
+
+        // Create a channel to wait for the map result
+        let (sender, receiver) = async_channel::bounded::<Result<(), wgpu::BufferAsyncError>>(1);
+
+        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = sender.try_send(result);
+        });
+
+        // Non-blocking poll until buffer is ready
+        loop {
+            device.poll(wgpu::Maintain::Poll);
+
+            // Check if mapping completed via a small yield
+            match receiver.try_recv() {
+                Ok(Ok(())) => break,
+                Ok(Err(_)) => return None, // Mapping failed
+                Err(async_channel::TryRecvError::Empty) => {
+                    // Yield to browser event loop
+                    gloo_timers::future::TimeoutFuture::new(0).await;
+                }
+                Err(async_channel::TryRecvError::Closed) => return None,
+            }
+        }
 
         let data = buffer_slice.get_mapped_range();
 

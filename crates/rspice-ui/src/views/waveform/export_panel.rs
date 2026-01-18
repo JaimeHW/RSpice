@@ -338,21 +338,32 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                                 return;
                             }
 
-                            // Show save dialog
-                            if let Some(file) = rfd::AsyncFileDialog::new()
-                                .add_filter(filter_name, &[extension])
-                                .set_file_name(default_name)
-                                .save_file()
-                                .await
+                            // Platform-specific file save
+                            #[cfg(not(target_arch = "wasm32"))]
                             {
-                                match std::fs::write(file.path(), &content) {
-                                    Ok(_) => {
-                                        println!("Exported to: {}", file.path().display());
-                                    }
-                                    Err(e) => {
-                                        eprintln!("Failed to save export: {}", e);
+                                // Show save dialog (desktop only)
+                                if let Some(file) = rfd::AsyncFileDialog::new()
+                                    .add_filter(filter_name, &[extension])
+                                    .set_file_name(default_name)
+                                    .save_file()
+                                    .await
+                                {
+                                    match std::fs::write(file.path(), &content) {
+                                        Ok(_) => {
+                                            log::info!("Exported to: {}", file.path().display());
+                                        }
+                                        Err(e) => {
+                                            log::error!("Failed to save export: {}", e);
+                                        }
                                     }
                                 }
+                            }
+
+                            #[cfg(target_arch = "wasm32")]
+                            {
+                                // Web export not yet implemented
+                                let _ = (content, default_name, filter_name, extension);
+                                log::warn!("Export to file not yet available in web version");
                             }
                         });
                     },

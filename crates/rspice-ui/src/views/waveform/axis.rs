@@ -8,7 +8,26 @@
 /// Targets approximately 6 divisions and rounds to "nice" values
 /// (1, 2, 5 multiples of powers of 10).
 pub fn calculate_nice_grid_step(range: f64) -> f64 {
-    let target_divisions = 6.0;
+    calculate_nice_grid_step_adaptive(range, None)
+}
+
+/// Calculate a nice step size for grid lines with adaptive division count.
+///
+/// When `container_size_px` is provided, the number of divisions scales with
+/// container size to maintain a consistent visual density (target ~80px between
+/// gridlines). Minimum 4 divisions, maximum ~15 divisions.
+///
+/// Uses "nice" step values (1, 2, 5 multiples of powers of 10) for readability.
+pub fn calculate_nice_grid_step_adaptive(range: f64, container_size_px: Option<f64>) -> f64 {
+    // Calculate target divisions based on container size
+    // Aim for ~80px between gridlines, with min 4 and max ~15 divisions
+    let target_divisions = if let Some(size) = container_size_px {
+        let raw_divisions = size / 80.0;
+        raw_divisions.max(4.0).min(15.0)
+    } else {
+        6.0 // Default when no container size provided
+    };
+
     let raw_step = range / target_divisions;
     if raw_step <= 0.0 || !raw_step.is_finite() {
         return 1.0;

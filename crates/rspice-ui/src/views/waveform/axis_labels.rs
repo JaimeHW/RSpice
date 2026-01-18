@@ -5,19 +5,20 @@
 
 use dioxus::prelude::*;
 
-use super::axis::{calculate_nice_grid_step, time_scale_for_range};
+use super::axis::{calculate_nice_grid_step_adaptive, time_scale_for_range};
 use super::state::ViewState;
 use crate::theme::Theme;
 
 /// Y-axis labels with actual values - positioned at grid lines.
+/// Uses adaptive division count based on container height for consistent visual density.
 #[component]
 pub fn YAxisLabels(view: ViewState) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
 
-    // Use same nice step calculation as GPU gridlines
+    // Use adaptive grid step based on container height
     let y_range = view.y_max - view.y_min;
-    let y_step = calculate_nice_grid_step(y_range);
+    let y_step = calculate_nice_grid_step_adaptive(y_range, Some(view.plot_height));
 
     // Generate labels at grid line positions
     let mut labels: Vec<(f64, String)> = Vec::new();
@@ -61,14 +62,15 @@ pub fn YAxisLabels(view: ViewState) -> Element {
 }
 
 /// X-axis labels with actual values - positioned at grid lines.
+/// Uses adaptive division count based on container width for consistent visual density.
 #[component]
 pub fn XAxisLabels(view: ViewState) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
 
-    // Use same nice step calculation as GPU gridlines
+    // Use adaptive grid step based on container width
     let x_range = view.x_max - view.x_min;
-    let x_step = calculate_nice_grid_step(x_range);
+    let x_step = calculate_nice_grid_step_adaptive(x_range, Some(view.plot_width));
 
     // Determine SI prefix for time display
     let (scale, suffix) = time_scale_for_range(x_range);
@@ -118,9 +120,81 @@ pub fn XAxisLabels(view: ViewState) -> Element {
 }
 
 /// Grid lines for the waveform plot.
-/// Note: Gridlines are now rendered by the GPU waveform renderer.
+/// Uses SVG rendering for consistent cross-platform display.
+/// Grid division count adapts to container size for consistent visual density.
 #[component]
-pub fn WaveformGrid() -> Element {
-    // Gridlines are rendered by the GPU, this component is kept for compatibility
-    rsx! {}
+pub fn WaveformGrid(view: ViewState) -> Element {
+    let theme: Signal<Theme> = use_context();
+    let th = theme.read();
+
+    // Calculate grid step sizes using adaptive divisions based on container size
+    let x_range = view.x_max - view.x_min;
+    let y_range = view.y_max - view.y_min;
+    let x_step = calculate_nice_grid_step_adaptive(x_range, Some(view.plot_width));
+    let y_step = calculate_nice_grid_step_adaptive(y_range, Some(view.plot_height));
+
+    // Generate vertical grid lines (X axis)
+    let mut v_lines: Vec<f64> = Vec::new();
+    let x_start = (view.x_min / x_step).floor() * x_step;
+    let mut x = x_start;
+    while x <= view.x_max + x_step * 0.01 {
+        if x >= view.x_min - x_step * 0.01 {
+            // Convert to percentage position
+            let pct = (x - view.x_min) / x_range * 100.0;
+            if pct >= 0.0 && pct <= 100.0 {
+                v_lines.push(pct);
+            }
+        }
+        x += x_step;
+    }
+
+    // Generate horizontal grid lines (Y axis)
+    let mut h_lines: Vec<f64> = Vec::new();
+    let y_start = (view.y_min / y_step).floor() * y_step;
+    let mut y = y_start;
+    while y <= view.y_max + y_step * 0.01 {
+        if y >= view.y_min - y_step * 0.01 {
+            // Convert to percentage position (Y is inverted - top is 0%)
+            let pct = (1.0 - (y - view.y_min) / y_range) * 100.0;
+            if pct >= 0.0 && pct <= 100.0 {
+                h_lines.push(pct);
+            }
+        }
+        y += y_step;
+    }
+
+    let grid_color = th.border();
+
+    rsx! {
+        svg {
+            class: "waveform-grid",
+            style: "position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none;",
+
+            // Vertical grid lines
+            for pct in v_lines.iter() {
+                line {
+                    x1: "{pct}%",
+                    y1: "0%",
+                    x2: "{pct}%",
+                    y2: "100%",
+                    stroke: "{grid_color}",
+                    stroke_width: "1",
+                    stroke_opacity: "0.3",
+                }
+            }
+
+            // Horizontal grid lines
+            for pct in h_lines.iter() {
+                line {
+                    x1: "0%",
+                    y1: "{pct}%",
+                    x2: "100%",
+                    y2: "{pct}%",
+                    stroke: "{grid_color}",
+                    stroke_width: "1",
+                    stroke_opacity: "0.3",
+                }
+            }
+        }
+    }
 }

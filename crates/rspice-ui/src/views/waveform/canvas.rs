@@ -14,69 +14,176 @@ use crate::views::waveform_gpu::{
 };
 
 /// GPU-accelerated waveform canvas component.
+/// On desktop: uses synchronous rendering.
+/// On web (WASM): uses async rendering to avoid blocking the browser.
+///
+/// Accepts `view_state` as a Signal so the component reacts to view changes.
 #[component]
-pub fn GpuWaveformCanvas(view: ViewState, waveforms: Vec<WaveformData>) -> Element {
+pub fn GpuWaveformCanvas(view_state: Signal<ViewState>, waveforms: Vec<WaveformData>) -> Element {
+    // Read view from signal - this creates a reactive dependency
+    let view = *view_state.read();
+
     // Track container size for dynamic resolution
     let mut container_size = use_signal(|| (1200u32, 400u32));
 
-    // Build traces from waveform data
-    let traces: Vec<WaveformTrace> = if waveforms.is_empty() {
-        // Demo waveform - generate X values covering current view
-        let n = 1000;
-        let x_range = view.x_max - view.x_min;
-        let step = x_range / (n - 1) as f64;
-        let x: Vec<f64> = (0..n).map(|i| view.x_min + i as f64 * step).collect();
-        let y: Vec<f64> = x
-            .iter()
-            .map(|t| (2.0 * std::f64::consts::PI * 1000.0 * t).sin())
-            .collect();
-        vec![WaveformTrace {
-            x,
-            y,
-            color: [0.133, 0.773, 0.369, 1.0], // #22c55e
-            name: "V(out)".to_string(),
-        }]
-    } else {
-        waveforms
-            .iter()
-            .filter(|wf| wf.visible)
-            .map(|wf| {
-                let color = parse_hex_color(&wf.color);
-                WaveformTrace {
-                    x: wf.x.clone(),
-                    y: wf.y.clone(),
-                    color,
-                    name: wf.name.clone(),
-                }
-            })
-            .collect()
-    };
+    // Signal to store the rendered image (updated asynchronously on web)
+    let mut rendered_image = use_signal(String::new);
 
-    // Create GPU state and render
-    let gpu_state = Arc::new(Mutex::new(WaveformGpuState {
-        traces,
-        x_min: view.x_min,
-        x_max: view.x_max,
-        y_min: view.y_min,
-        y_max: view.y_max,
-        dirty: true,
-    }));
+    // Memoize the key inputs to detect when we need to re-render
+    // Use the incoming view prop directly - this is the current state we want to render
+    let visible_trace_names: String = waveforms
+        .iter()
+        .filter(|w| w.visible)
+        .map(|w| w.name.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
 
     let (width, height) = *container_size.read();
-    // Render at 2x resolution for high-DPI displays, with minimum size
     let render_width = (width * 2).max(800);
     let render_height = (height * 2).max(300);
 
-    let mut painter = WaveformPainter::new(gpu_state);
-    let img_src = painter
-        .render_to_base64(render_width, render_height)
-        .unwrap_or_default();
+    // Use fresh view prop for render key - ensures effect triggers on view changes
+    let render_key = format!(
+        "{:.6}_{:.6}_{:.6}_{:.6}_{}_{}x{}",
+        view.x_min,
+        view.x_max,
+        view.y_min,
+        view.y_max,
+        visible_trace_names,
+        render_width,
+        render_height,
+    );
 
+    // Build traces from waveform data
+    let build_traces = |view: &ViewState, waveforms: &[WaveformData]| -> Vec<WaveformTrace> {
+        if waveforms.is_empty() {
+            // Demo waveform - generate X values covering current view
+            let n = 1000;
+            let x_range = view.x_max - view.x_min;
+            let step = x_range / (n - 1) as f64;
+            let x: Vec<f64> = (0..n).map(|i| view.x_min + i as f64 * step).collect();
+            let y: Vec<f64> = x
+                .iter()
+                .map(|t| (2.0 * std::f64::consts::PI * 1000.0 * t).sin())
+                .collect();
+            vec![WaveformTrace {
+                x,
+                y,
+                color: [0.133, 0.773, 0.369, 1.0], // #22c55e
+                name: "V(out)".to_string(),
+            }]
+        } else {
+            waveforms
+                .iter()
+                .filter(|wf| wf.visible)
+                .map(|wf| {
+                    let color = parse_hex_color(&wf.color);
+                    WaveformTrace {
+                        x: wf.x.clone(),
+                        y: wf.y.clone(),
+                        color,
+                        name: wf.name.clone(),
+                    }
+                })
+                .collect()
+        }
+    };
+
+    // Track the last render key to avoid redundant renders
+    let mut last_render_key = use_signal(String::new);
+
+    // Platform-specific rendering
+    #[cfg(target_arch = "wasm32")]
+    {
+        // Track render generation and timing
+        let mut render_generation = use_signal(|| 0u64);
+        let mut is_rendering = use_signal(|| false);
+
+        // Spawn async render directly on component render (not via use_effect)
+        // This ensures we react to every render caused by signal changes
+        let key = render_key.clone();
+        let last_key = last_render_key.read().clone();
+
+        // Throttle: only start new render if not already rendering and key changed
+        if last_key != key && !*is_rendering.read() {
+            log::info!("[GPU Canvas] new render key detected, spawning GPU render");
+            last_render_key.set(key.clone());
+
+            // Increment generation
+            let current_gen = *render_generation.read() + 1;
+            render_generation.set(current_gen);
+            is_rendering.set(true);
+
+            // Capture values for async block
+            let view = view;
+            let waveforms = waveforms.clone();
+
+            spawn(async move {
+                // Debounce: wait for pan/zoom to settle before GPU render
+                gloo_timers::future::TimeoutFuture::new(100).await;
+
+                // Check if this render is still current
+                if *render_generation.read() != current_gen {
+                    is_rendering.set(false);
+                    return; // Stale, skip
+                }
+
+                log::info!("[GPU Canvas] starting GPU render gen={}", current_gen);
+                let traces = build_traces(&view, &waveforms);
+
+                let gpu_state = Arc::new(Mutex::new(WaveformGpuState {
+                    traces,
+                    x_min: view.x_min,
+                    x_max: view.x_max,
+                    y_min: view.y_min,
+                    y_max: view.y_max,
+                    dirty: true,
+                }));
+
+                let mut painter = WaveformPainter::new(gpu_state);
+                if let Some(img) = painter
+                    .render_to_base64_async(render_width, render_height)
+                    .await
+                {
+                    log::info!("[GPU Canvas] render succeeded gen={}", current_gen);
+                    rendered_image.set(img);
+                } else {
+                    log::warn!("[GPU Canvas] render failed gen={}", current_gen);
+                }
+
+                // Allow next render to start
+                is_rendering.set(false);
+            });
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // Synchronous rendering for desktop
+        let traces = build_traces(&view, &waveforms);
+
+        let gpu_state = Arc::new(Mutex::new(WaveformGpuState {
+            traces,
+            x_min: view.x_min,
+            x_max: view.x_max,
+            y_min: view.y_min,
+            y_max: view.y_max,
+            dirty: true,
+        }));
+
+        let mut painter = WaveformPainter::new(gpu_state);
+        if let Some(img) = painter.render_to_base64(render_width, render_height) {
+            rendered_image.set(img);
+        }
+    }
+
+    let img_src = rendered_image.read().clone();
+
+    // Simple static display - waveforms update after pan/zoom settles (debounced 100ms)
     rsx! {
         div {
             style: "position: absolute; inset: 0;",
             onmounted: move |evt| {
-                // Measure container size when mounted
                 spawn(async move {
                     if let Ok(rect) = evt.get_client_rect().await {
                         let w = rect.width() as u32;
@@ -89,13 +196,7 @@ pub fn GpuWaveformCanvas(view: ViewState, waveforms: Vec<WaveformData>) -> Eleme
             },
             if !img_src.is_empty() {
                 img {
-                    style: "
-                        position: absolute;
-                        inset: 0;
-                        width: 100%;
-                        height: 100%;
-                        object-fit: fill;
-                    ",
+                    style: "position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill;",
                     src: "{img_src}",
                 }
             }
