@@ -1,198 +1,95 @@
 # RSpice
 
-A high-performance SPICE circuit simulator written in Rust.
+**RSpice** is a high-performance, modern analog circuit simulator written in Rust. It is designed to be a faster, safer, and more extensible alternative to traditional SPICE engines, leveraging the safety and parallelism of Rust alongside state-of-the-art sparse linear algebra.
 
-[![Rust](https://img.shields.io/badge/rust-1.70%2B-blue.svg)](https://www.rust-lang.org)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
+RSpice aims to bridge the gap between open-source simulation tools and professional-grade commercial simulators like LTspice or Cadence Spectre, offering advanced features like Verilog-A support, GPU-accelerated visualization, and a modern cross-platform UI.
 
-## Overview
+## ✨ Key Features
 
-RSpice is a modern circuit simulation engine that provides accurate analog circuit analysis with a focus on performance and extensibility. It supports standard SPICE netlist syntax with extensions for advanced analysis types.
+- **🚀 High Performance**: Built on the [faer](https://github.com/sarah-ek/faer-rs) sparse linear algebra library and Rayon for parallel processing, RSpice delivers exceptionally fast simulation times for large netlists.
+- **🔌 Verilog-A Support**: Integrated compiler and virtual machine for Verilog-A/AMS, allowing for the definition of custom compact devices and behavioral models standard in the semiconductor industry.
+- **🖥️ Modern UI**: A responsive, GPU-accelerated user interface built with Dioxus and WebGPU. Runs natively on Windows, Linux, and macOS, or directly in the browser via WebAssembly.
+- **📊 Rich Analysis Suite**:
+  - **OP**: DC Operating Point analysis.
+  - **DC**: DC Sweep analysis with nested sweeps.
+  - **AC**: Small-signal AC analysis (Bode plots, Noise analysis).
+  - **TRAN**: Transient analysis with adaptive time-stepping.
+  - **.STEP**: Parametric sweeps for design optimization.
+- **🛠️ Professional CLI**: Robust command-line interface with progress bars, formatted output, and extensive export options (`.raw`, `.csv`, `.json`).
+- **📏 Measurement**: Full support for `.MEAS` directives to extract precise metrics from simulation results.
 
-## Features
-
-### Analysis Types
-- **DC Analysis** - Operating point and DC sweep
-- **AC Analysis** - Small-signal frequency response
-- **Transient Analysis** - Time-domain simulation with adaptive timestep
-- **Noise Analysis** - Thermal, shot, flicker, and burst (popcorn) noise
-- **Fourier Analysis** - THD and harmonic distortion
-- **Monte Carlo** - Statistical variation analysis with parallel execution
-- **Sensitivity Analysis** - Component sensitivity
-- **S-Parameter** - RF network analysis
-
-### Device Models
-- **Passive** - Resistors, capacitors, inductors (with saturation)
-- **Semiconductors** - Diodes, BJTs (Gummel-Poon), MOSFETs (Level 1-3, BSIM3/4)
-- **Sources** - DC, AC, PULSE, SIN, PWL, EXP waveforms
-- **Controlled Sources** - VCVS, CCCS, VCCS, CCVS
-- **Advanced** - Transmission lines, coupled inductors, behavioral sources
-- **External Models** - FFI support for C/C++ device models via `libloading`
-
-### Technical Highlights
-- **C1-Continuous Models** - Smooth region transitions for robust Newton-Raphson convergence
-- **TrapGear Integration** - Automatic switching between Trapezoidal and Gear-2 methods
-- **Adaptive Timestepping** - LTE-based error control with breakpoint handling
-- **Sparse Matrix Solver** - Efficient direct LU factorization
-- **WebAssembly Support** - Optional WASM compilation for browser-based simulation
-
-## Quick Start
-
-```bash
-# Clone and build
-git clone https://github.com/your-org/rspice.git
-cd rspice
-cargo build --release
-
-# Run a simulation
-cargo run --release -- simulate circuit.cir -o results.raw
-```
-
-### Example Netlist
-
-```spice
-RC Lowpass Filter
-V1 in 0 AC 1 SIN(0 1 1k)
-R1 in out 1k
-C1 out 0 1u
-.AC DEC 10 1 100k
-.TRAN 1u 10m
-.END
-```
-
-## Installation
+## 📦 Installation
 
 ### From Source
+
+Ensure you have [Rust](https://rustup.rs/) (edition 2024 or newer) installed.
+
 ```bash
+git clone https://github.com/rspice/rspice.git
+cd rspice
 cargo install --path crates/rspice-cli
 ```
 
-### As a Library
-```toml
-[dependencies]
-rspice-core = { path = "crates/rspice-core" }
-```
-
-## Architecture
-
-```
-rspice/
-├── crates/
-│   ├── rspice-core/           # Simulation engine
-│   │   ├── analysis/
-│   │   │   ├── core/          # DC, AC, transient, laplace, temperature
-│   │   │   ├── advanced/      # Noise, fourier, monte_carlo, sensitivity, s_param, pole_zero
-│   │   │   └── output/        # Waveform recording, raw export
-│   │   ├── circuit/           # Circuit construction and stamping
-│   │   ├── device/
-│   │   │   ├── passive/       # Resistor, capacitor, inductor, coupled inductors
-│   │   │   ├── semiconductor/ # Diode, BJT
-│   │   │   └── mosfet/        # MOSFET Level 1-3, BSIM3/4, EKV, JFET, VDMOS
-│   │   ├── engine/            # Simulation orchestration
-│   │   ├── netlist/           # SPICE parser
-│   │   └── solver/            # Sparse matrix solver
-│   └── rspice-cli/            # Command-line interface
-```
-
-### Key Modules
-
-| Module | Description |
-|--------|-------------|
-| `netlist` | SPICE-compatible parser with subcircuit support |
-| `device` | Semiconductor and passive device models |
-| `solver` | Sparse matrix and Newton-Raphson iteration |
-| `analysis` | Simulation engines (DC, AC, transient, noise) |
-| `engine` | High-level simulation orchestration |
-
-## API Example
-
-```rust
-use rspice_core::{Netlist, Engine};
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let netlist = Netlist::parse(r#"
-        Voltage Divider
-        V1 in 0 DC 10
-        R1 in out 1k
-        R2 out 0 1k
-        .OP
-        .END
-    "#)?;
-
-    let engine = Engine::new(netlist)?;
-    let result = engine.run_dc_op()?;
-
-    println!("V(out) = {:.3}V", result.voltage("out")?);
-    Ok(())
-}
-```
-
-## Supported SPICE Commands
-
-| Command | Description |
-|---------|-------------|
-| `.OP` | DC operating point |
-| `.DC` | DC sweep analysis |
-| `.AC` | AC frequency sweep |
-| `.TRAN` | Transient time-domain |
-| `.NOISE` | Noise analysis |
-| `.FOUR` | Fourier/THD analysis |
-| `.PARAM` | Parameter definition |
-| `.MODEL` | Device model definition |
-| `.SUBCKT` | Subcircuit definition |
-| `.INCLUDE` | File inclusion |
-| `.STEP` | Parametric sweep |
-| `.MEAS` | Measurement statements |
-| `.OPTIONS` | Simulation configuration (RELTOL, ABSTOL, GMIN, etc.) |
-
-## Performance
-
-RSpice uses several optimizations for high performance:
-
-- **Sparse Matrix Storage** - CSC format for memory efficiency
-- **Direct Indexing** - Pre-computed matrix indices for O(1) stamping
-- **Parallel Analysis** - Optional multi-threaded sweeps (via `rayon`)
-- **Streaming Output** - Memory-efficient waveform storage
-
-## Building with Features
+To build the UI:
 
 ```bash
-# Enable parallel processing
-cargo build --release --features parallel
-
-# Build for WebAssembly
-cargo build --target wasm32-unknown-unknown --features wasm
-
-# Enable external C model loading
-cargo build --release --features ffi
+cargo run --bin rspice-ui --release
 ```
 
-## Contributing
+## 🚀 Getting Started
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+### CLI Usage
 
-1. Fork the repository
-2. Create a feature branch
-3. Write tests for new functionality
-4. Ensure `cargo test --all` passes
-5. Submit a pull request
+RSpice is compatible with standard SPICE netlists (`.sp`, `.cir`).
 
-## License
+**Run a simple simulation:**
+```bash
+rspice examples/amplifier.sp
+```
 
-Licensed under either of:
+**Export results to a raw file (LTspice compatible):**
+```bash
+rspice circuit.net -o output.raw
+```
 
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT License ([LICENSE-MIT](LICENSE-MIT))
+**Run a parametric sweep and export to CSV:**
+```bash
+rspice sweep.sp --format csv -o results.csv
+```
+
+### GUI Usage
+
+Launch the UI to access the schematic editor and waveform viewer:
+
+```bash
+cargo run --bin rspice-ui
+```
+
+- **Schematic Editor**: Intuitive drag-and-drop interface for circuit design.
+- **Waveform Viewer**: High-performance, GPU-rendered viewer with instant pan/zoom and precise cursors.
+
+## 🏗️ Project Structure
+
+The project is organized as a Rust workspace:
+
+- **`crates/rspice-core`**: The heart of the simulator. Contains the simulation engine, device models, and solvers.
+- **`crates/rspice-cli`**: The command-line interface driver.
+- **`crates/rspice-ui`**: The Dioxus-based graphical user interface.
+- **`crates/rspice-veriloga`**: The Verilog-A-to-IR compiler and runtime.
+- **`crates/rspice-wasm`**: WASM bindings for running the core engine in web environments.
+
+## 🤝 Contributing
+
+Contributions are welcome! We are actively looking for help with:
+- Adding new MOSFET models (BSIM, PSP).
+- Improving Verilog-A compatibility.
+- Enhancing the schematic capture UI.
+
+## 📄 License
+
+This project is licensed under either of:
+
+ * Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+ * MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
 
 at your option.
-
-## Acknowledgments
-
-RSpice draws inspiration from:
-- SPICE3 (UC Berkeley)
-- Ngspice
-- LTspice
-
----
-
-*Built with ❤️ in Rust*
