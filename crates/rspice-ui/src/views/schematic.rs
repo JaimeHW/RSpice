@@ -104,6 +104,9 @@ pub fn Schematic() -> Element {
     
     // Box selection state (rubber-band selection)
     let mut box_selection = use_signal(BoxSelectionState::default);
+    
+    // Close confirmation dialog state
+    let mut close_confirm: Signal<Option<(usize, String)>> = use_signal(|| None);
 
     // Undo/Redo history (local for now, will integrate with SchematicHistory later)
     let mut history = use_signal(|| SchematicHistory::new(schematic.read().clone(), 100));
@@ -199,13 +202,29 @@ pub fn Schematic() -> Element {
                                     sim_state_ctx.set(docs.active().simulation.clone());
                                 },
                                 on_tab_close: move |idx| {
-                                    let was_active = doc_manager.read().active_index == idx;
-                                    doc_manager.write().close_document(idx);
-                                    // If we closed the active tab, load state from the new active document
-                                    if was_active {
-                                        let docs = doc_manager.read();
-                                        schematic.set(docs.active().schematic.clone());
-                                        sim_state_ctx.set(docs.active().simulation.clone());
+                                    // Get fresh signals via context for clear type inference
+                                    let mut dm: Signal<DocumentManager> = use_context();
+                                    let mut sch: Signal<SchematicState> = use_context();
+                                    let mut sim: Signal<SimulationState> = use_context();
+                                    
+                                    let docs = dm.read();
+                                    let idx = idx as usize;
+                                    let is_dirty = docs.documents[idx].is_dirty;
+                                    let doc_name = docs.documents[idx].name.clone();
+                                    drop(docs);
+                                    
+                                    if is_dirty {
+                                        // Show custom confirmation dialog
+                                        close_confirm.set(Some((idx, doc_name)));
+                                    } else {
+                                        // No unsaved changes - close immediately
+                                        let was_active = dm.read().active_index == idx;
+                                        dm.write().close_document(idx);
+                                        if was_active {
+                                            let docs = dm.read();
+                                            sch.set(docs.active().schematic.clone());
+                                            sim.set(docs.active().simulation.clone());
+                                        }
                                     }
                                 },
                                 on_new_document: move |_| {
@@ -1255,6 +1274,86 @@ pub fn Schematic() -> Element {
                     on_cancel: move |_| {
                         editing.write().component_id = None;
                     },
+                }
+            }
+
+            // Close Confirmation Dialog
+            if let Some((close_idx, doc_name)) = close_confirm.read().clone() {
+                div {
+                    class: "modal-overlay",
+                    style: "
+                        position: fixed;
+                        inset: 0;
+                        background: rgba(0, 0, 0, 0.5);
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        z-index: 1000;
+                    ",
+                    onclick: move |_| close_confirm.set(None),
+                    
+                    div {
+                        class: "modal-content",
+                        style: "
+                            background: {th.bg_secondary()};
+                            border: 1px solid {th.border()};
+                            border-radius: 8px;
+                            padding: 20px;
+                            min-width: 320px;
+                            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+                        ",
+                        onclick: move |e| e.stop_propagation(),
+                        
+                        h3 {
+                            style: "margin: 0 0 12px 0; color: {th.text_primary()}; font-size: 16px;",
+                            "Unsaved Changes"
+                        }
+                        
+                        p {
+                            style: "margin: 0 0 20px 0; color: {th.text_secondary()}; font-size: 14px;",
+                            "\"{doc_name}\" has unsaved changes. Close anyway?"
+                        }
+                        
+                        div {
+                            style: "display: flex; gap: 8px; justify-content: flex-end;",
+                            
+                            button {
+                                style: "
+                                    padding: 8px 16px;
+                                    background: {th.surface()};
+                                    border: 1px solid {th.border()};
+                                    border-radius: 4px;
+                                    color: {th.text_primary()};
+                                    cursor: pointer;
+                                ",
+                                onclick: move |_| close_confirm.set(None),
+                                "Cancel"
+                            }
+                            
+                            button {
+                                style: "
+                                    padding: 8px 16px;
+                                    background: {th.accent_error()};
+                                    border: none;
+                                    border-radius: 4px;
+                                    color: white;
+                                    cursor: pointer;
+                                ",
+                                onclick: move |_| {
+                                    // Close the document
+                                    let was_active = doc_manager.read().active_index == close_idx;
+                                    doc_manager.write().close_document(close_idx);
+                                    if was_active {
+                                        let docs = doc_manager.read();
+                                        schematic.set(docs.active().schematic.clone());
+                                        sim_state.set(docs.active().simulation.clone());
+                                    }
+                                    close_confirm.set(None);
+                                },
+                                "Close Without Saving"
+                            }
+                        }
+                    }
                 }
             }
         }
