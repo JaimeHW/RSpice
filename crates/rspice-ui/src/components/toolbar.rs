@@ -5,7 +5,9 @@
 use dioxus::prelude::*;
 
 use super::button::{Button, ButtonVariant};
+use super::file_handlers;
 use super::icons::{Icon, IconType};
+use crate::state::simulation_command::SimulationConfig;
 use crate::state::{
     generate_netlist, run_simulation, ConsoleMessage, SchematicState, SimulationState, WaveformData,
 };
@@ -30,6 +32,8 @@ pub fn Toolbar() -> Element {
     let mut schematic: Signal<SchematicState> = use_context();
     let mut waveform_visible: Signal<crate::app::WaveformVisible> = use_context();
     let mut console_visible: Signal<crate::app::ConsoleVisible> = use_context();
+    let _sim_config: Signal<SimulationConfig> = use_context();
+    let mut sim_dialog_visible: Signal<bool> = use_context();
     let th = theme.read();
 
     let is_running = sim_state.read().is_running;
@@ -119,32 +123,7 @@ pub fn Toolbar() -> Element {
                     icon: rsx! { Icon { icon: IconType::FolderOpen, size: 16 } },
                     onclick: move |_| {
                         // Open file dialog
-                        spawn(async move {
-                            if let Some(path) = rfd::AsyncFileDialog::new()
-                                .add_filter("SPICE Netlist", &["cir", "sp", "spice", "net"])
-                                .add_filter("All Files", &["*"])
-                                .pick_file()
-                                .await
-                            {
-                                match std::fs::read_to_string(path.path()) {
-                                    Ok(content) => {
-                                        let mut state = sim_state.write();
-                                        state.netlist_content = content;
-                                        state.current_file = Some(path.path().to_path_buf());
-                                        state.is_dirty = false;
-                                        state.waveforms.clear();
-                                        state.console_messages.push(ConsoleMessage::success(
-                                            format!("Opened: {}", path.path().display())
-                                        ));
-                                    }
-                                    Err(e) => {
-                                        sim_state.write().console_messages.push(
-                                            ConsoleMessage::error(format!("Failed to open file: {}", e))
-                                        );
-                                    }
-                                }
-                            }
-                        });
+                        spawn(file_handlers::open_netlist(sim_state));
                     },
                     "Open"
                 }
@@ -152,40 +131,7 @@ pub fn Toolbar() -> Element {
                     variant: ButtonVariant::Ghost,
                     icon: rsx! { Icon { icon: IconType::Save, size: 16 } },
                     onclick: move |_| {
-                        let content = sim_state.read().netlist_content.clone();
-                        let current_path = sim_state.read().current_file.clone();
-
-                        spawn(async move {
-                            let save_path = if let Some(path) = current_path {
-                                Some(path)
-                            } else {
-                                // Save as dialog
-                                rfd::AsyncFileDialog::new()
-                                    .add_filter("SPICE Netlist", &["cir"])
-                                    .set_file_name("circuit.cir")
-                                    .save_file()
-                                    .await
-                                    .map(|f| f.path().to_path_buf())
-                            };
-
-                            if let Some(path) = save_path {
-                                match std::fs::write(&path, &content) {
-                                    Ok(_) => {
-                                        let mut state = sim_state.write();
-                                        state.current_file = Some(path.clone());
-                                        state.is_dirty = false;
-                                        state.console_messages.push(ConsoleMessage::success(
-                                            format!("Saved: {}", path.display())
-                                        ));
-                                    }
-                                    Err(e) => {
-                                        sim_state.write().console_messages.push(
-                                            ConsoleMessage::error(format!("Failed to save: {}", e))
-                                        );
-                                    }
-                                }
-                            }
-                        });
+                        spawn(file_handlers::save_netlist(sim_state));
                     },
                     "Save"
                 }
@@ -194,56 +140,7 @@ pub fn Toolbar() -> Element {
                     icon: rsx! { Icon { icon: IconType::FolderOpen, size: 16 } },
                     onclick: move |_| {
                         // Import LTspice .raw waveform file
-                        spawn(async move {
-                            if let Some(path) = rfd::AsyncFileDialog::new()
-                                .add_filter("LTspice Raw", &["raw"])
-                                .add_filter("All Files", &["*"])
-                                .pick_file()
-                                .await
-                            {
-                                match rspice_core::compat::parse_raw_file(path.path()) {
-                                    Ok(waveform_data) => {
-                                        let mut state = sim_state.write();
-                                        state.waveforms.clear();
-
-                                        // Convert raw waveforms to UI format
-                                        // Skip the first variable (time/frequency) - it's used as x-axis
-                                        for (idx, wf) in waveform_data.waveforms.iter().enumerate().skip(1) {
-                                            if let Some(values) = if wf.y_imag.is_some() {
-                                                // For complex data (AC analysis), use magnitude
-                                                Some(wf.y.iter().zip(wf.y_imag.as_ref().unwrap())
-                                                    .map(|(r, i)| (r * r + i * i).sqrt())
-                                                    .collect::<Vec<_>>())
-                                            } else {
-                                                Some(wf.y.clone())
-                                            } {
-                                                if !wf.x.is_empty() && wf.x.len() == values.len() {
-                                                    state.waveforms.push(WaveformData {
-                                                        name: wf.name.clone(),
-                                                        x: wf.x.clone(),
-                                                        y: values,
-                                                        color: crate::theme::Theme::trace_color_static(idx - 1).to_string(),
-                                                        visible: true,
-                                                    });
-                                                }
-                                            }
-                                        }
-
-                                        let trace_count = state.waveforms.len();
-                                        state.console_messages.push(ConsoleMessage::success(
-                                            format!("Imported {} traces from: {}",
-                                                trace_count,
-                                                path.path().display())
-                                        ));
-                                    }
-                                    Err(e) => {
-                                        sim_state.write().console_messages.push(
-                                            ConsoleMessage::error(format!("Failed to import .raw file: {}", e))
-                                        );
-                                    }
-                                }
-                            }
-                        });
+                        spawn(file_handlers::import_raw(sim_state));
                     },
                     "Import"
                 }
@@ -258,38 +155,7 @@ pub fn Toolbar() -> Element {
                     variant: ButtonVariant::Ghost,
                     icon: rsx! { Icon { icon: IconType::Save, size: 16 } },
                     onclick: move |_| {
-                        let current_path = schematic.read().current_file.clone();
-                        let sch_state = schematic.read().clone();
-
-                        spawn(async move {
-                            // If we have a current file, save directly; otherwise show dialog
-                            let save_path = if let Some(path) = current_path {
-                                Some(path)
-                            } else {
-                                rfd::AsyncFileDialog::new()
-                                    .add_filter("RSpice Schematic", &["rsch"])
-                                    .set_file_name("circuit.rsch")
-                                    .save_file()
-                                    .await
-                                    .map(|f| f.path().to_path_buf())
-                            };
-
-                            if let Some(path) = save_path {
-                                match crate::state::schematic_file::save_schematic(&sch_state, &path) {
-                                    Ok(_) => {
-                                        schematic.write().current_file = Some(path.clone());
-                                        sim_state.write().console_messages.push(
-                                            ConsoleMessage::success(format!("Schematic saved: {}", path.display()))
-                                        );
-                                    }
-                                    Err(e) => {
-                                        sim_state.write().console_messages.push(
-                                            ConsoleMessage::error(format!("Failed to save schematic: {}", e))
-                                        );
-                                    }
-                                }
-                            }
-                        });
+                        spawn(file_handlers::save_schematic(schematic, sim_state));
                     },
                     "Save Sch"
                 }
@@ -297,30 +163,7 @@ pub fn Toolbar() -> Element {
                     variant: ButtonVariant::Ghost,
                     icon: rsx! { Icon { icon: IconType::FolderOpen, size: 16 } },
                     onclick: move |_| {
-                        spawn(async move {
-                            if let Some(file) = rfd::AsyncFileDialog::new()
-                                .add_filter("RSpice Schematic", &["rsch"])
-                                .pick_file()
-                                .await
-                            {
-                                let file_path = file.path().to_path_buf();
-                                match crate::state::schematic_file::load_schematic(&file_path) {
-                                    Ok(mut loaded_state) => {
-                                        // Set the current file path so save knows where to write
-                                        loaded_state.current_file = Some(file_path.clone());
-                                        schematic.set(loaded_state);
-                                        sim_state.write().console_messages.push(
-                                            ConsoleMessage::success(format!("Schematic loaded: {}", file_path.display()))
-                                        );
-                                    }
-                                    Err(e) => {
-                                        sim_state.write().console_messages.push(
-                                            ConsoleMessage::error(format!("Failed to load schematic: {}", e))
-                                        );
-                                    }
-                                }
-                            }
-                        });
+                        spawn(file_handlers::open_schematic(schematic, sim_state));
                     },
                     "Open Sch"
                 }
@@ -346,6 +189,21 @@ pub fn Toolbar() -> Element {
             // Spacer
             div { style: "flex: 1;" }
 
+            // Simulation setup button
+            ToolbarGroup {
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    icon: rsx! { Icon { icon: IconType::Settings, size: 16 } },
+                    onclick: move |_| {
+                        sim_dialog_visible.set(true);
+                    },
+                    "Simulate..."
+                }
+            }
+
+            // Divider
+            ToolbarDivider {}
+
             // Simulation controls
             ToolbarGroup {
                 if is_running {
@@ -368,6 +226,9 @@ pub fn Toolbar() -> Element {
                             let netlist_result = generate_netlist(&schematic_state);
                             drop(schematic_state);
 
+                            // Store the point-to-net mapping for probe tool
+                            schematic.write().net_mapping = netlist_result.point_to_net.clone();
+
                             // Check for errors in netlist generation
                             if !netlist_result.errors.is_empty() {
                                 let mut state = sim_state.write();
@@ -382,8 +243,30 @@ pub fn Toolbar() -> Element {
                                 sim_state.write().console_messages.push(ConsoleMessage::warning(warn.clone()));
                             }
 
-                            // Update netlist content in sim state and run
-                            let netlist_content = netlist_result.netlist.clone();
+                            // Get simulation configuration and generate SPICE commands
+                            let config = _sim_config.read();
+                            let sim_commands = config.to_spice_string();
+                            let has_config = config.has_analysis();
+                            drop(config);
+
+                            // Build complete netlist with simulation commands
+                            let mut netlist_content = netlist_result.netlist.clone();
+
+                            // Professional behavior: if dialog has configuration, it REPLACES
+                            // any existing analysis commands in the netlist (like LTspice)
+                            if has_config {
+                                // Strip existing analysis commands from netlist
+                                netlist_content = strip_analysis_commands(&netlist_content);
+
+                                // Insert configured commands before .END
+                                if let Some(end_pos) = netlist_content.to_uppercase().rfind(".END") {
+                                    netlist_content.insert_str(end_pos, &format!("{}\n\n", sim_commands));
+                                } else {
+                                    // No .END found, append commands at the end
+                                    netlist_content.push_str(&format!("\n{}\n.END\n", sim_commands));
+                                }
+                            }
+                            // If no dialog config, use whatever's already in the netlist
 
                             sim_state.write().netlist_content = netlist_content.clone();
                             sim_state.write().is_running = true;
@@ -408,11 +291,20 @@ pub fn Toolbar() -> Element {
                                 // Clear old waveforms and add new ones
                                 state.waveforms.clear();
 
+                                // Collect waveform names for ground detection
+                                let mut waveform_nets: std::collections::HashSet<String> = std::collections::HashSet::new();
+
                                 if let Some(tran) = result.transient {
                                     log::info!("Transient data: {} time points, {} voltage traces",
                                         tran.time.len(), tran.voltages.len());
                                     for (idx, (name, values)) in tran.voltages.into_iter().enumerate() {
                                         log::info!("  Adding waveform: {} with {} points", name, values.len());
+                                        // Extract net name from V(N001) -> N001
+                                        let net_name = name
+                                            .trim_start_matches("V(")
+                                            .trim_end_matches(')')
+                                            .to_string();
+                                        waveform_nets.insert(net_name);
                                         state.waveforms.push(WaveformData {
                                             name,
                                             x: tran.time.clone(),
@@ -423,6 +315,16 @@ pub fn Toolbar() -> Element {
                                     }
                                 } else {
                                     log::warn!("No transient data in simulation result");
+                                }
+
+                                // Derive ground node: the net that exists in netlist but not in waveforms
+                                let all_nets: std::collections::HashSet<String> = netlist_result.nets.keys().cloned().collect();
+                                let ground_candidates: Vec<String> = all_nets.difference(&waveform_nets).cloned().collect();
+                                if let Some(ground) = ground_candidates.first() {
+                                    state.ground_node = Some(ground.clone());
+                                    log::info!("Ground reference node: {}", ground);
+                                } else {
+                                    state.ground_node = None;
                                 }
 
                                 log::info!("Total waveforms after simulation: {}", state.waveforms.len());
@@ -539,4 +441,22 @@ fn ToolbarDivider() -> Element {
             "
         }
     }
+}
+
+/// Strip existing analysis commands from a netlist.
+/// This allows dialog-configured commands to replace schematic-embedded ones.
+fn strip_analysis_commands(netlist: &str) -> String {
+    let analysis_prefixes = [".TRAN", ".AC", ".DC", ".OP"];
+
+    netlist
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim().to_uppercase();
+            // Keep lines that don't start with analysis commands
+            !analysis_prefixes
+                .iter()
+                .any(|prefix| trimmed.starts_with(prefix))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }

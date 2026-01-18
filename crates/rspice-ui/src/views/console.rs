@@ -79,24 +79,33 @@ pub fn Console() -> Element {
                 }
             }
 
-            // Console content
+            // Console content - uses column-reverse for natural bottom-pinning
+            // Messages display oldest at top, newest at bottom, auto-scrolls to new messages
             div {
+                id: "console-content",
                 style: "
                     flex: 1;
                     overflow-y: auto;
+                    display: flex;
+                    flex-direction: column-reverse;
                     padding: {Theme::SPACING_SM};
                     font-family: {Theme::FONT_MONO};
                     font-size: {Theme::FONT_SIZE_SM};
                 ",
 
-                if messages.is_empty() {
-                    div {
-                        style: "color: {th.text_muted()};",
-                        "Ready."
-                    }
-                } else {
-                    for msg in messages.iter() {
-                        ConsoleMessageLine { message: msg.clone() }
+                // Inner container reversed to correct display order
+                div {
+                    style: "display: flex; flex-direction: column;",
+
+                    if messages.is_empty() {
+                        div {
+                            style: "color: {th.text_muted()};",
+                            "Ready."
+                        }
+                    } else {
+                        for msg in messages.iter() {
+                            ConsoleMessageLine { message: msg.clone() }
+                        }
                     }
                 }
             }
