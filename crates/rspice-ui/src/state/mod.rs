@@ -7,6 +7,7 @@ pub mod fft;
 pub mod history;
 pub mod netlist_generator;
 mod schematic;
+pub mod schematic_file;
 mod simulation;
 mod simulation_runner;
 pub mod waveform_math;

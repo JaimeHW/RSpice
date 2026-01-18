@@ -93,9 +93,9 @@ impl ViewState {
             }
         }
 
-        // Add margins
-        let x_margin = (x_max - x_min) * 0.05;
-        let y_margin = (y_max - y_min) * 0.1;
+        // Add margins - use minimum margin for flat waveforms
+        let x_margin = (x_max - x_min).max(1e-9) * 0.05; // min 5% of range
+        let y_margin = (y_max - y_min).max(0.1) * 0.1; // min 0.1 absolute
 
         self.x_min = x_min - x_margin;
         self.x_max = x_max + x_margin;

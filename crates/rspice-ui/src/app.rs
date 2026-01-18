@@ -3,7 +3,10 @@
 //! The main application component that sets up the window layout,
 //! routing, and global state providers.
 
+use std::sync::Arc;
+
 use dioxus::prelude::*;
+use rspice_core::library::LibraryManager;
 
 use crate::components::{Panel, Toolbar};
 use crate::state::{SchematicState, SimulationState};
@@ -48,10 +51,14 @@ pub fn App() -> Element {
     let mut resize_start_y = use_signal(|| 0.0_f64);
     let mut resize_start_height = use_signal(|| 0.0_f64);
 
+    // Initialize component library manager (embedded libraries parsed at startup)
+    let library_manager = use_signal(|| Arc::new(LibraryManager::new()));
+
     // Provide contexts to all children
     use_context_provider(|| theme);
     use_context_provider(|| sim_state);
     use_context_provider(|| schematic_state);
+    use_context_provider(|| library_manager);
     use_context_provider(|| waveform_visible);
     use_context_provider(|| console_visible);
 

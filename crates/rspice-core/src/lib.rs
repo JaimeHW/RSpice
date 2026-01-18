@@ -30,6 +30,7 @@ pub mod compat;
 pub mod device;
 pub mod engine;
 pub mod expr;
+pub mod library;
 pub mod netlist;
 pub mod solver;
 
