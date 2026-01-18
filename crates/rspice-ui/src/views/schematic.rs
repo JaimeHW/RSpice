@@ -70,6 +70,7 @@ pub fn Schematic() -> Element {
     let mut schematic: Signal<SchematicState> = use_context();
     let mut sim_state: Signal<SimulationState> = use_context();
     let mut waveform_visible: Signal<WaveformVisible> = use_context();
+    let mut doc_manager: Signal<DocumentManager> = use_context();
 
     // Viewport state - pan/zoom stored in SchematicState for per-document persistence
     // Local signals mirror SchematicState and sync back on changes
@@ -106,6 +107,13 @@ pub fn Schematic() -> Element {
 
     // Undo/Redo history (local for now, will integrate with SchematicHistory later)
     let mut history = use_signal(|| SchematicHistory::new(schematic.read().clone(), 100));
+    
+    // Helper closure that pushes to history AND marks document dirty
+    // This encapsulates the dirty tracking logic in one place - professional approach
+    let mut push_edit = move |state: SchematicState, desc: &str| {
+        history.write().push(state, desc);
+        doc_manager.write().active_mut().mark_dirty();
+    };
 
     // Component editing state
     let mut editing = use_signal(EditingState::default);
@@ -261,7 +269,7 @@ pub fn Schematic() -> Element {
                                 Key::Character(c) if c == "v" || c == "V" => {
                                     let gp = *mouse_grid.read();
                                     schematic.write().paste_at(gp);
-                                    history.write().push(schematic.read().clone(), "Paste");
+                                    push_edit(schematic.read().clone(), "Paste");
                                     return;
                                 }
                                 _ => {}
@@ -274,7 +282,7 @@ pub fn Schematic() -> Element {
                             Key::Delete => {
                                 s.delete_selection();
                                 drop(s);
-                                history.write().push(schematic.read().clone(), "Delete selection");
+                                push_edit(schematic.read().clone(), "Delete selection");
                             }
                             Key::Character(c) if c == "r" || c == "R" => {
                                 if matches!(s.tool, Tool::Place(_)) {
@@ -282,7 +290,7 @@ pub fn Schematic() -> Element {
                                 } else {
                                     s.rotate_selection();
                                     drop(s);
-                                    history.write().push(schematic.read().clone(), "Rotate selection");
+                                    push_edit(schematic.read().clone(), "Rotate selection");
                                 }
                             }
                             Key::Character(c) if c == "w" || c == "W" => {
@@ -606,7 +614,7 @@ pub fn Schematic() -> Element {
                                 if delta_x != 0 || delta_y != 0 {
                                     // Move junction - all wire endpoints at this position
                                     schematic.write().move_junction(junction_pos, new_pos);
-                                    history.write().push(schematic.read().clone(), "Move junction");
+                                    push_edit(schematic.read().clone(), "Move junction");
                                 }
                                 
                                 // Set highlighted junction to persist selection after drag
@@ -629,15 +637,15 @@ pub fn Schematic() -> Element {
                                 if d.multi_selection {
                                     // Move ALL selected components and wires using the unified method
                                     schematic.write().move_selection(delta);
-                                    history.write().push(schematic.read().clone(), "Move selection");
+                                    push_edit(schematic.read().clone(), "Move selection");
                                 } else if let Some(comp_id) = d.component_id {
                                     // Move single component WITH attached wires (rubber-banding)
                                     schematic.write().move_component_with_wires(comp_id, delta);
-                                    history.write().push(schematic.read().clone(), "Move component");
+                                    push_edit(schematic.read().clone(), "Move component");
                                 } else if let Some(wire_id) = d.wire_id {
                                     // Move single wire (all points)
                                     schematic.write().move_wire(wire_id, delta);
-                                    history.write().push(schematic.read().clone(), "Move wire");
+                                    push_edit(schematic.read().clone(), "Move wire");
                                 }
                             }
                             drag.set(DragState::default());
@@ -702,7 +710,7 @@ pub fn Schematic() -> Element {
                                 s.add_component(k, gp);
                                 // Then push to history AFTER the change
                                 drop(s);
-                                history.write().push(schematic.read().clone(), format!("Add {:?}", k));
+                                push_edit(schematic.read().clone(), &format!("Add {:?}", k));
                             }
                             Tool::Wire => {
                                 if s.wire_drawing.active {
@@ -797,7 +805,7 @@ pub fn Schematic() -> Element {
                                 let label_num = s.net_labels.len() + 1;
                                 s.add_net_label(gp, format!("NET{}", label_num));
                                 drop(s);
-                                history.write().push(schematic.read().clone(), "Add label".to_string());
+                                push_edit(schematic.read().clone(), "Add label");
                             }
                         }
                     },
@@ -817,7 +825,7 @@ pub fn Schematic() -> Element {
                         // If drawing a wire, right-click finishes it
                         if schematic.read().wire_drawing.active {
                             if schematic.write().finish_wire().is_some() {
-                                history.write().push(schematic.read().clone(), "Add wire".to_string());
+                                push_edit(schematic.read().clone(), "Add wire");
                             }
                             return;
                         }
@@ -846,7 +854,7 @@ pub fn Schematic() -> Element {
                         if schematic.read().tool == Tool::Wire && schematic.read().wire_drawing.active {
                             // Don't add the double-click point, just finish
                             if schematic.write().finish_wire().is_some() {
-                                history.write().push(schematic.read().clone(), "Add wire".to_string());
+                                push_edit(schematic.read().clone(), "Add wire");
                             }
                             return;
                         }
@@ -1212,11 +1220,11 @@ pub fn Schematic() -> Element {
                                 }
                                 MenuAction::Delete => {
                                     schematic.write().delete_selection();
-                                    history.write().push(schematic.read().clone(), "Delete selection");
+                                    push_edit(schematic.read().clone(), "Delete selection");
                                 }
                                 MenuAction::Rotate => {
                                     schematic.write().rotate_selection();
-                                    history.write().push(schematic.read().clone(), "Rotate selection");
+                                    push_edit(schematic.read().clone(), "Rotate selection");
                                 }
                                 _ => {} // Other actions not yet implemented
                             }

@@ -150,17 +150,23 @@ pub mod handlers {
         }
     }
 
-    /// Save schematic file
+    /// Save schematic file for active document
     pub async fn save_schematic(
         mut schematic: Signal<SchematicState>,
         mut sim_state: Signal<SimulationState>,
     ) {
-        let current_path = schematic.read().current_file.clone();
-        let sch_state = schematic.read().clone();
+        // Get DocumentManager from context - use use_context in the calling component
+        let mut doc_manager: Signal<crate::state::DocumentManager> = use_context();
+
+        // Sync current schematic state to active document first
+        doc_manager.write().active_mut().schematic = schematic.read().clone();
+
+        let current_path = doc_manager.read().active().file_path.clone();
 
         let save_path = if let Some(path) = current_path {
             Some(path)
         } else {
+            // No path - need Save As dialog
             rfd::AsyncFileDialog::new()
                 .add_filter("RSpice Schematic", &["rsch"])
                 .set_file_name("circuit.rsch")
@@ -170,9 +176,12 @@ pub mod handlers {
         };
 
         if let Some(path) = save_path {
-            match crate::state::schematic_file::save_schematic(&sch_state, &path) {
+            let save_result = doc_manager.write().save_active_document_as(path.clone());
+
+            match save_result {
                 Ok(_) => {
-                    schematic.write().current_file = Some(path.clone());
+                    // Sync updated schematic (with file path) back to signal
+                    schematic.set(doc_manager.read().active().schematic.clone());
                     sim_state
                         .write()
                         .console_messages
@@ -194,21 +203,29 @@ pub mod handlers {
         }
     }
 
-    /// Open schematic file
+    /// Open schematic file into new document tab
     pub async fn open_schematic(
         mut schematic: Signal<SchematicState>,
         mut sim_state: Signal<SimulationState>,
     ) {
+        let mut doc_manager: Signal<crate::state::DocumentManager> = use_context();
+
         if let Some(file) = rfd::AsyncFileDialog::new()
             .add_filter("RSpice Schematic", &["rsch"])
             .pick_file()
             .await
         {
             let file_path = file.path().to_path_buf();
-            match crate::state::schematic_file::load_schematic(&file_path) {
-                Ok(mut loaded_state) => {
-                    loaded_state.current_file = Some(file_path.clone());
-                    schematic.set(loaded_state);
+            let load_result = doc_manager
+                .write()
+                .load_document_from_file(file_path.clone());
+
+            match load_result {
+                Ok(_idx) => {
+                    // Load the newly active document's schematic into signal
+                    schematic.set(doc_manager.read().active().schematic.clone());
+                    sim_state.set(doc_manager.read().active().simulation.clone());
+
                     sim_state
                         .write()
                         .console_messages

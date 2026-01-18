@@ -208,4 +208,73 @@ impl DocumentManager {
             .map(|(i, _)| i)
             .collect()
     }
+
+    /// Save the active document to its file path
+    /// Returns Ok(path) if saved, Err with message if failed
+    pub fn save_active_document(&mut self) -> Result<PathBuf, String> {
+        let idx = self.active_index;
+
+        // Clone path first to avoid borrow conflict
+        let path = self.documents[idx]
+            .file_path
+            .clone()
+            .ok_or_else(|| "No file path set. Use Save As.".to_string())?;
+
+        Self::write_schematic_to_file(&self.documents[idx].schematic, &path)?;
+        self.documents[idx].mark_clean();
+        Ok(path)
+    }
+
+    /// Save the active document to a new path
+    pub fn save_active_document_as(&mut self, path: PathBuf) -> Result<(), String> {
+        let doc = &mut self.documents[self.active_index];
+
+        Self::write_schematic_to_file(&doc.schematic, &path)?;
+
+        // Update document with new path and name
+        doc.file_path = Some(path.clone());
+        doc.name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Unknown")
+            .to_string();
+        doc.mark_clean();
+
+        Ok(())
+    }
+
+    /// Load a document from a file path and add it to the document list
+    pub fn load_document_from_file(&mut self, path: PathBuf) -> Result<usize, String> {
+        // Check if already open
+        if let Some(idx) = self
+            .documents
+            .iter()
+            .position(|d| d.file_path.as_ref() == Some(&path))
+        {
+            self.active_index = idx;
+            return Ok(idx);
+        }
+
+        let schematic = Self::read_schematic_from_file(&path)?;
+        let idx = self.open_document(path, schematic);
+        Ok(idx)
+    }
+
+    /// Write schematic state to a file
+    fn write_schematic_to_file(schematic: &SchematicState, path: &PathBuf) -> Result<(), String> {
+        let json = serde_json::to_string_pretty(schematic)
+            .map_err(|e| format!("Serialization error: {}", e))?;
+
+        std::fs::write(path, json).map_err(|e| format!("File write error: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Read schematic state from a file
+    fn read_schematic_from_file(path: &PathBuf) -> Result<SchematicState, String> {
+        let content =
+            std::fs::read_to_string(path).map_err(|e| format!("File read error: {}", e))?;
+
+        serde_json::from_str(&content).map_err(|e| format!("Parse error: {}", e))
+    }
 }
