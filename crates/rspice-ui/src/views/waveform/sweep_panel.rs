@@ -445,6 +445,11 @@ fn parse_value(s: &str) -> f64 {
         return 0.0;
     }
 
+    // Check for "meg" suffix first (before single-char suffixes)
+    if s.to_lowercase().ends_with("meg") {
+        return s[..s.len() - 3].parse::<f64>().unwrap_or(0.0) * 1e6;
+    }
+
     // Check for SI suffix
     let (num_str, multiplier) = if let Some(c) = s.chars().last() {
         match c.to_ascii_lowercase() {
@@ -455,14 +460,7 @@ fn parse_value(s: &str) -> f64 {
             'm' => (&s[..s.len() - 1], 1e-3),
             'k' => (&s[..s.len() - 1], 1e3),
             'g' => (&s[..s.len() - 1], 1e9),
-            _ => {
-                // Check for "meg" suffix
-                if s.to_lowercase().ends_with("meg") {
-                    (&s[..s.len() - 3], 1e6)
-                } else {
-                    (s, 1.0)
-                }
-            }
+            _ => (s, 1.0),
         }
     } else {
         (s, 1.0)
