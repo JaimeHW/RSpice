@@ -246,22 +246,79 @@ impl<'a> Lexer<'a> {
             let next_char = chars[i].to_ascii_uppercase();
             // Check if it could be a model name pattern (digit + letter + more alphanumeric)
             if next_char.is_ascii_alphabetic() && i + 1 < chars.len() {
-                let after = chars[i + 1];
+                let after = chars[i + 1].to_ascii_uppercase();
                 // If the letter is followed by more alphanumeric, it's likely a model name
                 // E.g., "1N4148" - after 'N' we have '4' which makes it a model name
                 // vs "1n" which is just 1 * nano
+                // But "1ns" (nanosecond) should be parsed as number - 's' is for 'seconds' unit
                 if after.is_ascii_alphanumeric() {
-                    // Check if it's NOT a valid suffix pattern
+                    // Check if it's a valid suffix pattern
                     let could_be_suffix = match next_char {
                         'E' => after == '+' || after == '-' || after.is_ascii_digit(), // Scientific notation
                         'M' => {
-                            // Could be MEG suffix
+                            // MEG suffix, MS (milliseconds), MHZ (megahertz)
                             if chars.len() > i + 2 {
                                 let m2 = chars[i + 1].to_ascii_uppercase();
                                 let m3 = chars[i + 2].to_ascii_uppercase();
-                                m2 == 'E' && m3 == 'G'
+                                (m2 == 'E' && m3 == 'G') || m2 == 'S' || (m2 == 'H' && m3 == 'Z')
                             } else {
-                                false
+                                after == 'S' || after == 'H' // MS, MH
+                            }
+                        }
+                        // Unit suffixes followed by 's' (seconds), 'F' (farad), or 'H' (henry/hertz)
+                        'N' => {
+                            // ns, nF, nH
+                            after == 'S'
+                                || after == 'F'
+                                || after == 'H'
+                                || !after.is_ascii_alphabetic()
+                        }
+                        'P' => {
+                            // ps, pF, pH
+                            after == 'S'
+                                || after == 'F'
+                                || after == 'H'
+                                || !after.is_ascii_alphabetic()
+                        }
+                        'U' => {
+                            // us, uF, uH
+                            after == 'S'
+                                || after == 'F'
+                                || after == 'H'
+                                || !after.is_ascii_alphabetic()
+                        }
+                        'F' => {
+                            // fs (femtosecond)
+                            after == 'S' || !after.is_ascii_alphabetic()
+                        }
+                        'K' => {
+                            // kHz
+                            if chars.len() > i + 2 {
+                                let k2 = chars[i + 1].to_ascii_uppercase();
+                                let k3 = chars[i + 2].to_ascii_uppercase();
+                                k2 == 'H' && k3 == 'Z'
+                            } else {
+                                !after.is_ascii_alphabetic()
+                            }
+                        }
+                        'G' => {
+                            // GHz
+                            if chars.len() > i + 2 {
+                                let g2 = chars[i + 1].to_ascii_uppercase();
+                                let g3 = chars[i + 2].to_ascii_uppercase();
+                                g2 == 'H' && g3 == 'Z'
+                            } else {
+                                !after.is_ascii_alphabetic()
+                            }
+                        }
+                        'T' => {
+                            // THz (terahertz)
+                            if chars.len() > i + 2 {
+                                let t2 = chars[i + 1].to_ascii_uppercase();
+                                let t3 = chars[i + 2].to_ascii_uppercase();
+                                t2 == 'H' && t3 == 'Z'
+                            } else {
+                                !after.is_ascii_alphabetic()
                             }
                         }
                         _ => false,
@@ -427,15 +484,58 @@ fn parse_spice_suffix(chars: &[char]) -> (Value, usize) {
         return (1.0, 0);
     }
 
-    // Try multi-char suffixes first
+    // Try three-char suffixes first
     if chars.len() >= 3 {
         let three: String = chars[..3].iter().collect();
         let three_upper = three.to_uppercase();
-        if three_upper == "MEG" {
-            return (1e6, 3);
+        match three_upper.as_str() {
+            "MEG" => return (1e6, 3),
+            "MIL" => return (25.4e-6, 3), // mil = 1/1000 inch
+            "GHZ" => return (1e9, 3),     // gigahertz
+            "MHZ" => return (1e6, 3),     // megahertz
+            "KHZ" => return (1e3, 3),     // kilohertz
+            "THZ" => return (1e12, 3),    // terahertz
+            _ => {}
         }
-        if three_upper == "MIL" {
-            return (25.4e-6, 3); // mil = 1/1000 inch
+    }
+
+    // Two-char unit suffixes
+    if chars.len() >= 2 {
+        let c1 = chars[0].to_ascii_uppercase();
+        let c2 = chars[1].to_ascii_uppercase();
+
+        // Time units (seconds)
+        if c2 == 'S' {
+            match c1 {
+                'N' => return (1e-9, 2),  // nanoseconds
+                'P' => return (1e-12, 2), // picoseconds
+                'U' => return (1e-6, 2),  // microseconds
+                'M' => return (1e-3, 2),  // milliseconds
+                'F' => return (1e-15, 2), // femtoseconds
+                _ => {}
+            }
+        }
+
+        // Capacitance units (farads) - just consume the F, value already scaled
+        if c2 == 'F' {
+            match c1 {
+                'N' => return (1e-9, 2),  // nanofarads
+                'P' => return (1e-12, 2), // picofarads
+                'U' => return (1e-6, 2),  // microfarads
+                'M' => return (1e-3, 2),  // millifarads (rare but valid)
+                _ => {}
+            }
+        }
+
+        // Inductance units (henrys)
+        if c2 == 'H' {
+            match c1 {
+                'N' => return (1e-9, 2),  // nanohenrys
+                'P' => return (1e-12, 2), // picohenrys
+                'U' => return (1e-6, 2),  // microhenrys
+                'M' => return (1e-3, 2),  // millihenrys
+                _ => {}
+            }
         }
     }
 

@@ -11,7 +11,7 @@ use super::lexer::{LexError, TokenKind, TokenStream, tokenize};
 use super::{
     AnalysisCommand, Element, ElementKind, FreqVariation, InitialCondition, ModelDef, Netlist,
     ParamContext, ParseError, SourceSpec, StepCommand, StepSweep, StepTarget, SubcircuitDef,
-    SwitchState,
+    SwitchState, VerilogAInclude,
 };
 use crate::Value;
 
@@ -35,6 +35,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
     let mut models = Vec::new();
     let mut subcircuits = Vec::new();
     let mut params = ParamContext::new();
+    let mut veriloga_includes = Vec::new();
 
     // State for tracking subcircuit blocks
     let mut in_subcircuit = false;
@@ -80,6 +81,23 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
             break;
         }
 
+        // Handle .VERILOGA directive directly (before continuation handling)
+        let upper_trimmed = trimmed.to_uppercase();
+        if upper_trimmed.starts_with(".VERILOGA") || upper_trimmed.starts_with(".VA") {
+            // Parse: .VERILOGA filename.va [MODELNAME]
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+            if parts.len() >= 2 {
+                let file_path = std::path::PathBuf::from(parts[1]);
+                let model_name = parts.get(2).map(|s| s.to_string());
+                veriloga_includes.push(VerilogAInclude {
+                    file_path,
+                    model_name,
+                });
+                log::debug!("Found .VERILOGA include: {:?}", parts[1]);
+                continue; // Skip normal processing
+            }
+        }
+
         // Start new continuation or process line
         continuation = trimmed.to_string();
     }
@@ -121,6 +139,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
         global_nodes: std::collections::HashSet::new(),
         measurements: Vec::new(),
         options: super::SimulationOptions::default(),
+        veriloga_includes,
     })
 }
 
@@ -216,17 +235,22 @@ fn parse_line(
         'D' => parse_diode(&mut stream, line_num, elements),
         'Q' => parse_bjt(&mut stream, line_num, elements),
         'M' => parse_mosfet(&mut stream, line_num, elements),
+        'J' => parse_jfet(&mut stream, line_num, elements),
         'X' => parse_subcircuit_instance(&mut stream, line_num, elements),
         'E' => parse_vcvs(&mut stream, line_num, elements, params),
         'F' => parse_cccs(&mut stream, line_num, elements, params),
         'G' => parse_vccs(&mut stream, line_num, elements, params),
         'H' => parse_ccvs(&mut stream, line_num, elements, params),
         'B' => parse_behavioral(&mut stream, line_num, elements),
-        // New element types
+        // Coupling and switches
         'K' => parse_coupling(&mut stream, line_num, elements, params),
         'S' => parse_vswitch(&mut stream, line_num, elements),
         'W' => parse_iswitch(&mut stream, line_num, elements),
+        // Transmission lines
         'T' => parse_transmission_line(&mut stream, line_num, elements, params),
+        'O' => parse_lossless_tline(&mut stream, line_num, elements),
+        'Y' => parse_lossy_tline(&mut stream, line_num, elements),
+        'P' => parse_coupled_tlines(&mut stream, line_num, elements),
         _ => Err(ParseError::Syntax {
             line: line_num,
             message: format!("Unknown element type: {}", first_char),
@@ -511,7 +535,82 @@ fn parse_resistor(
     // Skip optional parameter names (R=)
     skip_optional_param_name(stream, "R");
 
-    let value = expect_value(stream, line_num, params)?;
+    // Try to parse as a value first. If next token is an identifier
+    // that isn't a parameter, it's a model name.
+    let value = match &stream.peek().kind {
+        TokenKind::Number(v) => {
+            let v = *v;
+            stream.advance();
+            v
+        }
+        TokenKind::Ident(s) => {
+            // Check if it's a parameter reference
+            if let Some(v) = params.get(s) {
+                stream.advance();
+                v
+            } else {
+                // It's a model name - skip it and remaining parameters
+                // For model-based resistors, use a placeholder value
+                // Real value comes from .MODEL and geometry (L, W)
+                stream.advance(); // Skip model name
+
+                // Skip any geometry/additional params (L=, W=, AC=, etc.)
+                while !stream.is_eof()
+                    && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
+                {
+                    skip_commas(stream);
+                    // Skip parameter assignments like L=11u
+                    if let TokenKind::Ident(_) = &stream.peek().kind {
+                        stream.advance();
+                        if stream.consume(&TokenKind::Equals) {
+                            // Consume the value
+                            if let TokenKind::Number(_) = &stream.peek().kind {
+                                stream.advance();
+                            } else if let TokenKind::Ident(_) = &stream.peek().kind {
+                                stream.advance();
+                            }
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+
+                // Use a default 1k value for model-based resistors
+                // The actual simulation would need to look up the model
+                1000.0
+            }
+        }
+        TokenKind::Plus | TokenKind::Minus => {
+            // Handle signed values
+            let sign = if matches!(stream.peek().kind, TokenKind::Minus) {
+                -1.0
+            } else {
+                1.0
+            };
+            stream.advance();
+            if let TokenKind::Number(v) = &stream.peek().kind {
+                let v = *v * sign;
+                stream.advance();
+                v
+            } else {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "Expected value after sign".to_string(),
+                });
+            }
+        }
+        _ => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Expected resistor value or model, found {:?}",
+                    stream.peek().kind
+                ),
+            });
+        }
+    };
 
     elements.push(Element {
         name,
@@ -644,7 +743,51 @@ fn parse_bjt(
     let collector = expect_node(stream, line_num)?;
     let base = expect_node(stream, line_num)?;
     let emitter = expect_node(stream, line_num)?;
-    let model = expect_ident(stream, line_num)?;
+
+    // BJT can have optional substrate node: Q1 C B E [S] model
+    // We need to peek ahead to determine if next is substrate or model
+    let (substrate, model) = match &stream.peek().kind {
+        TokenKind::Number(_) => {
+            // It's a numeric node (substrate like "0")
+            let substrate = expect_node(stream, line_num)?;
+            let model = expect_ident(stream, line_num)?;
+            (Some(substrate), model)
+        }
+        TokenKind::Ident(s) => {
+            // Check if there's another identifier after this one
+            // by looking if what follows looks like a model name
+            let first_ident = s.clone();
+            stream.advance();
+
+            // Now peek at next token
+            match &stream.peek().kind {
+                TokenKind::Ident(_) => {
+                    // Two identifiers in a row: first is substrate node, second is model
+                    let model = expect_ident(stream, line_num)?;
+                    (Some(first_ident), model)
+                }
+                TokenKind::Newline | TokenKind::Eof | TokenKind::Comma => {
+                    // Only one identifier: it's the model name
+                    (None, first_ident)
+                }
+                _ => {
+                    // Assume first_ident is the model, any params follow
+                    (None, first_ident)
+                }
+            }
+        }
+        _ => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Expected BJT model name, found {:?}", stream.peek().kind),
+            });
+        }
+    };
+
+    let mut nodes = vec![collector, base, emitter];
+    if let Some(sub) = substrate {
+        nodes.push(sub);
+    }
 
     elements.push(Element {
         name,
@@ -652,7 +795,7 @@ fn parse_bjt(
             model,
             bjt_type: super::BjtType::Npn, // Will be set from model
         },
-        nodes: vec![collector, base, emitter],
+        nodes,
     });
 
     Ok(())
@@ -677,6 +820,123 @@ fn parse_mosfet(
             mos_type: super::MosType::Nmos, // Will be set from model
         },
         nodes: vec![drain, gate, source, bulk],
+    });
+
+    Ok(())
+}
+
+fn parse_jfet(
+    stream: &mut TokenStream,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+) -> Result<(), ParseError> {
+    let name = expect_ident(stream, line_num)?;
+    let drain = expect_node(stream, line_num)?;
+    let gate = expect_node(stream, line_num)?;
+    let source = expect_node(stream, line_num)?;
+    let model = expect_ident(stream, line_num)?;
+
+    elements.push(Element {
+        name,
+        kind: ElementKind::Jfet {
+            model,
+            jfet_type: super::JfetType::Njf, // Will be set from model
+        },
+        nodes: vec![drain, gate, source],
+    });
+
+    Ok(())
+}
+
+/// Parse lossless transmission line (O element)
+fn parse_lossless_tline(
+    stream: &mut TokenStream,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+) -> Result<(), ParseError> {
+    let name = expect_ident(stream, line_num)?;
+    let port1_pos = expect_node(stream, line_num)?;
+    let port1_neg = expect_node(stream, line_num)?;
+    let port2_pos = expect_node(stream, line_num)?;
+    let port2_neg = expect_node(stream, line_num)?;
+
+    // For now, skip to end of line (unsupported, but parsed)
+    stream.skip_to_eol();
+
+    elements.push(Element {
+        name,
+        kind: ElementKind::TransmissionLine {
+            z0: 50.0, // Default
+            td: Some(1e-9),
+            freq: None,
+            nl: None,
+        },
+        nodes: vec![port1_pos, port1_neg, port2_pos, port2_neg],
+    });
+
+    Ok(())
+}
+
+/// Parse lossy transmission line (Y element)
+fn parse_lossy_tline(
+    stream: &mut TokenStream,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+) -> Result<(), ParseError> {
+    let name = expect_ident(stream, line_num)?;
+    let port1_pos = expect_node(stream, line_num)?;
+    let port1_neg = expect_node(stream, line_num)?;
+    let port2_pos = expect_node(stream, line_num)?;
+    let port2_neg = expect_node(stream, line_num)?;
+
+    // For now, skip to end of line (unsupported, but parsed)
+    stream.skip_to_eol();
+
+    elements.push(Element {
+        name,
+        kind: ElementKind::TransmissionLine {
+            z0: 50.0,
+            td: Some(1e-9),
+            freq: None,
+            nl: None,
+        },
+        nodes: vec![port1_pos, port1_neg, port2_pos, port2_neg],
+    });
+
+    Ok(())
+}
+
+/// Parse coupled transmission lines (P element)
+fn parse_coupled_tlines(
+    stream: &mut TokenStream,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+) -> Result<(), ParseError> {
+    let name = expect_ident(stream, line_num)?;
+
+    // Coupled lines have more nodes - collect them all
+    let mut nodes = Vec::new();
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        skip_commas(stream);
+        if let Ok(node) = expect_node(stream, line_num) {
+            nodes.push(node);
+        } else {
+            break;
+        }
+    }
+
+    // Skip rest of line
+    stream.skip_to_eol();
+
+    elements.push(Element {
+        name,
+        kind: ElementKind::TransmissionLine {
+            z0: 50.0,
+            td: Some(1e-9),
+            freq: None,
+            nl: None,
+        },
+        nodes,
     });
 
     Ok(())
@@ -952,7 +1212,8 @@ fn parse_source_spec(
                 }
                 "AC" => {
                     stream.advance();
-                    let magnitude = expect_value(stream, line_num, params)?;
+                    // AC magnitude is optional - defaults to 1.0 if not specified
+                    let magnitude = try_value(stream, params).unwrap_or(1.0);
                     let phase = try_value(stream, params).unwrap_or(0.0);
                     return Ok(SourceSpec::Ac { magnitude, phase });
                 }
@@ -1283,22 +1544,37 @@ fn expect_value(
 ) -> Result<Value, ParseError> {
     skip_commas(stream);
 
+    // Handle optional sign prefix (+15 or -15)
+    let sign = match &stream.peek().kind {
+        TokenKind::Plus => {
+            stream.advance();
+            1.0
+        }
+        TokenKind::Minus => {
+            stream.advance();
+            -1.0
+        }
+        _ => 1.0,
+    };
+
     match &stream.peek().kind {
         TokenKind::Number(v) => {
-            let v = *v;
+            let v = *v * sign;
             stream.advance();
             Ok(v)
         }
         TokenKind::Expression(expr) => {
             let expr = expr.clone();
             stream.advance();
-            eval_expression(&expr, params).map_err(|e| ParseError::InvalidValue(e.to_string()))
+            eval_expression(&expr, params)
+                .map(|v| v * sign)
+                .map_err(|e| ParseError::InvalidValue(e.to_string()))
         }
         TokenKind::Ident(s) => {
             // Could be a parameter reference
             if let Some(v) = params.get(s) {
                 stream.advance();
-                Ok(v)
+                Ok(v * sign)
             } else {
                 Err(ParseError::Syntax {
                     line: line_num,
@@ -1760,11 +2036,33 @@ fn parse_noise_command(
     line_num: usize,
     params: &ParamContext,
 ) -> Result<AnalysisCommand, ParseError> {
-    // Parse output specification V(node) or V(node,ref)
-    let output_spec = expect_ident(stream, line_num)?;
+    // Parse output specification - could be V(node), V(node,ref), or just node
+    let first = expect_ident(stream, line_num)?;
 
-    // Parse the output node from V(node) format
-    let (output_node, reference_node) = parse_voltage_reference(&output_spec)?;
+    let (output_node, reference_node) =
+        if first.to_uppercase() == "V" && matches!(stream.peek().kind, TokenKind::LParen) {
+            // Consume LP, then parse V(node) or V(node,ref)
+            stream.advance(); // (
+            let node = expect_node(stream, line_num)?;
+            let reference = if stream.consume(&TokenKind::Comma) {
+                Some(expect_node(stream, line_num)?)
+            } else {
+                None
+            };
+            if !stream.consume(&TokenKind::RParen) {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "Expected ')' in V(node) specification".to_string(),
+                });
+            }
+            (node, reference)
+        } else if first.to_uppercase().starts_with("V(") {
+            // Already parsed as V(node) string
+            parse_voltage_reference(&first)?
+        } else {
+            // Simple node name
+            (first, None)
+        };
 
     // Input source
     let input_source = expect_ident(stream, line_num)?;
@@ -2349,5 +2647,99 @@ R1 1 0 1k
         assert!(result.params.get("IC_N1").is_some());
         assert!((result.params.get("IC_N1").unwrap() - 5.0).abs() < 1e-10);
         assert!((result.params.get("IC_N2").unwrap() - 2.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_parse_veriloga_directive() {
+        let netlist = r#"Verilog-A Test
+.VERILOGA resistor.va
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+
+        assert_eq!(result.veriloga_includes.len(), 1);
+        assert_eq!(
+            result.veriloga_includes[0].file_path.to_str().unwrap(),
+            "resistor.va"
+        );
+        assert!(result.veriloga_includes[0].model_name.is_none());
+    }
+
+    #[test]
+    fn test_parse_veriloga_with_model_name() {
+        let netlist = r#"Verilog-A Model Override
+.VERILOGA diode.va MyDiode
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+
+        assert_eq!(result.veriloga_includes.len(), 1);
+        assert_eq!(
+            result.veriloga_includes[0].file_path.to_str().unwrap(),
+            "diode.va"
+        );
+        assert_eq!(
+            result.veriloga_includes[0].model_name.as_deref(),
+            Some("MyDiode")
+        );
+    }
+
+    #[test]
+    fn test_parse_va_shorthand() {
+        let netlist = r#"VA Shorthand
+.VA capacitor.va
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+
+        assert_eq!(result.veriloga_includes.len(), 1);
+        assert_eq!(
+            result.veriloga_includes[0].file_path.to_str().unwrap(),
+            "capacitor.va"
+        );
+    }
+
+    #[test]
+    fn test_parse_multiple_veriloga() {
+        let netlist = r#"Multiple VA
+.VERILOGA resistor.va
+.VERILOGA diode.va Diode1N4148
+.VA capacitor.va
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+
+        assert_eq!(result.veriloga_includes.len(), 3);
+        assert_eq!(
+            result.veriloga_includes[0].file_path.to_str().unwrap(),
+            "resistor.va"
+        );
+        assert_eq!(
+            result.veriloga_includes[1].file_path.to_str().unwrap(),
+            "diode.va"
+        );
+        assert_eq!(
+            result.veriloga_includes[1].model_name.as_deref(),
+            Some("Diode1N4148")
+        );
+        assert_eq!(
+            result.veriloga_includes[2].file_path.to_str().unwrap(),
+            "capacitor.va"
+        );
+    }
+
+    #[test]
+    fn test_parse_veriloga_with_path() {
+        let netlist = r#"VA with Path
+.VERILOGA models/varactor.va
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+
+        assert_eq!(result.veriloga_includes.len(), 1);
+        assert_eq!(
+            result.veriloga_includes[0].file_path.to_str().unwrap(),
+            "models/varactor.va"
+        );
     }
 }

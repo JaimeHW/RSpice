@@ -24,21 +24,64 @@ Vin in 0 DC 0 AC 1
     let netlist = parse_netlist(netlist_str);
     let engine = Engine::new(SimulationConfig::default());
 
-    // Build circuit successfully
-    let circuit = engine
-        .build_circuit(&netlist)
-        .expect("Failed to build circuit");
+    // Run AC Analysis
+    // 1kHz cutoff frequency: f_c = 1 / (2*pi*R*C) = 1 / (2*pi*1k*1u) ≈ 159.15 Hz
+    let results = engine
+        .run_ac(&netlist, &[159.15])
+        .expect("AC analysis failed");
 
-    // Should have 2 nodes (in, out) plus ground
-    assert!(circuit.num_nodes() >= 2, "Expected at least 2 nodes");
+    assert!(!results.is_empty(), "Should have AC results");
 
-    // Run DC operating point
-    let result = engine.run_dc_op(&netlist).expect("DC OP failed");
+    // At cutoff frequency:
+    // Magnitude should be 1/sqrt(2) ≈ 0.707 (-3dB)
+    // Phase should be -45 degrees
+    let cutoff = &results[0];
 
-    // With 0V DC input, all nodes should be ~0V
+    // Find output node (should be index 2 for "out" if standard ordering holds,
+    // but let's check index 1 and 2 to be safe or use named lookup if possible.
+    // Indexing: 0=Ground, 1=in, 2=out usually.
+    // If results keys are not available, we assume index 2.
+    // If it was 0, maybe "out" is index 1?
+    // Let's print for debugging if it fails again, but here let's try to be smarter.
+    // If node 1 is input, it should be 1.0.
+    // If node 2 is output, it should be 0.707.
+
+    let v1 = cutoff.voltage_magnitude(1);
+    let v2 = cutoff.voltage_magnitude(2);
+
+    let (v_in, v_out) = if (v1 - 1.0).abs() < 0.1 {
+        (v1, v2)
+    } else {
+        (v2, v1) // Swap if ordering is reversed
+    };
+
+    let phase_rad = if (v1 - 1.0).abs() < 0.1 {
+        cutoff.voltage_phase(2)
+    } else {
+        cutoff.voltage_phase(1)
+    };
+
+    let phase_deg = phase_rad * 180.0 / std::f64::consts::PI;
+
+    // Verify input is present (AC 1)
     assert!(
-        result.node_voltages[0].abs() < 0.1,
-        "Node voltage should be near 0"
+        (v_in - 1.0).abs() < 0.1,
+        "Input AC magnitude should be 1.0, got {}",
+        v_in
+    );
+
+    // Verify output
+    assert!(
+        (v_out - 0.7071).abs() < 0.05,
+        "Magnitude at cutoff should be ~0.707, got {}. (in={}, out={})",
+        v_out,
+        v_in,
+        v_out
+    );
+    assert!(
+        (phase_deg + 45.0).abs() < 5.0,
+        "Phase at cutoff should be ~-45 deg, got {}",
+        phase_deg
     );
 }
 
@@ -283,4 +326,150 @@ R3 n3 0 1k
 
     let result = engine.run_dc_op(&netlist);
     assert!(result.is_ok(), "Multi-source circuit should solve");
+}
+
+/// Test RC step response (Transient)
+#[test]
+fn test_rc_step_response() {
+    let netlist_str = r#"
+* RC Step Response
+V1 in 0 PULSE(0 1 0 1u 1u 1m 2m)
+R1 in out 1k
+C1 out 0 1u
+.TRAN 10u 5m
+.END
+"#;
+    // Note: Time constant tau = R*C = 1ms
+    // V(out) at t=tau should be ~0.632 * Vfinal (assuming start from 0)
+    // Here PULSE starts at 0, goes to 1V.
+
+    let netlist = parse_netlist(netlist_str);
+    let engine = Engine::new(SimulationConfig::default());
+
+    let result = engine
+        .run_tran(&netlist, 0.005, 0.00001)
+        .expect("Transient failed");
+
+    // Find index near t = 1ms
+    let tau = 1e-3;
+    let idx = result
+        .time
+        .iter()
+        .position(|&t| t >= tau)
+        .expect("Simulation should cover tau");
+
+    // Check voltage at tau
+    let v_out_at_tau = result.voltages[1][idx]; // Node 2 (out) is index 1
+
+    assert!(
+        (v_out_at_tau - 0.632).abs() < 0.05,
+        "V(out) at tau (1ms) should be ~0.632V, got {}",
+        v_out_at_tau
+    );
+}
+
+/// Test Measurement Directives
+#[test]
+fn test_meas_directives() {
+    let netlist_str = r#"
+* Measurement Test
+V1 in 0 SIN(0 1 1k)
+R1 in 0 1k
+.TRAN 10u 2m
+.MEAS TRAN avg_v AVG V(in)
+.MEAS TRAN max_v MAX V(in)
+.END
+"#;
+
+    let netlist = parse_netlist(netlist_str);
+    let engine = Engine::new(SimulationConfig::default());
+
+    let result = engine
+        .run_tran(&netlist, 0.002, 10e-6)
+        .expect("Transient failed");
+
+    // Evaluate measurements
+    let mut meas_engine = rspice_core::MeasureEngine::new();
+    for meas in &netlist.measurements {
+        meas_engine.add(meas.clone());
+    }
+
+    use std::collections::HashMap;
+    let mut signals: HashMap<String, &[f64]> = HashMap::new();
+    // V(in) -> Node 1 (index 0 in voltages?)
+    // In TransientResult: voltages[0] corresponds to Node 1.
+    signals.insert("V(in)".to_string(), &result.voltages[0]);
+
+    let meas_results = meas_engine.evaluate(&result.time, &signals);
+
+    let avg = meas_results.iter().find(|m| m.name == "avg_v").unwrap();
+    let max = meas_results.iter().find(|m| m.name == "max_v").unwrap();
+
+    // Avg of sine over integer cycles is 0
+    assert!(avg.value.unwrap().abs() < 0.1, "AVG should be near 0");
+    // Max should be 1
+    assert!((max.value.unwrap() - 1.0).abs() < 0.01, "MAX should be 1.0");
+}
+
+/// Test Parametric Sweep (.STEP)
+#[test]
+fn test_step_param() {
+    let netlist_str = r#"
+* Parametric Sweep
+.PARAM Rval=1k
+V1 in 0 DC 10
+R1 in out 1k
+R2 out 0 {Rval}
+.STEP PARAM Rval LIST 1k 3k 9k
+.OP
+.END
+"#;
+    // Steps:
+    // 1. Rval=1k -> V(out) = 5V
+    // 2. Rval=3k -> V(out) = 7.5V
+    // 3. Rval=9k -> V(out) = 9V
+    // Vout = Vin * R2 / (R1 + R2)
+    // 1. R2=1k: 10 * 1k/2k = 5V
+    // 2. R2=3k: 10 * 3k/4k = 7.5V
+    // 3. R2=9k: 10 * 9k/10k = 9V
+
+    let mut netlist = parse_netlist(netlist_str);
+    let engine = Engine::new(SimulationConfig::default());
+
+    // We need to manually handle the STEP logic as the engine might not fully automate it in a single call for all analysis types yet
+    // But CLI handles it. Does Engine have a `run` wrapper?
+    // The CLI handles .STEP by iterating. The `integration.rs` usually tests `engine` methods.
+    // Let's emulate what the CLI does for STEP, which validates the core components (param substitution).
+
+    let step_cmd = netlist
+        .analyses
+        .iter()
+        .find_map(|a| match a {
+            rspice_core::netlist::AnalysisCommand::Step(s) => Some(s.clone()),
+            _ => None,
+        })
+        .expect("Should find STEP command");
+
+    let values = vec![1000.0, 3000.0, 9000.0]; // Extracted via logic in CLI, hardcoded here for test
+
+    let expected_outs = [5.0, 7.5, 9.0];
+
+    for (i, &val) in values.iter().enumerate() {
+        // Update param
+        netlist.params.set(&step_cmd.name, val);
+        // Improve: Re-eval netlist if needed (if params are burned in during parse?)
+        // Netlist::build_circuit handles param substitution?
+        // Usually build_circuit resolves params.
+
+        let result = engine.run_dc_op(&netlist).expect("DC OP failed");
+        let v_out = result.voltage(2); // Node 2 (out)
+
+        assert!(
+            (v_out - expected_outs[i]).abs() < 0.1,
+            "Step {}: Expected {}V, got {}V",
+            i,
+            expected_outs[i],
+            v_out
+        );
+    }
 }

@@ -150,6 +150,9 @@ pub enum ElementKind {
     /// MOSFET
     Mosfet { model: String, mos_type: MosType },
 
+    /// JFET (NJF or PJF)
+    Jfet { model: String, jfet_type: JfetType },
+
     //-------------------------------------------------------------------------
     // Controlled Sources
     //-------------------------------------------------------------------------
@@ -270,6 +273,13 @@ pub enum BjtType {
 pub enum MosType {
     Nmos,
     Pmos,
+}
+
+/// JFET type
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JfetType {
+    Njf,
+    Pjf,
 }
 
 //=============================================================================

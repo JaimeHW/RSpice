@@ -895,6 +895,7 @@ pub struct CircuitData {
     pub diodes: Diodes,
     pub bjts: Bjts,
     pub mosfets: Mosfets,
+    pub jfets: Vec<crate::device::Jfet>,
 
     // Controlled sources
     pub vcvs: Vcvs,
@@ -916,6 +917,10 @@ pub struct CircuitData {
 
     // Behavioral sources (expression-based B-elements)
     pub behavioral_sources: BehavioralSources,
+
+    // Verilog-A devices (feature-gated)
+    #[cfg(feature = "veriloga")]
+    pub veriloga_devices: crate::device::veriloga::VerilogADevices,
 }
 
 impl CircuitData {
@@ -939,6 +944,7 @@ impl CircuitData {
             diodes: Diodes::new(),
             bjts: Bjts::new(),
             mosfets: Mosfets::new(),
+            jfets: Vec::new(),
             vcvs: Vcvs::new(),
             vccs: Vccs::new(),
             cccs: Cccs::new(),
@@ -951,6 +957,9 @@ impl CircuitData {
             tlines: Vec::new(),
             couplings: Vec::new(),
             behavioral_sources: BehavioralSources::new(),
+            // Verilog-A devices
+            #[cfg(feature = "veriloga")]
+            veriloga_devices: crate::device::veriloga::VerilogADevices::new(),
         }
     }
 

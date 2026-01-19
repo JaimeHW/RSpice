@@ -58,22 +58,37 @@ pub fn expect_value(
 ) -> Result<Value, ParseError> {
     skip_commas(stream);
 
+    // Handle optional sign prefix (+15 or -15)
+    let sign = match &stream.peek().kind {
+        TokenKind::Plus => {
+            stream.advance();
+            1.0
+        }
+        TokenKind::Minus => {
+            stream.advance();
+            -1.0
+        }
+        _ => 1.0,
+    };
+
     match &stream.peek().kind {
         TokenKind::Number(v) => {
-            let v = *v;
+            let v = *v * sign;
             stream.advance();
             Ok(v)
         }
         TokenKind::Expression(expr) => {
             let expr = expr.clone();
             stream.advance();
-            eval_expression(&expr, params).map_err(|e| ParseError::InvalidValue(e.to_string()))
+            eval_expression(&expr, params)
+                .map(|v| v * sign)
+                .map_err(|e| ParseError::InvalidValue(e.to_string()))
         }
         TokenKind::Ident(s) => {
             // Could be a parameter reference
             if let Some(v) = params.get(s) {
                 stream.advance();
-                Ok(v)
+                Ok(v * sign)
             } else {
                 Err(ParseError::Syntax {
                     line: line_num,

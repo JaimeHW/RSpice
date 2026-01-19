@@ -77,6 +77,20 @@ pub struct Netlist {
     pub measurements: Vec<MeasureStatement>,
     /// Simulation options from .OPTIONS commands
     pub options: SimulationOptions,
+    /// Verilog-A model includes from .VERILOGA statements
+    pub veriloga_includes: Vec<VerilogAInclude>,
+}
+
+/// Verilog-A model include directive
+///
+/// References an external Verilog-A file to be compiled and used as a model.
+/// Usage in netlist: `.VERILOGA filename.va [MODELNAME]`
+#[derive(Debug, Clone)]
+pub struct VerilogAInclude {
+    /// Path to the Verilog-A source file
+    pub file_path: std::path::PathBuf,
+    /// Optional model name override (defaults to module name in VA file)
+    pub model_name: Option<String>,
 }
 
 impl Netlist {
@@ -115,6 +129,7 @@ impl Default for Netlist {
             global_nodes: HashSet::new(),
             measurements: Vec::new(),
             options: SimulationOptions::default(),
+            veriloga_includes: Vec::new(),
         }
     }
 }
