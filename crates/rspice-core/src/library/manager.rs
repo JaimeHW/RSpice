@@ -12,16 +12,16 @@ use super::parser::parse_library_content;
 //=============================================================================
 
 /// Embedded diode library
-const DIODE_LIB: &str = include_str!("../../../../lib/diode.lib");
+const DIODE_LIB: &str = include_str!("../../../../models/spice/diode.lib");
 
 /// Embedded MOSFET library
-const MOSFET_LIB: &str = include_str!("../../../../lib/mosfet.lib");
+const MOSFET_LIB: &str = include_str!("../../../../models/spice/mosfet.lib");
 
 /// Embedded OpAmp library
-const OPAMP_LIB: &str = include_str!("../../../../lib/opamp.lib");
+const OPAMP_LIB: &str = include_str!("../../../../models/spice/opamp.lib");
 
 /// Embedded transistor library
-const TRANSISTOR_LIB: &str = include_str!("../../../../lib/transistor.lib");
+const TRANSISTOR_LIB: &str = include_str!("../../../../models/spice/transistor.lib");
 
 //=============================================================================
 // Model Types

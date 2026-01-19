@@ -8,6 +8,8 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 use rspice_core::library::{LibraryManager, ModelType};
 
+use super::veriloga_dialog::VerilogAImportDialog;
+use super::veriloga_inspector::VerilogAModelInfo;
 use crate::state::{use_canvas_focus, ComponentType, Rotation, SchematicState, Tool};
 use crate::theme::Theme;
 
@@ -18,6 +20,7 @@ pub enum ComponentCategory {
     Semiconductors,
     Sources,
     ControlledSources,
+    VerilogA,
 }
 
 impl ComponentCategory {
@@ -27,6 +30,7 @@ impl ComponentCategory {
             ComponentCategory::Semiconductors => "Semiconductors",
             ComponentCategory::Sources => "Sources",
             ComponentCategory::ControlledSources => "Controlled Sources",
+            ComponentCategory::VerilogA => "Verilog-A Models",
         }
     }
 
@@ -36,6 +40,7 @@ impl ComponentCategory {
             ComponentCategory::Semiconductors => "",
             ComponentCategory::Sources => "",
             ComponentCategory::ControlledSources => "",
+            ComponentCategory::VerilogA => "VA",
         }
     }
 
@@ -70,6 +75,7 @@ impl ComponentCategory {
                 ComponentType::Ccvs,
                 ComponentType::Cccs,
             ],
+            ComponentCategory::VerilogA => &[], // VA models are dynamically loaded
         }
     }
 }
@@ -129,6 +135,10 @@ pub fn ComponentLibrary(props: ComponentLibraryProps) -> Element {
     let lib_manager = library_manager.read();
     let model_types = lib_manager.available_types();
     let mut lib_expanded = use_signal(|| vec![false; model_types.len()]); // Collapsed by default
+
+    // Verilog-A import dialog state
+    let mut va_import_visible = use_signal(|| false);
+    let mut va_models: Signal<Vec<VerilogAModelInfo>> = use_signal(Vec::new);
 
     if !props.visible {
         return rsx! {};
@@ -256,6 +266,103 @@ pub fn ComponentLibrary(props: ComponentLibraryProps) -> Element {
                 }
 
                 // ═══════════════════════════════════════════════════════════════
+                // Verilog-A Models Section
+                // ═══════════════════════════════════════════════════════════════
+
+                // Section divider
+                div {
+                    style: "
+                        margin: 8px 12px;
+                        border-bottom: 1px solid {th.border()};
+                    "
+                }
+
+                // Verilog-A section header
+                div {
+                    style: "
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        padding: 4px 12px 8px;
+                    ",
+
+                    span {
+                        style: "
+                            font-size: 10px;
+                            font-weight: 600;
+                            color: {th.accent_primary()};
+                            text-transform: uppercase;
+                            letter-spacing: 0.5px;
+                        ",
+                        "Verilog-A Models"
+                    }
+
+                    // Import button
+                    button {
+                        style: "
+                            padding: 3px 8px;
+                            background: {th.surface()};
+                            border: 1px solid {th.border()};
+                            border-radius: 4px;
+                            color: {th.text_secondary()};
+                            font-size: 10px;
+                            cursor: pointer;
+                            transition: all 0.15s;
+                        ",
+                        title: "Import Verilog-A Model",
+                        onclick: move |_| {
+                            va_import_visible.set(true);
+                        },
+                        "+ Import"
+                    }
+                }
+
+                // Verilog-A models list or empty state
+                if va_models.read().is_empty() {
+                    // Empty state placeholder
+                    div {
+                        style: "
+                            padding: 12px 16px;
+                            margin: 0 12px 8px;
+                            background: {th.bg_primary()};
+                            border-radius: 6px;
+                            text-align: center;
+                        ",
+
+                        div {
+                            style: "
+                                font-size: 11px;
+                                color: {th.text_muted()};
+                                margin-bottom: 4px;
+                            ",
+                            "No Verilog-A models loaded"
+                        }
+
+                        div {
+                            style: "
+                                font-size: 10px;
+                                color: {th.text_muted()};
+                                opacity: 0.7;
+                            ",
+                            "Click Import to add .va files"
+                        }
+                    }
+                } else {
+                    // List of imported VA models
+                    div {
+                        style: "
+                            padding: 0 12px 8px;
+                        ",
+                        for model in va_models.read().iter() {
+                            VerilogAModelItem {
+                                model: model.clone(),
+                                schematic: props.schematic,
+                            }
+                        }
+                    }
+                }
+
+                // ═══════════════════════════════════════════════════════════════
                 // Library Models Section
                 // ═══════════════════════════════════════════════════════════════
 
@@ -371,6 +478,18 @@ pub fn ComponentLibrary(props: ComponentLibraryProps) -> Element {
                 ",
                 "Click to select, then click canvas to place"
             }
+        }
+
+        // Verilog-A Import Dialog
+        VerilogAImportDialog {
+            visible: *va_import_visible.read(),
+            on_close: move |_| {
+                va_import_visible.set(false);
+            },
+            on_import: move |model: VerilogAModelInfo| {
+                log::info!("Imported Verilog-A model: {}", model.name);
+                va_models.write().push(model);
+            },
         }
     }
 }
@@ -505,5 +624,163 @@ fn LibraryModelItem(
                 }
             }
         }
+    }
+}
+
+/// Verilog-A model item for displaying imported VA models
+#[component]
+fn VerilogAModelItem(model: VerilogAModelInfo, schematic: Signal<SchematicState>) -> Element {
+    let theme: Signal<Theme> = use_context();
+    let th = theme.read();
+    let canvas_focus = use_canvas_focus();
+
+    // Build description from terminals and parameter count
+    let terminals_str = model.terminals.join(", ");
+    let desc = format!("({}) {} params", terminals_str, model.parameters.len());
+
+    rsx! {
+        div {
+            style: "
+                display: flex;
+                flex-direction: column;
+                padding: 8px 12px;
+                margin-bottom: 4px;
+                background: {th.surface()};
+                border: 1px solid {th.border()};
+                border-radius: 6px;
+                cursor: pointer;
+                transition: all 0.15s;
+            ",
+            onclick: move |_| {
+                // TODO: Set up placement tool for VA model
+                log::info!("Selected Verilog-A model: {}", model.name);
+                canvas_focus.read().focus();
+            },
+
+            // Model name with VA badge
+            div {
+                style: "display: flex; align-items: center; gap: 6px; margin-bottom: 4px;",
+
+                span {
+                    style: "
+                        font-size: 9px;
+                        font-weight: 700;
+                        color: {th.accent_primary()};
+                        background: {th.accent_primary()}22;
+                        padding: 1px 4px;
+                        border-radius: 3px;
+                    ",
+                    "VA"
+                }
+
+                span {
+                    style: "font-size: 12px; font-weight: 500; color: {th.text_primary()};",
+                    "{model.name}"
+                }
+            }
+
+            // Description (terminals and param count)
+            div {
+                style: "
+                    font-size: 10px;
+                    color: {th.text_muted()};
+                ",
+                "{desc}"
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_component_category_names() {
+        assert_eq!(ComponentCategory::Passives.name(), "Passive Components");
+        assert_eq!(ComponentCategory::Semiconductors.name(), "Semiconductors");
+        assert_eq!(ComponentCategory::Sources.name(), "Sources");
+        assert_eq!(
+            ComponentCategory::ControlledSources.name(),
+            "Controlled Sources"
+        );
+        assert_eq!(ComponentCategory::VerilogA.name(), "Verilog-A Models");
+    }
+
+    #[test]
+    fn test_component_category_icons() {
+        // VerilogA should have "VA" icon
+        assert_eq!(ComponentCategory::VerilogA.icon(), "VA");
+        // Others can be empty or have icons
+        let _ = ComponentCategory::Passives.icon();
+        let _ = ComponentCategory::Semiconductors.icon();
+    }
+
+    #[test]
+    fn test_component_category_components() {
+        // Passives should have R, C, L
+        let passives = ComponentCategory::Passives.components();
+        assert!(passives.contains(&ComponentType::Resistor));
+        assert!(passives.contains(&ComponentType::Capacitor));
+        assert!(passives.contains(&ComponentType::Inductor));
+
+        // Semiconductors should have diodes, BJTs, MOSFETs
+        let semiconductors = ComponentCategory::Semiconductors.components();
+        assert!(semiconductors.contains(&ComponentType::Diode));
+        assert!(semiconductors.contains(&ComponentType::NpnBjt));
+        assert!(semiconductors.contains(&ComponentType::Nmos));
+
+        // Sources should have voltage, current, ground
+        let sources = ComponentCategory::Sources.components();
+        assert!(sources.contains(&ComponentType::VoltageSource));
+        assert!(sources.contains(&ComponentType::CurrentSource));
+        assert!(sources.contains(&ComponentType::Ground));
+
+        // Controlled sources should have VCVS, VCCS, CCVS, CCCS
+        let controlled = ComponentCategory::ControlledSources.components();
+        assert!(controlled.contains(&ComponentType::Vcvs));
+        assert!(controlled.contains(&ComponentType::Vccs));
+        assert!(controlled.contains(&ComponentType::Ccvs));
+        assert!(controlled.contains(&ComponentType::Cccs));
+
+        // VerilogA is dynamically loaded, so empty by default
+        let veriloga = ComponentCategory::VerilogA.components();
+        assert!(veriloga.is_empty());
+    }
+
+    #[test]
+    fn test_component_info() {
+        // Test a few component infos
+        let (name, desc, shortcut) = component_info(ComponentType::Resistor);
+        assert_eq!(name, "Resistor");
+        assert!(desc.contains("R"));
+        assert_eq!(shortcut, "R");
+
+        let (name, desc, _) = component_info(ComponentType::Diode);
+        assert_eq!(name, "Diode");
+        assert!(desc.contains("D"));
+
+        let (name, _, shortcut) = component_info(ComponentType::Ground);
+        assert_eq!(name, "Ground");
+        assert_eq!(shortcut, "G");
+    }
+
+    #[test]
+    fn test_all_categories_have_unique_names() {
+        let categories = [
+            ComponentCategory::Passives,
+            ComponentCategory::Semiconductors,
+            ComponentCategory::Sources,
+            ComponentCategory::ControlledSources,
+            ComponentCategory::VerilogA,
+        ];
+
+        let names: Vec<_> = categories.iter().map(|c| c.name()).collect();
+        let unique: std::collections::HashSet<_> = names.iter().collect();
+        assert_eq!(
+            names.len(),
+            unique.len(),
+            "All category names should be unique"
+        );
     }
 }
