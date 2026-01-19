@@ -130,6 +130,16 @@ pub enum Instruction {
     Max,
     /// Limited exponential (for convergence)
     Limexp,
+    /// Inverse trigonometric functions
+    Asin,
+    Acos,
+    Atan,
+    Atan2, // 2-argument arctangent(y, x)
+    /// Rounding functions
+    Floor,
+    Ceil,
+    /// Power function (2-argument)
+    FnPow,
     /// Comparison operations (return 1.0 for true, 0.0 for false)
     Gt, // Greater than
     Lt, // Less than
@@ -141,6 +151,12 @@ pub enum Instruction {
     And, // Logical and
     Or, // Logical or
     Not, // Logical not
+    /// State-based time derivative: ddt(expr) using state index
+    /// Uses backward Euler: (current - prev) / dt
+    DdtState(usize),
+    /// State-based integration: idt(expr, ic) using state index
+    /// Uses forward Euler: prev + expr * dt
+    IdtState(usize),
     /// Conditional: if top is nonzero, use second, else third
     IfElse,
 }
@@ -367,11 +383,16 @@ impl<'a> CodeGenerator<'a> {
                     IrFunction::Tanh => Instruction::Tanh,
                     IrFunction::Min => Instruction::Min,
                     IrFunction::Max => Instruction::Max,
-                    _ => {
-                        return Err(CompileError::CodeGen(CodeGenError::new(
-                            CodeGenErrorKind::UnsupportedFeature(format!("Function {:?}", func)),
-                        )));
-                    }
+                    // Inverse trig
+                    IrFunction::Asin => Instruction::Asin,
+                    IrFunction::Acos => Instruction::Acos,
+                    IrFunction::Atan => Instruction::Atan,
+                    IrFunction::Atan2 => Instruction::Atan2,
+                    // Rounding
+                    IrFunction::Floor => Instruction::Floor,
+                    IrFunction::Ceil => Instruction::Ceil,
+                    // Power
+                    IrFunction::Pow => Instruction::FnPow,
                 });
             }
             IrExpr::Limexp(inner) => {

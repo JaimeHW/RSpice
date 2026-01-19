@@ -13,6 +13,7 @@ wasm = ["wasm-bindgen", "getrandom/js"]
 parallel = ["rayon", "portable-atomic"]
 faer-parallel = ["faer/rayon"]
 ffi = ["libloading"]
+veriloga = ["dep:rspice-veriloga"]
 
 [dependencies]
 # Faer for sparse linear algebra - workspace configures it with std only, faer-parallel feature adds rayon
@@ -36,8 +37,12 @@ getrandom = { version = "0.2", optional = true }
 # FFI support (optional)
 libloading = { version = "0.8", optional = true }
 
+# Verilog-A support (optional)
+rspice-veriloga = { path = "../rspice-veriloga", optional = true }
+
 [dev-dependencies]
 approx.workspace = true
 env_logger.workspace = true
+rspice-veriloga = { path = "../rspice-veriloga" }
 
 

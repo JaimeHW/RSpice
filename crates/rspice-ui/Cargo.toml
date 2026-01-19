@@ -27,6 +27,9 @@ dioxus = { version = "0.7", features = ["router"] }
 # RSpice core simulation engine
 rspice-core = { path = "../rspice-core", default-features = false }
 
+# Verilog-A compiler (pure Rust, works on all platforms including WASM)
+rspice-veriloga = { path = "../rspice-veriloga" }
+
 # Async runtime
 tokio = { version = "1", features = ["sync", "macros"] }
 

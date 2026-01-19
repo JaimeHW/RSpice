@@ -147,11 +147,18 @@ impl<'a> Parser<'a> {
                 module.nets.push(net);
             }
             TokenKind::Analog => {
-                let block = self.parse_analog_block()?;
-                if self.previous_was_initial() {
-                    module.analog_initial = Some(block);
+                // Check if this is an analog function declaration
+                let next_kind = self.tokens.get(self.pos + 1).map(|t| t.kind);
+                if next_kind == Some(TokenKind::Function) {
+                    let func = self.parse_analog_function()?;
+                    module.functions.push(func);
                 } else {
-                    module.analog_block = Some(block);
+                    let block = self.parse_analog_block()?;
+                    if self.previous_was_initial() {
+                        module.analog_initial = Some(block);
+                    } else {
+                        module.analog_block = Some(block);
+                    }
                 }
             }
             _ => {
@@ -411,6 +418,146 @@ impl<'a> Parser<'a> {
             statements,
             span: start.extend(self.previous_span()),
         })
+    }
+
+    /// Parse analog function declaration
+    ///
+    /// Syntax: analog function [return_type] function_name;
+    ///            input/output declarations;
+    ///            variable declarations;
+    ///            begin ... end
+    ///         endfunction
+    fn parse_analog_function(&mut self) -> Result<FunctionDef, ParseError> {
+        let start = self.current_span();
+        self.advance(); // consume 'analog'
+        self.expect(TokenKind::Function)?; // consume 'function'
+
+        // Parse optional return type (real, integer) - defaults to real
+        let return_type = if self.check(TokenKind::Real) {
+            self.advance();
+            VarType::Real
+        } else if self.check(TokenKind::Integer) {
+            self.advance();
+            VarType::Integer
+        } else {
+            VarType::Real // default
+        };
+
+        // Parse function name
+        let name = self.expect_identifier("function name")?;
+        self.expect(TokenKind::Semicolon)?;
+
+        // Parse function body: input/output declarations, variable declarations, statements
+        let mut params: Vec<FunctionParam> = Vec::new();
+        let mut statements: Vec<AnalogStatement> = Vec::new();
+        let mut local_vars: Vec<VariableDecl> = Vec::new();
+
+        while !self.check(TokenKind::Endfunction) && !self.at_end() {
+            match self.current().kind {
+                TokenKind::Input => {
+                    let param_start = self.current_span();
+                    self.advance();
+                    // Parse type if present
+                    let param_type = self.parse_optional_var_type();
+                    // Parse names
+                    let names = self.parse_identifier_list()?;
+                    self.expect(TokenKind::Semicolon)?;
+                    for pname in names {
+                        params.push(FunctionParam {
+                            name: pname.into(),
+                            param_type,
+                            direction: ParamDirection::Input,
+                            span: param_start,
+                        });
+                    }
+                }
+                TokenKind::Output => {
+                    let param_start = self.current_span();
+                    self.advance();
+                    let param_type = self.parse_optional_var_type();
+                    let names = self.parse_identifier_list()?;
+                    self.expect(TokenKind::Semicolon)?;
+                    for pname in names {
+                        params.push(FunctionParam {
+                            name: pname.into(),
+                            param_type,
+                            direction: ParamDirection::Output,
+                            span: param_start,
+                        });
+                    }
+                }
+                TokenKind::Inout => {
+                    let param_start = self.current_span();
+                    self.advance();
+                    let param_type = self.parse_optional_var_type();
+                    let names = self.parse_identifier_list()?;
+                    self.expect(TokenKind::Semicolon)?;
+                    for pname in names {
+                        params.push(FunctionParam {
+                            name: pname.into(),
+                            param_type,
+                            direction: ParamDirection::Inout,
+                            span: param_start,
+                        });
+                    }
+                }
+                TokenKind::Real | TokenKind::Integer => {
+                    // Variable declaration inside function
+                    let var = self.parse_variable_decl()?;
+                    local_vars.push(var);
+                }
+                TokenKind::Begin => {
+                    // Function body
+                    let block = self.parse_block_statement()?;
+                    statements.push(block);
+                }
+                _ => {
+                    // Try to parse as a statement or skip
+                    if self.check(TokenKind::Semicolon) {
+                        self.advance(); // skip empty semicolons
+                    } else {
+                        // Unknown, skip to next semicolon
+                        self.skip_to_semicolon()?;
+                    }
+                }
+            }
+        }
+
+        self.expect(TokenKind::Endfunction)?;
+
+        Ok(FunctionDef {
+            name: name.into(),
+            return_type,
+            params,
+            body: AnalogBlock {
+                statements,
+                span: start.extend(self.previous_span()),
+            },
+            span: start.extend(self.previous_span()),
+        })
+    }
+
+    /// Parse optional variable type (real, integer)
+    fn parse_optional_var_type(&mut self) -> VarType {
+        if self.check(TokenKind::Real) {
+            self.advance();
+            VarType::Real
+        } else if self.check(TokenKind::Integer) {
+            self.advance();
+            VarType::Integer
+        } else {
+            VarType::Real // default for analog functions
+        }
+    }
+
+    /// Parse a list of identifiers separated by commas
+    fn parse_identifier_list(&mut self) -> Result<Vec<String>, ParseError> {
+        let mut names = Vec::new();
+        names.push(self.expect_identifier("identifier")?);
+        while self.match_token(TokenKind::Comma) {
+            names.push(self.expect_identifier("identifier")?);
+        }
+        Ok(names)
     }
 
     /// Parse an analog statement
@@ -685,6 +832,31 @@ impl<'a> Parser<'a> {
                     self.pos = saved_pos;
                 }
             }
+        }
+
+        // Check for system task call ($strobe, $display, $write, etc.)
+        if self.check(TokenKind::SystemIdentifier) {
+            let sys_name = self.current().text.clone().unwrap_or_default();
+            self.advance();
+
+            // Parse arguments if present
+            let mut args = Vec::new();
+            if self.match_token(TokenKind::LParen) {
+                if !self.check(TokenKind::RParen) {
+                    args.push(self.parse_expression()?);
+                    while self.match_token(TokenKind::Comma) {
+                        args.push(self.parse_expression()?);
+                    }
+                }
+                self.expect(TokenKind::RParen)?;
+            }
+            self.expect(TokenKind::Semicolon)?;
+
+            return Ok(AnalogStatement::Call(CallStmt {
+                name: sys_name.into(),
+                args,
+                span: start.extend(self.previous_span()),
+            }));
         }
 
         // Must be assignment

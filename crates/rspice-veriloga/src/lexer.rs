@@ -782,13 +782,26 @@ impl<'a> Lexer<'a> {
             match self.advance() {
                 Some((_, '"')) => break,
                 Some((_, '\\')) => {
-                    // Escape sequence
+                    // Escape sequence or line continuation
                     match self.advance() {
                         Some((_, 'n')) => value.push('\n'),
                         Some((_, 't')) => value.push('\t'),
                         Some((_, 'r')) => value.push('\r'),
                         Some((_, '\\')) => value.push('\\'),
                         Some((_, '"')) => value.push('"'),
+                        Some((_, '0')) => value.push('\0'),
+                        // Line continuation: backslash followed by newline
+                        Some((_, '\n')) => {
+                            // Skip the newline and continue on next line
+                            // This is Verilog-A line continuation syntax
+                        }
+                        Some((_, '\r')) => {
+                            // Handle Windows-style line endings: \r\n
+                            if let Some((_, '\n')) = self.chars.clone().next() {
+                                self.advance(); // consume the \n
+                            }
+                            // Skip both and continue on next line
+                        }
                         Some((_, ch)) => {
                             return Err(LexerError::new(
                                 LexerErrorKind::InvalidEscape(ch),

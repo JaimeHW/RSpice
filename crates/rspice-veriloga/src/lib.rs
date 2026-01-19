@@ -60,6 +60,7 @@ pub mod expr_converter;
 pub mod ir;
 pub mod lexer;
 pub mod parser;
+pub mod preprocessor;
 pub mod semantic;
 pub mod source;
 pub mod types;
@@ -80,6 +81,7 @@ pub use codegen::{CodeGenerator, CompiledModel};
 pub use error::{CompileError, CompileResult};
 pub use lexer::{Lexer, Token, TokenKind};
 pub use parser::Parser;
+pub use preprocessor::{Preprocessor, PreprocessorError};
 pub use semantic::SemanticAnalyzer;
 pub use source::{SourceId, SourceMap, Span};
 pub use types::{FunctionRegistry, ParameterRange, ValueType};
@@ -144,12 +146,39 @@ impl VerilogACompiler {
         Ok(model)
     }
 
-    /// Compile a source file from disk
+    /// Compile a source file from disk with preprocessing
     pub fn compile_file(&self, path: &std::path::Path) -> CompileResult<CompiledModel> {
-        let source = std::fs::read_to_string(path).map_err(|e| {
-            CompileError::io_error(format!("Failed to read file '{}': {}", path.display(), e))
-        })?;
-        self.compile(&source)
+        // Create preprocessor with options
+        let mut pp = Preprocessor::new();
+
+        // Add include paths from options
+        for inc_path in &self.options.include_paths {
+            pp.add_include_path(inc_path);
+        }
+
+        // Add defines from options
+        for (name, value) in &self.options.defines {
+            let def = preprocessor::MacroDef::simple(value.as_deref().unwrap_or(""));
+            pp.define(name, def);
+        }
+
+        // Preprocess the file (handles `include, `define, `ifdef, etc.)
+        let preprocessed = pp
+            .preprocess_file(path)
+            .map_err(|e| CompileError::io_error(format!("Preprocessor error: {}", e)))?;
+
+        // DEBUG: Dump preprocessed content to file for debugging
+        if std::env::var("RSPICE_DEBUG_PP").is_ok() {
+            let debug_path = path.with_extension("pp.va");
+            let _ = std::fs::write(&debug_path, &preprocessed);
+            eprintln!(
+                "DEBUG: Preprocessed output written to {}",
+                debug_path.display()
+            );
+        }
+
+        // Compile the preprocessed source
+        self.compile(&preprocessed)
     }
 }
 

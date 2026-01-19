@@ -33,6 +33,7 @@ pub mod expr;
 pub mod library;
 pub mod netlist;
 pub mod solver;
+pub mod testing;
 
 // Re-export primary types for convenience
 pub use analysis::{AcAnalysis, DcAnalysis, MeasureEngine, TransientAnalysis};

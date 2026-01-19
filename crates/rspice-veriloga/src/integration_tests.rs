@@ -1346,3 +1346,168 @@ fn test_complex_expression_accuracy() {
         "Complex expr at V=0: got {current}, expected {expected}"
     );
 }
+
+// ============================================================================
+// Math Function Integration Tests
+// ============================================================================
+
+/// Test inverse trigonometric functions in full pipeline
+#[test]
+fn test_inverse_trig_functions() {
+    let source = r#"
+        module trig_test(a, c);
+            inout a, c;
+            electrical a, c;
+            // I = asin(V) + acos(0.5) + atan(1)
+            // At V=0.5: asin(0.5)=π/6, acos(0.5)=π/3, atan(1)=π/4
+            analog I(a, c) <+ asin(V(a, c)) + acos(0.5) + atan(1.0);
+        endmodule
+    "#;
+
+    let model = compile_or_panic(source);
+    let mut device = DeviceBuilder::new(model, "T1").nodes(&[1, 0]).build();
+
+    device.update_voltages(&[0.5]); // V = 0.5
+    let current = device.evaluate()[0];
+
+    // Expected: asin(0.5) + acos(0.5) + atan(1) = π/6 + π/3 + π/4
+    let expected =
+        std::f64::consts::FRAC_PI_6 + std::f64::consts::FRAC_PI_3 + std::f64::consts::FRAC_PI_4;
+    assert!(
+        (current - expected).abs() < 1e-10,
+        "Inverse trig: got {current}, expected {expected}"
+    );
+}
+
+/// Test atan2 function
+#[test]
+fn test_atan2_function() {
+    let source = r#"
+        module atan2_test(a, c);
+            inout a, c;
+            electrical a, c;
+            parameter real y = 1.0;
+            // I = atan2(y, V) where y=1
+            analog I(a, c) <+ atan2(y, V(a, c));
+        endmodule
+    "#;
+
+    let model = compile_or_panic(source);
+    let mut device = DeviceBuilder::new(model, "T1")
+        .nodes(&[1, 0])
+        .param("y", 1.0)
+        .build();
+
+    // atan2(1, 1) = π/4
+    device.update_voltages(&[1.0]);
+    let current = device.evaluate()[0];
+    assert!(
+        (current - std::f64::consts::FRAC_PI_4).abs() < 1e-10,
+        "atan2(1,1) = π/4: got {current}"
+    );
+
+    // atan2(1, 0) = π/2
+    device.update_voltages(&[0.0]);
+    let current = device.evaluate()[0];
+    assert!(
+        (current - std::f64::consts::FRAC_PI_2).abs() < 1e-10,
+        "atan2(1,0) = π/2: got {current}"
+    );
+}
+
+/// Test floor and ceil functions
+#[test]
+fn test_floor_ceil_functions() {
+    let source = r#"
+        module round_test(a, c);
+            inout a, c;
+            electrical a, c;
+            // I = floor(V) + ceil(V)
+            analog I(a, c) <+ floor(V(a, c)) + ceil(V(a, c));
+        endmodule
+    "#;
+
+    let model = compile_or_panic(source);
+    let mut device = DeviceBuilder::new(model, "T1").nodes(&[1, 0]).build();
+
+    // V = 3.7: floor(3.7) + ceil(3.7) = 3 + 4 = 7
+    device.update_voltages(&[3.7]);
+    let current = device.evaluate()[0];
+    assert!(
+        (current - 7.0).abs() < 1e-10,
+        "floor(3.7)+ceil(3.7) = 7: got {current}"
+    );
+
+    // V = -2.3: floor(-2.3) + ceil(-2.3) = -3 + -2 = -5
+    device.update_voltages(&[-2.3]);
+    let current = device.evaluate()[0];
+    assert!(
+        (current - (-5.0)).abs() < 1e-10,
+        "floor(-2.3)+ceil(-2.3) = -5: got {current}"
+    );
+}
+
+/// Test pow function
+#[test]
+fn test_pow_function() {
+    let source = r#"
+        module pow_test(a, c);
+            inout a, c;
+            electrical a, c;
+            parameter real exponent = 3.0;
+            // I = pow(V, exponent)
+            analog I(a, c) <+ pow(V(a, c), exponent);
+        endmodule
+    "#;
+
+    let model = compile_or_panic(source);
+    let mut device = DeviceBuilder::new(model, "T1")
+        .nodes(&[1, 0])
+        .param("exponent", 3.0)
+        .build();
+
+    // pow(2, 3) = 8
+    device.update_voltages(&[2.0]);
+    let current = device.evaluate()[0];
+    assert!(
+        (current - 8.0).abs() < 1e-10,
+        "pow(2, 3) = 8: got {current}"
+    );
+
+    // pow(4, 0.5) = 2
+    device.set_parameter("exponent", 0.5);
+    device.update_voltages(&[4.0]);
+    let current = device.evaluate()[0];
+    assert!(
+        (current - 2.0).abs() < 1e-10,
+        "pow(4, 0.5) = 2: got {current}"
+    );
+}
+
+/// Test combination of multiple math functions
+#[test]
+fn test_math_function_combination() {
+    let source = r#"
+        module math_combo(a, c);
+            inout a, c;
+            electrical a, c;
+            parameter real scale = 1.0;
+            // I = scale * (floor(abs(V)) + pow(2, ceil(V)))
+            analog I(a, c) <+ scale * (floor(abs(V(a, c))) + pow(2.0, ceil(V(a, c))));
+        endmodule
+    "#;
+
+    let model = compile_or_panic(source);
+    let mut device = DeviceBuilder::new(model, "T1")
+        .nodes(&[1, 0])
+        .param("scale", 1.0)
+        .build();
+
+    // V = 2.3: floor(abs(2.3)) + pow(2, ceil(2.3)) = floor(2.3) + pow(2, 3) = 2 + 8 = 10
+    device.update_voltages(&[2.3]);
+    let current = device.evaluate()[0];
+    assert!(
+        (current - 10.0).abs() < 1e-10,
+        "Combined math at V=2.3: got {current}, expected 10"
+    );
+}

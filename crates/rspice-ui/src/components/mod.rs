@@ -13,6 +13,8 @@ pub mod simulation_dialog;
 pub mod tab_bar;
 mod tabs;
 mod toolbar;
+pub mod veriloga_dialog;
+pub mod veriloga_inspector;
 
 #[allow(unused_imports)]
 pub use button::Button;

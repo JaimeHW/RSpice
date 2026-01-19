@@ -10,7 +10,6 @@ description = "Verilog-A/AMS compiler for RSpice circuit simulator"
 
 [dependencies]
 # Core dependencies
-rspice-core = { path = "../rspice-core" }
 thiserror.workspace = true
 log.workspace = true
 

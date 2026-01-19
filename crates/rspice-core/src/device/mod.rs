@@ -4,6 +4,7 @@
 //! - `passive/` - Resistors, capacitors, inductors
 //! - `semiconductor/` - Diodes, BJTs
 //! - `mosfet/` - MOSFETs, VDMOSFETs, JFETs, BSIM4, EKV
+//! - `veriloga/` - Verilog-A compiled models (optional feature)
 
 // Organized device subdirectories
 pub mod mosfet;
@@ -20,6 +21,10 @@ mod sources;
 mod switch;
 mod traits;
 mod transmission_line;
+
+// Verilog-A support (feature-gated)
+#[cfg(feature = "veriloga")]
+pub mod veriloga;
 
 // Re-export from subdirectories for backwards compatibility
 pub use mosfet::{

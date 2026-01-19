@@ -13,7 +13,7 @@
 //! stamp() → Matrix + RHS
 //! ```
 
-use crate::codegen::{BytecodeProgram, CompiledModel, StampIndex, StampProgram};
+use crate::codegen::{CompiledModel, StampIndex};
 use crate::vm::{Vm, VmContext};
 use smol_str::SmolStr;
 
@@ -30,6 +30,9 @@ pub struct VerilogADevice {
     context: VmContext,
     /// Mapping from terminal index to circuit node ID (0 = ground)
     node_mapping: Vec<usize>,
+    /// Mapping from internal node index to circuit node ID
+    /// When the solver allocates circuit nodes for internal nodes, this maps them
+    internal_node_indices: Vec<usize>,
     /// Number of internal nodes in this device
     num_internal_nodes: usize,
     /// Pre-computed matrix indices for O(1) stamping
@@ -90,8 +93,9 @@ impl VerilogADevice {
             }
         }
 
-        // Create context with terminal count
-        let mut context = VmContext::new(num_terminals);
+        // Create context with terminal count and internal nodes
+        let num_internal_nodes = model.internal_nodes;
+        let mut context = VmContext::with_internal_nodes(num_terminals, num_internal_nodes);
 
         // Initialize parameters to defaults
         for (i, param) in model.parameters.iter().enumerate() {
@@ -101,14 +105,12 @@ impl VerilogADevice {
         // Build matrix indices (will be set during circuit linking)
         let matrix_indices = MatrixIndices::default();
 
-        // Get number of internal nodes from model
-        let num_internal_nodes = model.internal_nodes;
-
         Self {
             name: name.into(),
             model,
             context,
             node_mapping,
+            internal_node_indices: vec![0; num_internal_nodes],
             num_internal_nodes,
             matrix_indices,
         }
@@ -162,7 +164,23 @@ impl VerilogADevice {
         self.context.time = time;
     }
 
-    /// Update voltages from circuit solution
+    /// Set the circuit node indices for internal nodes
+    ///
+    /// Called during circuit setup when the solver allocates nodes for internal nodes.
+    pub fn set_internal_node_indices(&mut self, indices: &[usize]) {
+        for (i, &idx) in indices.iter().enumerate() {
+            if i < self.internal_node_indices.len() {
+                self.internal_node_indices[i] = idx;
+            }
+        }
+    }
+
+    /// Get the circuit node index for an internal node
+    pub fn internal_node_index(&self, internal_idx: usize) -> Option<usize> {
+        self.internal_node_indices.get(internal_idx).copied()
+    }
+
+    /// Update terminal voltages from circuit solution
     ///
     /// Called before evaluating device equations.
     pub fn update_voltages(&mut self, circuit_voltages: &[f64]) {
@@ -176,6 +194,28 @@ impl VerilogADevice {
                     0.0
                 };
                 self.context.voltages[terminal] = v;
+            }
+        }
+    }
+
+    /// Update both terminal and internal node voltages from circuit solution
+    ///
+    /// This is the full-featured method for solver integration.
+    pub fn update_all_voltages(&mut self, circuit_voltages: &[f64]) {
+        // Update terminal voltages
+        self.update_voltages(circuit_voltages);
+
+        // Update internal node voltages
+        for (internal_idx, &circuit_node) in self.internal_node_indices.iter().enumerate() {
+            if internal_idx < self.context.internal_voltages.len() {
+                let v = if circuit_node == 0 {
+                    0.0
+                } else if circuit_node <= circuit_voltages.len() {
+                    circuit_voltages[circuit_node - 1]
+                } else {
+                    0.0
+                };
+                self.context.internal_voltages[internal_idx] = v;
             }
         }
     }
@@ -429,6 +469,36 @@ mod tests {
                 ],
             }],
             internal_nodes: 0,
+            branch_currents: 0,
+        }
+    }
+
+    fn create_internal_node_model() -> CompiledModel {
+        // Simple model with one internal node
+        // I = V(terminal) - V(internal)
+        let value_program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushVoltage(0, 1),      // V(terminal)
+                Instruction::PushInternalVoltage(0), // V(internal)
+                Instruction::Sub,
+            ],
+        };
+
+        CompiledModel {
+            name: "internal_node_test".into(),
+            num_terminals: 2,
+            terminal_names: vec!["p".into(), "n".into()],
+            parameters: vec![],
+            stamp_programs: vec![StampProgram {
+                stamp_locations: vec![StampLocation {
+                    row: StampIndex::Terminal(0),
+                    col: StampIndex::Ground,
+                    sign: 1.0,
+                }],
+                value_program,
+                jacobian_programs: vec![],
+            }],
+            internal_nodes: 1,
             branch_currents: 0,
         }
     }
@@ -844,5 +914,85 @@ mod tests {
         let result = device.evaluate();
         // 3 * 4 * 5 = 60
         assert!((result[0] - 60.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_set_internal_node_indices() {
+        let model = create_internal_node_model();
+        let mut device = VerilogADevice::new("D1", model, &[1, 0]);
+
+        // Set internal node index (circuit assigns node 5 to internal node)
+        device.set_internal_node_indices(&[5]);
+
+        assert_eq!(device.internal_node_index(0), Some(5));
+        assert_eq!(device.internal_node_index(1), None); // Only 1 internal node
+        assert_eq!(device.internal_node_index(999), None);
+    }
+
+    #[test]
+    fn test_update_all_voltages() {
+        let model = create_internal_node_model();
+        let mut device = VerilogADevice::new("D1", model, &[1, 2]);
+
+        // Set internal node at circuit node 3
+        device.set_internal_node_indices(&[3]);
+
+        // Circuit voltages: node1=5V, node2=3V, node3=4V (internal)
+        let voltages = vec![5.0, 3.0, 4.0];
+        device.update_all_voltages(&voltages);
+
+        // Terminal voltages
+        assert!((device.context.voltages[0] - 5.0).abs() < 1e-10);
+        assert!((device.context.voltages[1] - 3.0).abs() < 1e-10);
+
+        // Internal node voltage
+        assert!((device.context.internal_voltages[0] - 4.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_update_all_voltages_with_ground() {
+        let model = create_internal_node_model();
+        let mut device = VerilogADevice::new("D1", model, &[1, 0]);
+
+        // Internal node at ground (circuit node 0)
+        device.set_internal_node_indices(&[0]);
+
+        let voltages = vec![5.0, 3.0];
+        device.update_all_voltages(&voltages);
+
+        // Internal node voltage should be 0 (ground)
+        assert!(device.context.internal_voltages[0].abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_internal_node_affects_evaluate() {
+        // End-to-end: verify internal node voltage affects device output
+        // Model: I = V(terminals) - V(internal)
+        let model = create_internal_node_model();
+        let mut device = VerilogADevice::new("D1", model, &[1, 2]);
+
+        // Set internal node at circuit node 3
+        device.set_internal_node_indices(&[3]);
+
+        // Circuit: V(1)=5V, V(2)=3V (terminal difference: 2V), V(3)=1V (internal)
+        device.update_all_voltages(&[5.0, 3.0, 1.0]);
+
+        let result = device.evaluate();
+        // Expected: (V(1)-V(2)) - V(internal) = (5-3) - 1 = 1
+        assert!(
+            (result[0] - 1.0).abs() < 1e-10,
+            "Internal node should affect result: got {}, expected 1.0",
+            result[0]
+        );
+
+        // Change internal node voltage only
+        device.update_all_voltages(&[5.0, 3.0, 0.5]);
+        let result2 = device.evaluate();
+        // Expected: (V(1)-V(2)) - V(internal) = 2 - 0.5 = 1.5
+        assert!(
+            (result2[0] - 1.5).abs() < 1e-10,
+            "Changed internal node should affect result: got {}, expected 1.5",
+            result2[0]
+        );
     }
 }

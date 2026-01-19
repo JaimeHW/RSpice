@@ -23,6 +23,12 @@ pub struct VmContext {
     pub time: f64,
     /// Temperature in Kelvin
     pub temperature: f64,
+    /// State variable values (current timestep) - for ddt/idt
+    pub state_values: Vec<f64>,
+    /// State variable values (previous timestep) - for ddt/idt
+    pub state_values_prev: Vec<f64>,
+    /// Current timestep (delta t) for transient analysis
+    pub timestep: f64,
 }
 
 impl Default for VmContext {
@@ -35,6 +41,9 @@ impl Default for VmContext {
             variables: Vec::new(),
             time: 0.0,
             temperature: 300.15, // 27°C default
+            state_values: Vec::new(),
+            state_values_prev: Vec::new(),
+            timestep: 0.0,
         }
     }
 }
@@ -50,6 +59,9 @@ impl VmContext {
             variables: Vec::new(),
             time: 0.0,
             temperature: 300.15,
+            state_values: Vec::new(),
+            state_values_prev: Vec::new(),
+            timestep: 0.0,
         }
     }
 
@@ -63,7 +75,42 @@ impl VmContext {
             variables: Vec::new(),
             time: 0.0,
             temperature: 300.15,
+            state_values: Vec::new(),
+            state_values_prev: Vec::new(),
+            timestep: 0.0,
         }
+    }
+
+    /// Create with state variables for transient analysis
+    pub fn with_states(num_terminals: usize, num_states: usize) -> Self {
+        Self {
+            voltages: vec![0.0; num_terminals],
+            internal_voltages: Vec::new(),
+            currents: Vec::new(),
+            parameters: Vec::new(),
+            variables: Vec::new(),
+            time: 0.0,
+            temperature: 300.15,
+            state_values: vec![0.0; num_states],
+            state_values_prev: vec![0.0; num_states],
+            timestep: 0.0,
+        }
+    }
+
+    /// Advance state for a new timestep (copy current to prev)
+    pub fn advance_state(&mut self) {
+        self.state_values_prev.clone_from(&self.state_values);
+    }
+
+    /// Set the timestep for transient analysis
+    pub fn set_timestep(&mut self, dt: f64) {
+        self.timestep = dt;
+    }
+
+    /// Allocate state variables
+    pub fn allocate_states(&mut self, count: usize) {
+        self.state_values.resize(count, 0.0);
+        self.state_values_prev.resize(count, 0.0);
     }
 
     /// Get the voltage difference between two terminals
@@ -220,6 +267,19 @@ impl<'a> Vm<'a> {
                 }
             })?,
 
+            // Inverse trigonometric functions
+            Instruction::Asin => self.unary_op(|a| a.asin())?,
+            Instruction::Acos => self.unary_op(|a| a.acos())?,
+            Instruction::Atan => self.unary_op(|a| a.atan())?,
+            Instruction::Atan2 => self.binary_op(|y, x| y.atan2(x))?,
+
+            // Rounding functions
+            Instruction::Floor => self.unary_op(|a| a.floor())?,
+            Instruction::Ceil => self.unary_op(|a| a.ceil())?,
+
+            // Power function (2-argument: base^exponent)
+            Instruction::FnPow => self.binary_op(|base, exp| base.powf(exp))?,
+
             // Conditional: if cond != 0, use then_val, else else_val
             Instruction::IfElse => {
                 let else_val = self.pop()?;
@@ -261,6 +321,55 @@ impl<'a> Vm<'a> {
                 }
             })?,
             Instruction::Not => self.unary_op(|a| if a.abs() < 1e-15 { 1.0 } else { 0.0 })?,
+
+            // State-based ddt: (current_expr - prev_state) / dt
+            // The expression value is on the stack, we save it and compute derivative
+            Instruction::DdtState(idx) => {
+                let current_value = self.pop()?;
+                let prev_value = self
+                    .context
+                    .state_values_prev
+                    .get(*idx)
+                    .copied()
+                    .unwrap_or(current_value);
+
+                // Save current value for next timestep
+                if *idx < self.context.state_values.len() {
+                    // Note: We can't mutate context here since it's borrowed
+                    // The device layer should handle state updates
+                }
+
+                // Compute derivative: (current - prev) / dt
+                // For DC analysis (dt=0), return 0
+                let dt = self.context.timestep;
+                let derivative = if dt.abs() > 1e-20 {
+                    (current_value - prev_value) / dt
+                } else {
+                    0.0 // DC analysis: ddt = 0
+                };
+                self.stack.push(derivative);
+            }
+
+            // State-based idt: prev_state + expr * dt
+            // Accumulates the integral over time
+            Instruction::IdtState(idx) => {
+                let current_value = self.pop()?;
+                let prev_integral = self
+                    .context
+                    .state_values_prev
+                    .get(*idx)
+                    .copied()
+                    .unwrap_or(0.0);
+
+                let dt = self.context.timestep;
+                // Forward Euler: integral += expr * dt
+                let new_integral = if dt.abs() > 1e-20 {
+                    prev_integral + current_value * dt
+                } else {
+                    prev_integral // DC: use accumulated value
+                };
+                self.stack.push(new_integral);
+            }
         }
         Ok(())
     }
@@ -469,9 +578,9 @@ mod tests {
         // Large value - limited
         let program = make_program(vec![Instruction::PushConst(100.0), Instruction::Limexp]);
         let result = vm.execute(&program).unwrap();
-        // Should be linearized above 80
+        // Should be linearized above 40
         assert!(result < std::f64::INFINITY);
-        assert!(result > 80.0_f64.exp());
+        assert!(result > 40.0_f64.exp()); // Must be larger than exp(40)
     }
 
     #[test]
@@ -893,5 +1002,834 @@ mod tests {
         // Verify non-zero reasonable result
         assert!(result > 0.0);
         assert!(result < 1.0); // Should be small current
+    }
+
+    // ========================================================================
+    // Comparison Operator Tests
+    // ========================================================================
+
+    #[test]
+    fn test_execute_gt() {
+        let ctx = VmContext::default();
+        let mut vm = Vm::new(&ctx);
+
+        // 5 > 3 = true (1.0)
+        let program = make_program(vec![
+            Instruction::PushConst(5.0),
+            Instruction::PushConst(3.0),
+            Instruction::Gt,
+        ]);
+        assert!((vm.execute(&program).unwrap() - 1.0).abs() < 1e-10);
+
+        // 3 > 5 = false (0.0)
+        let program = make_program(vec![
+            Instruction::PushConst(3.0),
+            Instruction::PushConst(5.0),
+            Instruction::Gt,
+        ]);
+        assert!(vm.execute(&program).unwrap().abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_execute_lt() {
+        let ctx = VmContext::default();
+        let mut vm = Vm::new(&ctx);
+
+        // 3 < 5 = true (1.0)
+        let program = make_program(vec![
+            Instruction::PushConst(3.0),
+            Instruction::PushConst(5.0),
+            Instruction::Lt,
+        ]);
+        assert!((vm.execute(&program).unwrap() - 1.0).abs() < 1e-10);
+
+        // 5 < 3 = false (0.0)
+        let program = make_program(vec![
+            Instruction::PushConst(5.0),
+            Instruction::PushConst(3.0),
+            Instruction::Lt,
+        ]);
+        assert!(vm.execute(&program).unwrap().abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_execute_ge() {
+        let ctx = VmContext::default();
+        let mut vm = Vm::new(&ctx);
+
+        // 5 >= 5 = true (1.0)
+        let program = make_program(vec![
+            Instruction::PushConst(5.0),
+            Instruction::PushConst(5.0),
+            Instruction::Ge,
+        ]);
+        assert!((vm.execute(&program).unwrap() - 1.0).abs() < 1e-10);
+
+        // 5 >= 3 = true (1.0)
+        let program = make_program(vec![
+            Instruction::PushConst(5.0),
+            Instruction::PushConst(3.0),
+            Instruction::Ge,
+        ]);
+        assert!((vm.execute(&program).unwrap() - 1.0).abs() < 1e-10);
+
+        // 3 >= 5 = false (0.0)
+        let program = make_program(vec![
+            Instruction::PushConst(3.0),
+            Instruction::PushConst(5.0),
+            Instruction::Ge,
+        ]);
+        assert!(vm.execute(&program).unwrap().abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_execute_le() {
+        let ctx = VmContext::default();
+        let mut vm = Vm::new(&ctx);
+
+        // 5 <= 5 = true (1.0)
+        let program = make_program(vec![
+            Instruction::PushConst(5.0),
+            Instruction::PushConst(5.0),
+            Instruction::Le,
+        ]);
+        assert!((vm.execute(&program).unwrap() - 1.0).abs() < 1e-10);
+
+        // 3 <= 5 = true (1.0)
+        let program = make_program(vec![
+            Instruction::PushConst(3.0),
+            Instruction::PushConst(5.0),
+            Instruction::Le,
+        ]);
+        assert!((vm.execute(&program).unwrap() - 1.0).abs() < 1e-10);
+
+        // 5 <= 3 = false (0.0)
+        let program = make_program(vec![
+            Instruction::PushConst(5.0),
+            Instruction::PushConst(3.0),
+            Instruction::Le,
+        ]);
+        assert!(vm.execute(&program).unwrap().abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_execute_eq() {
+        let ctx = VmContext::default();
+        let mut vm = Vm::new(&ctx);
+
+        // 5 == 5 = true (1.0)
+        let program = make_program(vec![
+            Instruction::PushConst(5.0),
+            Instruction::PushConst(5.0),
+            Instruction::Eq,
+        ]);
+        assert!((vm.execute(&program).unwrap() - 1.0).abs() < 1e-10);
+
+        // 5 == 3 = false (0.0)
+        let program = make_program(vec![
+            Instruction::PushConst(5.0),
+            Instruction::PushConst(3.0),
+            Instruction::Eq,
+        ]);
+        assert!(vm.execute(&program).unwrap().abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_execute_ne() {
+        let ctx = VmContext::default();
+        let mut vm = Vm::new(&ctx);
+
+        // 5 != 3 = true (1.0)
+        let program = make_program(vec![
+            Instruction::PushConst(5.0),
+            Instruction::PushConst(3.0),
+            Instruction::Ne,
+        ]);
+        assert!((vm.execute(&program).unwrap() - 1.0).abs() < 1e-10);
+
+        // 5 != 5 = false (0.0)
+        let program = make_program(vec![
+            Instruction::PushConst(5.0),
+            Instruction::PushConst(5.0),
+            Instruction::Ne,
+        ]);
+        assert!(vm.execute(&program).unwrap().abs() < 1e-10);
+    }
+
+    // ========================================================================
+    // Logical Operator Tests
+    // ========================================================================
+
+    #[test]
+    fn test_execute_and() {
+        let ctx = VmContext::default();
+        let mut vm = Vm::new(&ctx);
+
+        // true && true = true
+        let program = make_program(vec![
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(1.0),
+            Instruction::And,
+        ]);
+        assert!((vm.execute(&program).unwrap() - 1.0).abs() < 1e-10);
+
+        // true && false = false
+        let program = make_program(vec![
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(0.0),
+            Instruction::And,
+        ]);
+        assert!(vm.execute(&program).unwrap().abs() < 1e-10);
+
+        // false && true = false
+        let program = make_program(vec![
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(1.0),
+            Instruction::And,
+        ]);
+        assert!(vm.execute(&program).unwrap().abs() < 1e-10);
+
+        // false && false = false
+        let program = make_program(vec![
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(0.0),
+            Instruction::And,
+        ]);
+        assert!(vm.execute(&program).unwrap().abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_execute_or() {
+        let ctx = VmContext::default();
+        let mut vm = Vm::new(&ctx);
+
+        // true || true = true
+        let program = make_program(vec![
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(1.0),
+            Instruction::Or,
+        ]);
+        assert!((vm.execute(&program).unwrap() - 1.0).abs() < 1e-10);
+
+        // true || false = true
+        let program = make_program(vec![
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(0.0),
+            Instruction::Or,
+        ]);
+        assert!((vm.execute(&program).unwrap() - 1.0).abs() < 1e-10);
+
+        // false || false = false
+        let program = make_program(vec![
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(0.0),
+            Instruction::Or,
+        ]);
+        assert!(vm.execute(&program).unwrap().abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_execute_not() {
+        let ctx = VmContext::default();
+        let mut vm = Vm::new(&ctx);
+
+        // !true = false
+        let program = make_program(vec![Instruction::PushConst(1.0), Instruction::Not]);
+        assert!(vm.execute(&program).unwrap().abs() < 1e-10);
+
+        // !false = true
+        let program = make_program(vec![Instruction::PushConst(0.0), Instruction::Not]);
+        assert!((vm.execute(&program).unwrap() - 1.0).abs() < 1e-10);
+    }
+
+    // ========================================================================
+    // Variable Tests
+    // ========================================================================
+
+    #[test]
+    fn test_execute_push_variable() {
+        let mut ctx = VmContext::new(2);
+        ctx.variables = vec![3.14, 2.71, 1.618];
+
+        let mut vm = Vm::new(&ctx);
+
+        let program = make_program(vec![Instruction::PushVariable(0)]);
+        assert!((vm.execute(&program).unwrap() - 3.14).abs() < 1e-10);
+
+        let program = make_program(vec![Instruction::PushVariable(1)]);
+        assert!((vm.execute(&program).unwrap() - 2.71).abs() < 1e-10);
+
+        let program = make_program(vec![Instruction::PushVariable(2)]);
+        assert!((vm.execute(&program).unwrap() - 1.618).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_execute_variable_in_expression() {
+        let mut ctx = VmContext::new(2);
+        ctx.variables = vec![10.0, 3.0];
+
+        let mut vm = Vm::new(&ctx);
+
+        // var[0] + var[1] = 10 + 3 = 13
+        let program = make_program(vec![
+            Instruction::PushVariable(0),
+            Instruction::PushVariable(1),
+            Instruction::Add,
+        ]);
+        assert!((vm.execute(&program).unwrap() - 13.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_execute_variable_out_of_bounds() {
+        let mut ctx = VmContext::new(2);
+        ctx.variables = vec![1.0];
+
+        let mut vm = Vm::new(&ctx);
+
+        // Accessing out-of-bounds variable returns 0.0
+        let program = make_program(vec![Instruction::PushVariable(10)]);
+        assert!(vm.execute(&program).unwrap().abs() < 1e-10);
+    }
+
+    // ========================================================================
+    // Complex Expression Tests with New Operators
+    // ========================================================================
+
+    #[test]
+    fn test_conditional_with_comparison() {
+        let ctx = VmContext::default();
+        let mut vm = Vm::new(&ctx);
+
+        // if (5 > 3) then 100 else 200 = 100
+        let program = make_program(vec![
+            Instruction::PushConst(5.0),
+            Instruction::PushConst(3.0),
+            Instruction::Gt,
+            Instruction::PushConst(100.0),
+            Instruction::PushConst(200.0),
+            Instruction::IfElse,
+        ]);
+        assert!((vm.execute(&program).unwrap() - 100.0).abs() < 1e-10);
+
+        // if (3 > 5) then 100 else 200 = 200
+        let program = make_program(vec![
+            Instruction::PushConst(3.0),
+            Instruction::PushConst(5.0),
+            Instruction::Gt,
+            Instruction::PushConst(100.0),
+            Instruction::PushConst(200.0),
+            Instruction::IfElse,
+        ]);
+        assert!((vm.execute(&program).unwrap() - 200.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_complex_logical_expression() {
+        let ctx = VmContext::default();
+        let mut vm = Vm::new(&ctx);
+
+        // (5 > 3) && (10 < 20) = true && true = true
+        let program = make_program(vec![
+            Instruction::PushConst(5.0),
+            Instruction::PushConst(3.0),
+            Instruction::Gt,
+            Instruction::PushConst(10.0),
+            Instruction::PushConst(20.0),
+            Instruction::Lt,
+            Instruction::And,
+        ]);
+        assert!((vm.execute(&program).unwrap() - 1.0).abs() < 1e-10);
+
+        // (5 < 3) || (10 < 20) = false || true = true
+        let program = make_program(vec![
+            Instruction::PushConst(5.0),
+            Instruction::PushConst(3.0),
+            Instruction::Lt,
+            Instruction::PushConst(10.0),
+            Instruction::PushConst(20.0),
+            Instruction::Lt,
+            Instruction::Or,
+        ]);
+        assert!((vm.execute(&program).unwrap() - 1.0).abs() < 1e-10);
+    }
+
+    // ========================================================================
+    // Inverse Trigonometric Function Tests
+    // ========================================================================
+
+    #[test]
+    fn test_execute_asin() {
+        let ctx = VmContext::default();
+        let mut vm = Vm::new(&ctx);
+
+        // asin(0) = 0
+        let program = make_program(vec![Instruction::PushConst(0.0), Instruction::Asin]);
+        assert!(vm.execute(&program).unwrap().abs() < 1e-10);
+
+        // asin(1) = π/2
+        let program = make_program(vec![Instruction::PushConst(1.0), Instruction::Asin]);
+        assert!((vm.execute(&program).unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1e-10);
+
+        // asin(0.5) = π/6
+        let program = make_program(vec![Instruction::PushConst(0.5), Instruction::Asin]);
+        assert!((vm.execute(&program).unwrap() - std::f64::consts::FRAC_PI_6).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_execute_acos() {
+        let ctx = VmContext::default();
+        let mut vm = Vm::new(&ctx);
+
+        // acos(1) = 0
+        let program = make_program(vec![Instruction::PushConst(1.0), Instruction::Acos]);
+        assert!(vm.execute(&program).unwrap().abs() < 1e-10);
+
+        // acos(0) = π/2
+        let program = make_program(vec![Instruction::PushConst(0.0), Instruction::Acos]);
+        assert!((vm.execute(&program).unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1e-10);
+
+        // acos(0.5) = π/3
+        let program = make_program(vec![Instruction::PushConst(0.5), Instruction::Acos]);
+        assert!((vm.execute(&program).unwrap() - std::f64::consts::FRAC_PI_3).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_execute_atan() {
+        let ctx = VmContext::default();
+        let mut vm = Vm::new(&ctx);
+
+        // atan(0) = 0
+        let program = make_program(vec![Instruction::PushConst(0.0), Instruction::Atan]);
+        assert!(vm.execute(&program).unwrap().abs() < 1e-10);
+
+        // atan(1) = π/4
+        let program = make_program(vec![Instruction::PushConst(1.0), Instruction::Atan]);
+        assert!((vm.execute(&program).unwrap() - std::f64::consts::FRAC_PI_4).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_execute_atan2() {
+        let ctx = VmContext::default();
+        let mut vm = Vm::new(&ctx);
+
+        // atan2(1, 1) = π/4
+        let program = make_program(vec![
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(1.0),
+            Instruction::Atan2,
+        ]);
+        assert!((vm.execute(&program).unwrap() - std::f64::consts::FRAC_PI_4).abs() < 1e-10);
+
+        // atan2(1, 0) = π/2
+        let program = make_program(vec![
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(0.0),
+            Instruction::Atan2,
+        ]);
+        assert!((vm.execute(&program).unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1e-10);
+
+        // atan2(-1, 0) = -π/2
+        let program = make_program(vec![
+            Instruction::PushConst(-1.0),
+            Instruction::PushConst(0.0),
+            Instruction::Atan2,
+        ]);
+        assert!((vm.execute(&program).unwrap() + std::f64::consts::FRAC_PI_2).abs() < 1e-10);
+
+        // atan2(0, 1) = 0
+        let program = make_program(vec![
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(1.0),
+            Instruction::Atan2,
+        ]);
+        assert!(vm.execute(&program).unwrap().abs() < 1e-10);
+    }
+
+    // ========================================================================
+    // Rounding Function Tests
+    // ========================================================================
+
+    #[test]
+    fn test_execute_floor() {
+        let ctx = VmContext::default();
+        let mut vm = Vm::new(&ctx);
+
+        // floor(3.7) = 3
+        let program = make_program(vec![Instruction::PushConst(3.7), Instruction::Floor]);
+        assert!((vm.execute(&program).unwrap() - 3.0).abs() < 1e-10);
+
+        // floor(-3.7) = -4
+        let program = make_program(vec![Instruction::PushConst(-3.7), Instruction::Floor]);
+        assert!((vm.execute(&program).unwrap() + 4.0).abs() < 1e-10);
+
+        // floor(5.0) = 5
+        let program = make_program(vec![Instruction::PushConst(5.0), Instruction::Floor]);
+        assert!((vm.execute(&program).unwrap() - 5.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_execute_ceil() {
+        let ctx = VmContext::default();
+        let mut vm = Vm::new(&ctx);
+
+        // ceil(3.2) = 4
+        let program = make_program(vec![Instruction::PushConst(3.2), Instruction::Ceil]);
+        assert!((vm.execute(&program).unwrap() - 4.0).abs() < 1e-10);
+
+        // ceil(-3.2) = -3
+        let program = make_program(vec![Instruction::PushConst(-3.2), Instruction::Ceil]);
+        assert!((vm.execute(&program).unwrap() + 3.0).abs() < 1e-10);
+
+        // ceil(5.0) = 5
+        let program = make_program(vec![Instruction::PushConst(5.0), Instruction::Ceil]);
+        assert!((vm.execute(&program).unwrap() - 5.0).abs() < 1e-10);
+    }
+
+    // ========================================================================
+    // Power Function Tests
+    // ========================================================================
+
+    #[test]
+    fn test_execute_fnpow() {
+        let ctx = VmContext::default();
+        let mut vm = Vm::new(&ctx);
+
+        // 2^3 = 8
+        let program = make_program(vec![
+            Instruction::PushConst(2.0),
+            Instruction::PushConst(3.0),
+            Instruction::FnPow,
+        ]);
+        assert!((vm.execute(&program).unwrap() - 8.0).abs() < 1e-10);
+
+        // 10^0 = 1
+        let program = make_program(vec![
+            Instruction::PushConst(10.0),
+            Instruction::PushConst(0.0),
+            Instruction::FnPow,
+        ]);
+        assert!((vm.execute(&program).unwrap() - 1.0).abs() < 1e-10);
+
+        // 4^0.5 = 2
+        let program = make_program(vec![
+            Instruction::PushConst(4.0),
+            Instruction::PushConst(0.5),
+            Instruction::FnPow,
+        ]);
+        assert!((vm.execute(&program).unwrap() - 2.0).abs() < 1e-10);
+
+        // 2^-1 = 0.5
+        let program = make_program(vec![
+            Instruction::PushConst(2.0),
+            Instruction::PushConst(-1.0),
+            Instruction::FnPow,
+        ]);
+        assert!((vm.execute(&program).unwrap() - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_execute_fnpow_edge_cases() {
+        let ctx = VmContext::default();
+        let mut vm = Vm::new(&ctx);
+
+        // 0^2 = 0
+        let program = make_program(vec![
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(2.0),
+            Instruction::FnPow,
+        ]);
+        assert!(vm.execute(&program).unwrap().abs() < 1e-10);
+
+        // e^1 = e
+        let program = make_program(vec![
+            Instruction::PushConst(std::f64::consts::E),
+            Instruction::PushConst(1.0),
+            Instruction::FnPow,
+        ]);
+        assert!((vm.execute(&program).unwrap() - std::f64::consts::E).abs() < 1e-10);
+    }
+
+    // ========================================================================
+    // Transient State Tracking Tests
+    // ========================================================================
+
+    #[test]
+    fn test_context_with_states() {
+        let ctx = VmContext::with_states(2, 3);
+        assert_eq!(ctx.state_values.len(), 3);
+        assert_eq!(ctx.state_values_prev.len(), 3);
+        assert_eq!(ctx.timestep, 0.0);
+    }
+
+    #[test]
+    fn test_context_allocate_states() {
+        let mut ctx = VmContext::new(2);
+        assert!(ctx.state_values.is_empty());
+
+        ctx.allocate_states(5);
+        assert_eq!(ctx.state_values.len(), 5);
+        assert_eq!(ctx.state_values_prev.len(), 5);
+    }
+
+    #[test]
+    fn test_context_advance_state() {
+        let mut ctx = VmContext::with_states(2, 2);
+        ctx.state_values[0] = 1.0;
+        ctx.state_values[1] = 2.0;
+
+        ctx.advance_state();
+
+        assert!((ctx.state_values_prev[0] - 1.0).abs() < 1e-10);
+        assert!((ctx.state_values_prev[1] - 2.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_context_set_timestep() {
+        let mut ctx = VmContext::new(2);
+        ctx.set_timestep(1e-6);
+        assert!((ctx.timestep - 1e-6).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_execute_ddt_state_transient() {
+        // Test ddt with known values
+        let mut ctx = VmContext::with_states(2, 1);
+        ctx.set_timestep(0.001); // 1ms timestep
+        ctx.state_values_prev[0] = 1.0; // Previous value
+
+        let mut vm = Vm::new(&ctx);
+
+        // ddt(2.0) with prev=1.0, dt=0.001 => (2.0 - 1.0) / 0.001 = 1000
+        let program = make_program(vec![
+            Instruction::PushConst(2.0), // Current value
+            Instruction::DdtState(0),
+        ]);
+        let result = vm.execute(&program).unwrap();
+        assert!(
+            (result - 1000.0).abs() < 1e-10,
+            "ddt: expected 1000, got {result}"
+        );
+    }
+
+    #[test]
+    fn test_execute_ddt_state_dc() {
+        // In DC analysis (dt=0), ddt should return 0
+        let mut ctx = VmContext::with_states(2, 1);
+        ctx.set_timestep(0.0); // DC: no timestep
+        ctx.state_values_prev[0] = 1.0;
+
+        let mut vm = Vm::new(&ctx);
+
+        let program = make_program(vec![
+            Instruction::PushConst(100.0),
+            Instruction::DdtState(0),
+        ]);
+        let result = vm.execute(&program).unwrap();
+        assert!(result.abs() < 1e-10, "ddt in DC should be 0, got {result}");
+    }
+
+    #[test]
+    fn test_execute_idt_state_transient() {
+        // Test idt accumulation
+        let mut ctx = VmContext::with_states(2, 1);
+        ctx.set_timestep(0.001); // 1ms
+        ctx.state_values_prev[0] = 5.0; // Previous integral value
+
+        let mut vm = Vm::new(&ctx);
+
+        // idt(current=10) => prev + current * dt = 5.0 + 10.0 * 0.001 = 5.01
+        let program = make_program(vec![Instruction::PushConst(10.0), Instruction::IdtState(0)]);
+        let result = vm.execute(&program).unwrap();
+        assert!(
+            (result - 5.01).abs() < 1e-10,
+            "idt: expected 5.01, got {result}"
+        );
+    }
+
+    #[test]
+    fn test_execute_idt_state_dc() {
+        // In DC analysis, idt returns previous accumulated value
+        let mut ctx = VmContext::with_states(2, 1);
+        ctx.set_timestep(0.0); // DC
+        ctx.state_values_prev[0] = 3.14;
+
+        let mut vm = Vm::new(&ctx);
+
+        let program = make_program(vec![
+            Instruction::PushConst(100.0),
+            Instruction::IdtState(0),
+        ]);
+        let result = vm.execute(&program).unwrap();
+        assert!(
+            (result - 3.14).abs() < 1e-10,
+            "idt in DC should be prev value (3.14), got {result}"
+        );
+    }
+
+    #[test]
+    fn test_ddt_capacitor_current() {
+        // Simulate I = C * dV/dt for a capacitor
+        // C = 1e-6 F, dV = 1V over dt = 1e-3s => I = 1e-6 * 1 / 1e-3 = 1e-3 A
+        let mut ctx = VmContext::with_states(2, 1);
+        ctx.set_timestep(1e-3);
+        ctx.state_values_prev[0] = 0.0; // Previous voltage
+
+        let mut vm = Vm::new(&ctx);
+
+        // I = C * ddt(V)
+        // ddt(1.0) with prev=0, dt=1e-3 => 1000
+        // I = 1e-6 * 1000 = 1e-3
+        let program = make_program(vec![
+            Instruction::PushConst(1e-6), // C
+            Instruction::PushConst(1.0),  // Current voltage
+            Instruction::DdtState(0),     // dV/dt
+            Instruction::Mul,             // C * dV/dt
+        ]);
+        let result = vm.execute(&program).unwrap();
+        assert!(
+            (result - 1e-3).abs() < 1e-12,
+            "Capacitor current: expected 1e-3, got {result}"
+        );
+    }
+
+    #[test]
+    fn test_multiple_state_variables() {
+        // Test that different state indices work independently
+        let mut ctx = VmContext::with_states(2, 3);
+        ctx.set_timestep(0.01);
+        ctx.state_values_prev[0] = 0.0;
+        ctx.state_values_prev[1] = 10.0;
+        ctx.state_values_prev[2] = 100.0;
+
+        let mut vm = Vm::new(&ctx);
+
+        // ddt at index 0: (1.0 - 0.0) / 0.01 = 100
+        let program = make_program(vec![Instruction::PushConst(1.0), Instruction::DdtState(0)]);
+        assert!((vm.execute(&program).unwrap() - 100.0).abs() < 1e-10);
+
+        // ddt at index 1: (11.0 - 10.0) / 0.01 = 100
+        let program = make_program(vec![Instruction::PushConst(11.0), Instruction::DdtState(1)]);
+        assert!((vm.execute(&program).unwrap() - 100.0).abs() < 1e-10);
+
+        // ddt at index 2: (101.0 - 100.0) / 0.01 = 100
+        let program = make_program(vec![
+            Instruction::PushConst(101.0),
+            Instruction::DdtState(2),
+        ]);
+        assert!((vm.execute(&program).unwrap() - 100.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_ddt_negative_slope() {
+        // Test ddt with decreasing values (negative derivative)
+        let mut ctx = VmContext::with_states(2, 1);
+        ctx.set_timestep(0.001);
+        ctx.state_values_prev[0] = 5.0;
+
+        let mut vm = Vm::new(&ctx);
+
+        // ddt(2.0) with prev=5.0 => (2.0 - 5.0) / 0.001 = -3000
+        let program = make_program(vec![Instruction::PushConst(2.0), Instruction::DdtState(0)]);
+        let result = vm.execute(&program).unwrap();
+        assert!(
+            (result + 3000.0).abs() < 1e-10,
+            "ddt negative slope: expected -3000, got {result}"
+        );
+    }
+
+    #[test]
+    fn test_idt_accumulation_sequence() {
+        // Simulate multiple timesteps of integration
+        // idt(constant) over 3 timesteps should accumulate
+        let mut ctx = VmContext::with_states(2, 1);
+        ctx.set_timestep(0.01);
+
+        // Timestep 1: idt(10) with prev=0 => 0 + 10*0.01 = 0.1
+        ctx.state_values_prev[0] = 0.0;
+        let mut vm = Vm::new(&ctx);
+        let program = make_program(vec![Instruction::PushConst(10.0), Instruction::IdtState(0)]);
+        let result1 = vm.execute(&program).unwrap();
+        assert!((result1 - 0.1).abs() < 1e-10);
+
+        // Timestep 2: idt(10) with prev=0.1 => 0.1 + 10*0.01 = 0.2
+        ctx.state_values_prev[0] = 0.1;
+        let vm = Vm::new(&ctx);
+        let mut vm = vm;
+        let result2 = vm.execute(&program).unwrap();
+        assert!((result2 - 0.2).abs() < 1e-10);
+
+        // Timestep 3: idt(10) with prev=0.2 => 0.2 + 10*0.01 = 0.3
+        ctx.state_values_prev[0] = 0.2;
+        let mut vm = Vm::new(&ctx);
+        let result3 = vm.execute(&program).unwrap();
+        assert!((result3 - 0.3).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_idt_out_of_bounds_state() {
+        // Out of bounds state index should use 0.0 as default prev
+        let mut ctx = VmContext::with_states(2, 1);
+        ctx.set_timestep(0.01);
+
+        let mut vm = Vm::new(&ctx);
+
+        // idt at index 999 (doesn't exist) => 0 + 5*0.01 = 0.05
+        let program = make_program(vec![
+            Instruction::PushConst(5.0),
+            Instruction::IdtState(999),
+        ]);
+        let result = vm.execute(&program).unwrap();
+        assert!(
+            (result - 0.05).abs() < 1e-10,
+            "Out of bounds idt should use prev=0: got {result}"
+        );
+    }
+
+    #[test]
+    fn test_inductor_voltage() {
+        // Simulate V = L * dI/dt for an inductor
+        // L = 1e-3 H, dI = 2A over dt = 1e-3s => V = 1e-3 * 2 / 1e-3 = 2V
+        let mut ctx = VmContext::with_states(2, 1);
+        ctx.set_timestep(1e-3);
+        ctx.state_values_prev[0] = 1.0; // Previous current
+
+        let mut vm = Vm::new(&ctx);
+
+        // V = L * ddt(I)
+        // ddt(3.0) with prev=1.0, dt=1e-3 => 2000
+        // V = 1e-3 * 2000 = 2.0
+        let program = make_program(vec![
+            Instruction::PushConst(1e-3), // L
+            Instruction::PushConst(3.0),  // Current (I)
+            Instruction::DdtState(0),     // dI/dt
+            Instruction::Mul,             // L * dI/dt
+        ]);
+        let result = vm.execute(&program).unwrap();
+        assert!(
+            (result - 2.0).abs() < 1e-10,
+            "Inductor voltage: expected 2.0, got {result}"
+        );
+    }
+
+    #[test]
+    fn test_very_small_timestep() {
+        // Verify numerical stability with very small timestep
+        let mut ctx = VmContext::with_states(2, 1);
+        ctx.set_timestep(1e-15); // femtosecond
+        ctx.state_values_prev[0] = 1.0;
+
+        let mut vm = Vm::new(&ctx);
+
+        // ddt(1.0 + 1e-15) => (1+1e-15 - 1) / 1e-15 = 1
+        let program = make_program(vec![
+            Instruction::PushConst(1.0 + 1e-15),
+            Instruction::DdtState(0),
+        ]);
+        let result = vm.execute(&program).unwrap();
+        // At e-15 scale, floating point precision gives ~11% error which is expected
+        assert!(
+            (result - 1.0).abs() < 0.2,
+            "Very small timestep ddt should be ~1: got {result}"
+        );
     }
 }
