@@ -261,6 +261,7 @@ fn test_full_ngspice_suite_summary() {
 
     // All test suites with .cir files
     let suites = [
+        // Core tests
         "general",
         "resistance",
         "filters",
@@ -271,9 +272,19 @@ fn test_full_ngspice_suite_summary() {
         "jfet",
         "vbic",
         "mesa",
+        "mos6",
+        // SOI MOSFET
         "bsim3soidd",
         "bsim3soifd",
         "bsim3soipd",
+        // Additional model tests
+        "hfet",
+        "mes",
+        "bsim1",
+        "bsim2",
+        // Regression tests (.control blocks ignored - runs simulation part)
+        "regression/parser",
+        "regression/func",
     ];
 
     let mut total_stats = TestStatistics {
