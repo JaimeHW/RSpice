@@ -35,6 +35,10 @@ pub mod netlist;
 pub mod solver;
 pub mod testing;
 
+/// SIMD-accelerated operations (optional, requires `simd` feature)
+#[cfg(feature = "simd")]
+pub mod simd;
+
 // Re-export primary types for convenience
 pub use analysis::{AcAnalysis, DcAnalysis, MeasureEngine, TransientAnalysis};
 pub use circuit::{Circuit, CircuitData, Node, NodeId};
