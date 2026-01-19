@@ -60,6 +60,19 @@ struct Args {
     /// Print node names in output (if available from netlist)
     #[arg(long)]
     node_names: bool,
+
+    // === Verilog-A Options ===
+    /// Compile a Verilog-A model file and display model information
+    #[arg(long, value_name = "FILE")]
+    compile_va: Option<PathBuf>,
+
+    /// Additional include directories for Verilog-A compilation
+    #[arg(long = "va-include", value_name = "DIR")]
+    va_includes: Vec<PathBuf>,
+
+    /// Enable strict Verilog-A LRM compliance mode
+    #[arg(long)]
+    va_strict: bool,
 }
 
 fn main() -> ExitCode {
@@ -88,6 +101,11 @@ fn main() -> ExitCode {
 }
 
 fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
+    // Handle Verilog-A compilation command
+    if let Some(ref va_path) = args.compile_va {
+        return run_veriloga_compile(&args, va_path);
+    }
+
     let input_path = args
         .input
         .ok_or("No input file specified. Use --help for usage.")?;
@@ -537,5 +555,122 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     if !args.quiet {
         println!("\nSimulation complete.");
     }
+    Ok(())
+}
+
+/// Compile a Verilog-A model file and display model information
+fn run_veriloga_compile(args: &Args, va_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    use rspice_veriloga::{CompilerOptions, VerilogACompiler};
+
+    if !va_path.exists() {
+        return Err(format!("Verilog-A file not found: {}", va_path.display()).into());
+    }
+
+    // Configure compiler options
+    let mut options = CompilerOptions::default();
+    options.strict_mode = args.va_strict;
+
+    // Add include paths
+    for include_dir in &args.va_includes {
+        options.include_paths.push(include_dir.clone());
+    }
+
+    // Add the source file's directory as an include path
+    if let Some(parent) = va_path.parent() {
+        options.include_paths.push(parent.to_path_buf());
+    }
+
+    if args.verbose {
+        println!("Verilog-A Compiler Options:");
+        println!("  Strict mode: {}", options.strict_mode);
+        println!("  Include paths: {:?}", options.include_paths);
+        println!();
+    }
+
+    // Compile the model
+    println!("Compiling: {}", va_path.display());
+    let compiler = VerilogACompiler::new(options);
+    let model = compiler.compile_file(va_path)?;
+
+    // Display model information
+    println!();
+    println!("╔══════════════════════════════════════════════════════════════════╗");
+    println!("║  Verilog-A Model: {:<48} ║", model.name);
+    println!("╚══════════════════════════════════════════════════════════════════╝");
+    println!();
+
+    // Terminals
+    println!("Terminals ({}):", model.num_terminals);
+    for (i, name) in model.terminal_names.iter().enumerate() {
+        println!("  [{:2}] {}", i, name);
+    }
+    println!();
+
+    // Internal nodes
+    if model.internal_nodes > 0 {
+        println!("Internal Nodes: {}", model.internal_nodes);
+        println!();
+    }
+
+    // Parameters
+    if !model.parameters.is_empty() {
+        println!("Parameters ({}):", model.parameters.len());
+        println!(
+            "  {:<20} {:>15} {:>12} {:>12}",
+            "Name", "Default", "Min", "Max"
+        );
+        println!("  {:-<20} {:-^15} {:-^12} {:-^12}", "", "", "", "");
+        for param in &model.parameters {
+            let min_str = param.min.map_or("-".to_string(), |v| format!("{:.4e}", v));
+            let max_str = param.max.map_or("-".to_string(), |v| format!("{:.4e}", v));
+            println!(
+                "  {:<20} {:>15.6e} {:>12} {:>12}",
+                param.name, param.default, min_str, max_str
+            );
+        }
+        println!();
+    }
+
+    // Branch equations (stamp programs)
+    println!("Branch Equations: {}", model.stamp_programs.len());
+    if args.verbose {
+        for (i, program) in model.stamp_programs.iter().enumerate() {
+            println!(
+                "  [{}] {} stamp locations, {} jacobian entries",
+                i,
+                program.stamp_locations.len(),
+                program.jacobian_programs.len()
+            );
+        }
+        println!();
+    }
+
+    // Summary
+    println!("✓ Compilation successful");
+    println!();
+    println!("Usage in SPICE netlist:");
+    println!(
+        "  .VERILOGA {}",
+        va_path.file_name().unwrap().to_string_lossy()
+    );
+
+    // Generate example device instantiation
+    let terminal_list: String = model
+        .terminal_names
+        .iter()
+        .map(|s| s.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    println!("  X1 {} {}", terminal_list, model.name);
+
+    if !model.parameters.is_empty() {
+        let param_example = model
+            .parameters
+            .first()
+            .map(|p| format!(".MODEL {} VERILOGA({}={})", model.name, p.name, p.default))
+            .unwrap_or_default();
+        println!("  {}", param_example);
+    }
+
     Ok(())
 }

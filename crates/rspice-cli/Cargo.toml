@@ -13,6 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 rspice-core.workspace = true
+rspice-veriloga = { path = "../rspice-veriloga" }
 clap.workspace = true
 log.workspace = true
 env_logger.workspace = true
