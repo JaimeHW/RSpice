@@ -99,10 +99,110 @@ impl Netlist {
         parser::parse_netlist(input)
     }
 
-    /// Parse a netlist from a file
+    /// Parse a netlist from a string with include resolution
+    ///
+    /// This method preprocesses .include and .lib directives using the specified
+    /// file path to resolve relative paths.
+    pub fn parse_with_path(input: &str, file_path: &std::path::Path) -> Result<Self, ParseError> {
+        let processed = Self::preprocess_includes(input, file_path)?;
+        Self::parse(&processed)
+    }
+
+    /// Parse a netlist from a file with include expansion
     pub fn parse_file(path: &std::path::Path) -> Result<Self, ParseError> {
         let content = std::fs::read_to_string(path)?;
-        Self::parse(&content)
+
+        // Preprocess includes
+        let processed = Self::preprocess_includes(&content, path)?;
+
+        Self::parse(&processed)
+    }
+
+    /// Preprocess netlist content to expand .include and .lib directives
+    ///
+    /// This method expands all .include and .lib directives in the content,
+    /// resolving paths relative to the given file_path.
+    pub fn preprocess_includes(
+        content: &str,
+        file_path: &std::path::Path,
+    ) -> Result<String, ParseError> {
+        let mut processor = IncludeProcessor::new(file_path);
+        let mut result = String::new();
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let upper = trimmed.to_uppercase();
+
+            if upper.starts_with(".INCLUDE") || upper.starts_with(".INC ") {
+                // Parse and process include directive
+                if let Some(filename) = parse_include_directive(trimmed) {
+                    match processor.process_include(&filename) {
+                        Ok(included_content) => {
+                            result.push_str(&included_content);
+                            result.push('\n');
+                        }
+                        Err(e) => {
+                            // Log warning but don't fail - file may not exist
+                            log::warn!("Include failed: {}", e);
+                        }
+                    }
+                }
+            } else if upper.starts_with(".LIB") && !upper.starts_with(".LIBS") {
+                // Parse and process lib directive
+                if let Some((filename, section)) = parse_lib_directive(trimmed) {
+                    match processor.process_lib(&filename, section.as_deref()) {
+                        Ok(lib_content) => {
+                            result.push_str(&lib_content);
+                            result.push('\n');
+                        }
+                        Err(e) => {
+                            log::warn!("Library include failed: {}", e);
+                        }
+                    }
+                }
+            } else {
+                result.push_str(line);
+                result.push('\n');
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Strip .control/.endc blocks from netlist
+    ///
+    /// Ngspice uses .control blocks for scripting (variable assignment, loops,
+    /// conditionals). These contain operators like '>' that break the netlist
+    /// parser. We strip them since RSpice runs the circuit directly.
+    pub fn strip_control_blocks(input: &str) -> String {
+        let mut result = String::with_capacity(input.len());
+        let mut in_control = false;
+
+        for line in input.lines() {
+            let trimmed = line.trim().to_lowercase();
+
+            if trimmed.starts_with(".control") {
+                in_control = true;
+                result.push_str("* ");
+                result.push_str(line);
+                result.push('\n');
+            } else if trimmed.starts_with(".endc") {
+                in_control = false;
+                result.push_str("* ");
+                result.push_str(line);
+                result.push('\n');
+            } else if in_control {
+                // Comment out control block content
+                result.push_str("* ");
+                result.push_str(line);
+                result.push('\n');
+            } else {
+                result.push_str(line);
+                result.push('\n');
+            }
+        }
+
+        result
     }
 
     /// Add a global node

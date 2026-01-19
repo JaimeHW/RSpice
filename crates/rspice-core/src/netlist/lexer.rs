@@ -54,6 +54,12 @@ pub enum TokenKind {
     Star,
     /// Forward slash (division)
     Slash,
+    /// At sign (for device parameter references @device[param])
+    AtSign,
+    /// Left bracket (for parameter indexing)
+    LBracket,
+    /// Right bracket
+    RBracket,
     /// Newline (significant for line structure)
     Newline,
     /// End of input
@@ -75,6 +81,9 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Minus => write!(f, "-"),
             TokenKind::Star => write!(f, "*"),
             TokenKind::Slash => write!(f, "/"),
+            TokenKind::AtSign => write!(f, "@"),
+            TokenKind::LBracket => write!(f, "["),
+            TokenKind::RBracket => write!(f, "]"),
             TokenKind::Newline => write!(f, "\\n"),
             TokenKind::Eof => write!(f, "EOF"),
         }
@@ -184,7 +193,11 @@ impl<'a> Lexer<'a> {
             }
             '*' => Ok((TokenKind::Star, 1)),
             '/' => Ok((TokenKind::Slash, 1)),
+            '@' => Ok((TokenKind::AtSign, 1)),
+            '[' => Ok((TokenKind::LBracket, 1)),
+            ']' => Ok((TokenKind::RBracket, 1)),
             '{' => self.parse_expression(input),
+            '\'' => self.parse_quoted_expression(input), // ngspice-style '1+2'
             '"' => self.parse_string(input),
             '.' => {
                 // Could be a dot-command (.PARAM, .OP) or a decimal number
@@ -433,6 +446,27 @@ impl<'a> Lexer<'a> {
         }
 
         // Extract content without braces
+        let content = &input[1..end - 1];
+        Ok((TokenKind::Expression(content.to_string()), end))
+    }
+
+    /// Parse a single-quoted expression 'expr' (ngspice-style)
+    fn parse_quoted_expression(&self, input: &str) -> Result<(TokenKind, usize), LexError> {
+        let mut end = 1; // Skip opening quote
+
+        for c in input[1..].chars() {
+            end += c.len_utf8();
+            if c == '\'' {
+                break;
+            }
+        }
+
+        // Check if we found the closing quote
+        if end == 1 || input.chars().nth(end - 1) != Some('\'') {
+            return Err(LexError::UnterminatedExpression(self.line));
+        }
+
+        // Extract content without quotes
         let content = &input[1..end - 1];
         Ok((TokenKind::Expression(content.to_string()), end))
     }

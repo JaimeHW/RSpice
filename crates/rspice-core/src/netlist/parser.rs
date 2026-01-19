@@ -177,13 +177,21 @@ fn process_line(
     if *in_subcircuit {
         if let Some(subckt) = current_subckt {
             let mut subckt_elements = Vec::new();
+
+            // Create a merged parameter context with subcircuit's default parameters
+            // This allows expressions like 'gold' to reference subcircuit params
+            let mut subckt_params = params.clone();
+            for (name, value) in &subckt.params {
+                subckt_params.set(name, *value);
+            }
+
             parse_line(
                 line,
                 line_num,
                 &mut subckt_elements,
                 analyses,
                 models,
-                params,
+                &mut subckt_params,
             )?;
             subckt.elements.extend(subckt_elements);
         }
@@ -251,6 +259,8 @@ fn parse_line(
         'O' => parse_lossless_tline(&mut stream, line_num, elements),
         'Y' => parse_lossy_tline(&mut stream, line_num, elements),
         'P' => parse_coupled_tlines(&mut stream, line_num, elements),
+        // MESFET (Z element) - treat like JFET with model
+        'Z' => parse_mesfet(&mut stream, line_num, elements),
         _ => Err(ParseError::Syntax {
             line: line_num,
             message: format!("Unknown element type: {}", first_char),
@@ -848,6 +858,30 @@ fn parse_jfet(
     Ok(())
 }
 
+/// Parse MESFET (Z element) - GaAs MESFET transistors
+fn parse_mesfet(
+    stream: &mut TokenStream,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+) -> Result<(), ParseError> {
+    let name = expect_ident(stream, line_num)?;
+    let drain = expect_node(stream, line_num)?;
+    let gate = expect_node(stream, line_num)?;
+    let source = expect_node(stream, line_num)?;
+    let model = expect_ident(stream, line_num)?;
+
+    elements.push(Element {
+        name,
+        kind: ElementKind::Mesfet {
+            model,
+            mesfet_type: super::MesfetType::Nmf, // Will be set from model
+        },
+        nodes: vec![drain, gate, source],
+    });
+
+    Ok(())
+}
+
 /// Parse lossless transmission line (O element)
 fn parse_lossless_tline(
     stream: &mut TokenStream,
@@ -1194,10 +1228,9 @@ fn parse_source_spec(
 ) -> Result<SourceSpec, ParseError> {
     skip_commas(stream);
 
+    // Standard SPICE behavior: missing source spec defaults to DC 0
     if stream.is_eof() || matches!(stream.peek().kind, TokenKind::Newline) {
-        return Err(ParseError::MissingParameter(
-            "source specification".to_string(),
-        ));
+        return Ok(SourceSpec::Dc(0.0));
     }
 
     // Check for keywords
@@ -1207,6 +1240,9 @@ fn parse_source_spec(
             match upper.as_str() {
                 "DC" => {
                     stream.advance();
+                    // Allow optional = after DC (e.g., "dc = 5" or "dc 5")
+                    skip_commas(stream);
+                    stream.consume(&TokenKind::Equals);
                     let value = expect_value(stream, line_num, params)?;
                     return Ok(SourceSpec::Dc(value));
                 }

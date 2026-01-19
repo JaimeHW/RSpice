@@ -153,6 +153,12 @@ pub enum ElementKind {
     /// JFET (NJF or PJF)
     Jfet { model: String, jfet_type: JfetType },
 
+    /// MESFET (GaAs FET: NMF or PMF)
+    Mesfet {
+        model: String,
+        mesfet_type: MesfetType,
+    },
+
     //-------------------------------------------------------------------------
     // Controlled Sources
     //-------------------------------------------------------------------------
@@ -280,6 +286,14 @@ pub enum MosType {
 pub enum JfetType {
     Njf,
     Pjf,
+}
+
+/// MESFET transistor type (GaAs)
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum MesfetType {
+    #[default]
+    Nmf, // N-channel MESFET
+    Pmf, // P-channel MESFET
 }
 
 //=============================================================================
