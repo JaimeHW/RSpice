@@ -1,0 +1,32 @@
+// Simple resistor model for Verilog-A testing
+// RSpice example model
+
+nature electrical;
+    units = "V";
+    access = V;
+    abstol = 1e-12;
+endnature
+
+nature current;
+    units = "A";
+    access = I;
+    abstol = 1e-12;
+endnature
+
+discipline electrical;
+    potential electrical;
+    flow current;
+enddiscipline
+
+// Simple resistor module
+module resistor(p, n);
+    inout p, n;
+    electrical p, n;
+    
+    // Resistance parameter with default and range
+    parameter real r = 1000 from (0:inf);
+    
+    analog begin
+        I(p, n) <+ V(p, n) / r;
+    end
+endmodule

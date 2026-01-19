@@ -1,0 +1,11 @@
+*.test
+*.log
+*.out
+*.vcd
+
+ngspiceCkt
+hspiceCkt
+
+/xspice/digital/spinit
+
+results/
