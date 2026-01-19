@@ -106,8 +106,20 @@ impl Engine {
         let mut total_iterations = 0;
         const MAX_RETRIES: usize = 20; // Maximum retries per timepoint before force-accept
         const MAX_TOTAL_ITERATIONS: usize = 100_000; // Safety limit for entire simulation
+        const MAX_WALL_TIME_SECS: u64 = 30; // Wall-clock timeout (30 seconds)
+        let wall_start = std::time::Instant::now();
 
         while t < tstop && total_iterations < MAX_TOTAL_ITERATIONS {
+            // Wall-clock timeout check
+            if wall_start.elapsed().as_secs() > MAX_WALL_TIME_SECS {
+                log::warn!(
+                    "Transient simulation wall-clock timeout after {}s at t={:.3e}s",
+                    MAX_WALL_TIME_SECS,
+                    t
+                );
+                break;
+            }
+
             total_iterations += 1;
             let (dt, _at_breakpoint) = breakpoints.limit_step(t, timestep.dt());
             let dt = dt.min(tstop - t); // Don't overshoot tstop

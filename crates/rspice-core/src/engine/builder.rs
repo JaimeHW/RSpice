@@ -139,6 +139,25 @@ impl Engine {
                     };
                     circuit.jfets.push(jfet);
                 }
+                // MESFET (GaAs FET) - treat as JFET for now since physics are similar
+                ElementKind::Mesfet {
+                    model: _,
+                    mesfet_type,
+                } => {
+                    let drain = circuit.get_or_create_node(&element.nodes[0]);
+                    let gate = circuit.get_or_create_node(&element.nodes[1]);
+                    let source = circuit.get_or_create_node(&element.nodes[2]);
+                    // MESFET uses similar equations to JFET - treat as N-channel JFET
+                    let jfet = match mesfet_type {
+                        crate::netlist::MesfetType::Nmf => {
+                            crate::device::Jfet::njf(&element.name, drain, gate, source)
+                        }
+                        crate::netlist::MesfetType::Pmf => {
+                            crate::device::Jfet::pjf(&element.name, drain, gate, source)
+                        }
+                    };
+                    circuit.jfets.push(jfet);
+                }
                 // Controlled sources
                 ElementKind::Vcvs {
                     gain,

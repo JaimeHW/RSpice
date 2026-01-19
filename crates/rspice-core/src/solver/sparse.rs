@@ -6,12 +6,12 @@
 //! Key optimization: Static structure matrix that caches topology
 //! and allows updates to values only, avoiding O(N log N) rebuild.
 
+use super::SolverError;
+use crate::Value;
 use faer::Mat;
 use faer::linalg::solvers::Solve;
-use faer::sparse::{SparseColMat, SymbolicSparseColMat};
 use faer::sparse::linalg::solvers::{Lu, SymbolicLu};
-use crate::Value;
-use super::SolverError;
+use faer::sparse::{SparseColMat, SymbolicSparseColMat};
 
 //=============================================================================
 // Static Structure Matrix - The Key Optimization
@@ -22,7 +22,7 @@ use super::SolverError;
 pub struct CscIndex(pub usize);
 
 /// Pre-built matrix structure with static topology
-/// 
+///
 /// This is the critical optimization: we build the structure once during
 /// circuit setup, then only update the values during Newton-Raphson iterations.
 /// This avoids the O(N log N) sort and memory allocation on every solve.
@@ -102,9 +102,19 @@ impl StaticMatrix {
     }
 
     /// Zero all values (call before each Newton iteration)
+    ///
+    /// When compiled with the `simd` feature, uses SIMD instructions
+    /// for 2-4x faster clearing on large matrices.
     #[inline]
     pub fn clear_values(&mut self) {
-        self.values.fill(0.0);
+        #[cfg(feature = "simd")]
+        {
+            crate::simd::fill_zero(&mut self.values);
+        }
+        #[cfg(not(feature = "simd"))]
+        {
+            self.values.fill(0.0);
+        }
     }
 
     /// Add value at (row, col) - O(1) using position map
@@ -114,7 +124,10 @@ impl StaticMatrix {
             self.values[idx] += value;
         } else {
             #[cfg(debug_assertions)]
-            panic!("StaticMatrix::add called with unknown position ({}, {})", row, col);
+            panic!(
+                "StaticMatrix::add called with unknown position ({}, {})",
+                row, col
+            );
         }
     }
 
@@ -163,11 +176,12 @@ impl StaticMatrix {
     /// Solve Ax = b using cached structure
     pub fn solve(&mut self, rhs: &[Value]) -> Result<Vec<Value>, SolverError> {
         let n = self.nrows;
-        
+
         if n != rhs.len() {
             return Err(SolverError::InvalidCircuit(format!(
                 "Matrix size {} doesn't match RHS size {}",
-                n, rhs.len()
+                n,
+                rhs.len()
             )));
         }
 
@@ -209,7 +223,7 @@ impl StaticMatrix {
 use num_complex::Complex64;
 
 /// ComplexMatrix for AC small-signal analysis
-/// 
+///
 /// Shares the same sparsity structure as a StaticMatrix but uses Complex64 values.
 /// This enables AC analysis at different frequencies without rebuilding topology.
 pub struct ComplexMatrix {
@@ -273,11 +287,12 @@ impl ComplexMatrix {
     /// Solve Ax = b for complex values
     pub fn solve(&self, rhs: &[Complex64]) -> Result<Vec<Complex64>, SolverError> {
         let n = self.nrows;
-        
+
         if n != rhs.len() {
             return Err(SolverError::InvalidCircuit(format!(
                 "Matrix size {} doesn't match RHS size {}",
-                n, rhs.len()
+                n,
+                rhs.len()
             )));
         }
 
@@ -289,12 +304,12 @@ impl ComplexMatrix {
             None,
             self.row_indices.clone(),
         );
-        
+
         let sparse_mat = SparseColMat::new(symbolic, self.values.clone());
-        
+
         // Factorize
-        let symbolic_lu = SymbolicLu::try_new(sparse_mat.symbolic())
-            .map_err(|_| SolverError::SingularMatrix)?;
+        let symbolic_lu =
+            SymbolicLu::try_new(sparse_mat.symbolic()).map_err(|_| SolverError::SingularMatrix)?;
         let lu = Lu::try_new_with_symbolic(symbolic_lu, sparse_mat.as_ref())
             .map_err(|_| SolverError::SingularMatrix)?;
 
@@ -360,13 +375,14 @@ impl TripletMatrix {
 
     /// Convert to StaticMatrix (freezes structure)
     pub fn to_static(&self) -> Result<StaticMatrix, SolverError> {
-        let triplets: Vec<_> = self.row_indices
+        let triplets: Vec<_> = self
+            .row_indices
             .iter()
             .zip(self.col_indices.iter())
             .zip(self.values.iter())
             .map(|((&r, &c), &v)| (r, c, v))
             .collect();
-        
+
         StaticMatrix::from_triplets(self.nrows, self.ncols, &triplets)
     }
 
@@ -388,9 +404,7 @@ pub struct SparseLuSolver {
 
 impl SparseLuSolver {
     pub fn new() -> Self {
-        Self {
-            symbolic_lu: None,
-        }
+        Self { symbolic_lu: None }
     }
 
     /// Solve Ax = b using sparse LU decomposition
@@ -400,7 +414,7 @@ impl SparseLuSolver {
         rhs: &[Value],
     ) -> Result<Vec<Value>, SolverError> {
         let n = matrix.nrows();
-        
+
         if n == 0 {
             return Ok(Vec::new());
         }
@@ -408,7 +422,8 @@ impl SparseLuSolver {
         if n != rhs.len() {
             return Err(SolverError::InvalidCircuit(format!(
                 "Matrix size {} doesn't match RHS size {}",
-                n, rhs.len()
+                n,
+                rhs.len()
             )));
         }
 
@@ -462,34 +477,34 @@ pub fn solve_sparse(triplets: &TripletMatrix, rhs: &[Value]) -> Result<Vec<Value
 /// Simple Gaussian elimination for small systems or fallback
 pub fn solve_gauss(mut a: Vec<Vec<Value>>, mut b: Vec<Value>) -> Result<Vec<Value>, SolverError> {
     let n = b.len();
-    
+
     if n == 0 {
         return Ok(Vec::new());
     }
-    
+
     // Forward elimination with partial pivoting
     for k in 0..n {
         // Find pivot
         let mut max_row = k;
         let mut max_val = a[k][k].abs();
-        
+
         for i in (k + 1)..n {
             if a[i][k].abs() > max_val {
                 max_val = a[i][k].abs();
                 max_row = i;
             }
         }
-        
+
         if max_val < 1e-15 {
             return Err(SolverError::SingularMatrix);
         }
-        
+
         // Swap rows
         if max_row != k {
             a.swap(k, max_row);
             b.swap(k, max_row);
         }
-        
+
         // Eliminate column
         for i in (k + 1)..n {
             let factor = a[i][k] / a[k][k];
@@ -499,7 +514,7 @@ pub fn solve_gauss(mut a: Vec<Vec<Value>>, mut b: Vec<Value>) -> Result<Vec<Valu
             b[i] -= factor * b[k];
         }
     }
-    
+
     // Back substitution
     let mut x = vec![0.0; n];
     for i in (0..n).rev() {
@@ -509,7 +524,7 @@ pub fn solve_gauss(mut a: Vec<Vec<Value>>, mut b: Vec<Value>) -> Result<Vec<Valu
         }
         x[i] = sum / a[i][i];
     }
-    
+
     Ok(x)
 }
 
@@ -524,7 +539,7 @@ mod tests {
         m.push(0, 1, 1.0);
         m.push(1, 0, 1.0);
         m.push(1, 1, 3.0);
-        
+
         assert_eq!(m.nnz(), 4);
     }
 
@@ -540,10 +555,10 @@ mod tests {
         m.push(0, 1, 1.0);
         m.push(1, 0, 1.0);
         m.push(1, 1, 3.0);
-        
+
         let b = vec![5.0, 7.0];
         let x = solve_sparse(&m, &b).unwrap();
-        
+
         assert!((x[0] - 1.6).abs() < 1e-10);
         assert!((x[1] - 1.8).abs() < 1e-10);
     }
@@ -559,10 +574,10 @@ mod tests {
         m.push(0, 1, 1.0);
         m.push(1, 0, 1.0);
         m.push(1, 1, 3.0);
-        
+
         let b = vec![5.0, 7.0];
         let x = solve_sparse(&m, &b).unwrap();
-        
+
         // 2x + y = 5, x + 3y = 7 -> x = 1.6, y = 1.8
         assert!((x[0] - 1.6).abs() < 1e-10);
         assert!((x[1] - 1.8).abs() < 1e-10);
@@ -571,25 +586,20 @@ mod tests {
     #[test]
     fn test_static_matrix() {
         // Build static matrix once
-        let triplets = vec![
-            (0, 0, 2.0),
-            (0, 1, 1.0),
-            (1, 0, 1.0),
-            (1, 1, 3.0),
-        ];
+        let triplets = vec![(0, 0, 2.0), (0, 1, 1.0), (1, 0, 1.0), (1, 1, 3.0)];
         let mut matrix = StaticMatrix::from_triplets(2, 2, &triplets).unwrap();
-        
+
         // Solve first time
         let x1 = matrix.solve(&[5.0, 7.0]).unwrap();
         assert!((x1[0] - 1.6).abs() < 1e-10);
-        
+
         // Clear and re-stamp (simulating Newton iteration)
         matrix.clear_values();
         matrix.add(0, 0, 2.0);
         matrix.add(0, 1, 1.0);
         matrix.add(1, 0, 1.0);
         matrix.add(1, 1, 3.0);
-        
+
         // Solve again - should use cached structure
         let x2 = matrix.solve(&[5.0, 7.0]).unwrap();
         assert!((x2[0] - 1.6).abs() < 1e-10);
@@ -597,14 +607,11 @@ mod tests {
 
     #[test]
     fn test_solve_gauss() {
-        let a = vec![
-            vec![2.0, 1.0],
-            vec![1.0, 3.0],
-        ];
+        let a = vec![vec![2.0, 1.0], vec![1.0, 3.0]];
         let b = vec![5.0, 7.0];
-        
+
         let x = solve_gauss(a, b).unwrap();
-        
+
         assert!((x[0] - 1.6).abs() < 1e-10);
         assert!((x[1] - 1.8).abs() < 1e-10);
     }

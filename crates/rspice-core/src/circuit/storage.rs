@@ -599,17 +599,509 @@ macro_rules! define_nonlinear_storage {
 }
 
 // Generate storage containers for all nonlinear device types
-define_nonlinear_storage!(
-    /// Diode storage for nonlinear Newton-Raphson iteration
-    Diodes, Diode
-);
+// NOTE: Diodes, Mosfets, and BJTs have custom implementations below for SIMD batch processing
 
-define_nonlinear_storage!(
-    /// BJT storage for nonlinear Newton-Raphson iteration
-    Bjts, Bjt
-);
+// NOTE: Mosfets, BJTs, and Diodes have custom implementations below to support SIMD batch processing
 
-define_nonlinear_storage!(
-    /// MOSFET storage for nonlinear Newton-Raphson iteration
-    Mosfets, Mosfet
-);
+//=============================================================================
+// Custom Diode Storage with SIMD Batch Support
+//=============================================================================
+
+/// Diode storage for nonlinear Newton-Raphson iteration.
+///
+/// When compiled with the `simd` feature, this struct maintains a batch
+/// representation for SIMD-accelerated evaluation on circuits with many diodes.
+#[derive(Debug, Default)]
+pub struct Diodes {
+    /// Individual diode devices
+    pub devices: Vec<Diode>,
+
+    /// Batch representation for SIMD acceleration
+    #[cfg(feature = "simd")]
+    batch: Option<crate::device::batch::BatchDiodes>,
+}
+
+impl Diodes {
+    #[inline]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[inline]
+    pub fn add(&mut self, device: Diode) {
+        self.devices.push(device);
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.devices.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.devices.is_empty()
+    }
+
+    /// Update all devices from node voltages.
+    pub fn update_all(&mut self, voltages: &[Value]) {
+        #[cfg(feature = "simd")]
+        if let Some(ref mut batch) = self.batch {
+            batch.gather_voltages(voltages);
+            batch.evaluate();
+            return;
+        }
+
+        for d in &mut self.devices {
+            d.update(voltages);
+        }
+    }
+
+    /// Stamp all devices into matrix and RHS.
+    pub fn stamp_all(
+        &self,
+        matrix: &mut impl MatrixStamper,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
+        // Batch processing isn't used here because stamp_all uses the generic
+        // MatrixStamper trait. Use stamp_all_direct for batch processing.
+        for d in &self.devices {
+            d.stamp_nonlinear(voltages, matrix, rhs);
+        }
+    }
+
+    /// Check if all devices have converged.
+    pub fn all_converged(&self, tolerance: Value) -> bool {
+        #[cfg(feature = "simd")]
+        if let Some(ref batch) = self.batch {
+            return batch.all_converged(tolerance);
+        }
+
+        self.devices.iter().all(|d| d.is_converged(tolerance))
+    }
+
+    /// Link all devices to the sparse matrix for O(1) stamping.
+    pub fn link_all(&mut self, matrix: &StaticMatrix) {
+        // Link individual devices
+        for d in &mut self.devices {
+            d.link(matrix);
+        }
+
+        // Build and link batch representation if we have enough diodes
+        #[cfg(feature = "simd")]
+        self.build_batch(matrix);
+    }
+
+    /// Build the batch representation from individual devices.
+    #[cfg(feature = "simd")]
+    fn build_batch(&mut self, matrix: &StaticMatrix) {
+        // Only use batch for 4+ diodes (minimum for SIMD benefit)
+        if self.devices.len() < 4 {
+            self.batch = None;
+            return;
+        }
+
+        let mut batch = crate::device::batch::BatchDiodes::with_capacity(self.devices.len());
+
+        for d in &self.devices {
+            batch.add(d.node_anode, d.node_cathode, d.is, d.n, d.vt);
+        }
+
+        // Link batch to matrix
+        batch.link(matrix);
+
+        self.batch = Some(batch);
+    }
+
+    /// Stamp all devices using O(1) direct indexing.
+    ///
+    /// When SIMD batch processing is available and enabled, this uses
+    /// SIMD-accelerated evaluation for the I-V calculations.
+    pub fn stamp_all_direct(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
+        #[cfg(feature = "simd")]
+        if let Some(ref mut batch) = self.batch {
+            // Use batch SIMD processing
+            batch.gather_voltages(voltages);
+            batch.evaluate();
+            batch.stamp(matrix, rhs);
+            return;
+        }
+
+        // Fallback to individual device stamping
+        for d in &self.devices {
+            d.stamp_direct(matrix, rhs, voltages);
+        }
+    }
+}
+
+//=============================================================================
+// Custom MOSFET Storage with SIMD Batch Support
+//=============================================================================
+
+/// MOSFET storage for nonlinear Newton-Raphson iteration.
+///
+/// When compiled with the `simd` feature, this struct maintains a batch
+/// representation for SIMD-accelerated evaluation on circuits with many MOSFETs.
+#[derive(Debug, Default)]
+pub struct Mosfets {
+    /// Individual MOSFET devices
+    pub devices: Vec<Mosfet>,
+
+    /// Batch representation for Level 1 MOSFETs
+    #[cfg(feature = "simd")]
+    batch_level1: Option<crate::device::batch_mosfet::BatchMosfets>,
+
+    /// Batch representation for Level 6 MOSFETs
+    #[cfg(feature = "simd")]
+    batch_level6: Option<crate::device::batch_mosfet_level6::BatchMosfetsLevel6>,
+
+    /// Indices of devices handled by batch (for fallback stamping)
+    #[cfg(feature = "simd")]
+    batched_indices: Vec<usize>,
+}
+
+impl Mosfets {
+    #[inline]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[inline]
+    pub fn add(&mut self, device: Mosfet) {
+        self.devices.push(device);
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.devices.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.devices.is_empty()
+    }
+
+    /// Update all devices from node voltages.
+    pub fn update_all(&mut self, voltages: &[Value]) {
+        #[cfg(feature = "simd")]
+        {
+            if let Some(ref mut batch) = self.batch_level1 {
+                batch.gather_voltages(voltages);
+                batch.evaluate();
+            }
+            if let Some(ref mut batch) = self.batch_level6 {
+                batch.gather_voltages(voltages);
+                batch.evaluate();
+            }
+            // Still need to update non-batched devices
+            for (i, d) in self.devices.iter_mut().enumerate() {
+                if !self.batched_indices.contains(&i) {
+                    d.update(voltages);
+                }
+            }
+            return;
+        }
+
+        #[cfg(not(feature = "simd"))]
+        for d in &mut self.devices {
+            d.update(voltages);
+        }
+    }
+
+    /// Stamp all devices into matrix and RHS.
+    pub fn stamp_all(
+        &self,
+        matrix: &mut impl MatrixStamper,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
+        for d in &self.devices {
+            d.stamp_nonlinear(voltages, matrix, rhs);
+        }
+    }
+
+    /// Check if all devices have converged.
+    pub fn all_converged(&self, tolerance: Value) -> bool {
+        #[cfg(feature = "simd")]
+        {
+            if let Some(ref batch) = self.batch_level1 {
+                if !batch.all_converged(tolerance) {
+                    return false;
+                }
+            }
+            if let Some(ref batch) = self.batch_level6 {
+                if !batch.all_converged(tolerance) {
+                    return false;
+                }
+            }
+            // Check non-batched devices
+            for (i, d) in self.devices.iter().enumerate() {
+                if !self.batched_indices.contains(&i) && !d.is_converged(tolerance) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        #[cfg(not(feature = "simd"))]
+        self.devices.iter().all(|d| d.is_converged(tolerance))
+    }
+
+    /// Link all devices to the sparse matrix for O(1) stamping.
+    pub fn link_all(&mut self, matrix: &StaticMatrix) {
+        // Link individual devices
+        for d in &mut self.devices {
+            d.link(matrix);
+        }
+
+        // Build batches for supported levels
+        #[cfg(feature = "simd")]
+        self.build_batches(matrix);
+    }
+
+    /// Build batch representations for supported MOSFET levels.
+    #[cfg(feature = "simd")]
+    fn build_batches(&mut self, matrix: &StaticMatrix) {
+        self.batched_indices.clear();
+
+        // Count devices by level
+        let level1_count = self.devices.iter().filter(|d| d.level == 1).count();
+        let level6_count = self.devices.iter().filter(|d| d.level == 6).count();
+
+        // Build Level 1 batch
+        if level1_count >= 4 {
+            let mut batch = crate::device::batch_mosfet::BatchMosfets::with_capacity(level1_count);
+            for (i, d) in self.devices.iter().enumerate() {
+                if d.level == 1 {
+                    batch.add(
+                        d.node_drain,
+                        d.node_gate,
+                        d.node_source,
+                        d.node_bulk,
+                        d.mos_type,
+                        d.beta(),
+                        d.vto,
+                        d.gamma,
+                        d.phi,
+                        d.lambda,
+                    );
+                    self.batched_indices.push(i);
+                }
+            }
+            batch.link(matrix);
+            self.batch_level1 = Some(batch);
+        } else {
+            self.batch_level1 = None;
+        }
+
+        // Build Level 6 batch
+        if level6_count >= 4 {
+            let mut batch =
+                crate::device::batch_mosfet_level6::BatchMosfetsLevel6::with_capacity(level6_count);
+            for (i, d) in self.devices.iter().enumerate() {
+                if d.level == 6 {
+                    batch.add(
+                        d.node_drain,
+                        d.node_gate,
+                        d.node_source,
+                        d.node_bulk,
+                        d.mos_type,
+                        d.wl_ratio(),
+                        d.vto,
+                        d.gamma,
+                        d.phi,
+                        d.kc,
+                        d.nc,
+                        d.kv,
+                        d.nv,
+                        d.lambda0,
+                        d.lambda1,
+                    );
+                    self.batched_indices.push(i);
+                }
+            }
+            batch.link(matrix);
+            self.batch_level6 = Some(batch);
+        } else {
+            self.batch_level6 = None;
+        }
+    }
+
+    /// Stamp all devices using O(1) direct indexing.
+    pub fn stamp_all_direct(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
+        #[cfg(feature = "simd")]
+        {
+            // Batch process Level 1
+            if let Some(ref mut batch) = self.batch_level1 {
+                batch.gather_voltages(voltages);
+                batch.evaluate();
+                batch.stamp(matrix, rhs);
+            }
+            // Batch process Level 6
+            if let Some(ref mut batch) = self.batch_level6 {
+                batch.gather_voltages(voltages);
+                batch.evaluate();
+                batch.stamp(matrix, rhs);
+            }
+            // Stamp non-batched devices individually
+            for (i, d) in self.devices.iter().enumerate() {
+                if !self.batched_indices.contains(&i) {
+                    d.stamp_direct(matrix, rhs, voltages);
+                }
+            }
+            return;
+        }
+
+        #[cfg(not(feature = "simd"))]
+        for d in &self.devices {
+            d.stamp_direct(matrix, rhs, voltages);
+        }
+    }
+}
+
+//=============================================================================
+// Custom BJT Storage with SIMD Batch Support
+//=============================================================================
+
+/// BJT storage for nonlinear Newton-Raphson iteration.
+///
+/// When compiled with the `simd` feature, maintains a batch representation
+/// for SIMD-accelerated evaluation.
+#[derive(Debug, Default)]
+pub struct Bjts {
+    /// Individual BJT devices
+    pub devices: Vec<Bjt>,
+
+    /// Batch representation for SIMD acceleration
+    #[cfg(feature = "simd")]
+    batch: Option<crate::device::batch_bjt::BatchBjts>,
+}
+
+impl Bjts {
+    #[inline]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[inline]
+    pub fn add(&mut self, device: Bjt) {
+        self.devices.push(device);
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.devices.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.devices.is_empty()
+    }
+
+    /// Update all devices from node voltages.
+    pub fn update_all(&mut self, voltages: &[Value]) {
+        #[cfg(feature = "simd")]
+        if let Some(ref mut batch) = self.batch {
+            batch.gather_voltages(voltages);
+            batch.evaluate();
+            return;
+        }
+
+        for d in &mut self.devices {
+            d.update(voltages);
+        }
+    }
+
+    /// Stamp all devices into matrix and RHS.
+    pub fn stamp_all(
+        &self,
+        matrix: &mut impl MatrixStamper,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
+        for d in &self.devices {
+            d.stamp_nonlinear(voltages, matrix, rhs);
+        }
+    }
+
+    /// Check if all devices have converged.
+    pub fn all_converged(&self, tolerance: Value) -> bool {
+        #[cfg(feature = "simd")]
+        if let Some(ref batch) = self.batch {
+            return batch.all_converged(tolerance);
+        }
+
+        self.devices.iter().all(|d| d.is_converged(tolerance))
+    }
+
+    /// Link all devices to the sparse matrix.
+    pub fn link_all(&mut self, matrix: &StaticMatrix) {
+        for d in &mut self.devices {
+            d.link(matrix);
+        }
+
+        #[cfg(feature = "simd")]
+        self.build_batch(matrix);
+    }
+
+    /// Build batch representation.
+    #[cfg(feature = "simd")]
+    fn build_batch(&mut self, matrix: &StaticMatrix) {
+        if self.devices.len() < 4 {
+            self.batch = None;
+            return;
+        }
+
+        let mut batch = crate::device::batch_bjt::BatchBjts::with_capacity(self.devices.len());
+
+        for d in &self.devices {
+            batch.add(
+                d.node_collector,
+                d.node_base,
+                d.node_emitter,
+                d.bjt_type,
+                d.is,
+                d.nf,
+                d.nr,
+                d.vt,
+                d.bf,
+                d.br,
+                d.vaf,
+                d.ikf,
+            );
+        }
+
+        batch.link(matrix);
+        self.batch = Some(batch);
+    }
+
+    /// Stamp using direct indexing.
+    pub fn stamp_all_direct(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
+        #[cfg(feature = "simd")]
+        if let Some(ref mut batch) = self.batch {
+            batch.gather_voltages(voltages);
+            batch.evaluate();
+            batch.stamp(matrix, rhs);
+            return;
+        }
+
+        for d in &self.devices {
+            d.stamp_direct(matrix, rhs, voltages);
+        }
+    }
+}
