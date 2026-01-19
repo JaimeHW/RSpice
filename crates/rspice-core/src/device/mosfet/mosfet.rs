@@ -121,6 +121,20 @@ pub struct Mosfet {
     /// Source/drain sheet resistance (RSH) in ohm/square
     pub rsh: Value,
 
+    // Level 6 (double-exponent/simplified) MOSFET parameters
+    /// Current gain coefficient (KC) - drain current multiplier
+    pub kc: Value,
+    /// Current gain exponent (NC) - affects Vgs dependence
+    pub nc: Value,
+    /// Voltage clipping coefficient (KV) - saturation factor
+    pub kv: Value,
+    /// Voltage clipping exponent (NV) - affects Vds dependence  
+    pub nv: Value,
+    /// First-order channel length modulation (LAMBDA0)
+    pub lambda0: Value,
+    /// Second-order channel length modulation (LAMBDA1)
+    pub lambda1: Value,
+
     // Operating point values
     vgs: Value,
     vds: Value,
@@ -210,6 +224,14 @@ impl Mosfet {
             cgdo: 2.4e-10, // Gate-drain overlap cap (F/m)
             cgbo: 0.0,     // Gate-bulk overlap cap (F/m)
             rsh: 0.0,      // Sheet resistance (ohm/sq)
+
+            // Level 6 parameters (double-exponent model)
+            kc: 110e-6,    // Current gain (similar to KP)
+            nc: 1.0,       // Current exponent
+            kv: 0.9,       // Voltage clipping coefficient
+            nv: 0.9,       // Voltage exponent
+            lambda0: 0.01, // First-order CLM
+            lambda1: 0.0,  // Second-order CLM
 
             vgs: 0.0,
             vds: 0.0,
@@ -309,6 +331,25 @@ impl Mosfet {
         }
         if let Some(&v) = params.get("RSH") {
             self.rsh = v;
+        }
+        // Level 6 parameters
+        if let Some(&v) = params.get("KC") {
+            self.kc = v;
+        }
+        if let Some(&v) = params.get("NC") {
+            self.nc = v;
+        }
+        if let Some(&v) = params.get("KV") {
+            self.kv = v;
+        }
+        if let Some(&v) = params.get("NV") {
+            self.nv = v;
+        }
+        if let Some(&v) = params.get("LAMBDA0") {
+            self.lambda0 = v;
+        }
+        if let Some(&v) = params.get("LAMBDA1") {
+            self.lambda1 = v;
         }
         self
     }
@@ -447,7 +488,8 @@ impl Mosfet {
         let phi_vbs = (self.phi - vbs_eff).max(0.0);
         let vth_base = self.vto + self.gamma * (phi_vbs.sqrt() - self.phi.sqrt());
 
-        if self.level < 3 {
+        if self.level < 3 || self.level == 6 {
+            // Level 1 and Level 6 use simple body effect
             return vth_base;
         }
 
@@ -638,7 +680,9 @@ impl Mosfet {
 
     /// Determine operating region and calculate drain current
     fn calculate_id(&self, vgs: Value, vds: Value, vbs: Value) -> (Value, MosRegion) {
-        if self.level >= 3 {
+        if self.level == 6 {
+            self.calculate_id_level6(vgs, vds, vbs)
+        } else if self.level >= 3 {
             self.calculate_id_bsim3(vgs, vds, vbs)
         } else {
             self.calculate_id_level1(vgs, vds, vbs)
@@ -751,77 +795,132 @@ impl Mosfet {
         (id, region)
     }
 
-    /// Calculate transconductance gm = dId/dVgs with C1 continuity
+    /// Level 6 (Double-Exponent Simplified) drain current calculation
     ///
-    /// Uses the same smooth transitions as calculate_id for consistent derivatives.
-    fn gm(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
+    /// Level 6 MOSFET model uses empirical fits with double-exponent equations:
+    /// - KC/NC control the current gain and gate voltage dependence
+    /// - KV/NV control the saturation characteristics  
+    /// - LAMBDA0/LAMBDA1 control channel length modulation
+    ///
+    /// Id = KC * W/L * (Vgs - Vth)^NC * (1 - exp(-Vds * KV))^NV * (1 + LAMBDA * Vds)
+    fn calculate_id_level6(&self, vgs: Value, vds: Value, vbs: Value) -> (Value, MosRegion) {
         let p = self.polarity();
         let vgs_eff = p * vgs;
         let vds_eff = smooth_positive(p * vds, SMOOTH_VOLTAGE * 0.1);
         let vth = self.vth(vbs);
 
-        // Smooth gate overdrive
+        // Gate overdrive with smooth cutoff transition
         let vgt_raw = vgs_eff - vth;
         let vgt = smooth_positive(vgt_raw, SMOOTH_VOLTAGE);
 
-        // Smooth Vdsat for region blending
-        let vdsat = smooth_min(vgt, vds_eff, SMOOTH_VOLTAGE);
+        // Determine effective region for reporting
+        let region = if vgt_raw <= -SMOOTH_VOLTAGE {
+            MosRegion::Cutoff
+        } else if vds_eff < vgt - SMOOTH_VOLTAGE {
+            MosRegion::Linear
+        } else {
+            MosRegion::Saturation
+        };
 
-        // Derivative of smooth_positive for cutoff transition
-        // d(smooth_positive(x))/dx = smooth_step(x)
-        let dvgt_dvgs = smooth_step(vgt_raw, SMOOTH_VOLTAGE);
+        // Level 6 double-exponent model equations
+        // Current gain term: KC * W/L * Vgt^NC
+        let wl = self.wl_ratio();
+        let current_term = self.kc * wl * vgt.powf(self.nc);
 
-        // In unified formulation: Id = beta * (Vgt * Vdsat - Vdsat²/2)
-        // Taking derivative w.r.t Vgs:
-        // dId/dVgs = beta * (Vdsat * dVgt/dVgs + Vgt * dVdsat/dVgs - Vdsat * dVdsat/dVgs)
-        // When Vds > Vgt (saturation): dVdsat/dVgs ≈ dVgt/dVgs
-        // When Vds < Vgt (linear): dVdsat/dVgs ≈ 0 (Vdsat = Vds)
+        // Saturation term: (1 - exp(-KV * Vds))^NV
+        // This smoothly transitions from linear to saturation
+        let exp_term = (-self.kv * vds_eff).exp();
+        let sat_factor = (1.0 - exp_term).max(0.0).powf(self.nv);
 
-        // Blend factor: how much Vdsat follows Vgt
-        let sat_blend = smooth_step(vgt - vds_eff, SMOOTH_VOLTAGE);
-        let dvdsat_dvgs = sat_blend * dvgt_dvgs;
+        // Channel length modulation: 1 + LAMBDA0 * Vds + LAMBDA1 * Vds^2
+        let clm = 1.0 + self.lambda0 * vds_eff + self.lambda1 * vds_eff * vds_eff;
 
-        let gm_core = self.beta() * (vdsat * dvgt_dvgs + (vgt - vdsat) * dvdsat_dvgs);
-        let gm_clm = gm_core * (1.0 + self.lambda * vds_eff);
+        // Total drain current
+        let id = p * current_term * sat_factor * clm;
 
-        // Ensure minimum conductance for numerical stability
-        gm_clm.max(1e-12)
+        (id, region)
     }
 
-    /// Calculate output conductance gds = dId/dVds with C1 continuity
+    /// Calculate transconductance gm = dId/dVgs
+    ///
+    /// Uses analytical formulas for all model levels for performance
+    fn gm(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
+        let p = self.polarity();
+        let vgs_eff = p * vgs;
+        let _vds_eff = smooth_positive(p * vds, SMOOTH_VOLTAGE * 0.1);
+        let vth = self.vth(vbs);
+        let vgt_raw = vgs_eff - vth;
+        let vgt = smooth_positive(vgt_raw, SMOOTH_VOLTAGE);
+        let dvgt_dvgs = smooth_step(vgt_raw, SMOOTH_VOLTAGE);
+
+        // Level 6: gm = dId/dVgs = Id / Vgt * NC * dVgt/dVgs (when Vgt > 0)
+        if self.level == 6 {
+            let (id, _) = self.calculate_id(vgs, vds, vbs);
+            let gm = if vgt > 1e-12 {
+                id.abs() / vgt * self.nc * dvgt_dvgs
+            } else {
+                1e-12
+            };
+            return gm.abs().max(1e-12);
+        }
+
+        // Analytical formula for Level 1/3 (optimized path)
+        let p = self.polarity();
+        let vgs_eff = p * vgs;
+        let vds_eff = smooth_positive(p * vds, SMOOTH_VOLTAGE * 0.1);
+        let vth = self.vth(vbs);
+        let vgt_raw = vgs_eff - vth;
+        let vgt = smooth_positive(vgt_raw, SMOOTH_VOLTAGE);
+        let vdsat = smooth_min(vgt, vds_eff, SMOOTH_VOLTAGE);
+        let dvgt_dvgs = smooth_step(vgt_raw, SMOOTH_VOLTAGE);
+        let sat_blend = smooth_step(vgt - vds_eff, SMOOTH_VOLTAGE);
+        let dvdsat_dvgs = sat_blend * dvgt_dvgs;
+        let gm_core = self.beta() * (vdsat * dvgt_dvgs + (vgt - vdsat) * dvdsat_dvgs);
+        (gm_core * (1.0 + self.lambda * vds_eff)).max(1e-12)
+    }
+
+    /// Calculate output conductance gds = dId/dVds
+    ///
+    /// Uses analytical formulas for all model levels for performance
     fn gds(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
         let p = self.polarity();
         let vgs_eff = p * vgs;
         let vds_eff = smooth_positive(p * vds, SMOOTH_VOLTAGE * 0.1);
         let vth = self.vth(vbs);
-
-        // Smooth gate overdrive
         let vgt_raw = vgs_eff - vth;
         let vgt = smooth_positive(vgt_raw, SMOOTH_VOLTAGE);
 
-        // Smooth Vdsat
+        // Level 6: analytical gds from saturation factor and CLM derivatives
+        if self.level == 6 {
+            let (id, _) = self.calculate_id(vgs, vds, vbs);
+
+            // gds has two components:
+            // 1. From saturation factor: d/dVds[(1-exp(-KV*Vds))^NV]
+            // 2. From CLM: d/dVds[1 + LAMBDA0*Vds + LAMBDA1*Vds^2]
+
+            // Saturation factor contribution
+            let exp_term = (-self.kv * vds_eff).exp();
+            let sat_factor = (1.0 - exp_term).max(1e-12);
+            let dsat_dvds = self.nv * sat_factor.powf(self.nv - 1.0) * self.kv * exp_term;
+
+            // CLM contribution
+            let clm = 1.0 + self.lambda0 * vds_eff + self.lambda1 * vds_eff * vds_eff;
+            let dclm_dvds = self.lambda0 + 2.0 * self.lambda1 * vds_eff;
+
+            // Using product rule: gds = Id * (dsat/sat + dclm/clm)
+            let gds = id.abs()
+                * (dsat_dvds / sat_factor.powf(self.nv).max(1e-12) + dclm_dvds / clm.max(1e-12));
+            return gds.abs().max(1e-12);
+        }
+
+        // Analytical formula for Level 1/3 (optimized path)
         let vdsat = smooth_min(vgt, vds_eff, SMOOTH_VOLTAGE);
-
-        // Blend factor for region transition
         let lin_blend = smooth_step(vgt - vds_eff, SMOOTH_VOLTAGE);
-
-        // In linear region: gds = beta * (Vgt - Vds) + lambda term
-        // In saturation: gds = lambda * Id (small)
-        // Derivative of Vdsat w.r.t Vds: ~1 in linear, ~0 in saturation
         let dvdsat_dvds = 1.0 - lin_blend;
-
-        // dId/dVds from main current term
         let gds_core = self.beta() * (vgt - vdsat) * dvdsat_dvds;
-
-        // Channel length modulation term
         let id_core = self.beta() * (vgt * vdsat - 0.5 * vdsat * vdsat);
         let gds_clm = id_core * self.lambda;
-
-        // Total conductance
-        let gds_total = gds_core * (1.0 + self.lambda * vds_eff) + gds_clm;
-
-        // Ensure minimum conductance
-        gds_total.max(1e-12)
+        (gds_core * (1.0 + self.lambda * vds_eff) + gds_clm).max(1e-12)
     }
 
     /// Calculate body transconductance gmb = dId/dVbs with C1 continuity

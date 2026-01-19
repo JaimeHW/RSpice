@@ -102,7 +102,13 @@ impl Engine {
         }
 
         // Main transient loop
-        while t < tstop {
+        let mut retry_count = 0;
+        let mut total_iterations = 0;
+        const MAX_RETRIES: usize = 20; // Maximum retries per timepoint before force-accept
+        const MAX_TOTAL_ITERATIONS: usize = 100_000; // Safety limit for entire simulation
+
+        while t < tstop && total_iterations < MAX_TOTAL_ITERATIONS {
+            total_iterations += 1;
             let (dt, _at_breakpoint) = breakpoints.limit_step(t, timestep.dt());
             let dt = dt.min(tstop - t); // Don't overshoot tstop
 
@@ -221,17 +227,47 @@ impl Engine {
             }
 
             if !converged {
-                timestep.adjust(1.0);
+                retry_count += 1;
+
+                // Convergence failed - reduce timestep significantly (4x) and retry
+                timestep.force_step(dt * 0.25);
+
+                // Force accept after too many retries to prevent infinite loop
+                if retry_count >= MAX_RETRIES || timestep.is_at_minimum() {
+                    t += dt;
+                    solution = new_solution;
+                    result.time.push(t);
+                    for (i, voltages) in result.voltages.iter_mut().enumerate() {
+                        voltages.push(solution.get(i).copied().unwrap_or(0.0));
+                    }
+                    retry_count = 0; // Reset for next timepoint
+                }
                 continue;
             }
 
             // Check LTE for physics accuracy
             let (lte, accept) = lte_estimator.estimate(&new_solution, dt);
             if !accept {
+                retry_count += 1;
                 let scale = lte_estimator.recommend_scale(lte);
                 timestep.adjust(lte / scale);
+
+                // Force accept after too many retries to prevent infinite loop
+                if retry_count >= MAX_RETRIES || timestep.is_at_minimum() {
+                    t += dt;
+                    lte_estimator.record(&new_solution, dt);
+                    solution = new_solution;
+                    result.time.push(t);
+                    for (i, voltages) in result.voltages.iter_mut().enumerate() {
+                        voltages.push(solution.get(i).copied().unwrap_or(0.0));
+                    }
+                    retry_count = 0; // Reset for next timepoint
+                }
                 continue;
             }
+
+            // Success - reset retry counter
+            retry_count = 0;
 
             // Accept this timestep
             t += dt;

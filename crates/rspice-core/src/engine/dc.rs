@@ -76,12 +76,13 @@ impl Engine {
             return Err(SimulationError::Circuit("No nodes in circuit".to_string()));
         }
 
-        // Find source index
+        // Find source index (case-insensitive comparison - SPICE standard)
+        let source_name_upper = source_name.to_uppercase();
         let vsrc_idx = circuit
             .voltage_sources
             .names
             .iter()
-            .position(|n| n == source_name)
+            .position(|n| n.to_uppercase() == source_name_upper)
             .ok_or_else(|| {
                 SimulationError::Circuit(format!("Source not found: {}", source_name))
             })?;

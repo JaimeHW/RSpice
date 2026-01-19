@@ -79,12 +79,12 @@ impl Engine {
                     };
                     circuit.bjts.add(bjt);
                 }
-                ElementKind::Mosfet { model: _, mos_type } => {
+                ElementKind::Mosfet { model, mos_type } => {
                     let drain = circuit.get_or_create_node(&element.nodes[0]);
                     let gate = circuit.get_or_create_node(&element.nodes[1]);
                     let source = circuit.get_or_create_node(&element.nodes[2]);
                     let bulk = circuit.get_or_create_node(&element.nodes[3]);
-                    let mosfet = match mos_type {
+                    let mut mosfet = match mos_type {
                         crate::netlist::MosType::Nmos => crate::device::Mosfet::new_nmos(
                             element.name.clone(),
                             drain,
@@ -100,7 +100,44 @@ impl Engine {
                             bulk,
                         ),
                     };
+
+                    // Look up model and apply parameters including LEVEL
+                    let model_upper = model.to_uppercase();
+                    if let Some(device_model) = netlist
+                        .models
+                        .iter()
+                        .find(|m| m.name.to_uppercase() == model_upper)
+                    {
+                        // Convert Vec<(String, f64)> to HashMap for with_params
+                        let params_map: std::collections::HashMap<String, f64> =
+                            device_model.params.iter().cloned().collect();
+
+                        // Extract LEVEL from params (default to 1)
+                        let level = params_map.get("LEVEL").copied().unwrap_or(1.0) as i32;
+                        mosfet = mosfet.with_level(level);
+
+                        // Apply all model parameters (VTO, KP, GAMMA, KC, NC, etc.)
+                        mosfet = mosfet.with_params(&params_map);
+                    }
+
                     circuit.mosfets.add(mosfet);
+                }
+                ElementKind::Jfet {
+                    model: _,
+                    jfet_type,
+                } => {
+                    let drain = circuit.get_or_create_node(&element.nodes[0]);
+                    let gate = circuit.get_or_create_node(&element.nodes[1]);
+                    let source = circuit.get_or_create_node(&element.nodes[2]);
+                    let jfet = match jfet_type {
+                        crate::netlist::JfetType::Njf => {
+                            crate::device::Jfet::njf(&element.name, drain, gate, source)
+                        }
+                        crate::netlist::JfetType::Pjf => {
+                            crate::device::Jfet::pjf(&element.name, drain, gate, source)
+                        }
+                    };
+                    circuit.jfets.push(jfet);
                 }
                 // Controlled sources
                 ElementKind::Vcvs {
@@ -267,6 +304,33 @@ impl Engine {
         circuit
             .resolve_control_elements()
             .map_err(|e| SimulationError::Circuit(e.to_string()))?;
+
+        // Load Verilog-A models from .VERILOGA includes
+        #[cfg(feature = "veriloga")]
+        {
+            for include in &netlist.veriloga_includes {
+                // Compile the Verilog-A source file
+                let compiler = rspice_veriloga::VerilogACompiler::default();
+                let model = compiler.compile_file(&include.file_path).map_err(|e| {
+                    SimulationError::Netlist(format!(
+                        "Failed to compile Verilog-A '{}': {}",
+                        include.file_path.display(),
+                        e
+                    ))
+                })?;
+
+                log::info!(
+                    "Loaded Verilog-A model '{}' from {}",
+                    model.name,
+                    include.file_path.display()
+                );
+
+                // Store the compiled model for later device instantiation
+                // Note: Actual device instances are created based on .MODEL and X statements
+                // For now, we just validate that the VA file compiles successfully
+                let _ = model; // TODO: Store models for lookup during device instantiation
+            }
+        }
 
         // Ensure ground reference exists (LTspice-compatible behavior)
         // If no node "0" was specified, auto-select a reference node
