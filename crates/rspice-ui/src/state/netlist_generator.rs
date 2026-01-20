@@ -81,6 +81,10 @@ pub fn generate_netlist(schematic: &SchematicState) -> NetlistResult {
 
 /// Build connectivity graph using flood-fill algorithm
 /// Returns: (point -> net_name, net_name -> points)
+///
+/// IMPORTANT: Professional simulator behavior (LTspice-style):
+/// - Crossing wires are NOT electrically connected
+/// - Wires only connect at shared endpoints OR explicit junctions
 fn build_connectivity_graph(
     schematic: &SchematicState,
 ) -> (HashMap<Point, String>, HashMap<String, Vec<Point>>) {
@@ -88,43 +92,42 @@ fn build_connectivity_graph(
     let mut net_to_points: HashMap<String, Vec<Point>> = HashMap::new();
     let mut net_counter = 0u32;
 
-    // Collect all wire points and build adjacency
-    let mut wire_points: HashSet<Point> = HashSet::new();
+    // Collect connection points - ONLY endpoints and junctions, NOT intermediate segment points
+    // This is the key difference from unprofessional simulators that auto-connect crossings
+    let mut connection_points: HashSet<Point> = HashSet::new();
+
+    // Add wire ENDPOINTS only (first and last point of each wire)
     for wire in &schematic.wires {
-        for point in &wire.points {
-            wire_points.insert(*point);
+        if let Some(first) = wire.points.first() {
+            connection_points.insert(*first);
         }
-        // Also add all points along segments
-        for segment in wire.points.windows(2) {
-            let (p1, p2) = (segment[0], segment[1]);
-            if p1.x == p2.x {
-                // Vertical segment
-                let (y_min, y_max) = if p1.y < p2.y {
-                    (p1.y, p2.y)
-                } else {
-                    (p2.y, p1.y)
-                };
-                for y in y_min..=y_max {
-                    wire_points.insert(Point::new(p1.x, y));
-                }
-            } else if p1.y == p2.y {
-                // Horizontal segment
-                let (x_min, x_max) = if p1.x < p2.x {
-                    (p1.x, p2.x)
-                } else {
-                    (p2.x, p1.x)
-                };
-                for x in x_min..=x_max {
-                    wire_points.insert(Point::new(x, p1.y));
-                }
-            }
+        if let Some(last) = wire.points.last() {
+            connection_points.insert(*last);
         }
+    }
+
+    // Add explicit junction positions - these connect crossing wires
+    for junction in &schematic.junctions {
+        connection_points.insert(junction.pos);
     }
 
     // Add component terminal positions
     for comp in &schematic.components {
         for (_, pos) in comp.terminal_positions() {
-            wire_points.insert(pos);
+            connection_points.insert(pos);
+        }
+    }
+
+    // Build wire adjacency map: point -> set of connected points
+    // Two points are connected if they are endpoints of the same wire
+    let mut adjacency: HashMap<Point, HashSet<Point>> = HashMap::new();
+    for wire in &schematic.wires {
+        if wire.points.len() >= 2 {
+            let first = wire.points.first().unwrap();
+            let last = wire.points.last().unwrap();
+            // Wire endpoints are connected to each other
+            adjacency.entry(*first).or_default().insert(*last);
+            adjacency.entry(*last).or_default().insert(*first);
         }
     }
 
@@ -135,7 +138,6 @@ fn build_connectivity_graph(
     }
 
     // Pre-seed ground terminals as "0" before flood-fill
-    // This ensures all connected points get the ground net name
     for comp in &schematic.components {
         if comp.kind == ComponentType::Ground {
             let terminals = comp.terminal_positions();
@@ -145,26 +147,24 @@ fn build_connectivity_graph(
         }
     }
 
-    // Flood-fill to assign net names
-    // IMPORTANT: Process labeled points (including ground) FIRST to ensure they propagate
-    // their names before auto-generated names are assigned
+    // Flood-fill to assign net names using wire-based connectivity
     let mut visited: HashSet<Point> = HashSet::new();
 
     // Collect labeled points to process first (ground and net labels)
     let labeled_points: Vec<Point> = label_names.keys().cloned().collect();
 
-    // Process labeled points first (ground, net labels), then remaining wire points
+    // Process labeled points first, then remaining connection points
     let points_to_process: Vec<Point> = labeled_points
         .into_iter()
-        .chain(wire_points.iter().cloned())
+        .chain(connection_points.iter().cloned())
         .collect();
 
     for start_point in points_to_process {
         if visited.contains(&start_point) {
             continue;
         }
-        if !wire_points.contains(&start_point) {
-            continue; // Skip labeled points not on wires
+        if !connection_points.contains(&start_point) {
+            continue;
         }
 
         // Determine net name - check labels first (includes ground)
@@ -175,7 +175,7 @@ fn build_connectivity_graph(
             format!("N{:03}", net_counter)
         };
 
-        // Flood fill from this point
+        // Flood fill from this point using wire-based connectivity
         let mut stack = vec![start_point];
         let mut net_points = Vec::new();
 
@@ -183,7 +183,7 @@ fn build_connectivity_graph(
             if visited.contains(&point) {
                 continue;
             }
-            if !wire_points.contains(&point) {
+            if !connection_points.contains(&point) {
                 continue;
             }
 
@@ -193,22 +193,32 @@ fn build_connectivity_graph(
 
             // Check if this point has a label (propagate name)
             if let Some(label) = label_names.get(&point) {
-                // Update all points in this net to use the label
                 for p in &net_points {
                     point_to_net.insert(*p, label.clone());
                 }
             }
 
-            // Add adjacent points (on wire grid)
-            for neighbor in point.neighbors() {
-                if wire_points.contains(&neighbor) && !visited.contains(&neighbor) {
-                    stack.push(neighbor);
+            // Add wire-connected points (via adjacency map)
+            if let Some(neighbors) = adjacency.get(&point) {
+                for neighbor in neighbors {
+                    if !visited.contains(neighbor) {
+                        stack.push(*neighbor);
+                    }
+                }
+            }
+
+            // Add points at same position (shared endpoints, component terminals, junctions)
+            for other in &connection_points {
+                if *other == point {
+                    continue;
+                }
+                if *other == point && !visited.contains(other) {
+                    stack.push(*other);
                 }
             }
         }
 
         if !net_points.is_empty() {
-            // Get final net name (may have been updated by label)
             let final_name = point_to_net.get(&net_points[0]).unwrap().clone();
             net_to_points.insert(final_name, net_points);
         }
@@ -488,8 +498,15 @@ fn generate_component_line(
         ComponentType::XspiceGain => {
             // A-device: Aname [in] [out] gain
             if nodes.len() >= 2 {
-                let gain_val = if comp.value.is_empty() { "1" } else { &comp.value };
-                format!("{} [{}] [{}] gain gain={}", comp.name, nodes[0], nodes[1], gain_val)
+                let gain_val = if comp.value.is_empty() {
+                    "1"
+                } else {
+                    &comp.value
+                };
+                format!(
+                    "{} [{}] [{}] gain gain={}",
+                    comp.name, nodes[0], nodes[1], gain_val
+                )
             } else {
                 return Err(format!("{}: Gain block needs 2 terminals", comp.name));
             }
@@ -498,7 +515,10 @@ fn generate_component_line(
         ComponentType::XspiceSummer => {
             // A-device: Aname [in1 in2] [out] summer
             if nodes.len() >= 3 {
-                format!("{} [{} {}] [{}] summer", comp.name, nodes[0], nodes[1], nodes[2])
+                format!(
+                    "{} [{} {}] [{}] summer",
+                    comp.name, nodes[0], nodes[1], nodes[2]
+                )
             } else {
                 return Err(format!("{}: Summer needs 3 terminals", comp.name));
             }
@@ -507,7 +527,10 @@ fn generate_component_line(
         ComponentType::XspiceMultiplier => {
             // A-device: Aname [in1 in2] [out] mult
             if nodes.len() >= 3 {
-                format!("{} [{} {}] [{}] mult", comp.name, nodes[0], nodes[1], nodes[2])
+                format!(
+                    "{} [{} {}] [{}] mult",
+                    comp.name, nodes[0], nodes[1], nodes[2]
+                )
             } else {
                 return Err(format!("{}: Multiplier needs 3 terminals", comp.name));
             }
@@ -516,7 +539,10 @@ fn generate_component_line(
         ComponentType::XspiceDivider => {
             // A-device: Aname [num denom] [out] divide
             if nodes.len() >= 3 {
-                format!("{} [{} {}] [{}] divide", comp.name, nodes[0], nodes[1], nodes[2])
+                format!(
+                    "{} [{} {}] [{}] divide",
+                    comp.name, nodes[0], nodes[1], nodes[2]
+                )
             } else {
                 return Err(format!("{}: Divider needs 3 terminals", comp.name));
             }
@@ -530,7 +556,10 @@ fn generate_component_line(
                 } else {
                     &comp.params
                 };
-                format!("{} [{}] [{}] limit {}", comp.name, nodes[0], nodes[1], params)
+                format!(
+                    "{} [{}] [{}] limit {}",
+                    comp.name, nodes[0], nodes[1], params
+                )
             } else {
                 return Err(format!("{}: Limiter needs 2 terminals", comp.name));
             }
@@ -539,8 +568,15 @@ fn generate_component_line(
         ComponentType::XspiceIntegrator => {
             // A-device: Aname [in] [out] integrate
             if nodes.len() >= 2 {
-                let ic = if comp.value.is_empty() { "0" } else { &comp.value };
-                format!("{} [{}] [{}] integrate ic={}", comp.name, nodes[0], nodes[1], ic)
+                let ic = if comp.value.is_empty() {
+                    "0"
+                } else {
+                    &comp.value
+                };
+                format!(
+                    "{} [{}] [{}] integrate ic={}",
+                    comp.name, nodes[0], nodes[1], ic
+                )
             } else {
                 return Err(format!("{}: Integrator needs 2 terminals", comp.name));
             }
@@ -574,7 +610,10 @@ fn generate_component_line(
 
         ComponentType::XspiceAndGate => {
             if nodes.len() >= 3 {
-                format!("{} [{} {}] [{}] d_and", comp.name, nodes[0], nodes[1], nodes[2])
+                format!(
+                    "{} [{} {}] [{}] d_and",
+                    comp.name, nodes[0], nodes[1], nodes[2]
+                )
             } else {
                 return Err(format!("{}: AND gate needs 3 terminals", comp.name));
             }
@@ -582,7 +621,10 @@ fn generate_component_line(
 
         ComponentType::XspiceOrGate => {
             if nodes.len() >= 3 {
-                format!("{} [{} {}] [{}] d_or", comp.name, nodes[0], nodes[1], nodes[2])
+                format!(
+                    "{} [{} {}] [{}] d_or",
+                    comp.name, nodes[0], nodes[1], nodes[2]
+                )
             } else {
                 return Err(format!("{}: OR gate needs 3 terminals", comp.name));
             }
@@ -590,7 +632,10 @@ fn generate_component_line(
 
         ComponentType::XspiceNandGate => {
             if nodes.len() >= 3 {
-                format!("{} [{} {}] [{}] d_nand", comp.name, nodes[0], nodes[1], nodes[2])
+                format!(
+                    "{} [{} {}] [{}] d_nand",
+                    comp.name, nodes[0], nodes[1], nodes[2]
+                )
             } else {
                 return Err(format!("{}: NAND gate needs 3 terminals", comp.name));
             }
@@ -598,7 +643,10 @@ fn generate_component_line(
 
         ComponentType::XspiceNorGate => {
             if nodes.len() >= 3 {
-                format!("{} [{} {}] [{}] d_nor", comp.name, nodes[0], nodes[1], nodes[2])
+                format!(
+                    "{} [{} {}] [{}] d_nor",
+                    comp.name, nodes[0], nodes[1], nodes[2]
+                )
             } else {
                 return Err(format!("{}: NOR gate needs 3 terminals", comp.name));
             }
@@ -606,7 +654,10 @@ fn generate_component_line(
 
         ComponentType::XspiceXorGate => {
             if nodes.len() >= 3 {
-                format!("{} [{} {}] [{}] d_xor", comp.name, nodes[0], nodes[1], nodes[2])
+                format!(
+                    "{} [{} {}] [{}] d_xor",
+                    comp.name, nodes[0], nodes[1], nodes[2]
+                )
             } else {
                 return Err(format!("{}: XOR gate needs 3 terminals", comp.name));
             }
@@ -614,7 +665,10 @@ fn generate_component_line(
 
         ComponentType::XspiceTristate => {
             if nodes.len() >= 3 {
-                format!("{} [{}] [{}] [{}] d_tristate", comp.name, nodes[0], nodes[1], nodes[2])
+                format!(
+                    "{} [{}] [{}] [{}] d_tristate",
+                    comp.name, nodes[0], nodes[1], nodes[2]
+                )
             } else {
                 return Err(format!("{}: Tri-state needs 3 terminals", comp.name));
             }
@@ -662,7 +716,10 @@ fn generate_component_line(
                 } else {
                     &comp.params
                 };
-                format!("{} [{}] [{}] adc_bridge {}", comp.name, nodes[0], nodes[1], params)
+                format!(
+                    "{} [{}] [{}] adc_bridge {}",
+                    comp.name, nodes[0], nodes[1], params
+                )
             } else {
                 return Err(format!("{}: ADC Bridge needs 2 terminals", comp.name));
             }
@@ -675,7 +732,10 @@ fn generate_component_line(
                 } else {
                     &comp.params
                 };
-                format!("{} [{}] [{}] dac_bridge {}", comp.name, nodes[0], nodes[1], params)
+                format!(
+                    "{} [{}] [{}] dac_bridge {}",
+                    comp.name, nodes[0], nodes[1], params
+                )
             } else {
                 return Err(format!("{}: DAC Bridge needs 2 terminals", comp.name));
             }

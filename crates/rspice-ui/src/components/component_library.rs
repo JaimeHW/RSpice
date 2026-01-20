@@ -593,8 +593,11 @@ fn ComponentItem(kind: ComponentType, schematic: Signal<SchematicState>) -> Elem
                 transition: background 0.1s;
             ",
             onclick: move |_| {
-                schematic.write().tool = Tool::Place(kind);
-                schematic.write().preview_rotation = Rotation::R0;  // Reset rotation for new component
+                let mut s = schematic.write();
+                s.selection.clear();
+                s.tool = Tool::Place(kind);
+                s.preview_rotation = Rotation::R0;  // Reset rotation for new component
+                drop(s);
                 // Focus canvas so keyboard shortcuts work immediately
                 canvas_focus.read().focus();
             },
@@ -657,8 +660,11 @@ fn LibraryModelItem(
             title: "{desc_text}",
             onclick: move |_| {
                 // Set tool to place the component type with model reference
-                schematic.write().tool = Tool::Place(component_type);
-                schematic.write().preview_rotation = Rotation::R0;
+                let mut s = schematic.write();
+                s.selection.clear();
+                s.tool = Tool::Place(component_type);
+                s.preview_rotation = Rotation::R0;
+                drop(s);
                 // Store model name in pending_model for the component that will be placed
                 // The placed component will have this model set in its params
                 log::info!("Selected library model: {} ({})", name_clone, model_type.display_name());
