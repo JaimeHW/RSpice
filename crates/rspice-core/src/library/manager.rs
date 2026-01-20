@@ -315,6 +315,109 @@ impl LibraryManager {
     pub fn subcircuit_count(&self) -> usize {
         self.subcircuits.len()
     }
+
+    /// Load an external .lib file with optional section/corner selection
+    ///
+    /// # Arguments
+    /// * `path` - Path to the .lib file
+    /// * `section` - Optional section name (e.g., "TT", "FF", "SS") to load specific corner
+    ///
+    /// # Returns
+    /// * Ok(count) - Number of models loaded
+    /// * Err(message) - Error description
+    pub fn load_external_lib(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+        section: Option<&str>,
+    ) -> Result<usize, String> {
+        use super::lib_parser::LibParser;
+
+        let path = path.as_ref();
+        let base_dir = path.parent().unwrap_or(std::path::Path::new("."));
+
+        let mut parser = LibParser::new(base_dir);
+        let result = parser.parse_file(path).map_err(|e| e.to_string())?;
+
+        if !result.errors.is_empty() {
+            // Log warnings but continue
+            for err in &result.errors {
+                eprintln!("Warning: {}", err);
+            }
+        }
+
+        let mut count = 0;
+
+        // Get library name for display
+        let lib_name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("external.lib");
+        let lib_name: &'static str = Box::leak(lib_name.to_string().into_boxed_str());
+
+        // Load models based on section selection
+        if let Some(section_name) = section {
+            // Load only the specified section
+            if let Some(lib_section) = result.get_section(section_name) {
+                for model in &lib_section.models {
+                    let def = model.to_model_definition(lib_name);
+                    self.models_by_type
+                        .entry(def.model_type)
+                        .or_default()
+                        .push(def.name.clone());
+                    self.models.insert(def.name.clone(), def);
+                    count += 1;
+                }
+            } else {
+                return Err(format!(
+                    "Section '{}' not found in library. Available: {:?}",
+                    section_name,
+                    result.section_names()
+                ));
+            }
+        } else {
+            // Load all top-level models and all sections
+            for model in &result.top_level_models {
+                let def = model.to_model_definition(lib_name);
+                self.models_by_type
+                    .entry(def.model_type)
+                    .or_default()
+                    .push(def.name.clone());
+                self.models.insert(def.name.clone(), def);
+                count += 1;
+            }
+
+            for section in &result.sections {
+                for model in &section.models {
+                    let def = model.to_model_definition(lib_name);
+                    self.models_by_type
+                        .entry(def.model_type)
+                        .or_default()
+                        .push(def.name.clone());
+                    self.models.insert(def.name.clone(), def);
+                    count += 1;
+                }
+            }
+        }
+
+        Ok(count)
+    }
+
+    /// Get available sections/corners from a .lib file without loading
+    pub fn peek_lib_sections(path: impl AsRef<std::path::Path>) -> Result<Vec<String>, String> {
+        use super::lib_parser::LibParser;
+
+        let path = path.as_ref();
+        let base_dir = path.parent().unwrap_or(std::path::Path::new("."));
+
+        let mut parser = LibParser::new(base_dir);
+        let result = parser.parse_file(path).map_err(|e| e.to_string())?;
+
+        Ok(result
+            .section_names()
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect())
+    }
 }
 
 impl Default for LibraryManager {
