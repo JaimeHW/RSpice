@@ -203,7 +203,7 @@ pub mod handlers {
         }
     }
 
-    /// Open schematic file into new document tab
+    /// Open schematic file - replaces current if empty, otherwise creates new tab
     pub async fn open_schematic(
         mut schematic: Signal<SchematicState>,
         mut sim_state: Signal<SimulationState>,
@@ -216,32 +216,83 @@ pub mod handlers {
             .await
         {
             let file_path = file.path().to_path_buf();
-            let load_result = doc_manager
-                .write()
-                .load_document_from_file(file_path.clone());
 
-            match load_result {
-                Ok(_idx) => {
-                    // Load the newly active document's schematic into signal
-                    schematic.set(doc_manager.read().active().schematic.clone());
-                    sim_state.set(doc_manager.read().active().simulation.clone());
+            // Check if current schematic is empty (no components and no wires)
+            let is_empty = {
+                let s = schematic.read();
+                s.components.is_empty() && s.wires.is_empty()
+            };
 
-                    sim_state
-                        .write()
-                        .console_messages
-                        .push(ConsoleMessage::success(format!(
-                            "Schematic loaded: {}",
-                            file_path.display()
-                        )));
+            if is_empty {
+                // Replace current schematic directly
+                match std::fs::read_to_string(&file_path) {
+                    Ok(content) => match serde_json::from_str::<SchematicState>(&content) {
+                        Ok(mut loaded) => {
+                            loaded.current_file = Some(file_path.clone());
+                            loaded.is_dirty = false;
+                            schematic.set(loaded.clone());
+
+                            // Also update the DocumentManager's active document for tab name
+                            {
+                                let mut dm = doc_manager.write();
+                                dm.active_mut().schematic = loaded;
+                                dm.active_mut().file_path = Some(file_path.clone());
+                                dm.active_mut().is_dirty = false;
+                            }
+
+                            sim_state
+                                .write()
+                                .console_messages
+                                .push(ConsoleMessage::success(format!(
+                                    "Schematic loaded: {}",
+                                    file_path.display()
+                                )));
+                        }
+                        Err(e) => {
+                            sim_state
+                                .write()
+                                .console_messages
+                                .push(ConsoleMessage::error(format!(
+                                    "Failed to parse schematic: {}",
+                                    e
+                                )));
+                        }
+                    },
+                    Err(e) => {
+                        sim_state
+                            .write()
+                            .console_messages
+                            .push(ConsoleMessage::error(format!("Failed to read file: {}", e)));
+                    }
                 }
-                Err(e) => {
-                    sim_state
-                        .write()
-                        .console_messages
-                        .push(ConsoleMessage::error(format!(
-                            "Failed to load schematic: {}",
-                            e
-                        )));
+            } else {
+                // Current has content - use document manager to open in new tab
+                let load_result = doc_manager
+                    .write()
+                    .load_document_from_file(file_path.clone());
+
+                match load_result {
+                    Ok(_idx) => {
+                        schematic.set(doc_manager.read().active().schematic.clone());
+                        sim_state.set(doc_manager.read().active().simulation.clone());
+
+                        sim_state
+                            .write()
+                            .console_messages
+                            .push(ConsoleMessage::success(format!(
+                                "Schematic loaded: {}",
+                                file_path.display()
+                            )));
+                    }
+                    Err(e) => {
+                        sim_state
+                            .write()
+                            .console_messages
+                            .push(ConsoleMessage::error(format!(
+                                "Failed to load schematic: {}",
+                                e
+                            )));
+                    }
                 }
             }
         }

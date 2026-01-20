@@ -5,6 +5,7 @@
 use dioxus::prelude::*;
 
 use super::button::{Button, ButtonVariant};
+use super::confirm_modal::{SaveDialogResult, UnsavedChangesModal};
 use super::file_handlers;
 use super::icons::{Icon, IconType};
 use crate::state::simulation_command::SimulationConfig;
@@ -13,16 +14,14 @@ use crate::state::{
 };
 use crate::theme::Theme;
 
-/// Default content for new files
-const DEFAULT_NEW_FILE: &str = r#"* RSpice Circuit
-* New Circuit
-
-V1 1 0 DC 5
-R1 1 0 1k
-
-.OP
-.END
-"#;
+/// Pending action that requires confirmation
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PendingAction {
+    /// Create a new schematic
+    New,
+    /// Open a schematic file
+    Open,
+}
 
 /// Main application toolbar
 #[component]
@@ -38,7 +37,84 @@ pub fn Toolbar() -> Element {
 
     let is_running = sim_state.read().is_running;
 
+    // State for unsaved changes modal
+    let mut show_save_modal = use_signal(|| false);
+    let mut pending_action: Signal<Option<PendingAction>> = use_signal(|| None);
+
+    // Get current file name for modal display
+    let current_filename = schematic
+        .read()
+        .current_file
+        .as_ref()
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().to_string());
+
+    // Helper: perform the New action
+    let mut do_new = move || {
+        let mut state = schematic.write();
+        state.components.clear();
+        state.wires.clear();
+        state.selection.clear();
+        state.current_file = None;
+        state.is_dirty = false;
+        drop(state);
+
+        sim_state.write().waveforms.clear();
+        sim_state.write().console_messages.clear();
+        sim_state
+            .write()
+            .console_messages
+            .push(ConsoleMessage::info("New schematic created"));
+    };
+
+    // Helper: perform the Open action
+    let do_open = move || {
+        spawn(file_handlers::open_schematic(schematic, sim_state));
+    };
+
+    // Handle modal result
+    let handle_modal_result = move |result: SaveDialogResult| {
+        show_save_modal.set(false);
+        let action = pending_action.read().clone();
+        pending_action.set(None);
+
+        match result {
+            SaveDialogResult::Save => {
+                // Save first, then perform action
+                spawn(async move {
+                    file_handlers::save_schematic(schematic, sim_state).await;
+                    // After save, perform the pending action
+                    if let Some(act) = action {
+                        match act {
+                            PendingAction::New => do_new(),
+                            PendingAction::Open => do_open(),
+                        }
+                    }
+                });
+            }
+            SaveDialogResult::DontSave => {
+                // Perform action without saving
+                if let Some(act) = action {
+                    match act {
+                        PendingAction::New => do_new(),
+                        PendingAction::Open => do_open(),
+                    }
+                }
+            }
+            SaveDialogResult::Cancel => {
+                // Do nothing - stay on current schematic
+            }
+        }
+    };
+
     rsx! {
+        // Unsaved changes modal
+        UnsavedChangesModal {
+            visible: *show_save_modal.read(),
+            filename: current_filename.clone(),
+            on_result: handle_modal_result,
+        }
+
         div {
             class: "toolbar",
             style: "
@@ -101,87 +177,64 @@ pub fn Toolbar() -> Element {
                 }
             }
 
-            // File operations group
+            // File operations (Schematic-focused)
             ToolbarGroup {
                 Button {
                     variant: ButtonVariant::Ghost,
                     icon: rsx! { Icon { icon: IconType::File, size: 16 } },
+                    title: "New Schematic (Ctrl+N)",
                     onclick: move |_| {
-                        // New file - clear editor
-                        let mut state = sim_state.write();
-                        state.netlist_content = DEFAULT_NEW_FILE.to_string();
-                        state.current_file = None;
-                        state.is_dirty = false;
-                        state.waveforms.clear();
-                        state.console_messages.clear();
-                        state.console_messages.push(ConsoleMessage::info("New file created"));
+                        // Check for unsaved changes
+                        if schematic.read().is_dirty {
+                            pending_action.set(Some(PendingAction::New));
+                            show_save_modal.set(true);
+                        } else {
+                            do_new();
+                        }
                     },
                     "New"
                 }
                 Button {
                     variant: ButtonVariant::Ghost,
                     icon: rsx! { Icon { icon: IconType::FolderOpen, size: 16 } },
+                    title: "Open Schematic (Ctrl+O)",
                     onclick: move |_| {
-                        // Open file dialog
-                        spawn(file_handlers::open_netlist(sim_state));
+                        // Check for unsaved changes
+                        if schematic.read().is_dirty {
+                            pending_action.set(Some(PendingAction::Open));
+                            show_save_modal.set(true);
+                        } else {
+                            do_open();
+                        }
                     },
                     "Open"
                 }
                 Button {
                     variant: ButtonVariant::Ghost,
                     icon: rsx! { Icon { icon: IconType::Save, size: 16 } },
-                    onclick: move |_| {
-                        spawn(file_handlers::save_netlist(sim_state));
-                    },
-                    "Save"
-                }
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    icon: rsx! { Icon { icon: IconType::FolderOpen, size: 16 } },
-                    onclick: move |_| {
-                        // Import LTspice .raw waveform file
-                        spawn(file_handlers::import_raw(sim_state));
-                    },
-                    "Import"
-                }
-            }
-
-            // Divider
-            ToolbarDivider {}
-
-            // Schematic file operations
-            ToolbarGroup {
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    icon: rsx! { Icon { icon: IconType::Save, size: 16 } },
+                    title: "Save Schematic (Ctrl+S)",
                     onclick: move |_| {
                         spawn(file_handlers::save_schematic(schematic, sim_state));
                     },
-                    "Save Sch"
-                }
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    icon: rsx! { Icon { icon: IconType::FolderOpen, size: 16 } },
-                    onclick: move |_| {
-                        spawn(file_handlers::open_schematic(schematic, sim_state));
-                    },
-                    "Open Sch"
+                    "Save"
                 }
             }
 
             // Divider
             ToolbarDivider {}
 
-            // Edit operations
+            // Edit operations (Undo/Redo) - placeholder, actual undo/redo uses keyboard shortcuts
             ToolbarGroup {
                 Button {
                     variant: ButtonVariant::Ghost,
                     icon: rsx! { Icon { icon: IconType::Undo, size: 16 } },
+                    title: "Undo (Ctrl+Z)",
                     ""
                 }
                 Button {
                     variant: ButtonVariant::Ghost,
                     icon: rsx! { Icon { icon: IconType::Redo, size: 16 } },
+                    title: "Redo (Ctrl+Y)",
                     ""
                 }
             }
@@ -352,30 +405,12 @@ pub fn Toolbar() -> Element {
             // Divider
             ToolbarDivider {}
 
-            // View controls
-            ToolbarGroup {
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    icon: rsx! { Icon { icon: IconType::ZoomIn, size: 16 } },
-                    ""
-                }
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    icon: rsx! { Icon { icon: IconType::ZoomOut, size: 16 } },
-                    ""
-                }
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    icon: rsx! { Icon { icon: IconType::FitToScreen, size: 16 } },
-                    ""
-                }
-            }
-
             // View toggles
             ToolbarGroup {
                 // Console toggle
                 Button {
                     variant: if console_visible.read().0 { ButtonVariant::Primary } else { ButtonVariant::Ghost },
+                    title: "Toggle Console",
                     onclick: move |_| {
                         let current = console_visible.read().0;
                         console_visible.set(crate::app::ConsoleVisible(!current));
@@ -389,6 +424,7 @@ pub fn Toolbar() -> Element {
                     } else {
                         ButtonVariant::Ghost
                     },
+                    title: "Toggle Waveform Viewer",
                     disabled: sim_state.read().waveforms.is_empty(),
                     onclick: move |_| {
                         if !sim_state.read().waveforms.is_empty() {
@@ -398,13 +434,6 @@ pub fn Toolbar() -> Element {
                     },
                     "Waveform"
                 }
-            }
-
-            // Settings
-            Button {
-                variant: ButtonVariant::Ghost,
-                icon: rsx! { Icon { icon: IconType::Settings, size: 18 } },
-                ""
             }
         }
     }

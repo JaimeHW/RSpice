@@ -5,6 +5,7 @@
 mod button;
 pub mod component_edit;
 pub mod component_library;
+pub mod confirm_modal;
 pub mod context_menu;
 pub mod file_handlers;
 mod icons;

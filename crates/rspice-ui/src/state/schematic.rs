@@ -113,6 +113,34 @@ pub enum ComponentType {
 
     // Special
     Ground,
+
+    // XSPICE Analog Behavioral Models
+    XspiceGain,           // Gain block (×k)
+    XspiceSummer,         // Summing amplifier (Σ)
+    XspiceMultiplier,     // Analog multiplier (×)
+    XspiceDivider,        // Analog divider (÷)
+    XspiceLimiter,        // Hard limiter
+    XspiceIntegrator,     // Integrator (∫)
+    XspiceDifferentiator, // Differentiator (d/dt)
+
+    // XSPICE Digital Gates
+    XspiceInverter, // NOT gate
+    XspiceBuffer,   // Digital buffer
+    XspiceAndGate,  // AND gate
+    XspiceOrGate,   // OR gate
+    XspiceNandGate, // NAND gate
+    XspiceNorGate,  // NOR gate
+    XspiceXorGate,  // XOR gate
+    XspiceTristate, // Tri-state buffer
+
+    // XSPICE Digital Sequential
+    XspiceDFlipFlop,  // D Flip-Flop
+    XspiceJkFlipFlop, // JK Flip-Flop
+    XspiceSrLatch,    // SR Latch
+
+    // XSPICE Analog/Digital Bridges
+    XspiceAdcBridge, // Analog-to-Digital converter
+    XspiceDacBridge, // Digital-to-Analog converter
 }
 
 impl ComponentType {
@@ -137,6 +165,27 @@ impl ComponentType {
             ComponentType::Ccvs => "H",
             ComponentType::Cccs => "F",
             ComponentType::Ground => "",
+            // All XSPICE components use "A" prefix
+            ComponentType::XspiceGain
+            | ComponentType::XspiceSummer
+            | ComponentType::XspiceMultiplier
+            | ComponentType::XspiceDivider
+            | ComponentType::XspiceLimiter
+            | ComponentType::XspiceIntegrator
+            | ComponentType::XspiceDifferentiator
+            | ComponentType::XspiceInverter
+            | ComponentType::XspiceBuffer
+            | ComponentType::XspiceAndGate
+            | ComponentType::XspiceOrGate
+            | ComponentType::XspiceNandGate
+            | ComponentType::XspiceNorGate
+            | ComponentType::XspiceXorGate
+            | ComponentType::XspiceTristate
+            | ComponentType::XspiceDFlipFlop
+            | ComponentType::XspiceJkFlipFlop
+            | ComponentType::XspiceSrLatch
+            | ComponentType::XspiceAdcBridge
+            | ComponentType::XspiceDacBridge => "A",
         }
     }
 
@@ -164,6 +213,30 @@ impl ComponentType {
             ComponentType::Ccvs => "CCVS (H)",
             ComponentType::Cccs => "CCCS (F)",
             ComponentType::Ground => "Ground",
+            // XSPICE Analog Behavioral
+            ComponentType::XspiceGain => "Gain",
+            ComponentType::XspiceSummer => "Summer",
+            ComponentType::XspiceMultiplier => "Multiplier",
+            ComponentType::XspiceDivider => "Divider",
+            ComponentType::XspiceLimiter => "Limiter",
+            ComponentType::XspiceIntegrator => "Integrator",
+            ComponentType::XspiceDifferentiator => "Differentiator",
+            // XSPICE Digital Gates
+            ComponentType::XspiceInverter => "Inverter",
+            ComponentType::XspiceBuffer => "Buffer",
+            ComponentType::XspiceAndGate => "AND Gate",
+            ComponentType::XspiceOrGate => "OR Gate",
+            ComponentType::XspiceNandGate => "NAND Gate",
+            ComponentType::XspiceNorGate => "NOR Gate",
+            ComponentType::XspiceXorGate => "XOR Gate",
+            ComponentType::XspiceTristate => "Tri-State",
+            // XSPICE Sequential
+            ComponentType::XspiceDFlipFlop => "D Flip-Flop",
+            ComponentType::XspiceJkFlipFlop => "JK Flip-Flop",
+            ComponentType::XspiceSrLatch => "SR Latch",
+            // XSPICE Bridges
+            ComponentType::XspiceAdcBridge => "ADC Bridge",
+            ComponentType::XspiceDacBridge => "DAC Bridge",
         }
     }
 
@@ -237,6 +310,75 @@ impl ComponentType {
             // Coupled inductor doesn't have terminals (it's a coupling statement)
             ComponentType::CoupledInductor => vec![],
             ComponentType::Ground => vec![("GND", Point::new(0, -2))],
+
+            // XSPICE 2-terminal analog blocks: input left, output right
+            ComponentType::XspiceGain
+            | ComponentType::XspiceLimiter
+            | ComponentType::XspiceIntegrator
+            | ComponentType::XspiceDifferentiator => {
+                vec![("in", Point::new(-2, 0)), ("out", Point::new(2, 0))]
+            }
+            // Summer: multiple inputs (top/bottom left), one output right
+            ComponentType::XspiceSummer => vec![
+                ("in1", Point::new(-2, -1)),
+                ("in2", Point::new(-2, 1)),
+                ("out", Point::new(2, 0)),
+            ],
+            // Multiplier/Divider: two inputs, one output
+            ComponentType::XspiceMultiplier | ComponentType::XspiceDivider => vec![
+                ("in1", Point::new(-2, -1)),
+                ("in2", Point::new(-2, 1)),
+                ("out", Point::new(2, 0)),
+            ],
+            // Digital gates: inputs left, output right
+            ComponentType::XspiceInverter | ComponentType::XspiceBuffer => {
+                vec![("in", Point::new(-2, 0)), ("out", Point::new(2, 0))]
+            }
+            ComponentType::XspiceAndGate
+            | ComponentType::XspiceOrGate
+            | ComponentType::XspiceNandGate
+            | ComponentType::XspiceNorGate
+            | ComponentType::XspiceXorGate => vec![
+                ("a", Point::new(-2, -1)),
+                ("b", Point::new(-2, 1)),
+                ("out", Point::new(2, 0)),
+            ],
+            // Tri-state: input, enable, output
+            ComponentType::XspiceTristate => vec![
+                ("in", Point::new(-2, 0)),
+                ("en", Point::new(0, -2)),
+                ("out", Point::new(2, 0)),
+            ],
+            // D Flip-Flop: D, CLK, Q, Qbar
+            ComponentType::XspiceDFlipFlop => vec![
+                ("d", Point::new(-2, -1)),
+                ("clk", Point::new(-2, 1)),
+                ("q", Point::new(2, -1)),
+                ("qbar", Point::new(2, 1)),
+            ],
+            // JK Flip-Flop: J, K, CLK, Q, Qbar
+            ComponentType::XspiceJkFlipFlop => vec![
+                ("j", Point::new(-2, -1)),
+                ("k", Point::new(-2, 1)),
+                ("clk", Point::new(-2, 0)),
+                ("q", Point::new(2, -1)),
+                ("qbar", Point::new(2, 1)),
+            ],
+            // SR Latch: S, R, Q, Qbar
+            ComponentType::XspiceSrLatch => vec![
+                ("s", Point::new(-2, -1)),
+                ("r", Point::new(-2, 1)),
+                ("q", Point::new(2, -1)),
+                ("qbar", Point::new(2, 1)),
+            ],
+            // ADC Bridge: analog input, digital output
+            ComponentType::XspiceAdcBridge => {
+                vec![("in", Point::new(-2, 0)), ("out", Point::new(2, 0))]
+            }
+            // DAC Bridge: digital input, analog output
+            ComponentType::XspiceDacBridge => {
+                vec![("in", Point::new(-2, 0)), ("out", Point::new(2, 0))]
+            }
         }
     }
 }
@@ -518,6 +660,11 @@ pub struct WireConnection {
     pub terminal_name: String,
 }
 
+/// Default zoom level for serde deserialization (prevents black screen on file load)
+fn default_zoom() -> f64 {
+    1.0
+}
+
 /// Main schematic state
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SchematicState {
@@ -539,10 +686,13 @@ pub struct SchematicState {
     /// Grid size in pixels
     pub grid_size: i32,
 
-    /// Zoom level (1.0 = 100%)
+    /// Zoom level (1.0 = 100%) - not part of undo history or saved files
+    /// Uses default of 1.0 when deserializing to prevent black screen
+    #[serde(skip, default = "default_zoom")]
     pub zoom: f64,
 
-    /// Pan offset in pixels
+    /// Pan offset in pixels - not part of undo history or saved files
+    #[serde(skip, default)]
     pub pan: (f64, f64),
 
     /// Current schematic file path (for save without dialog)
@@ -573,6 +723,10 @@ pub struct SchematicState {
     /// Updated after each simulation run
     #[serde(skip)]
     pub net_mapping: HashMap<Point, String>,
+
+    /// Flag indicating unsaved changes (runtime state, not persisted)
+    #[serde(skip)]
+    pub is_dirty: bool,
 }
 
 impl Default for SchematicState {
@@ -594,6 +748,7 @@ impl Default for SchematicState {
             preview_rotation: Rotation::default(),
             connections: Vec::new(),
             net_mapping: HashMap::new(),
+            is_dirty: false,
         }
     }
 }
@@ -833,10 +988,16 @@ impl SchematicState {
             log::warn!("[Wire] finish_wire: not active, returning None");
             return None;
         }
+
+        // Note: We do NOT commit the preview path here.
+        // Right-click/double-click to finish should only use the explicitly clicked points.
+        // The preview is a visual aid showing where the NEXT click would place wire,
+        // but finishing means "I'm done, use only the points I clicked on."
+
         self.wire_drawing.active = false;
         self.wire_drawing.preview_pos = None;
 
-        // Get the committed points
+        // Get the committed points (only points the user explicitly clicked)
         let points = std::mem::take(&mut self.wire_drawing.points);
         log::info!("[Wire] finish_wire: raw points = {:?}", points);
 
@@ -857,8 +1018,10 @@ impl SchematicState {
             let segment = vec![simplified[i], simplified[i + 1]];
             log::info!("[Wire] finish_wire: adding segment {:?}", segment);
             if let Some(wire_id) = self.add_wire(segment) {
-                // Snap endpoints to nearby terminals and register connections
-                self.snap_wire_to_terminals(wire_id);
+                // Note: We no longer auto-snap wire endpoints to terminals.
+                // This caused unexpected wire endpoint modification.
+                // Users should manually connect wires to component terminals.
+                // self.snap_wire_to_terminals(wire_id);
                 last_wire_id = Some(wire_id);
             }
         }
@@ -871,6 +1034,7 @@ impl SchematicState {
     }
 
     /// Simplify wire path by removing intermediate points on straight segments
+    /// Preserves corners (L-junctions) while removing redundant points on straight lines
     fn simplify_wire_path(points: Vec<Point>) -> Vec<Point> {
         if points.len() <= 2 {
             return points;
@@ -880,16 +1044,18 @@ impl SchematicState {
         result.push(points[0]);
 
         for i in 1..points.len() - 1 {
-            let prev = result.last().unwrap();
+            let prev = &points[i - 1]; // Use original sequence, not result
             let curr = &points[i];
             let next = &points[i + 1];
 
             // Check if curr is collinear with prev and next
-            let same_x = prev.x == curr.x && curr.x == next.x;
-            let same_y = prev.y == curr.y && curr.y == next.y;
+            // A point is collinear if all three points are on the same horizontal OR vertical line
+            let all_same_x = prev.x == curr.x && curr.x == next.x; // All on same vertical line
+            let all_same_y = prev.y == curr.y && curr.y == next.y; // All on same horizontal line
 
-            // Only keep if not collinear (it's a corner)
-            if !same_x && !same_y {
+            // Keep the point if it's NOT collinear (i.e., it's a corner)
+            // Remove if all three are on the same line (either horizontal or vertical)
+            if !all_same_x && !all_same_y {
                 result.push(*curr);
             }
         }
