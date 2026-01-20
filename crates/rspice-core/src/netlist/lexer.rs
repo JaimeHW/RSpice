@@ -280,29 +280,20 @@ impl<'a> Lexer<'a> {
                         }
                         // Unit suffixes followed by 's' (seconds), 'F' (farad), or 'H' (henry/hertz)
                         'N' => {
-                            // ns, nF, nH
-                            after == 'S'
-                                || after == 'F'
-                                || after == 'H'
-                                || !after.is_ascii_alphabetic()
+                            // ns, nF, nH - but NOT when followed by digit (like 1N4148)
+                            matches!(after, 'S' | 'F' | 'H')
                         }
                         'P' => {
-                            // ps, pF, pH
-                            after == 'S'
-                                || after == 'F'
-                                || after == 'H'
-                                || !after.is_ascii_alphabetic()
+                            // ps, pF, pH - but NOT when followed by digit
+                            matches!(after, 'S' | 'F' | 'H')
                         }
                         'U' => {
-                            // us, uF, uH
-                            after == 'S'
-                                || after == 'F'
-                                || after == 'H'
-                                || !after.is_ascii_alphabetic()
+                            // us, uF, uH - but NOT when followed by digit
+                            matches!(after, 'S' | 'F' | 'H')
                         }
                         'F' => {
-                            // fs (femtosecond)
-                            after == 'S' || !after.is_ascii_alphabetic()
+                            // fs (femtosecond) - but NOT when followed by digit
+                            after == 'S'
                         }
                         'K' => {
                             // kHz

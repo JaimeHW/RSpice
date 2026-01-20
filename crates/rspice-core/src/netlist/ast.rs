@@ -254,6 +254,30 @@ pub enum ElementKind {
         subckt_name: String,
         params: Vec<(String, Value)>,
     },
+
+    //-------------------------------------------------------------------------
+    // XSPICE Code Models
+    //-------------------------------------------------------------------------
+    /// XSPICE code model instance: A1 [in] out model_name [PARAM=val...]
+    ///
+    /// XSPICE provides mixed-signal simulation capability through code models.
+    /// Port connections use bracket syntax to distinguish port types:
+    /// - `node` - Analog node (voltage/current)
+    /// - `[node]` - Digital node (12-state logic)
+    /// - `[n1 n2 n3]` - Vector of digital nodes
+    /// - `%vd[n+ n-]` - Differential voltage input
+    /// - `%id[n+ n-]` - Differential current input
+    /// - `null` - Unconnected port
+    ///
+    /// Example: `A1 [clk] [d] [q] [qbar] d_dff rise_delay=10n`
+    Xspice {
+        /// Code model type name (e.g., "gain", "d_and", "adc_bridge")
+        model: String,
+        /// Port connections with type information
+        ports: Vec<XspicePort>,
+        /// Instance parameter overrides
+        params: Vec<(String, Value)>,
+    },
 }
 
 /// Switch initial state
@@ -261,6 +285,115 @@ pub enum ElementKind {
 pub enum SwitchState {
     On,
     Off,
+}
+
+//=============================================================================
+// XSPICE Port Types
+//=============================================================================
+
+/// XSPICE port connection specification
+///
+/// XSPICE uses bracket syntax to distinguish port types. This enum captures
+/// the various connection types supported by XSPICE code models.
+///
+/// # Examples
+/// ```text
+/// A1 in out gain              ; 'in' and 'out' are analog nodes
+/// A2 [clk] [d] [q] d_dff      ; [clk], [d], [q] are digital ports
+/// A3 [a b c] [y] d_and        ; [a b c] is a digital vector
+/// A4 %vd[n+ n-] out gain      ; differential voltage input
+/// A5 null out d_source        ; null = unconnected
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub enum XspicePort {
+    /// Single analog node (voltage or current)
+    /// Syntax: `nodename`
+    Analog(String),
+
+    /// Single digital node (12-state logic)
+    /// Syntax: `[nodename]`
+    Digital(String),
+
+    /// Vector of analog nodes
+    /// Syntax: `(n1 n2 n3)` (uncommon)
+    AnalogVector(Vec<String>),
+
+    /// Vector of digital nodes
+    /// Syntax: `[n1 n2 n3]`
+    DigitalVector(Vec<String>),
+
+    /// Differential voltage input/output
+    /// Syntax: `%vd[n+ n-]` or `%vd(n+ n-)`
+    DifferentialVoltage { pos: String, neg: String },
+
+    /// Differential current input/output
+    /// Syntax: `%id[n+ n-]` or `%id(n+ n-)`
+    DifferentialCurrent { pos: String, neg: String },
+
+    /// Null connection (unconnected port)
+    /// Syntax: `null` or `[]`
+    Null,
+}
+
+impl XspicePort {
+    /// Create a single analog port
+    pub fn analog(node: impl Into<String>) -> Self {
+        XspicePort::Analog(node.into())
+    }
+
+    /// Create a single digital port
+    pub fn digital(node: impl Into<String>) -> Self {
+        XspicePort::Digital(node.into())
+    }
+
+    /// Create a digital vector from node names
+    pub fn digital_vector(nodes: Vec<String>) -> Self {
+        XspicePort::DigitalVector(nodes)
+    }
+
+    /// Create a differential voltage port
+    pub fn diff_voltage(pos: impl Into<String>, neg: impl Into<String>) -> Self {
+        XspicePort::DifferentialVoltage {
+            pos: pos.into(),
+            neg: neg.into(),
+        }
+    }
+
+    /// Check if this is an analog port
+    pub fn is_analog(&self) -> bool {
+        matches!(
+            self,
+            XspicePort::Analog(_)
+                | XspicePort::AnalogVector(_)
+                | XspicePort::DifferentialVoltage { .. }
+                | XspicePort::DifferentialCurrent { .. }
+        )
+    }
+
+    /// Check if this is a digital port
+    pub fn is_digital(&self) -> bool {
+        matches!(self, XspicePort::Digital(_) | XspicePort::DigitalVector(_))
+    }
+
+    /// Check if this is a null connection
+    pub fn is_null(&self) -> bool {
+        matches!(self, XspicePort::Null)
+    }
+
+    /// Get all node names referenced by this port
+    pub fn node_names(&self) -> Vec<&str> {
+        match self {
+            XspicePort::Analog(n) | XspicePort::Digital(n) => vec![n.as_str()],
+            XspicePort::AnalogVector(v) | XspicePort::DigitalVector(v) => {
+                v.iter().map(|s| s.as_str()).collect()
+            }
+            XspicePort::DifferentialVoltage { pos, neg }
+            | XspicePort::DifferentialCurrent { pos, neg } => {
+                vec![pos.as_str(), neg.as_str()]
+            }
+            XspicePort::Null => vec![],
+        }
+    }
 }
 
 //=============================================================================

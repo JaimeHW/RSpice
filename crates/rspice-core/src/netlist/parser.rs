@@ -8,6 +8,7 @@
 
 use super::expr::eval_expression;
 use super::lexer::{LexError, TokenKind, TokenStream, tokenize};
+use super::xspice_parser;
 use super::{
     AnalysisCommand, Element, ElementKind, FreqVariation, InitialCondition, ModelDef, Netlist,
     ParamContext, ParseError, SourceSpec, StepCommand, StepSweep, StepTarget, SubcircuitDef,
@@ -261,6 +262,11 @@ fn parse_line(
         'P' => parse_coupled_tlines(&mut stream, line_num, elements),
         // MESFET (Z element) - treat like JFET with model
         'Z' => parse_mesfet(&mut stream, line_num, elements),
+        // XSPICE code model instance
+        'A' => {
+            let name = expect_ident(&mut stream, line_num)?;
+            xspice_parser::parse_xspice(&mut stream, line_num, name, elements)
+        }
         _ => Err(ParseError::Syntax {
             line: line_num,
             message: format!("Unknown element type: {}", first_char),
@@ -610,6 +616,12 @@ fn parse_resistor(
                     message: "Expected value after sign".to_string(),
                 });
             }
+        }
+        TokenKind::Expression(expr) => {
+            // Handle expression values like {R}
+            let expr = expr.clone();
+            stream.advance();
+            eval_expression(&expr, params).map_err(|e| ParseError::InvalidValue(e.to_string()))?
         }
         _ => {
             return Err(ParseError::Syntax {

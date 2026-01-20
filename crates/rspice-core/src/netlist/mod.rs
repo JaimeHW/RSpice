@@ -7,6 +7,7 @@
 //! - Standard SPICE elements (R, L, C, V, I, D, Q, M, X)
 //! - Advanced elements (K, S, W, T)
 //! - Controlled sources (E, F, G, H, B)
+//! - XSPICE code models (A) with bracket port syntax
 //! - Analysis commands (.OP, .DC, .AC, .TRAN, .NOISE, .FOUR, .STEP, .TEMP)
 //! - File inclusion (.INCLUDE, .LIB)
 //! - Subcircuits with parameter passing
@@ -17,6 +18,7 @@ mod flattener;
 pub mod include;
 pub mod lexer;
 mod parser;
+mod xspice_parser;
 
 pub use ast::*;
 pub use expr::ParamContext;

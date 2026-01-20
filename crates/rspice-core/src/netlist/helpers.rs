@@ -50,6 +50,42 @@ pub fn expect_node(stream: &mut TokenStream, line_num: usize) -> Result<String, 
     }
 }
 
+/// Expect and consume a model name (identifier or numeric-prefixed like 1N4148, 2N2222)
+///
+/// Model names in SPICE often start with digits (e.g., 1N4148, 2N2222, 74HC00).
+/// The lexer may tokenize these as numbers due to SI prefix parsing.
+pub fn expect_model_name(stream: &mut TokenStream, line_num: usize) -> Result<String, ParseError> {
+    skip_commas(stream);
+
+    match &stream.peek().kind {
+        TokenKind::Ident(s) => {
+            let s = s.clone();
+            stream.advance();
+            Ok(s)
+        }
+        TokenKind::Number(n) => {
+            // Model names like "1N4148" may be lexed as numbers with SI prefixes
+            // Convert to original text representation
+            let original = format!("{}", n);
+            stream.advance();
+
+            // Check if there's a continuation (letters after the number)
+            // e.g., the "4148" part in "1N4148" if "1N" was parsed as 1e-9
+            if let TokenKind::Number(n2) = &stream.peek().kind {
+                let s = format!("{}{}", original, n2);
+                stream.advance();
+                Ok(s)
+            } else {
+                Ok(original)
+            }
+        }
+        other => Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("Expected model name, found {:?}", other),
+        }),
+    }
+}
+
 /// Expect and consume a numeric value (number, expression, or parameter reference)
 pub fn expect_value(
     stream: &mut TokenStream,
