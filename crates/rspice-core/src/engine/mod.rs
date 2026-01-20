@@ -20,7 +20,9 @@ mod advanced;
 mod builder;
 mod convergence;
 mod dc;
+mod hb;
 mod matrix;
+mod pss;
 mod stamping;
 mod transient;
 
@@ -66,6 +68,48 @@ pub struct SimulationConfig {
     pub temperature: Value,
     /// Integration method for transient analysis
     pub integration_method: crate::analysis::IntegrationMethod,
+    /// Model evaluation bypass configuration for latent device optimization
+    pub bypass_config: BypassConfig,
+}
+
+/// Configuration for model evaluation bypass (latent device optimization)
+#[derive(Debug, Clone)]
+pub struct BypassConfig {
+    /// Enable bypass optimization (default: false for stability)
+    pub enabled: bool,
+    /// Relative voltage tolerance for bypass detection
+    pub reltol: Value,
+    /// Absolute voltage tolerance for bypass detection  
+    pub abstol: Value,
+}
+
+impl Default for BypassConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false, // Conservative default - must be explicitly enabled
+            reltol: 1e-3,   // 0.1% relative change threshold
+            abstol: 1e-6,   // 1µV absolute change threshold
+        }
+    }
+}
+
+impl BypassConfig {
+    /// Create bypass config with optimization enabled
+    pub fn enabled() -> Self {
+        Self {
+            enabled: true,
+            ..Default::default()
+        }
+    }
+
+    /// Create bypass config with custom tolerances
+    pub fn with_tolerances(reltol: Value, abstol: Value) -> Self {
+        Self {
+            enabled: true,
+            reltol,
+            abstol,
+        }
+    }
 }
 
 impl Default for SimulationConfig {
@@ -77,6 +121,7 @@ impl Default for SimulationConfig {
             max_timestep: 1e-3,
             temperature: 300.0, // Room temperature
             integration_method: crate::analysis::IntegrationMethod::TrapGear,
+            bypass_config: BypassConfig::default(),
         }
     }
 }

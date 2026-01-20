@@ -75,6 +75,20 @@ pub struct ParsedModel {
     pub source_file: Option<PathBuf>,
     /// Line number in source file
     pub source_line: Option<usize>,
+
+    //=========================================================================
+    // Model Binning Parameters (for PDK geometry-based selection)
+    //=========================================================================
+    /// Minimum channel length for this bin (meters)
+    pub lmin: Option<f64>,
+    /// Maximum channel length for this bin (meters)
+    pub lmax: Option<f64>,
+    /// Minimum channel width for this bin (meters)
+    pub wmin: Option<f64>,
+    /// Maximum channel width for this bin (meters)
+    pub wmax: Option<f64>,
+    /// Bin name prefix (e.g., "nch" for "nch.1", "nch.2", etc.)
+    pub bin_prefix: Option<String>,
 }
 
 impl ParsedModel {
@@ -90,7 +104,60 @@ impl ParsedModel {
             description: None,
             source_file: None,
             source_line: None,
+            lmin: None,
+            lmax: None,
+            wmin: None,
+            wmax: None,
+            bin_prefix: None,
         }
+    }
+
+    /// Check if this model matches the given geometry (W, L)
+    /// Returns true if the geometry falls within this model's bin range
+    pub fn matches_geometry(&self, width: f64, length: f64) -> bool {
+        // Check length bounds
+        if let Some(lmin) = self.lmin {
+            if length < lmin {
+                return false;
+            }
+        }
+        if let Some(lmax) = self.lmax {
+            if length > lmax {
+                return false;
+            }
+        }
+
+        // Check width bounds
+        if let Some(wmin) = self.wmin {
+            if width < wmin {
+                return false;
+            }
+        }
+        if let Some(wmax) = self.wmax {
+            if width > wmax {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Check if this model has any binning constraints
+    pub fn has_binning(&self) -> bool {
+        self.lmin.is_some() || self.lmax.is_some() || self.wmin.is_some() || self.wmax.is_some()
+    }
+
+    /// Extract bin prefix from model name (e.g., "nch.1" -> "nch")
+    pub fn extract_bin_prefix(&self) -> Option<String> {
+        // Common PDK naming: prefix.binnum (e.g., nch.1, nch_hvt.2)
+        if let Some(dot_pos) = self.name.rfind('.') {
+            let suffix = &self.name[dot_pos + 1..];
+            // Check if suffix is numeric (bin number)
+            if suffix.chars().all(|c| c.is_ascii_digit()) {
+                return Some(self.name[..dot_pos].to_string());
+            }
+        }
+        None
     }
 
     /// Get a parameter value, returning default if not found
@@ -108,6 +175,11 @@ impl ParsedModel {
         let mut def = ModelDefinition::new(self.name.clone(), self.model_type, library);
         if let Some(ref desc) = self.description {
             def = def.with_description(desc.clone());
+        }
+        // Transfer binning parameters
+        def = def.with_binning(self.lmin, self.lmax, self.wmin, self.wmax);
+        if let Some(ref prefix) = self.bin_prefix {
+            def = def.with_bin_prefix(prefix.clone());
         }
         def
     }
@@ -564,6 +636,16 @@ impl LibParser {
         model.level = model.get_param("level").map(|v| v as u32);
         model.version = model.get_param("version");
 
+        // Extract binning parameters (PDK geometry-based model selection)
+        // These are critical for foundry PDKs like TSMC, GF, etc.
+        model.lmin = model.get_param("lmin");
+        model.lmax = model.get_param("lmax");
+        model.wmin = model.get_param("wmin");
+        model.wmax = model.get_param("wmax");
+
+        // Extract bin prefix from model name for grouping related bins
+        model.bin_prefix = model.extract_bin_prefix();
+
         Some(model)
     }
 
@@ -835,5 +917,159 @@ M2 OUT IN VSS VSS nch W=500n L=100n
         let inv = &result.top_level_subcircuits[0];
         assert_eq!(inv.name, "inverter");
         assert_eq!(inv.pins, vec!["IN", "OUT", "VDD", "VSS"]);
+    }
+
+    //=========================================================================
+    // Model Binning Parsing Tests
+    //=========================================================================
+
+    #[test]
+    fn test_parse_model_with_binning_parameters() {
+        let content = r#"
+.MODEL nch.1 NMOS LEVEL=54 VTH0=0.4 LMIN=20n LMAX=50n WMIN=1u WMAX=10u
+"#;
+        let mut parser = LibParser::new(".");
+        let result = parser.parse_string(content);
+
+        assert_eq!(result.top_level_models.len(), 1);
+        let model = &result.top_level_models[0];
+
+        assert_eq!(model.name, "nch.1");
+        assert_eq!(model.model_type, ModelType::Nmos);
+
+        // Check binning parameters were extracted
+        assert!(model.lmin.is_some(), "lmin should be parsed");
+        assert!(model.lmax.is_some(), "lmax should be parsed");
+        assert!(model.wmin.is_some(), "wmin should be parsed");
+        assert!(model.wmax.is_some(), "wmax should be parsed");
+
+        // Check values with reasonable tolerance
+        assert!(
+            (model.lmin.unwrap() - 20e-9).abs() < 1e-15,
+            "lmin should be 20nm"
+        );
+        assert!(
+            (model.lmax.unwrap() - 50e-9).abs() < 1e-15,
+            "lmax should be 50nm"
+        );
+        assert!(
+            (model.wmin.unwrap() - 1e-6).abs() < 1e-15,
+            "wmin should be 1um"
+        );
+        assert!(
+            (model.wmax.unwrap() - 10e-6).abs() < 1e-15,
+            "wmax should be 10um"
+        );
+    }
+
+    #[test]
+    fn test_parse_model_partial_binning() {
+        let content = r#"
+.MODEL nch.2 NMOS LEVEL=54 LMIN=50n LMAX=200n
+"#;
+        let mut parser = LibParser::new(".");
+        let result = parser.parse_string(content);
+
+        let model = &result.top_level_models[0];
+
+        assert!(model.lmin.is_some(), "lmin should be parsed");
+        assert!(model.lmax.is_some(), "lmax should be parsed");
+        assert!(model.wmin.is_none(), "wmin should be None");
+        assert!(model.wmax.is_none(), "wmax should be None");
+    }
+
+    #[test]
+    fn test_extract_bin_prefix() {
+        // Standard binning format: prefix.number
+        let content = r#"
+.MODEL nch.1 NMOS LEVEL=54
+.MODEL nch.2 NMOS LEVEL=54
+.MODEL pch_hvt.1 PMOS LEVEL=54
+.MODEL mymodel NMOS LEVEL=1
+"#;
+        let mut parser = LibParser::new(".");
+        let result = parser.parse_string(content);
+
+        assert_eq!(result.top_level_models.len(), 4);
+
+        // nch.1 should have bin_prefix = "nch"
+        let nch1 = result.find_model("nch.1").unwrap();
+        assert_eq!(nch1.bin_prefix.as_deref(), Some("nch"));
+
+        // nch.2 should have bin_prefix = "nch"
+        let nch2 = result.find_model("nch.2").unwrap();
+        assert_eq!(nch2.bin_prefix.as_deref(), Some("nch"));
+
+        // pch_hvt.1 should have bin_prefix = "pch_hvt"
+        let pch_hvt = result.find_model("pch_hvt.1").unwrap();
+        assert_eq!(pch_hvt.bin_prefix.as_deref(), Some("pch_hvt"));
+
+        // mymodel (no dot+number) should have no bin_prefix
+        let mymodel = result.find_model("mymodel").unwrap();
+        assert!(mymodel.bin_prefix.is_none());
+    }
+
+    #[test]
+    fn test_parsed_model_matches_geometry() {
+        let content = r#"
+.MODEL nch.1 NMOS LEVEL=54 LMIN=20n LMAX=100n WMIN=1u WMAX=10u
+"#;
+        let mut parser = LibParser::new(".");
+        let result = parser.parse_string(content);
+        let model = &result.top_level_models[0];
+
+        // Should match
+        assert!(
+            model.matches_geometry(5e-6, 50e-9),
+            "Should match inside bounds"
+        );
+
+        // Should not match (too small W)
+        assert!(
+            !model.matches_geometry(0.5e-6, 50e-9),
+            "Should not match W < wmin"
+        );
+
+        // Should not match (too large L)
+        assert!(
+            !model.matches_geometry(5e-6, 200e-9),
+            "Should not match L > lmax"
+        );
+    }
+
+    #[test]
+    fn test_parsed_model_has_binning() {
+        let content = r#"
+.MODEL nch.1 NMOS LEVEL=54 LMIN=20n LMAX=100n
+.MODEL nch NMOS LEVEL=54
+"#;
+        let mut parser = LibParser::new(".");
+        let result = parser.parse_string(content);
+
+        let nch1 = result.find_model("nch.1").unwrap();
+        assert!(nch1.has_binning(), "nch.1 should have binning");
+
+        let nch = result.find_model("nch").unwrap();
+        assert!(!nch.has_binning(), "nch should not have binning");
+    }
+
+    #[test]
+    fn test_to_model_definition_transfers_binning() {
+        let content = r#"
+.MODEL nch.1 NMOS LEVEL=54 LMIN=20n LMAX=100n WMIN=1u WMAX=10u
+"#;
+        let mut parser = LibParser::new(".");
+        let result = parser.parse_string(content);
+        let model = &result.top_level_models[0];
+
+        // Convert to ModelDefinition
+        let def = model.to_model_definition("test.lib");
+
+        // Verify binning transferred
+        assert_eq!(def.lmin, model.lmin);
+        assert_eq!(def.lmax, model.lmax);
+        assert_eq!(def.wmin, model.wmin);
+        assert_eq!(def.wmax, model.wmax);
+        assert_eq!(def.bin_prefix.as_deref(), Some("nch"));
     }
 }

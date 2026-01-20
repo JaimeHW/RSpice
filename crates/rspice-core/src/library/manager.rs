@@ -116,6 +116,20 @@ pub struct ModelDefinition {
     pub description: Option<String>,
     /// Number of terminals
     pub terminals: usize,
+
+    //=========================================================================
+    // Model Binning Parameters (for PDK geometry-based selection)
+    //=========================================================================
+    /// Minimum channel length for this bin (meters)
+    pub lmin: Option<f64>,
+    /// Maximum channel length for this bin (meters)
+    pub lmax: Option<f64>,
+    /// Minimum channel width for this bin (meters)
+    pub wmin: Option<f64>,
+    /// Maximum channel width for this bin (meters)
+    pub wmax: Option<f64>,
+    /// Bin name prefix (e.g., "nch" from "nch.1")
+    pub bin_prefix: Option<String>,
 }
 
 impl ModelDefinition {
@@ -135,6 +149,11 @@ impl ModelDefinition {
             library,
             description: None,
             terminals,
+            lmin: None,
+            lmax: None,
+            wmin: None,
+            wmax: None,
+            bin_prefix: None,
         }
     }
 
@@ -142,6 +161,62 @@ impl ModelDefinition {
     pub fn with_description(mut self, desc: impl Into<String>) -> Self {
         self.description = Some(desc.into());
         self
+    }
+
+    /// Set binning parameters
+    pub fn with_binning(
+        mut self,
+        lmin: Option<f64>,
+        lmax: Option<f64>,
+        wmin: Option<f64>,
+        wmax: Option<f64>,
+    ) -> Self {
+        self.lmin = lmin;
+        self.lmax = lmax;
+        self.wmin = wmin;
+        self.wmax = wmax;
+        self
+    }
+
+    /// Set bin prefix
+    pub fn with_bin_prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.bin_prefix = Some(prefix.into());
+        self
+    }
+
+    /// Check if this model matches the given geometry (W, L)
+    /// Returns true if the geometry falls within this model's bin range
+    pub fn matches_geometry(&self, width: f64, length: f64) -> bool {
+        // Check length bounds
+        if let Some(lmin) = self.lmin {
+            if length < lmin {
+                return false;
+            }
+        }
+        if let Some(lmax) = self.lmax {
+            if length > lmax {
+                return false;
+            }
+        }
+
+        // Check width bounds
+        if let Some(wmin) = self.wmin {
+            if width < wmin {
+                return false;
+            }
+        }
+        if let Some(wmax) = self.wmax {
+            if width > wmax {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Check if this model has any binning constraints
+    pub fn has_binning(&self) -> bool {
+        self.lmin.is_some() || self.lmax.is_some() || self.wmin.is_some() || self.wmax.is_some()
     }
 }
 
@@ -273,6 +348,99 @@ impl LibraryManager {
         self.models
             .values()
             .find(|m| m.name.to_uppercase() == upper)
+    }
+
+    /// Select the best matching model for given geometry and model type
+    ///
+    /// This is the core PDK binning API. Given a model name prefix (e.g., "nch")
+    /// and device geometry (W, L), it finds the model bin whose lmin/lmax/wmin/wmax
+    /// range contains the specified geometry.
+    ///
+    /// # Arguments
+    /// * `prefix` - Model name prefix to search for (e.g., "nch", "pch_hvt")
+    /// * `width` - Device width in meters
+    /// * `length` - Device length in meters
+    /// * `model_type` - Expected model type (e.g., Nmos, Pmos)
+    ///
+    /// # Returns
+    /// * `Some(&ModelDefinition)` - Best matching model for the geometry
+    /// * `None` - No matching bin found
+    ///
+    /// # Selection Algorithm
+    /// 1. Find all models with matching prefix and type
+    /// 2. Filter to those whose binning range contains (W, L)
+    /// 3. If multiple match, prefer the one with tightest bounds (smallest bin)
+    /// 4. If no binned models match, fall back to unbinned model with same prefix
+    pub fn select_model_for_geometry(
+        &self,
+        prefix: &str,
+        width: f64,
+        length: f64,
+        model_type: ModelType,
+    ) -> Option<&ModelDefinition> {
+        let prefix_lower = prefix.to_lowercase();
+
+        // Collect all candidate models matching prefix and type
+        let candidates: Vec<_> = self
+            .models
+            .values()
+            .filter(|m| {
+                m.model_type == model_type && {
+                    // Match by explicit bin_prefix or by name prefix
+                    if let Some(ref bp) = m.bin_prefix {
+                        bp.to_lowercase() == prefix_lower
+                    } else {
+                        m.name.to_lowercase().starts_with(&prefix_lower)
+                    }
+                }
+            })
+            .collect();
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        // Find binned models that match the geometry
+        let binned_matches: Vec<_> = candidates
+            .iter()
+            .filter(|m| m.has_binning() && m.matches_geometry(width, length))
+            .collect();
+
+        if !binned_matches.is_empty() {
+            // If multiple binned models match, prefer the one with tightest bounds
+            // (smallest difference between max and min for both L and W)
+            return binned_matches
+                .into_iter()
+                .min_by(|a, b| {
+                    let a_range = Self::bin_range_size(a);
+                    let b_range = Self::bin_range_size(b);
+                    a_range
+                        .partial_cmp(&b_range)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .copied();
+        }
+
+        // Fall back to unbinned model with exact prefix match
+        candidates
+            .iter()
+            .find(|m| !m.has_binning() && m.name.to_lowercase() == prefix_lower)
+            .copied()
+            // Or any unbinned model with matching prefix
+            .or_else(|| candidates.iter().find(|m| !m.has_binning()).copied())
+    }
+
+    /// Calculate total bin range size for prioritizing tighter bins
+    fn bin_range_size(model: &ModelDefinition) -> f64 {
+        let l_range = match (model.lmin, model.lmax) {
+            (Some(min), Some(max)) => max - min,
+            _ => f64::MAX,
+        };
+        let w_range = match (model.wmin, model.wmax) {
+            (Some(min), Some(max)) => max - min,
+            _ => f64::MAX,
+        };
+        l_range + w_range
     }
 
     /// Get all subcircuits
@@ -462,5 +630,245 @@ mod tests {
         let manager = LibraryManager::new();
         let diodes = manager.models_of_type(ModelType::Diode);
         assert!(!diodes.is_empty(), "Should have diode models");
+    }
+
+    //=========================================================================
+    // Model Binning Tests
+    //=========================================================================
+
+    #[test]
+    fn test_model_definition_has_binning() {
+        // Model without binning
+        let model = ModelDefinition::new("test".to_string(), ModelType::Nmos, "test.lib");
+        assert!(
+            !model.has_binning(),
+            "Model without binning params should return false"
+        );
+
+        // Model with binning
+        let model = ModelDefinition::new("test".to_string(), ModelType::Nmos, "test.lib")
+            .with_binning(Some(1e-9), Some(100e-9), None, None);
+        assert!(
+            model.has_binning(),
+            "Model with lmin/lmax should return true"
+        );
+    }
+
+    #[test]
+    fn test_model_definition_matches_geometry() {
+        // Model with all binning params
+        let model = ModelDefinition::new("nch.1".to_string(), ModelType::Nmos, "pdk.lib")
+            .with_binning(
+                Some(20e-9),  // lmin = 20nm
+                Some(100e-9), // lmax = 100nm
+                Some(1e-6),   // wmin = 1um
+                Some(10e-6),  // wmax = 10um
+            );
+
+        // Inside bounds
+        assert!(
+            model.matches_geometry(5e-6, 50e-9),
+            "Should match geometry inside bounds"
+        );
+
+        // Exactly on bounds
+        assert!(
+            model.matches_geometry(1e-6, 20e-9),
+            "Should match geometry on lower bounds"
+        );
+        assert!(
+            model.matches_geometry(10e-6, 100e-9),
+            "Should match geometry on upper bounds"
+        );
+
+        // Outside bounds
+        assert!(
+            !model.matches_geometry(0.5e-6, 50e-9),
+            "Should not match width below wmin"
+        );
+        assert!(
+            !model.matches_geometry(20e-6, 50e-9),
+            "Should not match width above wmax"
+        );
+        assert!(
+            !model.matches_geometry(5e-6, 10e-9),
+            "Should not match length below lmin"
+        );
+        assert!(
+            !model.matches_geometry(5e-6, 200e-9),
+            "Should not match length above lmax"
+        );
+    }
+
+    #[test]
+    fn test_model_definition_matches_geometry_partial_bounds() {
+        // Model with only length bounds (no width bounds)
+        let model = ModelDefinition::new("nch.2".to_string(), ModelType::Nmos, "pdk.lib")
+            .with_binning(Some(50e-9), Some(200e-9), None, None);
+
+        // Any width should match if length is in bounds
+        assert!(
+            model.matches_geometry(1e-6, 100e-9),
+            "Should match any width with L in bounds"
+        );
+        assert!(
+            model.matches_geometry(100e-6, 100e-9),
+            "Should match any width with L in bounds"
+        );
+        assert!(
+            !model.matches_geometry(1e-6, 300e-9),
+            "Should not match L out of bounds"
+        );
+    }
+
+    #[test]
+    fn test_bin_range_size() {
+        // Tight bin (small range)
+        let tight = ModelDefinition::new("nch.1".to_string(), ModelType::Nmos, "pdk.lib")
+            .with_binning(Some(20e-9), Some(50e-9), Some(1e-6), Some(2e-6));
+
+        // Wide bin (large range)
+        let wide = ModelDefinition::new("nch.2".to_string(), ModelType::Nmos, "pdk.lib")
+            .with_binning(Some(20e-9), Some(500e-9), Some(1e-6), Some(100e-6));
+
+        let tight_size = LibraryManager::bin_range_size(&tight);
+        let wide_size = LibraryManager::bin_range_size(&wide);
+
+        assert!(
+            tight_size < wide_size,
+            "Tight bin should have smaller range size"
+        );
+    }
+
+    #[test]
+    fn test_select_model_for_geometry_basic() {
+        let mut manager = LibraryManager {
+            models: HashMap::new(),
+            subcircuits: HashMap::new(),
+            models_by_type: HashMap::new(),
+        };
+
+        // Add binned models
+        let bin1 = ModelDefinition::new("nch.1".to_string(), ModelType::Nmos, "pdk.lib")
+            .with_binning(Some(20e-9), Some(50e-9), Some(1e-6), Some(5e-6))
+            .with_bin_prefix("nch");
+        let bin2 = ModelDefinition::new("nch.2".to_string(), ModelType::Nmos, "pdk.lib")
+            .with_binning(Some(50e-9), Some(200e-9), Some(1e-6), Some(5e-6))
+            .with_bin_prefix("nch");
+
+        manager.models.insert("nch.1".to_string(), bin1);
+        manager.models.insert("nch.2".to_string(), bin2);
+        manager.models_by_type.insert(
+            ModelType::Nmos,
+            vec!["nch.1".to_string(), "nch.2".to_string()],
+        );
+
+        // Select for geometry in bin1
+        let result = manager.select_model_for_geometry("nch", 3e-6, 30e-9, ModelType::Nmos);
+        assert!(result.is_some(), "Should find model for geometry in bin1");
+        assert_eq!(result.unwrap().name, "nch.1");
+
+        // Select for geometry in bin2
+        let result = manager.select_model_for_geometry("nch", 3e-6, 100e-9, ModelType::Nmos);
+        assert!(result.is_some(), "Should find model for geometry in bin2");
+        assert_eq!(result.unwrap().name, "nch.2");
+    }
+
+    #[test]
+    fn test_select_model_for_geometry_prefers_tighter_bin() {
+        let mut manager = LibraryManager {
+            models: HashMap::new(),
+            subcircuits: HashMap::new(),
+            models_by_type: HashMap::new(),
+        };
+
+        // Add overlapping binned models (tight and wide)
+        let tight = ModelDefinition::new("nch.1".to_string(), ModelType::Nmos, "pdk.lib")
+            .with_binning(Some(40e-9), Some(60e-9), Some(2e-6), Some(4e-6))
+            .with_bin_prefix("nch");
+        let wide = ModelDefinition::new("nch.0".to_string(), ModelType::Nmos, "pdk.lib")
+            .with_binning(Some(20e-9), Some(200e-9), Some(1e-6), Some(10e-6))
+            .with_bin_prefix("nch");
+
+        manager.models.insert("nch.1".to_string(), tight);
+        manager.models.insert("nch.0".to_string(), wide);
+        manager.models_by_type.insert(
+            ModelType::Nmos,
+            vec!["nch.1".to_string(), "nch.0".to_string()],
+        );
+
+        // Geometry that fits both bins should select the tighter one
+        let result = manager.select_model_for_geometry("nch", 3e-6, 50e-9, ModelType::Nmos);
+        assert!(result.is_some(), "Should find model");
+        assert_eq!(result.unwrap().name, "nch.1", "Should prefer tighter bin");
+    }
+
+    #[test]
+    fn test_select_model_for_geometry_fallback_to_unbinned() {
+        let mut manager = LibraryManager {
+            models: HashMap::new(),
+            subcircuits: HashMap::new(),
+            models_by_type: HashMap::new(),
+        };
+
+        // Add unbinned base model
+        let unbinned = ModelDefinition::new("nch".to_string(), ModelType::Nmos, "pdk.lib");
+
+        // Add binned model that doesn't match our geometry
+        let binned = ModelDefinition::new("nch.1".to_string(), ModelType::Nmos, "pdk.lib")
+            .with_binning(Some(20e-9), Some(50e-9), Some(1e-6), Some(5e-6))
+            .with_bin_prefix("nch");
+
+        manager.models.insert("nch".to_string(), unbinned);
+        manager.models.insert("nch.1".to_string(), binned);
+        manager.models_by_type.insert(
+            ModelType::Nmos,
+            vec!["nch".to_string(), "nch.1".to_string()],
+        );
+
+        // Geometry outside binned range should fall back to unbinned
+        let result = manager.select_model_for_geometry("nch", 1e-6, 500e-9, ModelType::Nmos);
+        assert!(result.is_some(), "Should fall back to unbinned model");
+        assert_eq!(
+            result.unwrap().name,
+            "nch",
+            "Should select unbinned model as fallback"
+        );
+    }
+
+    #[test]
+    fn test_select_model_for_geometry_wrong_type() {
+        let mut manager = LibraryManager {
+            models: HashMap::new(),
+            subcircuits: HashMap::new(),
+            models_by_type: HashMap::new(),
+        };
+
+        // Add NMOS model
+        let nmos = ModelDefinition::new("nch.1".to_string(), ModelType::Nmos, "pdk.lib")
+            .with_binning(Some(20e-9), Some(100e-9), None, None)
+            .with_bin_prefix("nch");
+
+        manager.models.insert("nch.1".to_string(), nmos);
+        manager
+            .models_by_type
+            .insert(ModelType::Nmos, vec!["nch.1".to_string()]);
+
+        // Should not find PMOS when looking for NMOS prefix
+        let result = manager.select_model_for_geometry("nch", 1e-6, 50e-9, ModelType::Pmos);
+        assert!(result.is_none(), "Should not match wrong model type");
+    }
+
+    #[test]
+    fn test_select_model_for_geometry_no_match() {
+        let manager = LibraryManager::new();
+
+        // Search for model that doesn't exist
+        let result =
+            manager.select_model_for_geometry("nonexistent_model", 1e-6, 50e-9, ModelType::Nmos);
+        assert!(
+            result.is_none(),
+            "Should return None for nonexistent model prefix"
+        );
     }
 }
