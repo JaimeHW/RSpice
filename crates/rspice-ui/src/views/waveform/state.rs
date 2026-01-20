@@ -12,6 +12,9 @@ pub struct ViewState {
     /// Y-axis range (default for single pane mode)
     pub y_min: f64,
     pub y_max: f64,
+    /// Data bounds (for constraining pan/zoom to actual data)
+    /// Format: (data_x_min, data_x_max, data_y_min, data_y_max)
+    pub data_bounds: Option<(f64, f64, f64, f64)>,
     /// Whether we're currently panning
     pub is_panning: bool,
     /// Last mouse position during pan
@@ -31,6 +34,7 @@ impl Default for ViewState {
             x_max: 5e-3, // 5ms default
             y_min: -1.5,
             y_max: 1.5,
+            data_bounds: None,
             is_panning: false,
             pan_start_x: 0.0,
             pan_start_y: 0.0,
@@ -42,6 +46,44 @@ impl Default for ViewState {
 }
 
 impl ViewState {
+    /// Constrain view to data bounds (prevents panning into empty regions).
+    /// Called after pan/zoom operations to keep view within data range.
+    /// X-axis lower bound is ALWAYS 0 (time can never be negative).
+    fn clamp_to_bounds(&mut self) {
+        // HARD RULE: Time can never be negative - always clamp x_min to >= 0
+        if self.x_min < 0.0 {
+            let shift = -self.x_min;
+            self.x_min = 0.0;
+            self.x_max += shift;
+        }
+
+        // Clamp to data bounds if they exist
+        if let Some((_, data_x_max, data_y_min, data_y_max)) = self.data_bounds {
+            let view_x_range = self.x_max - self.x_min;
+            let view_y_range = self.y_max - self.y_min;
+            let data_y_range = data_y_max - data_y_min;
+
+            // Clamp X-axis max: don't pan beyond end of data
+            if self.x_max > data_x_max && view_x_range < data_x_max * 2.0 {
+                let shift = self.x_max - data_x_max;
+                self.x_max = data_x_max;
+                self.x_min = (self.x_min - shift).max(0.0); // Keep x_min >= 0
+            }
+
+            // Clamp Y-axis: allow some freedom but not too far from data
+            if self.y_min < data_y_min && view_y_range < data_y_range * 3.0 {
+                let shift = data_y_min - self.y_min;
+                self.y_min = data_y_min;
+                self.y_max += shift;
+            }
+            if self.y_max > data_y_max && view_y_range < data_y_range * 3.0 {
+                let shift = self.y_max - data_y_max;
+                self.y_max = data_y_max;
+                self.y_min -= shift;
+            }
+        }
+    }
+
     /// Zoom around a point (mouse position as fraction 0-1).
     pub fn zoom(&mut self, factor: f64, mouse_x_frac: f64, mouse_y_frac: f64) {
         let x_range = self.x_max - self.x_min;
@@ -60,6 +102,8 @@ impl ViewState {
         self.x_max = x_point + (1.0 - mouse_x_frac) * new_x_range;
         self.y_min = y_point - (1.0 - mouse_y_frac) * new_y_range;
         self.y_max = y_point + mouse_y_frac * new_y_range;
+
+        self.clamp_to_bounds();
     }
 
     /// Pan by delta (in data units).
@@ -68,23 +112,85 @@ impl ViewState {
         self.x_max += dx;
         self.y_min += dy;
         self.y_max += dy;
+
+        self.clamp_to_bounds();
+    }
+
+    /// Zoom X-axis only around a point (for horizontal-only zoom with Shift+scroll).
+    /// mouse_x_frac: mouse position as fraction of plot width (0-1)
+    pub fn zoom_x_only(&mut self, factor: f64, mouse_x_frac: f64) {
+        let x_range = self.x_max - self.x_min;
+        let x_point = self.x_min + mouse_x_frac * x_range;
+        let new_x_range = x_range * factor;
+        self.x_min = x_point - mouse_x_frac * new_x_range;
+        self.x_max = x_point + (1.0 - mouse_x_frac) * new_x_range;
+    }
+
+    /// Zoom Y-axis only around a point (for vertical-only zoom with Ctrl+scroll).
+    /// mouse_y_frac: mouse position as fraction of plot height (0-1, top=0)
+    pub fn zoom_y_only(&mut self, factor: f64, mouse_y_frac: f64) {
+        let y_range = self.y_max - self.y_min;
+        let y_point = self.y_max - mouse_y_frac * y_range; // Y is inverted
+        let new_y_range = y_range * factor;
+        self.y_min = y_point - (1.0 - mouse_y_frac) * new_y_range;
+        self.y_max = y_point + mouse_y_frac * new_y_range;
+    }
+
+    /// Fit X-axis (horizontal) to waveform data, preserving current Y-axis.
+    pub fn fit_x_to_data(&mut self, waveforms: &[crate::state::WaveformData]) {
+        if waveforms.is_empty() {
+            return;
+        }
+        let mut x_min = f64::INFINITY;
+        let mut x_max = f64::NEG_INFINITY;
+        for wf in waveforms {
+            for &x in &wf.x {
+                x_min = x_min.min(x);
+                x_max = x_max.max(x);
+            }
+        }
+        if x_min.is_finite() && x_max.is_finite() {
+            let x_margin = (x_max - x_min).max(1e-9) * 0.05;
+            self.x_min = x_min - x_margin;
+            self.x_max = x_max + x_margin;
+        }
+    }
+
+    /// Fit Y-axis (vertical) to waveform data, preserving current X-axis.
+    pub fn fit_y_to_data(&mut self, waveforms: &[crate::state::WaveformData]) {
+        if waveforms.is_empty() {
+            return;
+        }
+        let mut y_min = f64::INFINITY;
+        let mut y_max = f64::NEG_INFINITY;
+        for wf in waveforms {
+            for &y in &wf.y {
+                y_min = y_min.min(y);
+                y_max = y_max.max(y);
+            }
+        }
+        if y_min.is_finite() && y_max.is_finite() {
+            let y_margin = (y_max - y_min).max(0.1) * 0.1;
+            self.y_min = y_min - y_margin;
+            self.y_max = y_max + y_margin;
+        }
     }
 
     /// Fit to waveform data.
+    /// Sets data_bounds to constrain pan/zoom to actual data region.
+    /// X-axis lower bound is always 0 (time can't be negative).
     pub fn fit_to_data(&mut self, waveforms: &[crate::state::WaveformData]) {
         if waveforms.is_empty() {
             *self = Self::default();
             return;
         }
 
-        let mut x_min = f64::INFINITY;
         let mut x_max = f64::NEG_INFINITY;
         let mut y_min = f64::INFINITY;
         let mut y_max = f64::NEG_INFINITY;
 
         for wf in waveforms {
             for &x in &wf.x {
-                x_min = x_min.min(x);
                 x_max = x_max.max(x);
             }
             for &y in &wf.y {
@@ -93,14 +199,31 @@ impl ViewState {
             }
         }
 
-        // Add margins - use minimum margin for flat waveforms
-        let x_margin = (x_max - x_min).max(1e-9) * 0.05; // min 5% of range
-        let y_margin = (y_max - y_min).max(0.1) * 0.1; // min 0.1 absolute
+        // Time always starts at 0 (simulation time can't be negative)
+        let data_x_min = 0.0;
+        let data_x_max = if x_max.is_finite() { x_max } else { 5e-3 };
 
-        self.x_min = x_min - x_margin;
-        self.x_max = x_max + x_margin;
-        self.y_min = y_min - y_margin;
-        self.y_max = y_max + y_margin;
+        // Add margins for Y-axis
+        let y_margin = (y_max - y_min).max(0.1) * 0.1;
+        let data_y_min = if y_min.is_finite() {
+            y_min - y_margin
+        } else {
+            -1.5
+        };
+        let data_y_max = if y_max.is_finite() {
+            y_max + y_margin
+        } else {
+            1.5
+        };
+
+        // Set view to data bounds (no X margin to start exactly at 0)
+        self.x_min = data_x_min;
+        self.x_max = data_x_max * 1.02; // Small margin on right only
+        self.y_min = data_y_min;
+        self.y_max = data_y_max;
+
+        // Store bounds for pan/zoom clamping
+        self.data_bounds = Some((data_x_min, data_x_max, data_y_min, data_y_max));
     }
 }
 

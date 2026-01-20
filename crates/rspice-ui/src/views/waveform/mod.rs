@@ -347,6 +347,8 @@ fn WaveformPlotArea(
     rsx! {
         div {
             class: "plot-area",
+            // tabindex enables keyboard focus for shortcuts
+            tabindex: 0,
             style: "
                 flex: 1;
                 position: relative;
@@ -355,7 +357,51 @@ fn WaveformPlotArea(
                 cursor: {cursor_style};
                 user-select: none;
                 -webkit-user-select: none;
+                outline: none;
             ",
+
+            // Keyboard shortcuts for professional waveform navigation
+            // F = fit all, H = horizontal fit, V = vertical fit
+            // +/= = zoom in, - = zoom out, Esc = cancel
+            onkeydown: {
+                let waveforms_for_keys = waveforms.clone();
+                move |e| {
+                    match e.key() {
+                        Key::Character(c) => {
+                            match c.to_lowercase().as_str() {
+                                "f" => {
+                                    // Fit all (both axes)
+                                    view_state.write().fit_to_data(&waveforms_for_keys);
+                                }
+                                "h" => {
+                                    // Horizontal fit (time axis only)
+                                    view_state.write().fit_x_to_data(&waveforms_for_keys);
+                                }
+                                "v" => {
+                                    // Vertical fit (amplitude axis only)
+                                    view_state.write().fit_y_to_data(&waveforms_for_keys);
+                                }
+                                "+" | "=" => {
+                                    // Zoom in (at center)
+                                    view_state.write().zoom(0.8, 0.5, 0.5);
+                                }
+                                "-" | "_" => {
+                                    // Zoom out (at center)
+                                    view_state.write().zoom(1.25, 0.5, 0.5);
+                                }
+                                _ => {}
+                            }
+                        }
+                        Key::Escape => {
+                            // Cancel box selection if active
+                            box_selection.write().cancel();
+                            // Clear cursors
+                            cursor_state.write().clear();
+                        }
+                        _ => {}
+                    }
+                }
+            },
 
             // Get actual element dimensions on mount and store ref
             onmounted: move |e| {
@@ -369,7 +415,10 @@ fn WaveformPlotArea(
                 });
             },
 
-            // Mouse wheel zoom
+            // Mouse wheel zoom - cursor-centered with modifier key support
+            // - Normal scroll: zoom both axes centered on cursor
+            // - Shift+scroll: horizontal zoom only (time axis)
+            // - Ctrl+scroll: vertical zoom only (amplitude axis)
             onwheel: move |e| {
                 let delta = e.delta();
                 let delta_y = match delta {
@@ -378,11 +427,33 @@ fn WaveformPlotArea(
                     dioxus::html::geometry::WheelDelta::Pages(p) => p.y * 100.0,
                 };
                 let factor = if delta_y > 0.0 { 1.15 } else { 0.87 };
-                // Zoom at center for now (could use mouse position with element coords)
-                view_state.write().zoom(factor, 0.5, 0.5);
+
+                // Get mouse position as fraction of plot area (0-1)
+                let elem = e.element_coordinates();
+                let vs = *view_state.read();
+                let plot_width = vs.plot_width.max(100.0);
+                let plot_height = vs.plot_height.max(100.0);
+                let mouse_x_frac = (elem.x / plot_width).clamp(0.0, 1.0);
+                let mouse_y_frac = (elem.y / plot_height).clamp(0.0, 1.0);
+
+                // Apply zoom with modifier key support
+                let modifiers = e.modifiers();
+                if modifiers.shift() {
+                    // Horizontal zoom only (time axis)
+                    view_state.write().zoom_x_only(factor, mouse_x_frac);
+                } else if modifiers.ctrl() {
+                    // Vertical zoom only (amplitude axis)
+                    view_state.write().zoom_y_only(factor, mouse_y_frac);
+                } else {
+                    // Normal: zoom both axes centered on cursor
+                    view_state.write().zoom(factor, mouse_x_frac, mouse_y_frac);
+                }
             },
 
-            // Pan with mouse drag, or box zoom with shift+drag
+            // Pan with mouse drag, box zoom with shift+drag, or middle-click pan
+            // Middle mouse button (button 1) = pan (professional standard)
+            // Shift + left drag = box zoom selection
+            // Left drag = pan
             onmousedown: move |e| {
                 // Prevent native browser drag behavior
                 e.prevent_default();
@@ -396,11 +467,16 @@ fn WaveformPlotArea(
                 let data_x = vs.x_min + (elem.x / plot_width) * (vs.x_max - vs.x_min);
                 let data_y = vs.y_max - (elem.y / plot_height) * (vs.y_max - vs.y_min);
 
-                if e.modifiers().shift() {
-                    // Shift+drag = box zoom selection
+                // Check for middle mouse button (button 1 in web API, auxiliary button)
+                // or regular left-click without shift for panning
+                let trigger = e.trigger_button();
+                let is_middle_click = trigger.map(|b| b.into_web_code() == 1).unwrap_or(false);
+
+                if e.modifiers().shift() && !is_middle_click {
+                    // Shift+left-drag = box zoom selection
                     box_selection.write().start(data_x, data_y, elem.x, elem.y);
                 } else {
-                    // Normal drag = pan
+                    // Left drag or middle-click = pan
                     let mut vs = view_state.write();
                     vs.is_panning = true;
                     vs.pan_start_x = elem.x;
