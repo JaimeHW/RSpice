@@ -200,6 +200,22 @@ fn test_ngspice_polezero_suite() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// XSPICE Tests
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_ngspice_xspice_digital_suite() {
+    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
+    let stats = run_and_report(&runner, "xspice/digital");
+
+    println!(
+        "XSPICE Digital: {} tests, {:.1}% pass rate",
+        stats.total,
+        stats.pass_rate()
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // SOI MOSFET Tests
 // ═══════════════════════════════════════════════════════════════════════════════
 

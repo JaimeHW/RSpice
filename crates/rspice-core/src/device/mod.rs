@@ -29,14 +29,6 @@ pub mod veriloga;
 // Batch device storage for SIMD acceleration (feature-gated)
 #[cfg(feature = "simd")]
 pub mod batch;
-#[cfg(feature = "simd")]
-pub mod batch_bjt;
-#[cfg(feature = "simd")]
-pub mod batch_jfet;
-#[cfg(feature = "simd")]
-pub mod batch_mosfet;
-#[cfg(feature = "simd")]
-pub mod batch_mosfet_level6;
 
 // Re-export from subdirectories for backwards compatibility
 pub use mosfet::{
