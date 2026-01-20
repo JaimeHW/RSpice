@@ -198,6 +198,7 @@ pub struct AnalyzedModule {
     pub variables: Vec<AnalyzedVariable>,
     pub branches: Vec<AnalyzedBranch>,
     pub contributions: Vec<AnalyzedContribution>,
+    pub assignments: Vec<AnalyzedAssignment>,
     pub internal_nodes: Vec<AnalyzedInternalNode>,
     pub symbol_table: SymbolTable,
 }
@@ -258,6 +259,21 @@ pub struct AnalyzedContribution {
     pub span: Span,
 }
 
+/// Analyzed variable assignment
+#[derive(Debug, Clone)]
+pub struct AnalyzedAssignment {
+    /// Variable name being assigned
+    pub target: SmolStr,
+    /// Index of variable in variables list
+    pub var_index: usize,
+    /// The expression being assigned
+    pub expression: Expression,
+    /// Type of the expression
+    pub expr_type: ValueType,
+    /// Source span
+    pub span: Span,
+}
+
 impl<'a> SemanticAnalyzer<'a> {
     pub fn new(options: &'a CompilerOptions) -> Self {
         Self {
@@ -314,6 +330,7 @@ impl<'a> SemanticAnalyzer<'a> {
             variables: Vec::new(),
             branches: Vec::new(),
             contributions: Vec::new(),
+            assignments: Vec::new(),
             internal_nodes: Vec::new(),
             symbol_table: SymbolTable::new(),
         };
@@ -518,7 +535,7 @@ impl<'a> SemanticAnalyzer<'a> {
                 self.analyze_contribution(contrib, module)?;
             }
             AnalogStatement::Assignment(assign) => {
-                self.analyze_assignment(assign)?;
+                self.analyze_assignment(assign, module)?;
             }
             AnalogStatement::Block(block) => {
                 self.symbols.enter_scope(ScopeKind::Block);
@@ -625,8 +642,12 @@ impl<'a> SemanticAnalyzer<'a> {
         Ok(())
     }
 
-    fn analyze_assignment(&mut self, assign: &AssignmentStmt) -> CompileResult<()> {
-        let target_name = match &assign.target {
+    fn analyze_assignment(
+        &mut self,
+        assign: &AssignmentStmt,
+        module: &mut AnalyzedModule,
+    ) -> CompileResult<()> {
+        let (target_name, span) = match &assign.target {
             LValue::Variable { name, span } => {
                 if self.symbols.lookup(name).is_none() {
                     return Err(CompileError::Semantic(SemanticError::new(
@@ -635,7 +656,7 @@ impl<'a> SemanticAnalyzer<'a> {
                     )));
                 }
                 self.symbols.mark_used(name);
-                name
+                (name.clone(), *span)
             }
             LValue::ArrayAccess { name, span, .. } => {
                 if self.symbols.lookup(name).is_none() {
@@ -645,13 +666,13 @@ impl<'a> SemanticAnalyzer<'a> {
                     )));
                 }
                 self.symbols.mark_used(name);
-                name
+                (name.clone(), *span)
             }
         };
 
         let value_type = self.infer_type(&assign.value)?;
 
-        if let Some(sym) = self.symbols.lookup(target_name) {
+        if let Some(sym) = self.symbols.lookup(&target_name) {
             if !value_type.can_coerce_to(&sym.value_type) {
                 self.record_error(SemanticErrorKind::TypeMismatch {
                     expected: sym.value_type.to_string(),
@@ -660,6 +681,22 @@ impl<'a> SemanticAnalyzer<'a> {
                 });
             }
         }
+
+        // Find variable index
+        let var_index = module
+            .variables
+            .iter()
+            .position(|v| v.name == target_name)
+            .unwrap_or(0);
+
+        // Record the assignment for code generation
+        module.assignments.push(AnalyzedAssignment {
+            target: target_name,
+            var_index,
+            expression: assign.value.clone(),
+            expr_type: value_type,
+            span,
+        });
 
         Ok(())
     }

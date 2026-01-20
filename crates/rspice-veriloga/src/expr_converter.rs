@@ -811,6 +811,7 @@ mod tests {
             }],
             branches: vec![],
             contributions: vec![],
+            assignments: vec![],
             internal_nodes: vec![],
             symbol_table: SymbolTable::new(),
         };

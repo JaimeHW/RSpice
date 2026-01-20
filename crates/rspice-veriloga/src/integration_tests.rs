@@ -1511,3 +1511,89 @@ fn test_math_function_combination() {
         "Combined math at V=2.3: got {current}, expected 10"
     );
 }
+
+// ============================================================================
+// BSIM4 Industrial Model Tests
+// ============================================================================
+
+#[test]
+fn test_bsim4_parsing() {
+    // Test parsing of the industrial BSIM4 model
+    // This is a diagnostic test to identify required parser features
+    let bsim4_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("models")
+        .join("veriloga")
+        .join("bsim4.pp.va");
+
+    if !bsim4_path.exists() {
+        println!("BSIM4 model not found at {:?}, skipping test", bsim4_path);
+        return;
+    }
+
+    let source = std::fs::read_to_string(&bsim4_path).expect("Failed to read BSIM4 file");
+    println!(
+        "BSIM4 source: {} bytes, {} lines",
+        source.len(),
+        source.lines().count()
+    );
+
+    let compiler = VerilogACompiler::default();
+    match compiler.compile(&source) {
+        Ok(model) => {
+            println!("SUCCESS: BSIM4 parsed successfully!");
+            println!("  Model name: {}", model.name);
+            println!("  Terminals: {:?}", model.terminal_names);
+            println!("  Parameters: {}", model.parameters.len());
+            println!("  Stamp programs: {}", model.stamp_programs.len());
+            for (i, sp) in model.stamp_programs.iter().enumerate() {
+                println!(
+                    "    [{}]: {} instructions, {} jacobians",
+                    i,
+                    sp.value_program.instructions.len(),
+                    sp.jacobian_programs.len()
+                );
+            }
+
+            // Print assignments info for debugging
+            println!("  Variables: {}", model.num_variables);
+            println!("  Assignment programs: {}", model.assignment_programs.len());
+            let total_assignment_instrs: usize = model
+                .assignment_programs
+                .iter()
+                .map(|ap| ap.program.instructions.len())
+                .sum();
+            println!(
+                "  Total assignment instructions: {}",
+                total_assignment_instrs
+            );
+            if model
+                .stamp_programs
+                .iter()
+                .map(|sp| sp.value_program.instructions.len())
+                .sum::<usize>()
+                < 50
+                && total_assignment_instrs < 100
+            {
+                println!("  WARNING: Very few instructions - assignments may not be compiled yet");
+            }
+
+            // Try to create a device
+            let device = VerilogADevice::new("M1", model, &[1, 2, 3, 0]);
+            println!("  Device created: {}", device.name);
+            println!("  Using native: {}", device.is_using_native());
+
+            // Verify basic functionality
+            assert_eq!(device.num_terminals(), 4);
+        }
+        Err(e) => {
+            // Print detailed error for diagnosis
+            println!("BSIM4 parsing failed:");
+            println!("  Error: {:?}", e);
+            panic!("BSIM4 should parse successfully");
+        }
+    }
+}

@@ -12,10 +12,19 @@
 //!         ↓
 //! stamp() → Matrix + RHS
 //! ```
+//!
+//! # Native Compilation
+//!
+//! When the `native` feature is enabled and a C compiler is available,
+//! the device will automatically compile to native code for maximum performance.
+//! Falls back gracefully to the bytecode VM interpreter otherwise.
 
 use crate::codegen::{CompiledModel, StampIndex};
 use crate::vm::{Vm, VmContext};
 use smol_str::SmolStr;
+
+#[cfg(feature = "native")]
+use crate::native::NativeModel;
 
 /// A Verilog-A device instance in a circuit
 ///
@@ -38,7 +47,20 @@ pub struct VerilogADevice {
     /// Pre-computed matrix indices for O(1) stamping
     #[allow(dead_code)]
     matrix_indices: MatrixIndices,
+    /// Native compiled model (if compilation succeeded)
+    #[cfg(feature = "native")]
+    native_model: Option<std::sync::Arc<NativeModel>>,
+    /// Variable storage for native execution
+    #[cfg(feature = "native")]
+    native_vars: Vec<f64>,
 }
+
+// NativeModel contains raw pointers but is safe to send across threads
+// because the pointers are only used via the evaluate functions
+#[cfg(feature = "native")]
+unsafe impl Send for VerilogADevice {}
+#[cfg(feature = "native")]
+unsafe impl Sync for VerilogADevice {}
 
 /// Pre-computed matrix indices for fast stamping
 #[derive(Debug, Clone, Default)]
@@ -105,6 +127,10 @@ impl VerilogADevice {
         // Build matrix indices (will be set during circuit linking)
         let matrix_indices = MatrixIndices::default();
 
+        // Attempt native compilation (if feature enabled)
+        #[cfg(feature = "native")]
+        let (native_model, native_vars) = Self::try_native_compile(&model);
+
         Self {
             name: name.into(),
             model,
@@ -113,7 +139,52 @@ impl VerilogADevice {
             internal_node_indices: vec![0; num_internal_nodes],
             num_internal_nodes,
             matrix_indices,
+            #[cfg(feature = "native")]
+            native_model,
+            #[cfg(feature = "native")]
+            native_vars,
         }
+    }
+
+    /// Attempt to compile the model to native code using Cranelift JIT
+    #[cfg(feature = "native")]
+    fn try_native_compile(
+        model: &CompiledModel,
+    ) -> (Option<std::sync::Arc<NativeModel>>, Vec<f64>) {
+        use crate::native::try_compile_native;
+
+        let num_vars = model.num_variables;
+
+        match try_compile_native(model) {
+            Some(native) => {
+                log::info!("[JIT] Model '{}' compiled to native code", model.name);
+                #[cfg(debug_assertions)]
+                eprintln!("[JIT] Model '{}' compiled to native code", model.name);
+                (Some(std::sync::Arc::new(native)), vec![0.0; num_vars])
+            }
+            None => {
+                log::debug!("[JIT] Model '{}' using interpreter", model.name);
+                #[cfg(debug_assertions)]
+                eprintln!("[JIT] Model '{}' using interpreter", model.name);
+                (None, vec![0.0; num_vars])
+            }
+        }
+    }
+
+    /// Check if this device is using native compiled code
+    ///
+    /// Returns true if native compilation succeeded and the device
+    /// will use native code for evaluation. Returns false if using
+    /// the VM interpreter.
+    #[cfg(feature = "native")]
+    pub fn is_using_native(&self) -> bool {
+        self.native_model.is_some()
+    }
+
+    /// Check if this device is using native compiled code
+    #[cfg(not(feature = "native"))]
+    pub fn is_using_native(&self) -> bool {
+        false
     }
 
     /// Get the number of terminals
@@ -223,7 +294,20 @@ impl VerilogADevice {
     /// Evaluate the device: compute branch current
     ///
     /// Returns the current for each branch equation.
-    pub fn evaluate(&self) -> Vec<f64> {
+    /// Uses native compiled code if available, otherwise falls back to VM interpreter.
+    pub fn evaluate(&mut self) -> Vec<f64> {
+        // Try native evaluation if available
+        #[cfg(feature = "native")]
+        if self.native_model.is_some() {
+            return self.evaluate_native();
+        }
+
+        // Fall back to VM interpreter
+        self.evaluate_interpreter()
+    }
+
+    /// Evaluate using the bytecode VM interpreter
+    fn evaluate_interpreter(&self) -> Vec<f64> {
         let mut vm = Vm::new(&self.context);
         let mut currents = Vec::with_capacity(self.model.stamp_programs.len());
 
@@ -235,6 +319,37 @@ impl VerilogADevice {
         }
 
         currents
+    }
+
+    /// Evaluate using Cranelift JIT compiled code
+    #[cfg(feature = "native")]
+    fn evaluate_native(&mut self) -> Vec<f64> {
+        use crate::native::EvalContext;
+
+        let native = self.native_model.as_ref().unwrap();
+
+        // Build evaluation context
+        let ctx = EvalContext {
+            voltages: self.context.voltages.as_ptr(),
+            internal_voltages: self.context.internal_voltages.as_ptr(),
+            params: self.context.parameters.as_ptr(),
+            temperature: self.context.temperature,
+            time: self.context.time,
+            timestep: self.context.timestep,
+            state_prev: self.context.state_values_prev.as_ptr(),
+        };
+
+        // First, compute all variable assignments
+        native.evaluate_assignments(&ctx, &mut self.native_vars);
+
+        // Then evaluate each stamp program
+        let mut stamp_values = Vec::with_capacity(native.num_stamps);
+        for i in 0..native.num_stamps {
+            let value = native.evaluate_stamp(i, &ctx, &self.native_vars);
+            stamp_values.push(value);
+        }
+
+        stamp_values
     }
 
     /// Compute Jacobian entries
@@ -441,6 +556,8 @@ mod tests {
                 min: Some(0.0),
                 max: None,
             }],
+            num_variables: 0,
+            assignment_programs: vec![],
             stamp_programs: vec![StampProgram {
                 stamp_locations: vec![
                     StampLocation {
@@ -489,6 +606,8 @@ mod tests {
             num_terminals: 2,
             terminal_names: vec!["p".into(), "n".into()],
             parameters: vec![],
+            num_variables: 0,
+            assignment_programs: vec![],
             stamp_programs: vec![StampProgram {
                 stamp_locations: vec![StampLocation {
                     row: StampIndex::Terminal(0),
@@ -542,6 +661,8 @@ mod tests {
                 min: Some(0.0),
                 max: None,
             }],
+            num_variables: 0,
+            assignment_programs: vec![],
             stamp_programs: vec![StampProgram {
                 stamp_locations: vec![
                     StampLocation {
@@ -897,6 +1018,8 @@ mod tests {
                     max: None,
                 },
             ],
+            num_variables: 0,
+            assignment_programs: vec![],
             stamp_programs: vec![StampProgram {
                 stamp_locations: vec![],
                 value_program,

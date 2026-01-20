@@ -20,6 +20,15 @@ nom.workspace = true
 indexmap = "2.7"
 smol_str = "0.3"
 
+# Native compilation support (optional) - Cranelift JIT
+cranelift = { version = "0.115", optional = true }
+cranelift-jit = { version = "0.115", optional = true }
+cranelift-module = { version = "0.115", optional = true }
+cranelift-codegen = { version = "0.115", optional = true }
+cranelift-native = { version = "0.115", optional = true }
+
+[build-dependencies]
+
 [dev-dependencies]
 approx.workspace = true
 env_logger.workspace = true
@@ -28,3 +37,5 @@ env_logger.workspace = true
 default = []
 # Enable Verilog-AMS mixed-signal support
 ams = []
+# Enable native JIT compilation via Cranelift
+native = ["cranelift", "cranelift-jit", "cranelift-module", "cranelift-codegen", "cranelift-native"]

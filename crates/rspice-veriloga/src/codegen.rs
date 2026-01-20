@@ -27,6 +27,10 @@ pub struct CompiledModel {
     pub terminal_names: Vec<SmolStr>,
     /// Parameter definitions
     pub parameters: Vec<CompiledParameter>,
+    /// Number of variables
+    pub num_variables: usize,
+    /// Variable assignment programs (executed in order before contributions)
+    pub assignment_programs: Vec<AssignmentProgram>,
     /// Compiled stamp programs for each contribution
     pub stamp_programs: Vec<StampProgram>,
     /// Number of internal nodes (if any)
@@ -53,6 +57,15 @@ pub struct StampProgram {
     pub value_program: BytecodeProgram,
     /// Jacobian programs (one per derivative)
     pub jacobian_programs: Vec<JacobianEntry>,
+}
+
+/// Assignment program for a variable
+#[derive(Debug, Clone)]
+pub struct AssignmentProgram {
+    /// Index of variable being assigned
+    pub var_index: usize,
+    /// The bytecode program to compute the value
+    pub program: BytecodeProgram,
 }
 
 /// Location to stamp in matrix
@@ -197,10 +210,21 @@ impl<'a> CodeGenerator<'a> {
                     max: p.max,
                 })
                 .collect(),
+            num_variables: ir.variables.len(),
+            assignment_programs: Vec::new(),
             stamp_programs: Vec::new(),
             internal_nodes: ir.internal_nodes.len(),
             branch_currents: 0,
         };
+
+        // Generate assignment programs (executed in order before contributions)
+        for assign in &ir.assignments {
+            let program = self.compile_expr(&assign.expr, ir)?;
+            model.assignment_programs.push(AssignmentProgram {
+                var_index: assign.var_index,
+                program,
+            });
+        }
 
         // Generate stamp programs for each equation
         for eq in &ir.equations {
@@ -713,6 +737,7 @@ mod tests {
                 max: None,
             }],
             variables: vec![],
+            assignments: vec![],
             equations: vec![],
             noise_sources: vec![],
         }

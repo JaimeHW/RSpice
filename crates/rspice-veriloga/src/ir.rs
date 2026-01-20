@@ -21,6 +21,8 @@ pub struct DeviceIR {
     pub parameters: Vec<ParamDef>,
     /// Internal variables (state)
     pub variables: Vec<VarDef>,
+    /// Variable assignments (in execution order)
+    pub assignments: Vec<VarAssignment>,
     /// Branch equations
     pub equations: Vec<BranchEquation>,
     /// Noise sources
@@ -55,6 +57,15 @@ pub struct ParamDef {
 pub struct VarDef {
     pub name: SmolStr,
     pub is_state: bool,
+}
+
+/// Variable assignment in IR form
+#[derive(Debug, Clone)]
+pub struct VarAssignment {
+    /// Index of variable being assigned
+    pub var_index: usize,
+    /// The expression to assign
+    pub expr: IrExpr,
 }
 
 /// Branch equation: represents I(p,n) <+ f(V, params)
@@ -187,6 +198,7 @@ impl DeviceIR {
             internal_nodes: Vec::new(),
             parameters: Vec::new(),
             variables: Vec::new(),
+            assignments: Vec::new(),
             equations: Vec::new(),
             noise_sources: Vec::new(),
         };
@@ -234,6 +246,16 @@ impl DeviceIR {
         // Create conversion context
         let ctx = ConversionContext::from_module(module);
         let converter = ExprConverter::new(&ctx);
+
+        // Convert assignments to IR (in order)
+        for assign in &module.assignments {
+            if let Ok(expr) = converter.convert(&assign.expression) {
+                ir.assignments.push(VarAssignment {
+                    var_index: assign.var_index,
+                    expr,
+                });
+            }
+        }
 
         // Convert contributions to equations
         for contrib in &module.contributions {

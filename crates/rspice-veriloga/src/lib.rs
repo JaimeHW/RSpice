@@ -71,6 +71,10 @@ pub mod vm;
 /// Device interface for circuit simulation
 pub mod device;
 
+/// Native code generation and compilation (feature-gated)
+#[cfg(feature = "native")]
+pub mod native;
+
 /// End-to-end integration tests
 #[cfg(test)]
 mod integration_tests;
