@@ -146,6 +146,50 @@ fn get_type_fields(
 
         // Ground - minimal editing
         ComponentType::Ground => ("(no value)", "", "", "", false),
+
+        // XSPICE Analog Behavioral
+        ComponentType::XspiceGain => ("Gain", "1, 10, 100", "Parameters", "gain=1", true),
+        ComponentType::XspiceSummer => ("(no value)", "", "Parameters", "", false),
+        ComponentType::XspiceMultiplier => ("(no value)", "", "Parameters", "", false),
+        ComponentType::XspiceDivider => ("(no value)", "", "Parameters", "", false),
+        ComponentType::XspiceLimiter => (
+            "Limits",
+            "-1, 1",
+            "Parameters",
+            "out_lower_limit=-1 out_upper_limit=1",
+            true,
+        ),
+        ComponentType::XspiceIntegrator => ("Initial Condition", "0", "Parameters", "ic=0", true),
+        ComponentType::XspiceDifferentiator => ("(no value)", "", "Parameters", "", false),
+        // XSPICE Digital Gates
+        ComponentType::XspiceInverter | ComponentType::XspiceBuffer => {
+            ("(no value)", "", "Parameters", "", false)
+        }
+        ComponentType::XspiceAndGate
+        | ComponentType::XspiceOrGate
+        | ComponentType::XspiceNandGate
+        | ComponentType::XspiceNorGate
+        | ComponentType::XspiceXorGate => ("(no value)", "", "Parameters", "", false),
+        ComponentType::XspiceTristate => ("(no value)", "", "Parameters", "", false),
+        // XSPICE Sequential
+        ComponentType::XspiceDFlipFlop
+        | ComponentType::XspiceJkFlipFlop
+        | ComponentType::XspiceSrLatch => ("(no value)", "", "Parameters", "", false),
+        // XSPICE Bridges
+        ComponentType::XspiceAdcBridge => (
+            "Thresholds",
+            "0.5, 2.5",
+            "Parameters",
+            "in_low=0.5 in_high=2.5",
+            true,
+        ),
+        ComponentType::XspiceDacBridge => (
+            "Output Levels",
+            "0, 5",
+            "Parameters",
+            "out_low=0 out_high=5",
+            true,
+        ),
     }
 }
 
@@ -173,6 +217,27 @@ fn get_type_name(comp_type: ComponentType) -> &'static str {
         ComponentType::Ccvs => "CCVS (H)",
         ComponentType::Cccs => "CCCS (F)",
         ComponentType::Ground => "Ground",
+        // XSPICE types use display_name() method
+        ComponentType::XspiceGain => "Gain Block",
+        ComponentType::XspiceSummer => "Summer",
+        ComponentType::XspiceMultiplier => "Multiplier",
+        ComponentType::XspiceDivider => "Divider",
+        ComponentType::XspiceLimiter => "Limiter",
+        ComponentType::XspiceIntegrator => "Integrator",
+        ComponentType::XspiceDifferentiator => "Differentiator",
+        ComponentType::XspiceInverter => "Inverter",
+        ComponentType::XspiceBuffer => "Buffer",
+        ComponentType::XspiceAndGate => "AND Gate",
+        ComponentType::XspiceOrGate => "OR Gate",
+        ComponentType::XspiceNandGate => "NAND Gate",
+        ComponentType::XspiceNorGate => "NOR Gate",
+        ComponentType::XspiceXorGate => "XOR Gate",
+        ComponentType::XspiceTristate => "Tri-State Buffer",
+        ComponentType::XspiceDFlipFlop => "D Flip-Flop",
+        ComponentType::XspiceJkFlipFlop => "JK Flip-Flop",
+        ComponentType::XspiceSrLatch => "SR Latch",
+        ComponentType::XspiceAdcBridge => "ADC Bridge",
+        ComponentType::XspiceDacBridge => "DAC Bridge",
     }
 }
 

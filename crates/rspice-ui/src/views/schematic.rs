@@ -272,15 +272,27 @@ pub fn Schematic() -> Element {
                             match evt.key() {
                                 Key::Character(c) if c == "z" || c == "Z" => {
                                     if history.read().can_undo() {
+                                        // Preserve current pan/zoom (not part of undo history)
+                                        let current_pan = schematic.read().pan;
+                                        let current_zoom = schematic.read().zoom;
                                         history.write().undo();
-                                        schematic.set(history.read().current().clone());
+                                        let mut restored = history.read().current().clone();
+                                        restored.pan = current_pan;
+                                        restored.zoom = current_zoom;
+                                        schematic.set(restored);
                                     }
                                     return;
                                 }
                                 Key::Character(c) if c == "y" || c == "Y" => {
                                     if history.read().can_redo() {
+                                        // Preserve current pan/zoom (not part of undo history)
+                                        let current_pan = schematic.read().pan;
+                                        let current_zoom = schematic.read().zoom;
                                         history.write().redo();
-                                        schematic.set(history.read().current().clone());
+                                        let mut restored = history.read().current().clone();
+                                        restored.pan = current_pan;
+                                        restored.zoom = current_zoom;
+                                        schematic.set(restored);
                                     }
                                     return;
                                 }
@@ -1328,14 +1340,26 @@ pub fn Schematic() -> Element {
                             match action {
                                 MenuAction::Undo => {
                                     if history.read().can_undo() {
+                                        // Preserve current pan/zoom (not part of undo history)
+                                        let current_pan = schematic.read().pan;
+                                        let current_zoom = schematic.read().zoom;
                                         history.write().undo();
-                                        schematic.set(history.read().current().clone());
+                                        let mut restored = history.read().current().clone();
+                                        restored.pan = current_pan;
+                                        restored.zoom = current_zoom;
+                                        schematic.set(restored);
                                     }
                                 }
                                 MenuAction::Redo => {
                                     if history.read().can_redo() {
+                                        // Preserve current pan/zoom (not part of undo history)
+                                        let current_pan = schematic.read().pan;
+                                        let current_zoom = schematic.read().zoom;
                                         history.write().redo();
-                                        schematic.set(history.read().current().clone());
+                                        let mut restored = history.read().current().clone();
+                                        restored.pan = current_pan;
+                                        restored.zoom = current_zoom;
+                                        schematic.set(restored);
                                     }
                                 }
                                 MenuAction::Delete => {
@@ -1630,6 +1654,38 @@ fn symbol_path(k: ComponentType) -> &'static str {
         // Controlled sources: diamond shape with control/output terminals
         ComponentType::Vcvs | ComponentType::Vccs | ComponentType::Ccvs | ComponentType::Cccs => 
             "M0-15 L12 0 L0 15 L-12 0 Z M-20-10 L-12-5 M-20 10 L-12 5 M12-5 L20-10 M12 5 L20 10",
+        // XSPICE Analog Behavioral: rectangles with labels
+        ComponentType::XspiceGain | ComponentType::XspiceLimiter | ComponentType::XspiceIntegrator | ComponentType::XspiceDifferentiator =>
+            "M-15-12 L15-12 L15 12 L-15 12 Z M-20 0 L-15 0 M15 0 L20 0",
+        ComponentType::XspiceSummer =>
+            "M-10-15 L15 0 L-10 15 Z M-20-10 L-10-5 M-20 10 L-10 5 M15 0 L20 0",
+        ComponentType::XspiceMultiplier | ComponentType::XspiceDivider =>
+            "M-12-12 L12-12 L12 12 L-12 12 Z M-20-10 L-12-6 M-20 10 L-12 6 M12 0 L20 0",
+        // XSPICE Digital Gates - leads aligned to grid (±10 pixels = ±1 grid unit)
+        ComponentType::XspiceInverter =>
+            "M-10-12 L10 0 L-10 12 Z M12 0 m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0-6 0 M-20 0 L-10 0 M15 0 L20 0",
+        ComponentType::XspiceBuffer =>
+            "M-10-12 L10 0 L-10 12 Z M-20 0 L-10 0 M10 0 L20 0",
+        ComponentType::XspiceAndGate =>
+            "M-10-12 L-10 12 L2 12 A12 12 0 0 0 2-12 Z M-20-10 L-10-10 M-20 10 L-10 10 M14 0 L20 0",
+        ComponentType::XspiceOrGate =>
+            "M-12-12 Q-6 0-12 12 Q0 10 6 12 Q14 0 6-12 Q0-10-12-12 M-20-10 L-9-10 M-20 10 L-9 10 M14 0 L20 0",
+        ComponentType::XspiceNandGate =>
+            "M-10-12 L-10 12 L2 12 A12 12 0 0 0 2-12 Z M14 0 m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0-6 0 M-20-10 L-10-10 M-20 10 L-10 10 M17 0 L20 0",
+        ComponentType::XspiceNorGate =>
+            "M-12-12 Q-6 0-12 12 Q0 10 6 12 Q14 0 6-12 Q0-10-12-12 M14 0 m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0-6 0 M-20-10 L-9-10 M-20 10 L-9 10 M17 0 L20 0",
+        ComponentType::XspiceXorGate =>
+            "M-12-12 Q-6 0-12 12 Q0 10 6 12 Q14 0 6-12 Q0-10-12-12 M-15-12 Q-9 0-15 12 M-20-10 L-10-10 M-20 10 L-10 10 M14 0 L20 0",
+        ComponentType::XspiceTristate =>
+            "M-10-12 L10 0 L-10 12 Z M-20 0 L-10 0 M10 0 L20 0 M0-20 L0-6",
+        // XSPICE Sequential: rectangles with ports aligned to grid
+        ComponentType::XspiceDFlipFlop | ComponentType::XspiceSrLatch =>
+            "M-15-15 L15-15 L15 15 L-15 15 Z M-20-10 L-15-10 M-20 10 L-15 10 M15-10 L20-10 M15 10 L20 10 M-15 7 L-12 10 L-15 13",
+        ComponentType::XspiceJkFlipFlop =>
+            "M-15-20 L15-20 L15 20 L-15 20 Z M-20-10 L-15-10 M-20 0 L-15 0 M-20 10 L-15 10 M15-10 L20-10 M15 10 L20 10 M-15-3 L-12 0 L-15 3",
+        // XSPICE Bridges: rectangles with arrow
+        ComponentType::XspiceAdcBridge | ComponentType::XspiceDacBridge =>
+            "M-15-12 L15-12 L15 12 L-15 12 Z M-20 0 L-15 0 M15 0 L20 0 M-6 0 L6 0 M3-3 L6 0 L3 3",
     }
 }
 

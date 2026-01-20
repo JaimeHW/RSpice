@@ -421,6 +421,495 @@ pub const CCVS: Symbol = VCVS;
 pub const CCCS: Symbol = VCCS;
 
 // =============================================================================
+// XSPICE Symbol Definitions
+// =============================================================================
+
+/// XSPICE Gain Block (rectangle with ×k label)
+pub const XSPICE_GAIN: Symbol = Symbol {
+    path: "M -15 -12 L 15 -12 L 15 12 L -15 12 Z M -20 0 L -15 0 M 15 0 L 20 0",
+    size: (40, 28),
+    fill: "",
+    terminals: &[
+        TerminalDef {
+            name: "in",
+            x: -20,
+            y: 0,
+        },
+        TerminalDef {
+            name: "out",
+            x: 20,
+            y: 0,
+        },
+    ],
+};
+
+/// XSPICE Summer (triangle with Σ)
+pub const XSPICE_SUMMER: Symbol = Symbol {
+    path: "M -10 -15 L 15 0 L -10 15 Z M -20 -10 L -10 -5 M -20 10 L -10 5 M 15 0 L 20 0",
+    size: (40, 34),
+    fill: "",
+    terminals: &[
+        TerminalDef {
+            name: "in1",
+            x: -20,
+            y: -10,
+        },
+        TerminalDef {
+            name: "in2",
+            x: -20,
+            y: 10,
+        },
+        TerminalDef {
+            name: "out",
+            x: 20,
+            y: 0,
+        },
+    ],
+};
+
+/// XSPICE Multiplier (rectangle with × symbol)
+pub const XSPICE_MULTIPLIER: Symbol = Symbol {
+    path:
+        "M -12 -12 L 12 -12 L 12 12 L -12 12 Z M -20 -10 L -12 -5 M -20 10 L -12 5 M 12 0 L 20 0 \
+           M -4 -4 L 4 4 M -4 4 L 4 -4",
+    size: (40, 28),
+    fill: "",
+    terminals: &[
+        TerminalDef {
+            name: "in1",
+            x: -20,
+            y: -10,
+        },
+        TerminalDef {
+            name: "in2",
+            x: -20,
+            y: 10,
+        },
+        TerminalDef {
+            name: "out",
+            x: 20,
+            y: 0,
+        },
+    ],
+};
+
+/// XSPICE Divider (rectangle with ÷ symbol)
+pub const XSPICE_DIVIDER: Symbol = Symbol {
+    path:
+        "M -12 -12 L 12 -12 L 12 12 L -12 12 Z M -20 -10 L -12 -5 M -20 10 L -12 5 M 12 0 L 20 0 \
+           M -5 0 L 5 0 M 0 -4 m -1.5 0 a 1.5 1.5 0 1 0 3 0 a 1.5 1.5 0 1 0 -3 0 \
+           M 0 4 m -1.5 0 a 1.5 1.5 0 1 0 3 0 a 1.5 1.5 0 1 0 -3 0",
+    size: (40, 28),
+    fill: "",
+    terminals: &[
+        TerminalDef {
+            name: "in1",
+            x: -20,
+            y: -10,
+        },
+        TerminalDef {
+            name: "in2",
+            x: -20,
+            y: 10,
+        },
+        TerminalDef {
+            name: "out",
+            x: 20,
+            y: 0,
+        },
+    ],
+};
+
+/// XSPICE Limiter (rectangle with clipped sine)
+pub const XSPICE_LIMITER: Symbol = Symbol {
+    path: "M -15 -12 L 15 -12 L 15 12 L -15 12 Z M -20 0 L -15 0 M 15 0 L 20 0 \
+           M -8 4 L -4 4 Q 0 -8 4 4 L 8 4",
+    size: (40, 28),
+    fill: "",
+    terminals: &[
+        TerminalDef {
+            name: "in",
+            x: -20,
+            y: 0,
+        },
+        TerminalDef {
+            name: "out",
+            x: 20,
+            y: 0,
+        },
+    ],
+};
+
+/// XSPICE Integrator (rectangle with ∫ symbol)
+pub const XSPICE_INTEGRATOR: Symbol = Symbol {
+    path: "M -15 -12 L 15 -12 L 15 12 L -15 12 Z M -20 0 L -15 0 M 15 0 L 20 0 \
+           M 2 -8 C -4 -8 -4 0 0 0 C 4 0 4 8 -2 8",
+    size: (40, 28),
+    fill: "",
+    terminals: &[
+        TerminalDef {
+            name: "in",
+            x: -20,
+            y: 0,
+        },
+        TerminalDef {
+            name: "out",
+            x: 20,
+            y: 0,
+        },
+    ],
+};
+
+/// XSPICE Differentiator (rectangle with d/dt)
+pub const XSPICE_DIFFERENTIATOR: Symbol = Symbol {
+    path: "M -15 -12 L 15 -12 L 15 12 L -15 12 Z M -20 0 L -15 0 M 15 0 L 20 0",
+    size: (40, 28),
+    fill: "",
+    terminals: &[
+        TerminalDef {
+            name: "in",
+            x: -20,
+            y: 0,
+        },
+        TerminalDef {
+            name: "out",
+            x: 20,
+            y: 0,
+        },
+    ],
+};
+
+/// XSPICE Inverter (NOT gate - triangle with bubble)
+pub const XSPICE_INVERTER: Symbol = Symbol {
+    path: "M -10 -12 L 10 0 L -10 12 Z M 12 0 m -3 0 a 3 3 0 1 0 6 0 a 3 3 0 1 0 -6 0 \
+           M -20 0 L -10 0 M 15 0 L 20 0",
+    size: (40, 28),
+    fill: "",
+    terminals: &[
+        TerminalDef {
+            name: "in",
+            x: -20,
+            y: 0,
+        },
+        TerminalDef {
+            name: "out",
+            x: 20,
+            y: 0,
+        },
+    ],
+};
+
+/// XSPICE Buffer (triangle)
+pub const XSPICE_BUFFER: Symbol = Symbol {
+    path: "M -10 -12 L 10 0 L -10 12 Z M -20 0 L -10 0 M 10 0 L 20 0",
+    size: (40, 28),
+    fill: "",
+    terminals: &[
+        TerminalDef {
+            name: "in",
+            x: -20,
+            y: 0,
+        },
+        TerminalDef {
+            name: "out",
+            x: 20,
+            y: 0,
+        },
+    ],
+};
+
+/// XSPICE AND Gate (flat back, curved front)
+pub const XSPICE_AND_GATE: Symbol = Symbol {
+    path: "M -10 -12 L -10 12 L 2 12 A 12 12 0 0 0 2 -12 Z \
+           M -20 -8 L -10 -8 M -20 8 L -10 8 M 14 0 L 20 0",
+    size: (40, 28),
+    fill: "",
+    terminals: &[
+        TerminalDef {
+            name: "a",
+            x: -20,
+            y: -8,
+        },
+        TerminalDef {
+            name: "b",
+            x: -20,
+            y: 8,
+        },
+        TerminalDef {
+            name: "out",
+            x: 20,
+            y: 0,
+        },
+    ],
+};
+
+/// XSPICE OR Gate (curved back and front)
+pub const XSPICE_OR_GATE: Symbol = Symbol {
+    path: "M -12 -12 Q -6 0 -12 12 Q 0 10 6 12 Q 14 0 6 -12 Q 0 -10 -12 -12 \
+           M -20 -8 L -8 -8 M -20 8 L -8 8 M 14 0 L 20 0",
+    size: (40, 28),
+    fill: "",
+    terminals: &[
+        TerminalDef {
+            name: "a",
+            x: -20,
+            y: -8,
+        },
+        TerminalDef {
+            name: "b",
+            x: -20,
+            y: 8,
+        },
+        TerminalDef {
+            name: "out",
+            x: 20,
+            y: 0,
+        },
+    ],
+};
+
+/// XSPICE NAND Gate (AND with bubble)
+pub const XSPICE_NAND_GATE: Symbol = Symbol {
+    path: "M -10 -12 L -10 12 L 2 12 A 12 12 0 0 0 2 -12 Z \
+           M 14 0 m -3 0 a 3 3 0 1 0 6 0 a 3 3 0 1 0 -6 0 \
+           M -20 -8 L -10 -8 M -20 8 L -10 8 M 17 0 L 20 0",
+    size: (40, 28),
+    fill: "",
+    terminals: &[
+        TerminalDef {
+            name: "a",
+            x: -20,
+            y: -8,
+        },
+        TerminalDef {
+            name: "b",
+            x: -20,
+            y: 8,
+        },
+        TerminalDef {
+            name: "out",
+            x: 20,
+            y: 0,
+        },
+    ],
+};
+
+/// XSPICE NOR Gate (OR with bubble)
+pub const XSPICE_NOR_GATE: Symbol = Symbol {
+    path: "M -12 -12 Q -6 0 -12 12 Q 0 10 6 12 Q 14 0 6 -12 Q 0 -10 -12 -12 \
+           M 14 0 m -3 0 a 3 3 0 1 0 6 0 a 3 3 0 1 0 -6 0 \
+           M -20 -8 L -8 -8 M -20 8 L -8 8 M 17 0 L 20 0",
+    size: (40, 28),
+    fill: "",
+    terminals: &[
+        TerminalDef {
+            name: "a",
+            x: -20,
+            y: -8,
+        },
+        TerminalDef {
+            name: "b",
+            x: -20,
+            y: 8,
+        },
+        TerminalDef {
+            name: "out",
+            x: 20,
+            y: 0,
+        },
+    ],
+};
+
+/// XSPICE XOR Gate (OR with extra curve at input)
+pub const XSPICE_XOR_GATE: Symbol = Symbol {
+    path: "M -12 -12 Q -6 0 -12 12 Q 0 10 6 12 Q 14 0 6 -12 Q 0 -10 -12 -12 \
+           M -15 -12 Q -9 0 -15 12 \
+           M -20 -8 L -10 -8 M -20 8 L -10 8 M 14 0 L 20 0",
+    size: (40, 28),
+    fill: "",
+    terminals: &[
+        TerminalDef {
+            name: "a",
+            x: -20,
+            y: -8,
+        },
+        TerminalDef {
+            name: "b",
+            x: -20,
+            y: 8,
+        },
+        TerminalDef {
+            name: "out",
+            x: 20,
+            y: 0,
+        },
+    ],
+};
+
+/// XSPICE Tri-State Buffer (triangle with enable)
+pub const XSPICE_TRISTATE: Symbol = Symbol {
+    path: "M -10 -12 L 10 0 L -10 12 Z M -20 0 L -10 0 M 10 0 L 20 0 \
+           M 0 -20 L 0 -6",
+    size: (40, 48),
+    fill: "",
+    terminals: &[
+        TerminalDef {
+            name: "in",
+            x: -20,
+            y: 0,
+        },
+        TerminalDef {
+            name: "en",
+            x: 0,
+            y: -20,
+        },
+        TerminalDef {
+            name: "out",
+            x: 20,
+            y: 0,
+        },
+    ],
+};
+
+/// XSPICE D Flip-Flop (rectangle with D, CLK, Q)
+pub const XSPICE_D_FLIPFLOP: Symbol = Symbol {
+    path: "M -15 -18 L 15 -18 L 15 18 L -15 18 Z \
+           M -20 -10 L -15 -10 M -20 10 L -15 10 M 15 -10 L 20 -10 M 15 10 L 20 10 \
+           M -15 7 L -12 10 L -15 13",
+    size: (40, 44),
+    fill: "",
+    terminals: &[
+        TerminalDef {
+            name: "d",
+            x: -20,
+            y: -10,
+        },
+        TerminalDef {
+            name: "clk",
+            x: -20,
+            y: 10,
+        },
+        TerminalDef {
+            name: "q",
+            x: 20,
+            y: -10,
+        },
+        TerminalDef {
+            name: "qbar",
+            x: 20,
+            y: 10,
+        },
+    ],
+};
+
+/// XSPICE JK Flip-Flop (rectangle with J, K, CLK, Q)
+pub const XSPICE_JK_FLIPFLOP: Symbol = Symbol {
+    path: "M -15 -20 L 15 -20 L 15 20 L -15 20 Z \
+           M -20 -12 L -15 -12 M -20 0 L -15 0 M -20 12 L -15 12 \
+           M 15 -10 L 20 -10 M 15 10 L 20 10 \
+           M -15 -3 L -12 0 L -15 3",
+    size: (40, 48),
+    fill: "",
+    terminals: &[
+        TerminalDef {
+            name: "j",
+            x: -20,
+            y: -12,
+        },
+        TerminalDef {
+            name: "clk",
+            x: -20,
+            y: 0,
+        },
+        TerminalDef {
+            name: "k",
+            x: -20,
+            y: 12,
+        },
+        TerminalDef {
+            name: "q",
+            x: 20,
+            y: -10,
+        },
+        TerminalDef {
+            name: "qbar",
+            x: 20,
+            y: 10,
+        },
+    ],
+};
+
+/// XSPICE SR Latch (rectangle with S, R, Q)
+pub const XSPICE_SR_LATCH: Symbol = Symbol {
+    path: "M -15 -15 L 15 -15 L 15 15 L -15 15 Z \
+           M -20 -8 L -15 -8 M -20 8 L -15 8 M 15 -8 L 20 -8 M 15 8 L 20 8",
+    size: (40, 36),
+    fill: "",
+    terminals: &[
+        TerminalDef {
+            name: "s",
+            x: -20,
+            y: -8,
+        },
+        TerminalDef {
+            name: "r",
+            x: -20,
+            y: 8,
+        },
+        TerminalDef {
+            name: "q",
+            x: 20,
+            y: -8,
+        },
+        TerminalDef {
+            name: "qbar",
+            x: 20,
+            y: 8,
+        },
+    ],
+};
+
+/// XSPICE ADC Bridge (rectangle with A→D label)
+pub const XSPICE_ADC_BRIDGE: Symbol = Symbol {
+    path: "M -15 -12 L 15 -12 L 15 12 L -15 12 Z M -20 0 L -15 0 M 15 0 L 20 0 \
+           M -6 0 L 6 0 M 3 -3 L 6 0 L 3 3",
+    size: (40, 28),
+    fill: "",
+    terminals: &[
+        TerminalDef {
+            name: "in",
+            x: -20,
+            y: 0,
+        },
+        TerminalDef {
+            name: "out",
+            x: 20,
+            y: 0,
+        },
+    ],
+};
+
+/// XSPICE DAC Bridge (rectangle with D→A label)
+pub const XSPICE_DAC_BRIDGE: Symbol = Symbol {
+    path: "M -15 -12 L 15 -12 L 15 12 L -15 12 Z M -20 0 L -15 0 M 15 0 L 20 0 \
+           M -6 0 L 6 0 M 3 -3 L 6 0 L 3 3",
+    size: (40, 28),
+    fill: "",
+    terminals: &[
+        TerminalDef {
+            name: "in",
+            x: -20,
+            y: 0,
+        },
+        TerminalDef {
+            name: "out",
+            x: 20,
+            y: 0,
+        },
+    ],
+};
+
+// =============================================================================
 // Symbol Lookup
 // =============================================================================
 
@@ -450,5 +939,29 @@ pub fn get_symbol(kind: ComponentType) -> &'static Symbol {
         ComponentType::Vccs => &VCCS,
         ComponentType::Ccvs => &CCVS,
         ComponentType::Cccs => &CCCS,
+        // XSPICE Analog Behavioral
+        ComponentType::XspiceGain => &XSPICE_GAIN,
+        ComponentType::XspiceSummer => &XSPICE_SUMMER,
+        ComponentType::XspiceMultiplier => &XSPICE_MULTIPLIER,
+        ComponentType::XspiceDivider => &XSPICE_DIVIDER,
+        ComponentType::XspiceLimiter => &XSPICE_LIMITER,
+        ComponentType::XspiceIntegrator => &XSPICE_INTEGRATOR,
+        ComponentType::XspiceDifferentiator => &XSPICE_DIFFERENTIATOR,
+        // XSPICE Digital Gates
+        ComponentType::XspiceInverter => &XSPICE_INVERTER,
+        ComponentType::XspiceBuffer => &XSPICE_BUFFER,
+        ComponentType::XspiceAndGate => &XSPICE_AND_GATE,
+        ComponentType::XspiceOrGate => &XSPICE_OR_GATE,
+        ComponentType::XspiceNandGate => &XSPICE_NAND_GATE,
+        ComponentType::XspiceNorGate => &XSPICE_NOR_GATE,
+        ComponentType::XspiceXorGate => &XSPICE_XOR_GATE,
+        ComponentType::XspiceTristate => &XSPICE_TRISTATE,
+        // XSPICE Sequential
+        ComponentType::XspiceDFlipFlop => &XSPICE_D_FLIPFLOP,
+        ComponentType::XspiceJkFlipFlop => &XSPICE_JK_FLIPFLOP,
+        ComponentType::XspiceSrLatch => &XSPICE_SR_LATCH,
+        // XSPICE Bridges
+        ComponentType::XspiceAdcBridge => &XSPICE_ADC_BRIDGE,
+        ComponentType::XspiceDacBridge => &XSPICE_DAC_BRIDGE,
     }
 }

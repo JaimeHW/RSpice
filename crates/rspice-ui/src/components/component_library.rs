@@ -20,6 +20,9 @@ pub enum ComponentCategory {
     Semiconductors,
     Sources,
     ControlledSources,
+    XspiceAnalog,
+    XspiceDigital,
+    XspiceBridges,
     VerilogA,
 }
 
@@ -30,6 +33,9 @@ impl ComponentCategory {
             ComponentCategory::Semiconductors => "Semiconductors",
             ComponentCategory::Sources => "Sources",
             ComponentCategory::ControlledSources => "Controlled Sources",
+            ComponentCategory::XspiceAnalog => "XSPICE Analog",
+            ComponentCategory::XspiceDigital => "XSPICE Digital",
+            ComponentCategory::XspiceBridges => "XSPICE Bridges",
             ComponentCategory::VerilogA => "Verilog-A Models",
         }
     }
@@ -40,6 +46,9 @@ impl ComponentCategory {
             ComponentCategory::Semiconductors => "",
             ComponentCategory::Sources => "",
             ComponentCategory::ControlledSources => "",
+            ComponentCategory::XspiceAnalog => "ƒ",
+            ComponentCategory::XspiceDigital => "⚡",
+            ComponentCategory::XspiceBridges => "↔",
             ComponentCategory::VerilogA => "VA",
         }
     }
@@ -75,6 +84,32 @@ impl ComponentCategory {
                 ComponentType::Ccvs,
                 ComponentType::Cccs,
             ],
+            ComponentCategory::XspiceAnalog => &[
+                ComponentType::XspiceGain,
+                ComponentType::XspiceSummer,
+                ComponentType::XspiceMultiplier,
+                ComponentType::XspiceDivider,
+                ComponentType::XspiceLimiter,
+                ComponentType::XspiceIntegrator,
+                ComponentType::XspiceDifferentiator,
+            ],
+            ComponentCategory::XspiceDigital => &[
+                ComponentType::XspiceInverter,
+                ComponentType::XspiceBuffer,
+                ComponentType::XspiceAndGate,
+                ComponentType::XspiceOrGate,
+                ComponentType::XspiceNandGate,
+                ComponentType::XspiceNorGate,
+                ComponentType::XspiceXorGate,
+                ComponentType::XspiceTristate,
+                ComponentType::XspiceDFlipFlop,
+                ComponentType::XspiceJkFlipFlop,
+                ComponentType::XspiceSrLatch,
+            ],
+            ComponentCategory::XspiceBridges => &[
+                ComponentType::XspiceAdcBridge,
+                ComponentType::XspiceDacBridge,
+            ],
             ComponentCategory::VerilogA => &[], // VA models are dynamically loaded
         }
     }
@@ -105,6 +140,30 @@ fn component_info(kind: ComponentType) -> (&'static str, &'static str, &'static 
         ComponentType::Ccvs => ("CCVS", "H - Current-Controlled Voltage Source", ""),
         ComponentType::Cccs => ("CCCS", "F - Current-Controlled Current Source", ""),
         ComponentType::Ground => ("Ground", "0 - Ground reference", "G"),
+        // XSPICE Analog Behavioral
+        ComponentType::XspiceGain => ("Gain", "A - XSPICE Gain Block", ""),
+        ComponentType::XspiceSummer => ("Summer", "A - XSPICE Summing Block", ""),
+        ComponentType::XspiceMultiplier => ("Multiplier", "A - XSPICE Multiplier", ""),
+        ComponentType::XspiceDivider => ("Divider", "A - XSPICE Divider", ""),
+        ComponentType::XspiceLimiter => ("Limiter", "A - XSPICE Hard Limiter", ""),
+        ComponentType::XspiceIntegrator => ("Integrator", "A - XSPICE Integrator", ""),
+        ComponentType::XspiceDifferentiator => ("Differentiator", "A - XSPICE Differentiator", ""),
+        // XSPICE Digital Gates
+        ComponentType::XspiceInverter => ("Inverter", "A - Digital Inverter", ""),
+        ComponentType::XspiceBuffer => ("Buffer", "A - Digital Buffer", ""),
+        ComponentType::XspiceAndGate => ("AND Gate", "A - 2-Input AND Gate", ""),
+        ComponentType::XspiceOrGate => ("OR Gate", "A - 2-Input OR Gate", ""),
+        ComponentType::XspiceNandGate => ("NAND Gate", "A - 2-Input NAND Gate", ""),
+        ComponentType::XspiceNorGate => ("NOR Gate", "A - 2-Input NOR Gate", ""),
+        ComponentType::XspiceXorGate => ("XOR Gate", "A - 2-Input XOR Gate", ""),
+        ComponentType::XspiceTristate => ("Tri-State", "A - Tri-State Buffer", ""),
+        // XSPICE Sequential
+        ComponentType::XspiceDFlipFlop => ("D Flip-Flop", "A - D-Type Flip-Flop", ""),
+        ComponentType::XspiceJkFlipFlop => ("JK Flip-Flop", "A - JK-Type Flip-Flop", ""),
+        ComponentType::XspiceSrLatch => ("SR Latch", "A - SR Latch", ""),
+        // XSPICE Bridges
+        ComponentType::XspiceAdcBridge => ("ADC Bridge", "A - Analog to Digital Bridge", ""),
+        ComponentType::XspiceDacBridge => ("DAC Bridge", "A - Digital to Analog Bridge", ""),
     }
 }
 
@@ -128,8 +187,8 @@ pub fn ComponentLibrary(props: ComponentLibraryProps) -> Element {
     // Search filter state
     let mut search = use_signal(String::new);
 
-    // Expanded category state: [Passives, Semiconductors, Sources, ControlledSources]
-    let mut expanded = use_signal(|| vec![true, true, true, true]);
+    // Expanded category state: [Passives, Semiconductors, Sources, ControlledSources, XspiceAnalog, XspiceDigital, XspiceBridges]
+    let mut expanded = use_signal(|| vec![true, true, true, true, false, false, false]);
 
     // Library model categories expanded state (dynamically sized based on available model types)
     let lib_manager = library_manager.read();
@@ -150,6 +209,9 @@ pub fn ComponentLibrary(props: ComponentLibraryProps) -> Element {
         ComponentCategory::Semiconductors,
         ComponentCategory::Sources,
         ComponentCategory::ControlledSources,
+        ComponentCategory::XspiceAnalog,
+        ComponentCategory::XspiceDigital,
+        ComponentCategory::XspiceBridges,
     ];
 
     rsx! {
