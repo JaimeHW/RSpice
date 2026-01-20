@@ -9,7 +9,9 @@ use crate::Value;
 use crate::device::behavioral::BehavioralSources;
 use crate::device::{Bjt, Cccs, Ccvs, Diode, MatrixStamper, Mosfet, Vccs, Vcvs};
 use crate::solver::{CscIndex, StaticMatrix, TripletMatrix};
+use crate::xspice::{CodeModelRegistry, XspiceInstance};
 use std::collections::HashMap;
+use std::sync::Arc;
 use thiserror::Error;
 
 /// Node identifier (0 = ground, always)
@@ -918,6 +920,12 @@ pub struct CircuitData {
     // Behavioral sources (expression-based B-elements)
     pub behavioral_sources: BehavioralSources,
 
+    // XSPICE code model instances
+    /// XSPICE instance storage for code model evaluation
+    pub xspice_instances: Vec<XspiceInstance>,
+    /// XSPICE code model registry (shared across instances)
+    pub xspice_registry: Arc<CodeModelRegistry>,
+
     // Verilog-A devices (feature-gated)
     #[cfg(feature = "veriloga")]
     pub veriloga_devices: crate::device::veriloga::VerilogADevices,
@@ -957,6 +965,9 @@ impl CircuitData {
             tlines: Vec::new(),
             couplings: Vec::new(),
             behavioral_sources: BehavioralSources::new(),
+            // XSPICE instances
+            xspice_instances: Vec::new(),
+            xspice_registry: Arc::new(CodeModelRegistry::with_builtins()),
             // Verilog-A devices
             #[cfg(feature = "veriloga")]
             veriloga_devices: crate::device::veriloga::VerilogADevices::new(),
@@ -1367,6 +1378,131 @@ impl CircuitData {
         self.diodes.all_converged(tolerance)
             && self.bjts.all_converged(tolerance)
             && self.mosfets.all_converged(tolerance)
+    }
+
+    //=========================================================================
+    // XSPICE Code Model Interface
+    //=========================================================================
+
+    /// Check if circuit has any XSPICE code model instances
+    #[inline]
+    pub fn has_xspice_devices(&self) -> bool {
+        !self.xspice_instances.is_empty()
+    }
+
+    /// Evaluate all XSPICE code model instances
+    ///
+    /// This calls each XspiceInstance::evaluate() with the current simulation
+    /// state, updating internal context and computing output contributions.
+    ///
+    /// # Arguments
+    /// * `time` - Current simulation time
+    /// * `voltages` - Current node voltage solution
+    pub fn evaluate_xspice(&mut self, time: Value, voltages: &[Value]) {
+        use crate::xspice::AnalysisType;
+
+        for instance in &mut self.xspice_instances {
+            // First, collect input values (immutable borrow of connections)
+            let input_values: Vec<(usize, Value)> = instance
+                .connections()
+                .iter()
+                .enumerate()
+                .filter_map(|(port_idx, connection)| match connection {
+                    crate::xspice::PortConnection::Analog(node) => {
+                        let v = if *node == 0 {
+                            0.0
+                        } else {
+                            voltages.get(*node - 1).copied().unwrap_or(0.0)
+                        };
+                        Some((port_idx, v))
+                    }
+                    crate::xspice::PortConnection::Differential(pos, neg) => {
+                        let v_pos = if *pos == 0 {
+                            0.0
+                        } else {
+                            voltages.get(*pos - 1).copied().unwrap_or(0.0)
+                        };
+                        let v_neg = if *neg == 0 {
+                            0.0
+                        } else {
+                            voltages.get(*neg - 1).copied().unwrap_or(0.0)
+                        };
+                        Some((port_idx, v_pos - v_neg))
+                    }
+                    crate::xspice::PortConnection::Digital(_) => None,
+                    _ => None,
+                })
+                .collect();
+
+            // Now set input values (mutable borrow)
+            for (port_idx, v) in input_values {
+                instance.set_input_analog(port_idx, v);
+            }
+
+            // Evaluate the code model
+            let analysis = AnalysisType::Transient;
+            if let Err(e) = instance.evaluate(time, 0.0, analysis) {
+                log::warn!("XSPICE evaluation error for {}: {}", instance.name, e);
+            }
+        }
+    }
+
+    /// Stamp XSPICE analog contributions into matrix and RHS
+    ///
+    /// After evaluation, analog code models produce conductance and current
+    /// contributions that must be stamped into the MNA system.
+    pub fn stamp_xspice(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
+        for instance in &self.xspice_instances {
+            // Get contributions from each output port
+            for (port_idx, connection) in instance.connections().iter().enumerate() {
+                if let Some((conductance, current)) = instance.get_analog_contribution(port_idx) {
+                    match connection {
+                        crate::xspice::PortConnection::Analog(node) => {
+                            if *node > 0 {
+                                // Stamp diagonal conductance
+                                matrix.add(*node - 1, *node - 1, conductance);
+                                // Stamp RHS current
+                                rhs[*node - 1] += current;
+                            }
+                        }
+                        crate::xspice::PortConnection::Differential(pos, neg) => {
+                            // Stamp differential conductance
+                            if *pos > 0 {
+                                matrix.add(*pos - 1, *pos - 1, conductance);
+                                if *neg > 0 {
+                                    matrix.add(*pos - 1, *neg - 1, -conductance);
+                                }
+                                rhs[*pos - 1] += current;
+                            }
+                            if *neg > 0 {
+                                if *pos > 0 {
+                                    matrix.add(*neg - 1, *pos - 1, -conductance);
+                                }
+                                matrix.add(*neg - 1, *neg - 1, conductance);
+                                rhs[*neg - 1] -= current;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    /// Accept current timestep for all XSPICE instances
+    ///
+    /// Called after a successful timestep to commit state changes.
+    pub fn accept_xspice_timestep(&mut self) {
+        for instance in &mut self.xspice_instances {
+            instance.accept_timestep();
+        }
+    }
+
+    /// Check if all XSPICE instances have converged
+    pub fn xspice_converged(&self, tolerance: Value) -> bool {
+        self.xspice_instances
+            .iter()
+            .all(|inst| inst.is_converged(tolerance))
     }
 }
 

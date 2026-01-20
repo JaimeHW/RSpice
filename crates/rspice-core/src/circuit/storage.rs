@@ -1105,3 +1105,221 @@ impl Bjts {
         }
     }
 }
+
+//=============================================================================
+// Custom JFET Storage with SIMD Batch Support
+//=============================================================================
+
+use crate::device::Jfet;
+
+/// JFET storage for nonlinear Newton-Raphson iteration.
+///
+/// When compiled with the `simd` feature, maintains a batch representation
+/// for SIMD-accelerated evaluation.
+#[derive(Debug, Default)]
+pub struct Jfets {
+    /// Individual JFET devices
+    pub devices: Vec<Jfet>,
+
+    /// Batch representation for SIMD acceleration
+    #[cfg(feature = "simd")]
+    batch: Option<crate::device::batch_jfet::BatchJfets>,
+}
+
+impl Jfets {
+    #[inline]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[inline]
+    pub fn add(&mut self, device: Jfet) {
+        self.devices.push(device);
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.devices.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.devices.is_empty()
+    }
+
+    /// Update all devices from node voltages.
+    pub fn update_all(&mut self, voltages: &[Value]) {
+        #[cfg(feature = "simd")]
+        if let Some(ref mut batch) = self.batch {
+            batch.gather_voltages(voltages);
+            batch.evaluate();
+            return;
+        }
+
+        for d in &mut self.devices {
+            d.update(voltages);
+        }
+    }
+
+    /// Stamp all devices into matrix and RHS.
+    pub fn stamp_all(
+        &self,
+        matrix: &mut impl MatrixStamper,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
+        for d in &self.devices {
+            d.stamp_nonlinear(voltages, matrix, rhs);
+        }
+    }
+
+    /// Check if all devices have converged.
+    pub fn all_converged(&self, tolerance: Value) -> bool {
+        #[cfg(feature = "simd")]
+        if let Some(ref batch) = self.batch {
+            return batch.all_converged(tolerance);
+        }
+
+        self.devices.iter().all(|d| d.is_converged(tolerance))
+    }
+
+    /// Link all devices to the sparse matrix.
+    pub fn link_all(&mut self, matrix: &StaticMatrix) {
+        for d in &mut self.devices {
+            d.link(matrix);
+        }
+
+        #[cfg(feature = "simd")]
+        self.build_batch(matrix);
+    }
+
+    /// Build batch representation.
+    #[cfg(feature = "simd")]
+    fn build_batch(&mut self, matrix: &StaticMatrix) {
+        if self.devices.len() < 4 {
+            self.batch = None;
+            return;
+        }
+
+        let mut batch = crate::device::batch_jfet::BatchJfets::with_capacity(self.devices.len());
+
+        for d in &self.devices {
+            batch.add(
+                d.node_drain,
+                d.node_gate,
+                d.node_source,
+                d.jfet_type,
+                d.params.vto,
+                d.params.beta,
+                d.params.lambda,
+                d.params.is,
+                d.m * d.area,
+            );
+        }
+
+        batch.link(matrix);
+        self.batch = Some(batch);
+    }
+
+    /// Stamp using direct indexing.
+    pub fn stamp_all_direct(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
+        #[cfg(feature = "simd")]
+        if let Some(ref mut batch) = self.batch {
+            batch.gather_voltages(voltages);
+            batch.evaluate();
+            batch.stamp(matrix, rhs);
+            return;
+        }
+
+        for d in &self.devices {
+            d.stamp_direct(matrix, rhs, voltages);
+        }
+    }
+}
+
+//=============================================================================
+// VDMOS Storage (Individual Processing - Thermal Model)
+//=============================================================================
+
+use crate::device::Vdmos;
+
+/// VDMOS storage for nonlinear Newton-Raphson iteration.
+///
+/// VDMOS devices use individual processing due to the complexity of the
+/// thermal network and body diode recovery models which have device-specific
+/// state that doesn't benefit from SIMD vectorization.
+#[derive(Debug, Default)]
+pub struct Vdmoss {
+    /// Individual VDMOS devices
+    pub devices: Vec<Vdmos>,
+}
+
+impl Vdmoss {
+    #[inline]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[inline]
+    pub fn add(&mut self, device: Vdmos) {
+        self.devices.push(device);
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.devices.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.devices.is_empty()
+    }
+
+    /// Update all devices from node voltages.
+    pub fn update_all(&mut self, voltages: &[Value]) {
+        for d in &mut self.devices {
+            d.update(voltages);
+        }
+    }
+
+    /// Stamp all devices into matrix and RHS.
+    pub fn stamp_all(
+        &self,
+        matrix: &mut impl MatrixStamper,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
+        for d in &self.devices {
+            d.stamp_nonlinear(voltages, matrix, rhs);
+        }
+    }
+
+    /// Check if all devices have converged.
+    pub fn all_converged(&self, tolerance: Value) -> bool {
+        self.devices.iter().all(|d| d.is_converged(tolerance))
+    }
+
+    /// Link all devices to the sparse matrix.
+    pub fn link_all(&mut self, matrix: &StaticMatrix) {
+        for d in &mut self.devices {
+            d.link(matrix);
+        }
+    }
+
+    /// Stamp using direct indexing.
+    pub fn stamp_all_direct(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
+        for d in &self.devices {
+            d.stamp_direct(matrix, rhs, voltages);
+        }
+    }
+}

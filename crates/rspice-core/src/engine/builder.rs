@@ -316,6 +316,111 @@ impl Engine {
                         *coefficient,
                     ));
                 }
+
+                // XSPICE code model instances
+                ElementKind::Xspice {
+                    model,
+                    ports,
+                    params,
+                } => {
+                    // Convert parsed XspicePort to PortConnection with resolved node IDs
+                    let mut connections: Vec<crate::xspice::PortConnection> = Vec::new();
+                    for port in ports {
+                        let connection = match port {
+                            crate::netlist::XspicePort::Analog(name) => {
+                                let node = if name.eq_ignore_ascii_case("0") {
+                                    0
+                                } else {
+                                    circuit.get_or_create_node(name)
+                                };
+                                crate::xspice::PortConnection::Analog(node)
+                            }
+                            crate::netlist::XspicePort::Digital(name) => {
+                                let node = if name.eq_ignore_ascii_case("0") {
+                                    0
+                                } else {
+                                    circuit.get_or_create_node(name)
+                                };
+                                crate::xspice::PortConnection::Digital(node)
+                            }
+                            crate::netlist::XspicePort::AnalogVector(names) => {
+                                let nodes: Vec<usize> = names
+                                    .iter()
+                                    .map(|n| {
+                                        if n.eq_ignore_ascii_case("0") {
+                                            0
+                                        } else {
+                                            circuit.get_or_create_node(n)
+                                        }
+                                    })
+                                    .collect();
+                                crate::xspice::PortConnection::AnalogVector(nodes)
+                            }
+                            crate::netlist::XspicePort::DigitalVector(names) => {
+                                let nodes: Vec<usize> = names
+                                    .iter()
+                                    .map(|n| {
+                                        if n.eq_ignore_ascii_case("0") {
+                                            0
+                                        } else {
+                                            circuit.get_or_create_node(n)
+                                        }
+                                    })
+                                    .collect();
+                                crate::xspice::PortConnection::DigitalVector(nodes)
+                            }
+                            crate::netlist::XspicePort::DifferentialVoltage { pos, neg }
+                            | crate::netlist::XspicePort::DifferentialCurrent { pos, neg } => {
+                                let pos_node = if pos.eq_ignore_ascii_case("0") {
+                                    0
+                                } else {
+                                    circuit.get_or_create_node(pos)
+                                };
+                                let neg_node = if neg.eq_ignore_ascii_case("0") {
+                                    0
+                                } else {
+                                    circuit.get_or_create_node(neg)
+                                };
+                                crate::xspice::PortConnection::Differential(pos_node, neg_node)
+                            }
+                            crate::netlist::XspicePort::Null => crate::xspice::PortConnection::Null,
+                        };
+                        connections.push(connection);
+                    }
+
+                    // Look up the model in the registry and create instance
+                    if let Some(code_model) = circuit.xspice_registry.get(model) {
+                        match crate::xspice::XspiceInstance::new(
+                            element.name.clone(),
+                            code_model.clone(),
+                            connections,
+                            params,
+                        ) {
+                            Ok(instance) => {
+                                circuit.xspice_instances.push(instance);
+                                log::debug!(
+                                    "Created XSPICE instance {}: model={}, ports={}",
+                                    element.name,
+                                    model,
+                                    ports.len()
+                                );
+                            }
+                            Err(e) => {
+                                log::warn!(
+                                    "Failed to create XSPICE instance {}: {}",
+                                    element.name,
+                                    e
+                                );
+                            }
+                        }
+                    } else {
+                        log::warn!(
+                            "Unknown XSPICE model '{}' for element {}",
+                            model,
+                            element.name
+                        );
+                    }
+                }
             }
         }
 

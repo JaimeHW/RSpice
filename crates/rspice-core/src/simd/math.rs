@@ -239,6 +239,56 @@ pub fn diode_ieq(id: f64x4, gd: f64x4, vd: f64x4) -> f64x4 {
 }
 
 //=============================================================================
+// Common SIMD Helpers for Batch Processing
+//=============================================================================
+
+/// SIMD square root function.
+#[inline]
+pub fn sqrt_f64x4(x: f64x4) -> f64x4 {
+    let arr: [f64; 4] = x.into();
+    f64x4::from([arr[0].sqrt(), arr[1].sqrt(), arr[2].sqrt(), arr[3].sqrt()])
+}
+
+/// SIMD power function: base^exp for each lane.
+#[inline]
+pub fn pow_f64x4(base: f64x4, exp: f64x4) -> f64x4 {
+    let b: [f64; 4] = base.into();
+    let e: [f64; 4] = exp.into();
+    f64x4::from([
+        b[0].powf(e[0]),
+        b[1].powf(e[1]),
+        b[2].powf(e[2]),
+        b[3].powf(e[3]),
+    ])
+}
+
+/// SIMD step function: returns 1.0 if x >= 0, else 0.0.
+#[inline]
+pub fn step_f64x4(x: f64x4) -> f64x4 {
+    let arr: [f64; 4] = x.into();
+    f64x4::from([
+        if arr[0] >= 0.0 { 1.0 } else { 0.0 },
+        if arr[1] >= 0.0 { 1.0 } else { 0.0 },
+        if arr[2] >= 0.0 { 1.0 } else { 0.0 },
+        if arr[3] >= 0.0 { 1.0 } else { 0.0 },
+    ])
+}
+
+/// SIMD blend: returns `a` where mask > 0.5, else `b`.
+#[inline]
+pub fn blend_f64x4(mask: f64x4, a: f64x4, b: f64x4) -> f64x4 {
+    let m: [f64; 4] = mask.into();
+    let av: [f64; 4] = a.into();
+    let bv: [f64; 4] = b.into();
+    f64x4::from([
+        if m[0] > 0.5 { av[0] } else { bv[0] },
+        if m[1] > 0.5 { av[1] } else { bv[1] },
+        if m[2] > 0.5 { av[2] } else { bv[2] },
+        if m[3] > 0.5 { av[3] } else { bv[3] },
+    ])
+}
+
+//=============================================================================
 // Helper: Store to slice
 //=============================================================================
 

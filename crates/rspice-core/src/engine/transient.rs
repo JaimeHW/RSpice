@@ -216,6 +216,12 @@ impl Engine {
                     circuit.stamp_nonlinear(&mut matrix, &mut rhs, &new_solution);
                 }
 
+                // Evaluate and stamp XSPICE code models
+                if circuit.has_xspice_devices() {
+                    circuit.evaluate_xspice(t + dt, &new_solution);
+                    circuit.stamp_xspice(&mut matrix, &mut rhs);
+                }
+
                 // Solve and check convergence
                 match matrix.solve(&rhs) {
                     Ok(sol) => {
@@ -312,6 +318,11 @@ impl Engine {
                         - if nn == 0 { 0.0 } else { new_solution[nn - 1] };
                     circuit.inductors.v_prev[l_idx] = v_new;
                 }
+            }
+
+            // Accept XSPICE timestep (commit state changes)
+            if circuit.has_xspice_devices() {
+                circuit.accept_xspice_timestep();
             }
 
             solution = new_solution;
