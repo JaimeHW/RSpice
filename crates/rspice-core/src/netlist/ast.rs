@@ -129,6 +129,17 @@ pub enum ElementKind {
         initial_current: Option<Value>,
     },
 
+    /// Jiles-Atherton hysteresis inductor: magnetic core with nonlinear B-H curve
+    /// Syntax: L1 n+ n- value MODEL=JA_MODEL
+    JilesAthertonInductor {
+        /// Base inductance value (Henries)
+        value: Value,
+        /// Model name referencing a JA model definition
+        model: String,
+        /// Initial current (Amps)
+        initial_current: Option<Value>,
+    },
+
     //-------------------------------------------------------------------------
     // Sources
     //-------------------------------------------------------------------------

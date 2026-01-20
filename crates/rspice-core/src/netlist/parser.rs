@@ -683,12 +683,25 @@ fn parse_inductor(
     let value = expect_value(stream, line_num, params)?;
     let initial_current = try_value_with_param(stream, params, "IC");
 
-    elements.push(Element {
-        name,
-        kind: ElementKind::Inductor {
+    // Check for MODEL parameter (indicates Jiles-Atherton or other nonlinear inductor)
+    let model = try_string_with_param(stream, "MODEL");
+
+    let kind = if let Some(model_name) = model {
+        ElementKind::JilesAthertonInductor {
+            value,
+            model: model_name,
+            initial_current,
+        }
+    } else {
+        ElementKind::Inductor {
             value,
             initial_current,
-        },
+        }
+    };
+
+    elements.push(Element {
+        name,
+        kind,
         nodes: vec![node_pos, node_neg],
     });
 
@@ -1677,7 +1690,7 @@ fn try_value_with_param(
 
     // Check if next token is the param name followed by =
     if let TokenKind::Ident(s) = &stream.peek().kind {
-        if s == param_name {
+        if s.eq_ignore_ascii_case(param_name) {
             stream.advance();
             if stream.consume(&TokenKind::Equals) {
                 return try_value(stream, params);
@@ -1686,6 +1699,28 @@ fn try_value_with_param(
     }
 
     try_value(stream, params)
+}
+
+/// Try to consume a named string parameter (e.g., MODEL=name)
+fn try_string_with_param(stream: &mut TokenStream, param_name: &str) -> Option<String> {
+    skip_commas(stream);
+
+    // Check if next token is the param name followed by =
+    if let TokenKind::Ident(s) = &stream.peek().kind {
+        if s.eq_ignore_ascii_case(param_name) {
+            stream.advance();
+            if stream.consume(&TokenKind::Equals) {
+                // Get the string value (identifier)
+                if let TokenKind::Ident(value) = &stream.peek().kind {
+                    let value = value.clone();
+                    stream.advance();
+                    return Some(value);
+                }
+            }
+        }
+    }
+
+    None
 }
 
 fn skip_optional_param_name(stream: &mut TokenStream, param_name: &str) {

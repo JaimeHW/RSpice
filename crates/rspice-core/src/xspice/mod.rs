@@ -3,6 +3,10 @@
 //! Provides mixed-signal simulation capabilities through code models.
 //! This implementation follows the ngspice XSPICE specification.
 //!
+// Allow dead code - XSPICE has infrastructure for digital/event simulation
+// that will be connected as the subsystem matures
+#![allow(dead_code)]
+
 //! # Architecture
 //!
 //! ```text

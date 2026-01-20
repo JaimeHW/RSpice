@@ -36,6 +36,27 @@ impl Engine {
                         .inductors
                         .add(element.name.clone(), np, nn, branch, *value);
                 }
+                // Jiles-Atherton hysteresis inductor - currently treated as standard inductor
+                // TODO: Look up JA model parameters and create JilesAthertonInductor device
+                ElementKind::JilesAthertonInductor {
+                    value,
+                    model: _,
+                    initial_current: _,
+                } => {
+                    let np = circuit.get_or_create_node(&element.nodes[0]);
+                    let nn = circuit.get_or_create_node(&element.nodes[1]);
+                    let branch = circuit.allocate_branch_named(&element.name);
+                    // For now, create standard inductor - full JA integration requires:
+                    // 1. Looking up .MODEL CORE JA parameters from netlist
+                    // 2. Creating JilesAthertonInductor device with hysteresis state
+                    log::info!(
+                        "Jiles-Atherton inductor {} created as linear inductor (JA model not yet integrated)",
+                        element.name
+                    );
+                    circuit
+                        .inductors
+                        .add(element.name.clone(), np, nn, branch, *value);
+                }
                 ElementKind::VoltageSource(spec) => {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);

@@ -360,7 +360,7 @@ impl XspiceInstance {
 
     /// Process digital events scheduled by this instance
     pub fn schedule_events(&mut self, event_queue: &mut EventQueue, current_time: Value) {
-        let ports = self.model.ports();
+        let _ports = self.model.ports(); // Reserved for future port validation
         let events = self.context.take_pending_events();
 
         for (port_name, value, delay) in events {

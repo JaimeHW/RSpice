@@ -15,12 +15,14 @@ pub mod semiconductor;
 pub mod behavioral;
 pub mod controlled;
 pub mod ffi;
+pub mod model_bypass;
 pub mod opamp;
 pub mod pwl_file;
 mod sources;
 mod switch;
 mod traits;
 mod transmission_line;
+pub mod tristate;
 
 // Verilog-A support (feature-gated)
 #[cfg(feature = "veriloga")]

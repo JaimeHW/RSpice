@@ -187,7 +187,7 @@ pub fn try_value_with_param(
 
     // Check if next token is the param name followed by =
     if let TokenKind::Ident(s) = &stream.peek().kind {
-        if s == param_name {
+        if s.eq_ignore_ascii_case(param_name) {
             stream.advance();
             if stream.consume(&TokenKind::Equals) {
                 return try_value(stream, params);
@@ -196,6 +196,29 @@ pub fn try_value_with_param(
     }
 
     try_value(stream, params)
+}
+
+/// Try to consume a named string parameter (e.g., MODEL=name)
+/// Returns the string value if param_name=string is found
+pub fn try_string_with_param(stream: &mut TokenStream, param_name: &str) -> Option<String> {
+    skip_commas(stream);
+
+    // Check if next token is the param name followed by =
+    if let TokenKind::Ident(s) = &stream.peek().kind {
+        if s.eq_ignore_ascii_case(param_name) {
+            stream.advance();
+            if stream.consume(&TokenKind::Equals) {
+                // Get the string value (identifier)
+                if let TokenKind::Ident(value) = &stream.peek().kind {
+                    let value = value.clone();
+                    stream.advance();
+                    return Some(value);
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Skip an optional parameter name prefix (e.g., R= before value)
