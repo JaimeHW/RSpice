@@ -1,6 +1,6 @@
 <div align="center">
 
-# <img src="assets/logo.svg" alt="RSpice Logo" width="180" />
+# <img src="assets/logo.svg" alt="RSpice Logo" width="140" />
 
 **The Circuit Simulator, Reimagined.**
 
