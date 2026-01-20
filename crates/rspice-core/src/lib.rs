@@ -34,6 +34,7 @@ pub mod library;
 pub mod netlist;
 pub mod solver;
 pub mod testing;
+pub mod xspice;
 
 /// SIMD-accelerated operations (optional, requires `simd` feature)
 #[cfg(feature = "simd")]
@@ -46,6 +47,7 @@ pub use device::{Device, DeviceModel};
 pub use engine::{Engine, SimulationConfig, SimulationError};
 pub use netlist::Netlist;
 pub use solver::{SimulationResult, Simulator, SparseLuSolver, StaticMatrix, TripletMatrix};
+pub use xspice::{CmContext, CodeModel, CodeModelRegistry, XspiceInstance};
 
 /// Error types for the simulation engine
 pub mod error {

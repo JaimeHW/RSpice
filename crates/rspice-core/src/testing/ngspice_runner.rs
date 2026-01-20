@@ -652,8 +652,9 @@ impl TestRunner {
         // Directive-based patterns (can match anywhere since they start with '.')
         // NOTE: .subckt is now supported via flattening
         // NOTE: .tf and .sens are handled by running DC OP (sufficient for basic validation)
-        // NOTE: .noise and .pz have implementations but tests run DC OP for compatibility
         let directive_patterns = [
+            (".noise", "noise analysis"),
+            (".pz", "pole-zero analysis"),
             (".disto", "distortion analysis"),
             (".four", "Fourier analysis"),
             (".csparam", "constant parameter"),
