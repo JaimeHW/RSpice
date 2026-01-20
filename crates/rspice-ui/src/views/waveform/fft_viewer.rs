@@ -39,28 +39,32 @@ pub fn FftViewer(props: FftViewerProps) -> Element {
         return rsx! {};
     }
 
-    let waveforms = &sim_state.read().waveforms;
+    // Memoize FFT computation - only recompute when waveforms or window function changes
+    // This prevents expensive FFT recalculation during drag operations
+    let window = *window_fn.read();
+    let fft_result = use_memo(move || {
+        let waveforms = &sim_state.read().waveforms;
 
-    // Compute FFT for the first visible waveform (or demo)
-    let fft_result = if waveforms.is_empty() {
-        // Demo sine wave FFT
-        let n = 1024;
-        let sample_rate = 10000.0;
-        let freq = 1000.0;
-        let time: Vec<f64> = (0..n).map(|i| i as f64 / sample_rate).collect();
-        let values: Vec<f64> = time
-            .iter()
-            .map(|t| (2.0 * std::f64::consts::PI * freq * t).sin())
-            .collect();
-        compute_fft(&time, &values, *window_fn.read())
-    } else {
-        let wf = waveforms.iter().find(|w| w.visible).or(waveforms.first());
-        if let Some(wf) = wf {
-            compute_fft(&wf.x, &wf.y, *window_fn.read())
+        if waveforms.is_empty() {
+            // Demo sine wave FFT
+            let n = 1024;
+            let sample_rate = 10000.0;
+            let freq = 1000.0;
+            let time: Vec<f64> = (0..n).map(|i| i as f64 / sample_rate).collect();
+            let values: Vec<f64> = time
+                .iter()
+                .map(|t| (2.0 * std::f64::consts::PI * freq * t).sin())
+                .collect();
+            compute_fft(&time, &values, window)
         } else {
-            None
+            let wf = waveforms.iter().find(|w| w.visible).or(waveforms.first());
+            if let Some(wf) = wf {
+                compute_fft(&wf.x, &wf.y, window)
+            } else {
+                None
+            }
         }
-    };
+    });
 
     let (x, y) = props.position;
 
@@ -183,7 +187,7 @@ pub fn FftViewer(props: FftViewerProps) -> Element {
                     position: relative;
                 ",
 
-                if let Some(result) = &fft_result {
+                if let Some(result) = fft_result.read().as_ref() {
                     FftPlot {
                         frequencies: result.frequencies.clone(),
                         magnitudes: result.magnitudes.clone(),
@@ -206,7 +210,7 @@ pub fn FftViewer(props: FftViewerProps) -> Element {
             }
 
             // Peak frequency readout
-            if let Some(result) = &fft_result {
+            if let Some(result) = fft_result.read().as_ref() {
                 if let Some((peak_freq, peak_mag)) = result.peak_frequency() {
                     div {
                         style: "

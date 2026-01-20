@@ -8,7 +8,7 @@ use bytemuck::{Pod, Zeroable};
 use std::sync::{Arc, Mutex};
 use wgpu::util::DeviceExt;
 
-use super::waveform::axis::calculate_nice_grid_step;
+use super::waveform::axis::calculate_nice_step_fixed_divisions;
 
 // Desktop: use sync Lazy with pollster for blocking GPU init
 #[cfg(not(target_arch = "wasm32"))]
@@ -343,7 +343,7 @@ impl WaveformPainter {
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    blend: Some(wgpu::BlendState::REPLACE), // Fully opaque lines, no blending
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: Default::default(),
@@ -378,13 +378,16 @@ impl WaveformPainter {
         self.vertex_buffers.clear();
 
         // Create gridlines first (so they render behind traces)
-        let grid_color = [0.25f32, 0.25, 0.30, 1.0]; // Subtle grey
+        // Very subtle dark grid lines - matches professional simulators (Cadence, LTspice)
+        let grid_color = [0.15f32, 0.15, 0.15, 1.0]; // Dark grey - subtle but visible
         let x_range = state.x_max - state.x_min;
         let y_range = state.y_max - state.y_min;
 
-        // Use "nice" step values - gridlines at fixed data coordinates that scroll with pan
-        let x_step = calculate_nice_grid_step(x_range);
-        let y_step = calculate_nice_grid_step(y_range);
+        // Use fixed number of divisions like professional simulators (LTspice, Cadence)
+        // This ensures consistent grid spacing regardless of container size
+        // Target: 6 divisions for time axis, 5 for voltage axis
+        let x_step = calculate_nice_step_fixed_divisions(x_range, 6);
+        let y_step = calculate_nice_step_fixed_divisions(y_range, 5);
 
         // Vertical gridlines at fixed X values (e.g., 0ms, 1ms, 2ms)
         let x_start = (state.x_min / x_step).floor() * x_step;
@@ -590,9 +593,9 @@ impl WaveformPainter {
                     resolve_target: Some(texture_view), // Resolve to regular texture for readback
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.08,
-                            g: 0.08,
-                            b: 0.10,
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -734,9 +737,9 @@ impl WaveformPainter {
                     resolve_target: Some(texture_view),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.08,
-                            g: 0.08,
-                            b: 0.10,
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
