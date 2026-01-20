@@ -252,6 +252,295 @@ impl OpConfig {
 }
 
 // =============================================================================
+// Noise Analysis Configuration
+// =============================================================================
+
+/// Noise analysis configuration
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NoiseConfig {
+    /// Output node for noise measurement
+    pub output_node: String,
+    /// Reference node (usually ground)
+    pub reference_node: String,
+    /// Input source name for input-referred noise
+    pub input_source: String,
+    /// Start frequency in Hz
+    pub start_freq: f64,
+    /// Stop frequency in Hz
+    pub stop_freq: f64,
+    /// Number of points per decade
+    pub points_per_decade: u32,
+    /// Sweep type (Decade, Octave, Linear)
+    pub sweep_type: AcSweepType,
+}
+
+impl Default for NoiseConfig {
+    fn default() -> Self {
+        Self {
+            output_node: "out".to_string(),
+            reference_node: "0".to_string(),
+            input_source: "Vin".to_string(),
+            start_freq: 1.0,
+            stop_freq: 1e6,
+            points_per_decade: 10,
+            sweep_type: AcSweepType::Decade,
+        }
+    }
+}
+
+impl NoiseConfig {
+    /// Generate the SPICE command string
+    pub fn to_spice_string(&self) -> String {
+        // Format: .NOISE V(out[,ref]) src DEC|OCT|LIN points start stop
+        let output_spec = if self.reference_node == "0" || self.reference_node.is_empty() {
+            format!("V({})", self.output_node)
+        } else {
+            format!("V({},{})", self.output_node, self.reference_node)
+        };
+
+        format!(
+            ".NOISE {} {} {} {} {} {}",
+            output_spec,
+            self.input_source,
+            self.sweep_type.spice_keyword(),
+            self.points_per_decade,
+            format_engineering(self.start_freq),
+            format_engineering(self.stop_freq)
+        )
+    }
+}
+
+// =============================================================================
+// Monte Carlo Configuration
+// =============================================================================
+
+/// Distribution type for Monte Carlo analysis
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum McDistribution {
+    /// Uniform distribution ±tolerance%
+    #[default]
+    Uniform,
+    /// Gaussian distribution with sigma
+    Gaussian,
+}
+
+impl McDistribution {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            McDistribution::Uniform => "Uniform (±%)",
+            McDistribution::Gaussian => "Gaussian (σ)",
+        }
+    }
+}
+
+/// Monte Carlo analysis configuration
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MonteCarloConfig {
+    /// Number of simulation runs
+    pub num_runs: u32,
+    /// Random seed (None = random each run)
+    pub seed: Option<u64>,
+    /// Default tolerance percentage for components
+    pub default_tolerance: f64,
+    /// Distribution type
+    pub distribution: McDistribution,
+    /// Analysis to run for each Monte Carlo iteration
+    pub run_transient: bool,
+    /// Output variable to track (e.g., "V(out)")
+    pub track_output: String,
+}
+
+impl Default for MonteCarloConfig {
+    fn default() -> Self {
+        Self {
+            num_runs: 100,
+            seed: None,
+            default_tolerance: 5.0, // 5% default
+            distribution: McDistribution::Uniform,
+            run_transient: true,
+            track_output: "V(out)".to_string(),
+        }
+    }
+}
+
+impl MonteCarloConfig {
+    /// Generate a description of the Monte Carlo configuration
+    /// (Monte Carlo isn't a standard SPICE command, so we describe it)
+    pub fn to_spice_string(&self) -> String {
+        format!(
+            "* Monte Carlo: {} runs, {} ±{}%",
+            self.num_runs,
+            self.distribution.display_name(),
+            self.default_tolerance
+        )
+    }
+}
+
+// =============================================================================
+// Pole-Zero Analysis Configuration
+// =============================================================================
+
+/// Pole-Zero analysis configuration
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PoleZeroConfig {
+    /// Input node (positive)
+    pub input_pos: String,
+    /// Input node (negative, often ground)
+    pub input_neg: String,
+    /// Output node (positive)
+    pub output_pos: String,
+    /// Output node (negative, often ground)
+    pub output_neg: String,
+    /// Transfer type: VOL (voltage), CUR (current), or POL/ZER
+    pub transfer_type: PzTransferType,
+}
+
+/// Pole-Zero transfer function type
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum PzTransferType {
+    /// Voltage transfer function (V/V)
+    #[default]
+    Voltage,
+    /// Current transfer function (I/I)
+    Current,
+}
+
+impl PzTransferType {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            PzTransferType::Voltage => "Voltage (V/V)",
+            PzTransferType::Current => "Current (I/I)",
+        }
+    }
+
+    pub fn spice_keyword(&self) -> &'static str {
+        match self {
+            PzTransferType::Voltage => "VOL",
+            PzTransferType::Current => "CUR",
+        }
+    }
+}
+
+impl Default for PoleZeroConfig {
+    fn default() -> Self {
+        Self {
+            input_pos: "in".to_string(),
+            input_neg: "0".to_string(),
+            output_pos: "out".to_string(),
+            output_neg: "0".to_string(),
+            transfer_type: PzTransferType::Voltage,
+        }
+    }
+}
+
+impl PoleZeroConfig {
+    pub fn to_spice_string(&self) -> String {
+        format!(
+            ".PZ {} {} {} {} {} PZ",
+            self.input_pos,
+            self.input_neg,
+            self.output_pos,
+            self.output_neg,
+            self.transfer_type.spice_keyword()
+        )
+    }
+}
+
+// =============================================================================
+// Sensitivity Analysis Configuration
+// =============================================================================
+
+/// Sensitivity analysis configuration
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SensitivityConfig {
+    /// Output variable to analyze sensitivity of
+    pub output_var: String,
+    /// DC or AC sensitivity
+    pub is_ac: bool,
+    /// Frequency for AC sensitivity (if is_ac)
+    pub frequency: f64,
+}
+
+impl Default for SensitivityConfig {
+    fn default() -> Self {
+        Self {
+            output_var: "V(out)".to_string(),
+            is_ac: false,
+            frequency: 1e6,
+        }
+    }
+}
+
+impl SensitivityConfig {
+    pub fn to_spice_string(&self) -> String {
+        if self.is_ac {
+            format!(
+                ".SENS {} AC {}",
+                self.output_var,
+                format_engineering(self.frequency)
+            )
+        } else {
+            format!(".SENS {}", self.output_var)
+        }
+    }
+}
+
+// =============================================================================
+// S-Parameter Analysis Configuration
+// =============================================================================
+
+/// S-Parameter analysis configuration (for RF/microwave)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SParamConfig {
+    /// Port 1 positive node
+    pub port1_pos: String,
+    /// Port 1 negative node
+    pub port1_neg: String,
+    /// Port 2 positive node
+    pub port2_pos: String,
+    /// Port 2 negative node
+    pub port2_neg: String,
+    /// Reference impedance (typically 50Ω)
+    pub z0: f64,
+    /// Start frequency
+    pub start_freq: f64,
+    /// Stop frequency
+    pub stop_freq: f64,
+    /// Points per decade
+    pub points_per_decade: u32,
+}
+
+impl Default for SParamConfig {
+    fn default() -> Self {
+        Self {
+            port1_pos: "in".to_string(),
+            port1_neg: "0".to_string(),
+            port2_pos: "out".to_string(),
+            port2_neg: "0".to_string(),
+            z0: 50.0,
+            start_freq: 1e6,
+            stop_freq: 10e9,
+            points_per_decade: 20,
+        }
+    }
+}
+
+impl SParamConfig {
+    pub fn to_spice_string(&self) -> String {
+        format!(
+            "* S-Parameters: Port1=({},{}) Port2=({},{}) Z0={}Ω, {} - {}",
+            self.port1_pos,
+            self.port1_neg,
+            self.port2_pos,
+            self.port2_neg,
+            self.z0,
+            format_engineering(self.start_freq),
+            format_engineering(self.stop_freq)
+        )
+    }
+}
+
+// =============================================================================
 // Unified Simulation Configuration
 // =============================================================================
 
@@ -266,6 +555,16 @@ pub struct SimulationConfig {
     pub dc_sweep: Option<DcSweepConfig>,
     /// Operating point analysis
     pub op: OpConfig,
+    /// Noise analysis (enabled if Some)
+    pub noise: Option<NoiseConfig>,
+    /// Monte Carlo analysis (enabled if Some)
+    pub monte_carlo: Option<MonteCarloConfig>,
+    /// Pole-Zero analysis (enabled if Some)
+    pub pole_zero: Option<PoleZeroConfig>,
+    /// Sensitivity analysis (enabled if Some)
+    pub sensitivity: Option<SensitivityConfig>,
+    /// S-Parameter analysis (enabled if Some)
+    pub s_param: Option<SParamConfig>,
 }
 
 impl SimulationConfig {
@@ -276,7 +575,15 @@ impl SimulationConfig {
 
     /// Check if any analysis is configured
     pub fn has_analysis(&self) -> bool {
-        self.transient.is_some() || self.ac.is_some() || self.dc_sweep.is_some() || self.op.enabled
+        self.transient.is_some()
+            || self.ac.is_some()
+            || self.dc_sweep.is_some()
+            || self.op.enabled
+            || self.noise.is_some()
+            || self.monte_carlo.is_some()
+            || self.pole_zero.is_some()
+            || self.sensitivity.is_some()
+            || self.s_param.is_some()
     }
 
     /// Generate all SPICE command strings
@@ -297,6 +604,26 @@ impl SimulationConfig {
 
         if let Some(tran) = &self.transient {
             commands.push(tran.to_spice_string());
+        }
+
+        if let Some(noise) = &self.noise {
+            commands.push(noise.to_spice_string());
+        }
+
+        if let Some(mc) = &self.monte_carlo {
+            commands.push(mc.to_spice_string());
+        }
+
+        if let Some(pz) = &self.pole_zero {
+            commands.push(pz.to_spice_string());
+        }
+
+        if let Some(sens) = &self.sensitivity {
+            commands.push(sens.to_spice_string());
+        }
+
+        if let Some(sp) = &self.s_param {
+            commands.push(sp.to_spice_string());
         }
 
         commands

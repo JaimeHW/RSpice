@@ -54,6 +54,9 @@ pub fn Button(
     /// Optional icon (renders before text)
     #[props(default)]
     icon: Option<Element>,
+    /// Tooltip text
+    #[props(default)]
+    title: Option<&'static str>,
 ) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
@@ -110,6 +113,7 @@ pub fn Button(
                 outline: none;
                 white-space: nowrap;
             ",
+            title: title.unwrap_or(""),
             disabled: disabled,
             onmouseenter: move |_| is_hovered.set(true),
             onmouseleave: move |_| is_hovered.set(false),

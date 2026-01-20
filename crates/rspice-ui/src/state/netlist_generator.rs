@@ -483,6 +483,203 @@ fn generate_component_line(
                 return Err(format!("{}: CCCS needs 2 output terminals", comp.name));
             }
         }
+
+        // XSPICE Analog Behavioral Models
+        ComponentType::XspiceGain => {
+            // A-device: Aname [in] [out] gain
+            if nodes.len() >= 2 {
+                let gain_val = if comp.value.is_empty() { "1" } else { &comp.value };
+                format!("{} [{}] [{}] gain gain={}", comp.name, nodes[0], nodes[1], gain_val)
+            } else {
+                return Err(format!("{}: Gain block needs 2 terminals", comp.name));
+            }
+        }
+
+        ComponentType::XspiceSummer => {
+            // A-device: Aname [in1 in2] [out] summer
+            if nodes.len() >= 3 {
+                format!("{} [{} {}] [{}] summer", comp.name, nodes[0], nodes[1], nodes[2])
+            } else {
+                return Err(format!("{}: Summer needs 3 terminals", comp.name));
+            }
+        }
+
+        ComponentType::XspiceMultiplier => {
+            // A-device: Aname [in1 in2] [out] mult
+            if nodes.len() >= 3 {
+                format!("{} [{} {}] [{}] mult", comp.name, nodes[0], nodes[1], nodes[2])
+            } else {
+                return Err(format!("{}: Multiplier needs 3 terminals", comp.name));
+            }
+        }
+
+        ComponentType::XspiceDivider => {
+            // A-device: Aname [num denom] [out] divide
+            if nodes.len() >= 3 {
+                format!("{} [{} {}] [{}] divide", comp.name, nodes[0], nodes[1], nodes[2])
+            } else {
+                return Err(format!("{}: Divider needs 3 terminals", comp.name));
+            }
+        }
+
+        ComponentType::XspiceLimiter => {
+            // A-device: Aname [in] [out] limit
+            if nodes.len() >= 2 {
+                let params = if comp.params.is_empty() {
+                    "out_lower_limit=-1 out_upper_limit=1"
+                } else {
+                    &comp.params
+                };
+                format!("{} [{}] [{}] limit {}", comp.name, nodes[0], nodes[1], params)
+            } else {
+                return Err(format!("{}: Limiter needs 2 terminals", comp.name));
+            }
+        }
+
+        ComponentType::XspiceIntegrator => {
+            // A-device: Aname [in] [out] integrate
+            if nodes.len() >= 2 {
+                let ic = if comp.value.is_empty() { "0" } else { &comp.value };
+                format!("{} [{}] [{}] integrate ic={}", comp.name, nodes[0], nodes[1], ic)
+            } else {
+                return Err(format!("{}: Integrator needs 2 terminals", comp.name));
+            }
+        }
+
+        ComponentType::XspiceDifferentiator => {
+            // A-device: Aname [in] [out] d_dt
+            if nodes.len() >= 2 {
+                format!("{} [{}] [{}] d_dt", comp.name, nodes[0], nodes[1])
+            } else {
+                return Err(format!("{}: Differentiator needs 2 terminals", comp.name));
+            }
+        }
+
+        // XSPICE Digital Gates
+        ComponentType::XspiceInverter => {
+            if nodes.len() >= 2 {
+                format!("{} [{}] [{}] d_inverter", comp.name, nodes[0], nodes[1])
+            } else {
+                return Err(format!("{}: Inverter needs 2 terminals", comp.name));
+            }
+        }
+
+        ComponentType::XspiceBuffer => {
+            if nodes.len() >= 2 {
+                format!("{} [{}] [{}] d_buffer", comp.name, nodes[0], nodes[1])
+            } else {
+                return Err(format!("{}: Buffer needs 2 terminals", comp.name));
+            }
+        }
+
+        ComponentType::XspiceAndGate => {
+            if nodes.len() >= 3 {
+                format!("{} [{} {}] [{}] d_and", comp.name, nodes[0], nodes[1], nodes[2])
+            } else {
+                return Err(format!("{}: AND gate needs 3 terminals", comp.name));
+            }
+        }
+
+        ComponentType::XspiceOrGate => {
+            if nodes.len() >= 3 {
+                format!("{} [{} {}] [{}] d_or", comp.name, nodes[0], nodes[1], nodes[2])
+            } else {
+                return Err(format!("{}: OR gate needs 3 terminals", comp.name));
+            }
+        }
+
+        ComponentType::XspiceNandGate => {
+            if nodes.len() >= 3 {
+                format!("{} [{} {}] [{}] d_nand", comp.name, nodes[0], nodes[1], nodes[2])
+            } else {
+                return Err(format!("{}: NAND gate needs 3 terminals", comp.name));
+            }
+        }
+
+        ComponentType::XspiceNorGate => {
+            if nodes.len() >= 3 {
+                format!("{} [{} {}] [{}] d_nor", comp.name, nodes[0], nodes[1], nodes[2])
+            } else {
+                return Err(format!("{}: NOR gate needs 3 terminals", comp.name));
+            }
+        }
+
+        ComponentType::XspiceXorGate => {
+            if nodes.len() >= 3 {
+                format!("{} [{} {}] [{}] d_xor", comp.name, nodes[0], nodes[1], nodes[2])
+            } else {
+                return Err(format!("{}: XOR gate needs 3 terminals", comp.name));
+            }
+        }
+
+        ComponentType::XspiceTristate => {
+            if nodes.len() >= 3 {
+                format!("{} [{}] [{}] [{}] d_tristate", comp.name, nodes[0], nodes[1], nodes[2])
+            } else {
+                return Err(format!("{}: Tri-state needs 3 terminals", comp.name));
+            }
+        }
+
+        // XSPICE Sequential Logic
+        ComponentType::XspiceDFlipFlop => {
+            if nodes.len() >= 4 {
+                format!(
+                    "{} [{}] [{}] [{}] [{}] d_dff",
+                    comp.name, nodes[0], nodes[1], nodes[2], nodes[3]
+                )
+            } else {
+                return Err(format!("{}: D Flip-Flop needs 4 terminals", comp.name));
+            }
+        }
+
+        ComponentType::XspiceJkFlipFlop => {
+            if nodes.len() >= 5 {
+                format!(
+                    "{} [{}] [{}] [{}] [{}] [{}] d_jkff",
+                    comp.name, nodes[0], nodes[1], nodes[2], nodes[3], nodes[4]
+                )
+            } else {
+                return Err(format!("{}: JK Flip-Flop needs 5 terminals", comp.name));
+            }
+        }
+
+        ComponentType::XspiceSrLatch => {
+            if nodes.len() >= 4 {
+                format!(
+                    "{} [{}] [{}] [{}] [{}] d_srlatch",
+                    comp.name, nodes[0], nodes[1], nodes[2], nodes[3]
+                )
+            } else {
+                return Err(format!("{}: SR Latch needs 4 terminals", comp.name));
+            }
+        }
+
+        // XSPICE Bridges
+        ComponentType::XspiceAdcBridge => {
+            if nodes.len() >= 2 {
+                let params = if comp.params.is_empty() {
+                    "in_low=0.5 in_high=2.5"
+                } else {
+                    &comp.params
+                };
+                format!("{} [{}] [{}] adc_bridge {}", comp.name, nodes[0], nodes[1], params)
+            } else {
+                return Err(format!("{}: ADC Bridge needs 2 terminals", comp.name));
+            }
+        }
+
+        ComponentType::XspiceDacBridge => {
+            if nodes.len() >= 2 {
+                let params = if comp.params.is_empty() {
+                    "out_low=0 out_high=5"
+                } else {
+                    &comp.params
+                };
+                format!("{} [{}] [{}] dac_bridge {}", comp.name, nodes[0], nodes[1], params)
+            } else {
+                return Err(format!("{}: DAC Bridge needs 2 terminals", comp.name));
+            }
+        }
     };
 
     Ok(line)
