@@ -36,10 +36,13 @@ Bridging the gap between academic tools and commercial EDA, RSpice features a **
 ### 🔬 Analysis Types
 | Analysis | Description |
 | :--- | :--- |
-| **DC Operating Point** | robust Newton-Raphson nonlinear solver |
+| **DC Operating Point** | Robust Newton-Raphson nonlinear solver |
 | **DC Sweep** | Nested voltage/current/parameter sweeps |
 | **AC Small-Signal** | Frequency domain response with complex arithmetic |
 | **Transient** | Time-domain simulation with adaptive timestepping |
+| **Harmonic Balance** | Frequency-domain steady-state solution for nonlinear RF circuits |
+| **PSS** | Periodic Steady State analysis for RF & Mixed-Signal |
+| **PNoise** | Periodic Noise (Cyclostationary) analysis |
 | **Noise** | Thermal, Shot, and Flicker (1/f) noise analysis |
 | **Fourier (THD)** | Harmonic distortion analysis and spectral decomposition |
 | **Sensitivity** | DC/AC sensitivity to component variations |
@@ -54,12 +57,14 @@ RSpice includes a comprehensive library of industry-standard device models:
 *   **BJT**: Gummel-Poon (NPN/PNP) with quasi-saturation effects.
 *   **JFET**: N-Channel and P-Channel junction field-effect transistors.
 *   **Diode**: Level 1 (Shockley) and Level 3 (high-injection).
-*   **Passive**: Coupled Inductors (K-matrix), Lossy Transmission Lines (T-element), Non-linear Magnetics (Saturable Core).
-*   **Behavioral**: Arbitrary B-Sources (expression parsing), Controlled Sources (E, F, G, H), Voltage/Current Controlled Switches.
+*   **Magnetics**: **Jiles-Atherton** (Magnetic Hysteresis), Coupled Inductors (K-matrix), Saturable Cores.
+*   **Digital**: **Tristate Buffers**, Logic Gates, Voltage/Current Controlled Switches.
+*   **Passive**: Lossy Transmission Lines (T-element), R/L/C.
+*   **Behavioral**: Arbitrary B-Sources (expression parsing), Controlled Sources (E, F, G, H).
 
 ### 📜 Verilog-A Compiler
 RSpice features a **fully compliant Verilog-A LRM 2.4** compiler defined by its "Native-First" approach:
-*   **JIT Compilation**: Models are compiled directly to native machine code (AVX/SSE) via **Cranelift**—no external C compiler or linker required.
+*   **System-Native JIT**: Models are compiled directly to native machine code (AVX/SSE) via **Cranelift**—offering superior performance without external C compilers or linkers.
 *   **Full LRM Support**: Includes analog operators (`ddt`, `idt`, `absdelay`), noise functions (`white_noise`, `flicker_noise`), and system tasks.
 *   **Zero Overhead**: Compiled models execute with the same performance as built-in C++ primitives.
 
@@ -67,6 +72,7 @@ RSpice features a **fully compliant Verilog-A LRM 2.4** compiler defined by its 
 The visual interface is designed for the modern engineer:
 *   **GPU Rendering**: Powered by **WebGPU** and **`wgpu`**, the interface renders massive waveforms and complex schematics at a fluid 60FPS.
 *   **Cross-Platform**: Runs natively on Windows, macOS, and Linux, or directly in the browser via WebAssembly (WASM).
+*   **Smart Interaction**: Features **Cross-Probing** between schematic and waveform, and an **Adaptive Grid** system for precise signal analysis.
 *   **Integrated Workflow**: Hierarchical schematic capture, real-time simulation control, and interactive waveform analysis in a single IDE.
 
 ## Installation
@@ -102,8 +108,8 @@ cargo run -p rspice-cli --release -- design.cir
 
 We are consistently pushing the boundaries of open-source EDA:
 
-*   [ ] **Advanced RF**: Harmonic Balance (HB) & Shooting Newton.
-*   [ ] **Cloud Native**: Kuberenetes-ready distributed simulation dispatch.
+*   [x] **Advanced RF**: Harmonic Balance (HB), Shooting Newton (PSS), & PNoise.
+*   [ ] **Cloud Native**: Kubernetes-ready distributed simulation dispatch.
 *   [ ] **Model Import**: Direct reading of PSpice/LTspice encrypted libraries.
 *   [ ] **Layout**: Integrated PCB & IC layout views with parasitic extraction.
 
