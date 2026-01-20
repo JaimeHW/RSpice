@@ -54,7 +54,7 @@ impl WindowFunction {
 }
 
 /// FFT result containing frequency and magnitude data
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FftResult {
     /// Frequency values (Hz)
     pub frequencies: Vec<f64>,

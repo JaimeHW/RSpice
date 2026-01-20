@@ -49,6 +49,33 @@ pub fn calculate_nice_grid_step_adaptive(range: f64, container_size_px: Option<f
     nice * magnitude
 }
 
+/// Calculate step size with a fixed number of divisions.
+///
+/// This is the professional simulator approach (LTspice, Cadence Spectre):
+/// Always use a fixed number of divisions regardless of container size.
+/// Uses "nice" step values (1, 2, 5 multiples of powers of 10) for readability.
+pub fn calculate_nice_step_fixed_divisions(range: f64, target_divisions: usize) -> f64 {
+    let raw_step = range / target_divisions.max(1) as f64;
+    if raw_step <= 0.0 || !raw_step.is_finite() {
+        return 1.0;
+    }
+
+    let magnitude = 10f64.powf(raw_step.log10().floor());
+    let normalized = raw_step / magnitude;
+
+    let nice = if normalized < 1.5 {
+        1.0
+    } else if normalized < 3.5 {
+        2.0
+    } else if normalized < 7.5 {
+        5.0
+    } else {
+        10.0
+    };
+
+    nice * magnitude
+}
+
 /// Generate axis labels at evenly spaced positions (legacy, kept for compatibility).
 #[allow(dead_code)]
 pub fn generate_axis_labels(min: f64, max: f64, count: usize) -> Vec<String> {

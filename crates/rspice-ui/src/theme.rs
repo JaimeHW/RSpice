@@ -153,17 +153,17 @@ impl Theme {
     // Waveform Trace Colors
     //=========================================================================
 
-    /// Trace color palette for waveforms
+    /// Trace color palette for waveforms (professional high-saturation colors)
     pub fn trace_colors(&self) -> &'static [&'static str] {
         &[
-            "#3b82f6", // Blue
-            "#22c55e", // Green
-            "#ef4444", // Red
-            "#eab308", // Yellow
-            "#a855f7", // Purple
-            "#06b6d4", // Cyan
-            "#f97316", // Orange
-            "#ec4899", // Pink
+            "#FF6600", // Orange (primary - best visibility)
+            "#00FF00", // Green (high visibility)
+            "#00FFFF", // Cyan
+            "#FF00FF", // Magenta
+            "#FFFF00", // Yellow
+            "#FF0000", // Red
+            "#00FF80", // Spring green
+            "#FF80FF", // Pink
         ]
     }
 
@@ -173,16 +173,17 @@ impl Theme {
     }
 
     /// Get trace color by index (static version)
+    /// Uses high-saturation colors like professional simulators (Cadence Spectre, LTspice)
     pub fn trace_color_static(index: usize) -> &'static str {
         const COLORS: &[&str] = &[
-            "#3b82f6", // Blue
-            "#22c55e", // Green
-            "#ef4444", // Red
-            "#eab308", // Yellow
-            "#a855f7", // Purple
-            "#06b6d4", // Cyan
-            "#f97316", // Orange
-            "#ec4899", // Pink
+            "#FF6600", // Orange (primary - best visibility)
+            "#00FF00", // Green (high visibility)
+            "#00FFFF", // Cyan
+            "#FF00FF", // Magenta
+            "#FFFF00", // Yellow
+            "#FF0000", // Red
+            "#00FF80", // Spring green
+            "#FF80FF", // Pink
         ];
         COLORS[index % COLORS.len()]
     }

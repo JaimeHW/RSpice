@@ -5,7 +5,7 @@
 
 use dioxus::prelude::*;
 
-use super::axis::{calculate_nice_grid_step_adaptive, time_scale_for_range};
+use super::axis::{calculate_nice_step_fixed_divisions, time_scale_for_range};
 use super::state::ViewState;
 use crate::theme::Theme;
 
@@ -16,9 +16,9 @@ pub fn YAxisLabels(view: ViewState) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
 
-    // Use adaptive grid step based on container height
+    // Use fixed divisions like professional simulators (5 divisions for Y axis)
     let y_range = view.y_max - view.y_min;
-    let y_step = calculate_nice_grid_step_adaptive(y_range, Some(view.plot_height));
+    let y_step = calculate_nice_step_fixed_divisions(y_range, 5);
 
     // Generate labels at grid line positions
     let mut labels: Vec<(f64, String)> = Vec::new();
@@ -68,9 +68,9 @@ pub fn XAxisLabels(view: ViewState) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
 
-    // Use adaptive grid step based on container width
+    // Use fixed divisions like professional simulators (6 divisions for X axis)
     let x_range = view.x_max - view.x_min;
-    let x_step = calculate_nice_grid_step_adaptive(x_range, Some(view.plot_width));
+    let x_step = calculate_nice_step_fixed_divisions(x_range, 6);
 
     // Determine SI prefix for time display
     let (scale, suffix) = time_scale_for_range(x_range);
@@ -127,11 +127,11 @@ pub fn WaveformGrid(view: ViewState) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
 
-    // Calculate grid step sizes using adaptive divisions based on container size
+    // Calculate grid step sizes using fixed divisions (professional approach)
     let x_range = view.x_max - view.x_min;
     let y_range = view.y_max - view.y_min;
-    let x_step = calculate_nice_grid_step_adaptive(x_range, Some(view.plot_width));
-    let y_step = calculate_nice_grid_step_adaptive(y_range, Some(view.plot_height));
+    let x_step = calculate_nice_step_fixed_divisions(x_range, 6);
+    let y_step = calculate_nice_step_fixed_divisions(y_range, 5);
 
     // Generate vertical grid lines (X axis)
     let mut v_lines: Vec<f64> = Vec::new();
