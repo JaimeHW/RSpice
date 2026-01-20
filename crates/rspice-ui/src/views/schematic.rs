@@ -12,6 +12,7 @@ use crate::components::confirm_modal::{SaveDialogResult, UnsavedChangesModal};
 use crate::components::context_menu::{schematic_context_menu, canvas_context_menu, ContextMenu, MenuAction};
 use crate::components::file_handlers;
 use crate::components::tab_bar::DocumentTabBar;
+use crate::state::cross_probing::CrossProbeManager;
 use crate::state::{CanvasFocusState, ComponentType, ConsoleMessage, DocumentManager, Point, Rotation, SchematicState, SimulationState, Tool, SchematicHistory};
 use crate::theme::Theme;
 
@@ -73,27 +74,26 @@ pub fn Schematic() -> Element {
     let mut sim_state: Signal<SimulationState> = use_context();
     let mut waveform_visible: Signal<WaveformVisible> = use_context();
     let mut doc_manager: Signal<DocumentManager> = use_context();
+    let cross_probe: Signal<CrossProbeManager> = use_context();
 
     // Viewport state - pan/zoom stored in SchematicState for per-document persistence
     // Local signals mirror SchematicState and sync back on changes
-    let sch = schematic.read();
-    let mut pan = use_signal(|| sch.pan);
-    let mut zoom = use_signal(|| sch.zoom);
-    drop(sch);
+    let mut pan = use_signal(|| (0.0f64, 0.0f64));
+    let mut zoom = use_signal(|| 1.0f64);
     let mut is_panning = use_signal(|| false);
     let mut last_mouse = use_signal(|| (0.0f64, 0.0f64));
     let mut mouse_grid = use_signal(|| Point::new(0, 0));
     
-    // Sync pan/zoom from SchematicState when it changes (e.g., tab switch)
-    {
+    // Canvas size for zoom_to_fit (updated when canvas is mounted/resized)
+    let mut canvas_size = use_signal(|| (800.0f64, 600.0f64));
+    
+    // Sync pan/zoom from SchematicState when it changes (e.g., tab switch, file open)
+    // Use effect to properly react to schematic signal changes
+    use_effect(move || {
         let sch = schematic.read();
-        if *pan.read() != sch.pan {
-            pan.set(sch.pan);
-        }
-        if *zoom.read() != sch.zoom {
-            zoom.set(sch.zoom);
-        }
-    }
+        pan.set(sch.pan);
+        zoom.set(sch.zoom);
+    });
 
     // Drag-to-move state
     let mut drag = use_signal(DragState::default);
@@ -132,6 +132,34 @@ pub fn Schematic() -> Element {
     // Canvas focus context - shared with other components for focus management
     let mut canvas_focus = use_signal(CanvasFocusState::new);
     use_context_provider(|| canvas_focus);
+    
+    // Handle needs_fit flag - perform zoom_to_fit with viewport dimensions
+    // Read the signal first to create a reactive dependency, then check the flag
+    {
+        let needs_fit = schematic.read().needs_fit;
+        if needs_fit {
+            // Clear the flag first to prevent infinite loops
+            schematic.write().needs_fit = false;
+            
+            // Get fresh canvas dimensions at this moment (not stale cached values)
+            // Use the mounted element stored in canvas_focus to get current rect
+            let element_opt = {
+                let focus = canvas_focus.read();
+                focus.get_element()
+            };
+            if let Some(element) = element_opt {
+                spawn(async move {
+                    if let Ok(rect) = element.get_client_rect().await {
+                        let w = rect.width();
+                        let h = rect.height();
+                        if w > 0.0 && h > 0.0 {
+                            schematic.write().zoom_to_fit(w, h);
+                        }
+                    }
+                });
+            }
+        }
+    }
     
     // Global keyboard shortcut handler - works regardless of which panel has focus
     // Professional simulators use window-level shortcuts for consistent behavior
@@ -210,12 +238,10 @@ pub fn Schematic() -> Element {
                                     sim_state_ctx.set(docs.active().simulation.clone());
                                 },
                                 on_tab_close: move |idx| {
-                                    // Get fresh signals via context for clear type inference
-                                    let mut dm: Signal<DocumentManager> = use_context();
-                                    let mut sch: Signal<SchematicState> = use_context();
-                                    let mut sim: Signal<SimulationState> = use_context();
+                                    // Use captured signals from outer scope (doc_manager, schematic, sim_state_ctx)
+                                    // IMPORTANT: Never call use_context() inside callbacks - hooks must only be at component top level
                                     
-                                    let docs = dm.read();
+                                    let docs = doc_manager.read();
                                     let idx = idx as usize;
                                     let is_dirty = docs.documents[idx].is_dirty;
                                     let doc_name = docs.documents[idx].name.clone();
@@ -226,12 +252,12 @@ pub fn Schematic() -> Element {
                                         close_confirm.set(Some((idx, doc_name)));
                                     } else {
                                         // No unsaved changes - close immediately
-                                        let was_active = dm.read().active_index == idx;
-                                        dm.write().close_document(idx);
+                                        let was_active = doc_manager.read().active_index == idx;
+                                        doc_manager.write().close_document(idx);
                                         if was_active {
-                                            let docs = dm.read();
-                                            sch.set(docs.active().schematic.clone());
-                                            sim.set(docs.active().simulation.clone());
+                                            let docs = doc_manager.read();
+                                            schematic.set(docs.active().schematic.clone());
+                                            sim_state_ctx.set(docs.active().simulation.clone());
                                         }
                                     }
                                 },
@@ -262,6 +288,14 @@ pub fn Schematic() -> Element {
                         canvas_focus.write().set_element(evt.data());
                         // Auto-focus so keyboard shortcuts work immediately on startup
                         canvas_focus.read().focus();
+                        
+                        // Capture canvas dimensions for zoom_to_fit
+                        let mounted = evt.data();
+                        spawn(async move {
+                            if let Ok(rect) = mounted.get_client_rect().await {
+                                canvas_size.set((rect.width(), rect.height()));
+                            }
+                        });
                     },
                     // Re-focus when clicking on the canvas to restore keyboard shortcuts
                     onfocus: move |_| {
@@ -1073,11 +1107,37 @@ pub fn Schematic() -> Element {
                             let selection = schematic.read().selection.clone();
                             let probe_wires = probe_hover_wires.read().clone();
                             
+                            // Get cross-probe highlighted node names (strings like "N001", "out", etc.)
+                            let cross_probe_nodes = cross_probe.read().highlighted_schematic().clone();
+                            // Get net mapping from schematic (populated after simulation)
+                            let net_map = schematic.read().net_mapping.clone();
+                            
                             rsx! {
                                 for wire in schematic.read().wires.iter() {
-                                    // Check if wire is in the highlighted net
+                                    // Check if wire is in the highlighted net (probe tool or cross-probe)
                                     {
+                                        // Check probe tool highlight
                                         let is_probe_highlighted = probe_wires.contains(&wire.id);
+                                        
+                                        // Check cross-probe highlight - look up each wire point in net_mapping
+                                        // A wire should highlight if ANY of its points belongs to a cross-probed net
+                                        let is_cross_probe_highlighted = if cross_probe_nodes.is_empty() {
+                                            false
+                                        } else {
+                                            wire.points.iter().any(|point| {
+                                                if let Some(net_name) = net_map.get(point) {
+                                                    // Check if this net name matches any cross-probe target
+                                                    // Case-insensitive comparison for robustness
+                                                    cross_probe_nodes.iter().any(|target| {
+                                                        target.eq_ignore_ascii_case(net_name)
+                                                    })
+                                                } else {
+                                                    false
+                                                }
+                                            })
+                                        };
+                                        
+                                        let should_highlight = is_probe_highlighted || is_cross_probe_highlighted;
                                         
                                         // Calculate points based on drag type
                                         if Some(wire.id) == wire_dragging_id {
@@ -1087,7 +1147,7 @@ pub fn Schematic() -> Element {
                                                     points: wire.points.iter().map(|p| crate::state::Point::new(p.x + delta.x, p.y + delta.y)).collect(),
                                                     grid_size: gs,
                                                     selected: true,
-                                                    probe_highlight: is_probe_highlighted,
+                                                    probe_highlight: should_highlight,
                                                 }
                                             }
                                         } else if is_multi_drag && selection.has_wire(wire.id) {
@@ -1097,7 +1157,7 @@ pub fn Schematic() -> Element {
                                                     points: wire.points.iter().map(|p| crate::state::Point::new(p.x + delta.x, p.y + delta.y)).collect(),
                                                     grid_size: gs,
                                                     selected: true,
-                                                    probe_highlight: is_probe_highlighted,
+                                                    probe_highlight: should_highlight,
                                                 }
                                             }
                                         } else if junction_pos.is_some() {
@@ -1113,7 +1173,7 @@ pub fn Schematic() -> Element {
                                                     }).collect(),
                                                     grid_size: gs,
                                                     selected: (wire.points.first() == junction_pos.as_ref() || wire.points.last() == junction_pos.as_ref()) || selection.has_wire(wire.id),
-                                                    probe_highlight: is_probe_highlighted,
+                                                    probe_highlight: should_highlight,
                                                 }
                                             }
                                         } else {
@@ -1123,7 +1183,7 @@ pub fn Schematic() -> Element {
                                                     points: schematic.read().get_wire_preview_points(wire, comp_dragging_id, delta),
                                                     grid_size: gs,
                                                     selected: (persisted_junction.is_some() && (wire.points.first() == persisted_junction.as_ref() || wire.points.last() == persisted_junction.as_ref())) || selection.has_wire(wire.id),
-                                                    probe_highlight: is_probe_highlighted,
+                                                    probe_highlight: should_highlight,
                                                 }
                                             }
                                         }
@@ -1189,6 +1249,10 @@ pub fn Schematic() -> Element {
                             let selection = schematic.read().selection.clone();
                             let probe_wires = probe_hover_wires.read().clone();
                             
+                            // Get cross-probe state for junction highlighting
+                            let cross_probe_nodes = cross_probe.read().highlighted_schematic().clone();
+                            let net_map = schematic.read().net_mapping.clone();
+                            
                             // Collect wire endpoint segment counts to identify true junctions
                             // A junction exists only where 3+ wire segments meet
                             // Each wire endpoint contributes 1 segment to that point
@@ -1200,6 +1264,19 @@ pub fn Schematic() -> Element {
                             for wire in schematic.read().wires.iter() {
                                 let wire_is_selected = selection.has_wire(wire.id);
                                 let wire_is_probed = probe_wires.contains(&wire.id);
+                                
+                                // Check if wire is cross-probed (any point matches a cross-probe net)
+                                let wire_is_cross_probed = if cross_probe_nodes.is_empty() {
+                                    false
+                                } else {
+                                    wire.points.iter().any(|pt| {
+                                        if let Some(net_name) = net_map.get(pt) {
+                                            cross_probe_nodes.iter().any(|target| target.eq_ignore_ascii_case(net_name))
+                                        } else {
+                                            false
+                                        }
+                                    })
+                                };
                                 
                                 // Only endpoints contribute to junction count (first and last point)
                                 // Get actual display positions considering drag operations
@@ -1235,7 +1312,8 @@ pub fn Schematic() -> Element {
                                     if is_selected {
                                         *point_selected_count.entry(display_pt).or_insert(0) += 1;
                                     }
-                                    if wire_is_probed {
+                                    // Mark as probed if either probe tool or cross-probe is active
+                                    if wire_is_probed || wire_is_cross_probed {
                                         point_probed.insert(display_pt, true);
                                     }
                                 }

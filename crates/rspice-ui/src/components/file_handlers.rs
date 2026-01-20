@@ -230,6 +230,11 @@ pub mod handlers {
                         Ok(mut loaded) => {
                             loaded.current_file = Some(file_path.clone());
                             loaded.is_dirty = false;
+                            loaded.recalculate_runtime_state();
+                            // Set needs_fit flag - the Schematic component will perform
+                            // zoom_to_fit after rendering with correct viewport dimensions
+                            loaded.needs_fit = true;
+
                             schematic.set(loaded.clone());
 
                             // Also update the DocumentManager's active document for tab name

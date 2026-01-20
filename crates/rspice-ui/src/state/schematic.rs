@@ -746,6 +746,11 @@ pub struct SchematicState {
     /// Flag indicating unsaved changes (runtime state, not persisted)
     #[serde(skip)]
     pub is_dirty: bool,
+
+    /// Flag indicating zoom_to_fit should be called after next render with actual viewport dimensions.
+    /// Set to true when loading a file, cleared after the fit is performed.
+    #[serde(skip)]
+    pub needs_fit: bool,
 }
 
 impl Default for SchematicState {
@@ -769,6 +774,7 @@ impl Default for SchematicState {
             connections: Vec::new(),
             net_mapping: HashMap::new(),
             is_dirty: false,
+            needs_fit: false,
         }
     }
 }
@@ -804,6 +810,111 @@ impl SchematicState {
                 }
             }
         }
+    }
+
+    /// Zoom to fit all schematic content in the viewport.
+    ///
+    /// This is the professional approach used by LTspice, Cadence, etc.
+    /// Sets zoom and pan so all components and wires are visible with comfortable margins.
+    ///
+    /// Parameters:
+    /// - `viewport_width`: Width of the schematic canvas in pixels
+    /// - `viewport_height`: Height of the schematic canvas in pixels
+    pub fn zoom_to_fit(&mut self, viewport_width: f64, viewport_height: f64) {
+        // Calculate bounding box of all content (in grid units)
+        let bounds = self.content_bounds();
+
+        if bounds.is_none() {
+            // No content - reset to default view
+            self.zoom = 1.0;
+            self.pan = (0.0, 0.0);
+            return;
+        }
+
+        let (min_x, min_y, max_x, max_y) = bounds.unwrap();
+        let gs = self.grid_size as f64;
+
+        // Convert grid units to pixels for proper pan/zoom calculation
+        // Components are rendered at (grid_pos * grid_size) in the SVG coordinate space
+        let min_px = min_x as f64 * gs;
+        let min_py = min_y as f64 * gs;
+        let max_px = max_x as f64 * gs;
+        let max_py = max_y as f64 * gs;
+
+        // Add margin (5% of content size, minimum 20 pixels) for a comfortable fit
+        let content_width = max_px - min_px;
+        let content_height = max_py - min_py;
+        let margin = (content_width.max(content_height) * 0.05).max(20.0);
+
+        let total_width = content_width + margin * 2.0;
+        let total_height = content_height + margin * 2.0;
+
+        // Calculate zoom to fit (use the smaller scale to ensure everything fits)
+        let zoom_x = viewport_width / total_width;
+        let zoom_y = viewport_height / total_height;
+        let fit_zoom = zoom_x.min(zoom_y);
+
+        // Clamp zoom to reasonable bounds (0.1x to 5x)
+        self.zoom = fit_zoom.clamp(0.1, 5.0);
+
+        // Calculate pan to center the content
+        // Content center in pixel coordinates (SVG space)
+        let center_px = (min_px + max_px) / 2.0;
+        let center_py = (min_py + max_py) / 2.0;
+
+        // SVG transform is: translate(pan_x, pan_y) scale(zoom)
+        // So screen_pos = pan + (world_pos * zoom)
+        // To center content: viewport_center = pan + (content_center * zoom)
+        // Therefore: pan = viewport_center - (content_center * zoom)
+        // Small vertical offset (-15px) to account for status bar at bottom
+        self.pan = (
+            viewport_width / 2.0 - center_px * self.zoom,
+            viewport_height / 2.0 - center_py * self.zoom - 15.0,
+        );
+    }
+
+    /// Calculate the bounding box of all schematic content.
+    /// Returns (min_x, min_y, max_x, max_y) in grid coordinates, or None if empty.
+    pub fn content_bounds(&self) -> Option<(i32, i32, i32, i32)> {
+        if self.components.is_empty() && self.wires.is_empty() && self.junctions.is_empty() {
+            return None;
+        }
+
+        let mut min_x = i32::MAX;
+        let mut min_y = i32::MAX;
+        let mut max_x = i32::MIN;
+        let mut max_y = i32::MIN;
+
+        // Include component bounds (with approximate size for the symbol)
+        for comp in &self.components {
+            // Components have approximate footprint of ~60x30 grid units centered on position
+            let half_w = 30;
+            let half_h = 20;
+            min_x = min_x.min(comp.pos.x - half_w);
+            min_y = min_y.min(comp.pos.y - half_h);
+            max_x = max_x.max(comp.pos.x + half_w);
+            max_y = max_y.max(comp.pos.y + half_h);
+        }
+
+        // Include wire endpoints
+        for wire in &self.wires {
+            for point in &wire.points {
+                min_x = min_x.min(point.x);
+                min_y = min_y.min(point.y);
+                max_x = max_x.max(point.x);
+                max_y = max_y.max(point.y);
+            }
+        }
+
+        // Include junctions
+        for junction in &self.junctions {
+            min_x = min_x.min(junction.pos.x);
+            min_y = min_y.min(junction.pos.y);
+            max_x = max_x.max(junction.pos.x);
+            max_y = max_y.max(junction.pos.y);
+        }
+
+        Some((min_x, min_y, max_x, max_y))
     }
 
     /// Generate a unique component name

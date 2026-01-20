@@ -35,6 +35,11 @@ impl CanvasFocusState {
             });
         }
     }
+
+    /// Get a clone of the mounted element for dimension queries
+    pub fn get_element(&self) -> Option<Rc<MountedData>> {
+        self.element.clone()
+    }
 }
 
 /// Signal wrapper for canvas focus that can be used via context

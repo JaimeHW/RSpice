@@ -33,6 +33,7 @@ use sweep_panel::SweepPanel;
 
 use dioxus::prelude::*;
 
+use crate::state::cross_probing::CrossProbeManager;
 use crate::state::waveform_math;
 use crate::state::SimulationState;
 use crate::theme::Theme;
@@ -44,12 +45,13 @@ pub fn Waveform() -> Element {
     let theme: Signal<Theme> = use_context();
     let mut sim_state: Signal<SimulationState> = use_context();
     let mut waveform_visible: Signal<crate::app::WaveformVisible> = use_context();
+    let mut cross_probe: Signal<CrossProbeManager> = use_context();
     let th = theme.read();
 
     let waveforms = &sim_state.read().waveforms;
     let mut view_state = use_signal(ViewState::default);
     let cursor_state = use_signal(CursorState::default);
-    let box_selection = use_signal(BoxSelection::default);
+    let mut box_selection = use_signal(BoxSelection::default);
     let _viewer_state = use_signal(WaveformViewerState::new);
 
     // UI state for analysis panels
@@ -57,6 +59,9 @@ pub fn Waveform() -> Element {
     let mut show_fft = use_signal(|| false);
     let mut show_sweep = use_signal(|| false);
     let mut show_export = use_signal(|| false);
+
+    // Error message for expression evaluation
+    let mut expr_error = use_signal(|| Option::<String>::None);
 
     // Global drag state for smooth panel dragging
     let mut global_drag = use_signal(global_drag::GlobalDragState::default);
@@ -110,6 +115,55 @@ pub fn Waveform() -> Element {
             }
         }
 
+        // Box selection overlay - captures mouse events when selecting to allow drag outside plot
+        // This is the professional approach used by LTspice, Cadence, etc.
+        if box_selection.read().is_selecting {
+            div {
+                class: "box-selection-overlay",
+                style: "
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    z-index: 9998;
+                    cursor: crosshair;
+                ",
+                onmousemove: move |e| {
+                    // Convert client coordinates to data coordinates using stored plot bounds
+                    let client_x = e.client_coordinates().x;
+                    let client_y = e.client_coordinates().y;
+
+                    let bs = box_selection.read();
+                    let (plot_left, plot_top, plot_width, plot_height) = bs.plot_rect;
+                    drop(bs);
+
+                    let vs = *view_state.read();
+
+                    // Convert client coords relative to plot element bounds
+                    let elem_x = client_x - plot_left;
+                    let elem_y = client_y - plot_top;
+
+                    // Convert element coords to data coords
+                    let data_x = vs.x_min + (elem_x / plot_width.max(1.0)) * (vs.x_max - vs.x_min);
+                    let data_y = vs.y_max - (elem_y / plot_height.max(1.0)) * (vs.y_max - vs.y_min);
+
+                    box_selection.write().update(data_x, data_y);
+                },
+                onmouseup: move |_| {
+                    // Finish box selection and zoom to region
+                    if let Some((x_min, x_max, y_min, y_max)) = box_selection.write().finish() {
+                        let mut vs = view_state.write();
+                        vs.x_min = x_min;
+                        vs.x_max = x_max;
+                        vs.y_min = y_min;
+                        vs.y_max = y_max;
+                    }
+                    view_state.write().is_panning = false;
+                },
+            }
+        }
+
         div {
             class: "waveform-viewer",
             style: "
@@ -126,6 +180,14 @@ pub fn Waveform() -> Element {
                     let waveforms = &sim_state.read().waveforms;
                     view_state.write().fit_to_data(waveforms);
                 },
+                on_fit_x: move |_| {
+                    let waveforms = &sim_state.read().waveforms;
+                    view_state.write().fit_x_to_data(waveforms);
+                },
+                on_fit_y: move |_| {
+                    let waveforms = &sim_state.read().waveforms;
+                    view_state.write().fit_y_to_data(waveforms);
+                },
                 on_zoom_in: move |_| {
                     view_state.write().zoom(0.8, 0.5, 0.5);
                 },
@@ -133,6 +195,9 @@ pub fn Waveform() -> Element {
                     view_state.write().zoom(1.25, 0.5, 0.5);
                 },
                 on_add_trace: move |expr: String| {
+                    // Clear previous error
+                    expr_error.set(None);
+
                     // Build signal map from existing waveforms
                     let state = sim_state.read();
                     let signals: std::collections::HashMap<String, (Vec<f64>, Vec<f64>)> =
@@ -159,7 +224,9 @@ pub fn Waveform() -> Element {
                             });
                         }
                         Err(e) => {
-                            // Log error (in a real app would show in UI)
+                            // Display error in UI
+                            expr_error.set(Some(e.to_string()));
+                            // Also log to console for debugging
                             eprintln!("Expression error: {}", e);
                         }
                     }
@@ -187,6 +254,7 @@ pub fn Waveform() -> Element {
                 fft_active: *show_fft.read(),
                 sweep_active: *show_sweep.read(),
                 export_active: *show_export.read(),
+                error_message: expr_error.read().clone(),
             }
 
             // Measurements panel overlay
@@ -275,6 +343,10 @@ pub fn Waveform() -> Element {
                         border-left: 1px solid {th.border()};
                         overflow-y: auto;
                     ",
+                    // Click empty space to clear highlights
+                    onclick: move |_| {
+                        cross_probe.write().clear_highlights();
+                    },
 
                     div {
                         style: "
@@ -296,17 +368,32 @@ pub fn Waveform() -> Element {
                         }
                     } else {
                         for (idx, wf) in waveforms.iter().enumerate() {
-                            LegendItem {
-                                key: "{wf.name}-{idx}",
-                                name: wf.name.clone(),
-                                color: wf.color.clone(),
-                                visible: wf.visible,
-                                on_toggle: move |_| {
-                                    // Toggle visibility in SimulationState
-                                    if let Some(wf) = sim_state.write().waveforms.get_mut(idx) {
-                                        wf.visible = !wf.visible;
+                            {
+                                let wf_name = wf.name.clone();
+                                let is_highlighted = cross_probe.read().is_waveform_highlighted(&wf.name);
+                                rsx! {
+                                    LegendItem {
+                                        key: "{wf_name}-{idx}",
+                                        name: wf_name.clone(),
+                                        color: wf.color.clone(),
+                                        visible: wf.visible,
+                                        highlighted: is_highlighted,
+                                        on_toggle: move |_| {
+                                            // Toggle visibility in SimulationState
+                                            if let Some(wf) = sim_state.write().waveforms.get_mut(idx) {
+                                                wf.visible = !wf.visible;
+                                            }
+                                        },
+                                        on_crossprobe: {
+                                            let name_for_probe = wf_name.clone();
+                                            move |signal_name: String| {
+                                                // Trigger cross-probe to schematic
+                                                cross_probe.write().probe_from_waveform(&signal_name);
+                                                log::info!("Cross-probe triggered for: {}", name_for_probe);
+                                            }
+                                        },
                                     }
-                                },
+                                }
                             }
                         }
                     }
@@ -474,7 +561,15 @@ fn WaveformPlotArea(
 
                 if e.modifiers().shift() && !is_middle_click {
                     // Shift+left-drag = box zoom selection
-                    box_selection.write().start(data_x, data_y, elem.x, elem.y);
+                    // Store plot rect for global coordinate conversion
+                    let client = e.client_coordinates();
+                    let plot_rect = (
+                        client.x - elem.x,  // left = client_x - elem_x
+                        client.y - elem.y,  // top = client_y - elem_y
+                        plot_width,
+                        plot_height,
+                    );
+                    box_selection.write().start(data_x, data_y, elem.x, elem.y, plot_rect);
                 } else {
                     // Left drag or middle-click = pan
                     let mut vs = view_state.write();
@@ -499,8 +594,12 @@ fn WaveformPlotArea(
             },
 
             onmouseleave: move |_| {
-                box_selection.write().cancel();
-                view_state.write().is_panning = false;
+                // Don't cancel box selection when mouse leaves - let user drag outside
+                // This matches professional simulator behavior (LTspice, Cadence)
+                // Selection completes on mouseup, not on leaving the area
+                if !box_selection.read().is_selecting {
+                    view_state.write().is_panning = false;
+                }
             },
 
             // Click to place cursor (only if not dragging)

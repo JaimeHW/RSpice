@@ -343,11 +343,22 @@ pub struct BoxSelection {
     /// Start point in element coordinates for drawing
     pub start_elem_x: f64,
     pub start_elem_y: f64,
+    /// Plot element bounds (client coords) for global coordinate conversion
+    /// Stores (left, top, width, height) of the plot element when selection started
+    pub plot_rect: (f64, f64, f64, f64),
 }
 
 impl BoxSelection {
     /// Start a box selection at the given data coordinates.
-    pub fn start(&mut self, x: f64, y: f64, elem_x: f64, elem_y: f64) {
+    /// Also stores the plot element bounding rect for global coordinate conversion.
+    pub fn start(
+        &mut self,
+        x: f64,
+        y: f64,
+        elem_x: f64,
+        elem_y: f64,
+        plot_rect: (f64, f64, f64, f64),
+    ) {
         self.is_selecting = true;
         self.start_x = x;
         self.start_y = y;
@@ -355,6 +366,7 @@ impl BoxSelection {
         self.end_y = y;
         self.start_elem_x = elem_x;
         self.start_elem_y = elem_y;
+        self.plot_rect = plot_rect;
     }
 
     /// Update the end point during drag.

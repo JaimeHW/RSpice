@@ -11,6 +11,8 @@ use crate::theme::Theme;
 #[component]
 pub fn WaveformHeader(
     on_fit: EventHandler<MouseEvent>,
+    on_fit_x: EventHandler<MouseEvent>,
+    on_fit_y: EventHandler<MouseEvent>,
     on_zoom_in: EventHandler<MouseEvent>,
     on_zoom_out: EventHandler<MouseEvent>,
     on_add_trace: EventHandler<String>,
@@ -23,11 +25,16 @@ pub fn WaveformHeader(
     #[props(default)] fft_active: bool,
     #[props(default)] sweep_active: bool,
     #[props(default)] export_active: bool,
+    /// Error message to display (set by parent when expression evaluation fails)
+    #[props(default)]
+    error_message: Option<String>,
 ) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
     let mut expr_input = use_signal(|| String::new());
-    let mut error_msg = use_signal(|| Option::<String>::None);
+
+    // Use error from prop (parent-controlled) for display
+    let display_error = error_message.clone();
 
     rsx! {
         div {
@@ -77,7 +84,6 @@ pub fn WaveformHeader(
                     ",
                     oninput: move |e| {
                         expr_input.set(e.value().clone());
-                        error_msg.set(None);
                     },
                     onkeydown: move |e| {
                         if e.key() == Key::Enter {
@@ -113,10 +119,16 @@ pub fn WaveformHeader(
             }
 
             // Error message
-            if let Some(err) = error_msg.read().as_ref() {
+            if let Some(ref err) = display_error {
                 span {
-                    style: "color: #ef4444; font-size: 10px;",
-                    "{err}"
+                    style: "
+                        color: #ef4444;
+                        font-size: 10px;
+                        background: rgba(239, 68, 68, 0.1);
+                        padding: 2px 6px;
+                        border-radius: 3px;
+                    ",
+                    "⚠ {err}"
                 }
             }
 
@@ -132,7 +144,9 @@ pub fn WaveformHeader(
 
                 ControlButton { label: "⊕", title: "Zoom In", onclick: on_zoom_in }
                 ControlButton { label: "⊖", title: "Zoom Out", onclick: on_zoom_out }
-                ControlButton { label: "⊡", title: "Fit", onclick: on_fit }
+                ControlButton { label: "⊡", title: "Fit All", onclick: on_fit }
+                ControlButton { label: "↔", title: "Fit X (Time)", onclick: on_fit_x }
+                ControlButton { label: "↕", title: "Fit Y (Voltage)", onclick: on_fit_y }
                 ControlButton { label: "│", title: "Cursor 1" }
                 ControlButton { label: "┃", title: "Cursor 2" }
             }
@@ -283,23 +297,33 @@ pub fn ToggleButton(
     }
 }
 
-/// Legend item with visibility toggle.
+/// Legend item with visibility toggle and cross-probe support.
 #[component]
 pub fn LegendItem(
     name: String,
     color: String,
     visible: bool,
+    #[props(default)] highlighted: bool,
     on_toggle: EventHandler<MouseEvent>,
+    #[props(default)] on_crossprobe: EventHandler<String>,
 ) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
     let mut hovered = use_signal(|| false);
+    let signal_name = name.clone();
 
     let opacity = if visible { "1" } else { "0.4" };
-    let bg = if *hovered.read() {
-        th.surface_hover()
+    let bg = if highlighted {
+        th.accent_primary().to_string() + "30" // Highlighted background
+    } else if *hovered.read() {
+        th.surface_hover().to_string()
     } else {
-        "transparent"
+        "transparent".to_string()
+    };
+    let border_style = if highlighted {
+        format!("2px solid {}", th.accent_primary())
+    } else {
+        "2px solid transparent".to_string()
     };
     let checkbox_bg = if visible { "#3b82f6" } else { "transparent" };
 
@@ -315,12 +339,22 @@ pub fn LegendItem(
                 cursor: pointer;
                 border-radius: {Theme::RADIUS_SM};
                 background: {bg};
+                border: {border_style};
                 opacity: {opacity};
                 transition: all {Theme::TRANSITION_FAST};
             ",
             onmouseenter: move |_| hovered.set(true),
             onmouseleave: move |_| hovered.set(false),
             onclick: move |e| on_toggle.call(e),
+            // Right-click for cross-probing to schematic
+            oncontextmenu: {
+                let name_for_probe = signal_name.clone();
+                move |e: Event<MouseData>| {
+                    e.prevent_default();
+                    e.stop_propagation();
+                    on_crossprobe.call(name_for_probe.clone());
+                }
+            },
 
             // Visibility checkbox
             div {

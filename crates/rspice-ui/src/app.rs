@@ -9,6 +9,7 @@ use dioxus::prelude::*;
 use rspice_core::library::LibraryManager;
 
 use crate::components::{Panel, SimulationDialog, Toolbar};
+use crate::state::cross_probing::CrossProbeManager;
 use crate::state::simulation_command::SimulationConfig;
 use crate::state::{DocumentManager, SchematicState, SimulationState};
 use crate::theme::Theme;
@@ -53,6 +54,9 @@ pub fn App() -> Element {
     // Multi-document interface: manage open documents
     let doc_manager = use_signal(DocumentManager::default);
 
+    // Cross-probing manager for schematic ↔ waveform coordination
+    let cross_probe = use_signal(CrossProbeManager::new);
+
     // Provide contexts to all children
     use_context_provider(|| theme);
     use_context_provider(|| sim_state);
@@ -63,6 +67,7 @@ pub fn App() -> Element {
     use_context_provider(|| sim_config);
     use_context_provider(|| sim_dialog_visible);
     use_context_provider(|| doc_manager);
+    use_context_provider(|| cross_probe);
 
     let th = theme.read();
 

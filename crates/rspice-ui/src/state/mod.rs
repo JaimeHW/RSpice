@@ -3,6 +3,7 @@
 //! Application state for simulation, project, and UI state.
 
 pub mod canvas_focus;
+pub mod cross_probing;
 pub mod document;
 pub mod fft;
 pub mod history;
