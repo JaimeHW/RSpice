@@ -464,6 +464,108 @@ impl LteEstimator {
         }
     }
 
+    /// Charge-based LTE estimation for capacitive elements (MOSFET gates)
+    ///
+    /// For charge-conserving models (BSIM4, etc.), the fundamental relationship is:
+    /// ```text
+    /// dQ/dt = I
+    /// ```
+    ///
+    /// This method estimates LTE based on charge conservation errors rather than
+    /// voltage errors. This is more accurate for capacitive elements because:
+    /// 1. It directly tracks the physical quantity being integrated (charge)
+    /// 2. It catches errors in current integration that voltage-based LTE might miss
+    /// 3. It ensures charge conservation across the simulation
+    ///
+    /// # Arguments
+    /// * `charges` - Current charge values at each node
+    /// * `prev_charges` - Charge values from previous timestep
+    /// * `currents` - Current values (dQ/dt) at each node
+    /// * `dt` - Current timestep
+    ///
+    /// # Returns
+    /// (max_charge_lte, should_accept)
+    ///
+    /// # Theory
+    /// For trapezoidal integration: Q_{n+1} = Q_n + dt/2 * (I_n + I_{n+1})
+    /// The LTE is estimated as: |Q_actual - Q_predicted| / |Q_actual|
+    pub fn estimate_charge_lte(
+        &self,
+        charges: &[Value],
+        prev_charges: &[Value],
+        currents: &[Value],
+        prev_currents: &[Value],
+        dt: Value,
+    ) -> (Value, bool) {
+        if charges.len() != prev_charges.len() || charges.is_empty() {
+            return (0.0, true);
+        }
+
+        if charges.len() != currents.len() || charges.len() != prev_currents.len() {
+            return (0.0, true);
+        }
+
+        let mut max_lte = 0.0_f64;
+
+        // For each charge node, check conservation error
+        for i in 0..charges.len() {
+            let q_curr = charges[i];
+            let q_prev = prev_charges[i];
+            let i_curr = currents[i];
+            let i_prev = prev_currents[i];
+
+            // Trapezoidal prediction: Q_n+1 = Q_n + dt/2 * (I_n + I_{n+1})
+            let q_predicted = q_prev + dt * 0.5 * (i_prev + i_curr);
+
+            // Charge conservation error
+            let charge_error = (q_curr - q_predicted).abs();
+
+            // Normalize by charge magnitude (with minimum to avoid division issues)
+            let q_magnitude = q_curr.abs().max(q_prev.abs()).max(1e-18);
+            let normalized_lte = charge_error / q_magnitude;
+
+            max_lte = max_lte.max(normalized_lte);
+        }
+
+        let accept = max_lte <= self.tolerance;
+        (max_lte, accept)
+    }
+
+    /// Combined voltage and charge LTE estimation
+    ///
+    /// Uses both voltage-based and charge-based LTE to determine timestep.
+    /// Takes the maximum of both to ensure both voltages and charges are
+    /// accurately integrated.
+    ///
+    /// # Arguments
+    /// * `voltages` - Current node voltages
+    /// * `dt` - Current timestep
+    /// * `charges` - Gate/junction charges (if available)
+    /// * `prev_charges` - Previous gate/junction charges
+    /// * `currents` - Node currents
+    /// * `prev_currents` - Previous node currents
+    pub fn estimate_combined(
+        &self,
+        voltages: &[Value],
+        dt: Value,
+        charges: Option<(&[Value], &[Value], &[Value], &[Value])>,
+    ) -> (Value, bool) {
+        // Standard voltage-based LTE
+        let (v_lte, v_accept) = self.estimate(voltages, dt);
+
+        // Charge-based LTE if charge data provided
+        let (combined_lte, combined_accept) = if let Some((q_curr, q_prev, i_curr, i_prev)) =
+            charges
+        {
+            let (q_lte, q_accept) = self.estimate_charge_lte(q_curr, q_prev, i_curr, i_prev, dt);
+            (v_lte.max(q_lte), v_accept && q_accept)
+        } else {
+            (v_lte, v_accept)
+        };
+
+        (combined_lte, combined_accept)
+    }
+
     /// Reset history (e.g., after discontinuity)
     pub fn reset(&mut self) {
         self.prev_solution.clear();
@@ -987,5 +1089,122 @@ mod tests {
         // Reset should clear all history
         lte.reset();
         assert_eq!(lte.history_count, 0);
+    }
+
+    //=========================================================================
+    // Charge-Based LTE Tests
+    //=========================================================================
+
+    #[test]
+    fn test_charge_lte_perfect_conservation() {
+        let lte = LteEstimator::new(1e-3);
+
+        // Perfect charge conservation: Q_new = Q_old + dt/2 * (I_old + I_new)
+        let dt = 1e-9;
+        let prev_charges = vec![1e-15, 2e-15]; // 1fF, 2fF
+        let prev_currents = vec![1e-6, 2e-6]; // 1uA, 2uA
+        let currents = vec![1e-6, 2e-6]; // Same current
+
+        // Perfect integration: Q_new = Q_old + dt * I (since I_old = I_new)
+        let charges = vec![
+            prev_charges[0] + dt * prev_currents[0],
+            prev_charges[1] + dt * prev_currents[1],
+        ];
+
+        let (lte_est, accept) =
+            lte.estimate_charge_lte(&charges, &prev_charges, &currents, &prev_currents, dt);
+
+        assert!(
+            lte_est < 1e-10,
+            "Perfect conservation should have ~0 LTE, got {}",
+            lte_est
+        );
+        assert!(accept, "Should accept perfect conservation");
+    }
+
+    #[test]
+    fn test_charge_lte_with_error() {
+        let lte = LteEstimator::new(1e-3);
+
+        let dt = 1e-9;
+        let prev_charges = vec![1e-15];
+        let prev_currents = vec![1e-6];
+        let currents = vec![1e-6];
+
+        // Expected: Q = 1e-15 + 1e-9 * 1e-6 = 1e-15 + 1e-15 = 2e-15
+        // Actual with 10% error
+        let charges = vec![2.2e-15]; // 10% error
+
+        let (lte_est, accept) =
+            lte.estimate_charge_lte(&charges, &prev_charges, &currents, &prev_currents, dt);
+
+        // Error: |2.2e-15 - 2e-15| / 2.2e-15 = 0.2e-15 / 2.2e-15 ≈ 0.09
+        assert!(lte_est > 0.05, "Should detect 10% error, got {}", lte_est);
+        assert!(!accept, "Should reject 10% charge error");
+    }
+
+    #[test]
+    fn test_charge_lte_empty_inputs() {
+        let lte = LteEstimator::new(1e-3);
+
+        // Empty arrays should return (0.0, true)
+        let (lte_est, accept) = lte.estimate_charge_lte(&[], &[], &[], &[], 1e-9);
+        assert_eq!(lte_est, 0.0);
+        assert!(accept);
+    }
+
+    #[test]
+    fn test_charge_lte_mismatched_lengths() {
+        let lte = LteEstimator::new(1e-3);
+
+        // Mismatched array lengths should return (0.0, true)
+        let (lte_est, accept) = lte.estimate_charge_lte(&[1.0, 2.0], &[1.0], &[1.0], &[1.0], 1e-9);
+        assert_eq!(lte_est, 0.0);
+        assert!(accept);
+    }
+
+    #[test]
+    fn test_combined_lte_voltage_only() {
+        let mut lte = LteEstimator::new(1e-3);
+
+        // Record some history
+        lte.record(&[1.0, 2.0], 1e-9);
+        lte.record(&[1.1, 2.2], 1e-9);
+
+        // Test combined without charges
+        let (combined_lte, accept) = lte.estimate_combined(&[1.2, 2.4], 1e-9, None);
+
+        // Should be same as voltage-only LTE
+        let (v_lte, v_accept) = lte.estimate(&[1.2, 2.4], 1e-9);
+        assert!((combined_lte - v_lte).abs() < 1e-15);
+        assert_eq!(accept, v_accept);
+    }
+
+    #[test]
+    fn test_combined_lte_with_charges() {
+        let mut lte = LteEstimator::new(1e-3);
+
+        // Record some history
+        lte.record(&[1.0, 2.0], 1e-9);
+        lte.record(&[1.0, 2.0], 1e-9); // Constant voltage (no voltage error)
+
+        let dt = 1e-9;
+        // Charge with significant error
+        let q_curr = vec![2.5e-15];
+        let q_prev = vec![1e-15];
+        let i_curr = vec![1e-6];
+        let i_prev = vec![1e-6];
+        // Expected: 1e-15 + 1e-9 * 1e-6 = 2e-15, actual 2.5e-15 = 25% error
+
+        let (combined_lte, accept) =
+            lte.estimate_combined(&[1.0, 2.0], dt, Some((&q_curr, &q_prev, &i_curr, &i_prev)));
+
+        // Combined should catch the charge error
+        assert!(
+            combined_lte > 0.1,
+            "Should detect charge error, got {}",
+            combined_lte
+        );
+        assert!(!accept, "Should reject due to charge error");
     }
 }

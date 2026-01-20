@@ -23,6 +23,7 @@ thiserror.workspace = true
 log.workspace = true
 nom.workspace = true
 num-complex.workspace = true
+rustfft.workspace = true
 serde = { workspace = true, optional = true }
 
 # Parallel computation (optional)

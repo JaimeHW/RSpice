@@ -59,6 +59,18 @@ pub use advanced::{
     TransferFunctionConfig, TransferFunctionResult, TrigSpec, VariableStatistics, VariationSet,
 };
 
+// Re-export PSS types
+pub use advanced::pss::{
+    PeriodDetector, PeriodEstimate, PeriodicWaveform, PssConfig, PssResult, ShootingNewtonSolver,
+    ShootingState,
+};
+
+// Re-export Harmonic Balance types
+pub use advanced::harmonic_balance::{
+    FrequencyIndex, FrequencyMap, HarmonicData, HbConfig, HbError, HbFft, HbResult, HbSolver,
+    HbSolverState, HbTone, MultiToneConfig, SpectralVoltage,
+};
+
 // Re-export key types from output
 pub use output::{
     CompressionConfig, RawExporter, RawFormat, RawVariable, StreamingWaveformReader,
