@@ -22,6 +22,6 @@ pub use history::SchematicHistory;
 pub use netlist_generator::{generate_netlist, NetlistResult};
 pub use schematic::*;
 pub use simulation::{ConsoleMessage, MessageSeverity, SimulationState, WaveformData};
-pub use simulation_runner::run_simulation;
+pub use simulation_runner::{run_simulation, SimulationResult, SimulationStats};
 #[allow(unused_imports)]
 pub use waveform_math::eval_expression;

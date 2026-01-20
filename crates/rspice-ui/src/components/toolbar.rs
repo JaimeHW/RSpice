@@ -10,7 +10,8 @@ use super::file_handlers;
 use super::icons::{Icon, IconType};
 use crate::state::simulation_command::SimulationConfig;
 use crate::state::{
-    generate_netlist, run_simulation, ConsoleMessage, SchematicState, SimulationState, WaveformData,
+    generate_netlist, run_simulation, ConsoleMessage, SchematicState, SimulationResult,
+    SimulationState, WaveformData,
 };
 use crate::theme::Theme;
 
@@ -334,68 +335,85 @@ pub fn Toolbar() -> Element {
                                 format!("Generated netlist ({} nets)", netlist_result.nets.len())
                             ));
 
-                            let result = run_simulation(&netlist_content);
+                            // Clone data needed for async block
+                            let netlist_for_sim = netlist_content.clone();
+                            let nets_for_ground = netlist_result.nets.clone();
 
-                            // Update state with results
-                            let mut state = sim_state.write();
-                            state.is_running = false;
+                            // Run simulation in background thread to prevent UI freeze
+                            // spawn_blocking is essential for CPU-bound work in async context
+                            spawn(async move {
+                                // Use spawn_blocking to run CPU-intensive simulation on thread pool
+                                let result = tokio::task::spawn_blocking(move || {
+                                    run_simulation(&netlist_for_sim)
+                                }).await.unwrap_or_else(|_| SimulationResult {
+                                    success: false,
+                                    transient: None,
+                                    dc_op: None,
+                                    error: Some("Simulation task panicked".to_string()),
+                                    stats: Default::default(),
+                                });
 
-                            if result.success {
-                                // Clear old waveforms and add new ones
-                                state.waveforms.clear();
+                                // Update state with results
+                                let mut state = sim_state.write();
+                                state.is_running = false;
 
-                                // Collect waveform names for ground detection
-                                let mut waveform_nets: std::collections::HashSet<String> = std::collections::HashSet::new();
+                                if result.success {
+                                    // Clear old waveforms and add new ones
+                                    state.waveforms.clear();
 
-                                if let Some(tran) = result.transient {
-                                    log::info!("Transient data: {} time points, {} voltage traces",
-                                        tran.time.len(), tran.voltages.len());
-                                    for (idx, (name, values)) in tran.voltages.into_iter().enumerate() {
-                                        log::info!("  Adding waveform: {} with {} points", name, values.len());
-                                        // Extract net name from V(N001) -> N001
-                                        let net_name = name
-                                            .trim_start_matches("V(")
-                                            .trim_end_matches(')')
-                                            .to_string();
-                                        waveform_nets.insert(net_name);
-                                        state.waveforms.push(WaveformData {
-                                            name,
-                                            x: tran.time.clone(),
-                                            y: values,
-                                            color: Theme::trace_color_static(idx).to_string(),
-                                            visible: true,
-                                        });
+                                    // Collect waveform names for ground detection
+                                    let mut waveform_nets: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+                                    if let Some(tran) = result.transient {
+                                        log::info!("Transient data: {} time points, {} voltage traces",
+                                            tran.time.len(), tran.voltages.len());
+                                        for (idx, (name, values)) in tran.voltages.into_iter().enumerate() {
+                                            log::info!("  Adding waveform: {} with {} points", name, values.len());
+                                            // Extract net name from V(N001) -> N001
+                                            let net_name = name
+                                                .trim_start_matches("V(")
+                                                .trim_end_matches(')')
+                                                .to_string();
+                                            waveform_nets.insert(net_name);
+                                            state.waveforms.push(WaveformData {
+                                                name,
+                                                x: tran.time.clone(),
+                                                y: values,
+                                                color: Theme::trace_color_static(idx).to_string(),
+                                                visible: true,
+                                            });
+                                        }
+                                    } else {
+                                        log::warn!("No transient data in simulation result");
                                     }
+
+                                    // Derive ground node: the net that exists in netlist but not in waveforms
+                                    let all_nets: std::collections::HashSet<String> = nets_for_ground.keys().cloned().collect();
+                                    let ground_candidates: Vec<String> = all_nets.difference(&waveform_nets).cloned().collect();
+                                    if let Some(ground) = ground_candidates.first() {
+                                        state.ground_node = Some(ground.clone());
+                                        log::info!("Ground reference node: {}", ground);
+                                    } else {
+                                        state.ground_node = None;
+                                    }
+
+                                    log::info!("Total waveforms after simulation: {}", state.waveforms.len());
+
+                                    state.console_messages.push(ConsoleMessage::success(
+                                        format!("Simulation complete! {} points, {:.1}ms",
+                                            result.stats.num_points,
+                                            result.stats.sim_time_ms
+                                        )
+                                    ));
+                                    log::info!("Simulation completed: {} points in {:.1}ms",
+                                        result.stats.num_points, result.stats.sim_time_ms);
                                 } else {
-                                    log::warn!("No transient data in simulation result");
+                                    state.console_messages.push(ConsoleMessage::error(
+                                        result.error.unwrap_or_else(|| "Unknown error".to_string())
+                                    ));
+                                    log::error!("Simulation failed");
                                 }
-
-                                // Derive ground node: the net that exists in netlist but not in waveforms
-                                let all_nets: std::collections::HashSet<String> = netlist_result.nets.keys().cloned().collect();
-                                let ground_candidates: Vec<String> = all_nets.difference(&waveform_nets).cloned().collect();
-                                if let Some(ground) = ground_candidates.first() {
-                                    state.ground_node = Some(ground.clone());
-                                    log::info!("Ground reference node: {}", ground);
-                                } else {
-                                    state.ground_node = None;
-                                }
-
-                                log::info!("Total waveforms after simulation: {}", state.waveforms.len());
-
-                                state.console_messages.push(ConsoleMessage::success(
-                                    format!("Simulation complete! {} points, {:.1}ms",
-                                        result.stats.num_points,
-                                        result.stats.sim_time_ms
-                                    )
-                                ));
-                                log::info!("Simulation completed: {} points in {:.1}ms",
-                                    result.stats.num_points, result.stats.sim_time_ms);
-                            } else {
-                                state.console_messages.push(ConsoleMessage::error(
-                                    result.error.unwrap_or_else(|| "Unknown error".to_string())
-                                ));
-                                log::error!("Simulation failed");
-                            }
+                            });
                         },
                         "Run"
                     }

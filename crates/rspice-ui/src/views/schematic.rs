@@ -8,7 +8,9 @@ use dioxus::prelude::*;
 use crate::app::WaveformVisible;
 use crate::components::component_edit::ComponentEditModal;
 use crate::components::component_library::ComponentLibrary;
+use crate::components::confirm_modal::{SaveDialogResult, UnsavedChangesModal};
 use crate::components::context_menu::{schematic_context_menu, canvas_context_menu, ContextMenu, MenuAction};
+use crate::components::file_handlers;
 use crate::components::tab_bar::DocumentTabBar;
 use crate::state::{CanvasFocusState, ComponentType, ConsoleMessage, DocumentManager, Point, Rotation, SchematicState, SimulationState, Tool, SchematicHistory};
 use crate::theme::Theme;
@@ -110,6 +112,9 @@ pub fn Schematic() -> Element {
     
     // Probe tool: wire IDs of the hovered net (entire electrically connected net)
     let mut probe_hover_wires: Signal<std::collections::HashSet<u64>> = use_signal(std::collections::HashSet::new);
+    
+    // Wire corner hover state - shows visual feedback when cursor is near a draggable wire endpoint
+    let mut hovered_corner: Signal<Option<Point>> = use_signal(|| None);
 
     // Undo/Redo history (local for now, will integrate with SchematicHistory later)
     let mut history = use_signal(|| SchematicHistory::new(schematic.read().clone(), 100));
@@ -345,41 +350,49 @@ pub fn Schematic() -> Element {
                             }
                             Key::Character(c) if c == "g" || c == "G" => {
                                 s.cancel_wire();
+                                s.selection.clear();
                                 s.tool = Tool::Place(ComponentType::Ground);
                                 s.preview_rotation = Rotation::R0;
                             }
                             Key::Character(c) if c == "v" || c == "V" => {
                                 s.cancel_wire();
+                                s.selection.clear();
                                 s.tool = Tool::Place(ComponentType::VoltageSource);
                                 s.preview_rotation = Rotation::R0;
                             }
                             Key::Character(c) if c == "i" => {
                                 s.cancel_wire();
+                                s.selection.clear();
                                 s.tool = Tool::Place(ComponentType::CurrentSource);
                                 s.preview_rotation = Rotation::R0;
                             }
                             Key::Character(c) if c == "c" => {
                                 s.cancel_wire();
+                                s.selection.clear();
                                 s.tool = Tool::Place(ComponentType::Capacitor);
                                 s.preview_rotation = Rotation::R0;
                             }
                             Key::Character(c) if c == "l" || c == "L" => {
                                 s.cancel_wire();
+                                s.selection.clear();
                                 s.tool = Tool::Place(ComponentType::Inductor);
                                 s.preview_rotation = Rotation::R0;
                             }
                             Key::Character(c) if c == "d" => {
                                 s.cancel_wire();
+                                s.selection.clear();
                                 s.tool = Tool::Place(ComponentType::Diode);
                                 s.preview_rotation = Rotation::R0;
                             }
                             Key::Character(c) if c == "q" || c == "Q" => {
                                 s.cancel_wire();
+                                s.selection.clear();
                                 s.tool = Tool::Place(ComponentType::NpnBjt);
                                 s.preview_rotation = Rotation::R0;
                             }
                             Key::Character(c) if c == "m" => {
                                 s.cancel_wire();
+                                s.selection.clear();
                                 s.tool = Tool::Place(ComponentType::Nmos);
                                 s.preview_rotation = Rotation::R0;
                             }
@@ -475,6 +488,24 @@ pub fn Schematic() -> Element {
                         // Update wire preview position for orthogonal routing
                         if schematic.read().wire_drawing.active {
                             schematic.write().update_wire_preview(gp);
+                        }
+                        
+                        // Select tool: detect wire endpoints/corners on hover for drag feedback
+                        if matches!(schematic.read().tool, Tool::Select) && !d.active && !bs.active {
+                            let s = schematic.read();
+                            // Check if cursor is on any wire endpoint
+                            let mut found_corner: Option<Point> = None;
+                            'corner_search: for wire in &s.wires {
+                                for pt in &wire.points {
+                                    if *pt == gp {
+                                        found_corner = Some(*pt);
+                                        break 'corner_search;
+                                    }
+                                }
+                            }
+                            hovered_corner.set(found_corner);
+                        } else if d.active || bs.active {
+                            hovered_corner.set(None);
                         }
                         
                         // Probe tool: detect wire under cursor and highlight entire connected net
@@ -798,9 +829,8 @@ pub fn Schematic() -> Element {
                         let mut s = schematic.write();
                         match s.tool {
                             Tool::Select => {
-                                s.selection.clear();
-                                if let Some(id) = s.component_at(gp) { s.selection.components.push(id); }
-                                else if let Some(id) = s.wire_at(gp) { s.selection.wires.push(id); }
+                                // Selection and drag are handled in mousedown/mouseup
+                                // No action needed on click
                             }
                             Tool::Place(k) => {
                                 // Make the change first
@@ -819,14 +849,12 @@ pub fn Schematic() -> Element {
                                 }
                             }
                             Tool::Probe => {
-                                // Professional probe behavior: use cached net mapping
-                                // from netlist generation to find actual net names
-                                let probe_name = if let Some(comp_id) = s.component_at(gp) {
-                                    // Component probe - use component name
-                                    s.components.iter()
-                                        .find(|c| c.id == comp_id)
-                                        .map(|comp| format!("V({})", comp.name))
-                                } else if s.wire_at(gp).is_some() {
+                                // Professional probe behavior: probe WIRES/NODES, not components
+                                // SPICE simulators measure node voltages, not component voltages
+                                let clicked_component = s.component_at(gp);
+                                let clicked_wire = s.wire_at(gp);
+                                
+                                let probe_name = if clicked_wire.is_some() {
                                     // Wire probe - look up net name from cached mapping
                                     // This mapping is populated when netlist is generated
                                     s.net_mapping.get(&gp)
@@ -891,10 +919,22 @@ pub fn Schematic() -> Element {
                                             log::info!("Probe: {} - no simulation data available", name);
                                         }
                                     }
-                                } else {
-                                    // No net found at this position - need to run simulation first
+                                } else if clicked_wire.is_some() {
+                                    // Wire was clicked, but no net mapping found (simulation not run yet)
                                     sim_state.write().console_messages.push(
-                                        ConsoleMessage::warning("Run simulation first to probe nodes".to_string())
+                                        ConsoleMessage::warning("Run simulation first to probe node voltages".to_string())
+                                    );
+                                } else if clicked_component.is_some() {
+                                    // User clicked on a component body - explain proper probe usage
+                                    sim_state.write().console_messages.push(
+                                        ConsoleMessage::info(
+                                            "Tip: Probe wires to measure node voltages. Click on a wire, not the component body.".to_string()
+                                        )
+                                    );
+                                } else {
+                                    // No wire or component at this position
+                                    sim_state.write().console_messages.push(
+                                        ConsoleMessage::warning("Click on a wire to probe its voltage".to_string())
                                     );
                                 }
                             }
@@ -1149,16 +1189,27 @@ pub fn Schematic() -> Element {
                             let selection = schematic.read().selection.clone();
                             let probe_wires = probe_hover_wires.read().clone();
                             
-                            // Collect all unique wire endpoints with their display positions
-                            // Track: (selected, probe_highlighted)
-                            let mut endpoint_state: std::collections::HashMap<Point, (bool, bool)> = std::collections::HashMap::new();
+                            // Collect wire endpoint segment counts to identify true junctions
+                            // A junction exists only where 3+ wire segments meet
+                            // Each wire endpoint contributes 1 segment to that point
+                            // (Middle points of a wire are NOT junctions even if multiple wires cross)
+                            let mut point_segment_count: std::collections::HashMap<Point, usize> = std::collections::HashMap::new();
+                            let mut point_selected_count: std::collections::HashMap<Point, usize> = std::collections::HashMap::new();
+                            let mut point_probed: std::collections::HashMap<Point, bool> = std::collections::HashMap::new();
+                            
                             for wire in schematic.read().wires.iter() {
                                 let wire_is_selected = selection.has_wire(wire.id);
                                 let wire_is_probed = probe_wires.contains(&wire.id);
-                                for pt in wire.points.iter() {
-                                    // Apply drag delta based on drag type:
-                                    // 1. Junction drag - offset point at junction
-                                    // 2. Multi-selection drag - offset all points of selected wires
+                                
+                                // Only endpoints contribute to junction count (first and last point)
+                                // Get actual display positions considering drag operations
+                                for (idx, pt) in wire.points.iter().enumerate() {
+                                    let is_endpoint = idx == 0 || idx == wire.points.len() - 1;
+                                    if !is_endpoint {
+                                        continue; // Skip middle points - they don't form junctions
+                                    }
+                                    
+                                    // Apply drag delta based on drag type
                                     let display_pt = if junction_pos.is_some() && Some(*pt) == junction_pos {
                                         crate::state::Point::new(pt.x + drag_delta.x, pt.y + drag_delta.y)
                                     } else if is_multi_drag && wire_is_selected {
@@ -1167,52 +1218,117 @@ pub fn Schematic() -> Element {
                                         *pt
                                     };
                                     
-                                    // Skip points that are at component terminals
+                                    // Skip points at component terminals
                                     if terminal_positions.contains(&display_pt) {
                                         continue;
                                     }
                                     
+                                    // Count this endpoint as contributing 1 segment
+                                    *point_segment_count.entry(display_pt).or_insert(0) += 1;
+                                    
+                                    // Track selection state - count selected vs total for "all selected" logic
                                     let is_selected = 
-                                        // During drag - check if point is at junction
                                         (junction_pos.is_some() && (Some(*pt) == junction_pos || wire.points.first() == junction_pos.as_ref() || wire.points.last() == junction_pos.as_ref()))
-                                        // After drag - check persisted junction
                                         || (persisted.is_some() && (wire.points.first() == persisted.as_ref() || wire.points.last() == persisted.as_ref()))
-                                        // Normal selection
                                         || wire_is_selected;
                                     
-                                    // Mark point state - aggregate from all wires at this point
-                                    let entry = endpoint_state.entry(display_pt).or_insert((false, false));
-                                    entry.0 = entry.0 || is_selected;
-                                    entry.1 = entry.1 || wire_is_probed;
+                                    if is_selected {
+                                        *point_selected_count.entry(display_pt).or_insert(0) += 1;
+                                    }
+                                    if wire_is_probed {
+                                        point_probed.insert(display_pt, true);
+                                    }
                                 }
                             }
                             
                             rsx! {
-                                // Render unselected, non-probed dots first
-                                for (pt, (sel, probed)) in endpoint_state.iter() {
-                                    if !*sel && !*probed {
+                                // Junction dots at true junctions (3+ wire segments meeting)
+                                // Highlight only when ALL connected wires are selected (box selection)
+                                // This matches professional simulator behavior
+                                
+                                // Render normal junction dots (not all-selected, not probed)
+                                for (pt, total) in point_segment_count.iter() {
+                                    if *total >= 3 && !*point_probed.get(pt).unwrap_or(&false) {
                                         {
-                                            let (x, y) = pt.to_pixels(gs);
-                                            rsx! { circle { cx: "{x}", cy: "{y}", r: "4", fill: "{normal_col}" } }
+                                            let selected = *point_selected_count.get(pt).unwrap_or(&0);
+                                            let all_selected = selected >= *total;
+                                            if !all_selected {
+                                                let (x, y) = pt.to_pixels(gs);
+                                                rsx! { circle { cx: "{x}", cy: "{y}", r: "4", fill: "{normal_col}" } }
+                                            } else {
+                                                rsx! {}
+                                            }
                                         }
                                     }
                                 }
-                                // Render selected dots
-                                for (pt, (sel, probed)) in endpoint_state.iter() {
-                                    if *sel && !*probed {
+                                // Render all-selected junction dots (highlighted)
+                                for (pt, total) in point_segment_count.iter() {
+                                    if *total >= 3 && !*point_probed.get(pt).unwrap_or(&false) {
                                         {
-                                            let (x, y) = pt.to_pixels(gs);
-                                            rsx! { circle { cx: "{x}", cy: "{y}", r: "4", fill: "{selected_col}" } }
+                                            let selected = *point_selected_count.get(pt).unwrap_or(&0);
+                                            let all_selected = selected >= *total;
+                                            if all_selected {
+                                                let (x, y) = pt.to_pixels(gs);
+                                                rsx! { circle { cx: "{x}", cy: "{y}", r: "4", fill: "{selected_col}" } }
+                                            } else {
+                                                rsx! {}
+                                            }
                                         }
                                     }
                                 }
-                                // Render probe-highlighted dots on top (orange)
-                                for (pt, (_, probed)) in endpoint_state.iter() {
-                                    if *probed {
+                                // Render probe-highlighted junction dots on top (orange)
+                                for (pt, total) in point_segment_count.iter() {
+                                    if *total >= 3 && *point_probed.get(pt).unwrap_or(&false) {
                                         {
                                             let (x, y) = pt.to_pixels(gs);
                                             rsx! { circle { cx: "{x}", cy: "{y}", r: "5", fill: "#ffa500" } }
                                         }
+                                    }
+                                }
+                                
+                                // Render EXPLICIT junctions from schematic.junctions
+                                // These are shown as solid dots (same as implicit 3+ junctions)
+                                {
+                                    let sch = schematic.read();
+                                    rsx! {
+                                        for junction in sch.junctions.iter() {
+                                            {
+                                                let (x, y) = junction.pos.to_pixels(gs);
+                                                rsx! {
+                                                    circle { cx: "{x}", cy: "{y}", r: "4", fill: "{normal_col}" }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // Render hovered corner indicator (shows draggable point)
+                                {
+                                    if let Some(pt) = *hovered_corner.read() {
+                                        let theme: Signal<Theme> = use_context();
+                                        let accent = theme.read().accent_primary();
+                                        let (x, y) = pt.to_pixels(gs);
+                                        rsx! {
+                                            // Outer ring - indicates hoverable/draggable
+                                            circle { 
+                                                cx: "{x}", 
+                                                cy: "{y}", 
+                                                r: "7", 
+                                                fill: "none", 
+                                                stroke: "{accent}", 
+                                                stroke_width: "2",
+                                                opacity: "0.8"
+                                            }
+                                            // Inner dot
+                                            circle { 
+                                                cx: "{x}", 
+                                                cy: "{y}", 
+                                                r: "3", 
+                                                fill: "{accent}"
+                                            }
+                                        }
+                                    } else {
+                                        rsx! {}
                                     }
                                 }
                             }
@@ -1402,70 +1518,18 @@ pub fn Schematic() -> Element {
                 }
             }
 
-            // Close Confirmation Dialog
+            // Close Confirmation Dialog - using reusable UnsavedChangesModal component
             if let Some((close_idx, doc_name)) = close_confirm.read().clone() {
-                div {
-                    class: "modal-overlay",
-                    style: "
-                        position: fixed;
-                        inset: 0;
-                        background: rgba(0, 0, 0, 0.5);
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        z-index: 1000;
-                    ",
-                    onclick: move |_| close_confirm.set(None),
-                    
-                    div {
-                        class: "modal-content",
-                        style: "
-                            background: {th.bg_secondary()};
-                            border: 1px solid {th.border()};
-                            border-radius: 8px;
-                            padding: 20px;
-                            min-width: 320px;
-                            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-                        ",
-                        onclick: move |e| e.stop_propagation(),
-                        
-                        h3 {
-                            style: "margin: 0 0 12px 0; color: {th.text_primary()}; font-size: 16px;",
-                            "Unsaved Changes"
-                        }
-                        
-                        p {
-                            style: "margin: 0 0 20px 0; color: {th.text_secondary()}; font-size: 14px;",
-                            "\"{doc_name}\" has unsaved changes. Close anyway?"
-                        }
-                        
-                        div {
-                            style: "display: flex; gap: 8px; justify-content: flex-end;",
-                            
-                            button {
-                                style: "
-                                    padding: 8px 16px;
-                                    background: {th.surface()};
-                                    border: 1px solid {th.border()};
-                                    border-radius: 4px;
-                                    color: {th.text_primary()};
-                                    cursor: pointer;
-                                ",
-                                onclick: move |_| close_confirm.set(None),
-                                "Cancel"
-                            }
-                            
-                            button {
-                                style: "
-                                    padding: 8px 16px;
-                                    background: {th.accent_error()};
-                                    border: none;
-                                    border-radius: 4px;
-                                    color: white;
-                                    cursor: pointer;
-                                ",
-                                onclick: move |_| {
-                                    // Close the document
+                UnsavedChangesModal {
+                    visible: true,
+                    filename: Some(doc_name),
+                    on_result: move |result: SaveDialogResult| {
+                        match result {
+                            SaveDialogResult::Save => {
+                                // Save first, then close
+                                spawn(async move {
+                                    file_handlers::save_schematic(schematic, sim_state).await;
+                                    // Now close the document
                                     let was_active = doc_manager.read().active_index == close_idx;
                                     doc_manager.write().close_document(close_idx);
                                     if was_active {
@@ -1474,11 +1538,25 @@ pub fn Schematic() -> Element {
                                         sim_state.set(docs.active().simulation.clone());
                                     }
                                     close_confirm.set(None);
-                                },
-                                "Close Without Saving"
+                                });
+                            }
+                            SaveDialogResult::DontSave => {
+                                // Close without saving
+                                let was_active = doc_manager.read().active_index == close_idx;
+                                doc_manager.write().close_document(close_idx);
+                                if was_active {
+                                    let docs = doc_manager.read();
+                                    schematic.set(docs.active().schematic.clone());
+                                    sim_state.set(docs.active().simulation.clone());
+                                }
+                                close_confirm.set(None);
+                            }
+                            SaveDialogResult::Cancel => {
+                                // Just dismiss the dialog
+                                close_confirm.set(None);
                             }
                         }
-                    }
+                    },
                 }
             }
         }
@@ -1503,7 +1581,11 @@ pub fn SchematicToolbar(schematic: Signal<SchematicState>) -> Element {
                 s.selection.clear();
                 s.tool = Tool::Probe;
             }}
-            ToolBtn { label: "🏷 Label", active: matches!(tool, Tool::Label), onclick: move |_| schematic.write().tool = Tool::Label }
+            ToolBtn { label: "🏷 Label", active: matches!(tool, Tool::Label), onclick: move |_| {
+                let mut s = schematic.write();
+                s.selection.clear();
+                s.tool = Tool::Label;
+            }}
             div { style: "width: 1px; height: 18px; background: {th.border()}; margin: 0 4px;" }
             button { style: "padding: 4px 8px; background: {th.surface()}; border: 1px solid {th.border()}; border-radius: 4px; color: {th.text_primary()}; font-size: 12px; cursor: pointer;", onclick: move |_| schematic.write().rotate_selection(), "⟳ Rotate" }
             button { style: "padding: 4px 8px; background: {th.surface()}; border: 1px solid {th.border()}; border-radius: 4px; color: {th.text_primary()}; font-size: 12px; cursor: pointer;", onclick: move |_| schematic.write().delete_selection(), "🗑 Delete" }

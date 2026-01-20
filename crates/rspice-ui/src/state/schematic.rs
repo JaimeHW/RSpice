@@ -636,6 +636,21 @@ pub struct NetLabel {
     pub name: String,
 }
 
+/// Explicit wire junction point
+///
+/// In professional simulators like LTspice, crossing wires are NOT electrically
+/// connected unless an explicit junction exists. Junctions are created by:
+/// - Clicking on a wire crossing point
+/// - Ending a wire on an existing wire
+/// - Manually placing a junction at a point where 3+ wires should meet
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Junction {
+    /// Unique identifier
+    pub id: u64,
+    /// Position on grid
+    pub pos: Point,
+}
+
 /// Clipboard data for copy/paste operations
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ClipboardData {
@@ -713,6 +728,10 @@ pub struct SchematicState {
     /// Net labels for naming nodes
     pub net_labels: Vec<NetLabel>,
 
+    /// Explicit wire junctions for connecting crossing wires
+    /// Only wires sharing an endpoint OR joined by an explicit junction are connected
+    pub junctions: Vec<Junction>,
+
     /// Preview rotation for component placement
     pub preview_rotation: Rotation,
 
@@ -745,6 +764,7 @@ impl Default for SchematicState {
             component_counters: HashMap::new(),
             clipboard: ClipboardData::default(),
             net_labels: Vec::new(),
+            junctions: Vec::new(),
             preview_rotation: Rotation::default(),
             connections: Vec::new(),
             net_mapping: HashMap::new(),
@@ -764,10 +784,11 @@ impl SchematicState {
     /// Recalculate runtime state after loading from file
     /// This MUST be called after deserialization to prevent ID collisions
     pub fn recalculate_runtime_state(&mut self) {
-        // Find the maximum ID currently in use
+        // Find the maximum ID currently in use (components, wires, and junctions)
         let max_component_id = self.components.iter().map(|c| c.id).max().unwrap_or(0);
         let max_wire_id = self.wires.iter().map(|w| w.id).max().unwrap_or(0);
-        self.next_id = max_component_id.max(max_wire_id) + 1;
+        let max_junction_id = self.junctions.iter().map(|j| j.id).max().unwrap_or(0);
+        self.next_id = max_component_id.max(max_wire_id).max(max_junction_id) + 1;
 
         // Rebuild component counters from existing component names
         self.component_counters.clear();
@@ -826,6 +847,41 @@ impl SchematicState {
         let id = self.next_id();
         self.wires.push(Wire::new(id, points));
         Some(id)
+    }
+
+    /// Add an explicit junction at a position
+    /// Returns the junction ID if created, or existing ID if already present
+    pub fn add_junction(&mut self, pos: Point) -> u64 {
+        // Check if junction already exists at this position
+        if let Some(existing) = self.junctions.iter().find(|j| j.pos == pos) {
+            return existing.id;
+        }
+
+        let id = self.next_id();
+        self.junctions.push(Junction { id, pos });
+        self.is_dirty = true;
+        id
+    }
+
+    /// Remove a junction by ID
+    pub fn remove_junction(&mut self, id: u64) -> bool {
+        let len_before = self.junctions.len();
+        self.junctions.retain(|j| j.id != id);
+        let removed = self.junctions.len() < len_before;
+        if removed {
+            self.is_dirty = true;
+        }
+        removed
+    }
+
+    /// Find junction at a position
+    pub fn junction_at(&self, pos: Point) -> Option<u64> {
+        self.junctions.iter().find(|j| j.pos == pos).map(|j| j.id)
+    }
+
+    /// Check if a junction exists at a position
+    pub fn has_junction(&self, pos: Point) -> bool {
+        self.junctions.iter().any(|j| j.pos == pos)
     }
 
     /// Add a net label at the given position
@@ -1014,15 +1070,44 @@ impl SchematicState {
         // This matches professional simulator behavior (LTspice) where each wire
         // is a single straight line between two endpoints
         let mut last_wire_id = None;
+        let mut endpoints_to_check = Vec::new();
+
         for i in 0..simplified.len() - 1 {
             let segment = vec![simplified[i], simplified[i + 1]];
+            endpoints_to_check.push(simplified[i]);
+            if i == simplified.len() - 2 {
+                endpoints_to_check.push(simplified[i + 1]);
+            }
             log::info!("[Wire] finish_wire: adding segment {:?}", segment);
             if let Some(wire_id) = self.add_wire(segment) {
-                // Note: We no longer auto-snap wire endpoints to terminals.
-                // This caused unexpected wire endpoint modification.
-                // Users should manually connect wires to component terminals.
-                // self.snap_wire_to_terminals(wire_id);
                 last_wire_id = Some(wire_id);
+            }
+        }
+
+        // Auto-create junctions where wire endpoints land on existing wires
+        // This provides intuitive behavior: connecting a wire to an existing wire
+        // automatically creates the junction needed for electrical connectivity
+        for pt in endpoints_to_check {
+            // Check if this endpoint lies on ANY existing wire (not just endpoint match)
+            let wires_at_point: Vec<u64> = self
+                .wires
+                .iter()
+                .filter(|w| {
+                    // Don't count wires we just created (check by endpoint match)
+                    let is_just_created =
+                        w.points.first() == Some(&pt) || w.points.last() == Some(&pt);
+                    // Must actually contain the point
+                    w.contains_point(pt) && !is_just_created
+                })
+                .map(|w| w.id)
+                .collect();
+
+            if !wires_at_point.is_empty() && !self.has_junction(pt) {
+                log::info!(
+                    "[Wire] Auto-creating junction at {:?} (endpoint on existing wire)",
+                    pt
+                );
+                self.add_junction(pt);
             }
         }
 
@@ -1291,11 +1376,38 @@ impl SchematicState {
     }
 
     /// Move all points of a wire by a delta
+    /// Also moves any junctions at the wire's endpoints
     pub fn move_wire(&mut self, wire_id: u64, delta: Point) {
+        // Collect old endpoint positions before moving
+        let old_endpoints: Vec<Point> = self
+            .wires
+            .iter()
+            .find(|w| w.id == wire_id)
+            .map(|w| {
+                let mut eps = Vec::new();
+                if let Some(first) = w.points.first() {
+                    eps.push(*first);
+                }
+                if let Some(last) = w.points.last() {
+                    eps.push(*last);
+                }
+                eps
+            })
+            .unwrap_or_default();
+
+        // Move the wire points
         if let Some(wire) = self.wires.iter_mut().find(|w| w.id == wire_id) {
             for point in &mut wire.points {
                 point.x += delta.x;
                 point.y += delta.y;
+            }
+        }
+
+        // Move junctions that were at the old endpoints
+        for old_pt in old_endpoints {
+            if let Some(junction) = self.junctions.iter_mut().find(|j| j.pos == old_pt) {
+                junction.pos.x += delta.x;
+                junction.pos.y += delta.y;
             }
         }
     }
@@ -1361,8 +1473,17 @@ impl SchematicState {
             }
         }
 
-        // Move all selected wires entirely
+        // Move all selected wires entirely and track their endpoints
+        let mut wire_endpoints: Vec<Point> = Vec::new();
         for wire_id in &selection.wires {
+            if let Some(wire) = self.wires.iter().find(|w| w.id == *wire_id) {
+                if let Some(first) = wire.points.first() {
+                    wire_endpoints.push(*first);
+                }
+                if let Some(last) = wire.points.last() {
+                    wire_endpoints.push(*last);
+                }
+            }
             if let Some(wire) = self.wires.iter_mut().find(|w| w.id == *wire_id) {
                 for point in &mut wire.points {
                     point.x += delta.x;
@@ -1370,17 +1491,32 @@ impl SchematicState {
                 }
             }
         }
+
+        // Move junctions that were at selected wire endpoints
+        for old_pt in wire_endpoints {
+            if let Some(junction) = self.junctions.iter_mut().find(|j| j.pos == old_pt) {
+                junction.pos.x += delta.x;
+                junction.pos.y += delta.y;
+            }
+        }
     }
 
     /// Move all wire points at a junction to a new position
     /// This enables junction stretching - dragging a junction moves all connected wire endpoints
+    /// Also moves explicit junction objects
     pub fn move_junction(&mut self, old_pos: Point, new_pos: Point) {
+        // Move wire endpoints at this position
         for wire in &mut self.wires {
             for point in &mut wire.points {
                 if *point == old_pos {
                     *point = new_pos;
                 }
             }
+        }
+
+        // Move explicit junction object if one exists at this position
+        if let Some(junction) = self.junctions.iter_mut().find(|j| j.pos == old_pos) {
+            junction.pos = new_pos;
         }
     }
 

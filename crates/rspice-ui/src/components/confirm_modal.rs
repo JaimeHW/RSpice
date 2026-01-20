@@ -57,16 +57,15 @@ pub fn UnsavedChangesModal(
                 on_result.call(SaveDialogResult::Cancel);
             },
 
-            // Modal dialog
+            // Modal dialog - compact professional design
             div {
                 style: "
                     background: {th.bg_secondary()};
                     border: 1px solid {th.border()};
-                    border-radius: {Theme::RADIUS_LG};
-                    padding: {Theme::SPACING_XL};
-                    min-width: 400px;
-                    max-width: 500px;
-                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+                    border-radius: {Theme::RADIUS_MD};
+                    padding: 16px 20px;
+                    width: 360px;
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
                 ",
                 onclick: move |e| {
                     e.stop_propagation();
@@ -75,10 +74,10 @@ pub fn UnsavedChangesModal(
                 // Title
                 div {
                     style: "
-                        font-size: {Theme::FONT_SIZE_LG};
+                        font-size: 14px;
                         font-weight: 600;
                         color: {th.text_primary()};
-                        margin-bottom: {Theme::SPACING_MD};
+                        margin-bottom: 8px;
                     ",
                     "Save Changes?"
                 }
@@ -86,22 +85,22 @@ pub fn UnsavedChangesModal(
                 // Message
                 div {
                     style: "
-                        font-size: {Theme::FONT_SIZE_BASE};
+                        font-size: 13px;
                         color: {th.text_secondary()};
-                        margin-bottom: {Theme::SPACING_XL};
-                        line-height: 1.5;
+                        margin-bottom: 16px;
+                        line-height: 1.4;
                     ",
-                    "Do you want to save changes to \"{display_name}\" before continuing?"
+                    "Do you want to save changes to \"{display_name}\"?"
                 }
 
-                // Buttons
+                // Buttons - full width row with proper spacing
                 div {
                     style: "
                         display: flex;
-                        justify-content: flex-end;
-                        gap: {Theme::SPACING_SM};
+                        gap: 8px;
                     ",
 
+                    // Cancel on the left
                     Button {
                         variant: ButtonVariant::Ghost,
                         onclick: move |_| {
@@ -110,6 +109,10 @@ pub fn UnsavedChangesModal(
                         "Cancel"
                     }
 
+                    // Spacer to push action buttons right
+                    div { style: "flex: 1;" }
+
+                    // Don't Save
                     Button {
                         variant: ButtonVariant::Secondary,
                         onclick: move |_| {
@@ -118,6 +121,7 @@ pub fn UnsavedChangesModal(
                         "Don't Save"
                     }
 
+                    // Save - primary action
                     Button {
                         variant: ButtonVariant::Primary,
                         onclick: move |_| {
