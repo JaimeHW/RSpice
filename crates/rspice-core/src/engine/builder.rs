@@ -70,9 +70,15 @@ impl Engine {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
                     let dc_value = extract_dc_value(spec);
-                    circuit
-                        .current_sources
-                        .add(element.name.clone(), np, nn, dc_value);
+                    let (ac_mag, ac_phase) = super::extract_ac_value(spec);
+                    circuit.current_sources.add_with_ac(
+                        element.name.clone(),
+                        np,
+                        nn,
+                        dc_value,
+                        ac_mag,
+                        ac_phase,
+                    );
                 }
                 ElementKind::Diode { model: _ } => {
                     let anode = circuit.get_or_create_node(&element.nodes[0]);

@@ -210,11 +210,31 @@ impl Default for Engine {
 pub(crate) fn extract_dc_value(spec: &SourceSpec) -> Value {
     match spec {
         SourceSpec::Dc(v) => *v,
+        SourceSpec::DcAc { dc_value, .. } => *dc_value,
         SourceSpec::Pulse { v1, .. } => *v1, // Use initial value
         SourceSpec::Sin { offset, .. } => *offset, // Use DC offset
         SourceSpec::Pwl { points } => points.first().map(|(_, v)| *v).unwrap_or(0.0),
         SourceSpec::PwlFile { value_offset, .. } => *value_offset, // Use value offset as DC
         SourceSpec::Exp { v1, .. } => *v1,
         SourceSpec::Ac { .. } => 0.0, // AC sources have no DC component
+    }
+}
+
+/// Extract AC value (magnitude, phase in radians) from a SourceSpec enum
+/// Returns (magnitude, phase) tuple, defaulting to (0.0, 0.0) for non-AC sources
+pub(crate) fn extract_ac_value(spec: &SourceSpec) -> (Value, Value) {
+    match spec {
+        SourceSpec::Ac { magnitude, phase } => (*magnitude, *phase),
+        SourceSpec::DcAc {
+            ac_magnitude,
+            ac_phase,
+            ..
+        } => (*ac_magnitude, *ac_phase),
+        // Sin sources have AC component at their frequency
+        SourceSpec::Sin {
+            amplitude, phase, ..
+        } => (*amplitude, *phase),
+        // Other sources don't have explicit AC component in HB sense
+        _ => (0.0, 0.0),
     }
 }
