@@ -74,8 +74,24 @@ impl Rotation {
     }
 }
 
+/// Label position mode for component labels
+/// Implements Cadence-style smart auto-placement with user override capability
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum LabelPosition {
+    /// Automatic smart placement - avoids collisions with wires and components
+    Auto,
+    /// User-defined custom offset from default position (in pixels)
+    Custom { x_offset: f64, y_offset: f64 },
+}
+
+impl Default for LabelPosition {
+    fn default() -> Self {
+        LabelPosition::Auto
+    }
+}
+
 /// Component types available in the schematic
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ComponentType {
     // Passive components
     Resistor,
@@ -406,6 +422,14 @@ pub struct Component {
 
     /// Additional SPICE parameters
     pub params: String,
+
+    /// Name label position (Auto for smart placement, Custom for user-defined)
+    #[serde(default)]
+    pub name_label_pos: LabelPosition,
+
+    /// Value label position (Auto for smart placement, Custom for user-defined)
+    #[serde(default)]
+    pub value_label_pos: LabelPosition,
 }
 
 impl Component {
@@ -419,11 +443,18 @@ impl Component {
             name: String::new(),
             value: String::new(),
             params: String::new(),
+            name_label_pos: LabelPosition::Auto,
+            value_label_pos: LabelPosition::Auto,
         }
     }
 
-    /// Get terminal positions in world coordinates (accounting for rotation)
+    /// Get terminal positions in world coordinates (accounting for rotation and SVG terminal offsets)
     pub fn terminal_positions(&self) -> Vec<(&'static str, Point)> {
+        // Get terminal offset adjustments from the SVG asset (if any)
+        let (term_x_off, term_y_off) = crate::views::symbol_assets::get_terminal_offsets(self.kind);
+        let term_offset = Point::new(term_x_off, term_y_off);
+        let rotated_term_offset = self.rotate_point(term_offset);
+
         self.kind
             .terminal_offsets()
             .into_iter()
@@ -431,7 +462,10 @@ impl Component {
                 let rotated = self.rotate_point(offset);
                 (
                     name,
-                    Point::new(self.pos.x + rotated.x, self.pos.y + rotated.y),
+                    Point::new(
+                        self.pos.x + rotated.x + rotated_term_offset.x,
+                        self.pos.y + rotated.y + rotated_term_offset.y,
+                    ),
                 )
             })
             .collect()
