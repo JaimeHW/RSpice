@@ -4,6 +4,7 @@
 
 pub mod canvas_focus;
 pub mod cross_probing;
+pub mod display_settings;
 pub mod document;
 pub mod fft;
 pub mod history;
@@ -16,6 +17,7 @@ mod simulation_runner;
 pub mod waveform_math;
 
 pub use canvas_focus::{use_canvas_focus, CanvasFocus, CanvasFocusState};
+pub use display_settings::{PinNameVisibility, SchematicDisplaySettings};
 pub use document::{Document, DocumentManager};
 #[allow(unused_imports)]
 pub use fft::{compute_fft, FftResult, WindowFunction};
