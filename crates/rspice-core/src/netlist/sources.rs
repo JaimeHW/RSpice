@@ -13,6 +13,8 @@ use super::lexer::{TokenKind, TokenStream};
 use super::{ParamContext, ParseError, SourceSpec};
 
 /// Parse source specification (DC, AC, PULSE, SIN, PWL, EXP)
+///
+/// Supports combined DC+AC syntax: "DC 0 AC 1" or "DC 5 AC 1 45"
 pub fn parse_source_spec(
     stream: &mut TokenStream,
     line_num: usize,
@@ -33,8 +35,23 @@ pub fn parse_source_spec(
             match upper.as_str() {
                 "DC" => {
                     stream.advance();
-                    let value = expect_value(stream, line_num, params)?;
-                    return Ok(SourceSpec::Dc(value));
+                    let dc_value = expect_value(stream, line_num, params)?;
+
+                    // Check for optional AC specification after DC
+                    skip_commas(stream);
+                    if let TokenKind::Ident(next) = &stream.peek().kind {
+                        if next.to_uppercase() == "AC" {
+                            stream.advance();
+                            let ac_magnitude = expect_value(stream, line_num, params)?;
+                            let ac_phase = try_value(stream, params).unwrap_or(0.0);
+                            return Ok(SourceSpec::DcAc {
+                                dc_value,
+                                ac_magnitude,
+                                ac_phase,
+                            });
+                        }
+                    }
+                    return Ok(SourceSpec::Dc(dc_value));
                 }
                 "AC" => {
                     stream.advance();

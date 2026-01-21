@@ -453,6 +453,13 @@ pub enum SourceSpec {
     /// AC magnitude and phase
     Ac { magnitude: Value, phase: Value },
 
+    /// Combined DC and AC specification (common SPICE syntax: DC x AC y [phase])
+    DcAc {
+        dc_value: Value,
+        ac_magnitude: Value,
+        ac_phase: Value,
+    },
+
     /// Pulse source: PULSE(v1 v2 td tr tf pw per)
     Pulse {
         v1: Value,
