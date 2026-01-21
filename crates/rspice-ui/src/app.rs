@@ -10,6 +10,7 @@ use rspice_core::library::LibraryManager;
 
 use crate::components::{Panel, SimulationDialog, Toolbar};
 use crate::state::cross_probing::CrossProbeManager;
+use crate::state::display_settings::SchematicDisplaySettings;
 use crate::state::simulation_command::SimulationConfig;
 use crate::state::{DocumentManager, SchematicState, SimulationState};
 use crate::theme::Theme;
@@ -30,6 +31,9 @@ pub fn App() -> Element {
     let theme = use_signal(|| Theme::DARK);
     let sim_state = use_signal(SimulationState::default);
     let schematic_state = use_signal(SchematicState::default);
+
+    // Display settings for schematic rendering (label visibility, fonts, etc.)
+    let display_settings = use_signal(SchematicDisplaySettings::default);
 
     // Simulation configuration (from dialog)
     let mut sim_config = use_signal(SimulationConfig::default);
@@ -68,6 +72,7 @@ pub fn App() -> Element {
     use_context_provider(|| sim_dialog_visible);
     use_context_provider(|| doc_manager);
     use_context_provider(|| cross_probe);
+    use_context_provider(|| display_settings);
 
     let th = theme.read();
 
