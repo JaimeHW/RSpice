@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="150.24245mm"
+   height="60.999992mm"
+   viewBox="0 0 150.24245 60.999992"
+   version="1.1"
+   id="svg17030"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs17027">
+    <marker
+       style="overflow:visible"
+       id="TriangleInM-6"
+       refX="0"
+       refY="0"
+       orient="auto">
+      <path
+         transform="scale(-0.4)"
+         style="fill:context-stroke;fill-rule:evenodd;stroke:context-stroke;stroke-width:1pt"
+         d="M 5.77,0 -2.88,5 V -5 Z"
+         id="path20951-7" />
+    </marker>
+    <rect
+       x="207.87402"
+       y="-170.07874"
+       width="434.64551"
+       height="84.021484"
+       id="rect51664" />
+  </defs>
+  <g
+     id="layer1"
+     style="display:inline"
+     transform="translate(419.74244,-209.50001)">
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="m -325,260 h 10"
+       id="path26093" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:3;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="m -315,220 v 40.5"
+       id="path26095" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:2;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="M -310,260 V 250"
+       id="path26097" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:2;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="M -310,230 V 220"
+       id="path26099" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:2;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="M -310,245 V 235"
+       id="path26101" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="m -310,225 h 20 v -10"
+       id="path26103" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="m -310,255 h 20 v 10"
+       id="path26105" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="m -304.5,240 h 14.5 v 15"
+       id="path26107" />
+    <path
+       style="display:inline;fill:none;stroke:#000000;stroke-width:1.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1;marker-start:url(#TriangleInM-6)"
+       d="m -304,240 h 1"
+       id="path26111" />
+    <circle
+       style="fill:none;stroke:#040000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none"
+       id="circle26167"
+       cx="-300.00003"
+       cy="240"
+       r="30" />
+  </g>
+  <g
+     id="layer3"
+     style="display:inline"
+     transform="translate(419.74244,-209.50001)">
+    <text
+       xml:space="preserve"
+       transform="matrix(0.26458333,0,0,0.26458333,-510.99996,277.7693)"
+       id="text51660"
+       style="font-size:32px;line-height:1.25;font-family:sans-serif;text-align:end;white-space:pre;shape-inside:url(#rect51664);display:inline;fill:#0000ff;fill-opacity:1"
+       x="192.97554"
+       y="0"><tspan
+         x="341.78516"
+         y="-140.88355"
+         id="tspan1">Discrete P-channel </tspan><tspan
+         x="424.70703"
+         y="-100.88355"
+         id="tspan2">enhancement</tspan></text>
+  </g>
+  <g
+     id="layer2"
+     style="display:inline"
+     transform="translate(419.74244,-209.50001)">
+    <path
+       style="display:inline;fill:none;stroke:#f80000;stroke-width:0.4;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="m -300,238 v 4"
+       id="path26153" />
+    <path
+       style="display:inline;fill:none;stroke:#f80000;stroke-width:0.4;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="m -298,240 h -4"
+       id="path26155" />
+  </g>
+</svg>

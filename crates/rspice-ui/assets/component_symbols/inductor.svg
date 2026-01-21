@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="80" height="20" viewBox="0 0 80 20" xmlns="http://www.w3.org/2000/svg">
+  <!-- Inductor symbol: horizontal coil with terminals on left and right -->
+  <!-- Centered at (40, 10) with terminals at x=0 and x=80 -->
+  <!-- Note: stroke-width is NOT set here - it will be applied by the rendering code -->
+  <path 
+    d="M 0,10 
+       L 10,10 
+       C 10,10 12,0 17,0 
+       C 22,0 26,20 22,20 
+       C 18,20 20,0 27,0 
+       C 34,0 38,20 34,20 
+       C 30,20 32,0 40,0 
+       C 48,0 50,20 46,20 
+       C 42,20 46,0 53,0 
+       C 60,0 62,20 58,20 
+       C 54,20 58,0 63,0 
+       C 68,0 70,10 70,10 
+       L 80,10"
+    fill="none"
+    stroke="currentColor"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>
