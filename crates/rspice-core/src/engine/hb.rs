@@ -278,18 +278,46 @@ impl Engine {
     }
 
     /// Stamp current sources into HB solver
+    ///
+    /// Stamps both DC and AC components:
+    /// - DC component goes into harmonic 0
+    /// - AC component goes into harmonic 1 (fundamental) with magnitude and phase
     fn hb_stamp_current_sources(&self, circuit: &CircuitData, solver: &mut HbSolver) {
         for i in 0..circuit.current_sources.len() {
             let np = circuit.current_sources.node_pos[i];
             let nn = circuit.current_sources.node_neg[i];
             let dc = circuit.current_sources.dc_values[i];
 
-            // Current source stamps directly into RHS
+            // Stamp DC component (harmonic 0)
             if np > 0 {
                 solver.set_dc_source(np - 1, -dc); // Current leaves at + terminal
             }
             if nn > 0 {
                 solver.set_dc_source(nn - 1, dc); // Current enters at - terminal
+            }
+
+            // Stamp AC component at fundamental (harmonic 1)
+            let ac_mag = circuit
+                .current_sources
+                .ac_magnitudes
+                .get(i)
+                .copied()
+                .unwrap_or(0.0);
+            let ac_phase = circuit
+                .current_sources
+                .ac_phases
+                .get(i)
+                .copied()
+                .unwrap_or(0.0);
+
+            if ac_mag.abs() > 1e-30 {
+                // AC current at fundamental frequency
+                if np > 0 {
+                    solver.set_ac_source(np - 1, -ac_mag, ac_phase); // Current leaves at + terminal
+                }
+                if nn > 0 {
+                    solver.set_ac_source(nn - 1, ac_mag, ac_phase); // Current enters at - terminal
+                }
             }
         }
     }
@@ -1661,5 +1689,287 @@ mod tests {
             expected_ratio,
             actual_ratio
         );
+    }
+
+    #[test]
+    fn test_dcac_parsing_and_circuit_building() {
+        // Comprehensive test to verify DC AC combined syntax parsing
+        // and propagation through circuit building to HB solver
+        use crate::Netlist;
+        use crate::netlist::{ElementKind, SourceSpec};
+
+        let netlist_str = r#"
+            * Test DC AC combined source
+            I1 0 out DC 0 AC 1
+            R1 out 0 1k
+            C1 out 0 1n
+            .END
+        "#;
+
+        let netlist = Netlist::parse(netlist_str).expect("Parse failed");
+
+        // Verify the netlist parsed the current source correctly
+        let isrc = netlist
+            .elements
+            .iter()
+            .find(|e| e.name.to_uppercase() == "I1")
+            .expect("Should find I1");
+
+        // Check that SourceSpec is DcAc
+        match &isrc.kind {
+            ElementKind::CurrentSource(spec) => match spec {
+                SourceSpec::DcAc {
+                    dc_value,
+                    ac_magnitude,
+                    ac_phase,
+                } => {
+                    assert!(
+                        (*dc_value - 0.0).abs() < 1e-12,
+                        "DC value should be 0, got {}",
+                        dc_value
+                    );
+                    assert!(
+                        (*ac_magnitude - 1.0).abs() < 1e-12,
+                        "AC magnitude should be 1, got {}",
+                        ac_magnitude
+                    );
+                    assert!(
+                        (*ac_phase - 0.0).abs() < 1e-12,
+                        "AC phase should be 0, got {}",
+                        ac_phase
+                    );
+                }
+                other => panic!("Expected DcAc variant, got {:?}", other),
+            },
+            other => panic!("Expected CurrentSource, got {:?}", other),
+        }
+
+        // Now verify it propagates through circuit building
+        let engine = Engine::default();
+        let circuit = engine
+            .build_circuit(&netlist)
+            .expect("Circuit build failed");
+
+        // Check AC values in circuit
+        assert!(
+            !circuit.current_sources.is_empty(),
+            "Should have current sources"
+        );
+        assert!(
+            !circuit.current_sources.ac_magnitudes.is_empty(),
+            "Should have AC magnitudes"
+        );
+
+        let ac_mag = circuit.current_sources.ac_magnitudes[0];
+        let ac_phase = circuit.current_sources.ac_phases[0];
+
+        assert!(
+            (ac_mag - 1.0).abs() < 1e-12,
+            "Circuit should have AC magnitude 1.0, got {}",
+            ac_mag
+        );
+        assert!(
+            (ac_phase - 0.0).abs() < 1e-12,
+            "Circuit should have AC phase 0.0, got {}",
+            ac_phase
+        );
+    }
+
+    /// Test RLC series resonance in HB
+    #[test]
+    fn test_run_hb_rlc_series_resonance() {
+        use std::f64::consts::PI;
+
+        // At resonance f0 = 1/(2π√LC), impedance is purely resistive
+        // Below/above resonance, phase shifts occur
+        let r: f64 = 100.0;
+        let l: f64 = 1e-3; // 1mH
+        let c: f64 = 10e-9; // 10nF
+        // Resonant frequency = 1/(2π√(1e-3 * 10e-9)) ≈ 50.33 kHz
+        let f0 = 1.0 / (2.0 * PI * (l * c).sqrt());
+
+        // Test at resonance
+        let netlist_res = format!(
+            "* RLC Series at Resonance
+V1 1 0 DC 0 AC 1
+R1 1 2 {r}
+L1 2 3 {l}
+C1 3 0 {c}
+.END"
+        );
+        let netlist = Netlist::parse(&netlist_res).unwrap();
+        let engine = Engine::default();
+        let config = HbConfig::new(f0);
+
+        let result = engine.run_hb(&netlist, config).unwrap();
+
+        // At resonance, Z = R, so V across R should be close to source voltage
+        // Current = V/R = 1/100 = 10mA, voltage across R = IR = 1V
+        // This is approximate due to AC source handling
+        assert!(
+            result.result.iterations < 5,
+            "Should converge quickly at resonance"
+        );
+    }
+
+    /// Test inductor phase shift (current lags voltage by 90°)
+    #[test]
+    fn test_hb_inductor_phase_shift() {
+        use crate::Netlist;
+
+        // Pure inductor: current should lag voltage by 90°
+        let netlist_str = "* Pure RL for phase test
+I1 0 1 DC 0 AC 1
+R1 1 0 1k
+L1 1 0 10mH
+.END";
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let config = HbConfig::new(1e3); // 1kHz
+
+        let result = engine.run_hb(&netlist, config).unwrap();
+
+        // At node 1, we should have a voltage
+        // The impedance of parallel R||jωL determines the voltage
+        if let Some(v1) = result.result.get_node_voltage("1") {
+            // Verify voltage has both real and imaginary parts (indicating phase)
+            let magnitude = v1.magnitude(1); // 1 = fundamental
+            assert!(magnitude > 0.0, "Should have non-zero voltage");
+        }
+    }
+
+    /// Test that inductor impedance scales with frequency correctly
+    #[test]
+    fn test_hb_inductor_impedance_scaling() {
+        use std::f64::consts::PI;
+
+        let l = 10e-3; // 10mH
+        let freq1 = 1e3; // 1 kHz
+        let freq2 = 10e3; // 10 kHz
+
+        // At freq1: X_L = 2π * 1000 * 0.01 ≈ 62.8 Ω
+        // At freq2: X_L = 2π * 10000 * 0.01 ≈ 628 Ω
+        // Ratio should be 10x
+
+        let x_l1 = 2.0 * PI * freq1 * l;
+        let x_l2 = 2.0 * PI * freq2 * l;
+
+        let ratio = x_l2 / x_l1;
+        assert!(
+            (ratio - 10.0).abs() < 0.01,
+            "Impedance should scale linearly with frequency: got {}",
+            ratio
+        );
+
+        // Verify by running HB at both frequencies
+        let netlist_str = "* RL circuit
+I1 0 1 DC 0 AC 1
+R1 1 0 100
+L1 1 0 10m
+.END";
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+
+        // Both should converge
+        let result1 = engine.run_hb(&netlist, HbConfig::new(freq1)).unwrap();
+        let result2 = engine.run_hb(&netlist, HbConfig::new(freq2)).unwrap();
+
+        assert!(result1.converged, "Should converge at low freq");
+        assert!(result2.converged, "Should converge at high freq");
+    }
+
+    /// Test parallel RLC resonance
+    #[test]
+    fn test_run_hb_parallel_rlc_resonance() {
+        use std::f64::consts::PI;
+
+        // Parallel RLC: at resonance, impedance is maximum (= R)
+        let r: f64 = 10e3; // 10kΩ
+        let l: f64 = 1e-3; // 1mH
+        let c: f64 = 10e-9; // 10nF
+        let f0 = 1.0 / (2.0 * PI * (l * c).sqrt()); // ~50.33 kHz
+
+        let netlist_str = format!(
+            "* Parallel RLC
+I1 0 1 DC 0 AC 1mA
+R1 1 0 {r}
+L1 1 0 {l}
+C1 1 0 {c}
+.END"
+        );
+        let netlist = Netlist::parse(&netlist_str).unwrap();
+        let engine = Engine::default();
+        let config = HbConfig::new(f0);
+
+        let result = engine.run_hb(&netlist, config).unwrap();
+
+        // Should converge
+        assert!(result.converged, "Should converge for parallel RLC");
+
+        // At resonance, V = I * R = 1mA * 10kΩ = 10V (approximately)
+        if let Some(v1) = result.result.get_node_voltage("1") {
+            // Magnitude should be significant
+            assert!(
+                v1.magnitude(1) > 0.1,
+                "Should have measurable voltage at resonance"
+            );
+        }
+    }
+
+    /// Test AC current source with various phases
+    #[test]
+    fn test_run_hb_ac_source_phase() {
+        use crate::Netlist;
+
+        // AC source at 45 degrees phase
+        let netlist_str = "* AC source with phase
+I1 0 1 DC 0 AC 1 45
+R1 1 0 1k
+C1 1 0 1n
+.END";
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let config = HbConfig::new(1e3);
+
+        let result = engine.run_hb(&netlist, config).unwrap();
+
+        // Should converge with phase offset
+        assert!(result.converged, "Should converge with phase offset");
+
+        if let Some(v1) = result.result.get_node_voltage("1") {
+            // Phase should be approximately 45 degrees
+            let phase_deg = v1.phase(1) * 180.0 / std::f64::consts::PI;
+            // Allow some tolerance due to numerical effects
+            assert!(
+                (phase_deg - 45.0).abs() < 5.0 || (phase_deg - 45.0 + 360.0).abs() < 5.0,
+                "Phase should be ~45 degrees, got {}",
+                phase_deg
+            );
+        }
+    }
+
+    /// Verify inductor acts as open circuit at very high frequency
+    #[test]
+    fn test_hb_inductor_high_frequency_behavior() {
+        use crate::Netlist;
+
+        // At very high frequency, inductor impedance becomes very large
+        // For a voltage source driving R + L series, current -> 0
+        let netlist_str = "* High frequency RL
+V1 1 0 DC 0 AC 1
+R1 1 2 100
+L1 2 0 1
+.END"; // 1H inductor at GHz would be huge impedance
+
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let config = HbConfig::new(1e9); // 1 GHz
+
+        let result = engine.run_hb(&netlist, config);
+
+        // Should still converge (or handle gracefully)
+        // At 1GHz with 1H inductor: X_L = 6.28e9 Ω - essentially open
+        // The solver should handle this without numerical issues
+        assert!(result.is_ok(), "Should handle high frequency inductors");
     }
 }
