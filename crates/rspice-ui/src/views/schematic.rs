@@ -15,6 +15,7 @@ use crate::components::tab_bar::DocumentTabBar;
 use crate::state::cross_probing::CrossProbeManager;
 use crate::state::{CanvasFocusState, ComponentType, ConsoleMessage, DocumentManager, Point, Rotation, SchematicState, SimulationState, Tool, SchematicHistory};
 use crate::theme::Theme;
+use crate::views::symbol_assets;
 
 /// Drag operation state
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -62,6 +63,22 @@ struct EditingState {
     component_id: Option<u64>,
     /// Screen position for popup
     position: (f64, f64),
+}
+
+/// Label drag state for interactive repositioning of component labels
+/// Following Cadence Spectre pattern: labels can be dragged to custom positions
+#[derive(Clone, Copy, PartialEq, Default)]
+struct LabelDragState {
+    /// Whether a label drag is in progress
+    active: bool,
+    /// ID of the component whose label is being dragged
+    component_id: u64,
+    /// True = dragging name label, False = dragging value label
+    is_name_label: bool,
+    /// Starting offset (in pixels, relative to component center)
+    start_offset: (f64, f64),
+    /// Current offset during drag (in pixels)
+    current_offset: (f64, f64),
 }
 
 /// Main schematic editor component - Pure SVG
@@ -115,6 +132,14 @@ pub fn Schematic() -> Element {
     
     // Wire corner hover state - shows visual feedback when cursor is near a draggable wire endpoint
     let mut hovered_corner: Signal<Option<Point>> = use_signal(|| None);
+    
+    // Global label drag state - shared with CompSvg via context for proper pointer capture
+    // This allows a single global overlay at the Schematic level to capture events
+    let mut label_drag: Signal<LabelDragState> = use_signal(LabelDragState::default);
+    use_context_provider(|| label_drag);
+    
+    // Also provide component drag state so labels can disable pointer-events during component drag
+    use_context_provider(|| drag);
 
     // Undo/Redo history (local for now, will integrate with SchematicHistory later)
     let mut history = use_signal(|| SchematicHistory::new(schematic.read().clone(), 100));
@@ -478,6 +503,17 @@ pub fn Schematic() -> Element {
                             });
                         }
                         
+                        // Handle label dragging (also handled here because overlay pointer-events
+                        // updates asynchronously and may miss initial move events)
+                        if label_drag.read().active {
+                            let (start_x, start_y) = label_drag.read().start_offset;
+                            let coords = evt.page_coordinates();
+                            let z_current = *zoom.read();
+                            let dx = (coords.x - start_x) / z_current;
+                            let dy = (coords.y - start_y) / z_current;
+                            label_drag.write().current_offset = (dx, dy);
+                        }
+                        
                         // Handle box selection update with live preview
                         let bs = *box_selection.read();
                         if bs.active {
@@ -812,12 +848,65 @@ pub fn Schematic() -> Element {
                             }
                             drag.set(DragState::default());
                         }
+                        
+                        // Handle label drag finalization (also handled here for robustness)
+                        if label_drag.read().active {
+                            let ld = label_drag.read().clone();
+                            let (dx, dy) = ld.current_offset;
+                            
+                            // Only commit if actually moved
+                            if dx.abs() > 2.0 || dy.abs() > 2.0 {
+                                // Get required data for label position computation
+                                let wires_snapshot: Vec<_> = schematic.read().wires.clone();
+                                let components_snapshot: Vec<_> = schematic.read().components.clone();
+                                let current_grid_size = schematic.read().grid_size;
+                                
+                                if let Some(comp) = components_snapshot.iter().find(|c| c.id == ld.component_id) {
+                                    let (_name_pos, _value_pos) = crate::views::label_placement::compute_label_positions(
+                                        comp,
+                                        &wires_snapshot,
+                                        &components_snapshot,
+                                        current_grid_size,
+                                    );
+                                    let base_pos = if ld.is_name_label { _name_pos } else { _value_pos };
+                                    
+                                    // Final position in screen space (rotated coordinates)
+                                    let final_x = base_pos.x + dx;
+                                    let final_y = base_pos.y + dy;
+                                    
+                                    // Apply INVERSE rotation to convert back to component-local coords
+                                    // (because compute_label_positions will rotate Custom positions)
+                                    let (stored_x, stored_y) = match comp.rotation {
+                                        crate::state::Rotation::R0 => (final_x, final_y),
+                                        crate::state::Rotation::R90 => (-final_y, final_x),  // inverse of (y, -x)
+                                        crate::state::Rotation::R180 => (-final_x, -final_y),
+                                        crate::state::Rotation::R270 => (final_y, -final_x), // inverse of (-y, x)
+                                    };
+                                    
+                                    let new_pos = crate::state::LabelPosition::Custom {
+                                        x_offset: stored_x,
+                                        y_offset: stored_y,
+                                    };
+                                    
+                                    let old_state = schematic.read().clone();
+                                    {
+                                        let mut sch = schematic.write();
+                                        if let Some(c) = sch.components.iter_mut().find(|c| c.id == ld.component_id) {
+                                            if ld.is_name_label {
+                                                c.name_label_pos = new_pos;
+                                            } else {
+                                                c.value_label_pos = new_pos;
+                                            }
+                                        }
+                                    }
+                                    push_edit(old_state, "Move label");
+                                }
+                            }
+                            label_drag.set(LabelDragState::default());
+                        }
                     },
                     
-                    onmouseleave: move |_| {
-                        is_panning.set(false);
-                        drag.set(DragState::default());
-                    },
+
 
                     onwheel: move |evt| {
                         let c = evt.element_coordinates();
@@ -1463,21 +1552,60 @@ pub fn Schematic() -> Element {
                             
                             rsx! {
                                 for comp in schematic.read().components.iter() {
-                                    CompSvg {
-                                        kind: comp.kind,
-                                        // Apply drag delta: to clicked component OR all selected components in multi-mode
-                                        pos: if Some(comp.id) == dragging_id { 
-                                            crate::state::Point::new(comp.pos.x + drag_delta.x, comp.pos.y + drag_delta.y)
-                                        } else if is_multi_drag && selection.has_component(comp.id) {
-                                            crate::state::Point::new(comp.pos.x + drag_delta.x, comp.pos.y + drag_delta.y)
-                                        } else { 
-                                            comp.pos 
-                                        },
-                                        rotation: comp.rotation.degrees(),
-                                        name: comp.name.clone(),
-                                        value: comp.value.clone(),
-                                        grid_size: gs,
-                                        selected: selection.has_component(comp.id),
+                                    {
+                                        // Compute smart label positions using LabelPlacer
+                                        let wires: Vec<_> = schematic.read().wires.clone();
+                                        let components: Vec<_> = schematic.read().components.clone();
+                                        let (name_pos, value_pos) = crate::views::label_placement::compute_label_positions(
+                                            comp,
+                                            &wires,
+                                            &components,
+                                            gs,
+                                        );
+                                        
+                                        rsx! {
+                                            CompSvg {
+                                                component_id: comp.id,
+                                                kind: comp.kind,
+                                                pos: if Some(comp.id) == dragging_id { 
+                                                    crate::state::Point::new(comp.pos.x + drag_delta.x, comp.pos.y + drag_delta.y)
+                                                } else if is_multi_drag && selection.has_component(comp.id) {
+                                                    crate::state::Point::new(comp.pos.x + drag_delta.x, comp.pos.y + drag_delta.y)
+                                                } else { 
+                                                    comp.pos 
+                                                },
+                                                rotation: comp.rotation.degrees(),
+                                                name: comp.name.clone(),
+                                                value: comp.value.clone(),
+                                                grid_size: gs,
+                                                selected: selection.has_component(comp.id),
+                                                name_label_x: name_pos.x,
+                                                name_label_y: name_pos.y,
+                                                value_label_x: value_pos.x,
+                                                value_label_y: value_pos.y,
+                                                on_label_drag: move |(comp_id, is_name, new_x, new_y): (u64, bool, f64, f64)| {
+                                                    // Update component label position in state
+                                                    let old_state = schematic.read().clone();
+                                                    {
+                                                        let mut sch = schematic.write();
+                                                        if let Some(c) = sch.components.iter_mut().find(|c| c.id == comp_id) {
+                                                            let new_pos = crate::state::LabelPosition::Custom {
+                                                                x_offset: new_x,
+                                                                y_offset: new_y,
+                                                            };
+                                                            if is_name {
+                                                                c.name_label_pos = new_pos;
+                                                            } else {
+                                                                c.value_label_pos = new_pos;
+                                                            }
+                                                        }
+                                                    }
+                                                    // Push to undo history
+                                                    push_edit(old_state, "Move label");
+                                                },
+                                                zoom: *zoom.read(),
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1502,6 +1630,166 @@ pub fn Schematic() -> Element {
                                 rsx! {}
                             }
                         }
+                    }
+                    } // Close transform g element
+                    // ========================================================================
+                    // GLOBAL DRAG CAPTURE OVERLAY (Professional Implementation)
+                    // ========================================================================
+                    // This permanent overlay is ALWAYS rendered but with pointer-events
+                    // controlled by drag state. When ANY drag is active (component or label),
+                    // pointer-events: all captures all mouse events. Otherwise, pointer-events: none
+                    // allows events to pass through to underlying elements.
+                    //
+                    // This approach is used by professional CAD/EDA tools because it:
+                    // 1. Eliminates z-ordering issues (overlay is always on top)
+                    // 2. Eliminates timing issues (no conditional rendering)
+                    // 3. Provides single point of control for all drag operations
+                    // ========================================================================
+                    {
+                        // Check if ANY drag is active - combine component drag and label drag states
+                        let component_dragging = drag.read().active;
+                        let label_dragging = label_drag.read().active;
+                        let any_drag_active = component_dragging || label_dragging;
+                        
+                        // Compute pointer-events based on drag state
+                        let overlay_pointer_events = if any_drag_active { "all" } else { "none" };
+                        let overlay_cursor = if label_dragging { 
+                            "grabbing" 
+                        } else if component_dragging { 
+                            "move" 
+                        } else { 
+                            "default" 
+                        };
+                        
+                        // Capture values needed for handlers
+                        
+                        rsx! {
+                            rect {
+                                // Large absolute values to cover entire viewport
+                                // Must be outside transform group to use screen coordinates
+                                x: "0",
+                                y: "0",
+                                width: "10000",
+                                height: "10000",
+                                fill: "transparent",
+                                style: "pointer-events: {overlay_pointer_events}; cursor: {overlay_cursor};",
+                                
+                                onmousemove: move |e| {
+                                    // Handle label drag movement
+                                    if label_drag.read().active {
+                                        let (start_x, start_y) = label_drag.read().start_offset;
+                                        let coords = e.page_coordinates();
+                                        let z_current = *zoom.read();
+                                        let dx = (coords.x - start_x) / z_current;
+                                        let dy = (coords.y - start_y) / z_current;
+                                        label_drag.write().current_offset = (dx, dy);
+                                    }
+                                    
+                                    // Handle component drag movement
+                                    if drag.read().active {
+                                        // Get current mouse position and convert to grid coords
+                                        let (pan_x, pan_y) = *pan.read();
+                                        let z_current = *zoom.read();
+                                        let grid = schematic.read().grid_size;
+                                        let coords = e.element_coordinates();
+                                        let wx = (coords.x - pan_x) / z_current;
+                                        let wy = (coords.y - pan_y) / z_current;
+                                        let gx = (wx / grid as f64).round() as i32;
+                                        let gy = (wy / grid as f64).round() as i32;
+                                        let new_grid = crate::state::Point::new(gx, gy);
+                                        
+                                        // Update drag current position
+                                        drag.write().current_grid = new_grid;
+                                    }
+                                },
+                                
+                                onmouseup: move |_| {
+                                    // Handle label drag finalization
+                                    if label_drag.read().active {
+                                        let ld = label_drag.read().clone();
+                                        let (dx, dy) = ld.current_offset;
+                                        
+                                        // Only commit if actually moved
+                                        if dx.abs() > 2.0 || dy.abs() > 2.0 {
+                                            // Get required data for label position computation
+                                            let wires_snapshot: Vec<_> = schematic.read().wires.clone();
+                                            let components_snapshot: Vec<_> = schematic.read().components.clone();
+                                            let current_grid_size = schematic.read().grid_size;
+                                            
+                                            if let Some(comp) = components_snapshot.iter().find(|c| c.id == ld.component_id) {
+                                                let (_name_pos, _value_pos) = crate::views::label_placement::compute_label_positions(
+                                                    comp,
+                                                    &wires_snapshot,
+                                                    &components_snapshot,
+                                                    current_grid_size,
+                                                );
+                                                let base_pos = if ld.is_name_label { _name_pos } else { _value_pos };
+                                                
+                                                // Final position in screen space (rotated coordinates)
+                                                let final_x = base_pos.x + dx;
+                                                let final_y = base_pos.y + dy;
+                                                
+                                                // Apply INVERSE rotation to convert back to component-local coords
+                                                let (stored_x, stored_y) = match comp.rotation {
+                                                    crate::state::Rotation::R0 => (final_x, final_y),
+                                                    crate::state::Rotation::R90 => (-final_y, final_x),
+                                                    crate::state::Rotation::R180 => (-final_x, -final_y),
+                                                    crate::state::Rotation::R270 => (final_y, -final_x),
+                                                };
+                                                
+                                                let new_pos = crate::state::LabelPosition::Custom {
+                                                    x_offset: stored_x,
+                                                    y_offset: stored_y,
+                                                };
+                                                
+                                                let old_state = schematic.read().clone();
+                                                {
+                                                    let mut sch = schematic.write();
+                                                    if let Some(c) = sch.components.iter_mut().find(|c| c.id == ld.component_id) {
+                                                        if ld.is_name_label {
+                                                            c.name_label_pos = new_pos;
+                                                        } else {
+                                                            c.value_label_pos = new_pos;
+                                                        }
+                                                    }
+                                                }
+                                                push_edit(old_state, "Move label");
+                                            }
+                                        }
+                                        label_drag.set(LabelDragState::default());
+                                    }
+                                    
+                                    // Handle component drag finalization
+                                    if drag.read().active {
+                                        let d = drag.read().clone();
+                                        let delta_x = d.current_grid.x - d.start_grid.x;
+                                        let delta_y = d.current_grid.y - d.start_grid.y;
+                                        
+                                        if delta_x != 0 || delta_y != 0 {
+                                            let delta = crate::state::Point::new(delta_x, delta_y);
+                                            
+                                            if d.multi_selection {
+                                                schematic.write().move_selection(delta);
+                                                push_edit(schematic.read().clone(), "Move selection");
+                                            } else if let Some(comp_id) = d.component_id {
+                                                schematic.write().move_component_with_wires(comp_id, delta);
+                                                push_edit(schematic.read().clone(), "Move component");
+                                            } else if let Some(wire_id) = d.wire_id {
+                                                schematic.write().move_wire(wire_id, delta);
+                                                push_edit(schematic.read().clone(), "Move wire");
+                                            } else if let Some(junction_pos) = d.junction_point {
+                                                let new_pos = crate::state::Point::new(
+                                                    junction_pos.x + delta_x,
+                                                    junction_pos.y + delta_y,
+                                                );
+                                                schematic.write().move_junction(junction_pos, new_pos);
+                                                push_edit(schematic.read().clone(), "Move junction");
+                                            }
+                                        }
+                                        drag.set(DragState::default());
+                                    }
+                                },
+                            }
                         }
                     }
                 } // End svg rsx! block
@@ -1646,12 +1934,22 @@ pub fn Schematic() -> Element {
 #[component]
 pub fn SchematicToolbar(schematic: Signal<SchematicState>) -> Element {
     let theme: Signal<Theme> = use_context();
+    let mut display_settings: Signal<crate::state::display_settings::SchematicDisplaySettings> = use_context();
     let th = theme.read();
     let tool = schematic.read().tool;
+    let settings = display_settings.read();
+    
+    // Current pin visibility state for toggle button
+    let pins_visible = matches!(settings.show_pin_names, crate::state::display_settings::PinNameVisibility::Always);
+    let pin_btn_label = if pins_visible { "📍 Pins ✓" } else { "📍 Pins" };
+    
+    let pin_bg = if pins_visible { th.accent_primary() } else { th.surface() };
+    let pin_color = if pins_visible { "#fff" } else { th.text_primary() };
 
     rsx! {
         div {
             style: "display: flex; align-items: center; height: 32px; padding: 0 8px; background: {th.bg_tertiary()}; border-bottom: 1px solid {th.border()}; gap: 4px;",
+            // Tool buttons
             ToolBtn { label: "↖ Select", active: matches!(tool, Tool::Select), onclick: move |_| schematic.write().tool = Tool::Select }
             ToolBtn { label: "— Wire", active: matches!(tool, Tool::Wire), onclick: move |_| schematic.write().tool = Tool::Wire }
             ToolBtn { label: "⚡ Probe", active: matches!(tool, Tool::Probe), onclick: move |_| {
@@ -1667,6 +1965,26 @@ pub fn SchematicToolbar(schematic: Signal<SchematicState>) -> Element {
             div { style: "width: 1px; height: 18px; background: {th.border()}; margin: 0 4px;" }
             button { style: "padding: 4px 8px; background: {th.surface()}; border: 1px solid {th.border()}; border-radius: 4px; color: {th.text_primary()}; font-size: 12px; cursor: pointer;", onclick: move |_| schematic.write().rotate_selection(), "⟳ Rotate" }
             button { style: "padding: 4px 8px; background: {th.surface()}; border: 1px solid {th.border()}; border-radius: 4px; color: {th.text_primary()}; font-size: 12px; cursor: pointer;", onclick: move |_| schematic.write().delete_selection(), "🗑 Delete" }
+            
+            // View section divider
+            div { style: "width: 1px; height: 18px; background: {th.border()}; margin: 0 8px;" }
+            span { style: "font-size: 11px; color: {th.text_muted()}; margin-right: 4px;", "View:" }
+            
+            // Pin names toggle (Virtuoso-style View option)
+            button { 
+                style: "padding: 4px 8px; background: {pin_bg}; border: 1px solid {th.border()}; border-radius: 4px; color: {pin_color}; font-size: 12px; cursor: pointer;",
+                title: "Toggle terminal pin names (Virtuoso: View → Display Options)",
+                onclick: move |_| {
+                    let mut ds = display_settings.write();
+                    ds.show_pin_names = if matches!(ds.show_pin_names, crate::state::display_settings::PinNameVisibility::Always) {
+                        crate::state::display_settings::PinNameVisibility::Hidden
+                    } else {
+                        crate::state::display_settings::PinNameVisibility::Always
+                    };
+                },
+                "{pin_btn_label}"
+            }
+            
             div { style: "flex: 1;" }
             span { style: "font-size: 12px; color: {th.text_muted()};", {format!("{} components, {} wires", schematic.read().components.len(), schematic.read().wires.len())} }
         }
@@ -1694,11 +2012,11 @@ fn WireSvg(
     
     // Probe highlight takes priority, then selection, then normal
     let (col, sw) = if probe_highlight {
-        ("#ffa500", "4") // Orange highlight for probe mode
+        ("#ffa500", "2.5") // Orange highlight for probe mode
     } else if selected {
-        (th.accent_primary(), "3")
+        (th.accent_primary(), "2")
     } else {
-        (th.accent_success(), "2")
+        (th.accent_success(), "1.5")
     };
     
     // Build path string properly
@@ -1721,6 +2039,8 @@ fn WireSvg(
 
 #[component]
 fn CompSvg(
+    /// Component ID for identifying which component's label is being dragged
+    component_id: u64,
     kind: ComponentType,
     pos: Point,
     rotation: i32,
@@ -1728,42 +2048,438 @@ fn CompSvg(
     value: String,
     grid_size: i32,
     selected: bool,
+    /// Name label X offset (from smart placement)
+    #[props(default)] name_label_x: f64,
+    /// Name label Y offset (from smart placement)
+    #[props(default = -25.0)] name_label_y: f64,
+    /// Value label X offset
+    #[props(default)] value_label_x: f64,
+    /// Value label Y offset
+    #[props(default = 35.0)] value_label_y: f64,
     #[props(default)] ondoubleclick: EventHandler<MouseEvent>,
+    /// Callback when a label drag completes: (component_id, is_name_label, x_offset, y_offset)
+    #[props(default)] on_label_drag: EventHandler<(u64, bool, f64, f64)>,
+    /// Current zoom level for proper drag delta scaling
+    #[props(default = 1.0)] zoom: f64,
 ) -> Element {
     let theme: Signal<Theme> = use_context();
+    let display_settings: Signal<crate::state::display_settings::SchematicDisplaySettings> = use_context();
     let th = theme.read();
+    let settings = display_settings.read();
+    
     let (cx, cy) = pos.to_pixels(grid_size);
     let col = if selected { th.accent_primary() } else { th.text_primary() };
-    let sw = if selected { "2.5" } else { "2" };
-    let path = symbol_path(kind);
+    let sw = if selected { "2" } else { "1.5" }; // Stroke width (only for fallback paths)
+    
+    // Component hover state for terminal pin visibility
+    let mut is_hovered = use_signal(|| false);
+    
+    // Label hover states for drag interaction visual feedback
+    let mut name_label_hovered = use_signal(|| false);
+    let mut value_label_hovered = use_signal(|| false);
+    
+    // Label drag state - use global context provided by Schematic for proper pointer capture
+    // This allows the global overlay to handle events even when cursor leaves this component
+    let mut label_drag: Signal<LabelDragState> = use_context();
+    
+    // Component drag state - used to disable label pointer-events during component drag
+    let component_drag: Signal<DragState> = use_context();
+    
+    let asset = crate::views::symbol_assets::get_component_svg(kind);
+    
+    // Get terminal offsets for this component type
+    let terminal_offsets = kind.terminal_offsets();
+    
+    // Determine if we should show terminal pin names based on settings and hover state
+    let show_pins = match settings.show_pin_names {
+        crate::state::display_settings::PinNameVisibility::Always => true,
+        crate::state::display_settings::PinNameVisibility::OnHover => *is_hovered.read(),
+        crate::state::display_settings::PinNameVisibility::Hidden => false,
+    };
+    
+    // Label cursor style - "move" when hovered/dragging for professional UX
+    // Only show grab cursor when no drag is active
+    // Read signals directly for proper reactivity
+    let label_cursor = if label_drag.read().active {
+        "grabbing"
+    } else if component_drag.read().active {
+        "default"  // During component drag, don't show grab cursor
+    } else if *name_label_hovered.read() || *value_label_hovered.read() {
+        "grab"
+    } else {
+        "default"
+    };
+    
+    // Label highlight color for hover feedback
+    let name_label_bg = if *name_label_hovered.read() {
+        format!("{}20", th.accent_primary())
+    } else {
+        "transparent".to_string()
+    };
+    let value_label_bg = if *value_label_hovered.read() {
+        format!("{}20", th.accent_primary())
+    } else {
+        "transparent".to_string()
+    };
+    
     rsx! {
+        // Define SVG filter for label shadow (improves contrast against busy backgrounds)
+        defs {
+            filter {
+                id: "label-shadow",
+                x: "-20%",
+                y: "-20%",
+                width: "140%",
+                height: "140%",
+                // Light drop shadow for dark mode, dark shadow for light mode
+                feDropShadow {
+                    dx: "0",
+                    dy: "1",
+                    std_deviation: "1",
+                    flood_color: if th.is_dark { "#000000" } else { "#ffffff" },
+                    flood_opacity: if th.is_dark { "0.5" } else { "0.8" },
+                }
+            }
+        }
         g {
             transform: "translate({cx},{cy}) rotate({rotation})",
-            style: "cursor: pointer;",
+            style: "cursor: pointer; color: {col};",
             ondoubleclick: move |e| ondoubleclick.call(e),
-            if selected { circle { cx: "0", cy: "0", r: "25", fill: "{th.accent_primary()}20", stroke: "{th.accent_primary()}", stroke_width: "1", stroke_dasharray: "3,2" } }
+            onmouseenter: move |_| is_hovered.set(true),
+            onmouseleave: move |_| is_hovered.set(false),
+            
+            // Selection highlight (when selected) - tight bounding box from actual symbol dimensions
+            if selected && settings.show_selection_ring { 
+                {
+                    // Padding around symbol for selection box
+                    const SELECTION_PADDING: f64 = 4.0;
+                    
+                    // Get symbol bounds for native orientation (rotation=0)
+                    // The rect is inside the rotated g element, so it rotates automatically
+                    // No need to swap dimensions - the rotation transform handles it
+                    let (base_w, base_h) = symbol_assets::get_symbol_bounds(kind);
+                    let box_w = base_w + SELECTION_PADDING;
+                    let box_h = base_h + SELECTION_PADDING;
+                    let half_w = box_w / 2.0;
+                    let half_h = box_h / 2.0;
+                    rsx! {
+                        rect { 
+                            x: "{-half_w}", 
+                            y: "{-half_h}", 
+                            width: "{box_w}",
+                            height: "{box_h}",
+                            rx: "3",
+                            fill: "{th.accent_primary()}10", 
+                            stroke: "{th.accent_primary()}", 
+                            stroke_width: "1",
+                            stroke_dasharray: "3 2",
+                            pointer_events: "none",
+                        } 
+                    }
+                }
+            }
+            
             // Invisible hit area for clicks
             rect { x: "-20", y: "-30", width: "40", height: "60", fill: "transparent", pointer_events: "all" }
-            path { d: "{path}", stroke: "{col}", stroke_width: "{sw}", fill: "none", stroke_linecap: "round" }
-            g { transform: "rotate({-rotation})",
-                text { x: "0", y: "-25", text_anchor: "middle", font_size: "10", fill: "{th.text_primary()}", font_weight: "600", "{name}" }
-                text { x: "0", y: "35", text_anchor: "middle", font_size: "9", fill: "{th.text_secondary()}", "{value}" }
+            
+            // Component symbol rendering
+            if let Some(svg) = asset {
+                {
+                   let (vx, vy, vw, vh) = svg.view_box;
+                   let target_size = (grid_size as f64) * 4.0;
+                   let scale = (target_size / vw.max(vh)) * svg.scale;
+                   let center_x = vx + vw / 2.0 - svg.x_offset;
+                   let center_y = vy + vh / 2.0 - svg.y_offset;
+                   let base_scale = scale / svg.scale;
+
+                   rsx! {
+                       g {
+                           transform: "scale({scale}) translate({-center_x}, {-center_y})",
+                           dangerous_inner_html: "{svg.content}",
+                           stroke: "{col}",
+                           fill: "{col}",
+                           stroke_width: "{1.5 * svg.stroke_scale / base_scale}",
+                       }
+                   }
+                }
+            } else {
+                // Fallback to hardcoded paths
+                path { d: "{symbol_path(kind)}", stroke: "{col}", stroke_width: "{sw}", fill: "none", stroke_linecap: "round" }
+            }
+            
+            // Terminal pin labels (Virtuoso-style: simple text only, no decoration)
+            // Controlled by settings.show_pin_names (Hidden/OnHover/Always)
+            if show_pins && !terminal_offsets.is_empty() {
+                g { transform: "rotate({-rotation})",
+                    for (term_name, offset) in terminal_offsets.iter() {
+                        {
+                            // Rotate the offset back to screen space
+                            let (rx, ry) = rotate_point_by_deg(offset.x as f64, offset.y as f64, rotation);
+                            // Convert grid offset to pixels
+                            let tx = rx * (grid_size as f64);
+                            let ty = ry * (grid_size as f64);
+                            
+                            // Position text just outside terminal, anchor based on direction
+                            let offset_dist = 5.0;
+                            let (label_x, label_y, anchor) = if tx.abs() > ty.abs() {
+                                if tx > 0.0 { (tx + offset_dist, ty, "start") } 
+                                else { (tx - offset_dist, ty, "end") }
+                            } else {
+                                if ty > 0.0 { (tx, ty + offset_dist + 3.0, "middle") } 
+                                else { (tx, ty - offset_dist, "middle") }
+                            };
+                            
+                            rsx! {
+                                text {
+                                    x: "{label_x}",
+                                    y: "{label_y}",
+                                    text_anchor: "{anchor}",
+                                    dominant_baseline: "middle",
+                                    font_size: "{settings.pin_font_size}",
+                                    font_family: "{Theme::FONT_MONO}",
+                                    fill: "{th.text_muted()}",
+                                    style: "pointer-events: none;",
+                                    "{term_name}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Component labels with smart placement
+            // Labels are counter-rotated to remain horizontal regardless of component orientation
+            if settings.show_component_names || settings.show_component_values {
+                g { 
+                    transform: "rotate({-rotation})",
+                    style: "cursor: {label_cursor};",
+                    
+                    // Name label (reference designator: R1, C2, M1, etc.)
+                    // Full Spectre-level drag support: click and drag to reposition
+                    if settings.show_component_names && !name.is_empty() {
+                        {
+                            // Calculate displayed position (original + drag offset if dragging this label)
+                            let ld = label_drag.read();
+                            let is_dragging_this = ld.active && ld.component_id == component_id && ld.is_name_label;
+                            let display_x = if is_dragging_this {
+                                name_label_x + ld.current_offset.0
+                            } else {
+                                name_label_x
+                            };
+                            let display_y = if is_dragging_this {
+                                name_label_y + ld.current_offset.1
+                            } else {
+                                name_label_y
+                            };
+                            
+                            rsx! {
+                                g {
+                                    // Label event handling - global overlay now captures drag events
+                                    onmouseenter: move |_| name_label_hovered.set(true),
+                                    onmouseleave: move |_| {
+                                        name_label_hovered.set(false);
+                                    },
+                                    
+                                    // Note: onmousemove and onmouseup are now handled by the global overlay
+                                    // at the Schematic level to maintain proper pointer capture
+                                    
+                                    // Invisible hit area for mouse events (text has pointer-events: none)
+                                    // onmousedown is placed HERE on the rect, not on the parent g,
+                                    // because SVG event bubbling with explicit pointer-events can be inconsistent
+                                    rect {
+                                        // Width based on text length (approx 7px per character)
+                                        x: "{display_x - (name.len() as f64 * 3.5).max(12.0)}",
+                                        y: "{display_y - 8.0}",
+                                        width: "{(name.len() as f64 * 7.0).max(24.0)}",
+                                        height: "14",
+                                        fill: "transparent",
+                                        style: "cursor: {label_cursor};",
+                                        pointer_events: "all",
+                                        // Start drag on mousedown - set global state for overlay to track
+                                        onmousedown: move |e| {
+                                            e.stop_propagation();
+                                            let coords = e.page_coordinates();
+                                            label_drag.set(LabelDragState {
+                                                active: true,
+                                                component_id,
+                                                is_name_label: true,
+                                                start_offset: (coords.x, coords.y),
+                                                current_offset: (0.0, 0.0),
+                                            });
+                                        },
+                                    }
+                                    
+                                    // Hover highlight background (shown when hovered OR dragging)
+                                    if *name_label_hovered.read() || is_dragging_this {
+                                        rect {
+                                            // Width tightly fitting text, centered vertically
+                                            x: "{display_x - (name.len() as f64 * 3.5 + 2.0).max(10.0)}",
+                                            y: "{display_y - 5.0}",
+                                            width: "{(name.len() as f64 * 7.0 + 4.0).max(20.0)}",
+                                            height: "10",
+                                            rx: "2",
+                                            fill: "{name_label_bg}",
+                                            style: "pointer-events: none;",
+                                        }
+                                    }
+                                    
+                                    text { 
+                                        x: "{display_x}", 
+                                        y: "{display_y}", 
+                                        text_anchor: "middle",
+                                        dominant_baseline: "middle",
+                                        font_size: "{settings.name_font_size}", 
+                                        font_weight: "{settings.name_font_weight_css()}",
+                                        font_family: "{Theme::FONT_MONO}",
+                                        fill: "{th.text_primary()}",
+                                        filter: if settings.label_shadow_enabled { "url(#label-shadow)" } else { "" },
+                                        style: "user-select: none; pointer-events: none;",
+                                        "{name}" 
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Value label (component value: 1k, 10uF, etc.)
+                    // Full Spectre-level drag support: click and drag to reposition
+                    if settings.show_component_values && !value.is_empty() {
+                        {
+                            // Calculate displayed position (original + drag offset if dragging this label)
+                            let ld = label_drag.read();
+                            let is_dragging_this = ld.active && ld.component_id == component_id && !ld.is_name_label;
+                            let display_x = if is_dragging_this {
+                                value_label_x + ld.current_offset.0
+                            } else {
+                                value_label_x
+                            };
+                            let display_y = if is_dragging_this {
+                                value_label_y + ld.current_offset.1
+                            } else {
+                                value_label_y
+                            };
+                            
+                            rsx! {
+                                g {
+                                    // Disable pointer events during component drag to prevent interference
+                                    // Read signal directly for proper reactivity across all components
+                                    style: if component_drag.read().active { "pointer-events: none;" } else { "" },
+                                    onmouseenter: move |_| value_label_hovered.set(true),
+                                    onmouseleave: move |_| {
+                                        value_label_hovered.set(false);
+                                    },
+                                    
+                                    // Note: onmousemove and onmouseup are now handled by the global overlay
+                                    // at the Schematic level to maintain proper pointer capture
+                                    
+                                    // Hit area rect with onmousedown directly attached
+                                    rect {
+                                        // Width based on text length (approx 6px per character for values)
+                                        x: "{display_x - (value.len() as f64 * 3.0).max(15.0)}",
+                                        y: "{display_y - 7.0}",
+                                        width: "{(value.len() as f64 * 6.0).max(30.0)}",
+                                        height: "14",
+                                        fill: "transparent",
+                                        style: "cursor: {label_cursor};",
+                                        pointer_events: "all",
+                                        // Start drag on mousedown - set global state for overlay to track
+                                        onmousedown: move |e| {
+                                            e.stop_propagation();
+                                            let coords = e.page_coordinates();
+                                            label_drag.set(LabelDragState {
+                                                active: true,
+                                                component_id,
+                                                is_name_label: false,
+                                                start_offset: (coords.x, coords.y),
+                                                current_offset: (0.0, 0.0),
+                                            });
+                                        },
+                                    }
+                                    
+                                    // Hover highlight background
+                                    if *value_label_hovered.read() || is_dragging_this {
+                                        rect {
+                                            // Width tightly fitting text
+                                            x: "{display_x - (value.len() as f64 * 3.0 + 2.0).max(12.0)}",
+                                            y: "{display_y - 5.0}",
+                                            width: "{(value.len() as f64 * 6.0 + 4.0).max(24.0)}",
+                                            height: "10",
+                                            rx: "2",
+                                            fill: "{value_label_bg}",
+                                            style: "pointer-events: none;",
+                                        }
+                                    }
+                                    
+                                    text { 
+                                        x: "{display_x}", 
+                                        y: "{display_y}", 
+                                        text_anchor: "middle",
+                                        dominant_baseline: "middle",
+                                        font_size: "{settings.value_font_size}", 
+                                        font_family: "{Theme::FONT_MONO}",
+                                        fill: "{th.text_secondary()}",
+                                        filter: if settings.label_shadow_enabled { "url(#label-shadow)" } else { "" },
+                                        style: "user-select: none; pointer-events: none;",
+                                        "{value}" 
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 }
+
+/// Rotate a point by degrees (used for terminal pin name positioning)
+fn rotate_point_by_deg(x: f64, y: f64, degrees: i32) -> (f64, f64) {
+    let rad = (degrees as f64) * std::f64::consts::PI / 180.0;
+    let cos = rad.cos();
+    let sin = rad.sin();
+    (x * cos - y * sin, x * sin + y * cos)
+}
+
 
 #[component]
 fn PreviewSvg(kind: ComponentType, pos: Point, grid_size: i32, rotation: Rotation) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
     let (cx, cy) = pos.to_pixels(grid_size);
-    let path = symbol_path(kind);
     let rot_deg = rotation.degrees();
+    
+    let asset = crate::views::symbol_assets::get_component_svg(kind);
+    
     rsx! {
         g { transform: "translate({cx},{cy}) rotate({rot_deg})", opacity: "0.6",
             circle { cx: "0", cy: "0", r: "20", fill: "{th.accent_primary()}30", stroke: "{th.accent_primary()}", stroke_dasharray: "4,2" }
-            path { d: "{path}", stroke: "{th.accent_primary()}", stroke_width: "2", fill: "none" }
+            
+            if let Some(svg) = asset {
+                 {
+                   let (vx, vy, vw, vh) = svg.view_box;
+                   // Standard component size is 4 grid blocks (e.g. 40px for 10px grid)
+                   let target_size = (grid_size as f64) * 4.0;
+                   // Apply manual scale correction (same as CompSvg)
+                   let scale = (target_size / vw.max(vh)) * svg.scale;
+                   // Incorporate offsets into center calculation (same as CompSvg)
+                   let center_x = vx + vw / 2.0 - svg.x_offset;
+                   let center_y = vy + vh / 2.0 - svg.y_offset;
+                   // Stroke width correction (same as CompSvg)
+                   let base_scale = scale / svg.scale;
+
+                   rsx! {
+                       g {
+                           transform: "scale({scale}) translate({-center_x}, {-center_y})",
+                           dangerous_inner_html: "{svg.content}",
+                           stroke: "{th.accent_primary()}",
+                           fill: "{th.accent_primary()}",
+                           stroke_width: "{1.5 * svg.stroke_scale / base_scale}",
+                       }
+                   }
+                }
+            } else {
+                path { d: "{symbol_path(kind)}", stroke: "{th.accent_primary()}", stroke_width: "2", fill: "none" }
+            }
         }
     }
 }
