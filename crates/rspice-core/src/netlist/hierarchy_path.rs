@@ -1,0 +1,625 @@
+//! Hierarchical Path Management
+//!
+//! Provides unified path representation for hierarchical circuit navigation,
+//! following Cadence Spectre conventions for instance addressing.
+//!
+//! # Path Format
+//!
+//! Hierarchical paths use dot notation by default: `TOP.X1.X2.R1`
+//!
+//! Special path segments:
+//! - Empty path represents the root/top-level design
+//! - Global nodes (ground, power rails) are never prefixed
+//!
+//! # Usage
+//!
+//! ```ignore
+//! let path = HierarchyPath::root();
+//! let child = path.child("X1");
+//! let grandchild = child.child("X2");
+//! assert_eq!(grandchild.to_string(), "X1.X2");
+//!
+//! // Parse from string
+//! let parsed = HierarchyPath::parse("X1.X2.X3", '.');
+//! assert_eq!(parsed.depth(), 3);
+//! ```
+
+// Note: serde support not needed here - serialization handled at UI level
+use std::fmt;
+use std::hash::{Hash, Hasher};
+
+//=============================================================================
+// Hierarchy Path Configuration
+//=============================================================================
+
+/// Configuration for hierarchy path formatting
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HierarchyPathConfig {
+    /// Separator character between path segments
+    pub separator: char,
+    /// Maximum allowed hierarchy depth (prevents infinite recursion)
+    pub max_depth: usize,
+    /// Whether to preserve full paths or use compressed names
+    pub preserve_full_path: bool,
+}
+
+impl Default for HierarchyPathConfig {
+    fn default() -> Self {
+        Self {
+            separator: '.',
+            max_depth: 100,
+            preserve_full_path: true,
+        }
+    }
+}
+
+impl HierarchyPathConfig {
+    /// SPICE-style configuration (underscore separator)
+    pub fn spice_style() -> Self {
+        Self {
+            separator: '_',
+            max_depth: 100,
+            preserve_full_path: true,
+        }
+    }
+
+    /// Spectre-style configuration (dot separator)
+    pub fn spectre_style() -> Self {
+        Self {
+            separator: '.',
+            max_depth: 256,
+            preserve_full_path: true,
+        }
+    }
+}
+
+//=============================================================================
+// Hierarchy Path
+//=============================================================================
+
+/// A hierarchical path representing the location of an instance or node
+/// within a circuit design hierarchy.
+///
+/// This is the canonical representation used throughout the simulator
+/// for tracking instance relationships, parameter scopes, and result mapping.
+#[derive(Debug, Clone)]
+pub struct HierarchyPath {
+    /// Path segments from root to current location (instance names)
+    segments: Vec<String>,
+    /// Separator character for string formatting
+    separator: char,
+}
+
+fn default_separator() -> char {
+    '.'
+}
+
+impl Default for HierarchyPath {
+    fn default() -> Self {
+        Self::root()
+    }
+}
+
+impl PartialEq for HierarchyPath {
+    fn eq(&self, other: &Self) -> bool {
+        // Equality based on segments only, ignoring separator choice
+        self.segments == other.segments
+    }
+}
+
+impl Eq for HierarchyPath {}
+
+impl Hash for HierarchyPath {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.segments.hash(state);
+    }
+}
+
+impl HierarchyPath {
+    //-------------------------------------------------------------------------
+    // Constructors
+    //-------------------------------------------------------------------------
+
+    /// Create a root (top-level) path with no segments
+    pub fn root() -> Self {
+        Self {
+            segments: Vec::new(),
+            separator: '.',
+        }
+    }
+
+    /// Create a root path with custom separator
+    pub fn root_with_separator(separator: char) -> Self {
+        Self {
+            segments: Vec::new(),
+            separator,
+        }
+    }
+
+    /// Create a path from a single instance name
+    pub fn from_instance(name: impl Into<String>) -> Self {
+        Self {
+            segments: vec![name.into()],
+            separator: '.',
+        }
+    }
+
+    /// Create a path from a vector of segments
+    pub fn from_segments(segments: Vec<String>) -> Self {
+        Self {
+            segments,
+            separator: '.',
+        }
+    }
+
+    /// Create a path from segments with custom separator
+    pub fn from_segments_with_separator(segments: Vec<String>, separator: char) -> Self {
+        Self {
+            segments,
+            separator,
+        }
+    }
+
+    /// Parse a path from a string representation
+    ///
+    /// # Arguments
+    /// * `path` - The path string to parse
+    /// * `separator` - The separator character to split on
+    ///
+    /// # Examples
+    /// ```ignore
+    /// let path = HierarchyPath::parse("X1.X2.R1", '.');
+    /// assert_eq!(path.segments(), &["X1", "X2", "R1"]);
+    /// ```
+    pub fn parse(path: &str, separator: char) -> Self {
+        if path.is_empty() {
+            return Self::root_with_separator(separator);
+        }
+
+        let segments: Vec<String> = path
+            .split(separator)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
+
+        Self {
+            segments,
+            separator,
+        }
+    }
+
+    //-------------------------------------------------------------------------
+    // Navigation
+    //-------------------------------------------------------------------------
+
+    /// Create a child path by appending an instance name
+    ///
+    /// Returns a new path with the given name appended as a child segment.
+    pub fn child(&self, name: impl Into<String>) -> Self {
+        let mut new_segments = self.segments.clone();
+        new_segments.push(name.into());
+        Self {
+            segments: new_segments,
+            separator: self.separator,
+        }
+    }
+
+    /// Create a child path for a nested node
+    ///
+    /// This appends a node name that is internal to the current instance.
+    /// The result is a fully-qualified hierarchical node name.
+    pub fn node(&self, node_name: &str) -> String {
+        if self.is_root() {
+            node_name.to_string()
+        } else {
+            format!("{}{}{}", self.to_string(), self.separator, node_name)
+        }
+    }
+
+    /// Get the parent path, or None if this is the root
+    pub fn parent(&self) -> Option<Self> {
+        if self.segments.is_empty() {
+            None
+        } else {
+            let mut parent_segments = self.segments.clone();
+            parent_segments.pop();
+            Some(Self {
+                segments: parent_segments,
+                separator: self.separator,
+            })
+        }
+    }
+
+    /// Get ancestors from root to this path (not including this path)
+    pub fn ancestors(&self) -> Vec<Self> {
+        let mut result = Vec::with_capacity(self.depth());
+        let mut current = self.clone();
+
+        while let Some(parent) = current.parent() {
+            result.push(parent.clone());
+            current = parent;
+        }
+
+        result.reverse();
+        result
+    }
+
+    //-------------------------------------------------------------------------
+    // Queries
+    //-------------------------------------------------------------------------
+
+    /// Check if this is the root path (no segments)
+    pub fn is_root(&self) -> bool {
+        self.segments.is_empty()
+    }
+
+    /// Get the number of segments in the path (hierarchy depth)
+    pub fn depth(&self) -> usize {
+        self.segments.len()
+    }
+
+    /// Get the path segments
+    pub fn segments(&self) -> &[String] {
+        &self.segments
+    }
+
+    /// Get the last segment (leaf instance name), or None if root
+    pub fn leaf(&self) -> Option<&str> {
+        self.segments.last().map(|s| s.as_str())
+    }
+
+    /// Get the first segment (top-level instance), or None if root
+    pub fn top(&self) -> Option<&str> {
+        self.segments.first().map(|s| s.as_str())
+    }
+
+    /// Get the separator character
+    pub fn separator(&self) -> char {
+        self.separator
+    }
+
+    /// Set the separator character
+    pub fn with_separator(mut self, separator: char) -> Self {
+        self.separator = separator;
+        self
+    }
+
+    /// Check if this path is an ancestor of another path
+    pub fn is_ancestor_of(&self, other: &Self) -> bool {
+        if self.depth() >= other.depth() {
+            return false;
+        }
+
+        self.segments
+            .iter()
+            .zip(other.segments.iter())
+            .all(|(a, b)| a == b)
+    }
+
+    /// Check if this path is a descendant of another path
+    pub fn is_descendant_of(&self, other: &Self) -> bool {
+        other.is_ancestor_of(self)
+    }
+
+    /// Check if this path starts with another path (is equal or descendant)
+    pub fn starts_with(&self, prefix: &Self) -> bool {
+        if prefix.depth() > self.depth() {
+            return false;
+        }
+
+        prefix
+            .segments
+            .iter()
+            .zip(self.segments.iter())
+            .all(|(a, b)| a == b)
+    }
+
+    /// Get the relative path from an ancestor to this path
+    ///
+    /// Returns None if `ancestor` is not actually an ancestor.
+    pub fn relative_to(&self, ancestor: &Self) -> Option<Self> {
+        if !self.starts_with(ancestor) {
+            return None;
+        }
+
+        let relative_segments = self.segments[ancestor.depth()..].to_vec();
+        Some(Self {
+            segments: relative_segments,
+            separator: self.separator,
+        })
+    }
+
+    //-------------------------------------------------------------------------
+    // Name Generation
+    //-------------------------------------------------------------------------
+
+    /// Generate a unique element name within this hierarchy
+    ///
+    /// Combines the path with an element name to create a fully-qualified name.
+    pub fn qualified_name(&self, element_name: &str) -> String {
+        if self.is_root() {
+            element_name.to_string()
+        } else {
+            format!("{}{}{}", self.to_string(), self.separator, element_name)
+        }
+    }
+
+    /// Check if a node name is a global node (ground variants)
+    ///
+    /// Global nodes are never prefixed with hierarchy path.
+    pub fn is_global_node(node: &str) -> bool {
+        // Standard ground representations
+        node == "0"
+            || node.eq_ignore_ascii_case("gnd")
+            || node.eq_ignore_ascii_case("ground")
+            || node.eq_ignore_ascii_case("vss")
+            // Common global supply names
+            || node.eq_ignore_ascii_case("vdd")
+            || node.eq_ignore_ascii_case("vcc")
+            // Spectre global prefix
+            || node.starts_with('!')
+    }
+
+    /// Qualify a node name with this hierarchy path
+    ///
+    /// Global nodes are returned unchanged; local nodes get the full path prefix.
+    pub fn qualify_node(&self, node: &str) -> String {
+        if Self::is_global_node(node) || self.is_root() {
+            // Ground is never renamed, global power rails preserved
+            if node == "0" || node.eq_ignore_ascii_case("gnd") {
+                "0".to_string()
+            } else {
+                node.to_string()
+            }
+        } else {
+            format!("{}{}{}", self.to_string(), self.separator, node)
+        }
+    }
+}
+
+impl fmt::Display for HierarchyPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.segments.is_empty() {
+            write!(f, "")
+        } else {
+            let separator_str = self.separator.to_string();
+            write!(f, "{}", self.segments.join(&separator_str))
+        }
+    }
+}
+
+//=============================================================================
+// Path Iterator
+//=============================================================================
+
+/// Iterator over path segments from root to leaf
+pub struct HierarchyPathIter<'a> {
+    path: &'a HierarchyPath,
+    index: usize,
+}
+
+impl<'a> Iterator for HierarchyPathIter<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.path.segments.len() {
+            let segment = &self.path.segments[self.index];
+            self.index += 1;
+            Some(segment)
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a HierarchyPath {
+    type Item = &'a str;
+    type IntoIter = HierarchyPathIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        HierarchyPathIter {
+            path: self,
+            index: 0,
+        }
+    }
+}
+
+//=============================================================================
+// Tests
+//=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_root_path() {
+        let root = HierarchyPath::root();
+        assert!(root.is_root());
+        assert_eq!(root.depth(), 0);
+        assert_eq!(root.to_string(), "");
+        assert!(root.leaf().is_none());
+    }
+
+    #[test]
+    fn test_child_path() {
+        let root = HierarchyPath::root();
+        let x1 = root.child("X1");
+
+        assert!(!x1.is_root());
+        assert_eq!(x1.depth(), 1);
+        assert_eq!(x1.to_string(), "X1");
+        assert_eq!(x1.leaf(), Some("X1"));
+
+        let x2 = x1.child("X2");
+        assert_eq!(x2.depth(), 2);
+        assert_eq!(x2.to_string(), "X1.X2");
+    }
+
+    #[test]
+    fn test_parent_path() {
+        let path = HierarchyPath::parse("X1.X2.X3", '.');
+
+        let parent = path.parent().unwrap();
+        assert_eq!(parent.to_string(), "X1.X2");
+
+        let grandparent = parent.parent().unwrap();
+        assert_eq!(grandparent.to_string(), "X1");
+
+        let root = grandparent.parent().unwrap();
+        assert!(root.is_root());
+
+        assert!(root.parent().is_none());
+    }
+
+    #[test]
+    fn test_parse_path() {
+        let path = HierarchyPath::parse("X1.X2.R1", '.');
+        assert_eq!(path.depth(), 3);
+        assert_eq!(path.segments(), &["X1", "X2", "R1"]);
+
+        // Empty string = root
+        let empty = HierarchyPath::parse("", '.');
+        assert!(empty.is_root());
+
+        // Underscore separator
+        let spice = HierarchyPath::parse("X1_X2_R1", '_');
+        assert_eq!(spice.depth(), 3);
+        assert_eq!(spice.to_string(), "X1_X2_R1");
+    }
+
+    #[test]
+    fn test_qualified_name() {
+        let path = HierarchyPath::parse("X1.X2", '.');
+        assert_eq!(path.qualified_name("R1"), "X1.X2.R1");
+
+        let root = HierarchyPath::root();
+        assert_eq!(root.qualified_name("R1"), "R1");
+    }
+
+    #[test]
+    fn test_qualify_node() {
+        let path = HierarchyPath::parse("X1.X2", '.');
+
+        // Internal node gets prefixed
+        assert_eq!(path.qualify_node("net1"), "X1.X2.net1");
+
+        // Ground is never prefixed
+        assert_eq!(path.qualify_node("0"), "0");
+        assert_eq!(path.qualify_node("gnd"), "0");
+        assert_eq!(path.qualify_node("GND"), "0");
+
+        // Global supplies preserved
+        assert_eq!(path.qualify_node("VDD"), "VDD");
+        assert_eq!(path.qualify_node("VSS"), "VSS");
+    }
+
+    #[test]
+    fn test_global_node_detection() {
+        assert!(HierarchyPath::is_global_node("0"));
+        assert!(HierarchyPath::is_global_node("gnd"));
+        assert!(HierarchyPath::is_global_node("GND"));
+        assert!(HierarchyPath::is_global_node("VDD"));
+        assert!(HierarchyPath::is_global_node("VSS"));
+        assert!(HierarchyPath::is_global_node("!global_net"));
+
+        assert!(!HierarchyPath::is_global_node("net1"));
+        assert!(!HierarchyPath::is_global_node("out"));
+    }
+
+    #[test]
+    fn test_ancestor_relationships() {
+        let root = HierarchyPath::root();
+        let x1 = root.child("X1");
+        let x1_x2 = x1.child("X2");
+        let x1_x2_x3 = x1_x2.child("X3");
+
+        assert!(root.is_ancestor_of(&x1));
+        assert!(root.is_ancestor_of(&x1_x2));
+        assert!(x1.is_ancestor_of(&x1_x2_x3));
+
+        assert!(!x1_x2.is_ancestor_of(&x1));
+        assert!(!x1.is_ancestor_of(&x1)); // Not ancestor of self
+    }
+
+    #[test]
+    fn test_starts_with() {
+        let path = HierarchyPath::parse("X1.X2.X3", '.');
+        let prefix = HierarchyPath::parse("X1.X2", '.');
+        let other = HierarchyPath::parse("X1.Y2", '.');
+
+        assert!(path.starts_with(&prefix));
+        assert!(path.starts_with(&HierarchyPath::root()));
+        assert!(!path.starts_with(&other));
+    }
+
+    #[test]
+    fn test_relative_to() {
+        let path = HierarchyPath::parse("X1.X2.X3.R1", '.');
+        let ancestor = HierarchyPath::parse("X1.X2", '.');
+
+        let relative = path.relative_to(&ancestor).unwrap();
+        assert_eq!(relative.to_string(), "X3.R1");
+
+        let not_ancestor = HierarchyPath::parse("Y1.Y2", '.');
+        assert!(path.relative_to(&not_ancestor).is_none());
+    }
+
+    #[test]
+    fn test_ancestors() {
+        let path = HierarchyPath::parse("X1.X2.X3", '.');
+        let ancestors = path.ancestors();
+
+        assert_eq!(ancestors.len(), 3); // root, X1, X1.X2
+        assert!(ancestors[0].is_root());
+        assert_eq!(ancestors[1].to_string(), "X1");
+        assert_eq!(ancestors[2].to_string(), "X1.X2");
+    }
+
+    #[test]
+    fn test_node_method() {
+        let path = HierarchyPath::parse("X1.X2", '.');
+        assert_eq!(path.node("internal"), "X1.X2.internal");
+
+        let root = HierarchyPath::root();
+        assert_eq!(root.node("top_node"), "top_node");
+    }
+
+    #[test]
+    fn test_iterator() {
+        let path = HierarchyPath::parse("A.B.C", '.');
+        let segments: Vec<&str> = path.into_iter().collect();
+        assert_eq!(segments, vec!["A", "B", "C"]);
+    }
+
+    #[test]
+    fn test_equality() {
+        let path1 = HierarchyPath::parse("X1.X2", '.');
+        let path2 = HierarchyPath::parse("X1_X2", '_').with_separator('.');
+
+        // Different separators used in parsing, but same logical path
+        let path3 = HierarchyPath::from_segments(vec!["X1".to_string(), "X2".to_string()]);
+        assert_eq!(path1, path3);
+
+        // Not equal - different segments
+        let path4 = HierarchyPath::parse("X1.X3", '.');
+        assert_ne!(path1, path4);
+    }
+
+    #[test]
+    fn test_from_instance() {
+        let path = HierarchyPath::from_instance("XINV");
+        assert_eq!(path.depth(), 1);
+        assert_eq!(path.leaf(), Some("XINV"));
+    }
+
+    #[test]
+    fn test_config_styles() {
+        let spice = HierarchyPathConfig::spice_style();
+        assert_eq!(spice.separator, '_');
+
+        let spectre = HierarchyPathConfig::spectre_style();
+        assert_eq!(spectre.separator, '.');
+        assert_eq!(spectre.max_depth, 256);
+    }
+}
