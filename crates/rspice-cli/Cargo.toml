@@ -23,6 +23,11 @@ serde_json.workspace = true
 indicatif = "0.17"
 dirs = "5.0"
 toml = "0.8"
+hdf5 = { version = "0.8", optional = true }
+
+[features]
+default = []
+hdf5 = ["dep:hdf5"]
 
 [dev-dependencies]
 assert_cmd = "2.0"
