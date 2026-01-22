@@ -54,6 +54,7 @@ fn detect_format(path: &std::path::Path) -> OutputFormat {
         Some("csv") => OutputFormat::Csv,
         Some("json") => OutputFormat::Json,
         Some("tsv") => OutputFormat::Tsv,
+        Some("h5") | Some("hdf5") => OutputFormat::Hdf5,
         _ => OutputFormat::Raw,
     }
 }
@@ -114,6 +115,11 @@ fn write_output(args: &ConvertArgs, data: &WaveformData) -> Result<(), CliError>
         OutputFormat::Tsv => write_csv(&mut file, data, "\t")?,
         OutputFormat::Json => write_json(&mut file, data)?,
         OutputFormat::Raw | OutputFormat::RawAscii => write_raw(&mut file, data)?,
+        OutputFormat::Hdf5 => {
+            return Err(CliError::ConversionError {
+                message: "HDF5 conversion requires --features hdf5".to_string(),
+            });
+        }
     }
 
     Ok(())
