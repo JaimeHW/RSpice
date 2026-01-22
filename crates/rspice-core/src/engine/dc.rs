@@ -35,6 +35,13 @@ impl Engine {
 
         // Build result
         let mut result = SimulationResult::new(circuit.num_nodes(), circuit.num_branches());
+
+        // Populate node names from circuit (Spectre-style: results include actual net names)
+        let sorted_names = circuit.node_names_sorted();
+        result.node_names = std::iter::once("0".to_string()) // Ground is node 0
+            .chain(sorted_names.into_iter())
+            .collect();
+
         for (i, &v) in solution.iter().enumerate() {
             if i < circuit.num_nodes() {
                 result.node_voltages[i + 1] = v; // +1 because node 0 is ground
