@@ -49,17 +49,5 @@
        d="m -249.00001,-474.99999 h 10"
        id="path26" />
   </g>
-  <g
-     id="layer2"
-     style="display:inline"
-     transform="translate(249,500.00005)">
-    <path
-       style="display:inline;fill:none;stroke:#f80000;stroke-width:0.4;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -225.00001,-477 v 4"
-       id="path27" />
-    <path
-       style="display:inline;fill:none;stroke:#f80000;stroke-width:0.4;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -223.00001,-475 h -4"
-       id="path28" />
-  </g>
+
 </svg>

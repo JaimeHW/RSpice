@@ -95,17 +95,5 @@
          y="-100.88355"
          id="tspan2">enhancement</tspan></text>
   </g>
-  <g
-     id="layer2"
-     style="display:inline"
-     transform="translate(419.74244,-209.50001)">
-    <path
-       style="display:inline;fill:none;stroke:#f80000;stroke-width:0.4;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -300,238 v 4"
-       id="path26153" />
-    <path
-       style="display:inline;fill:none;stroke:#f80000;stroke-width:0.4;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -298,240 h -4"
-       id="path26155" />
-  </g>
+
 </svg>

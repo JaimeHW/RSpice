@@ -59,17 +59,5 @@
        cy="640"
        r="28" />
   </g>
-  <g
-     id="layer2"
-     style="display:inline"
-     transform="translate(125,-604.50002)">
-    <path
-       style="display:inline;fill:none;stroke:#f80000;stroke-width:0.4;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -92,638 v 4"
-       id="path72957" />
-    <path
-       style="display:inline;fill:none;stroke:#f80000;stroke-width:0.4;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -90,640 h -4"
-       id="path72959" />
-  </g>
+
 </svg>

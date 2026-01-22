@@ -88,17 +88,5 @@
        d="m -296,39.999994 h -1"
        id="path1810" />
   </g>
-  <g
-     id="layer2"
-     style="display:inline"
-     transform="translate(335.00002,-4.4999978)">
-    <path
-       style="display:inline;fill:none;stroke:#f80000;stroke-width:0.4;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -296,41.999998 v -4"
-       id="path1644" />
-    <path
-       style="display:inline;fill:none;stroke:#f80000;stroke-width:0.4;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -294,39.999998 h -4"
-       id="path1646" />
-  </g>
+
 </svg>

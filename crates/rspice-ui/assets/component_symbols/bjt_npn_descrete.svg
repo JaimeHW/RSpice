@@ -123,21 +123,5 @@
        id="path2"
        sodipodi:nodetypes="cc" />
   </g>
-  <g
-     inkscape:groupmode="layer"
-     id="layer4"
-     inkscape:label="Anchors"
-     style="display:inline"
-     transform="translate(62.00001,-4.500004)">
-    <path
-       style="fill:none;stroke:#f80000;stroke-width:0.4;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -18,43 -1e-6,4"
-       id="path2350"
-       sodipodi:nodetypes="cc" />
-    <path
-       style="fill:none;stroke:#f80000;stroke-width:0.4;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -16,45 h -4"
-       id="path2916"
-       sodipodi:nodetypes="cc" />
-  </g>
+
 </svg>

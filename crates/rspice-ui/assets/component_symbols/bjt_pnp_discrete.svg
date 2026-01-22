@@ -59,17 +59,5 @@
        d="m -35.089591,95.608919 0.30085,0.18053"
        id="path1" />
   </g>
-  <g
-     id="layer4"
-     style="display:inline"
-     transform="translate(62.00001,-4.500004)">
-    <path
-       style="fill:none;stroke:#f80000;stroke-width:0.4;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -18,43 -1e-6,4"
-       id="path2350" />
-    <path
-       style="fill:none;stroke:#f80000;stroke-width:0.4;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -16,45 h -4"
-       id="path2916" />
-  </g>
+
 </svg>

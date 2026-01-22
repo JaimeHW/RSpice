@@ -2,113 +2,55 @@
 <!-- Created with Inkscape (http://www.inkscape.org/) -->
 
 <svg
-   width="210mm"
-   height="296.99997mm"
-   viewBox="0 0 210 296.99998"
+   width="40.499985mm"
+   height="80.999992mm"
+   viewBox="0 0 40.499985 80.999995"
    version="1.1"
    id="svg5"
    xmlns="http://www.w3.org/2000/svg"
    xmlns:svg="http://www.w3.org/2000/svg">
   <defs
      id="defs2">
-    <rect
-       x="0.47243717"
-       y="102.04724"
-       width="14.171588"
-       height="4.1409798"
-       id="rect44215" />
-    <rect
-       x="0.47243717"
-       y="102.04724"
-       width="66.141953"
-       height="11.556045"
-       id="rect44217" />
-    <rect
-       x="207.87402"
-       y="-170.07874"
-       width="434.64606"
-       height="46.226265"
-       id="rect131831" />
-    <rect
-       x="207.87402"
-       y="-170.07874"
-       width="434.64606"
-       height="46.226265"
-       id="rect132993" />
+    <marker
+       style="overflow:visible"
+       id="TriangleOutM"
+       refX="0"
+       refY="0"
+       orient="auto"
+       viewBox="0 0 4.2595265 4.9243081"
+       markerWidth="4.2595263"
+       markerHeight="4.9243083"
+       preserveAspectRatio="xMidYMid">
+      <path
+         transform="scale(0.4)"
+         style="fill:context-stroke;fill-rule:evenodd;stroke:context-stroke;stroke-width:1pt"
+         d="M 5.77,0 -2.88,5 V -5 Z"
+         id="path1510" />
+    </marker>
   </defs>
   <g
      id="layer1"
-     transform="translate(14.939166,-64.879718)"
+     transform="translate(64.939153,30.620291)"
      style="display:inline">
-    <circle
-       style="fill:none;stroke:#040000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none"
-       id="path2098"
-       cx="-32.939178"
-       cy="109.87972"
-       r="32" />
-    <circle
-       style="fill:none;stroke:#040000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none"
-       id="circle144"
-       cx="-34.939167"
-       cy="209.87968"
-       r="24" />
-    <circle
-       style="display:inline;fill:none;stroke:#040000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none"
-       id="circle312"
-       cx="-44.939144"
-       cy="304.87973"
-       r="40" />
-  </g>
-  <g
-     id="layer5"
-     style="display:inline">
-    <text
-       xml:space="preserve"
-       transform="matrix(0.26458333,0,0,0.26458333,55.000067,122.7693)"
-       id="text131829"
-       style="font-size:32px;line-height:1.25;font-family:sans-serif;text-align:center;white-space:pre;shape-inside:url(#rect131831);display:inline;fill:#0000ff;fill-opacity:1"
-       x="149.91969"
-       y="0"><tspan
-         x="260.94141"
-         y="-140.88355"
-         id="tspan2"><tspan
-           style="text-align:end;text-anchor:end"
-           id="tspan1">Darlington (~80% size)</tspan></tspan></text>
-    <text
-       xml:space="preserve"
-       transform="matrix(0.26458333,0,0,0.26458333,55.000067,257.7693)"
-       id="text132979"
-       style="font-size:32px;line-height:1.25;font-family:sans-serif;text-align:center;white-space:pre;shape-inside:url(#rect132993);display:inline;fill:#0000ff;fill-opacity:1"
-       x="149.91969"
-       y="0"><tspan
-         x="331.16016"
-         y="-140.88355"
-         id="tspan4"><tspan
-           style="text-align:end;text-anchor:end"
-           id="tspan3">Sziklai (100% size)</tspan></tspan></text>
-  </g>
-  <g
-     id="layer2"
-     style="display:inline">
-    <text
-       xml:space="preserve"
-       transform="matrix(1.0583333,0,0,1.0583333,19.49979,120.06153)"
-       id="text44209"
-       style="font-style:normal;font-weight:normal;font-size:8px;line-height:0;font-family:sans-serif;letter-spacing:0px;white-space:pre;shape-inside:url(#rect44215);display:inline;fill:#000000;fill-opacity:1;stroke:none"><tspan
-         x="0.47265625"
-         y="104.34552"
-         id="tspan5">Q1</tspan></text>
-  </g>
-  <g
-     id="layer3"
-     style="display:inline">
-    <text
-       xml:space="preserve"
-       transform="matrix(1.0583333,0,0,1.0583333,19.499792,129.76986)"
-       id="text44213"
-       style="font-style:normal;font-weight:normal;font-size:8px;line-height:1.25;font-family:sans-serif;white-space:pre;shape-inside:url(#rect44217);display:inline;fill:#000000;fill-opacity:1;stroke:none"><tspan
-         x="0.47265625"
-         y="109.34552"
-         id="tspan6">DTC123JKAT146</tspan></text>
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="m -44.939166,29.879706 v -40"
+       id="path1180" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="m -44.939166,17.879706 20.000002,12 v 20"
+       id="path1182" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="m -44.939166,1.879706 20.000002,-12 v -20"
+       id="path1184" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+       d="m -44.939152,9.87971 h -20"
+       id="path1286" />
+    <path
+       style="fill:none;stroke:#000000;stroke-width:1.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1;marker-end:url(#TriangleOutM)"
+       d="m -35.240017,23.699195 0.300851,0.180526"
+       id="path1" />
   </g>
 </svg>
