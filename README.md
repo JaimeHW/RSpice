@@ -116,6 +116,35 @@ Execute batch simulations for CI/CD pipelines:
 cargo run -p rspice-cli --release -- design.cir
 ```
 
+📖 **For complete CLI documentation, see [CLI Reference](crates/rspice-cli/README.md).**
+
+---
+
+## CLI Features
+
+The RSpice CLI provides a subcommand-based interface designed for automation:
+
+| Command | Description |
+|---------|-------------|
+| `rspice run` | Execute simulations with full analysis support |
+| `rspice info` | Display netlist summary |
+| `rspice check` | Validate syntax and connectivity |
+| `rspice compare` | Golden file regression testing |
+| `rspice convert` | Format conversion |
+
+### CI/CD Integration
+
+```bash
+# JUnit report for CI pipelines
+rspice run circuit.sp -q --report-format junit --report-file results.xml
+
+# Regression testing
+rspice compare results.csv golden.csv --abstol 1e-9
+
+# Monte Carlo yield analysis
+rspice run circuit.sp --monte-carlo 1000 --seed 42
+```
+
 ---
 
 ## Roadmap
