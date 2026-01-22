@@ -736,8 +736,14 @@ fn run_step(
     Ok(())
 }
 
-/// Process .MEAS commands
-fn run_measurements(netlist: &Netlist, result: &rspice_core::engine::TransientResult, quiet: bool) {
+/// Process .MEAS commands and return measurement reports
+fn run_measurements(
+    netlist: &Netlist,
+    result: &rspice_core::engine::TransientResult,
+    quiet: bool,
+) -> Vec<crate::report::MeasurementReport> {
+    use crate::report::MeasurementReport;
+
     // Build signals map from simulation results
     let mut signals: HashMap<String, &[f64]> = HashMap::new();
     for (i, waveform) in result.voltages.iter().enumerate() {
@@ -751,6 +757,8 @@ fn run_measurements(netlist: &Netlist, result: &rspice_core::engine::TransientRe
         meas_engine.add(meas.clone());
     }
     let meas_results = meas_engine.evaluate(&result.time, &signals);
+
+    let mut reports = Vec::new();
 
     if !quiet {
         if meas_results.is_empty() && netlist.measurements.is_empty() {
@@ -770,6 +778,20 @@ fn run_measurements(netlist: &Netlist, result: &rspice_core::engine::TransientRe
             }
         }
     }
+
+    // Convert to MeasurementReport
+    for mr in meas_results {
+        reports.push(MeasurementReport {
+            name: mr.name,
+            value: mr.value.map(|v| f64::from(v)),
+            expected: None,
+            tolerance: None,
+            passed: mr.value.is_some(),
+            error: mr.error,
+        });
+    }
+
+    reports
 }
 
 /// Run Monte Carlo statistical analysis
