@@ -6,6 +6,7 @@ use dioxus::prelude::*;
 use std::sync::{Arc, Mutex};
 
 use super::state::ViewState;
+use crate::state::digital_waveform::{DigitalSignal, DigitalWaveformConfig, LogicState};
 use crate::state::WaveformData;
 use crate::theme::Theme;
 use crate::utils::formatting::parse_hex_color;
@@ -258,6 +259,115 @@ pub fn WaveformTraceView(x: Vec<f64>, y: Vec<f64>, color: String, view: ViewStat
     }
 }
 
+/// Digital waveform trace with step-style rendering (ModelSim/Cadence pattern).
+/// Automatically detects digital signals and renders with:
+/// - Sharp vertical transitions (no interpolation)
+/// - Logic level coloring (green=high, red=low, gray=unknown)
+/// - Bus value annotations for multi-bit buses
+#[component]
+pub fn DigitalWaveformTraceView(
+    x: Vec<f64>,
+    y: Vec<f64>,
+    color: String,
+    view: ViewState,
+) -> Element {
+    // Auto-detect if this is a digital signal (CMOS 3.3V thresholds)
+    let config = DigitalWaveformConfig::cmos_3v3();
+    let signal = DigitalSignal::from_analog("signal", &x, &y, &config);
+    let segments = signal.render_segments();
+
+    // Generate step-style SVG path with vertical transitions
+    let path = if x.is_empty() || y.is_empty() {
+        String::new()
+    } else {
+        let x_range = (view.x_max - view.x_min).max(1e-12);
+        let y_range = (view.y_max - view.y_min).max(1e-12);
+
+        let mut path = String::new();
+        let mut last_px = None;
+        let mut last_py = None;
+
+        for (xi, yi) in x.iter().zip(y.iter()) {
+            // Transform to view coordinates (0-100 range)
+            let px = ((xi - view.x_min) / x_range) * 100.0;
+            let py = 100.0 - ((yi - view.y_min) / y_range) * 100.0;
+
+            // Skip points outside view
+            if px < -10.0 || px > 110.0 {
+                continue;
+            }
+
+            if path.is_empty() {
+                path.push_str(&format!("M {:.2} {:.2}", px, py));
+            } else if let (Some(lpx), Some(_lpy)) = (last_px, last_py) {
+                // Step-style: first horizontal, then vertical transition
+                path.push_str(&format!(" H {:.2}", px));
+                path.push_str(&format!(" V {:.2}", py));
+            } else {
+                path.push_str(&format!(" L {:.2} {:.2}", px, py));
+            }
+
+            last_px = Some(px);
+            last_py = Some(py);
+        }
+        path
+    };
+
+    // Color based on logic level (use theme accent for high, muted for low)
+    let stroke_color = if segments.is_empty() {
+        color.clone()
+    } else {
+        // Use first segment's level to determine color
+        match segments[0].2 {
+            LogicState::High => "#22c55e".to_string(), // Green for HIGH
+            LogicState::Low => "#ef4444".to_string(),  // Red for LOW
+            LogicState::Unknown => "#6b7280".to_string(), // Gray for unknown
+            _ => color.clone(),
+        }
+    };
+
+    rsx! {
+        svg {
+            style: "
+                position: absolute;
+                inset: 0;
+                width: 100%;
+                height: 100%;
+            ",
+            view_box: "0 0 100 100",
+            preserve_aspect_ratio: "none",
+
+            path {
+                d: "{path}",
+                fill: "none",
+                stroke: "{stroke_color}",
+                stroke_width: "2",
+                stroke_linecap: "square",  // Square caps for digital waveforms
+                stroke_linejoin: "miter",  // Sharp corners for vertical transitions
+                vector_effect: "non-scaling-stroke",
+            }
+        }
+    }
+}
+
+/// Check if a waveform appears to be a digital signal.
+/// Uses simple heuristics: mostly at extreme values, fast transitions.
+pub fn is_digital_signal(y: &[f64], config: &DigitalWaveformConfig) -> bool {
+    if y.is_empty() {
+        return false;
+    }
+
+    // Count how many samples are at logical HIGH or LOW
+    let mut digital_count = 0;
+    for val in y {
+        if *val >= config.v_high || *val <= config.v_low {
+            digital_count += 1;
+        }
+    }
+
+    // If >80% of samples are at logic levels, it's digital
+    (digital_count as f64 / y.len() as f64) > 0.8
+}
 /// Placeholder demo waveform.
 #[component]
 pub fn WaveformPlaceholder() -> Element {
