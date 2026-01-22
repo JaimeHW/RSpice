@@ -5,7 +5,17 @@
 //! 2. Renaming internal nodes to prevent collisions
 //! 3. Mapping external ports to instance connections
 //! 4. Recursively handling nested subcircuits
+//!
+//! # Hierarchy Path Tracking
+//!
+//! The flattener now uses `HierarchyPath` to track the current position in
+//! the design hierarchy. This enables:
+//! - Fully-qualified element names (X1.X2.R1)
+//! - Hierarchical node naming for waveform access
+//! - Proper parameter scoping with precedence resolution
 
+use super::hierarchy_path::HierarchyPath;
+use super::param_scope::ParamResolver;
 use super::{Element, ElementKind, Netlist, ParseError, SubcircuitDef};
 use crate::Value;
 use std::collections::HashMap;
@@ -25,6 +35,8 @@ pub struct FlattenerConfig {
     pub preserve_hierarchy: bool,
     /// Separator character for hierarchical names (default: '.')
     pub hierarchy_separator: char,
+    /// Whether to collect hierarchy metadata during flattening
+    pub collect_metadata: bool,
 }
 
 impl Default for FlattenerConfig {
@@ -33,6 +45,7 @@ impl Default for FlattenerConfig {
             max_depth: 100,
             preserve_hierarchy: true, // Default to full path for debugging
             hierarchy_separator: '.',
+            collect_metadata: false,
         }
     }
 }
@@ -44,6 +57,7 @@ impl FlattenerConfig {
             max_depth: 100,
             preserve_hierarchy: true,
             hierarchy_separator: '.',
+            collect_metadata: true,
         }
     }
 
@@ -53,8 +67,36 @@ impl FlattenerConfig {
             max_depth: 100,
             preserve_hierarchy: false,
             hierarchy_separator: '_',
+            collect_metadata: false,
         }
     }
+
+    /// Create a Spectre-compatible config
+    pub fn spectre() -> Self {
+        Self {
+            max_depth: 256,
+            preserve_hierarchy: true,
+            hierarchy_separator: '.',
+            collect_metadata: true,
+        }
+    }
+}
+
+//=============================================================================
+// Hierarchy Metadata
+//=============================================================================
+
+/// Metadata about a flattened instance for hierarchy navigation
+#[derive(Debug, Clone)]
+pub struct InstanceMetadata {
+    /// Full hierarchical path to this instance
+    pub path: HierarchyPath,
+    /// Subcircuit definition name
+    pub subcircuit_name: String,
+    /// Instance parameters (overrides)
+    pub instance_params: Vec<(String, Value)>,
+    /// Child instances within this instance
+    pub children: Vec<String>,
 }
 
 //=============================================================================
@@ -62,6 +104,12 @@ impl FlattenerConfig {
 //=============================================================================
 
 /// Flattens a hierarchical netlist into a flat element list
+///
+/// This is the core hierarchy processor that converts subcircuit instances
+/// into their constituent elements while managing:
+/// - Unique node naming
+/// - Parameter inheritance and override
+/// - Local options propagation
 pub struct Flattener<'a> {
     /// Subcircuit definitions indexed by name
     subcircuits: HashMap<&'a str, &'a SubcircuitDef>,
@@ -70,6 +118,10 @@ pub struct Flattener<'a> {
     node_counter: usize,
     /// Configuration options
     config: FlattenerConfig,
+    /// Parameter resolver for scoped parameter lookup
+    param_resolver: ParamResolver,
+    /// Collected instance metadata (if collect_metadata is enabled)
+    instance_metadata: Vec<InstanceMetadata>,
 }
 
 impl<'a> Flattener<'a> {
@@ -80,18 +132,42 @@ impl<'a> Flattener<'a> {
 
     /// Create a flattener with custom configuration
     pub fn with_config(subcircuits: &'a [SubcircuitDef], config: FlattenerConfig) -> Self {
-        let subcircuits = subcircuits.iter().map(|s| (s.name.as_str(), s)).collect();
+        let subcircuit_map: HashMap<&str, &SubcircuitDef> =
+            subcircuits.iter().map(|s| (s.name.as_str(), s)).collect();
+
+        // Initialize param resolver with subcircuit defaults
+        let mut param_resolver = ParamResolver::new();
+        for subckt in subcircuits {
+            param_resolver.add_subcircuit_defaults(&subckt.name, &subckt.params);
+        }
 
         Self {
-            subcircuits,
+            subcircuits: subcircuit_map,
             node_counter: 0,
             config,
+            param_resolver,
+            instance_metadata: Vec::new(),
         }
+    }
+
+    /// Get the collected instance metadata (after flattening)
+    pub fn instance_metadata(&self) -> &[InstanceMetadata] {
+        &self.instance_metadata
+    }
+
+    /// Get a reference to the parameter resolver
+    pub fn param_resolver(&self) -> &ParamResolver {
+        &self.param_resolver
     }
 
     /// Flatten a netlist, expanding all subcircuit instances
     pub fn flatten(&mut self, netlist: &Netlist) -> Result<Vec<Element>, ParseError> {
         let mut flat_elements = Vec::new();
+
+        // Set global parameters from netlist
+        for (name, value) in netlist.params.all_params() {
+            self.param_resolver.set_global(&name, value);
+        }
 
         for element in &netlist.elements {
             self.flatten_element(element, "", &HashMap::new(), 0, &mut flat_elements)?;

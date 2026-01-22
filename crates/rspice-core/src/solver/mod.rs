@@ -1,21 +1,21 @@
 //! Numerical solvers for circuit simulation
 
-mod sparse;
-mod newton;
 pub mod convergence;
+mod newton;
+mod sparse;
 
 #[cfg(feature = "parallel")]
 pub mod parallel;
 
-pub use sparse::*;
-pub use newton::*;
 pub use convergence::{
-    SourceStepper, GminStepper, PseudoTransient, 
-    ConvergenceController, ConvergenceMethod, ConvergenceResult,
+    ConvergenceController, ConvergenceMethod, ConvergenceResult, GminStepper, PseudoTransient,
+    SourceStepper,
 };
+pub use newton::*;
+pub use sparse::*;
 
-use thiserror::Error;
 use crate::Value;
+use thiserror::Error;
 
 /// Solver errors
 #[derive(Debug, Error)]
@@ -38,6 +38,9 @@ pub enum SolverError {
 pub struct SimulationResult {
     /// Node voltages indexed by node ID (0 = ground = 0V)
     pub node_voltages: Vec<Value>,
+    /// Node names indexed by node ID (index 0 = "0" for ground)
+    /// This allows mapping node_voltages[i] to actual net names from netlist
+    pub node_names: Vec<String>,
     /// Branch currents for voltage sources/inductors
     pub branch_currents: Vec<Value>,
     /// Time points (for transient analysis)
@@ -48,8 +51,11 @@ pub struct SimulationResult {
 
 impl SimulationResult {
     pub fn new(num_nodes: usize, num_branches: usize) -> Self {
+        // Build default node names: "0" for ground, "1", "2", etc. for other nodes
+        let node_names: Vec<String> = (0..=num_nodes).map(|i| i.to_string()).collect();
         Self {
             node_voltages: vec![0.0; num_nodes + 1], // +1 for ground
+            node_names,
             branch_currents: vec![0.0; num_branches],
             time_points: Vec::new(),
             voltage_waveforms: Vec::new(),
@@ -82,7 +88,7 @@ impl SimulationResult {
     }
 
     /// Get branch current by index
-    /// 
+    ///
     /// Branch currents are stored for voltage sources and inductors
     /// which require additional MNA variables.
     #[inline]
@@ -91,14 +97,14 @@ impl SimulationResult {
     }
 
     /// Get branch current by element name using a lookup map
-    /// 
+    ///
     /// # Arguments
     /// * `name` - Element name (e.g., "V1", "L1", "VSRC")
     /// * `branch_map` - Map from element name to branch index
-    /// 
+    ///
     /// # Returns
     /// Current value if found, None otherwise
-    /// 
+    ///
     /// # Example
     /// ```ignore
     /// let current = result.branch_current_by_name("V1", &circuit.branch_names);
@@ -108,7 +114,8 @@ impl SimulationResult {
         name: &str,
         branch_map: &std::collections::HashMap<String, usize>,
     ) -> Option<Value> {
-        branch_map.get(name)
+        branch_map
+            .get(name)
             .and_then(|&idx| self.branch_currents.get(idx).copied())
     }
 }

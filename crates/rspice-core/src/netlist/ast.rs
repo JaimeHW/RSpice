@@ -759,13 +759,26 @@ pub struct ModelDef {
 }
 
 /// Subcircuit definition: .SUBCKT name ports [PARAMS: ...]
+///
+/// Represents a reusable circuit block that can be instantiated with X elements.
+/// Follows Cadence Spectre conventions for parameter scoping and local options.
 #[derive(Debug, Clone)]
 pub struct SubcircuitDef {
+    /// Subcircuit name
     pub name: String,
+    /// Port (terminal) names in connection order
     pub ports: Vec<String>,
+    /// Internal elements
     pub elements: Vec<Element>,
-    /// Default parameter values
+    /// Default parameter values (can be overridden at instance)
     pub params: Vec<(String, Value)>,
+    /// Local simulation options scoped to this subcircuit
+    /// (temp, scale, reltol, etc.)
+    pub local_options: std::collections::HashMap<String, Value>,
+    /// Optional parent library reference for cross-linking
+    pub library_ref: Option<String>,
+    /// Nested subcircuit definitions (for hierarchical parsing)
+    pub nested_subcircuits: Vec<SubcircuitDef>,
 }
 
 //=============================================================================

@@ -1527,6 +1527,9 @@ fn parse_subckt_def(line: &str, line_num: usize) -> Result<SubcircuitDef, ParseE
         ports,
         elements: Vec::new(),
         params,
+        local_options: std::collections::HashMap::new(),
+        library_ref: None,
+        nested_subcircuits: Vec::new(),
     })
 }
 
