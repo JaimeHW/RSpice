@@ -10,7 +10,7 @@
 
 <br/>
 
-<img src="assets/screenshot.png" alt="RSpice Studio" width="100%" style="border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);" />
+<img src="assets/image.png" alt="RSpice Studio" width="100%" style="border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);" />
 
 <br/>
 
