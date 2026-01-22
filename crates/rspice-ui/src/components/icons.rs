@@ -38,6 +38,7 @@ pub enum IconType {
     ChevronDown,
     Close,
     Menu,
+    Export,
 }
 
 /// Icon component with consistent sizing
@@ -80,6 +81,7 @@ pub fn Icon(
         IconType::ChevronDown => "M6 9l6 6 6-6",
         IconType::Close => "M18 6L6 18M6 6l12 12",
         IconType::Menu => "M3 12h18M3 6h18M3 18h18",
+        IconType::Export => "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M7 10l5 5 5-5 M12 15V3",
     };
 
     rsx! {
