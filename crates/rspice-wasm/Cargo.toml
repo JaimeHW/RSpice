@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "WebAssembly bindings for RSpice circuit simulator"
 authors = ["RSpice Contributors"]
-license = "MIT OR Apache-2.0"
+license-file.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]
