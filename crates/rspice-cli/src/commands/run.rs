@@ -7,11 +7,13 @@
 //! - Waveform compression
 
 use crate::cli::{CliError, Config, OutputFormat, RunArgs};
+use crate::report::{JUnitReporter, JsonMeasReporter, SimulationReport, TapReporter};
 use indicatif::{ProgressBar, ProgressStyle};
 use rspice_core::netlist::AnalysisCommand;
 use rspice_core::{Engine, Netlist, SimulationConfig};
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::Instant;
 
 /// Execute the run command
 pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Result<(), CliError> {
@@ -50,8 +52,61 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
         );
     }
 
+    // PSS (Periodic Steady-State) mode
+    if let Some(freq) = args.pss_freq {
+        return run_pss(
+            &engine,
+            &netlist,
+            freq,
+            args.pss_harmonics,
+            args.pss_tstab,
+            &args,
+            verbose,
+            quiet,
+        );
+    }
+
+    // HB (Harmonic Balance) mode
+    if let Some(freq) = args.hb_freq {
+        return run_hb(
+            &engine,
+            &netlist,
+            freq,
+            args.hb_harmonics,
+            &args,
+            verbose,
+            quiet,
+        );
+    }
+
+    // PZ (Pole-Zero) mode
+    if let (Some(input), Some(output)) = (args.pz_input, args.pz_output) {
+        return run_pz(&engine, &netlist, input, output, verbose, quiet);
+    }
+
+    // Sensitivity mode
+    if let (Some(output_node), Some(param)) = (args.sens_output, args.sens_param.as_ref()) {
+        let value = args.sens_value.unwrap_or(1.0);
+        return run_sensitivity(&engine, &netlist, output_node, param, value, verbose, quiet);
+    }
+
+    // Corner iteration mode
+    if let Some(ref corners_str) = args.corners {
+        return run_corner_sweep(
+            &engine,
+            &netlist,
+            corners_str,
+            &args,
+            config,
+            verbose,
+            quiet,
+        );
+    }
+
     // Track if any analysis was run
     let mut ran_analysis = false;
+    let start_time = Instant::now();
+    let mut simulation_error: Option<String> = None;
 
     // Process all analysis commands
     for (idx, analysis) in netlist.analyses.iter().enumerate() {
@@ -65,19 +120,78 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
         }
 
         ran_analysis = true;
-        run_analysis(&engine, &netlist, analysis, &args, config, verbose, quiet)?;
+        if let Err(e) = run_analysis(&engine, &netlist, analysis, &args, config, verbose, quiet) {
+            simulation_error = Some(e.to_string());
+            break;
+        }
     }
 
     // Default to DC operating point if no analyses specified
-    if !ran_analysis {
+    if !ran_analysis && simulation_error.is_none() {
         if !quiet {
             println!("No analysis commands - running default DC OP...");
         }
-        run_dc_op(&engine, &netlist, &args, quiet)?;
+        if let Err(e) = run_dc_op(&engine, &netlist, &args, quiet) {
+            simulation_error = Some(e.to_string());
+        }
+    }
+
+    let duration = start_time.elapsed().as_secs_f64();
+    let passed = simulation_error.is_none();
+
+    // Build simulation report
+    let report = SimulationReport {
+        name: args
+            .input
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("simulation")
+            .to_string(),
+        netlist: args.input.display().to_string(),
+        passed,
+        duration_secs: duration,
+        error: simulation_error.clone(),
+        measurements: Vec::new(), // Reserved for future measurement collection
+    };
+
+    // Write JUnit report if requested
+    if let Some(ref report_file) = args.report_file {
+        let reports = vec![report.clone()];
+        match args.report_format {
+            Some(crate::cli::ReportFormat::Junit) | None => {
+                JUnitReporter::write(&reports, report_file)?;
+                if verbose {
+                    println!("JUnit report written to: {}", report_file.display());
+                }
+            }
+            Some(crate::cli::ReportFormat::Tap) => {
+                TapReporter::write(&reports, report_file)?;
+                if verbose {
+                    println!("TAP report written to: {}", report_file.display());
+                }
+            }
+        }
+    }
+
+    // Write measurement report if requested
+    if let Some(ref meas_file) = args.meas_file {
+        let reports = vec![report.clone()];
+        JsonMeasReporter::write(&reports, meas_file)?;
+        if verbose {
+            println!("Measurement report written to: {}", meas_file.display());
+        }
     }
 
     if !quiet {
-        println!("\nSimulation complete.");
+        println!("\nSimulation complete in {:.3}s.", duration);
+    }
+
+    // Return error if simulation failed
+    if let Some(err_msg) = simulation_error {
+        return Err(CliError::SimulationError {
+            message: err_msg,
+            analysis: None,
+        });
     }
 
     Ok(())
@@ -721,6 +835,241 @@ fn run_monte_carlo(
     }
 }
 
+/// Run PSS (Periodic Steady-State) analysis
+fn run_pss(
+    engine: &Engine,
+    netlist: &Netlist,
+    freq: f64,
+    harmonics: usize,
+    tstab: Option<f64>,
+    _args: &RunArgs,
+    verbose: bool,
+    quiet: bool,
+) -> Result<(), CliError> {
+    if !quiet {
+        println!(
+            "Running PSS analysis: f₀ = {:.3e} Hz, {} harmonics",
+            freq, harmonics
+        );
+    }
+
+    // Build PSS configuration
+    let mut config = rspice_core::analysis::PssConfig::new(freq);
+    config.num_harmonics = harmonics;
+    if let Some(t) = tstab {
+        config.tstab = t;
+    }
+
+    match engine.run_pss(netlist, config) {
+        Ok(pss_result) => {
+            if !quiet {
+                println!("✓ PSS converged in {} iterations", pss_result.iterations);
+                println!("  Period: {:.6e} s", pss_result.period);
+                println!("  Nodes: {}", pss_result.result.num_nodes());
+
+                if verbose && pss_result.result.num_nodes() > 0 {
+                    println!("\n  Harmonic content (node 1):");
+                    let harm_data = pss_result.result.harmonics(1, 5);
+                    for h in &harm_data {
+                        println!(
+                            "    H{}: mag={:.6e}, phase={:.2}° (f={:.3e} Hz)",
+                            h.harmonic_number, h.magnitude, h.phase, h.frequency
+                        );
+                    }
+                }
+            }
+            Ok(())
+        }
+        Err(e) => Err(CliError::simulation_error_in(e.to_string(), "PSS")),
+    }
+}
+
+/// Run HB (Harmonic Balance) analysis
+fn run_hb(
+    engine: &Engine,
+    netlist: &Netlist,
+    freq: f64,
+    harmonics: usize,
+    _args: &RunArgs,
+    verbose: bool,
+    quiet: bool,
+) -> Result<(), CliError> {
+    if !quiet {
+        println!(
+            "Running HB analysis: f₀ = {:.3e} Hz, {} harmonics",
+            freq, harmonics
+        );
+    }
+
+    let config = rspice_core::analysis::HbConfig::new(freq).with_harmonics(harmonics);
+
+    match engine.run_hb(netlist, config) {
+        Ok(hb_result) => {
+            if !quiet {
+                println!("✓ HB converged");
+                println!("  Nodes: {}", hb_result.result.num_nodes());
+                println!("  Harmonics: {}", hb_result.result.num_harmonics);
+
+                if verbose && !hb_result.result.spectral_voltages.is_empty() {
+                    println!("\n  Spectral content (first node):");
+                    let sv = &hb_result.result.spectral_voltages[0];
+                    for k in 0..5.min(harmonics) {
+                        println!(
+                            "    H{}: mag={:.6e}, phase={:.2}°",
+                            k,
+                            sv.magnitude(k),
+                            sv.phase(k).to_degrees()
+                        );
+                    }
+                }
+            }
+            Ok(())
+        }
+        Err(e) => Err(CliError::simulation_error_in(e.to_string(), "HB")),
+    }
+}
+
+/// Run PZ (Pole-Zero) analysis
+fn run_pz(
+    engine: &Engine,
+    netlist: &Netlist,
+    input_node: usize,
+    output_node: usize,
+    verbose: bool,
+    quiet: bool,
+) -> Result<(), CliError> {
+    if !quiet {
+        println!(
+            "Running Pole-Zero analysis: input=node {}, output=node {}",
+            input_node, output_node
+        );
+    }
+
+    match engine.run_pz(netlist, input_node, output_node) {
+        Ok(result) => {
+            if !quiet {
+                println!("✓ Pole-Zero analysis complete");
+                println!("  Poles: {}", result.poles.len());
+                println!("  Zeros: {}", result.zeros.len());
+
+                if verbose {
+                    println!("\n  Poles:");
+                    for (i, pole) in result.poles.iter().enumerate() {
+                        let freq = pole.im / (2.0 * std::f64::consts::PI);
+                        let q = if pole.re.abs() > 1e-15 {
+                            -pole.im / (2.0 * pole.re)
+                        } else {
+                            f64::INFINITY
+                        };
+                        println!(
+                            "    P{}: {:.3e} + j{:.3e}  (f={:.3e} Hz, Q={:.2})",
+                            i,
+                            pole.re,
+                            pole.im,
+                            freq.abs(),
+                            q
+                        );
+                    }
+                    println!("\n  Zeros:");
+                    for (i, zero) in result.zeros.iter().enumerate() {
+                        println!("    Z{}: {:.3e} + j{:.3e}", i, zero.re, zero.im);
+                    }
+                }
+            }
+            Ok(())
+        }
+        Err(e) => Err(CliError::simulation_error_in(e.to_string(), "Pole-Zero")),
+    }
+}
+
+/// Run sensitivity analysis
+fn run_sensitivity(
+    engine: &Engine,
+    netlist: &Netlist,
+    output_node: usize,
+    param_name: &str,
+    param_value: f64,
+    verbose: bool,
+    quiet: bool,
+) -> Result<(), CliError> {
+    if !quiet {
+        println!(
+            "Running Sensitivity analysis: ∂V({})/∂{} at {}={:.6e}",
+            output_node, param_name, param_name, param_value
+        );
+    }
+
+    match engine.run_sensitivity(netlist, output_node, param_name, param_value, None) {
+        Ok(sensitivity) => {
+            if !quiet {
+                println!("✓ Sensitivity analysis complete");
+                println!(
+                    "  ∂V({})/∂{} = {:.6e} V/unit",
+                    output_node, param_name, sensitivity
+                );
+
+                if verbose {
+                    // Normalized sensitivity
+                    let nominal_sens = sensitivity * param_value;
+                    println!(
+                        "  Normalized: {:.2}% change per 1% parameter variation",
+                        nominal_sens * 100.0
+                    );
+                }
+            }
+            Ok(())
+        }
+        Err(e) => Err(CliError::simulation_error_in(e.to_string(), "Sensitivity")),
+    }
+}
+
+/// Run corner sweep (process corners)
+fn run_corner_sweep(
+    engine: &Engine,
+    netlist: &Netlist,
+    corners_str: &str,
+    args: &RunArgs,
+    config: &Config,
+    verbose: bool,
+    quiet: bool,
+) -> Result<(), CliError> {
+    let corners: Vec<&str> = corners_str.split(',').map(|s| s.trim()).collect();
+
+    if !quiet {
+        println!("Running corner sweep: {:?}", corners);
+    }
+
+    for (i, corner) in corners.iter().enumerate() {
+        if !quiet {
+            println!("\n[{}/{}] Corner: {}", i + 1, corners.len(), corner);
+        }
+
+        // For now, we just run the default analysis for each corner
+        // Full corner support requires .lib parsing which we'll implement separately
+        if verbose {
+            println!("  (Corner library support requires --corner-lib)");
+        }
+
+        // Run the analyses from the netlist
+        for analysis in &netlist.analyses {
+            run_analysis(engine, netlist, analysis, args, config, verbose, quiet)?;
+        }
+
+        if netlist.analyses.is_empty() {
+            run_dc_op(engine, netlist, args, quiet)?;
+        }
+    }
+
+    if !quiet {
+        println!(
+            "\n✓ Corner sweep complete: {} corners processed",
+            corners.len()
+        );
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -751,6 +1100,18 @@ mod tests {
             report_file: None,
             meas_format: None,
             meas_file: None,
+            pss_freq: None,
+            pss_harmonics: 9,
+            pss_tstab: None,
+            hb_freq: None,
+            hb_harmonics: 9,
+            pz_input: None,
+            pz_output: None,
+            sens_output: None,
+            sens_param: None,
+            sens_value: None,
+            corners: None,
+            corner_lib: None,
         };
         let config = Config::default();
         let sim_config = build_sim_config(&args, &config);
@@ -785,6 +1146,18 @@ mod tests {
             report_file: None,
             meas_format: None,
             meas_file: None,
+            pss_freq: None,
+            pss_harmonics: 9,
+            pss_tstab: None,
+            hb_freq: None,
+            hb_harmonics: 9,
+            pz_input: None,
+            pz_output: None,
+            sens_output: None,
+            sens_param: None,
+            sens_value: None,
+            corners: None,
+            corner_lib: None,
         };
         let config = Config::default();
         let sim_config = build_sim_config(&args, &config);

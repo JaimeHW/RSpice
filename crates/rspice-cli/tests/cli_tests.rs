@@ -203,3 +203,135 @@ fn test_quiet_flag() {
         .assert()
         .success();
 }
+
+// ============================================================================
+// Advanced Analysis Argument Parsing Tests
+// ============================================================================
+
+#[test]
+fn test_run_pss_args_parsing() {
+    // Test that PSS arguments are recognized (parsing, not execution)
+    Command::cargo_bin("rspice")
+        .unwrap()
+        .args(["run", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--pss-freq"))
+        .stdout(predicate::str::contains("--pss-harmonics"));
+}
+
+#[test]
+fn test_run_hb_args_parsing() {
+    Command::cargo_bin("rspice")
+        .unwrap()
+        .args(["run", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--hb-freq"))
+        .stdout(predicate::str::contains("--hb-harmonics"));
+}
+
+#[test]
+fn test_run_pz_args_parsing() {
+    Command::cargo_bin("rspice")
+        .unwrap()
+        .args(["run", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--pz-input"))
+        .stdout(predicate::str::contains("--pz-output"));
+}
+
+#[test]
+fn test_run_sensitivity_args_parsing() {
+    Command::cargo_bin("rspice")
+        .unwrap()
+        .args(["run", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--sens-output"))
+        .stdout(predicate::str::contains("--sens-param"));
+}
+
+#[test]
+fn test_run_corner_args_parsing() {
+    Command::cargo_bin("rspice")
+        .unwrap()
+        .args(["run", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--corners"));
+}
+
+// ============================================================================
+// Compare Command Tests
+// ============================================================================
+
+#[test]
+fn test_compare_help() {
+    Command::cargo_bin("rspice")
+        .unwrap()
+        .args(["compare", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("golden"))
+        .stdout(predicate::str::contains("tolerance"));
+}
+
+// ============================================================================
+// Simulation Options Tests
+// ============================================================================
+
+#[test]
+fn test_run_with_temperature() {
+    let fixture_path = fixture("resistor_divider.sp");
+    if !fixture_path.exists() {
+        return;
+    }
+
+    Command::cargo_bin("rspice")
+        .unwrap()
+        .args(["run", fixture_path.to_str().unwrap(), "--temp", "85", "-q"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_run_with_tolerance() {
+    let fixture_path = fixture("resistor_divider.sp");
+    if !fixture_path.exists() {
+        return;
+    }
+
+    Command::cargo_bin("rspice")
+        .unwrap()
+        .args([
+            "run",
+            fixture_path.to_str().unwrap(),
+            "--abstol",
+            "1e-12",
+            "-q",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_run_with_maxiter() {
+    let fixture_path = fixture("resistor_divider.sp");
+    if !fixture_path.exists() {
+        return;
+    }
+
+    Command::cargo_bin("rspice")
+        .unwrap()
+        .args([
+            "run",
+            fixture_path.to_str().unwrap(),
+            "--maxiter",
+            "100",
+            "-q",
+        ])
+        .assert()
+        .success();
+}

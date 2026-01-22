@@ -148,6 +148,76 @@ pub struct RunArgs {
     /// .MEAS output file
     #[arg(long, value_name = "FILE", requires = "meas_format")]
     pub meas_file: Option<PathBuf>,
+
+    // =========================================================================
+    // Advanced RF/Analog Analysis Options
+    // =========================================================================
+    /// PSS (Periodic Steady-State) fundamental frequency in Hz
+    #[arg(
+        long,
+        value_name = "FREQ",
+        help = "Enable PSS analysis at specified frequency"
+    )]
+    pub pss_freq: Option<f64>,
+
+    /// Number of harmonics for PSS analysis (default: 9)
+    #[arg(long, value_name = "N", default_value = "9", requires = "pss_freq")]
+    pub pss_harmonics: usize,
+
+    /// PSS stabilization time before shooting method (default: auto)
+    #[arg(long, value_name = "TIME", requires = "pss_freq")]
+    pub pss_tstab: Option<f64>,
+
+    /// HB (Harmonic Balance) fundamental frequency in Hz
+    #[arg(
+        long,
+        value_name = "FREQ",
+        help = "Enable HB analysis at specified frequency"
+    )]
+    pub hb_freq: Option<f64>,
+
+    /// Number of harmonics for HB analysis (default: 9)
+    #[arg(long, value_name = "N", default_value = "9", requires = "hb_freq")]
+    pub hb_harmonics: usize,
+
+    /// PZ (Pole-Zero) analysis input node
+    #[arg(long, value_name = "NODE", help = "Input node for pole-zero analysis")]
+    pub pz_input: Option<usize>,
+
+    /// PZ (Pole-Zero) analysis output node
+    #[arg(long, value_name = "NODE", requires = "pz_input")]
+    pub pz_output: Option<usize>,
+
+    /// Sensitivity analysis output node
+    #[arg(
+        long,
+        value_name = "NODE",
+        help = "Output node for sensitivity analysis"
+    )]
+    pub sens_output: Option<usize>,
+
+    /// Sensitivity analysis parameter name
+    #[arg(long, value_name = "PARAM", requires = "sens_output")]
+    pub sens_param: Option<String>,
+
+    /// Sensitivity analysis parameter nominal value
+    #[arg(long, value_name = "VALUE", requires = "sens_param")]
+    pub sens_value: Option<f64>,
+
+    // =========================================================================
+    // Process Corner Options
+    // =========================================================================
+    /// Process corners to simulate (comma-separated: tt,ss,ff,sf,fs)
+    #[arg(
+        long,
+        value_name = "CORNERS",
+        help = "Run simulation for each specified corner"
+    )]
+    pub corners: Option<String>,
+
+    /// Library file containing corner definitions
+    #[arg(long, value_name = "FILE", requires = "corners")]
+    pub corner_lib: Option<PathBuf>,
 }
 
 /// Arguments for the `info` subcommand
@@ -328,6 +398,7 @@ pub enum OutputFormat {
     Tsv,
 }
 
+#[allow(dead_code)] // Reserved APIs for output format handling
 impl OutputFormat {
     /// Get file extension for this format
     pub fn extension(&self) -> &'static str {

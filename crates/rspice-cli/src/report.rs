@@ -5,6 +5,8 @@
 //! - TAP (Test Anything Protocol) for streaming output
 //! - JSON/CSV for measurement results
 
+#![allow(dead_code)] // Reserved APIs for future measurement collection
+
 use crate::cli::CliError;
 use std::io::Write;
 use std::path::Path;
