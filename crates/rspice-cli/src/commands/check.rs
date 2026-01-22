@@ -14,6 +14,7 @@ pub struct ValidationResult {
 #[derive(Debug)]
 pub struct ValidationIssue {
     pub message: String,
+    #[allow(dead_code)] // Reserved for line-specific error reporting
     pub line: Option<usize>,
     pub element: Option<String>,
 }
@@ -23,6 +24,7 @@ impl ValidationResult {
         self.errors.is_empty()
     }
 
+    #[allow(dead_code)] // Reserved for future validation warnings
     pub fn add_warning(&mut self, message: impl Into<String>) {
         self.warnings.push(ValidationIssue {
             message: message.into(),

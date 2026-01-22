@@ -14,7 +14,6 @@ use std::process::ExitCode;
 
 mod cli;
 mod commands;
-mod output;
 mod report;
 
 use cli::{Cli, Commands, Config};
