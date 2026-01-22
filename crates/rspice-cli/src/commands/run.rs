@@ -325,7 +325,7 @@ fn run_analysis(
 fn run_dc_op(
     engine: &Engine,
     netlist: &Netlist,
-    _args: &RunArgs,
+    args: &RunArgs,
     quiet: bool,
 ) -> Result<(), CliError> {
     if !quiet {
@@ -343,10 +343,141 @@ fn run_dc_op(
                     println!("  ... ({} more nodes)", result.node_voltages.len() - 10);
                 }
             }
+
+            // Write output file if requested
+            if let Some(ref output_path) = args.output {
+                write_dc_op_output(output_path, &result, args)?;
+                if !quiet {
+                    println!("Results exported to: {}", output_path.display());
+                }
+            }
+
             Ok(())
         }
         Err(e) => Err(CliError::simulation_error_in(e.to_string(), "DC OP")),
     }
+}
+
+/// Write DC operating point results to file
+fn write_dc_op_output(
+    path: &std::path::Path,
+    result: &rspice_core::solver::SimulationResult,
+    args: &RunArgs,
+) -> Result<(), CliError> {
+    use std::io::Write;
+
+    let mut file = std::fs::File::create(path).map_err(|e| CliError::OutputError {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+
+    match args.format {
+        OutputFormat::Json => {
+            let mut vars = serde_json::Map::new();
+            for i in 1..=result.node_voltages.len() {
+                vars.insert(format!("V({})", i), serde_json::json!(result.voltage(i)));
+            }
+            let json = serde_json::json!({
+                "analysis": "dc_op",
+                "variables": vars,
+            });
+            writeln!(file, "{}", serde_json::to_string_pretty(&json).unwrap()).map_err(|e| {
+                CliError::OutputError {
+                    path: path.to_path_buf(),
+                    source: e,
+                }
+            })?;
+        }
+        OutputFormat::Csv => {
+            writeln!(file, "node,voltage").map_err(|e| CliError::OutputError {
+                path: path.to_path_buf(),
+                source: e,
+            })?;
+            for i in 1..=result.node_voltages.len() {
+                writeln!(file, "V({}),{:.9e}", i, result.voltage(i)).map_err(|e| {
+                    CliError::OutputError {
+                        path: path.to_path_buf(),
+                        source: e,
+                    }
+                })?;
+            }
+        }
+        OutputFormat::Tsv => {
+            writeln!(file, "node\tvoltage").map_err(|e| CliError::OutputError {
+                path: path.to_path_buf(),
+                source: e,
+            })?;
+            for i in 1..=result.node_voltages.len() {
+                writeln!(file, "V({})\t{:.9e}", i, result.voltage(i)).map_err(|e| {
+                    CliError::OutputError {
+                        path: path.to_path_buf(),
+                        source: e,
+                    }
+                })?;
+            }
+        }
+        OutputFormat::Raw | OutputFormat::RawAscii => {
+            writeln!(file, "Title: DC Operating Point").map_err(|e| CliError::OutputError {
+                path: path.to_path_buf(),
+                source: e,
+            })?;
+            writeln!(file, "Plotname: DC OP").map_err(|e| CliError::OutputError {
+                path: path.to_path_buf(),
+                source: e,
+            })?;
+            writeln!(file, "Flags: real").map_err(|e| CliError::OutputError {
+                path: path.to_path_buf(),
+                source: e,
+            })?;
+            writeln!(file, "No. Variables: {}", result.node_voltages.len()).map_err(|e| {
+                CliError::OutputError {
+                    path: path.to_path_buf(),
+                    source: e,
+                }
+            })?;
+            writeln!(file, "No. Points: 1").map_err(|e| CliError::OutputError {
+                path: path.to_path_buf(),
+                source: e,
+            })?;
+            writeln!(file, "Variables:").map_err(|e| CliError::OutputError {
+                path: path.to_path_buf(),
+                source: e,
+            })?;
+            for i in 1..=result.node_voltages.len() {
+                writeln!(file, "\t{}\tV({})\tvoltage", i - 1, i).map_err(|e| {
+                    CliError::OutputError {
+                        path: path.to_path_buf(),
+                        source: e,
+                    }
+                })?;
+            }
+            writeln!(file, "Values:").map_err(|e| CliError::OutputError {
+                path: path.to_path_buf(),
+                source: e,
+            })?;
+            writeln!(file, "0").map_err(|e| CliError::OutputError {
+                path: path.to_path_buf(),
+                source: e,
+            })?;
+            for i in 1..=result.node_voltages.len() {
+                writeln!(file, "\t{:.9e}", result.voltage(i)).map_err(|e| {
+                    CliError::OutputError {
+                        path: path.to_path_buf(),
+                        source: e,
+                    }
+                })?;
+            }
+        }
+        OutputFormat::Hdf5 => {
+            // HDF5 requires feature flag
+            return Err(CliError::SimulationError {
+                message: "HDF5 output requires --features hdf5".to_string(),
+                analysis: Some("DC OP".to_string()),
+            });
+        }
+    }
+
+    Ok(())
 }
 
 /// Run DC sweep analysis
