@@ -7,7 +7,6 @@ use dioxus::prelude::*;
 
 use crate::app::WaveformVisible;
 use crate::components::component_edit::ComponentEditModal;
-use crate::components::component_library::ComponentLibrary;
 use crate::components::confirm_modal::{SaveDialogResult, UnsavedChangesModal};
 use crate::components::context_menu::{schematic_context_menu, canvas_context_menu, ContextMenu, MenuAction};
 use crate::components::file_handlers;
@@ -248,9 +247,6 @@ pub fn Schematic() -> Element {
             div {
                 style: "display: flex; flex: 1 1 auto; overflow: hidden;",
                 
-                // Component Library sidebar
-                ComponentLibrary { schematic: schematic }
-
                 // Canvas container (tabs + canvas) - takes remaining width
                 div {
                     style: "display: flex; flex-direction: column; flex: 1 1 auto; overflow: hidden;",
