@@ -76,6 +76,23 @@ rspice run <NETLIST> [OPTIONS]
 | `-q, --quiet` | Suppress non-error output |
 | `-b, --batch` | Batch mode (no prompts) |
 
+**Advanced RF/Analog Analysis:**
+
+| Flag | Description |
+|------|-------------|
+| `--pss-freq <FREQ>` | Run PSS analysis at fundamental frequency |
+| `--pss-harmonics <N>` | Number of PSS harmonics (default: 9) |
+| `--pss-tstab <TIME>` | PSS stabilization time |
+| `--hb-freq <FREQ>` | Run Harmonic Balance at fundamental frequency |
+| `--hb-harmonics <N>` | Number of HB harmonics (default: 9) |
+| `--pz-input <NODE>` | Pole-Zero input node |
+| `--pz-output <NODE>` | Pole-Zero output node |
+| `--sens-output <NODE>` | Sensitivity analysis output node |
+| `--sens-param <PARAM>` | Parameter for sensitivity analysis |
+| `--sens-value <VALUE>` | Nominal parameter value |
+| `--corners <LIST>` | Process corners (comma-separated: tt,ss,ff,sf,fs) |
+| `--corner-lib <FILE>` | Library file with corner definitions |
+
 **Examples:**
 
 ```bash
@@ -93,6 +110,21 @@ rspice run circuit.sp -q --report-format junit --report-file results.xml
 
 # Extract measurements to JSON
 rspice run circuit.sp --meas --meas-format json --meas-file meas.json
+
+# PSS (Periodic Steady-State) for oscillators
+rspice run vco.sp --pss-freq 2.4e9 --pss-harmonics 15 -v
+
+# Harmonic Balance for RF circuits
+rspice run mixer.sp --hb-freq 900e6 --hb-harmonics 9
+
+# Pole-Zero analysis
+rspice run opamp.sp --pz-input 1 --pz-output 4
+
+# Sensitivity analysis
+rspice run amp.sp --sens-output 3 --sens-param R1 --sens-value 10k
+
+# Process corner sweep
+rspice run circuit.sp --corners tt,ss,ff,sf,fs -q
 ```
 
 ---
