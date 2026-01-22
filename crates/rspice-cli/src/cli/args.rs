@@ -145,8 +145,8 @@ pub struct RunArgs {
     #[arg(long, value_name = "FORMAT")]
     pub meas_format: Option<MeasFormat>,
 
-    /// .MEAS output file
-    #[arg(long, value_name = "FILE", requires = "meas_format")]
+    /// .MEAS output file (defaults to JSON format if --meas-format not specified)
+    #[arg(long, value_name = "FILE")]
     pub meas_file: Option<PathBuf>,
 
     // =========================================================================

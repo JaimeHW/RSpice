@@ -24,6 +24,8 @@
 //!     └── (name, value) pairs
 //! ```
 
+#![allow(dead_code)] // Reserved public APIs for HDF5 feature
+
 #[cfg(feature = "hdf5")]
 use hdf5::{File as Hdf5File, Result as Hdf5Result};
 
