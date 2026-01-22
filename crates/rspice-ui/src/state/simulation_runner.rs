@@ -129,7 +129,7 @@ pub fn run_simulation(netlist_text: &str) -> SimulationResult {
         }
     });
 
-    let has_op = netlist
+    let _has_op = netlist
         .analyses
         .iter()
         .any(|a| matches!(a, AnalysisCommand::Op));
