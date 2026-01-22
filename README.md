@@ -133,9 +133,3 @@ We are consistently pushing the boundaries of open-source EDA:
 RSpice is **Source Available** software licensed under the **RSpice Personal Use License**.
 You may view, download, and compile the code for personal, educational, or internal research purposes.
 **Redistribution and Commercial Usage are strictly prohibited** without prior written permission.
-
----
-
-<div align="center">
-  <sub>Built with 🧡 in high-performance Rust.</sub>
-</div>

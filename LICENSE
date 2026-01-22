@@ -1,20 +1,50 @@
 RSPICE PERSONAL USE LICENSE
-Version 1.0
+Version 1.1
 
 Copyright (c) 2026 RSpice Contributors. All rights reserved.
 
 TERMS AND CONDITIONS
 
-1. GRANT OF LICENSE
-Subject to the terms of this License, you are granted a non-exclusive, non-transferable, revocable license to:
-(a) Download, install, and compile the source code of the software;
-(b) Run and use the compiled software for personal, educational, or internal research purposes only.
+1. DEFINITIONS
+   (a) "Software" means the RSpice source code, documentation, and any compiled binaries.
+   (b) "Personal Use" means use by an individual for private, non-commercial purposes including hobby projects, self-education, and academic coursework.
+   (c) "Commercial Use" means any use intended for or directed toward commercial advantage or monetary compensation, including but not limited to: using the Software to design products for sale, offering the Software as a service, integrating it into commercial products, or using it for prototyping, evaluation, or development in connection with any commercial endeavor.
+   (d) "Copyright Holder" means RSpice Contributors.
 
-2. RESTRICTIONS
-The following activities are strictly PROHIBITED without express written permission from the Copyright Holder:
-(a) COMMERCIAL USE: You may not use the software for any commercial usage, including but not limited to using it to design products for sale, offering it as a service, or integrating it into commercial products.
-(b) REDISTRIBUTION: You may not redistribute, re-host, sublicense, mirror, or otherwise make the source code or compiled binaries available to third parties. Public forks are allowed only if they retain this license and are not used for distribution of binaries or competing products.
-(c) MODIFICATION: You may modify the software for your personal use, but you may not distribute modified versions.
+2. GRANT OF LICENSE
+   Subject to the terms of this License, you are granted a non-exclusive, non-transferable, revocable license to:
+   (a) Download, install, and compile the source code of the Software;
+   (b) Run and use the compiled Software for Personal Use only;
+   (c) Use the Software for academic research at educational institutions, provided results are published openly and not for commercial gain.
 
-3. NO WARRANTY
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+3. RESTRICTIONS
+   The following activities are strictly PROHIBITED without express written permission from the Copyright Holder:
+   (a) COMMERCIAL USE: Any Commercial Use of the Software is prohibited. This includes prototyping, evaluation, or any development activity related to a commercial product or service, regardless of whether revenue has been generated.
+   (b) REDISTRIBUTION: You may not redistribute, re-host, sublicense, mirror, or otherwise make the source code or compiled binaries available to third parties.
+   (c) MODIFICATION AND DISTRIBUTION: You may modify the Software for your Personal Use, but you may not distribute modified versions.
+   (d) DERIVATIVE WORKS: You may not create derivative works based on the Software for distribution or Commercial Use.
+
+4. NO CONTRIBUTIONS
+   This project does not accept code contributions, pull requests, or patches. You may report issues or suggest features, but any submissions of code will not be reviewed or merged. By submitting any feedback or suggestions, you grant the Copyright Holder a perpetual, irrevocable, royalty-free license to use such feedback without restriction.
+
+5. TRADEMARK
+   This License does not grant permission to use the trade names, trademarks, service marks, or product names of the Copyright Holder, except as required for describing the origin of the Software.
+
+6. TERMINATION
+   (a) This License is effective until terminated.
+   (b) Your rights under this License will terminate automatically without notice if you fail to comply with any of its terms.
+   (c) Upon termination, you must cease all use of the Software and destroy all copies in your possession.
+
+7. COMMERCIAL LICENSING
+   For Commercial Use, please contact the Copyright Holder to obtain a commercial license.
+
+8. NO WARRANTY
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+9. LIMITATION OF LIABILITY
+   IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. IN NO EVENT SHALL THE COPYRIGHT HOLDER'S TOTAL LIABILITY EXCEED THE AMOUNT PAID BY YOU FOR THE SOFTWARE.
+
+10. GENERAL
+    (a) This License constitutes the entire agreement between you and the Copyright Holder concerning the Software.
+    (b) If any provision of this License is held to be unenforceable, the remaining provisions shall remain in effect.
+    (c) Failure to enforce any provision of this License shall not constitute a waiver of such provision.
