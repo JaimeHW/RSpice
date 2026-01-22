@@ -52,7 +52,7 @@ rspice run <NETLIST> [OPTIONS]
 | Flag | Description |
 |------|-------------|
 | `-o, --output <FILE>` | Output file for results |
-| `-f, --format <FORMAT>` | Output format: `raw`, `ascii`, `csv`, `json`, `tsv` |
+| `-f, --format <FORMAT>` | Output format: `raw`, `ascii`, `csv`, `json`, `tsv`, `hdf5` |
 | `--temp <TEMP>` | Override temperature (Celsius) |
 | `--meas` | Print `.MEAS` measurement results |
 | `--progress` | Show progress bar with ETA |
