@@ -299,7 +299,7 @@ pub fn DigitalWaveformTraceView(
 
             if path.is_empty() {
                 path.push_str(&format!("M {:.2} {:.2}", px, py));
-            } else if let (Some(lpx), Some(_lpy)) = (last_px, last_py) {
+            } else if let (Some(_lpx), Some(_lpy)) = (last_px, last_py) {
                 // Step-style: first horizontal, then vertical transition
                 path.push_str(&format!(" H {:.2}", px));
                 path.push_str(&format!(" V {:.2}", py));
