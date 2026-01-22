@@ -13,8 +13,7 @@ version = "0.1.0"
 edition = "2024"
 authors = ["RSpice Contributors"]
 license-file = "LICENSE"
-# license = "MIT OR Apache-2.0" # Proprietary / Source Available
-repository = "https://github.com/rspice/rspice"
+repository = "https://github.com/JaimeHW/rspice"
 rust-version = "1.85"
 
 [workspace.dependencies]
