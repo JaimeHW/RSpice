@@ -1,7 +1,7 @@
 //! Leader Line Geometry Calculations
 //!
-//! Commercial-grade geometry utilities for DC annotation leader lines.
-//! Implements the behavior seen in professional simulators like Cadence Spectre:
+//! Geometry utilities for DC annotation leader lines.
+//! Implements the behavior seen in standard simulators:
 //!
 //! 1. Leader line starts from the point on the label closest to the target
 //! 2. Leader line terminates at the first wire intersection, not the node point
@@ -73,7 +73,7 @@ impl LabelBounds {
 
 /// Find the point on a rectangle's perimeter closest to a target point.
 ///
-/// This implements the commercial-grade behavior where the leader line
+/// This implements the behavior where the leader line
 /// originates from the optimal position on the label, not a fixed corner.
 ///
 /// # Arguments
@@ -210,8 +210,8 @@ fn segment_intersection(
 ///
 /// This function searches through ALL wire segments to find where the leader
 /// line first crosses any wire. The result is used to terminate the leader line
-/// at the wire instead of extending past it. This is the commercial-grade
-/// behavior seen in Cadence Spectre where leader lines never cross wires.
+/// at the wire instead of extending past it. This is the behavior
+/// seen in standard simulators where leader lines never cross wires.
 ///
 /// # Arguments
 ///
@@ -292,7 +292,7 @@ fn point_on_wire_segment(p: Point, a: Point, b: Point) -> bool {
 /// Compute optimal leader line endpoints for a DC annotation.
 ///
 /// This is the main entry point for the leader line calculation, implementing
-/// the full commercial-grade behavior:
+/// the full behavior:
 ///
 /// 1. Start point: closest point on label perimeter to the node
 /// 2. End point: first intersection with a wire, or node position if no intersection

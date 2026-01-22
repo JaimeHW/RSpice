@@ -1,7 +1,7 @@
 //! Cranelift JIT Compiler for Verilog-A
 //!
 //! Compiles Verilog-A bytecode to native machine code using Cranelift.
-//! This provides professional, dependency-free native compilation.
+//! This provides dependency-free native compilation.
 
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};

@@ -1,6 +1,6 @@
 //! Harmonic Balance Analysis Module
 //!
-//! This module provides commercial-grade Harmonic Balance (HB) analysis for
+//! This module provides Harmonic Balance (HB) analysis for
 //! finding periodic steady-state solutions in the frequency domain.
 //!
 //! # Overview

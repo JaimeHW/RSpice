@@ -4,7 +4,7 @@
 //! Devices are evaluated in the time domain (via IFFT) and their currents are
 //! transformed back to frequency domain (via FFT) for the Newton iteration.
 //!
-//! Commercial-grade implementation following Spectre/ADS methodology:
+//! Advanced implementation following standard methodology:
 //! - Time-domain device evaluation for accuracy
 //! - Analytical Jacobians for convergence
 //! - Proper handling of multi-terminal devices

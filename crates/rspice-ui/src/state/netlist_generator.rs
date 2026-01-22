@@ -98,7 +98,7 @@ fn point_on_segment(p: Point, a: Point, b: Point) -> bool {
 /// Build connectivity graph using flood-fill algorithm
 /// Returns: (point -> net_name, net_name -> points)
 ///
-/// IMPORTANT: Professional simulator behavior (LTspice-style):
+/// IMPORTANT: Standard simulator behavior:
 /// - Crossing wires are NOT electrically connected
 /// - Wires only connect at shared endpoints OR explicit junctions
 fn build_connectivity_graph(
@@ -109,7 +109,7 @@ fn build_connectivity_graph(
     let mut net_counter = 0u32;
 
     // Collect connection points - ONLY endpoints and junctions, NOT intermediate segment points
-    // This is the key difference from unprofessional simulators that auto-connect crossings
+    // This is the key difference from simulators that auto-connect crossings
     let mut connection_points: HashSet<Point> = HashSet::new();
 
     // Add wire ENDPOINTS only (first and last point of each wire)
@@ -148,7 +148,7 @@ fn build_connectivity_graph(
     }
 
     // =========================================================================
-    // T-JUNCTION DETECTION: Commercial-grade wire connectivity
+    // T-JUNCTION DETECTION: Standard wire connectivity
     // =========================================================================
     // If a wire endpoint lands ON another wire's segment (but not at its
     // endpoint), this creates a T-junction. We need to:

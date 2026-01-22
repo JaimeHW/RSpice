@@ -1,7 +1,7 @@
 //! DC Operating Point Annotation State
 //!
 //! Stores simulation results mapped to schematic elements for overlay display.
-//! Follows the Cadence Spectre pattern of displaying node voltages and branch
+//! Follows the pattern of displaying node voltages and branch
 //! currents directly on the schematic after DC analysis.
 //!
 //! # Usage
@@ -78,7 +78,7 @@ pub enum AnnotationKind {
 }
 
 impl AnnotationKind {
-    /// Get color for this annotation type (professional simulator colors)
+    /// Get color for this annotation type
     pub fn color(self) -> &'static str {
         match self {
             AnnotationKind::Voltage => "#3b82f6", // Blue for voltage

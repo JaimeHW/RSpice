@@ -1,6 +1,6 @@
 //! PNoise Configuration Types
 //!
-//! Commercial-grade configuration for phase noise analysis with support for:
+//! Configuration for phase noise analysis with support for:
 //! - Offset frequency sweeps (logarithmic or linear)
 //! - Multiple sideband analysis (upper, lower, or both)
 //! - Output node specification

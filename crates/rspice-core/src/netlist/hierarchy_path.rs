@@ -1,7 +1,7 @@
 //! Hierarchical Path Management
 //!
 //! Provides unified path representation for hierarchical circuit navigation,
-//! following Cadence Spectre conventions for instance addressing.
+//! following industry conventions for instance addressing.
 //!
 //! # Path Format
 //!
@@ -63,7 +63,7 @@ impl HierarchyPathConfig {
         }
     }
 
-    /// Spectre-style configuration (dot separator)
+    /// Standard style configuration (dot separator)
     pub fn spectre_style() -> Self {
         Self {
             separator: '.',
@@ -356,7 +356,7 @@ impl HierarchyPath {
             // Common global supply names
             || node.eq_ignore_ascii_case("vdd")
             || node.eq_ignore_ascii_case("vcc")
-            // Spectre global prefix
+            // Global prefix
             || node.starts_with('!')
     }
 

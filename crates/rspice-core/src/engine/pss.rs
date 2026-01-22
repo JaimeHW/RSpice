@@ -1,6 +1,6 @@
 //! Periodic Steady-State (PSS) Analysis
 //!
-//! This module provides commercial-grade PSS analysis using the shooting method.
+//! This module provides PSS analysis using the shooting method.
 //!
 //! # Overview
 //!
@@ -154,7 +154,7 @@ impl Engine {
         // ==================================================================
         // Phase 3: Shooting Newton Loop
         // ==================================================================
-        // Finite difference step for Jacobian computation (commercial-grade default)
+        // Finite difference step for Jacobian computation
         const FD_STEP: Value = 1e-8;
 
         let mut solver = ShootingNewtonSolver::new(config.tolerance, config.max_iterations)

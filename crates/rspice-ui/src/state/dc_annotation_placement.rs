@@ -1,6 +1,6 @@
 //! DC Annotation Placement Engine
 //!
-//! Commercial-grade label placement for DC operating point annotations.
+//! Smart label placement for DC operating point annotations.
 //! Implements a radial search algorithm that guarantees no overlap with
 //! schematic geometry (components, labels, wires).
 //!
@@ -15,7 +15,7 @@
 //! 3. At each radius step, check if the annotation bounding box overlaps any geometry
 //! 4. Return the first collision-free position found
 //!
-//! # Commercial Features
+//! # Features
 //!
 //! - Accurate bounding box estimation using character width metrics
 //! - Configurable margin/padding around exclusion zones
@@ -246,7 +246,7 @@ impl SearchDirection {
     }
 }
 
-/// Commercial-grade annotation placement engine.
+/// Annotation placement engine.
 ///
 /// Places DC annotations optimally around their associated nodes,
 /// avoiding all schematic geometry.
@@ -359,7 +359,7 @@ impl AnnotationPlacer {
 
 /// Wire segment classification for annotation anchor point selection.
 ///
-/// Commercial simulators prefer placing annotations on horizontal wire
+/// Simulators prefer placing annotations on horizontal wire
 /// segments rather than at corners or vertical segments. This provides
 /// better visual alignment and readability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -460,7 +460,7 @@ pub fn classify_point_on_wire(point: Point, wires: &[Wire]) -> WireSegmentType {
 
 /// Select the optimal annotation anchor point from a set of candidate points.
 ///
-/// This implements the commercial-grade anchor selection algorithm:
+/// This implements the anchor selection algorithm:
 ///
 /// 1. **Priority 1**: Points on horizontal wire segments (best visual alignment)
 /// 2. **Priority 2**: Points on vertical wire segments
@@ -529,7 +529,7 @@ const COMPONENT_CLEARANCE: i32 = 3;
 
 /// Generate wire-based anchor candidates for a net.
 ///
-/// Commercial-grade approach (Cadence Virtuoso-style):
+/// Standard approach:
 /// 1. Find wires that connect to this net via their ENDPOINTS
 /// 2. Generate multiple candidate points along each horizontal segment
 /// 3. Filter out points that are horizontally too close to components
@@ -631,10 +631,10 @@ fn point_lies_on_segment(p: Point, a: Point, b: Point) -> bool {
     false
 }
 
-/// Commercial-grade anchor point selection for DC annotations.
+/// Anchor point selection for DC annotations.
 ///
 /// This combines wire midpoint generation with optimal anchor selection
-/// to achieve Cadence Virtuoso-style placement:
+/// to achieve optimal placement:
 ///
 /// 1. Generate wire segment midpoints that are horizontally clear of components
 /// 2. Prioritize horizontal wire segments over vertical
@@ -649,7 +649,7 @@ fn point_lies_on_segment(p: Point, a: Point, b: Point) -> bool {
 /// # Returns
 ///
 /// The optimal anchor point for the DC annotation.
-pub fn select_commercial_anchor_point(
+pub fn select_anchor_point(
     terminal_points: &[Point],
     wires: &[Wire],
     component_positions: &[Point],

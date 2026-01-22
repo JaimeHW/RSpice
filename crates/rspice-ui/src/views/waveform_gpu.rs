@@ -378,12 +378,12 @@ impl WaveformPainter {
         self.vertex_buffers.clear();
 
         // Create gridlines first (so they render behind traces)
-        // Very subtle dark grid lines - matches professional simulators (Cadence, LTspice)
+        // Very subtle dark grid lines
         let grid_color = [0.15f32, 0.15, 0.15, 1.0]; // Dark grey - subtle but visible
         let x_range = state.x_max - state.x_min;
         let y_range = state.y_max - state.y_min;
 
-        // Use fixed number of divisions like professional simulators (LTspice, Cadence)
+        // Use fixed number of divisions
         // This ensures consistent grid spacing regardless of container size
         // Target: 6 divisions for time axis, 5 for voltage axis
         let x_step = calculate_nice_step_fixed_divisions(x_range, 6);

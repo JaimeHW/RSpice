@@ -116,7 +116,7 @@ pub fn Waveform() -> Element {
         }
 
         // Box selection overlay - captures mouse events when selecting to allow drag outside plot
-        // This is the professional approach used by LTspice, Cadence, etc.
+        // This is the standard approach used by industry simulators.
         if box_selection.read().is_selecting {
             div {
                 class: "box-selection-overlay",
@@ -447,7 +447,7 @@ fn WaveformPlotArea(
                 outline: none;
             ",
 
-            // Keyboard shortcuts for professional waveform navigation
+            // Keyboard shortcuts for waveform navigation
             // F = fit all, H = horizontal fit, V = vertical fit
             // +/= = zoom in, - = zoom out, Esc = cancel
             onkeydown: {
@@ -538,7 +538,7 @@ fn WaveformPlotArea(
             },
 
             // Pan with mouse drag, box zoom with shift+drag, or middle-click pan
-            // Middle mouse button (button 1) = pan (professional standard)
+            // Middle mouse button (button 1) = pan
             // Shift + left drag = box zoom selection
             // Left drag = pan
             onmousedown: move |e| {
@@ -595,7 +595,7 @@ fn WaveformPlotArea(
 
             onmouseleave: move |_| {
                 // Don't cancel box selection when mouse leaves - let user drag outside
-                // This matches professional simulator behavior (LTspice, Cadence)
+                // This matches standard simulator behavior
                 // Selection completes on mouseup, not on leaving the area
                 if !box_selection.read().is_selecting {
                     view_state.write().is_panning = false;

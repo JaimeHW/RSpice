@@ -14,7 +14,7 @@
 //! 3. Gmin stepping if source stepping fails
 //! 4. Pseudo-transient as last resort
 //!
-//! This is similar to LTspice's approach of "trying everything" to converge.
+//! This is similar to the robust approach of "trying everything" to converge.
 
 use crate::Value;
 
@@ -559,9 +559,7 @@ impl ConvergenceController {
             ConvergenceMethod::SourceStepping => {
                 self.source_stepper.is_complete() && self.succeeded
             }
-            ConvergenceMethod::GminStepping => {
-                self.gmin_stepper.is_complete() && self.succeeded
-            }
+            ConvergenceMethod::GminStepping => self.gmin_stepper.is_complete() && self.succeeded,
             ConvergenceMethod::PseudoTransient => {
                 self.pseudo_transient.is_complete() && self.succeeded
             }
@@ -619,20 +617,22 @@ mod tests {
     #[test]
     fn test_source_stepper_advance() {
         let mut stepper = SourceStepper::new();
-        
+
         assert_eq!(stepper.factor(), 0.0);
         assert!(!stepper.is_complete());
-        
+
         // Advance multiple times
         stepper.advance_on_success();
         assert!(stepper.factor() > 0.0);
-        
+
         // Keep advancing until complete
         for _ in 0..50 {
-            if stepper.is_complete() { break; }
+            if stepper.is_complete() {
+                break;
+            }
             stepper.advance_on_success();
         }
-        
+
         assert!(stepper.is_complete());
         assert!((stepper.factor() - 1.0).abs() < 1e-10);
     }
@@ -641,13 +641,13 @@ mod tests {
     fn test_source_stepper_failure() {
         let mut stepper = SourceStepper::new();
         stepper.advance_on_success(); // Move past zero
-        
+
         let factor_before = stepper.factor();
-        
+
         // Simulate failure
         let can_continue = stepper.reduce_on_failure();
         assert!(can_continue);
-        
+
         // Factor should be reduced
         assert!(stepper.factor() < factor_before);
     }
@@ -655,13 +655,13 @@ mod tests {
     #[test]
     fn test_gmin_stepper_advance() {
         let mut stepper = GminStepper::new();
-        
+
         assert_eq!(stepper.gmin(), GMIN_INITIAL);
         assert!(!stepper.is_complete());
-        
+
         let gmin_before = stepper.gmin();
         stepper.advance_on_success();
-        
+
         // Gmin should decrease
         assert!(stepper.gmin() < gmin_before);
     }
@@ -669,13 +669,15 @@ mod tests {
     #[test]
     fn test_gmin_stepper_complete() {
         let mut stepper = GminStepper::new();
-        
+
         // Advance until complete
         for _ in 0..20 {
-            if stepper.is_complete() { break; }
+            if stepper.is_complete() {
+                break;
+            }
             stepper.advance_on_success();
         }
-        
+
         assert!(stepper.is_complete());
         assert!(stepper.gmin() <= GMIN_FINAL);
     }
@@ -683,13 +685,13 @@ mod tests {
     #[test]
     fn test_pseudo_transient_advance() {
         let mut ptran = PseudoTransient::new();
-        
+
         assert_eq!(ptran.dt(), PTRAN_DT_INITIAL);
         assert!(!ptran.is_complete());
-        
+
         let dt_before = ptran.dt();
         ptran.advance_on_success();
-        
+
         // Timestep should increase
         assert!(ptran.dt() > dt_before);
         assert!(ptran.time() > 0.0);
@@ -699,7 +701,7 @@ mod tests {
     fn test_pseudo_transient_conductance() {
         let ptran = PseudoTransient::new();
         let g = ptran.conductance(1);
-        
+
         // Should be positive and reasonable
         assert!(g > 0.0);
         assert!(g < 1e6); // Not crazy large
@@ -708,17 +710,17 @@ mod tests {
     #[test]
     fn test_convergence_controller() {
         let mut ctrl = ConvergenceController::new();
-        
+
         assert_eq!(ctrl.active_method(), ConvergenceMethod::Direct);
-        
+
         // Switch to source stepping
         ctrl.set_method(ConvergenceMethod::SourceStepping);
         assert_eq!(ctrl.active_method(), ConvergenceMethod::SourceStepping);
-        
+
         // Record some iterations
         ctrl.add_iterations(5);
         ctrl.add_iterations(3);
-        
+
         let result = ctrl.result();
         assert_eq!(result.total_iterations, 8);
     }
@@ -726,14 +728,14 @@ mod tests {
     #[test]
     fn test_source_scale() {
         let mut stepper = SourceStepper::new();
-        
+
         // At factor 0, everything should be 0
         assert_eq!(stepper.scale_source(5.0), 0.0);
-        
+
         // Advance to some non-zero factor
         stepper.advance_on_success();
         let factor = stepper.factor();
-        
+
         // Scaling should work correctly
         assert!((stepper.scale_source(10.0) - 10.0 * factor).abs() < 1e-10);
     }

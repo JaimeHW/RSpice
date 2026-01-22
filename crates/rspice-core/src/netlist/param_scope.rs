@@ -1,6 +1,6 @@
 //! Parameter Scope and Precedence Resolution
 //!
-//! Implements Cadence Spectre-style parameter scoping with hierarchical
+//! Implements parameter scoping with hierarchical
 //! precedence resolution. Parameters defined at different levels of the
 //! design hierarchy have different priorities.
 //!
@@ -38,7 +38,7 @@ use std::collections::HashMap;
 /// Parameter scope levels with precedence ordering
 ///
 /// Higher values override lower values when resolving parameters.
-/// This follows Cadence Spectre conventions for parameter binding.
+/// This follows standard conventions for parameter binding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ParamScope {
     /// Global parameters from top-level .PARAM statements
@@ -148,7 +148,7 @@ impl ScopedParam {
 
 /// Resolves parameters across the design hierarchy with proper precedence
 ///
-/// This implements the core of Spectre-style parameter resolution,
+/// This implements the core of parameter resolution,
 /// ensuring that more specific definitions override less specific ones.
 #[derive(Debug, Clone, Default)]
 pub struct ParamResolver {
@@ -459,12 +459,12 @@ impl ParamResolver {
 }
 
 //=============================================================================
-// Local Options (Spectre-style)
+// Local Options
 //=============================================================================
 
 /// Local simulation options that can be scoped to instances or subcircuits
 ///
-/// In Spectre, options like temp, scale, reltol can be applied locally.
+/// Options like temp, scale, reltol can be applied locally.
 /// When conflicts exist, lower hierarchy (more specific) wins.
 #[derive(Debug, Clone, Default)]
 pub struct LocalOptions {

@@ -1,6 +1,6 @@
-//! LTspice/SPICE Compatibility Module
+//! SPICE Compatibility Module
 //!
-//! Parsers for LTspice and standard SPICE file formats.
+//! Parsers for standard SPICE file formats.
 
 mod ltspice_raw;
 

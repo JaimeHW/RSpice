@@ -3,7 +3,7 @@
 //! Implements s-domain transfer function evaluation for behavioral sources.
 //! LAPLACE expressions in SPICE allow specifying frequency response directly.
 //!
-//! # LTspice Syntax
+//! # Syntax
 //! ```text
 //! B1 out 0 V=LAPLACE(V(in)) {1/(1+s*R*C)}
 //! B2 out 0 V=LAPLACE(V(in), s/100k, 1)  ; First-order high-pass, DC gain=1

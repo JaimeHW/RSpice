@@ -163,13 +163,13 @@ pub fn run_simulation(netlist_text: &str) -> SimulationResult {
         None
     };
 
-    // Always run DC OP (Cadence Spectre-style: operating point is always available)
+    // Always run DC OP (operating point is always available)
     // This enables DC annotation display for any simulation type.
     // Note: DC OP failure is only fatal if we have no transient results.
     let dc_op = match engine.run_dc_op(&netlist) {
         Ok(result) => {
             let mut ops = Vec::new();
-            // Use actual node names from the result (Spectre-style)
+            // Use actual node names from the result
             // node_names[0] = "0" (ground), node_names[1..] = actual net names
             for (idx, &v) in result.node_voltages.iter().enumerate() {
                 if idx > 0 {

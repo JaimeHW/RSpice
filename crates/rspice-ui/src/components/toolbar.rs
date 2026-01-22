@@ -28,7 +28,7 @@ enum PendingAction {
     Open,
 }
 
-// DC annotation placement is now handled by the commercial-grade
+// DC annotation placement is now handled by the engine
 // dc_annotation_placement module. See state/dc_annotation_placement.rs
 // for the AnnotationPlacer implementation.
 
@@ -230,7 +230,7 @@ pub fn Toolbar() -> Element {
                     },
                     "Save"
                 }
-                // Export SVG - Professional schematic export for documentation
+                // Export SVG - Schematic export for documentation
                 Button {
                     variant: ButtonVariant::Ghost,
                     icon: rsx! { Icon { icon: IconType::Export, size: 16 } },
@@ -248,7 +248,7 @@ pub fn Toolbar() -> Element {
                             if let Some(handle) = dialog {
                                 let path = handle.path();
 
-                                // Generate SVG using professional export config
+                                // Generate SVG using export config
                                 let sch = schematic.read();
                                 let doc_name = sch.current_file
                                     .as_ref()
@@ -330,7 +330,7 @@ pub fn Toolbar() -> Element {
             // Divider
             ToolbarDivider {}
 
-            // Tools dropdown menu (Professional Cadence-style)
+            // Tools dropdown menu
             div {
                 style: "position: relative;",
 
@@ -457,8 +457,8 @@ pub fn Toolbar() -> Element {
                             // Build complete netlist with simulation commands
                             let mut netlist_content = netlist_result.netlist.clone();
 
-                            // Professional behavior: if dialog has configuration, it REPLACES
-                            // any existing analysis commands in the netlist (like LTspice)
+                            // Behavior: if dialog has configuration, it REPLACES
+                            // any existing analysis commands in the netlist
                             if has_config {
                                 // Strip existing analysis commands from netlist
                                 netlist_content = strip_analysis_commands(&netlist_content);
@@ -489,9 +489,9 @@ pub fn Toolbar() -> Element {
                             // Clone data needed for async block
                             let netlist_for_sim = netlist_content.clone();
                             let nets_for_ground = netlist_result.nets.clone();
-                            // Clone point_to_net for component-terminal annotation positions (Spectre-style)
+                            // Clone point_to_net for component-terminal annotation positions
                             let point_to_net = netlist_result.point_to_net.clone();
-                            // Clone component data for commercial-grade annotation placement
+                            // Clone component data for annotation placement
                             // components_for_exclusion: Full Component data for exclusion zone building
                             // component_positions: Just positions for segment distance calculation
                             // wires_for_exclusion: Wire data for accurate label placement calculation
@@ -561,7 +561,7 @@ pub fn Toolbar() -> Element {
                                     }
 
                                     // ============================================================
-                                    // DC Annotation Population (Professional Cadence Spectre-style)
+                                    // DC Annotation Population
                                     // ============================================================
                                     // Populate DC annotations from simulation results. Uses the
                                     // dc_op results (node voltages) and maps them to schematic
@@ -570,7 +570,7 @@ pub fn Toolbar() -> Element {
                                     if let Some(ref dc_op) = result.dc_op {
                                         log::info!("Populating DC annotations from {} operating points", dc_op.len());
 
-                                        // COMMERCIAL-GRADE: Use new AnnotationPlacer with radial search algorithm
+                                        // Use new AnnotationPlacer with radial search algorithm
                                         // This ensures annotations never overlap schematic geometry
                                         use crate::state::dc_annotation_placement::AnnotationPlacer;
                                         let mut placer = AnnotationPlacer::from_schematic(
@@ -591,28 +591,28 @@ pub fn Toolbar() -> Element {
                                             net_to_points.entry(net_name.clone()).or_default().push(*point);
                                         }
 
-                                        // COMMERCIAL-GRADE: Wire-centric anchor selection (Cadence Virtuoso-style)
+                                        // Wire-centric anchor selection
                                         // Generates wire segment midpoints with component clearance
                                         // filtering, prioritizing horizontal segments over terminals
-                                        use crate::state::dc_annotation_placement::select_commercial_anchor_point;
+                                        use crate::state::dc_annotation_placement::select_anchor_point;
 
                                         for (net_name, points) in &net_to_points {
                                             if points.is_empty() {
                                                 continue;
                                             }
 
-                                            // Use commercial-grade anchor selection:
+                                            // Use anchor selection:
                                             // 1. Generate wire midpoints that are horizontally clear of components
                                             // 2. Prefer horizontal wire segments (best visual alignment)
                                             // 3. Fall back to component terminals only if no clear midpoints
-                                            let best_point = select_commercial_anchor_point(
+                                            let best_point = select_anchor_point(
                                                 points,
                                                 &wires_for_exclusion,
                                                 &component_positions,
                                             ).unwrap_or(points[0]);
 
                                             net_positions.insert(net_name.clone(), best_point);
-                                            log::info!("  Net {} annotation anchor at ({}, {}) - commercial-grade wire-centric selection",
+                                            log::info!("  Net {} annotation anchor at ({}, {}) - wire-centric selection",
                                                 net_name, best_point.x, best_point.y);
                                         }
 

@@ -163,7 +163,7 @@ pub const CURRENT_SOURCE: Symbol = Symbol {
     ],
 };
 
-/// NPN BJT symbol - professional encircled style
+/// NPN BJT symbol - encircled style
 /// Base on left, vertical bar inside circle, Emitter at top-right with arrow out, Collector at bottom-right
 pub const NPN_BJT: Symbol = Symbol {
     // Circle: center at (0,0), radius 12
@@ -198,7 +198,7 @@ pub const NPN_BJT: Symbol = Symbol {
     ],
 };
 
-/// PNP BJT symbol - professional encircled style
+/// PNP BJT symbol - encircled style
 /// Base on left, vertical bar inside circle, Collector at top-right, Emitter at bottom-right with arrow in
 pub const PNP_BJT: Symbol = Symbol {
     // Same structure as NPN but with arrow pointing inward on emitter

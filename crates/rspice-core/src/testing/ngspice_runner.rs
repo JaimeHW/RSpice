@@ -1,6 +1,6 @@
 //! Ngspice Regression Test Runner
 //!
-//! Professional-grade automated test runner that validates RSpice against ngspice
+//! Automated test runner that validates RSpice against ngspice
 //! reference outputs. Supports DC, AC, and transient analysis with comprehensive
 //! result comparison.
 //!

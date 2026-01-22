@@ -761,7 +761,7 @@ pub struct ModelDef {
 /// Subcircuit definition: .SUBCKT name ports [PARAMS: ...]
 ///
 /// Represents a reusable circuit block that can be instantiated with X elements.
-/// Follows Cadence Spectre conventions for parameter scoping and local options.
+/// Follows standard conventions for parameter scoping and local options.
 #[derive(Debug, Clone)]
 pub struct SubcircuitDef {
     /// Subcircuit name

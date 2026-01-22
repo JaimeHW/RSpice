@@ -1,6 +1,6 @@
 //! Confirmation Modal Component
 //!
-//! Professional modal dialog for confirming destructive actions like
+//! Modal dialog for confirming destructive actions like
 //! discarding unsaved changes.
 
 use dioxus::prelude::*;
@@ -57,7 +57,7 @@ pub fn UnsavedChangesModal(
                 on_result.call(SaveDialogResult::Cancel);
             },
 
-            // Modal dialog - compact professional design
+            // Modal dialog - compact design
             div {
                 style: "
                     background: {th.bg_secondary()};

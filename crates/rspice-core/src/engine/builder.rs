@@ -483,7 +483,7 @@ impl Engine {
             }
         }
 
-        // Ensure ground reference exists (LTspice-compatible behavior)
+        // Ensure ground reference exists
         // If no node "0" was specified, auto-select a reference node
         circuit.ensure_ground_reference();
 

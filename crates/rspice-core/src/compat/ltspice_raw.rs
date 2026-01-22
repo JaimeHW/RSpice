@@ -1,11 +1,11 @@
-//! LTspice .raw File Parser
+//! Third-party .raw File Parser
 //!
-//! Parses LTspice simulation output files (.raw format).
+//! Parses standard simulation output files (.raw format).
 //! Supports both ASCII and binary (IEEE 754) formats.
 //!
 //! ## Format Overview
 //!
-//! LTspice .raw files contain:
+//! .raw files contain:
 //! 1. ASCII header with metadata (title, date, simulation type, variables)
 //! 2. Binary or ASCII data section with simulation values
 //!

@@ -128,7 +128,7 @@ impl PeriodDetector {
             };
         }
 
-        // Commercial-grade selection strategy:
+        // Selection strategy:
         // 1. Prefer estimates close to the initial guess (within 2x)
         // 2. Among those, prefer estimates that multiple methods agree on
         // 3. Weight by confidence
@@ -296,7 +296,7 @@ impl PeriodDetector {
     /// Detect period via FFT analysis
     ///
     /// Uses parabolic interpolation for sub-bin frequency accuracy,
-    /// as implemented in commercial simulators like Spectre.
+    /// as implemented in industry simulators.
     pub fn detect_fft(&self, time: &[Value], values: &[Value]) -> Option<PeriodEstimate> {
         use rustfft::{FftPlanner, num_complex::Complex};
 

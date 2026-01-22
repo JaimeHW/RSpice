@@ -507,7 +507,7 @@ fn parse_func_statement(
         }
         body = body_parts.join("");
     } else if let TokenKind::Expression(expr) = &stream.peek().kind {
-        // LTspice-style: .FUNC name(args) {expression}
+        // Function definition: .FUNC name(args) {expression}
         body = expr.clone();
         stream.advance();
     } else {

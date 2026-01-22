@@ -2,7 +2,7 @@
 //!
 //! Provides statistical analysis with component tolerances, supporting:
 //! - Gaussian and uniform distributions
-//! - Lot and device tolerances (per-LTspice)
+//! - Lot and device tolerances
 //! - Statistical output (mean, std, min, max, histograms)
 //! - Reproducible runs via seeding
 //!
@@ -74,7 +74,7 @@ impl Distribution {
 // Tolerance Specification
 //=============================================================================
 
-/// Component tolerance specification (LTspice-compatible)
+/// Component tolerance specification
 #[derive(Debug, Clone)]
 pub struct Tolerance {
     /// Lot-to-lot variation (same per Monte Carlo run)
@@ -107,7 +107,7 @@ impl Tolerance {
         }
     }
 
-    /// Create LTspice-style lot + dev tolerance
+    /// Create lot + dev tolerance
     pub fn lot_and_dev(lot_pct: Value, dev_pct: Value) -> Self {
         Self {
             lot: Some(Distribution::Uniform {

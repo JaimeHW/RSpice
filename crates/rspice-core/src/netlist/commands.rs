@@ -8,13 +8,11 @@
 //! - .FOUR, .NOISE - Advanced analysis
 //! - .IC, .NODESET - Initial conditions
 
+use super::helpers::{expect_ident, expect_value, skip_commas, try_value};
 use super::lexer::{TokenKind, TokenStream};
 use super::{
-    AnalysisCommand, FreqVariation, ModelDef, ParamContext, ParseError,
-    StepCommand, StepSweep, StepTarget,
-};
-use super::helpers::{
-    expect_ident, expect_value, try_value, skip_commas,
+    AnalysisCommand, FreqVariation, ModelDef, ParamContext, ParseError, StepCommand, StepSweep,
+    StepTarget,
 };
 use crate::Value;
 
@@ -244,7 +242,7 @@ pub fn parse_func_statement(
         }
         body = body_parts.join("");
     } else if let TokenKind::Expression(expr) = &stream.peek().kind {
-        // LTspice-style: .FUNC name(args) {expression}
+        // Function definition: .FUNC name(args) {expression}
         body = expr.clone();
         stream.advance();
     } else {

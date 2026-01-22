@@ -150,7 +150,7 @@ impl ViewState {
             }
         }
         if x_min.is_finite() && x_max.is_finite() {
-            // Exact fit to data - no margins (matches LTspice)
+            // Exact fit to data - no margins
             self.x_min = x_min;
             self.x_max = x_max;
         }
@@ -216,7 +216,7 @@ impl ViewState {
             1.5
         };
 
-        // Set view to data bounds (exact fit, no margin - matches LTspice)
+        // Set view to data bounds (exact fit, no margin)
         self.x_min = data_x_min;
         self.x_max = data_x_max;
         self.y_min = data_y_min;

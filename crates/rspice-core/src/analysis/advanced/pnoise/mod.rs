@@ -1,6 +1,6 @@
 //! Phase Noise (PNoise) Analysis Module
 //!
-//! This module provides commercial-grade phase noise analysis for periodic circuits.
+//! This module provides phase noise analysis for periodic circuits.
 //! PNoise measures the spectral purity of oscillators by quantifying noise power
 //! at offset frequencies from the carrier.
 //!

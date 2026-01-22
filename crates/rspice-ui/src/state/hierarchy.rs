@@ -1,7 +1,7 @@
 //! Hierarchical Design Support
 //!
-//! Implements a professional Library/Cell/View hierarchy for managing complex
-//! designs with reusable blocks. This follows the Cadence Open Access model
+//! Implements a Library/Cell/View hierarchy for managing complex
+//! designs with reusable blocks. This follows the standard Open Access model
 //! used by industry-standard IC design tools.
 //!
 //! # Hierarchy Model

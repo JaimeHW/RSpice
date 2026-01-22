@@ -704,7 +704,7 @@ impl CompanionCoefficients {
 
 /// TrapGear Controller for automatic integration method switching
 ///
-/// This implements the hybrid Trapezoidal/Gear-2 method used by LTspice
+/// This implements the hybrid Trapezoidal/Gear-2 method
 /// to suppress numerical oscillation (ringing) at switching transitions.
 ///
 /// # Algorithm

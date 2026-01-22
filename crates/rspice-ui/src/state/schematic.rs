@@ -75,7 +75,7 @@ impl Rotation {
 }
 
 /// Label position mode for component labels
-/// Implements Cadence-style smart auto-placement with user override capability
+/// Implements smart auto-placement with user override capability
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum LabelPosition {
     /// Automatic smart placement - avoids collisions with wires and components
@@ -672,7 +672,7 @@ pub struct NetLabel {
 
 /// Explicit wire junction point
 ///
-/// In professional simulators like LTspice, crossing wires are NOT electrically
+/// In standard simulators, crossing wires are NOT electrically
 /// connected unless an explicit junction exists. Junctions are created by:
 /// - Clicking on a wire crossing point
 /// - Ending a wire on an existing wire
@@ -854,7 +854,7 @@ impl SchematicState {
 
     /// Zoom to fit all schematic content in the viewport.
     ///
-    /// This is the professional approach used by LTspice, Cadence, etc.
+    /// This is the standard approach used by simulators.
     /// Sets zoom and pan so all components and wires are visible with comfortable margins.
     ///
     /// Parameters:
@@ -1218,7 +1218,7 @@ impl SchematicState {
         }
 
         // Split the path into individual 2-point wire segments
-        // This matches professional simulator behavior (LTspice) where each wire
+        // This matches standard simulator behavior where each wire
         // is a single straight line between two endpoints
         let mut last_wire_id = None;
         let mut endpoints_to_check = Vec::new();
@@ -1476,7 +1476,7 @@ impl SchematicState {
 
     /// Move a component and update all attached wire endpoints (rubber-banding)
     ///
-    /// This uses junction-aware moving like professional simulators:
+    /// This uses junction-aware moving like standard simulators:
     /// - Find all terminal positions before moving
     /// - Find ALL wire points (from any wire) at those positions  
     /// - Move ALL those points together, preserving junctions
@@ -1565,7 +1565,7 @@ impl SchematicState {
 
     /// Move all selected components and wires by a delta
     ///
-    /// This implements professional multi-selection movement:
+    /// This implements multi-selection movement:
     /// - Components are moved with rubber-banding for attached wires NOT in selection
     /// - Wires in selection are moved entirely  
     /// - Avoids double-moving wires that are both selected AND attached to selected components
@@ -1676,7 +1676,7 @@ impl SchematicState {
     /// Returns the wire's points as they would appear if the component were at the
     /// preview position. Used for live wire updates during drag.
     ///
-    /// Uses stretch behavior like professional simulators:
+    /// Uses stretch behavior like standard simulators:
     /// - Only endpoints directly at terminals move
     /// - Rest of wire stays anchored (may create diagonal segments)
     pub fn get_wire_preview_points(

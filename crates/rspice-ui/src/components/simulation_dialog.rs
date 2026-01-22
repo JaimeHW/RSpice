@@ -1,6 +1,6 @@
 //! Simulation Dialog Component
 //!
-//! A professional tabbed dialog for configuring simulation analyses.
+//! A tabbed dialog for configuring simulation analyses.
 //! Replaces manual SPICE command editing with intuitive form inputs.
 
 use dioxus::prelude::*;
@@ -67,7 +67,7 @@ pub struct SimulationDialogProps {
 // Main Dialog Component
 // =============================================================================
 
-/// Professional simulation setup dialog with tabbed interface
+/// Simulation setup dialog with tabbed interface
 #[component]
 pub fn SimulationDialog(props: SimulationDialogProps) -> Element {
     let theme: Signal<Theme> = use_context();

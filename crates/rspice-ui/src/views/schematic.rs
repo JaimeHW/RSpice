@@ -67,7 +67,7 @@ struct EditingState {
 }
 
 /// Label drag state for interactive repositioning of component labels
-/// Following Cadence Spectre pattern: labels can be dragged to custom positions
+/// Labels can be dragged to custom positions
 #[derive(Clone, Copy, PartialEq, Default)]
 struct LabelDragState {
     /// Whether a label drag is in progress
@@ -146,7 +146,7 @@ pub fn Schematic() -> Element {
     let mut history = use_signal(|| SchematicHistory::new(schematic.read().clone(), 100));
     
     // Helper closure that pushes to history AND marks document dirty
-    // This encapsulates the dirty tracking logic in one place - professional approach
+    // This encapsulates the dirty tracking logic in one place
     let mut push_edit = move |state: SchematicState, desc: &str| {
         history.write().push(state, desc);
         doc_manager.write().active_mut().mark_dirty();
@@ -200,7 +200,7 @@ pub fn Schematic() -> Element {
     }
     
     // Global keyboard shortcut handler - works regardless of which panel has focus
-    // Professional simulators use window-level shortcuts for consistent behavior
+    // Simulators use window-level shortcuts for consistent behavior
     use_effect(move || {
         // Set up window-level keydown listener via JavaScript
         // This ensures hotkeys work even when focus is on console or properties panel
@@ -884,7 +884,7 @@ pub fn Schematic() -> Element {
                                 highlighted_junction.set(Some(final_pos));
                                 
                                 // Add all wires at the junction to the selection so Delete works
-                                // This matches professional simulator behavior
+                                // This matches standard simulator behavior
                                 let wire_points = schematic.read().wire_points_at(final_pos);
                                 let mut s = schematic.write();
                                 s.selection.clear();
@@ -1028,7 +1028,7 @@ pub fn Schematic() -> Element {
                             }
                             Tool::Wire => {
                                 // Wire drawing is transient - cancel with ESC
-                                // Undo only affects completed wires (professional behavior)
+                                // Undo only affects completed wires
                                 if s.wire_drawing.active {
                                     // Additional clicks add vertices (multi-segment wires)
                                     s.extend_wire(gp);
@@ -1038,7 +1038,7 @@ pub fn Schematic() -> Element {
                                 }
                             }
                             Tool::Probe => {
-                                // Professional probe behavior: probe WIRES/NODES, not components
+                                // Probe behavior: probe WIRES/NODES, not components
                                 // SPICE simulators measure node voltages, not component voltages
                                 let clicked_component = s.component_at(gp);
                                 let clicked_wire = s.wire_at(gp);
@@ -1403,7 +1403,7 @@ pub fn Schematic() -> Element {
                             };
                             
                             // Collect all component terminal positions to exclude from junction circles
-                            // Professional simulators don't show junction circles at component terminals
+                            // Standard simulators don't show junction circles at component terminals
                             let terminal_positions: std::collections::HashSet<Point> = schematic.read()
                                 .components.iter()
                                 .flat_map(|comp| comp.terminal_positions())
@@ -1496,7 +1496,7 @@ pub fn Schematic() -> Element {
                             rsx! {
                                 // Junction dots at true junctions (3+ wire segments meeting)
                                 // Highlight only when ALL connected wires are selected (box selection)
-                                // This matches professional simulator behavior
+                                // This matches standard simulator behavior
                                 
                                 // Render normal junction dots (not all-selected, not probed)
                                 for (pt, total) in point_segment_count.iter() {
@@ -1642,7 +1642,7 @@ pub fn Schematic() -> Element {
                             let current_zoom = *zoom.read();
                             let viewport = Viewport::from_transform(canvas_w, canvas_h, (pan_x, pan_y), current_zoom, gs);
                             
-                            // Pre-filter components for visibility (professional O(visible) rendering)
+                            // Pre-filter components for visibility (O(visible) rendering)
                             // Component symbols typically span ~60 grid units, so use half_size of 30
                             let visible_components: Vec<_> = schematic.read().components.iter()
                                 .filter(|c| viewport.is_component_visible(c.pos, 40))
@@ -1720,11 +1720,10 @@ pub fn Schematic() -> Element {
                         }
                         
                         // ====================================================================
-                        // DC Annotation Overlay (Cadence Spectre-style operating point display)
+                        // DC Annotation Overlay (Operating point display)
                         // ====================================================================
                         // Renders node voltages and branch currents directly on the schematic
-                        // when DC annotation mode is enabled. This is a professional feature
-                        // found in commercial simulators like Cadence Virtuoso ADE.
+                        // when DC annotation mode is enabled.
                         // Note: sim_state is accessed from Schematic component props above.
                         // ====================================================================
                         DcAnnotationLayer {
@@ -1745,14 +1744,14 @@ pub fn Schematic() -> Element {
                     }
                     } // Close transform g element
                     // ========================================================================
-                    // GLOBAL DRAG CAPTURE OVERLAY (Professional Implementation)
+                    // GLOBAL DRAG CAPTURE OVERLAY
                     // ========================================================================
                     // This permanent overlay is ALWAYS rendered but with pointer-events
                     // controlled by drag state. When ANY drag is active (component or label),
                     // pointer-events: all captures all mouse events. Otherwise, pointer-events: none
                     // allows events to pass through to underlying elements.
                     //
-                    // This approach is used by professional CAD/EDA tools because it:
+                    // This approach is used by high-end EDA tools because it:
                     // 1. Eliminates z-ordering issues (overlay is always on top)
                     // 2. Eliminates timing issues (no conditional rendering)
                     // 3. Provides single point of control for all drag operations
@@ -2082,10 +2081,10 @@ pub fn SchematicToolbar(schematic: Signal<SchematicState>) -> Element {
             div { style: "width: 1px; height: 18px; background: {th.border()}; margin: 0 8px;" }
             span { style: "font-size: 11px; color: {th.text_muted()}; margin-right: 4px;", "View:" }
             
-            // Pin names toggle (Virtuoso-style View option)
+            // Pin names toggle (View option)
             button { 
                 style: "padding: 4px 8px; background: {pin_bg}; border: 1px solid {th.border()}; border-radius: 4px; color: {pin_color}; font-size: 12px; cursor: pointer;",
-                title: "Toggle terminal pin names (Virtuoso: View → Display Options)",
+                title: "Toggle terminal pin names",
                 onclick: move |_| {
                     let mut ds = display_settings.write();
                     ds.show_pin_names = if matches!(ds.show_pin_names, crate::state::display_settings::PinNameVisibility::Always) {
@@ -2097,7 +2096,7 @@ pub fn SchematicToolbar(schematic: Signal<SchematicState>) -> Element {
                 "{pin_btn_label}"
             }
             
-            // DC Annotation toggle (Cadence Spectre: Results → Annotate → DC Operating Point)
+            // DC Annotation toggle
             {
                 let mut sim_state: Signal<crate::state::SimulationState> = use_context();
                 let mode = sim_state.read().dc_annotations.mode;
@@ -2114,7 +2113,7 @@ pub fn SchematicToolbar(schematic: Signal<SchematicState>) -> Element {
                 rsx! {
                     button {
                         style: "padding: 4px 8px; background: {dc_bg}; border: 1px solid {th.border()}; border-radius: 4px; color: {dc_color}; font-size: 12px; cursor: pointer;",
-                        title: "Cycle DC annotation mode (Spectre: Results → Annotate → DC Operating Point)",
+                        title: "Cycle DC annotation mode",
                         onclick: move |_| {
                             let current_mode = sim_state.read().dc_annotations.mode;
                             let new_mode = current_mode.cycle();
@@ -2237,7 +2236,7 @@ fn CompSvg(
         crate::state::display_settings::PinNameVisibility::Hidden => false,
     };
     
-    // Label cursor style - "move" when hovered/dragging for professional UX
+    // Label cursor style - "move" when hovered/dragging
     // Only show grab cursor when no drag is active
     // Read signals directly for proper reactivity
     let label_cursor = if label_drag.read().active {
@@ -2347,7 +2346,7 @@ fn CompSvg(
                 path { d: "{symbol_path(kind)}", stroke: "{col}", stroke_width: "{sw}", fill: "none", stroke_linecap: "round" }
             }
             
-            // Terminal pin labels (Virtuoso-style: simple text only, no decoration)
+            // Terminal pin labels (simple text only, no decoration)
             // Controlled by settings.show_pin_names (Hidden/OnHover/Always)
             if show_pins && !terminal_offsets.is_empty() {
                 g { transform: "rotate({-rotation})",
@@ -2395,7 +2394,7 @@ fn CompSvg(
                     style: "cursor: {label_cursor};",
                     
                     // Name label (reference designator: R1, C2, M1, etc.)
-                    // Full Spectre-level drag support: click and drag to reposition
+                    // Full drag support: click and drag to reposition
                     if settings.show_component_names && !name.is_empty() {
                         {
                             // Calculate displayed position (original + drag offset if dragging this label)
@@ -2482,7 +2481,7 @@ fn CompSvg(
                     }
                     
                     // Value label (component value: 1k, 10uF, etc.)
-                    // Full Spectre-level drag support: click and drag to reposition
+                    // Full drag support: click and drag to reposition
                     if settings.show_component_values && !value.is_empty() {
                         {
                             // Calculate displayed position (original + drag offset if dragging this label)
@@ -2677,7 +2676,7 @@ fn symbol_path(k: ComponentType) -> &'static str {
             "M-10-15 L15 0 L-10 15 Z M-20-10 L-10-5 M-20 10 L-10 5 M15 0 L20 0",
         ComponentType::XspiceMultiplier | ComponentType::XspiceDivider =>
             "M-12-12 L12-12 L12 12 L-12 12 Z M-20-10 L-12-6 M-20 10 L-12 6 M12 0 L20 0",
-        // XSPICE Digital Gates - leads aligned to grid (±10 pixels = ±1 grid unit)
+        // Mixed-Signal Digital Gates - leads aligned to grid (±10 pixels = ±1 grid unit)
         ComponentType::XspiceInverter =>
             "M-10-12 L10 0 L-10 12 Z M12 0 m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0-6 0 M-20 0 L-10 0 M15 0 L20 0",
         ComponentType::XspiceBuffer =>

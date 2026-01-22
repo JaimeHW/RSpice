@@ -183,7 +183,7 @@ pub trait HbNonlinearDevice: Send + Sync {
 
 /// Harmonic Balance solver
 ///
-/// Commercial-grade HB solver supporting:
+/// HB solver supporting:
 /// - Linear elements: R, C, L (with proper jωL admittance)
 /// - MNA voltage sources with branch currents
 /// - Nonlinear device Newton iteration via FFT/IFFT
@@ -437,7 +437,7 @@ impl NonlinearDeviceInstance {
         let a = self.terminals[0];
         let c = self.terminals[1];
 
-        // Return MNA conductance stamp (Spectre convention)
+        // Return MNA conductance stamp
         // Physical conductance gd is POSITIVE. MNA stamp for 2-terminal conductance:
         // G[n+,n+] += gd, G[n+,n-] -= gd, G[n-,n+] -= gd, G[n-,n-] += gd
         vec![((a, a), gd), ((a, c), -gd), ((c, a), -gd), ((c, c), gd)]
@@ -583,7 +583,7 @@ impl NonlinearDeviceInstance {
         let v_s = self.get_terminal_voltage(node_voltages, 2);
         // v_b = self.get_terminal_voltage(node_voltages, 3); // bulk, simplified for now
 
-        // MOSFET is symmetric - swap D/S when Vds < 0 (like Spectre)
+        // MOSFET is symmetric - swap D/S when Vds < 0
         let (vgs, vds, is_reversed) = if v_d >= v_s {
             (v_g - v_s, v_d - v_s, false)
         } else {
@@ -626,7 +626,7 @@ impl NonlinearDeviceInstance {
         let g = self.terminals[1];
         let s = self.terminals[2];
 
-        // MOSFET is symmetric - swap D/S when Vds < 0 (like Spectre)
+        // MOSFET is symmetric - swap D/S when Vds < 0
         let (vgs, vds, eff_d, eff_s) = if v_d >= v_s {
             (v_g - v_s, v_d - v_s, d, s)
         } else {
@@ -668,7 +668,7 @@ impl NonlinearDeviceInstance {
         let v_g = self.get_terminal_voltage(node_voltages, 1);
         let v_s = self.get_terminal_voltage(node_voltages, 2);
 
-        // PMOS is symmetric - swap S/D when Vsd < 0 (like Spectre)
+        // PMOS is symmetric - swap S/D when Vsd < 0
         let (vsg, vsd, is_reversed) = if v_s >= v_d {
             (v_s - v_g, v_s - v_d, false)
         } else {
@@ -1163,7 +1163,7 @@ impl HbSolver {
     }
 
     // =========================================================================
-    // DC Operating Point Solver (Spectre-grade)
+    // DC Operating Point Solver
     // =========================================================================
     //
     // Solves the DC component (harmonic 0) before full HB iteration.
@@ -1173,7 +1173,7 @@ impl HbSolver {
     // Flow: DC Solve → Initialize Harmonics → Full HB Newton
     // =========================================================================
 
-    /// Solve DC operating point before full HB iteration (Spectre methodology)
+    /// Solve DC operating point before full HB iteration
     ///
     /// This method solves only the DC component (k=0) of the HB problem to establish
     /// the nonlinear device operating points. The DC solution provides a much better
@@ -1188,13 +1188,13 @@ impl HbSolver {
         &mut self,
         state: &mut HbSolverState,
     ) -> Result<Vec<Value>, HbError> {
-        // Spectre-like DC tolerances (more realistic than HB defaults)
+        // DC tolerances (more realistic than HB defaults)
         // For DC analysis, we're solving KCL: sum of currents = 0
         // Typical circuit currents are in mA-µA range, so abstol should be ~pA
         let dc_reltol = self.config.tolerance.max(1e-3); // At least 0.1% relative
         let dc_abstol = self.config.abstol.max(1e-9); // At least 1 pA absolute
 
-        // DC-specific iteration limit (Spectre uses ~150 for DC)
+        // DC-specific iteration limit
         let dc_max_iter = self.config.max_iterations.max(150);
 
         // For linear circuits, DC is just a linear solve at k=0
@@ -1203,7 +1203,7 @@ impl HbSolver {
             return Ok(self.extract_dc_solution(state));
         }
 
-        // Target GMIN for final solution (Spectre default: 1e-12)
+        // Target GMIN for final solution
         let target_gmin = 1e-12;
 
         // Initialize diode voltages with forward bias estimate (0.6V per diode)
@@ -1390,7 +1390,7 @@ impl HbSolver {
             // Compute DC residual
             self.compute_dc_residual(state, gmin);
 
-            // Check convergence using Spectre-style criteria:
+            // Check convergence using standard criteria:
             // - Absolute: residual < abstol (current tolerance)
             // - Relative: residual < reltol * max_current_in_circuit
             // The relative tolerance should be against CURRENT, not voltage
@@ -1609,7 +1609,7 @@ impl HbSolver {
                 if node < state.x.len() && !state.x[node].is_empty() && node < delta_x.len() {
                     let mut new_v = orig_x[node] + alpha * delta_x[node];
 
-                    // PN junction voltage limiting (Spectre-style)
+                    // PN junction voltage limiting
                     // Limit voltage changes at PN junctions to prevent overflow
                     let max_delta_v = 0.5; // Maximum voltage change per iteration
                     if (new_v - orig_x[node]).abs() > max_delta_v {
@@ -1934,7 +1934,7 @@ impl HbSolver {
 
     /// Full Newton-Raphson iteration for nonlinear HB analysis
     ///
-    /// Commercial-grade implementation following Spectre methodology:
+    /// Advanced implementation following standard methodology:
     /// 1. Try direct Newton-Raphson first
     /// 2. If that fails, use source stepping (ramp sources from 0 to full)
     /// 3. Use GMIN as a constant stabilizer throughout
@@ -1952,11 +1952,11 @@ impl HbSolver {
             return self.solve_linear(state);
         }
 
-        // Use constant GMIN for numerical stability (Spectre typically uses 1e-9 to 1e-12)
+        // Use constant GMIN for numerical stability
         // Larger gmin provides better Jacobian conditioning for difficult circuits
         let gmin = 1e-9;
 
-        // Step 0: Solve DC operating point first (Spectre methodology)
+        // Step 0: Solve DC operating point first
         // This establishes the nonlinear device operating points and provides a much
         // better initial guess than starting from zero or a random guess.
         if let Ok(_dc_solution) = self.solve_dc_operating_point(state) {
@@ -1999,7 +1999,7 @@ impl HbSolver {
 
                 let mut current_gmin = gmin_level;
                 while current_gmin > gmin {
-                    // Use factor of 2 for very gradual refinement (Spectre-like)
+                    // Use factor of 2 for very gradual refinement
                     current_gmin /= 2.0;
                     if self.newton_inner_loop(
                         state,
@@ -2029,7 +2029,7 @@ impl HbSolver {
             }
         }
 
-        // Step 3: Try source stepping (Spectre's primary convergence aid)
+        // Step 3: Try source stepping
         // Scale sources from 0 to full, using previous converged solution as starting point
         let original_sources = self.source_spectra.clone();
         let mut source_stepper = SourceStepper::new();
@@ -2237,7 +2237,7 @@ impl HbSolver {
 
     /// Apply line search with GMIN and PN voltage limiting
     ///
-    /// Commercial-grade implementation following Spectre methodology:
+    /// Advanced implementation following standard methodology:
     /// - Armijo backtracking line search
     /// - PN junction voltage limiting on DC component
     fn apply_line_search_with_gmin(
@@ -2434,7 +2434,7 @@ impl HbSolver {
     /// For nonlinear devices, the frequency-domain Jacobian is a Toeplitz matrix
     /// representing convolution: J[k,l] = G[k-l] where G is the DFT of g(t).
     ///
-    /// This is the commercial-grade implementation that exactly matches the
+    /// This is the implementation that exactly matches the
     /// FFT-based residual computation, ensuring proper Newton convergence.
     fn add_nonlinear_jacobian(&mut self, jac: &mut [Vec<Complex64>], state: &HbSolverState) {
         let n = self.num_nodes;
@@ -2915,7 +2915,7 @@ mod solver_tests {
     }
 
     // ==========================================================================
-    // Newton Solver Tests - Commercial-grade verification
+    // Newton Solver Tests - Verification
     // ==========================================================================
 
     #[test]
@@ -3400,7 +3400,7 @@ mod solver_tests {
     }
 
     // =========================================================================
-    // Comprehensive Test Suite for Spectre-Grade HB Newton Solver
+    // Comprehensive Test Suite for HB Newton Solver
     // =========================================================================
 
     #[test]
@@ -4746,7 +4746,7 @@ mod solver_tests {
         );
     }
 
-    // ==================== SPECTRE-GRADE COMPREHENSIVE TESTS ====================
+    // ==================== COMPREHENSIVE TESTS ====================
 
     #[test]
     fn test_dc_solve_nmos_current_mirror() {

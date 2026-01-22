@@ -71,7 +71,7 @@ impl FlattenerConfig {
         }
     }
 
-    /// Create a Spectre-compatible config
+    /// Create a standard config
     pub fn spectre() -> Self {
         Self {
             max_depth: 256,

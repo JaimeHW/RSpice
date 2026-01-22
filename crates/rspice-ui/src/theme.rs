@@ -153,7 +153,7 @@ impl Theme {
     // Waveform Trace Colors
     //=========================================================================
 
-    /// Trace color palette for waveforms (professional high-saturation colors)
+    /// Trace color palette for waveforms
     pub fn trace_colors(&self) -> &'static [&'static str] {
         &[
             "#FF6600", // Orange (primary - best visibility)
@@ -173,7 +173,7 @@ impl Theme {
     }
 
     /// Get trace color by index (static version)
-    /// Uses high-saturation colors like professional simulators (Cadence Spectre, LTspice)
+    /// Uses high-saturation colors for distinct visibility
     pub fn trace_color_static(index: usize) -> &'static str {
         const COLORS: &[&str] = &[
             "#FF6600", // Orange (primary - best visibility)

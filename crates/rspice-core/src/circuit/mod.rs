@@ -1076,7 +1076,7 @@ impl CircuitData {
 
     /// Ensure a ground reference exists. If no explicit node "0" was specified,
     /// pick the first node connected to a voltage source's negative terminal
-    /// as the reference (LTspice-compatible behavior).
+    /// as the reference.
     /// This should be called after all elements are added but before simulation.
     pub fn ensure_ground_reference(&mut self) {
         if self.has_ground_node() {
@@ -1084,7 +1084,7 @@ impl CircuitData {
         }
 
         // No explicit ground - pick first voltage source's negative terminal
-        // This matches LTspice behavior
+        // This matches standard behavior
         if !self.voltage_sources.is_empty() {
             let ref_node_id = self.voltage_sources.node_neg[0];
             if ref_node_id > 0 {
@@ -1100,10 +1100,7 @@ impl CircuitData {
                 if let Some(name) = ref_node_name {
                     // Remap this node to ground (0)
                     self.remap_node_to_ground(ref_node_id);
-                    log::info!(
-                        "Auto-selected node '{}' as ground reference (LTspice-compatible)",
-                        name
-                    );
+                    log::info!("Auto-selected node '{}' as ground reference", name);
                 }
             }
         }

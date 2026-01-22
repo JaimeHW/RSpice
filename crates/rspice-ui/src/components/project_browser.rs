@@ -1,7 +1,6 @@
-//! Project Browser Component - Virtuoso Library Manager Style
+//! Project Browser Component - Library Manager Style
 //!
-//! A professional tree-view component for browsing the Library/Cell/View
-//! hierarchy. Matches the Cadence Virtuoso Library Manager paradigm.
+//! hierarchy. Standard library manager paradigm.
 //!
 //! This is the unified component library - clicking on primitive cells
 //! activates the placement tool for that component type.

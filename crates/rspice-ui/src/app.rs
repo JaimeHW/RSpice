@@ -67,7 +67,7 @@ pub fn App() -> Element {
     // Cross-probing manager for schematic ↔ waveform coordination
     let cross_probe = use_signal(CrossProbeManager::new);
 
-    // Hierarchy manager for Library/Cell/View navigation (Virtuoso-style)
+    // Hierarchy manager for Library/Cell/View navigation
     // Initialize with built-in primitives library
     let hierarchy_manager = use_signal(|| {
         let mut mgr = HierarchyManager::new();
@@ -376,7 +376,7 @@ pub fn App() -> Element {
                     }
 
                     // Waveform viewer - FULL WIDTH spanning under all sidebars
-                    // This matches Cadence Spectre/Virtuoso professional layout
+                    // This matches industry standard layout
                     // Only show when simulation results exist AND visible
                     if !sim_state.read().waveforms.is_empty() && waveform_visible.read().0 {
                         // Resizable divider for waveform pane

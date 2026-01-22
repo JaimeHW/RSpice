@@ -1,6 +1,6 @@
 //! Verilog-A Model Inspector Component
 //!
-//! Professional collapsible panel for displaying compiled Verilog-A model details.
+//! Collapsible panel for displaying compiled Verilog-A model details.
 //! Shows terminals, parameters, and compilation status.
 
 use dioxus::prelude::*;

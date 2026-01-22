@@ -1,6 +1,6 @@
 //! PNoise Solver
 //!
-//! Commercial-grade phase noise solver implementing:
+//! Phase noise solver implementing:
 //! - Time-varying linearization around periodic operating point
 //! - Floquet mode decomposition
 //! - Noise source projection onto phase/amplitude

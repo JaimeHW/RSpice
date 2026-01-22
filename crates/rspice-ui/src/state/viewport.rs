@@ -4,7 +4,7 @@
 //! are visible in the current view. This is critical for performance when
 //! rendering large schematics with thousands of components.
 //!
-//! Professional simulators like Cadence Virtuoso use viewport culling to
+//! Simulators use viewport culling to
 //! maintain 60fps even with complex designs by only rendering visible elements.
 //!
 //! # Usage
@@ -283,7 +283,7 @@ impl Viewport {
     /// Determine if simplified (LOD) rendering should be used
     ///
     /// At very low zoom levels, detailed component symbols waste rendering time.
-    /// Professional tools switch to simplified representations when zoomed out.
+    /// Tools switch to simplified representations when zoomed out.
     pub fn use_simplified_symbols(&self) -> bool {
         self.zoom < 0.25
     }

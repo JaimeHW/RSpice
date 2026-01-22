@@ -259,7 +259,7 @@ pub fn WaveformTraceView(x: Vec<f64>, y: Vec<f64>, color: String, view: ViewStat
     }
 }
 
-/// Digital waveform trace with step-style rendering (ModelSim/Cadence pattern).
+/// Digital waveform trace with step-style rendering.
 /// Automatically detects digital signals and renders with:
 /// - Sharp vertical transitions (no interpolation)
 /// - Logic level coloring (green=high, red=low, gray=unknown)

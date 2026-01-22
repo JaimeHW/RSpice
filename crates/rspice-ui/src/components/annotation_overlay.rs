@@ -1,7 +1,7 @@
 //! DC Annotation Overlay Component
 //!
 //! Renders simulation results (node voltages, branch currents) as an overlay
-//! on top of the schematic canvas. Follows the Cadence Spectre pattern of
+//! on top of the schematic canvas. Follows the pattern of
 //! displaying operating point values directly on the schematic.
 //!
 //! The overlay consists of small badges positioned near circuit nodes and
@@ -101,7 +101,7 @@ pub fn AnnotationOverlay(props: AnnotationOverlayProps) -> Element {
                 {
                     // Look up LIVE wire position
                     // Find which wire contains the annotation's original position.
-                    // If the wire is deleted, don't render this annotation (professional behavior).
+                    // If the wire is deleted, don't render this annotation.
                     let current_position: Option<Point> = if !props.wires.is_empty() {
                         // Find wire that contains (or contained) the annotation position
                         let original_pos = annotation.position;
@@ -133,7 +133,7 @@ pub fn AnnotationOverlay(props: AnnotationOverlayProps) -> Element {
                         Some(annotation.position)
                     };
 
-                    // Only render if wire exists (professional behavior: hidden when wire deleted)
+                    // Only render if wire exists (hidden when wire deleted)
                     if let Some(current_position) = current_position {
                         // Calculate pixel position from current (possibly live) grid position
                         let node_x = current_position.x as f64 * gs;
@@ -153,7 +153,7 @@ pub fn AnnotationOverlay(props: AnnotationOverlayProps) -> Element {
                         let text_color = annotation.kind.color();
                         let border_color = text_color;
 
-                        // Compute leader line with commercial-grade geometry:
+                        // Compute leader line with standard geometry:
                         // 1. Start from closest point on label to node
                         // 2. End at first wire intersection (not node center)
                         let label_bounds = LabelBounds::new(badge_x, badge_y, text_width, text_height);

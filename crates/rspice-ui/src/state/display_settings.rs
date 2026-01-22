@@ -1,7 +1,7 @@
 //! Schematic Display Settings
 //!
 //! Centralized configuration for schematic rendering and label display.
-//! Follows the Cadence/Spectre pattern of separating display preferences
+//! Follows the pattern of separating display preferences
 //! from schematic data, enabling per-session or per-project customization.
 
 use serde::{Deserialize, Serialize};
@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 /// Display settings for schematic components and labels.
 ///
 /// These settings control the visual presentation without affecting
-/// the underlying circuit data. Professional simulators like Cadence Spectre
+/// the underlying circuit data. Simulators
 /// separate these concerns to allow flexible visualization.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SchematicDisplaySettings {
@@ -62,13 +62,13 @@ pub struct SchematicDisplaySettings {
     pub show_bounding_boxes: bool,
 }
 
-/// Pin name visibility modes (Virtuoso-style display option)
+/// Pin name visibility modes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum PinNameVisibility {
-    /// Never show pin names (Virtuoso default - clean schematic)
+    /// Never show pin names (Default - clean schematic)
     #[default]
     Hidden,
-    /// Show pin names only on hover (convenience feature, not Virtuoso-authentic)
+    /// Show pin names only on hover
     OnHover,
     /// Always show pin names (toggle via View menu)
     Always,
@@ -77,13 +77,13 @@ pub enum PinNameVisibility {
 impl Default for SchematicDisplaySettings {
     fn default() -> Self {
         Self {
-            // Label visibility - sensible defaults matching professional tools
+            // Label visibility - sensible defaults
             show_component_names: true,
             show_component_values: true,
-            show_pin_names: PinNameVisibility::Hidden, // Virtuoso default: hidden, toggle via View menu
+            show_pin_names: PinNameVisibility::Hidden,
             show_net_names: false,
 
-            // Typography - match existing CompSvg defaults, professional sizing
+            // Typography - match existing CompSvg defaults
             name_font_size: 10.0,
             value_font_size: 9.0,
             pin_font_size: 7.0,

@@ -11,8 +11,8 @@
 //! - Case-insensitive matching for Windows compatibility
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
 use std::fs;
+use std::path::{Path, PathBuf};
 
 use super::ParseError;
 
@@ -49,7 +49,7 @@ impl IncludeProcessor {
         } else {
             base_path.to_path_buf()
         };
-        
+
         Self {
             base_dir,
             included_files: HashSet::new(),
@@ -77,7 +77,7 @@ impl IncludeProcessor {
     /// The file contents, or an error if the file cannot be read
     pub fn process_include(&mut self, filename: &str) -> Result<String, ParseError> {
         self.current_depth += 1;
-        
+
         if self.current_depth > self.max_depth {
             self.current_depth -= 1;
             return Err(ParseError::Syntax {
@@ -85,9 +85,9 @@ impl IncludeProcessor {
                 message: format!("Include depth exceeded maximum of {}", self.max_depth),
             });
         }
-        
+
         let path = self.resolve_path(filename)?;
-        
+
         // Check for circular inclusion
         let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
         if self.included_files.contains(&canonical) {
@@ -96,14 +96,14 @@ impl IncludeProcessor {
             log::debug!("Skipping already-included file: {:?}", path);
             return Ok(String::new());
         }
-        
+
         self.included_files.insert(canonical);
-        
+
         let content = fs::read_to_string(&path).map_err(|e| ParseError::Syntax {
             line: 0,
             message: format!("Failed to include '{}': {}", filename, e),
         })?;
-        
+
         self.current_depth -= 1;
         Ok(content)
     }
@@ -120,16 +120,16 @@ impl IncludeProcessor {
     /// # Returns
     /// The section contents, or an error if not found
     pub fn process_lib(
-        &mut self, 
-        filename: &str, 
-        section: Option<&str>
+        &mut self,
+        filename: &str,
+        section: Option<&str>,
     ) -> Result<String, ParseError> {
         let content = self.process_include(filename)?;
-        
+
         if content.is_empty() {
             return Ok(content);
         }
-        
+
         match section {
             Some(sect) => self.extract_section(&content, sect),
             None => Ok(content),
@@ -140,9 +140,9 @@ impl IncludeProcessor {
     fn resolve_path(&self, filename: &str) -> Result<PathBuf, ParseError> {
         // Remove quotes if present
         let clean_name = filename.trim_matches('"').trim_matches('\'');
-        
+
         let path = Path::new(clean_name);
-        
+
         // If absolute, use as-is
         if path.is_absolute() {
             if path.exists() {
@@ -153,13 +153,13 @@ impl IncludeProcessor {
                 message: format!("File not found: {}", clean_name),
             });
         }
-        
+
         // Try relative to base directory first
         let relative = self.base_dir.join(path);
         if relative.exists() {
             return Ok(relative);
         }
-        
+
         // Try library search paths
         for lib_path in &self.lib_paths {
             let candidate = lib_path.join(path);
@@ -167,26 +167,24 @@ impl IncludeProcessor {
                 return Ok(candidate);
             }
         }
-        
-        // Try common library locations (LTspice compatibility)
-        let common_paths = [
-            "lib",
-            "models",
-            "../lib",
-            "../models",
-        ];
-        
+
+        // Try common library locations
+        let common_paths = ["lib", "models", "../lib", "../models"];
+
         for common in common_paths {
             let candidate = self.base_dir.join(common).join(path);
             if candidate.exists() {
                 return Ok(candidate);
             }
         }
-        
+
         Err(ParseError::Syntax {
             line: 0,
-            message: format!("Include file not found: {} (searched {})", 
-                clean_name, self.base_dir.display()),
+            message: format!(
+                "Include file not found: {} (searched {})",
+                clean_name,
+                self.base_dir.display()
+            ),
         })
     }
 
@@ -203,11 +201,11 @@ impl IncludeProcessor {
         let mut in_section = false;
         let mut section_content = Vec::new();
         let mut found = false;
-        
+
         for line in content.lines() {
             let trimmed = line.trim();
             let upper = trimmed.to_uppercase();
-            
+
             if upper.starts_with(".LIB") && !upper.starts_with(".LIBS") {
                 // Check if this is our section start
                 let parts: Vec<&str> = trimmed.split_whitespace().collect();
@@ -217,13 +215,14 @@ impl IncludeProcessor {
                     continue;
                 }
             }
-            
+
             if in_section {
                 if upper.starts_with(".ENDL") {
                     // Check if this ends our section
                     let parts: Vec<&str> = trimmed.split_whitespace().collect();
-                    if parts.len() == 1 || 
-                       (parts.len() >= 2 && parts[1].eq_ignore_ascii_case(section)) {
+                    if parts.len() == 1
+                        || (parts.len() >= 2 && parts[1].eq_ignore_ascii_case(section))
+                    {
                         in_section = false;
                         break;
                     }
@@ -231,18 +230,18 @@ impl IncludeProcessor {
                 section_content.push(line);
             }
         }
-        
+
         if !found {
             return Err(ParseError::Syntax {
                 line: 0,
                 message: format!("Library section '{}' not found", section),
             });
         }
-        
+
         if in_section {
             log::warn!("Library section '{}' missing .ENDL", section);
         }
-        
+
         Ok(section_content.join("\n"))
     }
 
@@ -251,7 +250,7 @@ impl IncludeProcessor {
         self.included_files.clear();
         self.current_depth = 0;
     }
-    
+
     /// Set base directory (useful when changing context)
     pub fn set_base_dir(&mut self, path: &Path) {
         self.base_dir = if path.is_file() {
@@ -279,25 +278,25 @@ impl Default for IncludeProcessor {
 pub fn parse_include_directive(line: &str) -> Option<String> {
     let trimmed = line.trim();
     let upper = trimmed.to_uppercase();
-    
+
     if !upper.starts_with(".INCLUDE") {
         return None;
     }
-    
+
     // Skip the .INCLUDE keyword
     let rest = &trimmed[8..].trim();
-    
+
     // Handle quoted paths
     if rest.starts_with('"') {
         if let Some(end) = rest[1..].find('"') {
-            return Some(rest[1..end+1].to_string());
+            return Some(rest[1..end + 1].to_string());
         }
     } else if rest.starts_with('\'') {
         if let Some(end) = rest[1..].find('\'') {
-            return Some(rest[1..end+1].to_string());
+            return Some(rest[1..end + 1].to_string());
         }
     }
-    
+
     // Unquoted - take first word
     Some(rest.split_whitespace().next()?.to_string())
 }
@@ -308,46 +307,49 @@ pub fn parse_include_directive(line: &str) -> Option<String> {
 pub fn parse_lib_directive(line: &str) -> Option<(String, Option<String>)> {
     let trimmed = line.trim();
     let upper = trimmed.to_uppercase();
-    
+
     if !upper.starts_with(".LIB") || upper.starts_with(".LIBS") {
         return None;
     }
-    
+
     let rest = &trimmed[4..].trim();
     let parts: Vec<&str> = rest.split_whitespace().collect();
-    
+
     if parts.is_empty() {
         return None;
     }
-    
+
     // Handle quoted filename
     let filename;
     let section_idx;
-    
+
     if parts[0].starts_with('"') {
         // Find closing quote
         let combined = rest.to_string();
         if let Some(end) = combined[1..].find('"') {
-            filename = combined[1..end+1].to_string();
+            filename = combined[1..end + 1].to_string();
             // Section is after the quoted filename
-            let after_quote = &combined[end+2..].trim();
+            let after_quote = &combined[end + 2..].trim();
             if after_quote.is_empty() {
                 return Some((filename, None));
             }
-            return Some((filename, Some(after_quote.split_whitespace().next()?.to_string())));
+            return Some((
+                filename,
+                Some(after_quote.split_whitespace().next()?.to_string()),
+            ));
         }
         return None;
     } else {
         filename = parts[0].to_string();
         section_idx = 1;
     }
-    
+
     let section = if parts.len() > section_idx {
         Some(parts[section_idx].to_string())
     } else {
         None
     };
-    
+
     Some((filename, section))
 }
 
@@ -380,10 +382,7 @@ mod tests {
             parse_include_directive(".INCLUDE standard.lib"),
             Some("standard.lib".to_string())
         );
-        assert_eq!(
-            parse_include_directive(".MODEL NPN NPN"),
-            None
-        );
+        assert_eq!(parse_include_directive(".MODEL NPN NPN"), None);
     }
 
     #[test]
@@ -398,7 +397,10 @@ mod tests {
         );
         assert_eq!(
             parse_lib_directive(".LIB \"path with spaces.lib\" section"),
-            Some(("path with spaces.lib".to_string(), Some("section".to_string())))
+            Some((
+                "path with spaces.lib".to_string(),
+                Some("section".to_string())
+            ))
         );
     }
 
@@ -422,11 +424,11 @@ mod tests {
 .MODEL LOG_NMOS NMOS(VTO=0.7)
 .ENDL LOGIC
 "#;
-        
+
         let power = proc.extract_section(content, "POWER").unwrap();
         assert!(power.contains("PWR_NMOS"));
         assert!(!power.contains("LOG_NMOS"));
-        
+
         let logic = proc.extract_section(content, "LOGIC").unwrap();
         assert!(logic.contains("LOG_NMOS"));
         assert!(!logic.contains("PWR_NMOS"));
@@ -436,7 +438,7 @@ mod tests {
     fn test_extract_section_not_found() {
         let proc = IncludeProcessor::new(Path::new("."));
         let content = ".LIB POWER\n.MODEL M1 NMOS\n.ENDL POWER";
-        
+
         let result = proc.extract_section(content, "NONEXISTENT");
         assert!(result.is_err());
     }
@@ -446,9 +448,9 @@ mod tests {
         let mut proc = IncludeProcessor::new(Path::new("."));
         proc.add_lib_path(PathBuf::from("/path/to/lib"));
         proc.add_lib_path(PathBuf::from("/path/to/models"));
-        
+
         assert_eq!(proc.lib_paths.len(), 2);
-        
+
         // Adding duplicate should not increase count
         proc.add_lib_path(PathBuf::from("/path/to/lib"));
         assert_eq!(proc.lib_paths.len(), 2);
@@ -459,11 +461,10 @@ mod tests {
         let mut proc = IncludeProcessor::new(Path::new("."));
         proc.current_depth = 5;
         proc.included_files.insert(PathBuf::from("/test/file"));
-        
+
         proc.reset();
-        
+
         assert_eq!(proc.current_depth, 0);
         assert!(proc.included_files.is_empty());
     }
 }
-

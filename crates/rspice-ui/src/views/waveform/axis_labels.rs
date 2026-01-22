@@ -16,7 +16,7 @@ pub fn YAxisLabels(view: ViewState) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
 
-    // Use fixed divisions like professional simulators (5 divisions for Y axis)
+    // Use fixed divisions (5 divisions for Y axis)
     let y_range = view.y_max - view.y_min;
     let y_step = calculate_nice_step_fixed_divisions(y_range, 5);
 
@@ -68,7 +68,7 @@ pub fn XAxisLabels(view: ViewState) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
 
-    // Use fixed divisions like professional simulators (6 divisions for X axis)
+    // Use fixed divisions (6 divisions for X axis)
     let x_range = view.x_max - view.x_min;
     let x_step = calculate_nice_step_fixed_divisions(x_range, 6);
 
@@ -127,7 +127,7 @@ pub fn WaveformGrid(view: ViewState) -> Element {
     let theme: Signal<Theme> = use_context();
     let th = theme.read();
 
-    // Calculate grid step sizes using fixed divisions (professional approach)
+    // Calculate grid step sizes using fixed divisions
     let x_range = view.x_max - view.x_min;
     let y_range = view.y_max - view.y_min;
     let x_step = calculate_nice_step_fixed_divisions(x_range, 6);

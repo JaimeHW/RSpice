@@ -1,6 +1,6 @@
 //! Label Placement System
 //!
-//! Implements Cadence-style smart auto-placement for component labels.
+//! Implements smart auto-placement for component labels.
 //! Features:
 //! - Collision detection with wires and other components
 //! - Multiple candidate positions scored by proximity and overlap

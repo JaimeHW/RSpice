@@ -93,10 +93,10 @@ pub mod handlers {
         }
     }
 
-    /// Import LTspice .raw file
+    /// Import .raw file
     pub async fn import_raw(mut sim_state: Signal<SimulationState>) {
         if let Some(path) = rfd::AsyncFileDialog::new()
-            .add_filter("LTspice Raw", &["raw"])
+            .add_filter("Raw File", &["raw"])
             .add_filter("All Files", &["*"])
             .pick_file()
             .await

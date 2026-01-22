@@ -35,7 +35,7 @@
 //!
 //! # References
 //!
-//! - Spectre Reference Manual: "Model Evaluation Bypassing"
+//! - Reference Manual: "Model Evaluation Bypassing"
 //! - Nagel, L. "SPICE2: A Computer Program to Simulate Semiconductor Circuits"
 
 use std::collections::HashMap;
@@ -150,7 +150,7 @@ impl CachedStamp {
 /// Tracks device terminal voltages and caches evaluation results to skip
 /// redundant calculations when voltages haven't changed significantly.
 ///
-/// Commercial simulators like Cadence Spectre call this "Model Evaluation
+/// Simulators call this "Model Evaluation
 /// Bypassing" and it provides significant speedup for large circuits.
 #[derive(Debug)]
 pub struct ModelBypassManager {
@@ -208,7 +208,7 @@ impl BypassStats {
 impl ModelBypassManager {
     /// Create a new bypass manager with default tolerances
     ///
-    /// Default tolerances match Spectre recommended values:
+    /// Default tolerances match recommended values:
     /// - reltol: 1e-3 (0.1%)
     /// - abstol: 1e-12 (1pV)
     pub fn new() -> Self {

@@ -1,10 +1,10 @@
 //! Raw Waveform Export
 //!
-//! Provides LTspice-compatible .raw file export for simulation results.
+//! Provides standard .raw file export for simulation results.
 //! Supports both binary (fast, compact) and ASCII (human-readable) formats.
 //!
 //! # Format Specification
-//! LTspice raw files have a header followed by data:
+//! .raw files have a header followed by data:
 //! ```text
 //! Title: <simulation name>
 //! Date: <date>
@@ -21,8 +21,8 @@
 //! ```
 
 use crate::Value;
-use std::io::{self, Write, BufWriter};
 use std::fs::File;
+use std::io::{self, BufWriter, Write};
 use std::path::Path;
 
 /// Export format for raw files
@@ -186,7 +186,7 @@ impl RawExporter {
         writeln!(writer, "No. Variables: {}", self.variables.len())?;
         writeln!(writer, "No. Points: {}", self.data.len())?;
         writeln!(writer, "Variables:")?;
-        
+
         for (i, var) in self.variables.iter().enumerate() {
             writeln!(writer, "\t{}\t{}\t{}", i, var.name, var.var_type.as_str())?;
         }
@@ -242,11 +242,11 @@ pub fn export_transient<P: AsRef<Path>>(
     format: RawFormat,
 ) -> io::Result<()> {
     let mut exporter = RawExporter::new_transient("Transient Analysis");
-    
+
     for name in node_names {
         exporter.add_voltage(name);
     }
-    
+
     exporter.add_transient_data(times, waveforms);
     exporter.write_to_file(path, format)
 }
@@ -269,11 +269,11 @@ pub fn export_dc_sweep<P: AsRef<Path>>(
         }],
         data: Vec::new(),
     };
-    
+
     for name in node_names {
         exporter.add_voltage(name);
     }
-    
+
     for (i, &sweep_val) in sweep_values.iter().enumerate() {
         let mut point = vec![sweep_val];
         for result in results {
@@ -281,7 +281,7 @@ pub fn export_dc_sweep<P: AsRef<Path>>(
         }
         exporter.data.push(point);
     }
-    
+
     exporter.write_to_file(path, format)
 }
 
@@ -313,11 +313,11 @@ mod tests {
     fn test_add_data_points() {
         let mut exporter = RawExporter::new_transient("Test");
         exporter.add_voltage("1");
-        
+
         exporter.add_point(vec![0.0, 0.0]);
         exporter.add_point(vec![1e-6, 1.0]);
         exporter.add_point(vec![2e-6, 2.0]);
-        
+
         assert_eq!(exporter.num_points(), 3);
     }
 
@@ -327,7 +327,7 @@ mod tests {
         exporter.add_voltage("out");
         exporter.add_point(vec![0.0, 0.0]);
         exporter.add_point(vec![1e-6, 5.0]);
-        
+
         let output = exporter.to_ascii_string();
         assert!(output.contains("Title: Test"));
         assert!(output.contains("No. Variables: 2"));
@@ -341,10 +341,10 @@ mod tests {
         let mut exporter = RawExporter::new_transient("Test");
         exporter.add_voltage("1");
         exporter.add_point(vec![0.0, 1.0]);
-        
+
         let mut buffer: Vec<u8> = Vec::new();
         exporter.write(&mut buffer, RawFormat::Binary).unwrap();
-        
+
         let output = String::from_utf8_lossy(&buffer);
         assert!(output.contains("Binary:"));
     }

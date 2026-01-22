@@ -30,7 +30,7 @@ pub struct Document {
     /// Whether document has unsaved changes
     pub is_dirty: bool,
 
-    /// Hierarchical navigation state (Cadence-style push-into/pop-out)
+    /// Hierarchical navigation state
     pub hierarchy_nav: HierarchyManager,
 }
 

@@ -1,6 +1,6 @@
 //! PDF/Print Export for Schematic Documentation
 //!
-//! Provides professional schematic export with vector graphics, title blocks,
+//! Provides schematic export with vector graphics, title blocks,
 //! page sizing, and print-quality output. Follows industry standards for
 //! engineering documentation output.
 //!

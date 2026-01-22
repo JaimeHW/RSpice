@@ -1,10 +1,10 @@
 //! Digital Waveform State and Rendering
 //!
-//! Provides professional digital signal display for mixed-signal simulation.
+//! Provides digital signal display for mixed-signal simulation.
 //! Digital waveforms are rendered as step transitions (HIGH/LOW levels) rather
 //! than analog traces, with proper logic-level thresholds and bus grouping.
 //!
-//! This follows the Cadence ViVA/Mixed Signal Waveform Viewer pattern for
+//! This follows standard industry patterns for
 //! displaying digital signals in transient simulation results.
 //!
 //! # Usage

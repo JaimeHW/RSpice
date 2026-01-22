@@ -1,6 +1,6 @@
 //! Tristate Bus and Signal Strength Models
 //!
-//! Implements professional-grade tristate logic with signal strength resolution
+//! Implements advanced tristate logic with signal strength resolution
 //! for mixed-signal simulation. Essential for modeling:
 //! - Tristate buffers and drivers
 //! - I2C, SPI, and other open-drain buses

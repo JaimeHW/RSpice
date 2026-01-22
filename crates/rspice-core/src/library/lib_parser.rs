@@ -1,6 +1,6 @@
 //! SPICE Library File Parser
 //!
-//! Professional-grade parser for foundry .lib files with support for:
+//! Advanced parser for foundry .lib files with support for:
 //! - `.lib/.endl` section syntax (corners, process variants)
 //! - `.include` directive handling
 //! - Model parameter extraction and validation

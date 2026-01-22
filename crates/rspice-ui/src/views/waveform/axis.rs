@@ -51,7 +51,7 @@ pub fn calculate_nice_grid_step_adaptive(range: f64, container_size_px: Option<f
 
 /// Calculate step size with a fixed number of divisions.
 ///
-/// This is the professional simulator approach (LTspice, Cadence Spectre):
+/// This is the standard simulator approach:
 /// Always use a fixed number of divisions regardless of container size.
 /// Uses "nice" step values (1, 2, 5 multiples of powers of 10) for readability.
 pub fn calculate_nice_step_fixed_divisions(range: f64, target_divisions: usize) -> f64 {

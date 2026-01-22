@@ -1,6 +1,6 @@
 //! Tab Bar Component for Multi-Document Interface
 //!
-//! Professional tab bar with document tabs, close buttons, and new document button.
+//! Tab bar with document tabs, close buttons, and new document button.
 //! Provides visual feedback for dirty state and active tab.
 
 use dioxus::prelude::*;

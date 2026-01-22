@@ -364,7 +364,7 @@ impl CrossProbeManager {
     /// Probe from waveform - highlight corresponding schematic elements
     ///
     /// Toggle behavior: if the signal is already highlighted, this clears the highlight.
-    /// This provides professional UX where right-clicking a highlighted trace deselects it.
+    /// This provides seamless UX where right-clicking a highlighted trace deselects it.
     pub fn probe_from_waveform(&mut self, signal: &str) {
         if !self.enabled {
             return;

@@ -1,6 +1,6 @@
 //! Harmonic Balance (HB) Analysis Engine Integration
 //!
-//! This module provides commercial-grade Harmonic Balance analysis for finding
+//! This module provides Harmonic Balance analysis for finding
 //! periodic steady-state solutions in the frequency domain.
 //!
 //! # Overview
