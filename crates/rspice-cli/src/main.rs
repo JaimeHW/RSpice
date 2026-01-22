@@ -1,676 +1,200 @@
 //! RSpice CLI - High-performance SPICE circuit simulator
 //!
 //! Usage:
-//!   rspice <netlist.sp>              Run simulation
-//!   rspice -o output.raw <netlist>   Specify output file
+//!   rspice run <netlist.sp>          Run simulation
+//!   rspice info <netlist.sp>         Show netlist info
+//!   rspice check <netlist.sp>        Validate netlist
+//!   rspice compile-va <model.va>     Compile Verilog-A
+//!   rspice convert <in> <out>        Convert formats
+//!   rspice compare <result> <golden> Compare for CI/CD
 //!   rspice --help                    Show help
 
 use clap::Parser;
-use std::path::PathBuf;
 use std::process::ExitCode;
 
+mod cli;
 mod commands;
 mod output;
+mod report;
 
-/// RSpice - High-performance SPICE circuit simulator
-#[derive(Parser, Debug)]
-#[command(name = "rspice")]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    /// Input netlist file (.sp, .cir, .net)
-    #[arg(value_name = "NETLIST")]
-    input: Option<PathBuf>,
-
-    /// Output file for simulation results
-    #[arg(short, long, value_name = "FILE")]
-    output: Option<PathBuf>,
-
-    /// Output format (raw, csv, json)
-    #[arg(short, long, default_value = "raw")]
-    format: String,
-
-    /// Verbose output
-    #[arg(short, long)]
-    verbose: bool,
-
-    /// Run in batch mode (no interactive prompts)
-    #[arg(short, long)]
-    batch: bool,
-
-    /// Override simulation temperature (Celsius)
-    #[arg(long, value_name = "TEMP")]
-    temp: Option<f64>,
-
-    /// Print version information
-    #[arg(long)]
-    print_version: bool,
-
-    /// Print .MEAS measurement results
-    #[arg(long)]
-    meas: bool,
-
-    /// Quiet mode - suppress progress output (for scripting)
-    #[arg(short, long)]
-    quiet: bool,
-
-    /// Show progress bar with ETA for transient simulation
-    #[arg(long)]
-    progress: bool,
-
-    /// Print node names in output (if available from netlist)
-    #[arg(long)]
-    node_names: bool,
-
-    // === Verilog-A Options ===
-    /// Compile a Verilog-A model file and display model information
-    #[arg(long, value_name = "FILE")]
-    compile_va: Option<PathBuf>,
-
-    /// Additional include directories for Verilog-A compilation
-    #[arg(long = "va-include", value_name = "DIR")]
-    va_includes: Vec<PathBuf>,
-
-    /// Enable strict Verilog-A LRM compliance mode
-    #[arg(long)]
-    va_strict: bool,
-}
+use cli::{Cli, Commands, Config};
 
 fn main() -> ExitCode {
-    let args = Args::parse();
+    let cli = Cli::parse();
 
-    // Initialize logging
-    if args.verbose {
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
+    // Initialize logging based on verbosity
+    let log_level = if cli.verbose {
+        "debug"
+    } else if cli.quiet {
+        "error"
     } else {
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
-    }
+        cli.log_level.as_deref().unwrap_or("warn")
+    };
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(log_level)).init();
 
-    if args.print_version {
-        println!("RSpice version {}", env!("CARGO_PKG_VERSION"));
-        println!("High-performance SPICE circuit simulator");
-        return ExitCode::SUCCESS;
-    }
-
-    match run(args) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            ExitCode::FAILURE
-        }
-    }
-}
-
-fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
-    // Handle Verilog-A compilation command
-    if let Some(ref va_path) = args.compile_va {
-        return run_veriloga_compile(&args, va_path);
-    }
-
-    let input_path = args
-        .input
-        .ok_or("No input file specified. Use --help for usage.")?;
-
-    if !input_path.exists() {
-        return Err(format!("Input file not found: {}", input_path.display()).into());
-    }
-
-    log::info!("Loading netlist: {}", input_path.display());
-
-    // Parse the netlist
-    let netlist = rspice_core::Netlist::parse_file(&input_path)?;
-
-    if args.verbose {
-        println!("Title: {}", netlist.title);
-        println!("Elements: {}", netlist.elements.len());
-        println!("Analyses: {}", netlist.analyses.len());
-    }
-
-    // Create simulation engine
-    let engine = rspice_core::Engine::default();
-
-    // Process all analysis commands in the netlist
-    use rspice_core::netlist::AnalysisCommand;
-
-    for (idx, analysis) in netlist.analyses.iter().enumerate() {
-        if args.verbose {
-            println!(
-                "\nRunning analysis {}/{}: {:?}",
-                idx + 1,
-                netlist.analyses.len(),
-                analysis
-            );
-        }
-
-        match analysis {
-            AnalysisCommand::Op => {
-                if !args.quiet {
-                    println!("Running DC operating point...");
-                }
-                match engine.run_dc_op(&netlist) {
-                    Ok(result) => {
-                        if !args.quiet {
-                            println!("DC Operating Point:");
-                            for i in 1..=result.node_voltages.len().min(10) {
-                                println!("  V({}) = {:.6} V", i, result.voltage(i));
-                            }
-                            if result.node_voltages.len() > 10 {
-                                println!("  ... ({} more nodes)", result.node_voltages.len() - 10);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("DC OP failed: {}", e);
-                    }
-                }
-            }
-            AnalysisCommand::Dc {
-                source,
-                start,
-                stop,
-                step,
-            } => {
-                println!(
-                    "Running DC sweep on {} from {} to {} by {}...",
-                    source, start, stop, step
-                );
-                match engine.run_dc_sweep(&netlist, source, *start, *stop, *step) {
-                    Ok(results) => {
-                        println!("DC Sweep: {} points computed", results.len());
-                        // Export if output path specified
-                        if let Some(ref output_path) = args.output {
-                            let sweep_vals: Vec<f64> = results.iter().map(|(v, _)| *v).collect();
-                            let mut node_waveforms: Vec<Vec<f64>> = Vec::new();
-                            if !results.is_empty() {
-                                let num_nodes = results[0].1.node_voltages.len();
-                                for node in 0..num_nodes.min(5) {
-                                    let waveform: Vec<f64> =
-                                        results.iter().map(|(_, r)| r.voltage(node + 1)).collect();
-                                    node_waveforms.push(waveform);
-                                }
-                            }
-                            let node_names: Vec<String> =
-                                (1..=node_waveforms.len()).map(|i| i.to_string()).collect();
-                            let format = if args.format == "ascii" {
-                                rspice_core::analysis::RawFormat::Ascii
-                            } else {
-                                rspice_core::analysis::RawFormat::Binary
-                            };
-                            rspice_core::analysis::export_dc_sweep(
-                                output_path,
-                                &sweep_vals,
-                                source,
-                                &node_names,
-                                &node_waveforms,
-                                format,
-                            )?;
-                            println!("Results exported to: {}", output_path.display());
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("DC sweep failed: {}", e);
-                    }
-                }
-            }
-            AnalysisCommand::Tran {
-                step,
-                stop,
-                start,
-                max_step: _,
-            } => {
-                let tstart = start.unwrap_or(0.0);
-
-                // Progress indicator for transient simulation
-                use indicatif::{ProgressBar, ProgressStyle};
-
-                let pb = if args.quiet {
-                    ProgressBar::hidden()
-                } else if args.progress {
-                    // Full progress bar with ETA
-                    let eta_steps = ((stop - tstart) / step) as u64;
-                    let pb = ProgressBar::new(eta_steps);
-                    pb.set_style(
-                        ProgressStyle::default_bar()
-                            .template("{spinner:.green} [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
-                            .unwrap()
-                            .progress_chars("#>-"),
-                    );
-                    pb.set_message(format!("Transient: {} to {}", tstart, stop));
-                    pb
-                } else {
-                    // Simple spinner
-                    let pb = ProgressBar::new_spinner();
-                    pb.set_style(
-                        ProgressStyle::default_spinner()
-                            .template("{spinner:.green} {msg}")
-                            .unwrap(),
-                    );
-                    pb.set_message(format!(
-                        "Running transient: {} to {} (step {})...",
-                        tstart, stop, step
-                    ));
-                    pb.enable_steady_tick(std::time::Duration::from_millis(100));
-                    pb
-                };
-
-                let result = engine.run_tran(&netlist, *stop, *step);
-                pb.finish_and_clear();
-
-                match result {
-                    Ok(result) => {
-                        if !args.quiet {
-                            println!(
-                                "✓ Transient complete: {} time points computed",
-                                result.time.len()
-                            );
-                        }
-
-                        // Process .MEAS commands if --meas flag is set
-                        if args.meas {
-                            use std::collections::HashMap;
-
-                            // Build signals map from simulation results
-                            let mut signals: HashMap<String, &[f64]> = HashMap::new();
-                            for (i, waveform) in result.voltages.iter().enumerate() {
-                                let name = format!("V({})", i + 1);
-                                signals.insert(name.clone(), waveform.as_slice());
-                                // Also add lowercase version for case-insensitive matching
-                                signals.insert(name.to_lowercase(), waveform.as_slice());
-                            }
-
-                            // Use measurements from the netlist
-                            let mut meas_engine = rspice_core::MeasureEngine::new();
-                            for meas in &netlist.measurements {
-                                meas_engine.add(meas.clone());
-                            }
-                            let meas_results = meas_engine.evaluate(&result.time, &signals);
-
-                            if !args.quiet {
-                                if meas_results.is_empty() && netlist.measurements.is_empty() {
-                                    println!("  No .MEAS statements found in netlist");
-                                } else {
-                                    println!("  Measurement Results ({}):", meas_results.len());
-                                    for mr in &meas_results {
-                                        if let Some(value) = mr.value {
-                                            println!("    {} = {:.6}", mr.name, value);
-                                        } else {
-                                            println!(
-                                                "    {} = FAILED ({})",
-                                                mr.name,
-                                                mr.error.as_ref().unwrap_or(&String::new())
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Export if output path specified
-                        if let Some(ref output_path) = args.output {
-                            let node_names: Vec<String> =
-                                (1..=result.voltages.len()).map(|i| i.to_string()).collect();
-                            let format = if args.format == "ascii" {
-                                rspice_core::analysis::RawFormat::Ascii
-                            } else {
-                                rspice_core::analysis::RawFormat::Binary
-                            };
-                            rspice_core::analysis::export_transient(
-                                output_path,
-                                &result.time,
-                                &node_names,
-                                &result.voltages,
-                                format,
-                            )?;
-                            if !args.quiet {
-                                println!("  Results exported to: {}", output_path.display());
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("✗ Transient failed: {}", e);
-                    }
-                }
-            }
-            AnalysisCommand::Ac {
-                variation: _,
-                points,
-                start_freq,
-                stop_freq,
-            } => {
-                if !args.quiet {
-                    println!(
-                        "Running AC analysis: {} to {} Hz ({} points)...",
-                        start_freq, stop_freq, points
-                    );
-                }
-
-                // Generate frequency points (decade sweep)
-                let frequencies: Vec<f64> = (0..*points)
-                    .map(|i| {
-                        start_freq
-                            * (stop_freq / start_freq).powf(i as f64 / (*points as f64 - 1.0))
-                    })
-                    .collect();
-
-                match engine.run_ac(&netlist, &frequencies) {
-                    Ok(results) => {
-                        if !args.quiet {
-                            println!("AC Analysis: {} frequency points", results.len());
-                            if args.verbose && !results.is_empty() {
-                                let first = &results[0];
-                                let last = results.last().unwrap();
-                                println!(
-                                    "  @ {:e} Hz: |V(1)| = {:.4}",
-                                    first.frequency,
-                                    first.voltage_magnitude(1)
-                                );
-                                println!(
-                                    "  @ {:e} Hz: |V(1)| = {:.4}",
-                                    last.frequency,
-                                    last.voltage_magnitude(1)
-                                );
-                            }
-                        }
-                        // Bode plot CSV export
-                        if let Some(ref output_path) = args.output {
-                            if args.format == "csv" {
-                                use std::io::Write;
-                                let mut file = std::fs::File::create(output_path)?;
-                                writeln!(file, "Frequency_Hz,Magnitude_dB,Phase_deg")?;
-                                for r in &results {
-                                    let mag_db = 20.0 * r.voltage_magnitude(1).log10();
-                                    let phase_deg =
-                                        r.voltage_phase(1) * 180.0 / std::f64::consts::PI;
-                                    writeln!(
-                                        file,
-                                        "{:e},{:.4},{:.2}",
-                                        r.frequency, mag_db, phase_deg
-                                    )?;
-                                }
-                                if !args.quiet {
-                                    println!("  Bode plot exported to: {}", output_path.display());
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("AC analysis failed: {}", e);
-                    }
-                }
-            }
-            AnalysisCommand::Noise {
-                output_node,
-                input_source,
-                variation: _,
-                points,
-                start_freq,
-                stop_freq,
-                ..
-            } => {
-                if !args.quiet {
-                    println!(
-                        "Running Noise analysis on {} from {} to {} Hz ({} points)...",
-                        output_node, start_freq, stop_freq, points
-                    );
-                }
-
-                // Generate frequency points (decade sweep)
-                let frequencies: Vec<f64> = (0..*points)
-                    .map(|i| {
-                        start_freq
-                            * (stop_freq / start_freq).powf(i as f64 / (*points as f64 - 1.0))
-                    })
-                    .collect();
-
-                match engine.run_ac(&netlist, &frequencies) {
-                    Ok(_ac_results) => {
-                        if !args.quiet {
-                            println!("Noise Analysis: {} frequency points", frequencies.len());
-                            println!("  Output node: {}", output_node);
-                            println!("  Input source: {}", input_source);
-                            // TODO: Integrate with NoiseAnalysis engine for actual noise calculation
-                            println!(
-                                "  (Noise spectral density calculation pending full integration)"
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Noise analysis failed: {}", e);
-                    }
-                }
-            }
-            AnalysisCommand::Step(step_cmd) => {
-                use rspice_core::netlist::{StepSweep, StepTarget};
-
-                // Generate parameter values for the sweep
-                let values: Vec<f64> = match &step_cmd.sweep {
-                    StepSweep::Linear { start, stop, step } => {
-                        let mut vals = Vec::new();
-                        let mut v = *start;
-                        while v <= *stop {
-                            vals.push(v);
-                            v += step;
-                        }
-                        vals
-                    }
-                    StepSweep::Decade {
-                        points_per_decade,
-                        start,
-                        stop,
-                    } => {
-                        let decades = (stop / start).log10();
-                        let num_points = (decades * (*points_per_decade as f64)).ceil() as usize;
-                        (0..=num_points)
-                            .map(|i| start * 10_f64.powf(i as f64 / *points_per_decade as f64))
-                            .take_while(|&v| v <= *stop)
-                            .collect()
-                    }
-                    StepSweep::Octave {
-                        points_per_octave,
-                        start,
-                        stop,
-                    } => {
-                        let octaves = (stop / start).log2();
-                        let num_points = (octaves * (*points_per_octave as f64)).ceil() as usize;
-                        (0..=num_points)
-                            .map(|i| start * 2_f64.powf(i as f64 / *points_per_octave as f64))
-                            .take_while(|&v| v <= *stop)
-                            .collect()
-                    }
-                    StepSweep::List(vals) => vals.clone(),
-                };
-
-                if !args.quiet {
-                    let target_name = match step_cmd.target {
-                        StepTarget::Param => format!("PARAM {}", step_cmd.name),
-                        StepTarget::Device => format!("device {}", step_cmd.name),
-                        StepTarget::Model => format!("MODEL {}", step_cmd.name),
-                        StepTarget::Temp => "TEMP".to_string(),
-                    };
-                    println!(
-                        "Running .STEP sweep on {}: {} values ({:.3e} to {:.3e})...",
-                        target_name,
-                        values.len(),
-                        values.first().unwrap_or(&0.0),
-                        values.last().unwrap_or(&0.0)
-                    );
-                }
-
-                // Run DC OP for each parameter value
-                for (i, value) in values.iter().enumerate() {
-                    if args.verbose && !args.quiet {
-                        println!(
-                            "  Step {}/{}: {} = {:.4e}",
-                            i + 1,
-                            values.len(),
-                            step_cmd.name,
-                            value
-                        );
-                    }
-                    // Note: actual parameter substitution would modify the netlist
-                    // For now, we just run the analysis (demonstration)
-                    match engine.run_dc_op(&netlist) {
-                        Ok(result) => {
-                            if args.verbose && !args.quiet {
-                                println!("    V(1) = {:.6} V", result.voltage(1));
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("  Step {} failed: {}", i + 1, e);
-                        }
-                    }
-                }
-
-                if !args.quiet {
-                    println!("✓ .STEP sweep complete: {} iterations", values.len());
-                }
-            }
-            _ => {
-                if !args.quiet {
-                    println!("Analysis type {:?} not yet fully supported", analysis);
-                }
-            }
-        }
-    }
-
-    if netlist.analyses.is_empty() {
-        // Default: run DC operating point
-        if !args.quiet {
-            println!("No analysis commands - running default DC OP...");
-        }
-        match engine.run_dc_op(&netlist) {
-            Ok(result) => {
-                if !args.quiet {
-                    println!("DC Operating Point:");
-                    for i in 1..=result.node_voltages.len().min(10) {
-                        println!("  V({}) = {:.6} V", i, result.voltage(i));
-                    }
-                }
-            }
+    // Load configuration
+    let config = if let Some(ref config_path) = cli.config {
+        match Config::load_file(config_path) {
+            Ok(c) => c,
             Err(e) => {
-                eprintln!("DC OP failed: {}", e);
+                eprintln!("Error loading config: {}", e);
+                return ExitCode::from(78); // CONFIG_ERROR
             }
         }
-    }
+    } else {
+        Config::load()
+    };
 
-    if !args.quiet {
-        println!("\nSimulation complete.");
+    // Execute command
+    let result: Result<(), cli::CliError> = match cli.command {
+        Commands::Run(args) => commands::run(args, &config, cli.verbose, cli.quiet),
+        Commands::Info(args) => commands::info(args, cli.verbose, cli.quiet),
+        Commands::CompileVa(args) => commands::compile_va(args, cli.verbose, cli.quiet),
+        Commands::Check(args) => commands::check(args, cli.verbose, cli.quiet),
+        Commands::Convert(args) => commands::convert(args, cli.verbose, cli.quiet),
+        Commands::Compare(args) => {
+            let compare_args = commands::compare::CompareArgs {
+                result: args.result,
+                golden: args.golden,
+                abstol: args.abstol,
+                reltol: args.reltol,
+                format: if args.json {
+                    cli::OutputFormat::Json
+                } else {
+                    cli::OutputFormat::Raw
+                },
+                variables: args.variables,
+                fail_fast: args.fail_fast,
+            };
+            commands::compare::execute(compare_args, cli.verbose, cli.quiet)
+        }
+    };
+
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(ref e) => {
+            eprintln!("Error: {}", e);
+            if let Some(suggestion) = e.suggestion() {
+                eprintln!("Suggestion: {}", suggestion);
+            }
+            e.exit_code().into()
+        }
     }
-    Ok(())
 }
 
-/// Compile a Verilog-A model file and display model information
-fn run_veriloga_compile(args: &Args, va_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    use rspice_veriloga::{CompilerOptions, VerilogACompiler};
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
 
-    if !va_path.exists() {
-        return Err(format!("Verilog-A file not found: {}", va_path.display()).into());
+    #[test]
+    fn test_cli_help() {
+        let result = Cli::try_parse_from(["rspice", "run", "test.sp"]);
+        assert!(result.is_ok());
     }
 
-    // Configure compiler options
-    let mut options = CompilerOptions::default();
-    options.strict_mode = args.va_strict;
-
-    // Add include paths
-    for include_dir in &args.va_includes {
-        options.include_paths.push(include_dir.clone());
+    #[test]
+    fn test_cli_version() {
+        let result = Cli::try_parse_from(["rspice", "--version"]);
+        assert!(result.is_err());
     }
 
-    // Add the source file's directory as an include path
-    if let Some(parent) = va_path.parent() {
-        options.include_paths.push(parent.to_path_buf());
-    }
+    #[test]
+    fn test_run_command_parsing() {
+        let cli = Cli::try_parse_from([
+            "rspice",
+            "run",
+            "circuit.sp",
+            "-o",
+            "output.raw",
+            "--temp",
+            "85",
+            "--meas",
+        ])
+        .unwrap();
 
-    if args.verbose {
-        println!("Verilog-A Compiler Options:");
-        println!("  Strict mode: {}", options.strict_mode);
-        println!("  Include paths: {:?}", options.include_paths);
-        println!();
-    }
-
-    // Compile the model
-    println!("Compiling: {}", va_path.display());
-    let compiler = VerilogACompiler::new(options);
-    let model = compiler.compile_file(va_path)?;
-
-    // Display model information
-    println!();
-    println!("╔══════════════════════════════════════════════════════════════════╗");
-    println!("║  Verilog-A Model: {:<48} ║", model.name);
-    println!("╚══════════════════════════════════════════════════════════════════╝");
-    println!();
-
-    // Terminals
-    println!("Terminals ({}):", model.num_terminals);
-    for (i, name) in model.terminal_names.iter().enumerate() {
-        println!("  [{:2}] {}", i, name);
-    }
-    println!();
-
-    // Internal nodes
-    if model.internal_nodes > 0 {
-        println!("Internal Nodes: {}", model.internal_nodes);
-        println!();
-    }
-
-    // Parameters
-    if !model.parameters.is_empty() {
-        println!("Parameters ({}):", model.parameters.len());
-        println!(
-            "  {:<20} {:>15} {:>12} {:>12}",
-            "Name", "Default", "Min", "Max"
-        );
-        println!("  {:-<20} {:-^15} {:-^12} {:-^12}", "", "", "", "");
-        for param in &model.parameters {
-            let min_str = param.min.map_or("-".to_string(), |v| format!("{:.4e}", v));
-            let max_str = param.max.map_or("-".to_string(), |v| format!("{:.4e}", v));
-            println!(
-                "  {:<20} {:>15.6e} {:>12} {:>12}",
-                param.name, param.default, min_str, max_str
-            );
+        match cli.command {
+            Commands::Run(args) => {
+                assert_eq!(args.input.to_str(), Some("circuit.sp"));
+                assert_eq!(
+                    args.output.as_ref().and_then(|p| p.to_str()),
+                    Some("output.raw")
+                );
+                assert_eq!(args.temp, Some(85.0));
+                assert!(args.meas);
+            }
+            _ => panic!("Expected Run command"),
         }
-        println!();
     }
 
-    // Branch equations (stamp programs)
-    println!("Branch Equations: {}", model.stamp_programs.len());
-    if args.verbose {
-        for (i, program) in model.stamp_programs.iter().enumerate() {
-            println!(
-                "  [{}] {} stamp locations, {} jacobian entries",
-                i,
-                program.stamp_locations.len(),
-                program.jacobian_programs.len()
-            );
+    #[test]
+    fn test_info_command_parsing() {
+        let cli = Cli::try_parse_from(["rspice", "info", "circuit.sp", "--detailed", "--models"])
+            .unwrap();
+
+        match cli.command {
+            Commands::Info(args) => {
+                assert!(args.detailed);
+                assert!(args.models);
+            }
+            _ => panic!("Expected Info command"),
         }
-        println!();
     }
 
-    // Summary
-    println!("✓ Compilation successful");
-    println!();
-    println!("Usage in SPICE netlist:");
-    println!(
-        "  .VERILOGA {}",
-        va_path.file_name().unwrap().to_string_lossy()
-    );
+    #[test]
+    fn test_check_command_parsing() {
+        let cli = Cli::try_parse_from([
+            "rspice",
+            "check",
+            "circuit.sp",
+            "--connectivity",
+            "--strict",
+        ])
+        .unwrap();
 
-    // Generate example device instantiation
-    let terminal_list: String = model
-        .terminal_names
-        .iter()
-        .map(|s| s.as_str())
-        .collect::<Vec<_>>()
-        .join(" ");
-    println!("  X1 {} {}", terminal_list, model.name);
-
-    if !model.parameters.is_empty() {
-        let param_example = model
-            .parameters
-            .first()
-            .map(|p| format!(".MODEL {} VERILOGA({}={})", model.name, p.name, p.default))
-            .unwrap_or_default();
-        println!("  {}", param_example);
+        match cli.command {
+            Commands::Check(args) => {
+                assert!(args.connectivity);
+                assert!(args.strict);
+            }
+            _ => panic!("Expected Check command"),
+        }
     }
 
-    Ok(())
+    #[test]
+    fn test_compare_command_parsing() {
+        let cli = Cli::try_parse_from([
+            "rspice",
+            "compare",
+            "result.csv",
+            "golden.csv",
+            "--abstol",
+            "1e-6",
+            "--json",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Compare(args) => {
+                assert_eq!(args.result.to_str(), Some("result.csv"));
+                assert_eq!(args.golden.to_str(), Some("golden.csv"));
+                assert!(args.json);
+            }
+            _ => panic!("Expected Compare command"),
+        }
+    }
+
+    #[test]
+    fn test_global_verbose_flag() {
+        let cli = Cli::try_parse_from(["rspice", "-v", "run", "test.sp"]).unwrap();
+        assert!(cli.verbose);
+        assert!(!cli.quiet);
+    }
+
+    #[test]
+    fn test_global_quiet_flag() {
+        let cli = Cli::try_parse_from(["rspice", "-q", "run", "test.sp"]).unwrap();
+        assert!(!cli.verbose);
+        assert!(cli.quiet);
+    }
 }
