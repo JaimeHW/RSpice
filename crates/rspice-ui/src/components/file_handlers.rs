@@ -234,6 +234,8 @@ pub mod handlers {
                             // Set needs_fit flag - the Schematic component will perform
                             // zoom_to_fit after rendering with correct viewport dimensions
                             loaded.needs_fit = true;
+                            // Reset undo history to start fresh with loaded content
+                            loaded.needs_history_reset = true;
 
                             schematic.set(loaded.clone());
 

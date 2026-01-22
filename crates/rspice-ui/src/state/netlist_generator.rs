@@ -79,6 +79,22 @@ pub fn generate_netlist(schematic: &SchematicState) -> NetlistResult {
     }
 }
 
+/// Check if point lies on a horizontal or vertical wire segment
+/// Used for T-junction detection (when a wire endpoint lands on another wire's segment)
+fn point_on_segment(p: Point, a: Point, b: Point) -> bool {
+    // Horizontal segment
+    if a.y == b.y && p.y == a.y {
+        let (min_x, max_x) = if a.x < b.x { (a.x, b.x) } else { (b.x, a.x) };
+        return p.x > min_x && p.x < max_x; // Exclusive of endpoints
+    }
+    // Vertical segment
+    if a.x == b.x && p.x == a.x {
+        let (min_y, max_y) = if a.y < b.y { (a.y, b.y) } else { (b.y, a.y) };
+        return p.y > min_y && p.y < max_y; // Exclusive of endpoints
+    }
+    false
+}
+
 /// Build connectivity graph using flood-fill algorithm
 /// Returns: (point -> net_name, net_name -> points)
 ///
@@ -128,6 +144,52 @@ fn build_connectivity_graph(
             // Wire endpoints are connected to each other
             adjacency.entry(*first).or_default().insert(*last);
             adjacency.entry(*last).or_default().insert(*first);
+        }
+    }
+
+    // =========================================================================
+    // T-JUNCTION DETECTION: Commercial-grade wire connectivity
+    // =========================================================================
+    // If a wire endpoint lands ON another wire's segment (but not at its
+    // endpoint), this creates a T-junction. We need to:
+    // 1. Add that point to connection_points
+    // 2. Connect it to both endpoints of the wire segment it's on
+    // =========================================================================
+    for wire_a in &schematic.wires {
+        let endpoints_a = [wire_a.points.first(), wire_a.points.last()];
+
+        for endpoint_opt in endpoints_a {
+            let Some(&endpoint) = endpoint_opt else {
+                continue;
+            };
+
+            // Check if this endpoint lies ON any other wire's segment
+            for wire_b in &schematic.wires {
+                if wire_a.id == wire_b.id {
+                    continue; // Skip self
+                }
+
+                // Check each segment of wire_b
+                for segment in wire_b.points.windows(2) {
+                    let seg_start = segment[0];
+                    let seg_end = segment[1];
+
+                    // Skip if endpoint is at segment endpoints (already handled)
+                    if endpoint == seg_start || endpoint == seg_end {
+                        continue;
+                    }
+
+                    // Check if endpoint lies ON this segment (T-junction)
+                    if point_on_segment(endpoint, seg_start, seg_end) {
+                        // Found a T-junction! Connect endpoint to segment endpoints
+                        connection_points.insert(endpoint);
+                        adjacency.entry(endpoint).or_default().insert(seg_start);
+                        adjacency.entry(endpoint).or_default().insert(seg_end);
+                        adjacency.entry(seg_start).or_default().insert(endpoint);
+                        adjacency.entry(seg_end).or_default().insert(endpoint);
+                    }
+                }
+            }
         }
     }
 

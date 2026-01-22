@@ -8,9 +8,11 @@ use super::button::{Button, ButtonVariant};
 use super::confirm_modal::{SaveDialogResult, UnsavedChangesModal};
 use super::file_handlers;
 use super::icons::{Icon, IconType};
+use crate::state::dc_annotation::Annotation;
+use crate::state::pdf_export::{PdfExportConfig, SvgExporter, TitleBlock};
 use crate::state::simulation_command::SimulationConfig;
 use crate::state::{
-    generate_netlist, run_simulation, ConsoleMessage, SchematicState, SimulationResult,
+    generate_netlist, run_simulation, ConsoleMessage, Point, SchematicState, SimulationResult,
     SimulationState, WaveformData,
 };
 use crate::theme::Theme;
@@ -23,6 +25,10 @@ enum PendingAction {
     /// Open a schematic file
     Open,
 }
+
+// DC annotation placement is now handled by the commercial-grade
+// dc_annotation_placement module. See state/dc_annotation_placement.rs
+// for the AnnotationPlacer implementation.
 
 /// Main application toolbar
 #[component]
@@ -219,6 +225,82 @@ pub fn Toolbar() -> Element {
                     },
                     "Save"
                 }
+                // Export SVG - Professional schematic export for documentation
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    icon: rsx! { Icon { icon: IconType::Export, size: 16 } },
+                    title: "Export Schematic as SVG",
+                    onclick: move |_| {
+                        spawn(async move {
+                            // Use file dialog to get save path
+                            let dialog = rfd::AsyncFileDialog::new()
+                                .set_title("Export Schematic as SVG")
+                                .add_filter("SVG Files", &["svg"])
+                                .set_file_name("schematic.svg")
+                                .save_file()
+                                .await;
+
+                            if let Some(handle) = dialog {
+                                let path = handle.path();
+
+                                // Generate SVG using professional export config
+                                let sch = schematic.read();
+                                let doc_name = sch.current_file
+                                    .as_ref()
+                                    .and_then(|p| p.file_stem())
+                                    .map(|n| n.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| "Untitled".to_string());
+
+                                // Create export config with title block
+                                let config = PdfExportConfig::a4_landscape()
+                                    .with_title_block(TitleBlock::new("RSpice", &doc_name))
+                                    .with_margin(15.0);
+
+                                let mut exporter = SvgExporter::new(config);
+                                exporter.begin_document();
+                                exporter.add_border();
+                                exporter.add_title_block();
+
+                                // Add wires
+                                let gs = sch.grid_size as f64;
+                                for wire in &sch.wires {
+                                    let points: Vec<(f64, f64)> = wire.points.iter()
+                                        .map(|p| (p.x as f64 * gs / 20.0 + 50.0, p.y as f64 * gs / 20.0 + 50.0))
+                                        .collect();
+                                    exporter.add_wire(&points);
+                                }
+
+                                // Add component labels
+                                for comp in &sch.components {
+                                    let x = comp.pos.x as f64 * gs / 20.0 + 50.0;
+                                    let y = comp.pos.y as f64 * gs / 20.0 + 50.0;
+                                    exporter.add_text(x, y - 10.0, &comp.name, "text-label");
+                                    exporter.add_text(x, y + 5.0, &comp.value, "text-value");
+                                }
+
+                                let svg_content = exporter.export_svg();
+                                drop(sch);
+
+                                // Write to file
+                                match std::fs::write(path, svg_content) {
+                                    Ok(_) => {
+                                        sim_state.write().console_messages.push(
+                                            ConsoleMessage::success(format!("Exported SVG to {}", path.display()))
+                                        );
+                                        log::info!("Exported schematic to SVG: {}", path.display());
+                                    }
+                                    Err(e) => {
+                                        sim_state.write().console_messages.push(
+                                            ConsoleMessage::error(format!("Failed to export SVG: {}", e))
+                                        );
+                                        log::error!("Failed to export SVG: {}", e);
+                                    }
+                                }
+                            }
+                        });
+                    },
+                    "Export"
+                }
             }
 
             // Divider
@@ -338,6 +420,18 @@ pub fn Toolbar() -> Element {
                             // Clone data needed for async block
                             let netlist_for_sim = netlist_content.clone();
                             let nets_for_ground = netlist_result.nets.clone();
+                            // Clone point_to_net for component-terminal annotation positions (Spectre-style)
+                            let point_to_net = netlist_result.point_to_net.clone();
+                            // Clone component data for commercial-grade annotation placement
+                            // components_for_exclusion: Full Component data for exclusion zone building
+                            // component_positions: Just positions for segment distance calculation
+                            // wires_for_exclusion: Wire data for accurate label placement calculation
+                            let components_for_exclusion: Vec<crate::state::Component> = schematic.read().components.clone();
+                            let wires_for_exclusion: Vec<crate::state::Wire> = schematic.read().wires.clone();
+                            let component_positions: Vec<Point> = components_for_exclusion.iter()
+                                .map(|c| c.pos)
+                                .collect();
+                            let grid_size_for_ann = schematic.read().grid_size;
 
                             // Run simulation in background thread to prevent UI freeze
                             // spawn_blocking is essential for CPU-bound work in async context
@@ -395,6 +489,94 @@ pub fn Toolbar() -> Element {
                                         log::info!("Ground reference node: {}", ground);
                                     } else {
                                         state.ground_node = None;
+                                    }
+
+                                    // ============================================================
+                                    // DC Annotation Population (Professional Cadence Spectre-style)
+                                    // ============================================================
+                                    // Populate DC annotations from simulation results. Uses the
+                                    // dc_op results (node voltages) and maps them to schematic
+                                    // positions using the nets data structure.
+                                    // ============================================================
+                                    if let Some(ref dc_op) = result.dc_op {
+                                        log::info!("Populating DC annotations from {} operating points", dc_op.len());
+
+                                        // COMMERCIAL-GRADE: Use new AnnotationPlacer with radial search algorithm
+                                        // This ensures annotations never overlap schematic geometry
+                                        use crate::state::dc_annotation_placement::AnnotationPlacer;
+                                        let mut placer = AnnotationPlacer::from_schematic(
+                                            &components_for_exclusion,
+                                            &wires_for_exclusion,
+                                            grid_size_for_ann,
+                                        );
+
+                                        // Build net name → position map using point_to_net
+                                        // point_to_net contains component terminal positions - use those directly
+                                        let mut net_positions: std::collections::HashMap<String, Point> =
+                                            std::collections::HashMap::new();
+
+                                        // Invert point_to_net: for each net, collect all its points
+                                        let mut net_to_points: std::collections::HashMap<String, Vec<Point>> =
+                                            std::collections::HashMap::new();
+                                        for (point, net_name) in &point_to_net {
+                                            net_to_points.entry(net_name.clone()).or_default().push(*point);
+                                        }
+
+                                        // COMMERCIAL-GRADE: Wire-centric anchor selection (Cadence Virtuoso-style)
+                                        // Generates wire segment midpoints with component clearance
+                                        // filtering, prioritizing horizontal segments over terminals
+                                        use crate::state::dc_annotation_placement::select_commercial_anchor_point;
+
+                                        for (net_name, points) in &net_to_points {
+                                            if points.is_empty() {
+                                                continue;
+                                            }
+
+                                            // Use commercial-grade anchor selection:
+                                            // 1. Generate wire midpoints that are horizontally clear of components
+                                            // 2. Prefer horizontal wire segments (best visual alignment)
+                                            // 3. Fall back to component terminals only if no clear midpoints
+                                            let best_point = select_commercial_anchor_point(
+                                                points,
+                                                &wires_for_exclusion,
+                                                &component_positions,
+                                            ).unwrap_or(points[0]);
+
+                                            net_positions.insert(net_name.clone(), best_point);
+                                            log::info!("  Net {} annotation anchor at ({}, {}) - commercial-grade wire-centric selection",
+                                                net_name, best_point.x, best_point.y);
+                                        }
+
+                                        // Clear existing annotations and populate with new DC results
+                                        state.dc_annotations.clear();
+
+                                        // Process each DC operating point voltage using radial search placement
+                                        for (net_name, voltage) in dc_op {
+                                            // Direct lookup - net names from DC OP match netlist generator names
+                                            let position = net_positions.get(net_name.as_str());
+
+                                            if let Some(&pos) = position {
+                                                // Use AnnotationPlacer to find collision-free position
+                                                let label_text = crate::state::dc_annotation::format_voltage(*voltage);
+                                                let offset = placer.find_optimal_position(pos, &label_text);
+
+                                                let mut annotation = Annotation::voltage(pos, *voltage, net_name.clone());
+                                                annotation.offset = offset;
+
+                                                // Mark this annotation as placed for subsequent annotations
+                                                placer.mark_placed(pos, offset, &label_text);
+
+                                                state.dc_annotations.voltages.insert(
+                                                    net_name.clone(),
+                                                    annotation,
+                                                );
+                                                log::info!("  DC annotation: {} = {:.4}V at ({}, {}) offset ({:.1}, {:.1}) - collision-free",
+                                                    net_name, voltage, pos.x, pos.y, offset.0, offset.1);
+                                            }
+                                        }
+
+                                        log::info!("DC annotations populated: {} voltage annotations",
+                                            state.dc_annotations.voltages.len());
                                     }
 
                                     log::info!("Total waveforms after simulation: {}", state.waveforms.len());

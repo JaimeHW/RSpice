@@ -12,8 +12,10 @@ use crate::components::confirm_modal::{SaveDialogResult, UnsavedChangesModal};
 use crate::components::context_menu::{schematic_context_menu, canvas_context_menu, ContextMenu, MenuAction};
 use crate::components::file_handlers;
 use crate::components::tab_bar::DocumentTabBar;
+use crate::components::annotation_overlay::AnnotationOverlay;
 use crate::state::cross_probing::CrossProbeManager;
-use crate::state::{CanvasFocusState, ComponentType, ConsoleMessage, DocumentManager, Point, Rotation, SchematicState, SimulationState, Tool, SchematicHistory};
+use crate::state::dc_annotation::{Annotation, AnnotationMode};
+use crate::state::{CanvasFocusState, ComponentType, ConsoleMessage, DocumentManager, Point, Rotation, SchematicState, SimulationState, Tool, SchematicHistory, Viewport};
 use crate::theme::Theme;
 use crate::views::symbol_assets;
 
@@ -186,6 +188,18 @@ pub fn Schematic() -> Element {
         }
     }
     
+    // Handle needs_history_reset flag - reset undo history after loading a file
+    // This ensures undo doesn't revert to a previous/empty schematic
+    {
+        let needs_reset = schematic.read().needs_history_reset;
+        if needs_reset {
+            // Clear the flag first
+            schematic.write().needs_history_reset = false;
+            // Reset history with the loaded schematic as the new base state
+            history.set(SchematicHistory::new(schematic.read().clone(), 100));
+        }
+    }
+    
     // Global keyboard shortcut handler - works regardless of which panel has focus
     // Professional simulators use window-level shortcuts for consistent behavior
     use_effect(move || {
@@ -314,11 +328,65 @@ pub fn Schematic() -> Element {
                         // Auto-focus so keyboard shortcuts work immediately on startup
                         canvas_focus.read().focus();
                         
-                        // Capture canvas dimensions for zoom_to_fit
+                        // Initial canvas dimensions capture
                         let mounted = evt.data();
                         spawn(async move {
                             if let Ok(rect) = mounted.get_client_rect().await {
                                 canvas_size.set((rect.width(), rect.height()));
+                            }
+                        });
+                        
+                        // Set up ResizeObserver via JavaScript for continuous size tracking
+                        // This is essential for proper viewport culling - without it, wires
+                        // disappear during pan/zoom because viewport bounds use stale dimensions
+                        let _ = document::eval(r#"
+                            (function() {
+                                var wrapper = document.getElementById('schematic-canvas-wrapper');
+                                if (!wrapper) return;
+                                
+                                // Store last known size to avoid redundant updates
+                                window.__rspice_canvas_size = { w: 0, h: 0 };
+                                
+                                // ResizeObserver for instant resize detection
+                                if (!window.__rspice_resize_observer) {
+                                    window.__rspice_resize_observer = new ResizeObserver(function(entries) {
+                                        for (var entry of entries) {
+                                            var rect = entry.contentRect;
+                                            if (rect.width > 0 && rect.height > 0) {
+                                                window.__rspice_canvas_size.w = rect.width;
+                                                window.__rspice_canvas_size.h = rect.height;
+                                            }
+                                        }
+                                    });
+                                    window.__rspice_resize_observer.observe(wrapper);
+                                }
+                            })();
+                        "#);
+                        
+                        // Periodic polling to sync JS resize state with Rust signal
+                        // This is a fallback mechanism since we can't directly call into Dioxus from JS
+                        let mounted_for_poll = evt.data();
+                        spawn(async move {
+                            loop {
+                                // Poll every 200ms for size changes
+                                // Use platform-specific sleep
+                                #[cfg(target_arch = "wasm32")]
+                                {
+                                    gloo_timers::future::TimeoutFuture::new(200).await;
+                                }
+                                #[cfg(not(target_arch = "wasm32"))]
+                                {
+                                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                                }
+                                if let Ok(rect) = mounted_for_poll.get_client_rect().await {
+                                    let w = rect.width();
+                                    let h = rect.height();
+                                    let (old_w, old_h) = *canvas_size.read();
+                                    // Only update if size actually changed (avoids unnecessary re-renders)
+                                    if (w - old_w).abs() > 1.0 || (h - old_h).abs() > 1.0 {
+                                        canvas_size.set((w, h));
+                                    }
+                                }
                             }
                         });
                     },
@@ -963,6 +1031,8 @@ pub fn Schematic() -> Element {
                                 push_edit(schematic.read().clone(), &format!("Add {:?}", k));
                             }
                             Tool::Wire => {
+                                // Wire drawing is transient - cancel with ESC
+                                // Undo only affects completed wires (professional behavior)
                                 if s.wire_drawing.active {
                                     // Additional clicks add vertices (multi-segment wires)
                                     s.extend_wire(gp);
@@ -1176,6 +1246,7 @@ pub fn Schematic() -> Element {
                         line { x1: "0", y1: "-30", x2: "0", y2: "30", stroke: "{th.accent_primary()}", stroke_width: "1" }
 
                         // Wires - render with preview positions during component or wire drag
+                        // VIEWPORT CULLING: Only render wires that are visible in the current view
                         {
                             let d = *drag.read();
                             let comp_dragging_id = if d.active { d.component_id } else { None };
@@ -1201,8 +1272,26 @@ pub fn Schematic() -> Element {
                             // Get net mapping from schematic (populated after simulation)
                             let net_map = schematic.read().net_mapping.clone();
                             
+                            
+                            // VIEWPORT CULLING: Re-enabled with proper dynamic canvas_size tracking
+                            // Canvas dimensions are now updated via ResizeObserver polling
+                            let (canvas_w, canvas_h) = *canvas_size.read();
+                            let current_pan = *pan.read();
+                            let current_zoom = *zoom.read();
+                            
+                            // Compute viewport bounds in grid coordinates
+                            let viewport = crate::state::viewport::Viewport::from_transform(
+                                canvas_w, canvas_h, current_pan, current_zoom, gs
+                            );
+                            
+                            // Filter to only wires visible in the current viewport (performance optimization)
+                            let visible_wires: Vec<_> = schematic.read().wires.iter()
+                                .filter(|w| viewport.is_wire_visible(&w.points))
+                                .cloned()
+                                .collect();
+                            
                             rsx! {
-                                for wire in schematic.read().wires.iter() {
+                                for wire in visible_wires.iter() {
                                     // Check if wire is in the highlighted net (probe tool or cross-probe)
                                     {
                                         // Check probe tool highlight
@@ -1533,6 +1622,7 @@ pub fn Schematic() -> Element {
                         }
 
                         // Components - render at current position, or with drag offset if being dragged
+                        // VIEWPORT CULLING: Only render components visible in the current view
                         {
                             // Pre-compute drag state before the for loop (RSX for doesn't allow let statements)
                             let d = *drag.read();
@@ -1550,8 +1640,21 @@ pub fn Schematic() -> Element {
                             let gs = schematic.read().grid_size;
                             let selection = schematic.read().selection.clone();
                             
+                            // VIEWPORT CULLING: Compute visible region for O(visible) rendering
+                            let (canvas_w, canvas_h) = *canvas_size.read();
+                            let (pan_x, pan_y) = *pan.read();
+                            let current_zoom = *zoom.read();
+                            let viewport = Viewport::from_transform(canvas_w, canvas_h, (pan_x, pan_y), current_zoom, gs);
+                            
+                            // Pre-filter components for visibility (professional O(visible) rendering)
+                            // Component symbols typically span ~60 grid units, so use half_size of 30
+                            let visible_components: Vec<_> = schematic.read().components.iter()
+                                .filter(|c| viewport.is_component_visible(c.pos, 40))
+                                .cloned()
+                                .collect();
+                            
                             rsx! {
-                                for comp in schematic.read().components.iter() {
+                                for comp in visible_components.iter() {
                                     {
                                         // Compute smart label positions using LabelPlacer
                                         let wires: Vec<_> = schematic.read().wires.clone();
@@ -1618,6 +1721,19 @@ pub fn Schematic() -> Element {
                                 name: label.name.clone(),
                                 grid_size: schematic.read().grid_size,
                             }
+                        }
+                        
+                        // ====================================================================
+                        // DC Annotation Overlay (Cadence Spectre-style operating point display)
+                        // ====================================================================
+                        // Renders node voltages and branch currents directly on the schematic
+                        // when DC annotation mode is enabled. This is a professional feature
+                        // found in commercial simulators like Cadence Virtuoso ADE.
+                        // Note: sim_state is accessed from Schematic component props above.
+                        // ====================================================================
+                        DcAnnotationLayer {
+                            grid_size: schematic.read().grid_size,
+                            current_zoom: *zoom.read(),
                         }
 
                         // Placement preview
@@ -1983,6 +2099,34 @@ pub fn SchematicToolbar(schematic: Signal<SchematicState>) -> Element {
                     };
                 },
                 "{pin_btn_label}"
+            }
+            
+            // DC Annotation toggle (Cadence Spectre: Results → Annotate → DC Operating Point)
+            {
+                let mut sim_state: Signal<crate::state::SimulationState> = use_context();
+                let mode = sim_state.read().dc_annotations.mode;
+                let dc_label = match mode {
+                    crate::state::dc_annotation::AnnotationMode::Hidden => "DC: Off",
+                    crate::state::dc_annotation::AnnotationMode::Voltages => "DC: V",
+                    crate::state::dc_annotation::AnnotationMode::Currents => "DC: I",
+                    crate::state::dc_annotation::AnnotationMode::All => "DC: All",
+                };
+                let dc_active = !matches!(mode, crate::state::dc_annotation::AnnotationMode::Hidden);
+                let dc_bg = if dc_active { th.accent_primary() } else { th.surface() };
+                let dc_color = if dc_active { "#fff".to_string() } else { th.text_primary().to_string() };
+                
+                rsx! {
+                    button {
+                        style: "padding: 4px 8px; background: {dc_bg}; border: 1px solid {th.border()}; border-radius: 4px; color: {dc_color}; font-size: 12px; cursor: pointer;",
+                        title: "Cycle DC annotation mode (Spectre: Results → Annotate → DC Operating Point)",
+                        onclick: move |_| {
+                            let current_mode = sim_state.read().dc_annotations.mode;
+                            let new_mode = current_mode.cycle();
+                            sim_state.write().dc_annotations.mode = new_mode;
+                        },
+                        "{dc_label}"
+                    }
+                }
             }
             
             div { style: "flex: 1;" }
@@ -2638,6 +2782,64 @@ fn WirePreviewSvg(schematic: Signal<crate::state::SchematicState>) -> Element {
                     }
                 }
             }
+        }
+    }
+}
+
+// =============================================================================
+// DC Annotation Layer Component
+// =============================================================================
+// Separate component for DC annotation overlay to ensure hooks are called
+// unconditionally at component level (not inside conditional RSX blocks).
+// This follows Dioxus/React rules of hooks.
+// =============================================================================
+
+/// DC Annotation Layer - renders operating point annotations
+///
+/// This is a separate component to isolate use_context() calls from
+/// conditional rendering paths, avoiding hooks ordering violations.
+#[component]
+fn DcAnnotationLayer(grid_size: i32, current_zoom: f64) -> Element {
+    // Hooks are called unconditionally at component top level
+    let sim_state: Signal<SimulationState> = use_context();
+    let doc_manager: Signal<DocumentManager> = use_context();
+    
+    // Read states
+    let sim_read = sim_state.read();
+    let dc_state = &sim_read.dc_annotations;
+    let mode = dc_state.mode;
+    
+    // Only render if mode is not hidden
+    if matches!(mode, AnnotationMode::Hidden) {
+        return rsx! {};
+    }
+    
+    // Get visible annotations based on current mode
+    let annotations: Vec<Annotation> = dc_state.visible_annotations()
+        .into_iter()
+        .cloned()
+        .collect();
+    let is_stale = dc_state.is_stale;
+    
+    // Render overlay if there are annotations
+    if annotations.is_empty() {
+        return rsx! {};
+    }
+    
+    // Get current wires for live position tracking
+    // When annotations have wire_id set, they'll look up current positions from this
+    let wires = {
+        let docs = doc_manager.read();
+        docs.active().schematic.wires.clone()
+    };
+    
+    rsx! {
+        AnnotationOverlay {
+            annotations: annotations,
+            zoom: current_zoom,
+            grid_size: grid_size,
+            is_stale: is_stale,
+            wires: wires,
         }
     }
 }

@@ -483,7 +483,7 @@ impl Component {
 }
 
 /// A wire segment connecting two points
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Wire {
     /// Unique identifier
     pub id: u64,
@@ -785,6 +785,11 @@ pub struct SchematicState {
     /// Set to true when loading a file, cleared after the fit is performed.
     #[serde(skip)]
     pub needs_fit: bool,
+
+    /// Flag indicating the undo history should be reset (e.g., after loading a file).
+    /// Set to true when a file is loaded, cleared after history is reset.
+    #[serde(skip)]
+    pub needs_history_reset: bool,
 }
 
 impl Default for SchematicState {
@@ -809,6 +814,7 @@ impl Default for SchematicState {
             net_mapping: HashMap::new(),
             is_dirty: false,
             needs_fit: false,
+            needs_history_reset: false,
         }
     }
 }

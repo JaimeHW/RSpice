@@ -8,9 +8,10 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 use rspice_core::library::LibraryManager;
 
-use crate::components::{Panel, SimulationDialog, Toolbar};
+use crate::components::{Panel, ProjectBrowser, SimulationDialog, Toolbar};
 use crate::state::cross_probing::CrossProbeManager;
 use crate::state::display_settings::SchematicDisplaySettings;
+use crate::state::hierarchy::HierarchyManager;
 use crate::state::simulation_command::SimulationConfig;
 use crate::state::{DocumentManager, SchematicState, SimulationState};
 use crate::theme::Theme;
@@ -61,6 +62,9 @@ pub fn App() -> Element {
     // Cross-probing manager for schematic ↔ waveform coordination
     let cross_probe = use_signal(CrossProbeManager::new);
 
+    // Hierarchy manager for Library/Cell/View navigation (Virtuoso-style)
+    let hierarchy_manager = use_signal(HierarchyManager::new);
+
     // Provide contexts to all children
     use_context_provider(|| theme);
     use_context_provider(|| sim_state);
@@ -73,6 +77,7 @@ pub fn App() -> Element {
     use_context_provider(|| doc_manager);
     use_context_provider(|| cross_probe);
     use_context_provider(|| display_settings);
+    use_context_provider(|| hierarchy_manager);
 
     let th = theme.read();
 
@@ -133,7 +138,15 @@ pub fn App() -> Element {
                     overflow: hidden;
                 ",
 
-                // Center - Editor area (schematic + waveform)
+                // Left sidebar - Project Browser (Library/Cell/View tree)
+                Panel {
+                    title: "Project",
+                    width: "220px",
+                    position: "left",
+                    ProjectBrowser {}
+                }
+
+                // Center - Editor area (schematic only - waveform moved to full-width below)
                 div {
                     class: "editor-area",
                     style: "
@@ -151,32 +164,6 @@ pub fn App() -> Element {
                         style: "flex: 1; overflow: hidden; min-height: 0;",
                         Schematic {}
                     }
-
-                    // Only show waveform viewer when simulation results exist AND visible
-                    // This matches professional simulator behavior (LTspice)
-                    if !sim_state.read().waveforms.is_empty() && waveform_visible.read().0 {
-                        // Resizable divider for waveform pane
-                        div {
-                            style: "
-                                height: 6px;
-                                background: {th.border()};
-                                cursor: row-resize;
-                                transition: background 0.15s;
-                            ",
-                            onmouseenter: move |_| {},
-                            onmousedown: move |evt| {
-                                resize_dragging.set(Some("waveform"));
-                                resize_start_y.set(evt.page_coordinates().y);
-                                resize_start_height.set(*waveform_height.read());
-                            },
-                        }
-
-                        // Waveform viewer (bottom) - dynamic height
-                        div {
-                            style: "height: {waveform_height}px; min-height: 100px; overflow: hidden;",
-                            Waveform {}
-                        }
-                    }
                 }
 
                 // Right sidebar - Properties
@@ -185,6 +172,33 @@ pub fn App() -> Element {
                     width: "250px",
                     position: "right",
                     PropertiesPanel {}
+                }
+            }
+
+            // Waveform viewer - FULL WIDTH spanning under all sidebars
+            // This matches Cadence Spectre/Virtuoso professional layout
+            // Only show when simulation results exist AND visible
+            if !sim_state.read().waveforms.is_empty() && waveform_visible.read().0 {
+                // Resizable divider for waveform pane
+                div {
+                    style: "
+                        height: 6px;
+                        background: {th.border()};
+                        cursor: row-resize;
+                        transition: background 0.15s;
+                    ",
+                    onmouseenter: move |_| {},
+                    onmousedown: move |evt| {
+                        resize_dragging.set(Some("waveform"));
+                        resize_start_y.set(evt.page_coordinates().y);
+                        resize_start_height.set(*waveform_height.read());
+                    },
+                }
+
+                // Waveform viewer (full width) - dynamic height
+                div {
+                    style: "height: {waveform_height}px; min-height: 100px; overflow: hidden;",
+                    Waveform {}
                 }
             }
 

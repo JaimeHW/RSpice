@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 use uuid::Uuid;
 
+use crate::state::hierarchy::HierarchyManager;
 use crate::state::{SchematicState, SimulationState};
 
 /// A single document representing one schematic file
@@ -28,6 +29,9 @@ pub struct Document {
 
     /// Whether document has unsaved changes
     pub is_dirty: bool,
+
+    /// Hierarchical navigation state (Cadence-style push-into/pop-out)
+    pub hierarchy_nav: HierarchyManager,
 }
 
 impl Document {
@@ -44,6 +48,7 @@ impl Document {
             schematic: SchematicState::default(),
             simulation: SimulationState::default(),
             is_dirty: false,
+            hierarchy_nav: HierarchyManager::new(),
         }
     }
 
@@ -62,6 +67,7 @@ impl Document {
             schematic,
             simulation: SimulationState::default(),
             is_dirty: false,
+            hierarchy_nav: HierarchyManager::new(),
         }
     }
 

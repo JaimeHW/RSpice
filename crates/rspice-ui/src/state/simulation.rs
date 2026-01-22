@@ -2,6 +2,7 @@
 //!
 //! Manages simulation execution state and results.
 
+use super::dc_annotation::{AnnotationMode, DcAnnotationState};
 use rspice_core::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -40,6 +41,10 @@ pub struct SimulationState {
     /// The node selected as ground reference (0V)
     /// When probing this node, we show a message that it's the ground reference
     pub ground_node: Option<String>,
+
+    /// DC operating point annotations for display on schematic
+    /// Populated after DC OP simulation, shows node voltages and branch currents
+    pub dc_annotations: DcAnnotationState,
 }
 
 /// Waveform trace data

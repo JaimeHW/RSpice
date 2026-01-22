@@ -163,35 +163,45 @@ pub fn run_simulation(netlist_text: &str) -> SimulationResult {
         None
     };
 
-    // Run DC OP if requested or as fallback
-    let dc_op = if has_op || transient.is_none() {
-        match engine.run_dc_op(&netlist) {
-            Ok(result) => {
-                let mut ops = Vec::new();
-                for (idx, &v) in result.node_voltages.iter().enumerate() {
-                    if idx > 0 {
-                        // Skip ground
-                        ops.push((format!("V({})", idx), v));
-                    }
+    // Always run DC OP (Cadence Spectre-style: operating point is always available)
+    // This enables DC annotation display for any simulation type.
+    // Note: DC OP failure is only fatal if we have no transient results.
+    let dc_op = match engine.run_dc_op(&netlist) {
+        Ok(result) => {
+            let mut ops = Vec::new();
+            // Use actual node names from the result (Spectre-style)
+            // node_names[0] = "0" (ground), node_names[1..] = actual net names
+            for (idx, &v) in result.node_voltages.iter().enumerate() {
+                if idx > 0 {
+                    // Skip ground, use actual net name from node_names
+                    let node_name = result
+                        .node_names
+                        .get(idx)
+                        .cloned()
+                        .unwrap_or_else(|| idx.to_string());
+                    ops.push((node_name, v));
                 }
-                Some(ops)
             }
-            Err(e) => {
-                // DC OP failure is fatal only if we have no transient
-                if transient.is_none() {
-                    return SimulationResult {
-                        success: false,
-                        transient: None,
-                        dc_op: None,
-                        error: Some(format!("DC OP error: {}", e)),
-                        stats,
-                    };
-                }
-                None
-            }
+            log::info!("DC operating point computed: {} node voltages", ops.len());
+            Some(ops)
         }
-    } else {
-        None
+        Err(e) => {
+            log::warn!(
+                "DC OP computation failed: {} (continuing with transient if available)",
+                e
+            );
+            // DC OP failure is fatal only if we have no transient
+            if transient.is_none() {
+                return SimulationResult {
+                    success: false,
+                    transient: None,
+                    dc_op: None,
+                    error: Some(format!("DC OP error: {}", e)),
+                    stats,
+                };
+            }
+            None
+        }
     };
 
     stats.sim_time_ms = now_ms() - sim_start;

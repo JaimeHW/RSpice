@@ -31,7 +31,7 @@ rspice-core = { path = "../rspice-core", default-features = false }
 rspice-veriloga = { path = "../rspice-veriloga" }
 
 # Async runtime
-tokio = { version = "1", features = ["sync", "macros"] }
+tokio = { version = "1", features = ["sync", "macros", "time"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
