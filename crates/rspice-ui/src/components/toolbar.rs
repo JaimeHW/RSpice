@@ -8,7 +8,9 @@ use super::button::{Button, ButtonVariant};
 use super::confirm_modal::{SaveDialogResult, UnsavedChangesModal};
 use super::file_handlers;
 use super::icons::{Icon, IconType};
+use super::veriloga_dialog::VerilogAImportDialog;
 use crate::state::dc_annotation::Annotation;
+use crate::state::hierarchy::HierarchyManager;
 use crate::state::pdf_export::{PdfExportConfig, SvgExporter, TitleBlock};
 use crate::state::simulation_command::SimulationConfig;
 use crate::state::{
@@ -36,8 +38,6 @@ pub fn Toolbar() -> Element {
     let theme: Signal<Theme> = use_context();
     let mut sim_state: Signal<SimulationState> = use_context();
     let mut schematic: Signal<SchematicState> = use_context();
-    let mut waveform_visible: Signal<crate::app::WaveformVisible> = use_context();
-    let mut console_visible: Signal<crate::app::ConsoleVisible> = use_context();
     let _sim_config: Signal<SimulationConfig> = use_context();
     let mut sim_dialog_visible: Signal<bool> = use_context();
     let th = theme.read();
@@ -46,6 +46,11 @@ pub fn Toolbar() -> Element {
 
     // State for unsaved changes modal
     let mut show_save_modal = use_signal(|| false);
+
+    // State for Tools menu and Verilog-A dialog
+    let mut tools_menu_open = use_signal(|| false);
+    let mut veriloga_dialog_visible = use_signal(|| false);
+    let mut hierarchy_manager: Signal<HierarchyManager> = use_context();
     let mut pending_action: Signal<Option<PendingAction>> = use_signal(|| None);
 
     // Get current file name for modal display
@@ -319,6 +324,70 @@ pub fn Toolbar() -> Element {
                     icon: rsx! { Icon { icon: IconType::Redo, size: 16 } },
                     title: "Redo (Ctrl+Y)",
                     ""
+                }
+            }
+
+            // Divider
+            ToolbarDivider {}
+
+            // Tools dropdown menu (Professional Cadence-style)
+            div {
+                style: "position: relative;",
+
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    icon: rsx! { Icon { icon: IconType::Settings, size: 16 } },
+                    onclick: move |_| {
+                        let is_open = *tools_menu_open.read();
+                        tools_menu_open.set(!is_open);
+                    },
+                    "Tools ▾"
+                }
+
+                // Dropdown menu
+                if *tools_menu_open.read() {
+                    div {
+                        style: "
+                            position: absolute;
+                            top: 100%;
+                            left: 0;
+                            min-width: 220px;
+                            background: {th.surface()};
+                            border: 1px solid {th.border()};
+                            border-radius: 6px;
+                            box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+                            z-index: 1000;
+                            padding: 4px 0;
+                        ",
+
+                        // Import Verilog-A Model
+                        ToolsMenuItem {
+                            label: "Import Verilog-A Model...",
+                            icon: "📦",
+                            enabled: true,
+                            onclick: move |_| {
+                                tools_menu_open.set(false);
+                                veriloga_dialog_visible.set(true);
+                            },
+                        }
+
+                        // Separator
+                        div {
+                            style: "
+                                height: 1px;
+                                background: {th.border()};
+                                margin: 4px 8px;
+                            "
+                        }
+
+                        // Model Browser (placeholder for future)
+                        ToolsMenuItem {
+                            label: "Model Browser",
+                            icon: "📚",
+                            enabled: false,
+                            onclick: |_| {},
+                        }
+                    }
                 }
             }
 
@@ -601,40 +670,41 @@ pub fn Toolbar() -> Element {
                     }
                 }
             }
+        }
 
-            // Divider
-            ToolbarDivider {}
+        // Verilog-A Import Dialog (Modal)
+        VerilogAImportDialog {
+            visible: *veriloga_dialog_visible.read(),
+            on_close: move |_| {
+                veriloga_dialog_visible.set(false);
+            },
+            on_import: move |model_info: super::veriloga_inspector::VerilogAModelInfo| {
+                log::info!("Verilog-A model imported: {}", model_info.name);
+                veriloga_dialog_visible.set(false);
 
-            // View toggles
-            ToolbarGroup {
-                // Console toggle
-                Button {
-                    variant: if console_visible.read().0 { ButtonVariant::Primary } else { ButtonVariant::Ghost },
-                    title: "Toggle Console",
-                    onclick: move |_| {
-                        let current = console_visible.read().0;
-                        console_visible.set(crate::app::ConsoleVisible(!current));
-                    },
-                    "Console"
-                }
-                // Waveform toggle (only enabled when waveforms exist)
-                Button {
-                    variant: if waveform_visible.read().0 && !sim_state.read().waveforms.is_empty() {
-                        ButtonVariant::Primary
-                    } else {
-                        ButtonVariant::Ghost
-                    },
-                    title: "Toggle Waveform Viewer",
-                    disabled: sim_state.read().waveforms.is_empty(),
-                    onclick: move |_| {
-                        if !sim_state.read().waveforms.is_empty() {
-                            let current = waveform_visible.read().0;
-                            waveform_visible.set(crate::app::WaveformVisible(!current));
-                        }
-                    },
-                    "Waveform"
-                }
-            }
+                // Add model to hierarchy manager's veriloga library
+                let terminals: Vec<String> = model_info.terminals.clone();
+                let parameters: Vec<(String, String)> = model_info.parameters
+                    .iter()
+                    .map(|p| (p.name.clone(), p.default_value.to_string()))
+                    .collect();
+                let source_path = Some(model_info.source_path.as_str());
+
+                hierarchy_manager.write().add_veriloga_model(
+                    &model_info.name,
+                    &terminals,
+                    &parameters,
+                    source_path,
+                );
+
+                sim_state.write().console_messages.push(
+                    ConsoleMessage::success(format!("Imported Verilog-A model: {} ({} terminals, {} parameters)",
+                        model_info.name,
+                        terminals.len(),
+                        parameters.len()
+                    ))
+                );
+            },
         }
     }
 }
@@ -668,6 +738,64 @@ fn ToolbarDivider() -> Element {
                 background: {th.border()};
                 margin: 0 {Theme::SPACING_XS};
             "
+        }
+    }
+}
+
+/// Menu item for Tools dropdown
+#[component]
+fn ToolsMenuItem(
+    label: &'static str,
+    icon: &'static str,
+    enabled: bool,
+    onclick: EventHandler<MouseEvent>,
+) -> Element {
+    let theme: Signal<Theme> = use_context();
+    let th = theme.read();
+    let mut hovered = use_signal(|| false);
+
+    let bg_color = if *hovered.read() && enabled {
+        th.surface_hover().to_string()
+    } else {
+        "transparent".to_string()
+    };
+
+    let text_color = if enabled {
+        th.text_primary().to_string()
+    } else {
+        th.text_muted().to_string()
+    };
+
+    let cursor = if enabled { "pointer" } else { "default" };
+
+    rsx! {
+        div {
+            style: "
+                padding: 8px 16px;
+                cursor: {cursor};
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                font-size: 13px;
+                background: {bg_color};
+                color: {text_color};
+            ",
+            onmouseenter: move |_| {
+                if enabled {
+                    hovered.set(true);
+                }
+            },
+            onmouseleave: move |_| {
+                hovered.set(false);
+            },
+            onclick: move |evt| {
+                if enabled {
+                    onclick.call(evt);
+                }
+            },
+
+            span { style: "font-size: 14px;", "{icon}" }
+            span { "{label}" }
         }
     }
 }

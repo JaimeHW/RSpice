@@ -25,6 +25,10 @@ pub struct WaveformVisible(pub bool);
 #[derive(Clone, Copy)]
 pub struct ConsoleVisible(pub bool);
 
+/// Wrapper type for library browser visibility (needed for distinct context type)
+#[derive(Clone, Copy)]
+pub struct BrowserVisible(pub bool);
+
 /// Root application component
 #[component]
 pub fn App() -> Element {
@@ -47,6 +51,7 @@ pub fn App() -> Element {
     // Panel visibility state (using wrapper types for distinct context lookup)
     let waveform_visible = use_signal(|| WaveformVisible(true));
     let console_visible = use_signal(|| ConsoleVisible(true));
+    let browser_visible = use_signal(|| BrowserVisible(false)); // Default hidden to maximize canvas
 
     // Drag state for resizable dividers: None = not dragging, Some("waveform" or "console")
     let mut resize_dragging: Signal<Option<&'static str>> = use_signal(|| None);
@@ -63,7 +68,12 @@ pub fn App() -> Element {
     let cross_probe = use_signal(CrossProbeManager::new);
 
     // Hierarchy manager for Library/Cell/View navigation (Virtuoso-style)
-    let hierarchy_manager = use_signal(HierarchyManager::new);
+    // Initialize with built-in primitives library
+    let hierarchy_manager = use_signal(|| {
+        let mut mgr = HierarchyManager::new();
+        mgr.create_primitives_library();
+        mgr
+    });
 
     // Provide contexts to all children
     use_context_provider(|| theme);
@@ -78,6 +88,7 @@ pub fn App() -> Element {
     use_context_provider(|| cross_probe);
     use_context_provider(|| display_settings);
     use_context_provider(|| hierarchy_manager);
+    use_context_provider(|| browser_visible);
 
     let th = theme.read();
 
@@ -129,26 +140,181 @@ pub fn App() -> Element {
             // Top toolbar
             Toolbar {}
 
-            // Main content area
+            // Main layout: Icon rail on left (full height) + Content area on right
             div {
-                class: "main-content",
+                class: "main-layout",
                 style: "
                     display: flex;
                     flex: 1;
                     overflow: hidden;
                 ",
 
-                // Left sidebar - Project Browser (Library/Cell/View tree)
-                Panel {
-                    title: "Project",
-                    width: "220px",
-                    position: "left",
-                    ProjectBrowser {}
+                // Left icon rail (VSCode style) - FULL HEIGHT from toolbar to bottom
+                div {
+                    class: "icon-rail",
+                    style: "
+                        display: flex;
+                        flex-direction: column;
+                        width: 42px;
+                        min-width: 42px;
+                        background: {th.surface()};
+                        border-right: 1px solid {th.border()};
+                        padding: 8px 0;
+                        align-items: center;
+                    ",
+
+                    // === TOP SECTION: Navigation panels ===
+
+                    // Library browser toggle
+                    {
+                        let mut browser_vis = browser_visible;
+                        let is_active = browser_visible.read().0;
+                        // Use a brighter surface for inactive buttons so they stand out
+                        let btn_bg = if is_active { th.accent_primary().to_string() } else { "#3a3e4a".to_string() };
+                        let btn_border = if is_active { th.accent_primary().to_string() } else { "#555963".to_string() };
+                        let btn_color = if is_active { "#ffffff".to_string() } else { th.text_primary().to_string() };
+                        rsx! {
+                            button {
+                                class: "rail-btn",
+                                style: "
+                                    width: 32px;
+                                    height: 32px;
+                                    border: 2px solid {btn_border};
+                                    border-radius: 6px;
+                                    background: {btn_bg};
+                                    color: {btn_color};
+                                    cursor: pointer;
+                                    font-size: 16px;
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    margin-bottom: 6px;
+                                    transition: all 0.15s ease;
+                                    box-shadow: 0 2px 4px rgba(0,0,0,0.25);
+                                ",
+                                title: "Library Browser (Ctrl+Shift+L)",
+                                onclick: move |_| {
+                                    let current = browser_vis.read().0;
+                                    browser_vis.set(BrowserVisible(!current));
+                                },
+                                // Folder icon for library
+                                "📁"
+                            }
+                        }
+                    }
+
+                    // === SPACER: Push bottom section to bottom ===
+                    div { style: "flex: 1;" }
+
+                    // === BOTTOM SECTION: Auxiliary panels ===
+
+                    // Console toggle
+                    {
+                        let mut console_vis = console_visible;
+                        let is_active = console_visible.read().0;
+                        // Use brighter surface for inactive buttons
+                        let btn_bg = if is_active { th.accent_primary().to_string() } else { "#3a3e4a".to_string() };
+                        let btn_border = if is_active { th.accent_primary().to_string() } else { "#555963".to_string() };
+                        let btn_color = if is_active { "#ffffff".to_string() } else { th.text_primary().to_string() };
+                        rsx! {
+                            button {
+                                class: "rail-btn",
+                                style: "
+                                    width: 32px;
+                                    height: 32px;
+                                    border: 2px solid {btn_border};
+                                    border-radius: 6px;
+                                    background: {btn_bg};
+                                    color: {btn_color};
+                                    cursor: pointer;
+                                    font-size: 16px;
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    margin-bottom: 6px;
+                                    transition: all 0.15s ease;
+                                    box-shadow: 0 2px 4px rgba(0,0,0,0.25);
+                                ",
+                                title: "Toggle Console",
+                                onclick: move |_| {
+                                    let current = console_vis.read().0;
+                                    console_vis.set(ConsoleVisible(!current));
+                                },
+                                // Terminal/console icon
+                                "⌨"
+                            }
+                        }
+                    }
+
+                    // Waveform toggle
+                    {
+                        let mut waveform_vis = waveform_visible;
+                        let sim = sim_state.read();
+                        let has_waveforms = !sim.waveforms.is_empty();
+                        let is_active = waveform_visible.read().0 && has_waveforms;
+                        drop(sim);
+                        // Use brighter surface for inactive buttons
+                        let btn_bg = if is_active {
+                            th.accent_primary().to_string()
+                        } else if has_waveforms {
+                            "#3a3e4a".to_string()
+                        } else {
+                            "#2d3038".to_string()
+                        };
+                        let btn_border = if is_active {
+                            th.accent_primary().to_string()
+                        } else if has_waveforms {
+                            "#555963".to_string()
+                        } else {
+                            "#404550".to_string()
+                        };
+                        let btn_color = if !has_waveforms {
+                            th.text_muted().to_string()
+                        } else if is_active {
+                            "#ffffff".to_string()
+                        } else {
+                            th.text_primary().to_string()
+                        };
+                        let cursor = if has_waveforms { "pointer" } else { "not-allowed" };
+                        let opacity = if has_waveforms { "1" } else { "0.5" };
+                        rsx! {
+                            button {
+                                class: "rail-btn",
+                                style: "
+                                    width: 32px;
+                                    height: 32px;
+                                    border: 2px solid {btn_border};
+                                    border-radius: 6px;
+                                    background: {btn_bg};
+                                    color: {btn_color};
+                                    cursor: {cursor};
+                                    opacity: {opacity};
+                                    font-size: 18px;
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    transition: all 0.15s ease;
+                                    box-shadow: 0 2px 4px rgba(0,0,0,0.25);
+                                ",
+                                title: if has_waveforms { "Toggle Waveform Viewer" } else { "No waveforms available" },
+                                disabled: !has_waveforms,
+                                onclick: move |_| {
+                                    if has_waveforms {
+                                        let current = waveform_vis.read().0;
+                                        waveform_vis.set(WaveformVisible(!current));
+                                    }
+                                },
+                                // Waveform/wave icon
+                                "∿"
+                            }
+                        }
+                    }
                 }
 
-                // Center - Editor area (schematic only - waveform moved to full-width below)
+                // Right side: All content (main area + bottom panels)
+                // This is a flex column that the icon rail sits beside
                 div {
-                    class: "editor-area",
+                    class: "content-area",
                     style: "
                         display: flex;
                         flex-direction: column;
@@ -156,73 +322,109 @@ pub fn App() -> Element {
                         overflow: hidden;
                     ",
 
-                    // Tool selection bar (Select, Wire, Probe, etc.)
-                    SchematicToolbar { schematic: schematic_state }
-
-                    // Schematic editor (main) - includes document tabs internally
+                    // Main content row (sidebars + editor)
                     div {
-                        style: "flex: 1; overflow: hidden; min-height: 0;",
-                        Schematic {}
+                        class: "main-content",
+                        style: "
+                            display: flex;
+                            flex: 1;
+                            overflow: hidden;
+                        ",
+
+                        // Left sidebar - Project Browser (Library/Cell/View tree)
+                        // Conditionally rendered based on browser_visible state
+                        if browser_visible.read().0 {
+                            div {
+                                style: "
+                                    width: 220px;
+                                    border-right: 1px solid {th.border()};
+                                    display: flex;
+                                    flex-direction: column;
+                                    overflow: hidden;
+                                ",
+                                ProjectBrowser {}
+                            }
+                        }
+
+                        // Center - Editor area (schematic only - waveform moved to full-width below)
+                        div {
+                            class: "editor-area",
+                            style: "
+                                display: flex;
+                                flex-direction: column;
+                                flex: 1;
+                                overflow: hidden;
+                            ",
+
+                            // Tool selection bar (Select, Wire, Probe, etc.)
+                            SchematicToolbar { schematic: schematic_state }
+
+                            // Schematic editor (main) - includes document tabs internally
+                            div {
+                                style: "flex: 1; overflow: hidden; min-height: 0;",
+                                Schematic {}
+                            }
+                        }
+
+                        // Right sidebar - Properties
+                        Panel {
+                            title: "Properties",
+                            width: "250px",
+                            position: "right",
+                            PropertiesPanel {}
+                        }
                     }
-                }
 
-                // Right sidebar - Properties
-                Panel {
-                    title: "Properties",
-                    width: "250px",
-                    position: "right",
-                    PropertiesPanel {}
-                }
-            }
+                    // Waveform viewer - FULL WIDTH spanning under all sidebars
+                    // This matches Cadence Spectre/Virtuoso professional layout
+                    // Only show when simulation results exist AND visible
+                    if !sim_state.read().waveforms.is_empty() && waveform_visible.read().0 {
+                        // Resizable divider for waveform pane
+                        div {
+                            style: "
+                                height: 6px;
+                                background: {th.border()};
+                                cursor: row-resize;
+                                transition: background 0.15s;
+                            ",
+                            onmouseenter: move |_| {},
+                            onmousedown: move |evt| {
+                                resize_dragging.set(Some("waveform"));
+                                resize_start_y.set(evt.page_coordinates().y);
+                                resize_start_height.set(*waveform_height.read());
+                            },
+                        }
 
-            // Waveform viewer - FULL WIDTH spanning under all sidebars
-            // This matches Cadence Spectre/Virtuoso professional layout
-            // Only show when simulation results exist AND visible
-            if !sim_state.read().waveforms.is_empty() && waveform_visible.read().0 {
-                // Resizable divider for waveform pane
-                div {
-                    style: "
-                        height: 6px;
-                        background: {th.border()};
-                        cursor: row-resize;
-                        transition: background 0.15s;
-                    ",
-                    onmouseenter: move |_| {},
-                    onmousedown: move |evt| {
-                        resize_dragging.set(Some("waveform"));
-                        resize_start_y.set(evt.page_coordinates().y);
-                        resize_start_height.set(*waveform_height.read());
-                    },
-                }
+                        // Waveform viewer (full width) - dynamic height
+                        div {
+                            style: "height: {waveform_height}px; min-height: 100px; overflow: hidden;",
+                            Waveform {}
+                        }
+                    }
 
-                // Waveform viewer (full width) - dynamic height
-                div {
-                    style: "height: {waveform_height}px; min-height: 100px; overflow: hidden;",
-                    Waveform {}
-                }
-            }
+                    // Console section (only visible if not hidden)
+                    if console_visible.read().0 {
+                        // Resizable divider for console pane
+                        div {
+                            style: "
+                                height: 6px;
+                                background: {th.border()};
+                                cursor: row-resize;
+                                transition: background 0.15s;
+                            ",
+                            onmousedown: move |evt| {
+                                resize_dragging.set(Some("console"));
+                                resize_start_y.set(evt.page_coordinates().y);
+                                resize_start_height.set(*console_height.read());
+                            },
+                        }
 
-            // Console section (only visible if not hidden)
-            if console_visible.read().0 {
-                // Resizable divider for console pane
-                div {
-                    style: "
-                        height: 6px;
-                        background: {th.border()};
-                        cursor: row-resize;
-                        transition: background 0.15s;
-                    ",
-                    onmousedown: move |evt| {
-                        resize_dragging.set(Some("console"));
-                        resize_start_y.set(evt.page_coordinates().y);
-                        resize_start_height.set(*console_height.read());
-                    },
-                }
-
-                // Bottom console with dynamic height
-                div {
-                    style: "height: {console_height}px; min-height: 60px; overflow: hidden;",
-                    Console {}
+                        // Bottom console with dynamic height
+                        div {
+                            style: "height: {console_height}px; min-height: 60px; overflow: hidden;",
+                            Console {}
+                        }
+                    }
                 }
             }
 
