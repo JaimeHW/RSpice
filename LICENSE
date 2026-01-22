@@ -1,0 +1,20 @@
+RSPICE PERSONAL USE LICENSE
+Version 1.0
+
+Copyright (c) 2026 RSpice Contributors. All rights reserved.
+
+TERMS AND CONDITIONS
+
+1. GRANT OF LICENSE
+Subject to the terms of this License, you are granted a non-exclusive, non-transferable, revocable license to:
+(a) Download, install, and compile the source code of the software;
+(b) Run and use the compiled software for personal, educational, or internal research purposes only.
+
+2. RESTRICTIONS
+The following activities are strictly PROHIBITED without express written permission from the Copyright Holder:
+(a) COMMERCIAL USE: You may not use the software for any commercial usage, including but not limited to using it to design products for sale, offering it as a service, or integrating it into commercial products.
+(b) REDISTRIBUTION: You may not redistribute, re-host, sublicense, mirror, or otherwise make the source code or compiled binaries available to third parties. Public forks are allowed only if they retain this license and are not used for distribution of binaries or competing products.
+(c) MODIFICATION: You may modify the software for your personal use, but you may not distribute modified versions.
+
+3. NO WARRANTY
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

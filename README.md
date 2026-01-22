@@ -5,7 +5,7 @@
 # RSpice
 **The Circuit Simulator, Reimagined.**
 
-[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/license-Source%20Available-red.svg?style=flat-square)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg?style=flat-square)](https://www.rust-lang.org)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg?style=flat-square)](https://github.com/rspice/rspice/actions)
 [![Platform](https://img.shields.io/badge/platform-win%20|%20macos%20|%20linux%20|%20web-lightgrey.svg?style=flat-square)](https://rspice.org)
@@ -130,7 +130,9 @@ We are consistently pushing the boundaries of open-source EDA:
 
 ## License
 
-RSpice is open source, dual-licensed under [MIT](LICENSE-MIT) and [Apache 2.0](LICENSE-APACHE).
+RSpice is **Source Available** software licensed under the **RSpice Personal Use License**.
+You may view, download, and compile the code for personal, educational, or internal research purposes.
+**Redistribution and Commercial Usage are strictly prohibited** without prior written permission.
 
 ---
 
