@@ -20,6 +20,12 @@ pub mod advanced;
 mod core;
 mod output;
 
+// Waveform measurement module - Spectre/ADE-style calculator functions
+pub mod measurements;
+
+// Signal integrity analysis - eye diagrams, jitter analysis
+pub mod signal_integrity;
+
 // Re-export submodules for backwards-compatible paths (crate::analysis::ac etc)
 pub use advanced::fourier;
 pub use advanced::measure;
