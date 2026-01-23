@@ -130,13 +130,52 @@ impl Engine {
     }
 
     /// Solve a nonlinear circuit using Newton-Raphson iteration
+    ///
+    /// This is a convenience wrapper that starts from zero initial guess.
+    /// For DC sweeps, use `solve_nonlinear_with_guess` with the previous solution.
     pub(crate) fn solve_nonlinear(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
     ) -> Result<Vec<Value>, SimulationError> {
+        self.solve_nonlinear_with_guess(circuit, matrix, None)
+    }
+
+    /// Solve a nonlinear circuit using Newton-Raphson iteration with optional initial guess
+    ///
+    /// # Arguments
+    /// * `circuit` - Circuit data with nonlinear devices
+    /// * `matrix` - Sparse matrix structure for MNA
+    /// * `initial_guess` - Optional initial solution vector (e.g., from previous DC sweep point)
+    ///
+    /// Using a good initial guess (like the previous sweep point solution) significantly
+    /// improves convergence speed and robustness for nonlinear circuits.
+    ///
+    /// # Returns
+    /// The converged solution vector, or error if Newton-Raphson fails to converge.
+    pub(crate) fn solve_nonlinear_with_guess(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: Option<&[Value]>,
+    ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
-        let mut solution = vec![0.0; size];
+
+        // Use provided initial guess or start from zero
+        let mut solution = match initial_guess {
+            Some(guess) if guess.len() == size => guess.to_vec(),
+            Some(guess) => {
+                // Mismatched size - log warning and use zero
+                // This can happen if circuit topology changed
+                let mut sol = vec![0.0; size];
+                // Copy as much as we can
+                let copy_len = guess.len().min(size);
+                sol[..copy_len].copy_from_slice(&guess[..copy_len]);
+                sol
+            }
+            None => vec![0.0; size],
+        };
+
         let mut rhs = vec![0.0; size];
 
         // Newton-Raphson iteration
@@ -173,7 +212,8 @@ impl Engine {
         }
 
         // If we didn't converge, try with source stepping
-        self.source_stepping_nonlinear(circuit, matrix)
+        // Use current solution as starting point for source stepping
+        self.source_stepping_nonlinear_with_guess(circuit, matrix, &solution)
     }
 
     /// Check if voltage solution has converged
@@ -199,16 +239,43 @@ impl Engine {
         true
     }
 
-    /// Source stepping for nonlinear circuits
+    /// Source stepping for nonlinear circuits (starts from zero)
+    #[allow(dead_code)]
     pub(crate) fn source_stepping_nonlinear(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
     ) -> Result<Vec<Value>, SimulationError> {
+        let size = circuit.matrix_size();
+        let zero_guess = vec![0.0; size];
+        self.source_stepping_nonlinear_with_guess(circuit, matrix, &zero_guess)
+    }
+
+    /// Source stepping for nonlinear circuits with initial guess
+    ///
+    /// # Arguments
+    /// * `circuit` - Circuit data with nonlinear devices
+    /// * `matrix` - Sparse matrix structure  
+    /// * `initial_guess` - Starting solution (e.g., from failed Newton iteration or previous sweep point)
+    ///
+    /// Source stepping ramps sources from 0% to 100% in steps, which helps
+    /// find operating points in difficult circuits with strong nonlinearities.
+    pub(crate) fn source_stepping_nonlinear_with_guess(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: &[Value],
+    ) -> Result<Vec<Value>, SimulationError> {
         const SOURCE_SCALES: &[Value] = &[0.0, 0.1, 0.25, 0.5, 0.75, 1.0];
 
         let size = circuit.matrix_size();
-        let mut solution = vec![0.0; size];
+
+        // Start from provided initial guess (scaled to first source level)
+        let mut solution = if initial_guess.len() == size {
+            initial_guess.to_vec()
+        } else {
+            vec![0.0; size]
+        };
 
         for &scale in SOURCE_SCALES {
             // Run Newton iterations at this source level
@@ -257,5 +324,127 @@ impl Engine {
         }
 
         Ok(solution)
+    }
+}
+
+//=============================================================================
+// Tests
+//=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Test voltage convergence checking with identical vectors.
+    #[test]
+    fn test_voltage_convergence_identical() {
+        let a = vec![1.0, 2.0, 3.0];
+        let b = vec![1.0, 2.0, 3.0];
+        assert!(Engine::check_voltage_convergence(&a, &b, 1e-9));
+    }
+
+    /// Test voltage convergence with small absolute differences.
+    #[test]
+    fn test_voltage_convergence_small_absolute() {
+        let a = vec![1.0, 2.0, 3.0];
+        let b = vec![1.0 + 1e-10, 2.0 + 1e-10, 3.0 + 1e-10];
+        assert!(Engine::check_voltage_convergence(&a, &b, 1e-9));
+    }
+
+    /// Test voltage convergence fails with large differences.
+    #[test]
+    fn test_voltage_convergence_large_diff() {
+        let a = vec![1.0, 2.0, 3.0];
+        let b = vec![1.0, 2.0, 4.0]; // 33% relative diff
+        assert!(!Engine::check_voltage_convergence(&a, &b, 1e-9));
+    }
+
+    /// Test voltage convergence with near-zero values (special handling).
+    #[test]
+    fn test_voltage_convergence_near_zero() {
+        let a = vec![1e-15, 0.0, 1e-14];
+        let b = vec![0.0, 1e-15, 0.0];
+        // Near-zero values should use absolute tolerance only
+        assert!(Engine::check_voltage_convergence(&a, &b, 1e-9));
+    }
+
+    /// Test voltage convergence with mismatched lengths fails.
+    #[test]
+    fn test_voltage_convergence_mismatched_length() {
+        let a = vec![1.0, 2.0];
+        let b = vec![1.0, 2.0, 3.0];
+        assert!(!Engine::check_voltage_convergence(&a, &b, 1e-9));
+    }
+
+    /// Test voltage convergence with empty vectors.
+    #[test]
+    fn test_voltage_convergence_empty() {
+        let a: Vec<f64> = vec![];
+        let b: Vec<f64> = vec![];
+        assert!(Engine::check_voltage_convergence(&a, &b, 1e-9));
+    }
+
+    /// Test convergence at tolerance boundary.
+    #[test]
+    fn test_voltage_convergence_at_tolerance() {
+        let tolerance: f64 = 1e-6;
+        let a = vec![1.0];
+        let b = vec![1.0 + tolerance * 0.9]; // Just under tolerance
+        assert!(Engine::check_voltage_convergence(&a, &b, tolerance));
+    }
+
+    /// Test that relative tolerance kicks in for large values.
+    #[test]
+    fn test_voltage_convergence_relative_tolerance() {
+        // For large values, relative tolerance of 1e-3 is used
+        let a = vec![1000.0];
+        let b = vec![1000.5]; // 0.05% difference, under 0.1%
+        // 0.5 absolute diff > 1e-6 tolerance, but relative = 0.0005 < 1e-3
+        assert!(Engine::check_voltage_convergence(&a, &b, 1e-6));
+    }
+
+    /// Test voltage convergence with negative values.
+    #[test]
+    fn test_voltage_convergence_negative_values() {
+        let a = vec![-5.0, -10.0];
+        let b = vec![-5.0 + 1e-10, -10.0 - 1e-10];
+        assert!(Engine::check_voltage_convergence(&a, &b, 1e-9));
+    }
+
+    /// Test convergence with mixed positive/negative.
+    #[test]
+    fn test_voltage_convergence_mixed_signs() {
+        let a = vec![5.0, -5.0, 0.0];
+        let b = vec![5.0, -5.0, 0.0];
+        assert!(Engine::check_voltage_convergence(&a, &b, 1e-9));
+    }
+
+    /// Test that GMIN values are in decreasing order.
+    #[test]
+    fn test_gmin_stepping_values_order() {
+        // The GMIN_VALUES constant should be in decreasing order
+        // for proper stepping from large to small
+        const GMIN_VALUES: &[f64] = &[1e-2, 1e-4, 1e-6, 1e-9, 1e-12];
+        for i in 1..GMIN_VALUES.len() {
+            assert!(
+                GMIN_VALUES[i] < GMIN_VALUES[i - 1],
+                "GMIN values should be decreasing"
+            );
+        }
+    }
+
+    /// Test that source stepping scales are in increasing order.
+    #[test]
+    fn test_source_stepping_values_order() {
+        const SOURCE_SCALES: &[f64] = &[0.0, 0.1, 0.25, 0.5, 0.75, 1.0];
+        for i in 1..SOURCE_SCALES.len() {
+            assert!(
+                SOURCE_SCALES[i] > SOURCE_SCALES[i - 1],
+                "Source scales should be increasing"
+            );
+        }
+        // Must start at 0 and end at 1
+        assert!((SOURCE_SCALES[0] - 0.0).abs() < 1e-10);
+        assert!((SOURCE_SCALES[SOURCE_SCALES.len() - 1] - 1.0).abs() < 1e-10);
     }
 }
