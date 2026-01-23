@@ -809,6 +809,485 @@ pub fn reactance_to_component(x: Value, frequency: Value) -> (Value, bool) {
 }
 
 //=============================================================================
+// Stability Analysis
+//=============================================================================
+
+/// Stability analysis result for a 2-port network
+#[derive(Debug, Clone, Default)]
+pub struct StabilityAnalysis {
+    /// Rollett stability factor K (unconditionally stable if K > 1 and |Δ| < 1)
+    pub k_factor: Value,
+
+    /// Determinant of S-matrix (Δ = S11*S22 - S12*S21)
+    pub delta: Complex,
+
+    /// Magnitude of Δ
+    pub delta_mag: Value,
+
+    /// μ-factor (Edwards-Sinsky) - unconditionally stable if μ > 1
+    pub mu_factor: Value,
+
+    /// μ'-factor (alternate stability measure for output)
+    pub mu_prime: Value,
+
+    /// Whether device is unconditionally stable
+    pub unconditionally_stable: bool,
+
+    /// Whether device is potentially unstable (K < 1 or |Δ| > 1)
+    pub potentially_unstable: bool,
+
+    /// Input stability circle center (Γ-plane)
+    pub input_stability_center: Complex,
+
+    /// Input stability circle radius
+    pub input_stability_radius: Value,
+
+    /// Output stability circle center (Γ-plane)
+    pub output_stability_center: Complex,
+
+    /// Output stability circle radius
+    pub output_stability_radius: Value,
+
+    /// Whether stable region is inside or outside input circle
+    pub input_stable_inside: bool,
+
+    /// Whether stable region is inside or outside output circle
+    pub output_stable_inside: bool,
+}
+
+impl StabilityAnalysis {
+    /// Compute stability analysis from S-parameters
+    pub fn from_s_matrix(s: &SMatrix) -> Self {
+        let s11 = s.s11();
+        let s12 = s.s12();
+        let s21 = s.s21();
+        let s22 = s.s22();
+
+        // Δ = S11*S22 - S12*S21
+        let delta = s11 * s22 - s12 * s21;
+        let delta_mag = delta.magnitude();
+
+        // K = (1 - |S11|² - |S22|² + |Δ|²) / (2|S12*S21|)
+        let s11_mag_sq = s11.magnitude().powi(2);
+        let s22_mag_sq = s22.magnitude().powi(2);
+        let s12s21_mag = (s12 * s21).magnitude();
+
+        let k_factor = if s12s21_mag > 1e-15 {
+            (1.0 - s11_mag_sq - s22_mag_sq + delta_mag.powi(2)) / (2.0 * s12s21_mag)
+        } else {
+            f64::INFINITY // No feedback = unconditionally stable
+        };
+
+        // μ = (1 - |S11|²) / (|S22 - Δ*S11*| + |S12*S21|)
+        let s11_conj = s11.conj();
+        let s22_minus_delta_s11_conj = s22 - delta * s11_conj;
+        let denom_mu = s22_minus_delta_s11_conj.magnitude() + s12s21_mag;
+
+        let mu_factor = if denom_mu > 1e-15 {
+            (1.0 - s11_mag_sq) / denom_mu
+        } else {
+            f64::INFINITY
+        };
+
+        // μ' = (1 - |S22|²) / (|S11 - Δ*S22*| + |S12*S21|)
+        let s22_conj = s22.conj();
+        let s11_minus_delta_s22_conj = s11 - delta * s22_conj;
+        let denom_mu_prime = s11_minus_delta_s22_conj.magnitude() + s12s21_mag;
+
+        let mu_prime = if denom_mu_prime > 1e-15 {
+            (1.0 - s22_mag_sq) / denom_mu_prime
+        } else {
+            f64::INFINITY
+        };
+
+        // Stability circles (for potentially unstable devices)
+        // Input stability circle: center Cs, radius rs
+        // Cs = (S11 - Δ*S22*)* / (|S11|² - |Δ|²)
+        // rs = |S12*S21| / ||S11|² - |Δ|²|
+        let denom_input = s11_mag_sq - delta_mag.powi(2);
+        let (input_center, input_radius) = if denom_input.abs() > 1e-15 {
+            let center_num = s11 - delta * s22.conj();
+            let center = center_num.conj() / denom_input;
+            let radius = s12s21_mag / denom_input.abs();
+            (center, radius)
+        } else {
+            (Complex::ZERO, 0.0)
+        };
+
+        // Output stability circle: center CL, radius rL
+        // CL = (S22 - Δ*S11*)* / (|S22|² - |Δ|²)
+        // rL = |S12*S21| / ||S22|² - |Δ|²|
+        let denom_output = s22_mag_sq - delta_mag.powi(2);
+        let (output_center, output_radius) = if denom_output.abs() > 1e-15 {
+            let center_num = s22 - delta * s11.conj();
+            let center = center_num.conj() / denom_output;
+            let radius = s12s21_mag / denom_output.abs();
+            (center, radius)
+        } else {
+            (Complex::ZERO, 0.0)
+        };
+
+        // Determine if stable region is inside or outside the circle
+        // If |S11| < 1, origin (Γ=0) is in stable region
+        // Check if origin is inside or outside the stability circle
+        let input_stable_inside = s11_mag_sq > 1.0 || denom_input < 0.0;
+        let output_stable_inside = s22_mag_sq > 1.0 || denom_output < 0.0;
+
+        let unconditionally_stable = k_factor > 1.0 && delta_mag < 1.0;
+        let potentially_unstable = !unconditionally_stable;
+
+        Self {
+            k_factor,
+            delta,
+            delta_mag,
+            mu_factor,
+            mu_prime,
+            unconditionally_stable,
+            potentially_unstable,
+            input_stability_center: input_center,
+            input_stability_radius: input_radius,
+            output_stability_center: output_center,
+            output_stability_radius: output_radius,
+            input_stable_inside,
+            output_stable_inside,
+        }
+    }
+
+    /// Get stability circle points for plotting (input)
+    pub fn input_circle_points(&self, num_points: usize) -> Vec<(Value, Value)> {
+        circle_points(
+            self.input_stability_center,
+            self.input_stability_radius,
+            num_points,
+        )
+    }
+
+    /// Get stability circle points for plotting (output)
+    pub fn output_circle_points(&self, num_points: usize) -> Vec<(Value, Value)> {
+        circle_points(
+            self.output_stability_center,
+            self.output_stability_radius,
+            num_points,
+        )
+    }
+}
+
+/// Generate points on a circle for plotting
+fn circle_points(center: Complex, radius: Value, num_points: usize) -> Vec<(Value, Value)> {
+    (0..num_points)
+        .map(|i| {
+            let theta = 2.0 * PI * i as f64 / num_points as f64;
+            (
+                center.re + radius * theta.cos(),
+                center.im + radius * theta.sin(),
+            )
+        })
+        .collect()
+}
+
+//=============================================================================
+// Gain Calculations
+//=============================================================================
+
+/// Gain analysis result for a 2-port amplifier
+#[derive(Debug, Clone, Default)]
+pub struct GainAnalysis {
+    /// Maximum available gain (MAG) in dB - only valid if unconditionally stable
+    pub mag_db: Value,
+
+    /// Maximum stable gain (MSG) in dB - for potentially unstable devices
+    pub msg_db: Value,
+
+    /// Mason's unilateral gain (U) in dB
+    pub mason_u_db: Value,
+
+    /// Forward transducer gain |S21|² in dB
+    pub s21_gain_db: Value,
+
+    /// Reverse isolation |S12|² in dB  
+    pub s12_isolation_db: Value,
+
+    /// Whether MAG is valid (device is unconditionally stable)
+    pub mag_valid: bool,
+
+    /// Maximum unilateral transducer gain (Gtu_max) in dB
+    pub gtu_max_db: Value,
+
+    /// Unilateral figure of merit
+    pub unilateral_fom: Value,
+}
+
+impl GainAnalysis {
+    /// Compute gain analysis from S-parameters
+    pub fn from_s_matrix(s: &SMatrix) -> Self {
+        let s11 = s.s11();
+        let s12 = s.s12();
+        let s21 = s.s21();
+        let s22 = s.s22();
+
+        let s11_mag_sq = s11.magnitude().powi(2);
+        let s12_mag_sq = s12.magnitude().powi(2);
+        let s21_mag_sq = s21.magnitude().powi(2);
+        let s22_mag_sq = s22.magnitude().powi(2);
+
+        // Stability check
+        let stability = StabilityAnalysis::from_s_matrix(s);
+        let k = stability.k_factor;
+
+        // MSG = |S21/S12|
+        let msg = if s12_mag_sq > 1e-30 {
+            s21_mag_sq / s12_mag_sq
+        } else {
+            f64::INFINITY
+        };
+        let msg_db = 10.0 * msg.log10();
+
+        // MAG = MSG * (K - sqrt(K² - 1))  for K >= 1
+        let mag_db = if stability.unconditionally_stable && k >= 1.0 {
+            let mag = msg * (k - (k * k - 1.0).sqrt());
+            10.0 * mag.log10()
+        } else {
+            f64::NEG_INFINITY // Not valid
+        };
+
+        // Mason's unilateral gain U = |S21/S12 - 1|² / (2*K*|S21/S12| - 2*Re{S21/S12})
+        let s21_over_s12 = s21 / s12;
+        let ratio_minus_1 = s21_over_s12 - Complex::ONE;
+        let u = if s12_mag_sq > 1e-30 {
+            let num = ratio_minus_1.magnitude().powi(2);
+            let denom = 2.0 * k * s21_over_s12.magnitude() - 2.0 * s21_over_s12.re;
+            if denom > 1e-15 {
+                num / denom
+            } else {
+                f64::INFINITY
+            }
+        } else {
+            f64::INFINITY
+        };
+        let mason_u_db = 10.0 * u.log10();
+
+        // S21 gain and S12 isolation
+        let s21_gain_db = 10.0 * s21_mag_sq.log10();
+        let s12_isolation_db = 10.0 * s12_mag_sq.log10();
+
+        // Maximum unilateral transducer gain
+        // Gtu_max = |S21|² / ((1-|S11|²)(1-|S22|²))
+        let gtu_max = if (1.0 - s11_mag_sq) > 0.0 && (1.0 - s22_mag_sq) > 0.0 {
+            s21_mag_sq / ((1.0 - s11_mag_sq) * (1.0 - s22_mag_sq))
+        } else {
+            f64::INFINITY
+        };
+        let gtu_max_db = 10.0 * gtu_max.log10();
+
+        // Unilateral figure of merit
+        // Shows how valid the unilateral assumption is
+        let u_fom = (s11_mag_sq * s12_mag_sq * s21_mag_sq * s22_mag_sq)
+            / ((1.0 - s11_mag_sq).powi(2) * (1.0 - s22_mag_sq).powi(2));
+        let unilateral_fom = if u_fom.is_finite() && u_fom > 0.0 {
+            u_fom
+        } else {
+            0.0
+        };
+
+        Self {
+            mag_db,
+            msg_db,
+            mason_u_db,
+            s21_gain_db,
+            s12_isolation_db,
+            mag_valid: stability.unconditionally_stable,
+            gtu_max_db,
+            unilateral_fom,
+        }
+    }
+}
+
+//=============================================================================
+// Touchstone (SnP) Export
+//=============================================================================
+
+/// Touchstone file format options
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TouchstoneFormat {
+    /// Magnitude-Angle (MA)
+    MagnitudeAngle,
+    /// Real-Imaginary (RI)
+    RealImaginary,
+    /// dB-Angle (DB)
+    DecibelAngle,
+}
+
+impl TouchstoneFormat {
+    /// Get format string for Touchstone header
+    pub fn format_string(&self) -> &'static str {
+        match self {
+            TouchstoneFormat::MagnitudeAngle => "MA",
+            TouchstoneFormat::RealImaginary => "RI",
+            TouchstoneFormat::DecibelAngle => "DB",
+        }
+    }
+}
+
+/// Touchstone file frequency unit
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TouchstoneFreqUnit {
+    Hz,
+    KHz,
+    MHz,
+    GHz,
+}
+
+impl TouchstoneFreqUnit {
+    /// Get the multiplier to convert to Hz
+    pub fn multiplier(&self) -> Value {
+        match self {
+            TouchstoneFreqUnit::Hz => 1.0,
+            TouchstoneFreqUnit::KHz => 1e3,
+            TouchstoneFreqUnit::MHz => 1e6,
+            TouchstoneFreqUnit::GHz => 1e9,
+        }
+    }
+
+    /// Get unit string for Touchstone header
+    pub fn unit_string(&self) -> &'static str {
+        match self {
+            TouchstoneFreqUnit::Hz => "HZ",
+            TouchstoneFreqUnit::KHz => "KHZ",
+            TouchstoneFreqUnit::MHz => "MHZ",
+            TouchstoneFreqUnit::GHz => "GHZ",
+        }
+    }
+}
+
+/// Touchstone file exporter
+pub struct TouchstoneExporter {
+    /// Data format
+    pub format: TouchstoneFormat,
+    /// Frequency unit
+    pub freq_unit: TouchstoneFreqUnit,
+    /// Reference impedance
+    pub z0: Value,
+    /// Comments to include in file
+    pub comments: Vec<String>,
+}
+
+impl Default for TouchstoneExporter {
+    fn default() -> Self {
+        Self {
+            format: TouchstoneFormat::RealImaginary,
+            freq_unit: TouchstoneFreqUnit::GHz,
+            z0: 50.0,
+            comments: Vec::new(),
+        }
+    }
+}
+
+impl TouchstoneExporter {
+    /// Create new exporter with default settings
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set data format
+    pub fn with_format(mut self, format: TouchstoneFormat) -> Self {
+        self.format = format;
+        self
+    }
+
+    /// Set frequency unit
+    pub fn with_freq_unit(mut self, unit: TouchstoneFreqUnit) -> Self {
+        self.freq_unit = unit;
+        self
+    }
+
+    /// Set reference impedance
+    pub fn with_z0(mut self, z0: Value) -> Self {
+        self.z0 = z0;
+        self
+    }
+
+    /// Add a comment line
+    pub fn with_comment(mut self, comment: &str) -> Self {
+        self.comments.push(comment.to_string());
+        self
+    }
+
+    /// Export S-parameter result to Touchstone format string
+    pub fn export(&self, result: &SParameterResult) -> String {
+        let mut output = String::new();
+
+        // Comments
+        for comment in &self.comments {
+            output.push_str(&format!("! {}\n", comment));
+        }
+
+        // Option line: # <freq_unit> S <format> R <z0>
+        output.push_str(&format!(
+            "# {} S {} R {:.1}\n",
+            self.freq_unit.unit_string(),
+            self.format.format_string(),
+            self.z0
+        ));
+
+        // Data lines
+        let freq_mult = self.freq_unit.multiplier();
+
+        for s in &result.data {
+            let freq = s.frequency / freq_mult;
+
+            match result.num_ports {
+                1 => {
+                    // 1-port: freq S11
+                    let s11 = s.get(1, 1);
+                    let (v1, v2) = self.format_complex(s11);
+                    output.push_str(&format!("{:.9e}\t{:.9e}\t{:.9e}\n", freq, v1, v2));
+                }
+                2 => {
+                    // 2-port: freq S11 S21 S12 S22
+                    let s11 = s.get(1, 1);
+                    let s21 = s.get(2, 1);
+                    let s12 = s.get(1, 2);
+                    let s22 = s.get(2, 2);
+
+                    let (s11_1, s11_2) = self.format_complex(s11);
+                    let (s21_1, s21_2) = self.format_complex(s21);
+                    let (s12_1, s12_2) = self.format_complex(s12);
+                    let (s22_1, s22_2) = self.format_complex(s22);
+
+                    output.push_str(&format!(
+                        "{:.9e}\t{:.9e}\t{:.9e}\t{:.9e}\t{:.9e}\t{:.9e}\t{:.9e}\t{:.9e}\t{:.9e}\n",
+                        freq, s11_1, s11_2, s21_1, s21_2, s12_1, s12_2, s22_1, s22_2
+                    ));
+                }
+                _ => {
+                    // N-port: more complex formatting (split across lines)
+                    output.push_str(&format!("{:.9e}", freq));
+                    for row in 1..=result.num_ports {
+                        for col in 1..=result.num_ports {
+                            let sij = s.get(row, col);
+                            let (v1, v2) = self.format_complex(sij);
+                            output.push_str(&format!("\t{:.9e}\t{:.9e}", v1, v2));
+                        }
+                    }
+                    output.push('\n');
+                }
+            }
+        }
+
+        output
+    }
+
+    /// Format complex number according to selected format
+    fn format_complex(&self, c: Complex) -> (Value, Value) {
+        match self.format {
+            TouchstoneFormat::RealImaginary => (c.re, c.im),
+            TouchstoneFormat::MagnitudeAngle => (c.magnitude(), c.phase_deg()),
+            TouchstoneFormat::DecibelAngle => (c.mag_db(), c.phase_deg()),
+        }
+    }
+}
+
+//=============================================================================
 // Tests
 //=============================================================================
 
@@ -946,5 +1425,365 @@ mod tests {
 
         let rl = result.return_loss();
         assert!((rl[0] - 20.0).abs() < 0.1);
+    }
+
+    // =========================================================================
+    // Stability Analysis Tests
+    // =========================================================================
+
+    #[test]
+    fn test_stability_unconditionally_stable() {
+        // Create a 2-port that is unconditionally stable
+        // S11=0.1, S22=0.1, S21=0.8, S12=0.01 (typical well-designed amplifier)
+        let mut s = SMatrix::new(1e9, 2);
+        s.set(1, 1, Complex::new(0.1, 0.0));
+        s.set(2, 2, Complex::new(0.1, 0.0));
+        s.set(2, 1, Complex::new(0.8, 0.0));
+        s.set(1, 2, Complex::new(0.01, 0.0));
+
+        let stability = StabilityAnalysis::from_s_matrix(&s);
+
+        assert!(
+            stability.k_factor > 1.0,
+            "K should be > 1, got {}",
+            stability.k_factor
+        );
+        assert!(
+            stability.delta_mag < 1.0,
+            "|Δ| should be < 1, got {}",
+            stability.delta_mag
+        );
+        assert!(stability.unconditionally_stable);
+        assert!(!stability.potentially_unstable);
+        assert!(stability.mu_factor > 1.0);
+    }
+
+    #[test]
+    fn test_stability_potentially_unstable() {
+        // Create a potentially unstable device (high feedback transistor)
+        // S11=0.5, S22=0.6, S21=3.0, S12=0.3
+        let mut s = SMatrix::new(1e9, 2);
+        s.set(1, 1, Complex::new(0.5, -0.2));
+        s.set(2, 2, Complex::new(0.6, -0.3));
+        s.set(2, 1, Complex::new(3.0, 1.0));
+        s.set(1, 2, Complex::new(0.3, 0.1));
+
+        let stability = StabilityAnalysis::from_s_matrix(&s);
+
+        // This should be potentially unstable (K < 1 or |Δ| > 1)
+        assert!(stability.potentially_unstable);
+    }
+
+    #[test]
+    fn test_stability_k_factor_calculation() {
+        // Test K factor calculation with known values
+        // For S12=0 (unilateral), K → infinity
+        let mut s = SMatrix::new(1e9, 2);
+        s.set(1, 1, Complex::new(0.1, 0.0));
+        s.set(2, 2, Complex::new(0.1, 0.0));
+        s.set(2, 1, Complex::new(2.0, 0.0));
+        s.set(1, 2, Complex::new(0.0, 0.0)); // No reverse transmission
+
+        let stability = StabilityAnalysis::from_s_matrix(&s);
+
+        assert!(stability.k_factor.is_infinite() || stability.k_factor > 100.0);
+    }
+
+    #[test]
+    fn test_stability_delta_calculation() {
+        // Δ = S11*S22 - S12*S21
+        let mut s = SMatrix::new(1e9, 2);
+        s.set(1, 1, Complex::new(0.3, 0.0));
+        s.set(2, 2, Complex::new(0.4, 0.0));
+        s.set(2, 1, Complex::new(0.5, 0.0));
+        s.set(1, 2, Complex::new(0.1, 0.0));
+
+        let stability = StabilityAnalysis::from_s_matrix(&s);
+
+        // Δ = 0.3*0.4 - 0.1*0.5 = 0.12 - 0.05 = 0.07
+        assert!((stability.delta.re - 0.07).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_stability_mu_factor() {
+        let mut s = SMatrix::new(1e9, 2);
+        s.set(1, 1, Complex::new(0.1, 0.0));
+        s.set(2, 2, Complex::new(0.1, 0.0));
+        s.set(2, 1, Complex::new(0.8, 0.0));
+        s.set(1, 2, Complex::new(0.01, 0.0));
+
+        let stability = StabilityAnalysis::from_s_matrix(&s);
+
+        // For unconditionally stable, μ > 1
+        assert!(stability.mu_factor > 1.0);
+        assert!(stability.mu_prime > 1.0);
+    }
+
+    #[test]
+    fn test_stability_circle_points() {
+        let mut s = SMatrix::new(1e9, 2);
+        s.set(1, 1, Complex::new(0.5, 0.1));
+        s.set(2, 2, Complex::new(0.6, -0.1));
+        s.set(2, 1, Complex::new(2.0, 0.5));
+        s.set(1, 2, Complex::new(0.2, 0.05));
+
+        let stability = StabilityAnalysis::from_s_matrix(&s);
+
+        let input_points = stability.input_circle_points(36);
+        let output_points = stability.output_circle_points(36);
+
+        assert_eq!(input_points.len(), 36);
+        assert_eq!(output_points.len(), 36);
+
+        // Points should form a circle
+        // Check that distance from center is approximately radius
+        for (x, y) in &input_points {
+            let dist = ((x - stability.input_stability_center.re).powi(2)
+                + (y - stability.input_stability_center.im).powi(2))
+            .sqrt();
+            assert!(
+                (dist - stability.input_stability_radius).abs() < 0.01,
+                "Point not on circle"
+            );
+        }
+    }
+
+    // =========================================================================
+    // Gain Analysis Tests
+    // =========================================================================
+
+    #[test]
+    fn test_gain_s21_gain() {
+        let mut s = SMatrix::new(1e9, 2);
+        s.set(1, 1, Complex::new(0.1, 0.0));
+        s.set(2, 2, Complex::new(0.1, 0.0));
+        s.set(2, 1, Complex::new(3.16, 0.0)); // 10 dB gain
+        s.set(1, 2, Complex::new(0.01, 0.0));
+
+        let gain = GainAnalysis::from_s_matrix(&s);
+
+        // |S21|² = 10 → 10 dB
+        assert!((gain.s21_gain_db - 10.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn test_gain_msg_calculation() {
+        let mut s = SMatrix::new(1e9, 2);
+        s.set(1, 1, Complex::new(0.1, 0.0));
+        s.set(2, 2, Complex::new(0.1, 0.0));
+        s.set(2, 1, Complex::new(10.0, 0.0)); // |S21| = 10
+        s.set(1, 2, Complex::new(0.1, 0.0)); // |S12| = 0.1
+
+        let gain = GainAnalysis::from_s_matrix(&s);
+
+        // MSG = |S21|²/|S12|² (power ratio) = 100/0.01 = 10000 → 40 dB
+        assert!((gain.msg_db - 40.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn test_gain_mag_valid() {
+        // Unconditionally stable device should have valid MAG
+        let mut s = SMatrix::new(1e9, 2);
+        s.set(1, 1, Complex::new(0.1, 0.0));
+        s.set(2, 2, Complex::new(0.1, 0.0));
+        s.set(2, 1, Complex::new(2.0, 0.0));
+        s.set(1, 2, Complex::new(0.01, 0.0));
+
+        let gain = GainAnalysis::from_s_matrix(&s);
+
+        assert!(gain.mag_valid);
+        assert!(gain.mag_db.is_finite());
+        assert!(gain.mag_db > 0.0); // Should have positive gain
+    }
+
+    #[test]
+    fn test_gain_unilateral_fom() {
+        // For truly unilateral device (S12=0), FOM should be 0
+        let mut s = SMatrix::new(1e9, 2);
+        s.set(1, 1, Complex::new(0.1, 0.0));
+        s.set(2, 2, Complex::new(0.1, 0.0));
+        s.set(2, 1, Complex::new(2.0, 0.0));
+        s.set(1, 2, Complex::new(0.0, 0.0)); // Unilateral
+
+        let gain = GainAnalysis::from_s_matrix(&s);
+
+        assert!(gain.unilateral_fom < 0.01);
+    }
+
+    #[test]
+    fn test_gain_gtu_max() {
+        let mut s = SMatrix::new(1e9, 2);
+        s.set(1, 1, Complex::new(0.2, 0.0));
+        s.set(2, 2, Complex::new(0.2, 0.0));
+        s.set(2, 1, Complex::new(2.0, 0.0)); // |S21|² = 4
+        s.set(1, 2, Complex::new(0.0, 0.0));
+
+        let gain = GainAnalysis::from_s_matrix(&s);
+
+        // Gtu_max = |S21|² / ((1-|S11|²)(1-|S22|²))
+        // = 4 / ((1-0.04)(1-0.04)) = 4 / 0.9216 ≈ 4.34 → 6.37 dB
+        assert!(gain.gtu_max_db > 6.0 && gain.gtu_max_db < 7.0);
+    }
+
+    // =========================================================================
+    // Touchstone Export Tests
+    // =========================================================================
+
+    #[test]
+    fn test_touchstone_format_strings() {
+        assert_eq!(TouchstoneFormat::RealImaginary.format_string(), "RI");
+        assert_eq!(TouchstoneFormat::MagnitudeAngle.format_string(), "MA");
+        assert_eq!(TouchstoneFormat::DecibelAngle.format_string(), "DB");
+    }
+
+    #[test]
+    fn test_touchstone_freq_unit_multiplier() {
+        assert_eq!(TouchstoneFreqUnit::Hz.multiplier(), 1.0);
+        assert_eq!(TouchstoneFreqUnit::KHz.multiplier(), 1e3);
+        assert_eq!(TouchstoneFreqUnit::MHz.multiplier(), 1e6);
+        assert_eq!(TouchstoneFreqUnit::GHz.multiplier(), 1e9);
+    }
+
+    #[test]
+    fn test_touchstone_exporter_defaults() {
+        let exporter = TouchstoneExporter::new();
+
+        assert_eq!(exporter.format, TouchstoneFormat::RealImaginary);
+        assert_eq!(exporter.freq_unit, TouchstoneFreqUnit::GHz);
+        assert_eq!(exporter.z0, 50.0);
+    }
+
+    #[test]
+    fn test_touchstone_exporter_builder() {
+        let exporter = TouchstoneExporter::new()
+            .with_format(TouchstoneFormat::DecibelAngle)
+            .with_freq_unit(TouchstoneFreqUnit::MHz)
+            .with_z0(75.0)
+            .with_comment("Test export");
+
+        assert_eq!(exporter.format, TouchstoneFormat::DecibelAngle);
+        assert_eq!(exporter.freq_unit, TouchstoneFreqUnit::MHz);
+        assert_eq!(exporter.z0, 75.0);
+        assert!(exporter.comments.contains(&"Test export".to_string()));
+    }
+
+    #[test]
+    fn test_touchstone_export_1port() {
+        let mut result = SParameterResult::new(50.0, vec![Port::single_ended(1, "in", 50.0)]);
+
+        let mut s = SMatrix::new(1e9, 1);
+        s.set(1, 1, Complex::new(0.5, 0.5));
+        result.add(s);
+
+        let exporter = TouchstoneExporter::new()
+            .with_format(TouchstoneFormat::RealImaginary)
+            .with_freq_unit(TouchstoneFreqUnit::GHz);
+
+        let output = exporter.export(&result);
+
+        assert!(output.contains("# GHZ S RI R 50.0"));
+        assert!(output.contains("1.000000000e0")); // 1 GHz
+    }
+
+    #[test]
+    fn test_touchstone_export_2port() {
+        let ports = vec![
+            Port::single_ended(1, "in", 50.0),
+            Port::single_ended(2, "out", 50.0),
+        ];
+        let mut result = SParameterResult::new(50.0, ports);
+
+        let mut s = SMatrix::new(2e9, 2);
+        s.set(1, 1, Complex::new(0.1, 0.0));
+        s.set(2, 1, Complex::new(0.9, 0.1));
+        s.set(1, 2, Complex::new(0.01, 0.0));
+        s.set(2, 2, Complex::new(0.1, 0.0));
+        result.add(s);
+
+        let exporter = TouchstoneExporter::new()
+            .with_format(TouchstoneFormat::RealImaginary)
+            .with_freq_unit(TouchstoneFreqUnit::GHz);
+
+        let output = exporter.export(&result);
+
+        assert!(output.contains("# GHZ S RI R 50.0"));
+        // Frequency should be 2 GHz
+        let lines: Vec<&str> = output.lines().collect();
+        assert!(lines.len() >= 2);
+    }
+
+    #[test]
+    fn test_touchstone_export_magnitude_angle() {
+        let ports = vec![Port::single_ended(1, "in", 50.0)];
+        let mut result = SParameterResult::new(50.0, ports);
+
+        // S11 = 0.707 + j*0.707 → mag=1, angle=45°
+        let mut s = SMatrix::new(1e9, 1);
+        s.set(1, 1, Complex::new(0.707, 0.707));
+        result.add(s);
+
+        let exporter = TouchstoneExporter::new().with_format(TouchstoneFormat::MagnitudeAngle);
+
+        let output = exporter.export(&result);
+
+        assert!(output.contains("MA"));
+    }
+
+    #[test]
+    fn test_touchstone_export_db_angle() {
+        let ports = vec![Port::single_ended(1, "in", 50.0)];
+        let mut result = SParameterResult::new(50.0, ports);
+
+        // S11 = 0.1 → -20 dB
+        let mut s = SMatrix::new(1e9, 1);
+        s.set(1, 1, Complex::new(0.1, 0.0));
+        result.add(s);
+
+        let exporter = TouchstoneExporter::new().with_format(TouchstoneFormat::DecibelAngle);
+
+        let output = exporter.export(&result);
+
+        assert!(output.contains("DB"));
+    }
+
+    #[test]
+    fn test_touchstone_export_with_comments() {
+        let mut result = SParameterResult::new(50.0, vec![Port::single_ended(1, "in", 50.0)]);
+
+        let mut s = SMatrix::new(1e9, 1);
+        s.set(1, 1, Complex::new(0.1, 0.0));
+        result.add(s);
+
+        let exporter = TouchstoneExporter::new()
+            .with_comment("RSpice S-Parameter Export")
+            .with_comment("Created: 2026-01-23");
+
+        let output = exporter.export(&result);
+
+        assert!(output.contains("! RSpice S-Parameter Export"));
+        assert!(output.contains("! Created: 2026-01-23"));
+    }
+
+    #[test]
+    fn test_touchstone_multiple_frequencies() {
+        let ports = vec![Port::single_ended(1, "in", 50.0)];
+        let mut result = SParameterResult::new(50.0, ports);
+
+        for i in 1..=5 {
+            let mut s = SMatrix::new(i as f64 * 1e9, 1);
+            let mag = 0.1 * i as f64;
+            s.set(1, 1, Complex::new(mag, 0.0));
+            result.add(s);
+        }
+
+        let exporter = TouchstoneExporter::new();
+        let output = exporter.export(&result);
+
+        // Should have 5 data lines (1 per frequency)
+        let data_lines: Vec<&str> = output
+            .lines()
+            .filter(|l| !l.starts_with('!') && !l.starts_with('#'))
+            .collect();
+        assert_eq!(data_lines.len(), 5);
     }
 }
