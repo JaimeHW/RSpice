@@ -216,7 +216,10 @@ pub struct Capacitors {
     pub v_prev: Vec<Value>,
     /// Voltage from 2 steps ago (t - 2*dt) for Gear2/BDF2
     pub v_prev_prev: Vec<Value>,
-    /// Equivalent current source
+    /// Previous timestep capacitor current (for trapezoidal companion model)
+    /// Required for accurate trapezoidal integration: ieq = geq * v_n + i_n
+    pub i_prev: Vec<Value>,
+    /// Equivalent current source (legacy, kept for compatibility)
     pub i_eq: Vec<Value>,
     /// Initial condition voltage (IC=)
     pub ic: Vec<Option<Value>>,
@@ -233,6 +236,7 @@ impl Capacitors {
         self.capacitances.push(capacitance);
         self.v_prev.push(0.0);
         self.v_prev_prev.push(0.0);
+        self.i_prev.push(0.0); // Initial capacitor current is zero
         self.i_eq.push(0.0);
         self.ic.push(None);
     }
@@ -250,6 +254,7 @@ impl Capacitors {
         self.capacitances.push(capacitance);
         self.v_prev.push(ic); // Initialize v_prev to IC
         self.v_prev_prev.push(ic); // Initialize v_prev_prev to IC as well
+        self.i_prev.push(0.0); // Initial capacitor current is zero (DC steady state)
         self.i_eq.push(0.0);
         self.ic.push(Some(ic));
     }
@@ -306,6 +311,12 @@ pub struct VoltageSources {
     pub node_neg: Vec<NodeId>,
     pub branch_indices: Vec<NodeId>,
     pub dc_values: Vec<Value>,
+    /// AC magnitude for AC/HB analysis
+    pub ac_magnitudes: Vec<Value>,
+    /// AC phase in radians for AC/HB analysis
+    pub ac_phases: Vec<Value>,
+    /// Full source specification for transient waveform evaluation
+    pub source_specs: Vec<Option<crate::netlist::SourceSpec>>,
     /// Pre-baked CSC indices: [br->np, np->br, br->nn, nn->br] per source
     csc_indices: Vec<[Option<CscIndex>; 4]>,
 }
@@ -328,6 +339,32 @@ impl VoltageSources {
         self.node_neg.push(node_neg);
         self.branch_indices.push(branch_idx);
         self.dc_values.push(dc_value);
+        self.ac_magnitudes.push(0.0);
+        self.ac_phases.push(0.0);
+        self.source_specs.push(None);
+        self.csc_indices.push([None; 4]);
+    }
+
+    /// Add voltage source with full AC and transient specification
+    pub fn add_with_ac_and_spec(
+        &mut self,
+        name: String,
+        node_pos: NodeId,
+        node_neg: NodeId,
+        branch_idx: NodeId,
+        dc_value: Value,
+        ac_magnitude: Value,
+        ac_phase: Value,
+        source_spec: Option<crate::netlist::SourceSpec>,
+    ) {
+        self.names.push(name);
+        self.node_pos.push(node_pos);
+        self.node_neg.push(node_neg);
+        self.branch_indices.push(branch_idx);
+        self.dc_values.push(dc_value);
+        self.ac_magnitudes.push(ac_magnitude);
+        self.ac_phases.push(ac_phase);
+        self.source_specs.push(source_spec);
         self.csc_indices.push([None; 4]);
     }
 
@@ -439,6 +476,120 @@ impl VoltageSources {
             }
             if br > 0 {
                 rhs[br - 1] = v;
+            }
+        }
+    }
+
+    /// Update voltage source RHS values for transient analysis at time t
+    ///
+    /// Evaluates time-varying sources (PULSE, SIN, PWL, EXP) at the given time
+    /// and updates the RHS vector. Matrix structure is unchanged.
+    #[inline]
+    pub fn update_transient_rhs(
+        &self,
+        rhs: &mut [Value],
+        time: Value,
+        get_branch_idx: impl Fn(usize) -> usize,
+    ) {
+        for i in 0..self.names.len() {
+            let br = get_branch_idx(self.branch_indices[i]);
+
+            let v = match &self.source_specs[i] {
+                Some(spec) => Self::evaluate_source_at_time(spec, time),
+                None => self.dc_values[i], // DC only
+            };
+
+            rhs[br - 1] = v;
+        }
+    }
+
+    /// Evaluate source specification at given time
+    fn evaluate_source_at_time(spec: &crate::netlist::SourceSpec, time: Value) -> Value {
+        use crate::netlist::SourceSpec;
+        use std::f64::consts::PI;
+
+        match spec {
+            SourceSpec::Dc(v) => *v,
+            SourceSpec::Ac { .. } => 0.0, // AC sources are DC=0 in transient
+            SourceSpec::DcAc { dc_value, .. } => *dc_value,
+            SourceSpec::Pulse {
+                v1,
+                v2,
+                delay,
+                rise,
+                fall,
+                width,
+                period,
+            } => {
+                if time < *delay {
+                    return *v1;
+                }
+                let t = (time - delay) % period;
+                if t < *rise {
+                    v1 + (v2 - v1) * t / rise
+                } else if t < rise + width {
+                    *v2
+                } else if t < rise + width + fall {
+                    v2 + (v1 - v2) * (t - rise - width) / fall
+                } else {
+                    *v1
+                }
+            }
+            SourceSpec::Sin {
+                offset,
+                amplitude,
+                frequency,
+                delay,
+                damping,
+                phase,
+            } => {
+                if time < *delay {
+                    *offset
+                } else {
+                    let t = time - delay;
+                    offset
+                        + amplitude
+                            * (-damping * t).exp()
+                            * (2.0 * PI * frequency * t + phase).sin()
+                }
+            }
+            SourceSpec::Pwl { points } => {
+                if points.is_empty() {
+                    return 0.0;
+                }
+                if time <= points[0].0 {
+                    return points[0].1;
+                }
+                if time >= points[points.len() - 1].0 {
+                    return points[points.len() - 1].1;
+                }
+                // Linear interpolation
+                for j in 0..points.len() - 1 {
+                    if time >= points[j].0 && time < points[j + 1].0 {
+                        let (t1, v1) = points[j];
+                        let (t2, v2) = points[j + 1];
+                        return v1 + (v2 - v1) * (time - t1) / (t2 - t1);
+                    }
+                }
+                0.0
+            }
+            SourceSpec::PwlFile { value_offset, .. } => *value_offset, // TODO: file loading
+            SourceSpec::Exp {
+                v1,
+                v2,
+                td1,
+                tau1,
+                td2,
+                tau2,
+            } => {
+                if time < *td1 {
+                    *v1
+                } else if time < *td2 {
+                    v1 + (v2 - v1) * (1.0 - (-(time - td1) / tau1).exp())
+                } else {
+                    v1 + (v2 - v1) * (1.0 - (-(time - td1) / tau1).exp())
+                        - (v2 - v1) * (1.0 - (-(time - td2) / tau2).exp())
+                }
             }
         }
     }
