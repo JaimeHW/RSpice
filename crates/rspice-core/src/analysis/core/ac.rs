@@ -87,17 +87,20 @@ pub struct AcResult {
 }
 
 impl AcResult {
-    /// Get voltage magnitude at a node
+    /// Get voltage magnitude at a node (1-indexed, consistent with SPICE)
     pub fn voltage_magnitude(&self, node: usize) -> Value {
-        self.voltages.get(node).map(|v| v.norm()).unwrap_or(0.0)
+        if node == 0 {
+            return 0.0; // Ground is always 0V
+        }
+        self.voltages.get(node - 1).map(|v| v.norm()).unwrap_or(0.0)
     }
 
-    /// Get voltage phase at a node (in degrees)
+    /// Get voltage phase at a node (in radians, 1-indexed)
     pub fn voltage_phase(&self, node: usize) -> Value {
-        self.voltages
-            .get(node)
-            .map(|v| v.arg().to_degrees())
-            .unwrap_or(0.0)
+        if node == 0 {
+            return 0.0; // Ground phase is 0
+        }
+        self.voltages.get(node - 1).map(|v| v.arg()).unwrap_or(0.0)
     }
 
     /// Get voltage in dB at a node
