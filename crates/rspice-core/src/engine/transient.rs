@@ -155,70 +155,18 @@ impl Engine {
                 let coeff = CompanionCoefficients::for_method(current_method);
 
                 // Stamp capacitor companion models for transient
-                for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
-                    let capacitance = circuit.capacitors.capacitances[cap_idx];
-                    let np = cap.pp.row;
-                    let nn = cap.nn.row;
-
-                    let v_n = circuit.capacitors.v_prev[cap_idx];
-                    let v_n_minus_1 = circuit.capacitors.v_prev_prev[cap_idx];
-
-                    let geq = coeff.capacitor_geq(capacitance, dt);
-                    let i_n_cap = circuit.capacitors.i_prev[cap_idx];
-                    let ieq = coeff.capacitor_ieq(capacitance, dt, v_n, v_n_minus_1, i_n_cap);
-
-                    if np > 0 {
-                        matrix.add(np - 1, np - 1, geq);
-                        if nn > 0 {
-                            matrix.add(np - 1, nn - 1, -geq);
-                        }
-                    }
-                    if nn > 0 {
-                        if np > 0 {
-                            matrix.add(nn - 1, np - 1, -geq);
-                        }
-                        matrix.add(nn - 1, nn - 1, geq);
-                    }
-
-                    // Stamp equivalent current source for capacitor companion model
-                    if np > 0 {
-                        rhs[np - 1] += ieq;
-                    }
-                    if nn > 0 {
-                        rhs[nn - 1] -= ieq;
-                    }
-                }
+                circuit
+                    .capacitors
+                    .stamp_transient_companion(&mut matrix, &mut rhs, dt, &coeff);
 
                 // Stamp inductor companion models for transient
-                for l_idx in 0..circuit.inductors.names.len() {
-                    let np = circuit.inductors.node_pos[l_idx];
-                    let nn = circuit.inductors.node_neg[l_idx];
-                    let br = circuit.inductors.branch_indices[l_idx];
-                    let inductance = circuit.inductors.inductances[l_idx];
-
-                    let i_n = circuit.inductors.i_prev[l_idx];
-                    let i_n_minus_1 = circuit.inductors.i_prev_prev[l_idx];
-                    let v_n = circuit.inductors.v_prev[l_idx];
-
-                    let req = coeff.inductor_req(inductance, dt);
-                    let veq = coeff.inductor_veq(inductance, dt, i_n, i_n_minus_1, v_n);
-
-                    if np > 0 && br > 0 {
-                        let br_idx = circuit.num_nodes() + br - 1;
-                        matrix.add(br_idx, np - 1, 1.0);
-                        matrix.add(np - 1, br_idx, 1.0);
-                    }
-                    if nn > 0 && br > 0 {
-                        let br_idx = circuit.num_nodes() + br - 1;
-                        matrix.add(br_idx, nn - 1, -1.0);
-                        matrix.add(nn - 1, br_idx, -1.0);
-                    }
-                    if br > 0 {
-                        let br_idx = circuit.num_nodes() + br - 1;
-                        matrix.add(br_idx, br_idx, -req);
-                        rhs[br_idx] = veq;
-                    }
-                }
+                circuit.inductors.stamp_transient_companion(
+                    &mut matrix,
+                    &mut rhs,
+                    dt,
+                    &coeff,
+                    num_nodes,
+                );
 
                 // Stamp nonlinear devices if present
                 if circuit.has_nonlinear_devices() {
@@ -264,48 +212,16 @@ impl Engine {
                 if retry_count >= MAX_RETRIES || timestep.is_at_minimum() {
                     t += dt;
 
-                    // CRITICAL: Update capacitor voltage history even on force-accept
-                    for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
-                        let np = cap.pp.row;
-                        let nn = cap.nn.row;
-                        let v_new = if np == 0 { 0.0 } else { new_solution[np - 1] }
-                            - if nn == 0 { 0.0 } else { new_solution[nn - 1] };
-                        circuit.capacitors.v_prev_prev[cap_idx] =
-                            circuit.capacitors.v_prev[cap_idx];
-                        circuit.capacitors.v_prev[cap_idx] = v_new;
-
-                        // Update current history: i_new = geq * v_new - ieq
-                        let coeff_update =
-                            CompanionCoefficients::for_method(trapgear.current_method());
-                        let geq = coeff_update
-                            .capacitor_geq(circuit.capacitors.capacitances[cap_idx], dt);
-                        let i_n_cap = circuit.capacitors.i_prev[cap_idx];
-                        let ieq = coeff_update.capacitor_ieq(
-                            circuit.capacitors.capacitances[cap_idx],
-                            dt,
-                            circuit.capacitors.v_prev_prev[cap_idx],
-                            circuit.capacitors.v_prev_prev[cap_idx],
-                            i_n_cap,
-                        );
-                        circuit.capacitors.i_prev[cap_idx] = geq * v_new - ieq;
-                    }
-
-                    // CRITICAL: Update inductor current history even on force-accept
-                    for l_idx in 0..circuit.inductors.names.len() {
-                        let br = circuit.inductors.branch_indices[l_idx];
-                        if br > 0 {
-                            let br_idx = circuit.num_nodes() + br - 1;
-                            let i_new = new_solution[br_idx];
-                            circuit.inductors.i_prev_prev[l_idx] = circuit.inductors.i_prev[l_idx];
-                            circuit.inductors.i_prev[l_idx] = i_new;
-
-                            let np = circuit.inductors.node_pos[l_idx];
-                            let nn = circuit.inductors.node_neg[l_idx];
-                            let v_new = if np == 0 { 0.0 } else { new_solution[np - 1] }
-                                - if nn == 0 { 0.0 } else { new_solution[nn - 1] };
-                            circuit.inductors.v_prev[l_idx] = v_new;
-                        }
-                    }
+                    // CRITICAL: Update device history even on force-accept
+                    circuit
+                        .capacitors
+                        .update_state(&new_solution, dt, trapgear.current_method());
+                    circuit.inductors.update_state(
+                        &new_solution,
+                        num_nodes,
+                        dt,
+                        trapgear.current_method(),
+                    );
 
                     solution = new_solution;
                     result.time.push(t);
