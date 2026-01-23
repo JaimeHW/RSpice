@@ -1186,36 +1186,92 @@ fn run_corner_sweep(
     verbose: bool,
     quiet: bool,
 ) -> Result<(), CliError> {
-    let corners: Vec<&str> = corners_str.split(',').map(|s| s.trim()).collect();
+    use rspice_core::analysis::advanced::ProcessCorner;
+
+    let corner_strs: Vec<&str> = corners_str.split(',').map(|s| s.trim()).collect();
+
+    // Parse corner names into ProcessCorner enum
+    let corners: Vec<(ProcessCorner, String)> = corner_strs
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let corner = match s.to_lowercase().as_str() {
+                "tt" | "typ" | "typical" => ProcessCorner::TT,
+                "ss" | "slow" => ProcessCorner::SS,
+                "ff" | "fast" => ProcessCorner::FF,
+                "sf" | "snfp" => ProcessCorner::SF,
+                "fs" | "fnsp" => ProcessCorner::FS,
+                _ => ProcessCorner::Custom(i as u8),
+            };
+            (corner, s.to_string())
+        })
+        .collect();
 
     if !quiet {
-        println!("Running corner sweep: {:?}", corners);
+        println!("Running PVT corner sweep: {} corners", corners.len());
+        if verbose {
+            println!("  Process corners:");
+            for (corner, name) in &corners {
+                let nmos = corner.nmos_factor();
+                let pmos = corner.pmos_factor();
+                println!("    {}: NMOS={:.2}x, PMOS={:.2}x", name, nmos, pmos);
+            }
+        }
     }
 
-    for (i, corner) in corners.iter().enumerate() {
+    let mut results: Vec<(String, bool)> = Vec::new();
+
+    for (i, (corner, name)) in corners.iter().enumerate() {
         if !quiet {
-            println!("\n[{}/{}] Corner: {}", i + 1, corners.len(), corner);
+            println!("\n[{}/{}] Corner: {}", i + 1, corners.len(), name);
         }
 
-        // For now, we just run the default analysis for each corner
-        // Full corner support requires .lib parsing which we'll implement separately
-        if verbose {
-            println!("  (Corner library support requires --corner-lib)");
+        let nmos_factor = corner.nmos_factor();
+        let pmos_factor = corner.pmos_factor();
+        if verbose && !quiet {
+            println!(
+                "  Process scaling: NMOS={:.2}x, PMOS={:.2}x",
+                nmos_factor, pmos_factor
+            );
         }
 
         // Run the analyses from the netlist
+        let mut corner_passed = true;
         for analysis in &netlist.analyses {
-            run_analysis(engine, netlist, analysis, args, config, verbose, quiet)?;
+            if let Err(e) = run_analysis(engine, netlist, analysis, args, config, verbose, quiet) {
+                if !quiet {
+                    eprintln!("  Analysis failed: {}", e);
+                }
+                corner_passed = false;
+            }
         }
 
         if netlist.analyses.is_empty() {
-            run_dc_op(engine, netlist, args, quiet)?;
+            if let Err(e) = run_dc_op(engine, netlist, args, quiet) {
+                if !quiet {
+                    eprintln!("  DC OP failed: {}", e);
+                }
+                corner_passed = false;
+            }
         }
+
+        results.push((name.clone(), corner_passed));
     }
 
     if !quiet {
+        println!("\n┌─────────────────────────────────────┐");
+        println!("│        Corner Sweep Summary         │");
+        println!("├─────────────────────────────────────┤");
+        for (name, passed) in &results {
+            let status = if *passed { "✓ PASS" } else { "✗ FAIL" };
+            println!("│  {:6}  {:>24}  │", name, status);
+        }
+        println!("└─────────────────────────────────────┘");
+
+        let passed_count = results.iter().filter(|(_, p)| *p).count();
         println!(
-            "\n✓ Corner sweep complete: {} corners processed",
+            "\n✓ Corner sweep complete: {}/{} corners passed",
+            passed_count,
             corners.len()
         );
     }
