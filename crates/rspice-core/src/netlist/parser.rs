@@ -37,6 +37,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
     let mut subcircuits = Vec::new();
     let mut params = ParamContext::new();
     let mut veriloga_includes = Vec::new();
+    let mut measurements = Vec::new();
 
     // State for tracking subcircuit blocks
     let mut in_subcircuit = false;
@@ -73,6 +74,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
                 &mut in_subcircuit,
                 &mut current_subckt,
                 &mut params,
+                &mut measurements,
             )?;
             continuation.clear();
         }
@@ -115,6 +117,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
             &mut in_subcircuit,
             &mut current_subckt,
             &mut params,
+            &mut measurements,
         )?;
     }
 
@@ -138,7 +141,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
         params,
         initial_conditions,
         global_nodes: std::collections::HashSet::new(),
-        measurements: Vec::new(),
+        measurements,
         options: super::SimulationOptions::default(),
         veriloga_includes,
     })
@@ -154,6 +157,7 @@ fn process_line(
     in_subcircuit: &mut bool,
     current_subckt: &mut Option<SubcircuitDef>,
     params: &mut ParamContext,
+    measurements: &mut Vec<crate::analysis::MeasureStatement>,
 ) -> Result<(), ParseError> {
     let upper = line.to_uppercase();
 
@@ -186,6 +190,8 @@ fn process_line(
                 subckt_params.set(name, *value);
             }
 
+            // Subcircuits don't get standalone measurements parsing
+            let mut dummy_measurements = Vec::new();
             parse_line(
                 line,
                 line_num,
@@ -193,6 +199,7 @@ fn process_line(
                 analyses,
                 models,
                 &mut subckt_params,
+                &mut dummy_measurements,
             )?;
             subckt.elements.extend(subckt_elements);
         }
@@ -200,7 +207,15 @@ fn process_line(
     }
 
     // Normal element/command parsing
-    parse_line(line, line_num, elements, analyses, models, params)
+    parse_line(
+        line,
+        line_num,
+        elements,
+        analyses,
+        models,
+        params,
+        measurements,
+    )
 }
 
 fn parse_line(
@@ -210,6 +225,7 @@ fn parse_line(
     analyses: &mut Vec<AnalysisCommand>,
     models: &mut Vec<ModelDef>,
     params: &mut ParamContext,
+    measurements: &mut Vec<crate::analysis::MeasureStatement>,
 ) -> Result<(), ParseError> {
     // Tokenize the line
     let tokens = tokenize(line).map_err(|e| lex_to_parse_error(e, line_num))?;
@@ -235,7 +251,14 @@ fn parse_line(
     let first_char = first.chars().next().unwrap_or(' ');
 
     match first_char {
-        '.' => parse_command(&mut stream, line_num, analyses, models, params),
+        '.' => parse_command(
+            &mut stream,
+            line_num,
+            analyses,
+            models,
+            params,
+            measurements,
+        ),
         'R' => parse_resistor(&mut stream, line_num, elements, params),
         'C' => parse_capacitor(&mut stream, line_num, elements, params),
         'L' => parse_inductor(&mut stream, line_num, elements, params),
@@ -284,6 +307,7 @@ fn parse_command(
     analyses: &mut Vec<AnalysisCommand>,
     models: &mut Vec<ModelDef>,
     params: &mut ParamContext,
+    measurements: &mut Vec<crate::analysis::MeasureStatement>,
 ) -> Result<(), ParseError> {
     let cmd = expect_ident(stream, line_num)?;
 
@@ -400,6 +424,12 @@ fn parse_command(
             // Just consume the line - parsing happens at higher level
             log::debug!(".OPTIONS found at line {}", line_num);
         }
+        ".MEAS" | ".MEASURE" => {
+            // Parse measurement statement: .MEAS TRAN name TYPE signal [options]
+            if let Ok(meas) = parse_meas_command(stream, line_num, params) {
+                measurements.push(meas);
+            }
+        }
         _ => {
             // Ignore unknown commands
             log::debug!("Ignoring unknown command: {}", cmd);
@@ -407,6 +437,99 @@ fn parse_command(
     }
 
     Ok(())
+}
+
+/// Parse .MEAS/.MEASURE statement
+/// Syntax: .MEAS TRAN name TYPE signal [FROM=x TO=y]
+/// Examples:
+///   .MEAS TRAN vmax MAX V(out)
+///   .MEAS TRAN vavg AVG V(out) FROM=0 TO=1m
+fn parse_meas_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<crate::analysis::MeasureStatement, ParseError> {
+    use crate::analysis::{MeasureStatement, MeasureType};
+
+    // Parse analysis type (TRAN, AC, DC)
+    let analysis = expect_ident(stream, line_num)?;
+
+    // Parse measurement name
+    let name = expect_ident(stream, line_num)?;
+
+    // Parse measurement type keyword
+    let measure_type_str = expect_ident(stream, line_num)?;
+
+    // Parse signal name
+    let signal = expect_ident(stream, line_num)?;
+
+    // Parse optional FROM/TO
+    let mut from: Option<crate::Value> = None;
+    let mut to: Option<crate::Value> = None;
+
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        if let TokenKind::Ident(s) = &stream.peek().kind {
+            let key = s.to_uppercase();
+            stream.advance();
+            if stream.consume(&TokenKind::Equals) {
+                if let Ok(val) = expect_value(stream, line_num, params) {
+                    match key.as_str() {
+                        "FROM" => from = Some(val),
+                        "TO" => to = Some(val),
+                        _ => {}
+                    }
+                }
+            }
+        } else {
+            stream.advance();
+        }
+    }
+
+    // Create the measurement type based on keyword
+    let measure_type = match measure_type_str.as_str() {
+        "AVG" => MeasureType::Avg {
+            signal: signal.clone(),
+            from,
+            to,
+        },
+        "MAX" => MeasureType::Max {
+            signal: signal.clone(),
+            from,
+            to,
+        },
+        "MIN" => MeasureType::Min {
+            signal: signal.clone(),
+            from,
+            to,
+        },
+        "PP" => MeasureType::PeakToPeak {
+            signal: signal.clone(),
+            from,
+            to,
+        },
+        "RMS" => MeasureType::Rms {
+            signal: signal.clone(),
+            from,
+            to,
+        },
+        "INTEG" => MeasureType::Integ {
+            signal: signal.clone(),
+            from,
+            to,
+        },
+        _ => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Unknown measurement type: {}", measure_type_str),
+            });
+        }
+    };
+
+    Ok(MeasureStatement {
+        name,
+        measure_type,
+        analysis,
+    })
 }
 
 fn parse_param_statement(
