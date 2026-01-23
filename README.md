@@ -116,9 +116,6 @@ Execute batch simulations for CI/CD pipelines:
 cargo run -p rspice-cli --release -- design.cir
 ```
 
-📖 **For complete CLI documentation, see [CLI Reference](crates/rspice-cli/README.md).**
-
----
 
 ## CLI Features
 
@@ -144,6 +141,7 @@ rspice compare results.csv golden.csv --abstol 1e-9
 # Monte Carlo yield analysis
 rspice run circuit.sp --monte-carlo 1000 --seed 42
 ```
+📖 **For complete CLI documentation, see [CLI Reference](crates/rspice-cli/README.md).**
 
 ---
 
@@ -153,9 +151,6 @@ We are consistently pushing the boundaries of open-source EDA:
 
 *   [x] **Advanced RF**: Harmonic Balance, PSS, & PNoise.
 *   [x] **Measurement Engine**: Automated extraction of circuit metrics.
-*   [ ] **Cloud Native**: Kubernetes-ready distributed simulation dispatch.
-*   [ ] **Layout**: Integrated PCB & IC layout views with parasitic extraction.
-*   [ ] **Synthesis**: AI-assisted topology generation.
 
 ## License
 
