@@ -26,6 +26,9 @@ pub mod measurements;
 // Signal integrity analysis - eye diagrams, jitter analysis
 pub mod signal_integrity;
 
+// Post-processing utilities - THD, SFDR, IMD, group delay
+pub mod post_processing;
+
 // Re-export submodules for backwards-compatible paths (crate::analysis::ac etc)
 pub use advanced::fourier;
 pub use advanced::measure;
