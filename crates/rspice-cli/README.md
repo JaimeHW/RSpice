@@ -37,7 +37,37 @@ rspice check circuit.sp --connectivity
 
 ---
 
+## Supported Analyses
+
+| Analysis | CLI Flag | Description |
+|----------|----------|-------------|
+| DC Operating Point | `rspice run` | Finds DC solution with Newton-Raphson |
+| DC Sweep | Built-in | Nested voltage/current/parameter sweeps |
+| Transient | Built-in | Time-domain with adaptive timestepping |
+| AC Small-Signal | Built-in | Frequency response |
+| Noise | `--noise` | Thermal, Shot, and Flicker (1/f) noise |
+| Monte Carlo | `--monte-carlo N` | Statistical yield with histogram & 3σ |
+| Corner Analysis | `--corners tt,ss,ff` | PVT sweep with NMOS/PMOS scaling |
+| PSS | `--pss-freq F` | Periodic Steady-State for oscillators |
+| Harmonic Balance | `--hb-freq F` | RF steady-state solution |
+| Pole-Zero | `--pz-input/output` | Transfer function analysis |
+| Sensitivity | `--sens-*` | DC/AC sensitivity |
+
+## Device Models
+
+| Device | Models |
+|--------|--------|
+| **MOSFET** | BSIM4, BSIM3v3.24 (submicron), EKV, VDMOS (Power), Level 1-3 |
+| **BJT** | Gummel-Poon (NPN/PNP) with quasi-saturation and high-injection |
+| **Diode** | Shockley with junction and diffusion capacitance |
+| **JFET** | Curtice model with channel length modulation |
+| **GaN HEMT** | Cubic model with self-heating and trapping effects |
+| **Verilog-A** | JIT-compiled behavioral models via Cranelift |
+
+---
+
 ## Commands
+
 
 ### `rspice run` — Execute Simulations
 
