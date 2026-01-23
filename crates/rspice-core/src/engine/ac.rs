@@ -160,12 +160,20 @@ impl Engine {
                 ac_matrix.add_real(i, i, 1e-15);
             }
 
-            // RHS: AC source magnitude (1V for first voltage source)
+            // RHS: stamp AC excitation for each voltage source with AC specification
             let mut rhs = vec![Complex64::new(0.0, 0.0); size];
-            if !circuit.voltage_sources.is_empty() {
-                let br_ordinal = circuit.voltage_sources.branch_indices[0];
-                let br = circuit.get_branch_matrix_index(br_ordinal);
-                rhs[br - 1] = Complex64::new(1.0, 0.0); // 1V AC magnitude
+            for i in 0..circuit.voltage_sources.len() {
+                let ac_mag = circuit.voltage_sources.ac_magnitudes[i];
+                let ac_phase = circuit.voltage_sources.ac_phases[i];
+
+                // Only stamp sources with non-zero AC magnitude
+                if ac_mag.abs() > 1e-15 {
+                    let br_ordinal = circuit.voltage_sources.branch_indices[i];
+                    let br = circuit.get_branch_matrix_index(br_ordinal);
+                    // Convert magnitude and phase to complex: mag * e^(j*phase)
+                    let ac_value = Complex64::from_polar(ac_mag, ac_phase);
+                    rhs[br - 1] = ac_value;
+                }
             }
 
             // Solve

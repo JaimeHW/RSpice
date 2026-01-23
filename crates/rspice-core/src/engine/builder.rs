@@ -62,9 +62,34 @@ impl Engine {
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
                     let branch = circuit.allocate_branch_named(&element.name);
                     let dc_value = extract_dc_value(spec);
-                    circuit
-                        .voltage_sources
-                        .add(element.name.clone(), np, nn, branch, dc_value);
+                    let (ac_mag, ac_phase) = super::extract_ac_value(spec);
+                    log::debug!(
+                        "VoltageSource {}: DC={}, AC_mag={}, AC_phase={}, spec={:?}",
+                        element.name,
+                        dc_value,
+                        ac_mag,
+                        ac_phase,
+                        spec
+                    );
+                    // Clone spec for transient analysis if it's a time-varying source
+                    let transient_spec = match spec {
+                        crate::netlist::SourceSpec::Pulse { .. }
+                        | crate::netlist::SourceSpec::Sin { .. }
+                        | crate::netlist::SourceSpec::Pwl { .. }
+                        | crate::netlist::SourceSpec::PwlFile { .. }
+                        | crate::netlist::SourceSpec::Exp { .. } => Some(spec.clone()),
+                        _ => None,
+                    };
+                    circuit.voltage_sources.add_with_ac_and_spec(
+                        element.name.clone(),
+                        np,
+                        nn,
+                        branch,
+                        dc_value,
+                        ac_mag,
+                        ac_phase,
+                        transient_spec,
+                    );
                 }
                 ElementKind::CurrentSource(spec) => {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
