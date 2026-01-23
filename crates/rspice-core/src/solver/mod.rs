@@ -1,16 +1,22 @@
 //! Numerical solvers for circuit simulation
 
+pub mod arc_length;
 pub mod convergence;
+pub mod damping;
+pub mod enhanced_newton;
 mod newton;
 mod sparse;
 
 #[cfg(feature = "parallel")]
 pub mod parallel;
 
+pub use arc_length::{ArcLengthConfig, ArcLengthContinuation, ArcLengthResult, ArcLengthState};
 pub use convergence::{
     ConvergenceController, ConvergenceMethod, ConvergenceResult, GminStepper, PseudoTransient,
     SourceStepper,
 };
+pub use damping::{DampingController, DampingStatistics, DampingStrategy};
+pub use enhanced_newton::{EnhancedNewtonConfig, EnhancedNewtonSolver, EnhancedNewtonState};
 pub use newton::*;
 pub use sparse::*;
 
