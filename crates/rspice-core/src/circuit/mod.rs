@@ -6,6 +6,7 @@
 //! - Separation of topology (static) from values (mutable)
 
 use crate::Value;
+use crate::analysis::{CompanionCoefficients, IntegrationMethod};
 use crate::device::behavioral::BehavioralSources;
 use crate::device::{Bjt, Cccs, Ccvs, Diode, MatrixStamper, Mosfet, Vccs, Vcvs};
 use crate::solver::{CscIndex, StaticMatrix, TripletMatrix};
@@ -283,21 +284,90 @@ impl Capacitors {
         }
     }
 
-    /// Stamp all capacitors for transient analysis
+    /// Stamp all capacitors for transient analysis using optimized direct stamping
+    ///
+    /// This is the unified stamping method for both StaticMatrix (direct) and TripletMatrix
+    #[inline]
+    pub fn stamp_transient_companion(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+    ) {
+        for (i, stamp) in self.stamps.iter().enumerate() {
+            // geq = coeff_g * C / dt
+            let geq = coeff.capacitor_geq(self.capacitances[i], dt);
+            stamp.stamp_direct(matrix, geq);
+
+            // Compute equivalent current source based on history
+            let i_eq = coeff.capacitor_ieq(
+                self.capacitances[i],
+                dt,
+                self.v_prev[i],
+                self.v_prev_prev[i],
+                self.i_prev[i],
+            );
+
+            if stamp.pp.row != 0 {
+                rhs[stamp.pp.row - 1] += i_eq;
+            }
+            if stamp.nn.row != 0 {
+                rhs[stamp.nn.row - 1] -= i_eq;
+            }
+        }
+    }
+
+    /// Update capacitor state after a successful timestep
+    ///
+    /// Stores current voltage and calculates internal current based on integration method.
+    pub fn update_state(&mut self, solution: &[Value], dt: Value, method: IntegrationMethod) {
+        let coeff = CompanionCoefficients::for_method(method);
+        for (i, stamp) in self.stamps.iter().enumerate() {
+            let v_curr = if stamp.pp.row != 0 {
+                solution[stamp.pp.row - 1]
+            } else {
+                0.0
+            } - if stamp.nn.row != 0 {
+                solution[stamp.nn.row - 1]
+            } else {
+                0.0
+            };
+
+            // geq and ieq based on history (v_prev, v_prev_prev, i_prev)
+            let geq = coeff.capacitor_geq(self.capacitances[i], dt);
+            let i_eq = coeff.capacitor_ieq(
+                self.capacitances[i],
+                dt,
+                self.v_prev[i],
+                self.v_prev_prev[i],
+                self.i_prev[i],
+            );
+
+            // Compute newest current: i_{n+1} = geq * v_{n+1} - i_eq
+            let i_curr = geq * v_curr - i_eq;
+
+            // Advance history
+            self.v_prev_prev[i] = self.v_prev[i];
+            self.v_prev[i] = v_curr;
+            self.i_prev[i] = i_curr;
+        }
+    }
+
+    /// Stamp all capacitors (legacy TripletMatrix support)
     #[inline]
     pub fn stamp_all(&self, matrix: &mut TripletMatrix, rhs: &mut [Value], dt: Value) {
         for (i, stamp) in self.stamps.iter().enumerate() {
-            // Trapezoidal companion model: geq = 2C/dt
             let geq = 2.0 * self.capacitances[i] / dt;
             stamp.stamp_conductance(matrix, geq);
 
-            // Current source contribution
-            let i_eq = self.i_eq[i];
+            // Fallback to basic Trapezoidal for i_eq if update_state hasn't been unified yet
+            let i_eq = geq * self.v_prev[i] + self.i_prev[i];
             if stamp.pp.row != 0 {
-                rhs[stamp.pp.row - 1] -= i_eq;
+                rhs[stamp.pp.row - 1] += i_eq;
             }
             if stamp.nn.row != 0 {
-                rhs[stamp.nn.row - 1] += i_eq;
+                rhs[stamp.nn.row - 1] -= i_eq;
             }
         }
     }
@@ -776,31 +846,100 @@ impl Inductors {
         2.0 * self.inductances[idx] / dt
     }
 
-    /// Stamp all inductors for transient analysis (trapezoidal companion model)
-    /// Inductor: v = L * di/dt → companion: v = req * i + veq
-    /// where req = 2L/dt, veq = req * i_prev + v_prev
+    /// Stamp all inductors for transient analysis using optimized direct stamping
+    ///
+    /// This is the unified stamping method for both StaticMatrix (direct) and TripletMatrix
     #[inline]
-    pub fn stamp_all(&self, matrix: &mut TripletMatrix, rhs: &mut [Value], dt: Value) {
+    pub fn stamp_transient_companion(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+        num_nodes: usize,
+    ) {
         for i in 0..self.names.len() {
             let np = self.node_pos[i];
             let nn = self.node_neg[i];
-            let br = self.branch_indices[i];
-            let req = self.req(i, dt);
+            let br_ordinal = self.branch_indices[i];
+            let br = num_nodes + br_ordinal;
+
+            let r_eq = coeff.inductor_req(self.inductances[i], dt);
+            let v_eq = coeff.inductor_veq(
+                self.inductances[i],
+                dt,
+                self.i_prev[i],
+                self.i_prev_prev[i],
+                self.v_prev[i],
+            );
+
+            // MNA stamp for inductor companion model (V-source branch)
+            // L: v = L*di/dt → v_n+1 - v_eq = r_eq * i_n+1
+            if np > 0 {
+                matrix.add(br - 1, np - 1, 1.0);
+                matrix.add(np - 1, br - 1, 1.0);
+            }
+            if nn > 0 {
+                matrix.add(br - 1, nn - 1, -1.0);
+                matrix.add(nn - 1, br - 1, -1.0);
+            }
+            matrix.add(br - 1, br - 1, -r_eq);
+            rhs[br - 1] = v_eq;
+        }
+    }
+
+    /// Update inductor state after a successful timestep
+    pub fn update_state(
+        &mut self,
+        solution: &[Value],
+        num_nodes: usize,
+        _dt: Value,
+        _method: IntegrationMethod,
+    ) {
+        for i in 0..self.names.len() {
+            let np = self.node_pos[i];
+            let nn = self.node_neg[i];
+            let br_idx = num_nodes + self.branch_indices[i] - 1;
+
+            let v_curr = if np == 0 { 0.0 } else { solution[np - 1] }
+                - if nn == 0 { 0.0 } else { solution[nn - 1] };
+            let i_curr = solution[br_idx];
+
+            // Advance history
+            self.i_prev_prev[i] = self.i_prev[i];
+            self.i_prev[i] = i_curr;
+            self.v_prev[i] = v_curr;
+        }
+    }
+
+    /// Stamp all inductors (legacy TripletMatrix support)
+    #[inline]
+    pub fn stamp_all(
+        &self,
+        matrix: &mut TripletMatrix,
+        rhs: &mut [Value],
+        num_nodes: usize,
+        dt: Value,
+    ) {
+        for i in 0..self.names.len() {
+            let np = self.node_pos[i];
+            let nn = self.node_neg[i];
+            let br_ordinal = self.branch_indices[i];
+            let br = num_nodes + br_ordinal;
+
+            let req = 2.0 * self.inductances[i] / dt;
             let veq = req * self.i_prev[i] + self.v_prev[i];
 
-            // MNA stamp: branch equation V(n+) - V(n-) - req*I = veq
-            if np > 0 && br > 0 {
+            if np > 0 {
                 matrix.push(br - 1, np - 1, 1.0);
                 matrix.push(np - 1, br - 1, 1.0);
             }
-            if nn > 0 && br > 0 {
+            if nn > 0 {
                 matrix.push(br - 1, nn - 1, -1.0);
                 matrix.push(nn - 1, br - 1, -1.0);
             }
-            if br > 0 {
-                matrix.push(br - 1, br - 1, -req);
-                rhs[br - 1] = veq;
-            }
+            matrix.push(br - 1, br - 1, -req);
+            rhs[br - 1] = veq;
         }
     }
 
