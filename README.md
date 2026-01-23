@@ -60,15 +60,19 @@ Bridging the gap between academic tools and commercial EDA, RSpice features a **
 | | **Noise** | Thermal, Shot, and Flicker (1/f) noise summary |
 | | **S-Parameter** | N-port network scattering parameters |
 | **Param** | **DC Sweep** | Nested voltage/current/parameter sweeps |
-| | **Monte Carlo** | Statistical yield verification |
+| | **Monte Carlo** | Statistical yield verification with histogram & 3-sigma |
+| | **Corner Analysis** | PVT (Process-Voltage-Temperature) sweep with TT/SS/FF/SF/FS |
 | | **Sensitivity** | DC/AC sensitivity to component variations |
 | | **Pole-Zero** | Transfer function pole/zero extraction |
+
 
 ### ⚡ Device Models
 RSpice includes a comprehensive library of industry-standard device models:
 
-*   **MOSFET**: **BSIM4**, **EKV**, **VDMOS** (Power), Level 1-3.
-*   **BJT**: Gummel-Poon (NPN/PNP) with quasi-saturation & substrate effects.
+*   **MOSFET**: **BSIM4**, **BSIM3v3.24** (submicron), **EKV**, **VDMOS** (Power), Level 1-3.
+*   **BJT**: Gummel-Poon (NPN/PNP) with quasi-saturation, substrate effects, and high-injection modeling.
+*   **Diode**: Shockley equation with junction and diffusion capacitance.
+*   **JFET/GaN HEMT**: Curtice/Cubic models with self-heating and trapping effects.
 *   **Passive**: Lossy Transmission Lines (T-element), **Jiles-Atherton** Magnetic Hysteresis, Coupled Inductors.
 *   **Behavioral**: Arbitrary Sources (Equation-based), **Verilog-A** modules.
 *   **Mixed-Signal**: Full **XSPICE** event-driven subsystem (ngspice-compatible) with **A/D & D/A bridges** and Digital Primitives.
