@@ -1,21 +1,30 @@
 //! Advanced analysis types
 //!
 //! Specialized analyses: noise, Fourier, sensitivity, pole-zero, S-parameters, Monte Carlo,
-//! PSS (Periodic Steady State), Harmonic Balance, and Phase Noise.
+//! PSS (Periodic Steady State), Harmonic Balance, Phase Noise, Envelope Transient, Multi-Rate,
+//! and PSTB (Periodic Stability).
 
+pub mod envelope;
 pub mod fourier;
 pub mod harmonic_balance;
 pub mod measure;
 pub mod monte_carlo;
+pub mod multirate;
 pub mod noise;
+pub mod pac;
 pub mod parametric;
 pub mod pnoise;
 pub mod pole_zero;
 pub mod pss;
+pub mod pstb;
 pub mod s_param;
 pub mod sensitivity;
 pub mod transfer;
 
+pub use envelope::{
+    AmSource, EnvelopeSignal, EnvelopeTransientConfig, EnvelopeTransientResult,
+    EnvelopeTransientSolver, EnvelopeTransientState, FmSource, IqSource, PulseShape,
+};
 pub use fourier::{FourierAnalysis, FourierConfig, FourierResult, HarmonicComponent};
 pub use harmonic_balance::{
     FrequencyMap, HarmonicData, HbConfig, HbFft, HbResult, HbSolver, HbTone, MultiToneConfig,
@@ -28,9 +37,15 @@ pub use monte_carlo::{
     Distribution, MonteCarloConfig, MonteCarloResult, MonteCarloRunner, Tolerance,
     VariableStatistics, VariationSet,
 };
+pub use multirate::{
+    AutoPartitioner, CircuitPartition, InterfaceHistory, MultiRateConfig, MultiRateResult,
+    MultiRateSolver, MultiRateState, NodeActivity, PartitionState, PartitionStats, RateClass,
+};
 pub use noise::{IntegratedNoise, NoiseAnalysis, NoiseResult, NoiseSource, NoiseSourceType};
+pub use pac::{ConversionMatrix, PacAnalyzer, PacConfig, PacError, PacResult, PacSweepType};
 pub use parametric::{ParametricResults, ParametricSweep, StepSpec, StepTarget, StepType};
 pub use pole_zero::{Matrix as PzMatrix, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult};
+pub use pstb::{FloquetMultiplier, PstbAnalyzer, PstbConfig, PstbResult, StabilityType};
 pub use s_param::{
     FrequencySweep, Port, SMatrix, SParameterAnalyzer, SParameterConfig, SParameterResult,
 };
