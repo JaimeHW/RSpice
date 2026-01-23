@@ -593,6 +593,8 @@ pub struct CompanionCoefficients {
     pub coeff_v_n_minus_1: Value,
     /// Whether v_{n-1} history is needed
     pub needs_two_history: bool,
+    /// Whether i_n current history is needed (Trapezoidal)
+    pub needs_current_history: bool,
 }
 
 impl CompanionCoefficients {
@@ -607,6 +609,7 @@ impl CompanionCoefficients {
             coeff_v_n: 1.0,
             coeff_v_n_minus_1: 0.0,
             needs_two_history: false,
+            needs_current_history: false,
         }
     }
 
@@ -622,6 +625,7 @@ impl CompanionCoefficients {
             coeff_v_n: 2.0,
             coeff_v_n_minus_1: 0.0,
             needs_two_history: false,
+            needs_current_history: true,
         }
     }
 
@@ -637,6 +641,7 @@ impl CompanionCoefficients {
             coeff_v_n: 2.0,          // 4/2 = 2
             coeff_v_n_minus_1: -0.5, // -1/2
             needs_two_history: true,
+            needs_current_history: false,
         }
     }
 
@@ -666,13 +671,16 @@ impl CompanionCoefficients {
         dt: Value,
         v_n: Value,
         v_n_minus_1: Value,
+        i_n: Value,
     ) -> Value {
-        let base = self.coeff_v_n * capacitance * v_n / dt;
+        let mut ieq = self.coeff_v_n * capacitance * v_n / dt;
         if self.needs_two_history {
-            base + self.coeff_v_n_minus_1 * capacitance * v_n_minus_1 / dt
-        } else {
-            base
+            ieq += self.coeff_v_n_minus_1 * capacitance * v_n_minus_1 / dt;
         }
+        if self.needs_current_history {
+            ieq += i_n;
+        }
+        ieq
     }
 
     /// Calculate equivalent resistance for an inductor
@@ -962,7 +970,7 @@ mod tests {
         assert!((geq - 1e3).abs() < 1e-6, "G_eq = {} (expected 1000)", geq);
 
         // I_eq = G_eq * v_n = 1000 * 5.0 = 5000
-        let ieq = coeff.capacitor_ieq(1e-6, 1e-9, 5.0, 0.0);
+        let ieq = coeff.capacitor_ieq(1e-6, 1e-9, 5.0, 0.0, 0.0);
         assert!(
             (ieq - 5000.0).abs() < 1e-6,
             "I_eq = {} (expected 5000)",
@@ -978,11 +986,11 @@ mod tests {
         let geq = coeff.capacitor_geq(1e-6, 1e-9);
         assert!((geq - 2e3).abs() < 1e-6, "G_eq = {} (expected 2000)", geq);
 
-        // I_eq = 2 * C * v_n / dt = 2 * 1e-6 * 5.0 / 1e-9 = 10000
-        let ieq = coeff.capacitor_ieq(1e-6, 1e-9, 5.0, 0.0);
+        // I_eq = 2 * C * v_n / dt + i_n = 2 * 1e-6 * 5.0 / 1e-9 + 2000 = 12000
+        let ieq = coeff.capacitor_ieq(1e-6, 1e-9, 5.0, 0.0, 2000.0);
         assert!(
-            (ieq - 10000.0).abs() < 1e-6,
-            "I_eq = {} (expected 10000)",
+            (ieq - 12000.0).abs() < 1e-6,
+            "I_eq = {} (expected 12000)",
             ieq
         );
     }
@@ -1005,7 +1013,7 @@ mod tests {
         // With our coefficients: 2.0*C*v_n/dt + (-0.5)*C*v_{n-1}/dt
         // = 2.0*1e-6*5.0/1e-9 + (-0.5)*1e-6*3.0/1e-9
         // = 10000 - 1500 = 8500
-        let ieq = coeff.capacitor_ieq(1e-6, 1e-9, 5.0, 3.0);
+        let ieq = coeff.capacitor_ieq(1e-6, 1e-9, 5.0, 3.0, 0.0);
         assert!(
             (ieq - 8500.0).abs() < 1e-6,
             "I_eq = {} (expected 8500)",

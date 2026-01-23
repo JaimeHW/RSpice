@@ -629,7 +629,8 @@ impl Engine {
                     let v_n_minus_1 = circuit.capacitors.v_prev_prev[cap_idx];
 
                     let geq = coeff.capacitor_geq(capacitance, dt);
-                    let ieq = coeff.capacitor_ieq(capacitance, dt, v_n, v_n_minus_1);
+                    let i_n_cap = circuit.capacitors.i_prev[cap_idx];
+                    let ieq = coeff.capacitor_ieq(capacitance, dt, v_n, v_n_minus_1, i_n_cap);
 
                     if np > 0 {
                         matrix.add(np - 1, np - 1, geq);
@@ -724,6 +725,19 @@ impl Engine {
                     - if nn == 0 { 0.0 } else { new_solution[nn - 1] };
                 circuit.capacitors.v_prev_prev[cap_idx] = circuit.capacitors.v_prev[cap_idx];
                 circuit.capacitors.v_prev[cap_idx] = v_new;
+
+                // Update current history
+                let coeff_update = CompanionCoefficients::for_method(trapgear.current_method());
+                let geq = coeff_update.capacitor_geq(circuit.capacitors.capacitances[cap_idx], dt);
+                let i_n_cap = circuit.capacitors.i_prev[cap_idx];
+                let ieq = coeff_update.capacitor_ieq(
+                    circuit.capacitors.capacitances[cap_idx],
+                    dt,
+                    circuit.capacitors.v_prev_prev[cap_idx],
+                    circuit.capacitors.v_prev_prev[cap_idx],
+                    i_n_cap,
+                );
+                circuit.capacitors.i_prev[cap_idx] = geq * v_new - ieq;
             }
 
             // Update inductor history
