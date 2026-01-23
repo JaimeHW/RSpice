@@ -796,4 +796,277 @@ mod tests {
         let p90 = stats.percentile(90.0);
         assert!((p90 - 89.0).abs() < 2.0);
     }
+
+    // =========================================================================
+    // Commercial-Grade Comprehensive Tests
+    // =========================================================================
+
+    /// Test 3-sigma range calculation for Gaussian distribution.
+    /// 99.7% of samples should fall within mean ± 3*sigma.
+    #[test]
+    fn test_three_sigma_range() {
+        let mut rng = Xorshift128Plus::new(54321);
+        let dist = Distribution::Gaussian { sigma: 0.1 }; // 10% sigma
+        let nominal: f64 = 1000.0;
+
+        let mut samples = Vec::new();
+        for _ in 0..10000 {
+            samples.push(dist.sample(&mut rng, nominal));
+        }
+
+        let stats = VariableStatistics::from_samples("test", samples.clone(), 50);
+        let (low, high) = stats.three_sigma_range();
+
+        // Count how many samples fall outside 3-sigma
+        let outliers = samples.iter().filter(|&&x| x < low || x > high).count();
+
+        // Should be < 0.3% outliers for true Gaussian
+        let outlier_pct = (outliers as f64) / (samples.len() as f64) * 100.0;
+        assert!(
+            outlier_pct < 1.0,
+            "Too many outliers outside 3-sigma: {}%",
+            outlier_pct
+        );
+    }
+
+    /// Test Gaussian distribution mean converges to nominal.
+    #[test]
+    fn test_gaussian_mean_convergence() {
+        let mut rng = Xorshift128Plus::new(99999);
+        let dist = Distribution::Gaussian { sigma: 0.05 };
+        let nominal: f64 = 500.0;
+
+        let mut samples: Vec<f64> = Vec::new();
+        for _ in 0..5000 {
+            samples.push(dist.sample(&mut rng, nominal));
+        }
+
+        let mean: f64 = samples.iter().sum::<f64>() / samples.len() as f64;
+
+        // Mean should be within 1% of nominal for 5000 samples
+        let error_pct = ((mean - nominal) / nominal).abs() * 100.0;
+        assert!(
+            error_pct < 1.0,
+            "Mean {} too far from nominal {}: {}%",
+            mean,
+            nominal,
+            error_pct
+        );
+    }
+
+    /// Test histogram bin count accuracy.
+    #[test]
+    fn test_histogram_accuracy() {
+        // Linear samples 0-99 with 10 bins should have exactly 10 per bin
+        let samples: Vec<Value> = (0..100).map(|i| i as Value).collect();
+        let stats = VariableStatistics::from_samples("linear", samples, 10);
+
+        assert_eq!(stats.histogram.len(), 10);
+        assert_eq!(stats.bin_edges.len(), 11); // n+1 edges for n bins
+
+        // Total should equal sample count
+        let total: usize = stats.histogram.iter().sum();
+        assert_eq!(total, 100);
+    }
+
+    /// Test simulation failure tracking.
+    #[test]
+    fn test_failure_tracking() {
+        let config = MonteCarloConfig::new(100).with_seed(42);
+        let runner = MonteCarloRunner::new(config);
+
+        let mut fail_count = 0;
+        let result = runner.run(|_| {
+            fail_count += 1;
+            if fail_count % 3 == 0 {
+                Err("simulated failure")
+            } else {
+                let mut outputs = HashMap::new();
+                outputs.insert("x".to_string(), 1.0);
+                Ok(outputs)
+            }
+        });
+
+        // Every 3rd run fails = 33 failures out of 100
+        assert_eq!(result.num_failures, 33);
+        assert!(!result.all_converged);
+    }
+
+    /// Test no-tolerance (nominal only) handling.
+    #[test]
+    fn test_no_tolerance() {
+        let config = MonteCarloConfig::new(50).with_seed(42);
+        let mut runner = MonteCarloRunner::new(config);
+
+        runner.add_component("R1", 1000.0, Tolerance::none());
+
+        let result = runner.run(|variations| {
+            let r1 = variations.get("R1", 1000.0);
+            let mut outputs = HashMap::new();
+            outputs.insert("R1".to_string(), r1);
+            Ok::<_, ()>(outputs)
+        });
+
+        // All samples should be exactly nominal
+        let stats = result.variables.get("R1").unwrap();
+        assert!(
+            (stats.min - 1000.0).abs() < 1e-10,
+            "Min should be exactly nominal"
+        );
+        assert!(
+            (stats.max - 1000.0).abs() < 1e-10,
+            "Max should be exactly nominal"
+        );
+        assert!(
+            stats.std_dev.abs() < 1e-10,
+            "Std dev should be zero for no tolerance"
+        );
+    }
+
+    /// Test lot-only tolerance (no device variation).
+    #[test]
+    fn test_lot_only_tolerance() {
+        let config = MonteCarloConfig::new(100).with_seed(42);
+        let mut runner = MonteCarloRunner::new(config);
+
+        runner.add_component("R1", 1000.0, Tolerance::lot_only(5.0));
+
+        let result = runner.run(|variations| {
+            let r1 = variations.get("R1", 1000.0);
+            let mut outputs = HashMap::new();
+            outputs.insert("R1".to_string(), r1);
+            Ok::<_, ()>(outputs)
+        });
+
+        // All samples should be within 5% of nominal
+        let range = result.range("R1").unwrap();
+        assert!(range.0 >= 950.0 - 1.0, "Min should be >= 95%");
+        assert!(range.1 <= 1050.0 + 1.0, "Max should be <= 105%");
+    }
+
+    /// Test empty samples handling.
+    #[test]
+    fn test_empty_samples_percentile() {
+        let samples: Vec<Value> = vec![];
+        let stats = VariableStatistics::from_samples("empty", samples, 10);
+
+        // Should return 0 for empty samples
+        assert_eq!(stats.percentile(50.0), 0.0);
+    }
+
+    /// Test single sample statistics.
+    #[test]
+    fn test_single_sample() {
+        let samples: Vec<Value> = vec![42.0];
+        let stats = VariableStatistics::from_samples("single", samples, 1);
+
+        assert!((stats.mean - 42.0).abs() < 1e-10);
+        assert!((stats.min - 42.0).abs() < 1e-10);
+        assert!((stats.max - 42.0).abs() < 1e-10);
+        // Std dev of single sample should be 0 (or handled gracefully)
+    }
+
+    /// Test Monte Carlo result accessors with missing variable.
+    #[test]
+    fn test_result_accessors_missing() {
+        let result = MonteCarloResult::new();
+
+        assert!(result.mean("nonexistent").is_none());
+        assert!(result.std_dev("nonexistent").is_none());
+        assert!(result.range("nonexistent").is_none());
+    }
+
+    /// Test seed reproducibility across runner instances.
+    #[test]
+    fn test_seed_reproducibility_across_runners() {
+        let config1 = MonteCarloConfig::new(50).with_seed(12345);
+        let mut runner1 = MonteCarloRunner::new(config1);
+        runner1.add_component("R1", 1000.0, Tolerance::uniform(10.0));
+
+        let config2 = MonteCarloConfig::new(50).with_seed(12345);
+        let mut runner2 = MonteCarloRunner::new(config2);
+        runner2.add_component("R1", 1000.0, Tolerance::uniform(10.0));
+
+        let result1 = runner1.run(|v| {
+            let mut out = HashMap::new();
+            out.insert("x".to_string(), v.get("R1", 1000.0));
+            Ok::<_, ()>(out)
+        });
+
+        let result2 = runner2.run(|v| {
+            let mut out = HashMap::new();
+            out.insert("x".to_string(), v.get("R1", 1000.0));
+            Ok::<_, ()>(out)
+        });
+
+        // Results should be identical with same seed
+        let mean1 = result1.mean("x").unwrap();
+        let mean2 = result2.mean("x").unwrap();
+        assert!(
+            (mean1 - mean2).abs() < 1e-10,
+            "Same seed should give same results"
+        );
+    }
+
+    /// Test uniform distribution bounds are respected.
+    #[test]
+    fn test_uniform_bounds_strict() {
+        let mut rng = Xorshift128Plus::new(77777);
+        let tolerance: f64 = 0.1; // 10%
+        let dist = Distribution::Uniform { tolerance };
+        let nominal: f64 = 100.0;
+
+        for _ in 0..10000 {
+            let sample = dist.sample(&mut rng, nominal);
+            assert!(
+                sample >= nominal * (1.0 - tolerance),
+                "Sample {} below lower bound",
+                sample
+            );
+            assert!(
+                sample <= nominal * (1.0 + tolerance),
+                "Sample {} above upper bound",
+                sample
+            );
+        }
+    }
+
+    /// Test ConfigVariation default and builder pattern.
+    #[test]
+    fn test_config_builder_pattern() {
+        let config = MonteCarloConfig::new(500).with_seed(42).with_bins(100);
+
+        assert_eq!(config.num_runs, 500);
+        assert_eq!(config.seed, Some(42));
+        assert_eq!(config.histogram_bins, 100);
+        assert!((config.confidence_pct - 95.0).abs() < 0.01);
+    }
+
+    /// Test VariationSet get with fallback.
+    #[test]
+    fn test_variation_set_fallback() {
+        let mut vs = VariationSet::new();
+        vs.set("R1", 1234.0);
+
+        assert!((vs.get("R1", 1000.0) - 1234.0).abs() < 1e-10);
+        assert!((vs.get("R2", 2000.0) - 2000.0).abs() < 1e-10); // Falls back to nominal
+    }
+
+    /// Test default trait implementations.
+    #[test]
+    fn test_default_implementations() {
+        let tol = Tolerance::default();
+        assert!(tol.lot.is_none());
+        assert!(tol.dev.is_none());
+
+        let config = MonteCarloConfig::default();
+        assert_eq!(config.num_runs, 100);
+
+        let vs = VariationSet::default();
+        assert!(vs.values.is_empty());
+
+        let result = MonteCarloResult::default();
+        assert_eq!(result.num_runs, 0);
+        assert!(result.all_converged);
+    }
 }
