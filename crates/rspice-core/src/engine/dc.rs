@@ -112,10 +112,13 @@ impl Engine {
             circuit.voltage_sources.dc_values[vsrc_idx] = sweep_value;
 
             // Solve DC at this point
+            // Key optimization: use previous solution as initial guess for faster convergence
             let solution = if circuit.has_nonlinear_devices() {
-                // For nonlinear, would need to update with prev_solution as initial guess
-                // For now, just solve fresh
-                self.solve_nonlinear(&mut circuit, &mut matrix)?
+                self.solve_nonlinear_with_guess(
+                    &mut circuit,
+                    &mut matrix,
+                    prev_solution.as_deref(),
+                )?
             } else {
                 self.solve_linear(&circuit, &mut matrix)?
             };
@@ -136,7 +139,6 @@ impl Engine {
 
         // Restore original value
         circuit.voltage_sources.dc_values[vsrc_idx] = original_value;
-        let _ = prev_solution; // Suppress unused warning for now
 
         Ok(results)
     }
