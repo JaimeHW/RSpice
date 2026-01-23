@@ -16,7 +16,7 @@
 //! - Pole-zero analysis
 
 // Subdirectories
-mod advanced;
+pub mod advanced;
 mod core;
 mod output;
 
