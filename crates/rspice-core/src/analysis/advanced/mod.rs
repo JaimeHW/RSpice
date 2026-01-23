@@ -2,8 +2,9 @@
 //!
 //! Specialized analyses: noise, Fourier, sensitivity, pole-zero, S-parameters, Monte Carlo,
 //! PSS (Periodic Steady State), Harmonic Balance, Phase Noise, Envelope Transient, Multi-Rate,
-//! and PSTB (Periodic Stability).
+//! PSTB (Periodic Stability), PXF (Periodic Transfer Function), and Corner Analysis.
 
+pub mod corner;
 pub mod envelope;
 pub mod fourier;
 pub mod harmonic_balance;
@@ -17,10 +18,16 @@ pub mod pnoise;
 pub mod pole_zero;
 pub mod pss;
 pub mod pstb;
+pub mod pxf;
 pub mod s_param;
 pub mod sensitivity;
+pub mod stb;
 pub mod transfer;
 
+pub use corner::{
+    CornerConfig, CornerPoint, CornerResult, CornerRunner, CornerSimResult, CornerSummary,
+    ProcessCorner,
+};
 pub use envelope::{
     AmSource, EnvelopeSignal, EnvelopeTransientConfig, EnvelopeTransientResult,
     EnvelopeTransientSolver, EnvelopeTransientState, FmSource, IqSource, PulseShape,
@@ -46,10 +53,14 @@ pub use pac::{ConversionMatrix, PacAnalyzer, PacConfig, PacError, PacResult, Pac
 pub use parametric::{ParametricResults, ParametricSweep, StepSpec, StepTarget, StepType};
 pub use pole_zero::{Matrix as PzMatrix, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult};
 pub use pstb::{FloquetMultiplier, PstbAnalyzer, PstbConfig, PstbResult, StabilityType};
+pub use pxf::{PxfAnalyzer, PxfConfig, PxfError, PxfResult, PxfSweepType, TransferPoint};
 pub use s_param::{
     FrequencySweep, Port, SMatrix, SParameterAnalyzer, SParameterConfig, SParameterResult,
 };
 pub use sensitivity::{
     ElementDesc, ElementType, Sensitivity, SensitivityAnalyzer, SensitivityResult,
+};
+pub use stb::{
+    BodePoint, NyquistPoint, StabilityMargins, StbAnalyzer, StbConfig, StbResult, StbSweepType,
 };
 pub use transfer::{TransferAnalyzer, TransferFunctionConfig, TransferFunctionResult};
