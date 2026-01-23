@@ -460,8 +460,31 @@ fn parse_meas_command(
     // Parse measurement type keyword
     let measure_type_str = expect_ident(stream, line_num)?;
 
-    // Parse signal name
-    let signal = expect_ident(stream, line_num)?;
+    // Parse signal name - handle V(node) or just node
+    let mut signal = expect_ident(stream, line_num)?;
+
+    // Check if it's a function-like signal e.g. V(out)
+    if stream.consume(&TokenKind::LParen) {
+        let inner = match &stream.peek().kind {
+            TokenKind::Ident(s) => s.clone(),
+            TokenKind::Number(v) => format!("{}", v), // Allow V(1)
+            _ => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "Expected identifier or number inside signal parentheses".to_string(),
+                });
+            }
+        };
+        stream.advance();
+
+        if !stream.consume(&TokenKind::RParen) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: "Expected closing parenthesis for signal".to_string(),
+            });
+        }
+        signal = format!("{}({})", signal, inner);
+    }
 
     // Parse optional FROM/TO
     let mut from: Option<crate::Value> = None;
