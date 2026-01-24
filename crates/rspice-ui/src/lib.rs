@@ -10,6 +10,8 @@
 
 mod app;
 mod components;
+pub mod dialogs;
+pub mod services;
 mod state;
 mod theme;
 pub mod utils;
