@@ -139,6 +139,93 @@ pub enum IrExpr {
     Idt(Box<IrExpr>, Option<Box<IrExpr>>),
     /// Limited exponential
     Limexp(Box<IrExpr>),
+    /// $limit function for convergence control
+    /// Bounds the expression change per Newton iteration
+    /// Args: (expression, step_limit)
+    Limit(Box<IrExpr>, Option<Box<IrExpr>>),
+    /// $table_model lookup table interpolation
+    /// Args: (input_expr, table_data) where table_data is (x_values, y_values)
+    TableLookup {
+        input: Box<IrExpr>,
+        x_data: Vec<f64>,
+        y_data: Vec<f64>,
+    },
+    /// absdelay - absolute transport delay
+    /// Returns the value of expr delayed by delay_time seconds
+    /// Uses a circular buffer for transient analysis
+    AbsDelay {
+        expr: Box<IrExpr>,
+        delay_time: Box<IrExpr>,
+    },
+    /// transition - piecewise-linear signal smoothing
+    /// Args: (expr, delay, rise_time, fall_time)
+    /// Smoothly transitions between values over rise/fall times
+    Transition {
+        expr: Box<IrExpr>,
+        delay: Option<Box<IrExpr>>,
+        rise_time: Option<Box<IrExpr>>,
+        fall_time: Option<Box<IrExpr>>,
+    },
+    /// slew - slew rate limiting
+    /// Args: (expr, max_pos_slew, max_neg_slew)
+    /// Limits the rate of change of the signal
+    Slew {
+        expr: Box<IrExpr>,
+        max_pos_slew: Option<Box<IrExpr>>,
+        max_neg_slew: Option<Box<IrExpr>>,
+    },
+    /// cross - threshold crossing detection
+    /// Args: (expr, direction, time_tol, expr_tol)
+    /// Returns 1 when expr crosses zero, else 0
+    Cross {
+        expr: Box<IrExpr>,
+        direction: Option<i32>, // +1=rising, -1=falling, 0=both
+        time_tol: Option<Box<IrExpr>>,
+    },
+    /// white_noise - white noise source for AC noise analysis
+    /// Args: (power, name)
+    WhiteNoise {
+        power: Box<IrExpr>,
+        name: Option<String>,
+    },
+    /// flicker_noise - 1/f flicker noise source
+    /// Args: (power, exponent, name)
+    FlickerNoise {
+        power: Box<IrExpr>,
+        exponent: Box<IrExpr>,
+        name: Option<String>,
+    },
+    /// analysis(name) - check current analysis type
+    /// Returns 1.0 if running specified analysis, else 0.0
+    Analysis(String),
+    /// above(expr, threshold, time_tol) - level crossing event
+    /// Returns 1 when expr crosses above threshold, else 0
+    Above {
+        expr: Box<IrExpr>,
+        threshold: Box<IrExpr>,
+        time_tol: Option<Box<IrExpr>>,
+    },
+    /// timer(start, period) - periodic time event
+    /// Returns 1 at time=start and every period thereafter
+    Timer {
+        start_time: Box<IrExpr>,
+        period: Option<Box<IrExpr>>,
+    },
+    /// laplace_zp - s-domain filter with poles and zeros
+    /// Args: (expr, zeros, poles, k_factor)
+    LaplaceZP {
+        expr: Box<IrExpr>,
+        zeros: Vec<(f64, f64)>, // (real, imag) pairs
+        poles: Vec<(f64, f64)>,
+        gain: f64,
+    },
+    /// laplace_nd - s-domain filter with num/den coefficients  
+    /// Args: (expr, numerator_coeffs, denominator_coeffs)
+    LaplaceND {
+        expr: Box<IrExpr>,
+        numerator: Vec<f64>, // ascending powers of s
+        denominator: Vec<f64>,
+    },
     /// Conditional
     Conditional(Box<IrExpr>, Box<IrExpr>, Box<IrExpr>),
 }
@@ -350,6 +437,28 @@ impl DeviceIR {
                 Self::contains_ddt(c) || Self::contains_ddt(t) || Self::contains_ddt(e)
             }
             IrExpr::Limexp(e) => Self::contains_ddt(e),
+            IrExpr::Limit(e, _) => Self::contains_ddt(e),
+            IrExpr::TableLookup { input, .. } => Self::contains_ddt(input),
+            IrExpr::AbsDelay { expr, delay_time } => {
+                Self::contains_ddt(expr) || Self::contains_ddt(delay_time)
+            }
+            IrExpr::Transition { expr, .. } => Self::contains_ddt(expr),
+            IrExpr::Slew { expr, .. } => Self::contains_ddt(expr),
+            IrExpr::Cross { expr, .. } => Self::contains_ddt(expr),
+            IrExpr::WhiteNoise { power, .. } => Self::contains_ddt(power),
+            IrExpr::FlickerNoise {
+                power, exponent, ..
+            } => Self::contains_ddt(power) || Self::contains_ddt(exponent),
+            IrExpr::Analysis(_) => false,
+            IrExpr::Above {
+                expr, threshold, ..
+            } => Self::contains_ddt(expr) || Self::contains_ddt(threshold),
+            IrExpr::Timer { start_time, period } => {
+                Self::contains_ddt(start_time)
+                    || period.as_ref().is_some_and(|p| Self::contains_ddt(p))
+            }
+            IrExpr::LaplaceZP { expr, .. } => Self::contains_ddt(expr),
+            IrExpr::LaplaceND { expr, .. } => Self::contains_ddt(expr),
             IrExpr::Idt(e, _) => Self::contains_ddt(e),
             _ => false,
         }

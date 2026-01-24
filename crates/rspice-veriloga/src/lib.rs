@@ -65,6 +65,9 @@ pub mod semantic;
 pub mod source;
 pub mod types;
 
+/// Laplace (s-domain) filters for transient analysis
+pub mod laplace;
+
 /// Virtual machine for bytecode execution
 pub mod vm;
 

@@ -1,0 +1,723 @@
+//! Laplace (s-domain) filter implementation for Verilog-A
+//!
+//! This module provides state-space representations for continuous-time
+//! transfer functions in the s-domain, supporting both pole-zero and
+//! numerator-denominator forms.
+//!
+//! ## Theory
+//!
+//! For a transfer function H(s) = N(s)/D(s), we convert to state-space form:
+//!   dx/dt = A*x + B*u
+//!   y = C*x + D*u
+//!
+//! The controllable canonical form is used for the conversion.
+//!
+//! ## Time Integration
+//!
+//! Backward Euler integration is used for numerical stability:
+//!   x[n] = (I - h*A)^(-1) * (x[n-1] + h*B*u[n])
+//!
+//! where h is the timestep.
+
+use std::f64::consts::PI;
+
+/// Complex number representation for poles and zeros
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Complex {
+    pub re: f64,
+    pub im: f64,
+}
+
+impl Complex {
+    pub fn new(re: f64, im: f64) -> Self {
+        Self { re, im }
+    }
+
+    pub fn real(re: f64) -> Self {
+        Self { re, im: 0.0 }
+    }
+
+    pub fn magnitude(&self) -> f64 {
+        (self.re * self.re + self.im * self.im).sqrt()
+    }
+
+    pub fn phase(&self) -> f64 {
+        self.im.atan2(self.re)
+    }
+
+    pub fn conj(&self) -> Self {
+        Self {
+            re: self.re,
+            im: -self.im,
+        }
+    }
+}
+
+/// State-space filter representation
+#[derive(Debug, Clone)]
+pub struct StateSpaceFilter {
+    /// State matrix A (n x n)
+    pub a: Vec<Vec<f64>>,
+    /// Input matrix B (n x 1)
+    pub b: Vec<f64>,
+    /// Output matrix C (1 x n)
+    pub c: Vec<f64>,
+    /// Feedthrough coefficient D (scalar)
+    pub d: f64,
+    /// Current state vector x
+    pub state: Vec<f64>,
+    /// Previous state for multi-step methods
+    pub state_prev: Vec<f64>,
+    /// System order
+    pub order: usize,
+    /// DC gain for normalization
+    pub dc_gain: f64,
+}
+
+impl StateSpaceFilter {
+    /// Create a new state-space filter from coefficients
+    pub fn new(a: Vec<Vec<f64>>, b: Vec<f64>, c: Vec<f64>, d: f64) -> Self {
+        let order = b.len();
+        let state = vec![0.0; order];
+        let state_prev = vec![0.0; order];
+
+        Self {
+            a,
+            b,
+            c,
+            d,
+            state,
+            state_prev,
+            order,
+            dc_gain: 1.0,
+        }
+    }
+
+    /// Create from numerator and denominator polynomials (descending powers of s)
+    ///
+    /// H(s) = (b_n*s^n + ... + b_1*s + b_0) / (a_m*s^m + ... + a_1*s + a_0)
+    pub fn from_transfer_function(numerator: &[f64], denominator: &[f64]) -> Self {
+        let n = denominator.len() - 1; // Order of the system
+
+        if n == 0 {
+            // Static gain only
+            let gain = if denominator[0].abs() > 1e-15 {
+                numerator.get(0).copied().unwrap_or(1.0) / denominator[0]
+            } else {
+                1.0
+            };
+            return Self {
+                a: vec![],
+                b: vec![],
+                c: vec![],
+                d: gain,
+                state: vec![],
+                state_prev: vec![],
+                order: 0,
+                dc_gain: gain,
+            };
+        }
+
+        // Normalize by leading coefficient
+        let a_n = denominator[0];
+        if a_n.abs() < 1e-15 {
+            return Self::unity_gain();
+        }
+
+        let denom_norm: Vec<f64> = denominator.iter().map(|x| x / a_n).collect();
+
+        // Pad numerator if shorter than denominator
+        let mut num_norm = vec![0.0; denominator.len()];
+        let offset = denominator.len() - numerator.len();
+        for (i, &coeff) in numerator.iter().enumerate() {
+            num_norm[offset + i] = coeff / a_n;
+        }
+
+        // Build controllable canonical form
+        let mut a_matrix = vec![vec![0.0; n]; n];
+        let mut b_vec = vec![0.0; n];
+        let mut c_vec = vec![0.0; n];
+
+        // A matrix: companion form
+        for i in 0..n - 1 {
+            a_matrix[i][i + 1] = 1.0;
+        }
+        for i in 0..n {
+            a_matrix[n - 1][i] = -denom_norm[n - i];
+        }
+
+        // B vector
+        b_vec[n - 1] = 1.0;
+
+        // C vector and D scalar
+        let d_scalar = num_norm[0];
+        for i in 0..n {
+            c_vec[i] = num_norm[n - i] - num_norm[0] * denom_norm[n - i];
+        }
+
+        // Compute DC gain: H(0) = b_0 / a_0
+        let dc_gain = if denom_norm[n].abs() > 1e-15 {
+            num_norm[n] / denom_norm[n]
+        } else {
+            1.0
+        };
+
+        Self {
+            a: a_matrix,
+            b: b_vec,
+            c: c_vec,
+            d: d_scalar,
+            state: vec![0.0; n],
+            state_prev: vec![0.0; n],
+            order: n,
+            dc_gain,
+        }
+    }
+
+    /// Create from poles and zeros with gain
+    ///
+    /// H(s) = gain * prod(s - zeros) / prod(s - poles)
+    pub fn from_poles_zeros(poles: &[Complex], zeros: &[Complex], gain: f64) -> Self {
+        if poles.is_empty() && zeros.is_empty() {
+            return Self {
+                a: vec![],
+                b: vec![],
+                c: vec![],
+                d: gain,
+                state: vec![],
+                state_prev: vec![],
+                order: 0,
+                dc_gain: gain,
+            };
+        }
+
+        // Convert poles/zeros to polynomial coefficients
+        let numerator = Self::roots_to_poly(zeros);
+        let denominator = Self::roots_to_poly(poles);
+
+        // Scale numerator by gain
+        let scaled_num: Vec<f64> = numerator.iter().map(|x| x * gain).collect();
+
+        Self::from_transfer_function(&scaled_num, &denominator)
+    }
+
+    /// Convert roots to polynomial coefficients (descending powers)
+    fn roots_to_poly(roots: &[Complex]) -> Vec<f64> {
+        if roots.is_empty() {
+            return vec![1.0];
+        }
+
+        // Start with (s - r_0)
+        let mut poly = vec![Complex::real(1.0), Complex::new(-roots[0].re, -roots[0].im)];
+
+        // Multiply by each (s - r_i)
+        for root in roots.iter().skip(1) {
+            let mut new_poly = vec![Complex::real(0.0); poly.len() + 1];
+
+            // Multiply by s
+            for (i, &coeff) in poly.iter().enumerate() {
+                new_poly[i].re += coeff.re;
+                new_poly[i].im += coeff.im;
+            }
+
+            // Multiply by -root
+            for (i, &coeff) in poly.iter().enumerate() {
+                new_poly[i + 1].re -= coeff.re * root.re - coeff.im * root.im;
+                new_poly[i + 1].im -= coeff.re * root.im + coeff.im * root.re;
+            }
+
+            poly = new_poly;
+        }
+
+        // Extract real parts (imaginary should be ~0 for conjugate pairs)
+        poly.iter().map(|c| c.re).collect()
+    }
+
+    /// Create a unity gain passthrough filter
+    pub fn unity_gain() -> Self {
+        Self {
+            a: vec![],
+            b: vec![],
+            c: vec![],
+            d: 1.0,
+            state: vec![],
+            state_prev: vec![],
+            order: 0,
+            dc_gain: 1.0,
+        }
+    }
+
+    /// Create a first-order lowpass filter with cutoff frequency
+    /// H(s) = omega_c / (s + omega_c)
+    pub fn lowpass_first_order(cutoff_hz: f64) -> Self {
+        let omega_c = 2.0 * PI * cutoff_hz;
+        Self::from_transfer_function(&[omega_c], &[1.0, omega_c])
+    }
+
+    /// Create a second-order lowpass filter (Butterworth)
+    /// H(s) = omega_n^2 / (s^2 + 2*zeta*omega_n*s + omega_n^2)
+    pub fn lowpass_second_order(cutoff_hz: f64, damping: f64) -> Self {
+        let omega_n = 2.0 * PI * cutoff_hz;
+        let omega_n2 = omega_n * omega_n;
+        Self::from_transfer_function(&[omega_n2], &[1.0, 2.0 * damping * omega_n, omega_n2])
+    }
+
+    /// Create a differentiator with time constant tau
+    /// H(s) = tau*s / (tau*s + 1)
+    pub fn differentiator(tau: f64) -> Self {
+        Self::from_transfer_function(&[tau, 0.0], &[tau, 1.0])
+    }
+
+    /// Create an integrator with time constant tau (leaky)
+    /// H(s) = 1 / (tau*s + 1)
+    pub fn integrator(tau: f64) -> Self {
+        Self::from_transfer_function(&[1.0], &[tau, 1.0])
+    }
+
+    /// Step the filter forward using Backward Euler integration
+    ///
+    /// This computes: x[n] = (I - h*A)^(-1) * (x[n-1] + h*B*u[n])
+    ///                y[n] = C*x[n] + D*u[n]
+    ///
+    /// Note: This method advances `state_prev = state` before computing,
+    /// then updates `state` with the new value. This supports sequential
+    /// timestep simulation in unit tests.
+    pub fn step(&mut self, input: f64, timestep: f64) -> f64 {
+        // Advance state: state_prev <- state (synchronize for new timestep)
+        self.state_prev.copy_from_slice(&self.state);
+
+        if self.order == 0 {
+            return self.d * input;
+        }
+
+        // For small systems (order <= 2), use direct formulas
+        // For larger systems, use Gauss elimination
+        match self.order {
+            1 => self.step_first_order(input, timestep),
+            2 => self.step_second_order(input, timestep),
+            _ => self.step_general(input, timestep),
+        }
+    }
+
+    /// First-order Backward Euler step
+    fn step_first_order(&mut self, input: f64, h: f64) -> f64 {
+        // dx/dt = a*x + b*u
+        // (1 - h*a)*x_new = x_old + h*b*u
+        let a = self.a[0][0];
+        let b = self.b[0];
+        let c = self.c[0];
+
+        let denom = 1.0 - h * a;
+        if denom.abs() > 1e-15 {
+            self.state[0] = (self.state_prev[0] + h * b * input) / denom;
+        }
+
+        c * self.state[0] + self.d * input
+    }
+
+    /// Second-order Backward Euler step
+    fn step_second_order(&mut self, input: f64, h: f64) -> f64 {
+        // Build I - h*A
+        let a00 = 1.0 - h * self.a[0][0];
+        let a01 = -h * self.a[0][1];
+        let a10 = -h * self.a[1][0];
+        let a11 = 1.0 - h * self.a[1][1];
+
+        // RHS: x_old + h*B*u
+        let rhs0 = self.state_prev[0] + h * self.b[0] * input;
+        let rhs1 = self.state_prev[1] + h * self.b[1] * input;
+
+        // Solve 2x2 system using Cramer's rule
+        let det = a00 * a11 - a01 * a10;
+        if det.abs() > 1e-15 {
+            self.state[0] = (rhs0 * a11 - rhs1 * a01) / det;
+            self.state[1] = (rhs1 * a00 - rhs0 * a10) / det;
+        }
+
+        // Output: y = C*x + D*u
+        self.c[0] * self.state[0] + self.c[1] * self.state[1] + self.d * input
+    }
+
+    /// General order Backward Euler step (Gauss elimination)
+    fn step_general(&mut self, input: f64, h: f64) -> f64 {
+        let n = self.order;
+
+        // Build the system matrix (I - h*A)
+        let mut mat = vec![vec![0.0; n]; n];
+        for i in 0..n {
+            for j in 0..n {
+                mat[i][j] = if i == j { 1.0 } else { 0.0 };
+                mat[i][j] -= h * self.a[i][j];
+            }
+        }
+
+        // Build RHS: x_prev + h*B*u
+        let mut rhs: Vec<f64> = self
+            .state_prev
+            .iter()
+            .zip(self.b.iter())
+            .map(|(&x_prev, &b)| x_prev + h * b * input)
+            .collect();
+
+        // Gaussian elimination with partial pivoting
+        for k in 0..n {
+            // Find pivot
+            let mut max_row = k;
+            let mut max_val = mat[k][k].abs();
+            for i in k + 1..n {
+                if mat[i][k].abs() > max_val {
+                    max_val = mat[i][k].abs();
+                    max_row = i;
+                }
+            }
+
+            // Swap rows
+            if max_row != k {
+                mat.swap(k, max_row);
+                rhs.swap(k, max_row);
+            }
+
+            // Eliminate
+            let pivot = mat[k][k];
+            if pivot.abs() < 1e-15 {
+                continue;
+            }
+
+            for i in k + 1..n {
+                let factor = mat[i][k] / pivot;
+                mat[i][k] = 0.0;
+                for j in k + 1..n {
+                    mat[i][j] -= factor * mat[k][j];
+                }
+                rhs[i] -= factor * rhs[k];
+            }
+        }
+
+        // Back substitution
+        for i in (0..n).rev() {
+            let pivot = mat[i][i];
+            if pivot.abs() < 1e-15 {
+                self.state[i] = 0.0;
+                continue;
+            }
+            let mut sum = rhs[i];
+            for j in i + 1..n {
+                sum -= mat[i][j] * self.state[j];
+            }
+            self.state[i] = sum / pivot;
+        }
+
+        // Output: y = C*x + D*u
+        let mut output = self.d * input;
+        for i in 0..n {
+            output += self.c[i] * self.state[i];
+        }
+        output
+    }
+
+    /// Get DC output (s=0) for a given input
+    pub fn dc_output(&self, input: f64) -> f64 {
+        self.dc_gain * input
+    }
+
+    /// Reset filter state to zero
+    pub fn reset(&mut self) {
+        for x in &mut self.state {
+            *x = 0.0;
+        }
+        for x in &mut self.state_prev {
+            *x = 0.0;
+        }
+    }
+
+    /// Set initial state
+    pub fn set_initial_state(&mut self, initial: &[f64]) {
+        for (i, &val) in initial.iter().enumerate() {
+            if i < self.state.len() {
+                self.state[i] = val;
+            }
+        }
+    }
+
+    /// Compute frequency response at given frequency (Hz)
+    pub fn frequency_response(&self, freq_hz: f64) -> (f64, f64) {
+        let omega = 2.0 * PI * freq_hz;
+
+        if self.order == 0 {
+            return (self.d.abs(), if self.d >= 0.0 { 0.0 } else { PI });
+        }
+
+        // H(jw) = C * (jwI - A)^(-1) * B + D
+        // For simplicity, evaluate numerator/denominator polynomials directly
+        // This is more efficient than matrix inversion for frequency response
+
+        // Build (jw)^k terms
+        let mut jw_powers = Vec::with_capacity(self.order + 1);
+        let jw = Complex::new(0.0, omega);
+        jw_powers.push(Complex::real(1.0)); // (jw)^0
+
+        for _ in 0..self.order {
+            let last = jw_powers.last().unwrap().clone();
+            jw_powers.push(Complex::new(
+                last.re * jw.re - last.im * jw.im,
+                last.re * jw.im + last.im * jw.re,
+            ));
+        }
+
+        // This is a simplified evaluation; full implementation would
+        // reconstruct polynomials from state-space form
+        let magnitude = 1.0; // Placeholder
+        let phase = 0.0; // Placeholder
+
+        (magnitude, phase)
+    }
+}
+
+/// Laplace transform filter type
+#[derive(Debug, Clone)]
+pub enum LaplaceFilter {
+    /// Pole-zero form: H(s) = gain * prod(s-zeros) / prod(s-poles)
+    PoleZero {
+        gain: f64,
+        poles: Vec<Complex>,
+        zeros: Vec<Complex>,
+    },
+    /// Numerator-denominator form: H(s) = N(s)/D(s)
+    NumDen {
+        numerator: Vec<f64>,
+        denominator: Vec<f64>,
+    },
+}
+
+impl LaplaceFilter {
+    /// Convert to state-space representation
+    pub fn to_state_space(&self) -> StateSpaceFilter {
+        match self {
+            LaplaceFilter::PoleZero { gain, poles, zeros } => {
+                StateSpaceFilter::from_poles_zeros(poles, zeros, *gain)
+            }
+            LaplaceFilter::NumDen {
+                numerator,
+                denominator,
+            } => StateSpaceFilter::from_transfer_function(numerator, denominator),
+        }
+    }
+
+    /// Evaluate DC gain
+    pub fn dc_gain(&self) -> f64 {
+        match self {
+            LaplaceFilter::PoleZero { gain, poles, zeros } => {
+                // H(0) = gain * prod(-zeros) / prod(-poles)
+                let mut dc = *gain;
+                for z in zeros {
+                    dc *= z.magnitude();
+                }
+                for p in poles {
+                    let mag = p.magnitude();
+                    if mag.abs() > 1e-15 {
+                        dc /= mag;
+                    }
+                }
+                dc
+            }
+            LaplaceFilter::NumDen {
+                numerator,
+                denominator,
+            } => {
+                // H(0) = N(0)/D(0) = numerator[last] / denominator[last]
+                let n0 = numerator.last().copied().unwrap_or(1.0);
+                let d0 = denominator.last().copied().unwrap_or(1.0);
+                if d0.abs() > 1e-15 { n0 / d0 } else { 1.0 }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_unity_gain_filter() {
+        let filter = StateSpaceFilter::unity_gain();
+        assert_eq!(filter.order, 0);
+        assert_eq!(filter.d, 1.0);
+        assert_eq!(filter.dc_gain, 1.0);
+    }
+
+    #[test]
+    fn test_static_gain_filter() {
+        let filter = StateSpaceFilter::from_transfer_function(&[5.0], &[1.0]);
+        assert_eq!(filter.order, 0);
+        assert_eq!(filter.d, 5.0);
+    }
+
+    #[test]
+    fn test_first_order_lowpass() {
+        let filter = StateSpaceFilter::lowpass_first_order(1000.0);
+        assert_eq!(filter.order, 1);
+        // DC gain should be 1.0
+        assert!((filter.dc_gain - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_second_order_lowpass() {
+        let filter = StateSpaceFilter::lowpass_second_order(1000.0, 0.707);
+        assert_eq!(filter.order, 2);
+        // DC gain should be 1.0
+        assert!((filter.dc_gain - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_first_order_step_response() {
+        let mut filter = StateSpaceFilter::lowpass_first_order(100.0);
+        let timestep = 1e-4; // 100us
+
+        // Step response: should approach 1.0
+        let mut output = 0.0;
+        for _ in 0..1000 {
+            output = filter.step(1.0, timestep);
+        }
+        // After 100ms with 100Hz cutoff, should be very close to 1.0
+        assert!((output - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_second_order_step_response() {
+        let mut filter = StateSpaceFilter::lowpass_second_order(100.0, 0.707);
+        let timestep = 1e-4;
+
+        // Step response: should approach 1.0
+        let mut output = 0.0;
+        for _ in 0..1000 {
+            output = filter.step(1.0, timestep);
+        }
+        assert!((output - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_dc_output() {
+        let filter = StateSpaceFilter::from_transfer_function(&[2.0], &[1.0, 1.0]);
+        // H(0) = 2/1 = 2
+        assert!((filter.dc_output(3.0) - 6.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_filter_reset() {
+        let mut filter = StateSpaceFilter::lowpass_first_order(100.0);
+        filter.step(1.0, 1e-4);
+        assert!(filter.state[0].abs() > 1e-10);
+
+        filter.reset();
+        assert!(filter.state[0].abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_poles_zeros_to_state_space() {
+        // Simple pole at s = -1
+        let poles = vec![Complex::real(-1.0)];
+        let zeros = vec![];
+        let filter = StateSpaceFilter::from_poles_zeros(&poles, &zeros, 1.0);
+
+        assert_eq!(filter.order, 1);
+        // DC gain: 1/1 = 1
+        assert!((filter.dc_gain - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_complex_conjugate_poles() {
+        // Complex conjugate pair: s = -1 ± j
+        let poles = vec![Complex::new(-1.0, 1.0), Complex::new(-1.0, -1.0)];
+        let filter = StateSpaceFilter::from_poles_zeros(&poles, &[], 2.0);
+
+        assert_eq!(filter.order, 2);
+    }
+
+    #[test]
+    fn test_laplace_filter_pole_zero() {
+        let lf = LaplaceFilter::PoleZero {
+            gain: 1.0,
+            poles: vec![Complex::real(-1.0)],
+            zeros: vec![],
+        };
+        let ss = lf.to_state_space();
+        assert_eq!(ss.order, 1);
+    }
+
+    #[test]
+    fn test_laplace_filter_num_den() {
+        let lf = LaplaceFilter::NumDen {
+            numerator: vec![1.0],
+            denominator: vec![1.0, 1.0],
+        };
+        let dc = lf.dc_gain();
+        assert!((dc - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_integrator_filter() {
+        let filter = StateSpaceFilter::integrator(0.001);
+        assert_eq!(filter.order, 1);
+        // DC gain should be 1.0
+        assert!((filter.dc_gain - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_differentiator_filter() {
+        let filter = StateSpaceFilter::differentiator(0.001);
+        assert_eq!(filter.order, 1);
+        // DC gain should be 0.0 (blocks DC)
+        assert!(filter.dc_gain.abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_initial_state() {
+        let mut filter = StateSpaceFilter::lowpass_first_order(100.0);
+        filter.set_initial_state(&[0.5]);
+        assert!((filter.state[0] - 0.5).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_complex_magnitude_phase() {
+        let c = Complex::new(3.0, 4.0);
+        assert!((c.magnitude() - 5.0).abs() < 1e-10);
+        assert!((c.phase() - 0.927295218).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_complex_conjugate() {
+        let c = Complex::new(1.0, 2.0);
+        let conj = c.conj();
+        assert_eq!(conj.re, 1.0);
+        assert_eq!(conj.im, -2.0);
+    }
+
+    #[test]
+    fn test_general_order_filter() {
+        // Third-order Butterworth lowpass
+        let omega = 2.0 * PI * 100.0;
+        let filter = StateSpaceFilter::from_transfer_function(
+            &[omega.powi(3)],
+            &[1.0, 2.0 * omega, 2.0 * omega * omega, omega.powi(3)],
+        );
+        assert_eq!(filter.order, 3);
+    }
+
+    #[test]
+    fn test_step_with_zero_timestep() {
+        let mut filter = StateSpaceFilter::lowpass_first_order(100.0);
+        // Zero timestep should return D*input (feedthrough only)
+        let output = filter.step(2.0, 0.0);
+        // For this lowpass, D = 0, so output should be 0
+        assert!(output.abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_step_preserves_previous_state() {
+        let mut filter = StateSpaceFilter::lowpass_first_order(100.0);
+        filter.step(1.0, 1e-4);
+        let state_after_first = filter.state[0];
+        filter.step(1.0, 1e-4);
+        assert!((filter.state_prev[0] - state_after_first).abs() < 1e-15);
+    }
+}

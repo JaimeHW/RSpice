@@ -191,6 +191,11 @@ impl ParameterRange {
 
     /// Check if a value is within this range
     pub fn contains(&self, value: f64) -> bool {
+        // NaN is never a valid parameter value (commercial simulator behavior)
+        if value.is_nan() {
+            return false;
+        }
+
         // Check minimum
         if let Some(min) = self.min {
             if self.min_exclusive {
@@ -599,5 +604,157 @@ mod tests {
 
         let closed = ParameterRange::closed(-1.0, 1.0);
         assert_eq!(format!("{}", closed), "from [-1:1]");
+    }
+
+    // ========================================================================
+    // Additional Parameter Range Tests for Commercial-Grade Coverage
+    // ========================================================================
+
+    #[test]
+    fn test_parameter_range_infinity_bounds() {
+        // Test with positive infinity
+        let mut range = ParameterRange::unrestricted();
+        range.min = Some(0.0);
+        range.min_exclusive = true;
+        // (0:inf)
+        assert!(!range.contains(0.0));
+        assert!(range.contains(0.001));
+        assert!(range.contains(1e12));
+        assert!(range.contains(f64::MAX));
+
+        // Test with negative infinity
+        let mut range2 = ParameterRange::unrestricted();
+        range2.max = Some(0.0);
+        range2.max_exclusive = true;
+        // (-inf:0)
+        assert!(!range2.contains(0.0));
+        assert!(range2.contains(-0.001));
+        assert!(range2.contains(-1e12));
+        assert!(range2.contains(f64::MIN));
+    }
+
+    #[test]
+    fn test_parameter_range_multiple_exclusions() {
+        let mut range = ParameterRange::closed(0.0, 10.0);
+        range.exclude = vec![0.0, 5.0, 10.0];
+
+        assert!(!range.contains(0.0), "Excluded: boundary 0");
+        assert!(!range.contains(5.0), "Excluded: middle");
+        assert!(!range.contains(10.0), "Excluded: boundary 10");
+        assert!(range.contains(0.001));
+        assert!(range.contains(4.999));
+        assert!(range.contains(5.001));
+        assert!(range.contains(9.999));
+    }
+
+    #[test]
+    fn test_parameter_range_negative_values() {
+        let range = ParameterRange::closed(-100.0, -10.0);
+        assert!(range.contains(-100.0));
+        assert!(range.contains(-50.0));
+        assert!(range.contains(-10.0));
+        assert!(!range.contains(-9.999));
+        assert!(!range.contains(-100.001));
+        assert!(!range.contains(0.0));
+    }
+
+    #[test]
+    fn test_parameter_range_very_small_range() {
+        let range = ParameterRange::open(0.0, 1e-15);
+        assert!(!range.contains(0.0));
+        assert!(!range.contains(1e-15));
+        assert!(range.contains(5e-16));
+    }
+
+    #[test]
+    fn test_parameter_range_single_point() {
+        // A range [1,1] contains only 1
+        let range = ParameterRange::closed(1.0, 1.0);
+        assert!(range.contains(1.0));
+        assert!(!range.contains(0.99999999));
+        assert!(!range.contains(1.00000001));
+    }
+
+    #[test]
+    fn test_parameter_range_contains_special_values() {
+        let range = ParameterRange::unrestricted();
+        // Should handle special values gracefully
+        assert!(range.contains(0.0));
+        assert!(range.contains(f64::MAX));
+        assert!(range.contains(f64::MIN));
+        // NaN is never a valid parameter value (commercial simulator behavior)
+        assert!(!range.contains(f64::NAN));
+
+        // With bounds, NaN is also rejected
+        let bounded = ParameterRange::closed(0.0, 100.0);
+        assert!(!bounded.contains(f64::NAN));
+    }
+
+    #[test]
+    fn test_parameter_range_display_with_exclusions() {
+        let mut range = ParameterRange::open(0.0, 100.0);
+        range.exclude = vec![50.0];
+        let display = format!("{}", range);
+        assert!(display.contains("exclude 50"));
+    }
+
+    #[test]
+    fn test_parameter_range_display_infinity() {
+        let mut range = ParameterRange::unrestricted();
+        range.min = Some(0.0);
+        range.min_exclusive = true;
+        let display = format!("{}", range);
+        assert!(display.contains("inf"), "Display: {}", display);
+    }
+
+    #[test]
+    fn test_is_inf_helpers() {
+        assert!(ParameterRange::is_inf(f64::INFINITY));
+        assert!(!ParameterRange::is_inf(f64::MAX));
+        assert!(!ParameterRange::is_inf(1e308));
+
+        assert!(ParameterRange::is_neg_inf(f64::NEG_INFINITY));
+        assert!(!ParameterRange::is_neg_inf(f64::MIN));
+        assert!(!ParameterRange::is_neg_inf(-1e308));
+    }
+
+    #[test]
+    fn test_parameter_range_boundary_combinations() {
+        // All combinations of open/closed bounds
+        // [0,10]
+        let closed_closed = ParameterRange::closed(0.0, 10.0);
+        assert!(closed_closed.contains(0.0));
+        assert!(closed_closed.contains(10.0));
+
+        // (0,10)
+        let open_open = ParameterRange::open(0.0, 10.0);
+        assert!(!open_open.contains(0.0));
+        assert!(!open_open.contains(10.0));
+
+        // (0,10]
+        let open_closed = ParameterRange::left_open(0.0, 10.0);
+        assert!(!open_closed.contains(0.0));
+        assert!(open_closed.contains(10.0));
+
+        // [0,10) - need to construct manually
+        let closed_open = ParameterRange {
+            min: Some(0.0),
+            max: Some(10.0),
+            min_exclusive: false,
+            max_exclusive: true,
+            exclude: Vec::new(),
+        };
+        assert!(closed_open.contains(0.0));
+        assert!(!closed_open.contains(10.0));
+    }
+
+    #[test]
+    fn test_parameter_range_exclusion_at_boundary() {
+        let mut range = ParameterRange::closed(0.0, 10.0);
+        range.exclude = vec![0.0, 10.0];
+        // Boundary values are in range [0,10] but excluded
+        assert!(!range.contains(0.0));
+        assert!(!range.contains(10.0));
+        assert!(range.contains(5.0));
     }
 }
