@@ -1,0 +1,42 @@
+//! Schematic State Module
+//!
+//! Data structures for the schematic capture editor.
+//! Manages components, wires, selection, and interaction state.
+//!
+//! This module is split into focused submodules for maintainability:
+//! - `point` - Grid-aligned coordinates
+//! - `rotation` - Component rotation
+//! - `component_type` - Component type enumeration
+//! - `component` - Component struct
+//! - `wire` - Wire and wire drawing state
+//! - `selection` - Selection management
+//! - `tool` - Current interaction tool
+//! - `clipboard` - Copy/paste support
+//! - `net_label` - Net labels and junctions
+//! - `state` - Main SchematicState
+
+mod clipboard;
+mod component;
+mod component_type;
+mod net_label;
+mod point;
+mod rotation;
+mod selection;
+mod state;
+mod tool;
+mod wire;
+
+// Re-export all public types for backwards compatibility
+pub use clipboard::ClipboardData;
+pub use component::Component;
+pub use component_type::ComponentType;
+pub use net_label::{Junction, NetLabel};
+pub use point::{LabelPosition, Point};
+pub use rotation::Rotation;
+pub use selection::Selection;
+pub use state::SchematicState;
+pub use tool::Tool;
+pub use wire::{Wire, WireConnection, WireDrawing, WireRoutingMode};
+
+#[cfg(test)]
+mod tests;
