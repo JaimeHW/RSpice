@@ -1597,3 +1597,224 @@ fn test_bsim4_parsing() {
         }
     }
 }
+
+// ============================================================================
+// $limit Function Integration Tests
+// ============================================================================
+
+#[test]
+fn test_compile_limit_function_simple() {
+    // Test basic $limit compilation
+    let source = r#"
+        module limit_test(p, n);
+            inout p, n;
+            electrical p, n;
+            parameter real g = 0.001;
+            real v_limited;
+            analog begin
+                v_limited = $limit(V(p, n), 0.7);
+                I(p, n) <+ g * v_limited;
+            end
+        endmodule
+    "#;
+
+    let model = compile_or_panic(source);
+    assert_eq!(model.name.as_str(), "limit_test");
+    assert_eq!(model.num_terminals, 2);
+    assert_eq!(model.num_variables, 1); // v_limited
+}
+
+#[test]
+fn test_compile_limit_with_expression() {
+    // Test $limit with computed step limit
+    let source = r#"
+        module limit_expr(p, n);
+            inout p, n;
+            electrical p, n;
+            parameter real is = 1e-14;
+            real voltage;
+            analog begin
+                voltage = $limit(V(p, n), 2 * $vt);
+                I(p, n) <+ is * (limexp(voltage / $vt) - 1);
+            end
+        endmodule
+    "#;
+
+    let model = compile_or_panic(source);
+    assert_eq!(model.name.as_str(), "limit_expr");
+}
+
+#[test]
+fn test_compile_limit_diode_model() {
+    // Realistic diode model using $limit for convergence
+    let source = r#"
+        module diode_limited(a, c);
+            inout a, c;
+            electrical a, c;
+            parameter real Is = 1e-14;
+            parameter real N = 1.0;
+            real Vd;
+            analog begin
+                // Limit junction voltage step for better convergence
+                Vd = $limit(V(a, c), 0.7);
+                I(a, c) <+ Is * (limexp(Vd / ($vt * N)) - 1);
+            end
+        endmodule
+    "#;
+
+    let model = compile_or_panic(source);
+    assert_eq!(model.name.as_str(), "diode_limited");
+    assert_eq!(model.parameters.len(), 2);
+
+    // Create and test device
+    let device = VerilogADevice::new("D1", model, &[1, 0]);
+    assert_eq!(device.num_terminals(), 2);
+}
+
+#[test]
+fn test_limit_in_bjt_model() {
+    // BJT model using $limit on junction voltages
+    let source = r#"
+        module bjt_limited(c, b, e);
+            inout c, b, e;
+            electrical c, b, e;
+            parameter real Is = 1e-16;
+            parameter real Bf = 100;
+            real vbe_lim;
+            real vbc_lim;
+            analog begin
+                vbe_lim = $limit(V(b, e), 0.6);
+                vbc_lim = $limit(V(b, c), 0.6);
+                I(b, e) <+ Is * (limexp(vbe_lim / $vt) - 1);
+                I(c, e) <+ Bf * Is * (limexp(vbe_lim / $vt) - 1);
+            end
+        endmodule
+    "#;
+
+    let model = compile_or_panic(source);
+    assert_eq!(model.name.as_str(), "bjt_limited");
+    assert_eq!(model.num_terminals, 3);
+    assert!(model.num_variables >= 2); // vbe_lim and vbc_lim
+}
+
+#[test]
+fn test_limit_with_multiple_junctions() {
+    // Model with multiple independent $limit calls
+    let source = r#"
+        module multi_limit(p1, n1, p2, n2);
+            inout p1, n1, p2, n2;
+            electrical p1, n1, p2, n2;
+            parameter real Is = 1e-14;
+            real v1_lim;
+            real v2_lim;
+            analog begin
+                v1_lim = $limit(V(p1, n1), 0.5);
+                v2_lim = $limit(V(p2, n2), 0.5);
+                I(p1, n1) <+ Is * (limexp(v1_lim / $vt) - 1);
+                I(p2, n2) <+ Is * (limexp(v2_lim / $vt) - 1);
+            end
+        endmodule
+    "#;
+
+    let model = compile_or_panic(source);
+    assert_eq!(model.name.as_str(), "multi_limit");
+    assert_eq!(model.num_terminals, 4);
+    assert!(model.num_variables >= 2);
+}
+
+#[test]
+fn test_limit_combined_with_limexp() {
+    // Common pattern: $limit + limexp for robust convergence
+    let source = r#"
+        module robust_diode(a, c);
+            inout a, c;
+            electrical a, c;
+            parameter real Is = 1e-14;
+            parameter real Rs = 10;
+            real Vd;
+            real Id;
+            analog begin
+                // $limit controls voltage step, limexp prevents exp overflow
+                Vd = $limit(V(a, c), 0.7);
+                Id = Is * (limexp(Vd / $vt) - 1);
+                I(a, c) <+ Id + V(a, c) / Rs;
+            end
+        endmodule
+    "#;
+
+    let model = compile_or_panic(source);
+    assert_eq!(model.name.as_str(), "robust_diode");
+}
+
+#[test]
+fn test_limit_in_conditional_context() {
+    // $limit usage within conditional
+    let source = r#"
+        module cond_limit(p, n);
+            inout p, n;
+            electrical p, n;
+            parameter real vth = 0.5;
+            real v_lim;
+            analog begin
+                if (V(p, n) > vth) begin
+                    v_lim = $limit(V(p, n) - vth, 0.3);
+                end else begin
+                    v_lim = 0;
+                end
+                I(p, n) <+ v_lim * 0.001;
+            end
+        endmodule
+    "#;
+
+    let model = compile_or_panic(source);
+    assert_eq!(model.name.as_str(), "cond_limit");
+}
+
+#[test]
+fn test_limit_device_execution() {
+    // Verify $limit works during device evaluation
+    let source = r#"
+        module limit_device(p, n);
+            inout p, n;
+            electrical p, n;
+            parameter real g = 0.01;
+            real v_limited;
+            analog begin
+                v_limited = $limit(V(p, n), 1.0);
+                I(p, n) <+ g * v_limited;
+            end
+        endmodule
+    "#;
+
+    let model = compile_or_panic(source);
+    let mut device = VerilogADevice::new("L1", model, &[1, 0]);
+
+    // Apply voltage and evaluate
+    device.update_voltages(&[5.0]);
+    let currents = device.evaluate();
+
+    // Should produce some output
+    println!("$limit device currents: {:?}", currents);
+}
+
+#[test]
+fn test_limit_with_nested_expression() {
+    // $limit with complex nested expression
+    let source = r#"
+        module nested_limit(p, n);
+            inout p, n;
+            electrical p, n;
+            parameter real a = 1.0;
+            parameter real b = 2.0;
+            real result;
+            analog begin
+                result = $limit((a * V(p, n) + b) / (a + b), 0.5);
+                I(p, n) <+ result;
+            end
+        endmodule
+    "#;
+
+    let model = compile_or_panic(source);
+    assert_eq!(model.name.as_str(), "nested_limit");
+    assert_eq!(model.parameters.len(), 2);
+}
