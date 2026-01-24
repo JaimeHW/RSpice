@@ -206,6 +206,291 @@ impl<'a> ExprConverter<'a> {
                 // Multiplicity factor (default 1.0)
                 Ok(IrExpr::Const(1.0))
             }
+            "$limit" => {
+                // $limit(expr) or $limit(expr, step)
+                // Bounds expression change per Newton iteration for convergence
+                if func.args.is_empty() {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "$limit requires at least one argument".into(),
+                    ))
+                    .into());
+                }
+                let inner = self.convert(&func.args[0])?;
+                let step = if func.args.len() > 1 {
+                    Some(Box::new(self.convert(&func.args[1])?))
+                } else {
+                    None
+                };
+                Ok(IrExpr::Limit(Box::new(inner), step))
+            }
+            "$table_model" => {
+                // $table_model(input, "tablefile", "intercol")
+                // For now, create placeholder with empty table data
+                // Real implementation would parse table file or inline data
+                if func.args.is_empty() {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "$table_model requires at least one argument".into(),
+                    ))
+                    .into());
+                }
+                let input = self.convert(&func.args[0])?;
+                // TODO: Parse table data from file or parameters
+                // For now, use placeholder empty tables
+                Ok(IrExpr::TableLookup {
+                    input: Box::new(input),
+                    x_data: vec![],
+                    y_data: vec![],
+                })
+            }
+            "absdelay" => {
+                // absdelay(expr, delay_time) - transport delay
+                // Returns value of expr delayed by delay_time seconds
+                if func.args.is_empty() {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "absdelay requires at least one argument".into(),
+                    ))
+                    .into());
+                }
+                let expr = self.convert(&func.args[0])?;
+                let delay_time = if func.args.len() > 1 {
+                    self.convert(&func.args[1])?
+                } else {
+                    // Default delay of 0 (no delay)
+                    IrExpr::Const(0.0)
+                };
+                Ok(IrExpr::AbsDelay {
+                    expr: Box::new(expr),
+                    delay_time: Box::new(delay_time),
+                })
+            }
+            "transition" => {
+                // transition(expr, delay, rise_time, fall_time)
+                if func.args.is_empty() {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "transition requires at least one argument".into(),
+                    ))
+                    .into());
+                }
+                let expr = self.convert(&func.args[0])?;
+                let delay = if func.args.len() > 1 {
+                    Some(Box::new(self.convert(&func.args[1])?))
+                } else {
+                    None
+                };
+                let rise_time = if func.args.len() > 2 {
+                    Some(Box::new(self.convert(&func.args[2])?))
+                } else {
+                    None
+                };
+                let fall_time = if func.args.len() > 3 {
+                    Some(Box::new(self.convert(&func.args[3])?))
+                } else {
+                    None
+                };
+                Ok(IrExpr::Transition {
+                    expr: Box::new(expr),
+                    delay,
+                    rise_time,
+                    fall_time,
+                })
+            }
+            "slew" => {
+                // slew(expr, max_pos_slew, max_neg_slew)
+                if func.args.is_empty() {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "slew requires at least one argument".into(),
+                    ))
+                    .into());
+                }
+                let expr = self.convert(&func.args[0])?;
+                let max_pos_slew = if func.args.len() > 1 {
+                    Some(Box::new(self.convert(&func.args[1])?))
+                } else {
+                    None
+                };
+                let max_neg_slew = if func.args.len() > 2 {
+                    Some(Box::new(self.convert(&func.args[2])?))
+                } else {
+                    None
+                };
+                Ok(IrExpr::Slew {
+                    expr: Box::new(expr),
+                    max_pos_slew,
+                    max_neg_slew,
+                })
+            }
+            "cross" => {
+                // cross(expr, direction, time_tol)
+                if func.args.is_empty() {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "cross requires at least one argument".into(),
+                    ))
+                    .into());
+                }
+                let expr = self.convert(&func.args[0])?;
+                // Direction: +1=rising, -1=falling, 0=both (default)
+                let direction = if func.args.len() > 1 {
+                    // Try to extract constant direction
+                    if let crate::ast::Expression::Number(n) = &func.args[1] {
+                        Some(n.value as i32)
+                    } else {
+                        Some(0)
+                    }
+                } else {
+                    None
+                };
+                let time_tol = if func.args.len() > 2 {
+                    Some(Box::new(self.convert(&func.args[2])?))
+                } else {
+                    None
+                };
+                Ok(IrExpr::Cross {
+                    expr: Box::new(expr),
+                    direction,
+                    time_tol,
+                })
+            }
+            "$white_noise" | "white_noise" => {
+                // $white_noise(power, name)
+                if func.args.is_empty() {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "$white_noise requires power argument".into(),
+                    ))
+                    .into());
+                }
+                let power = self.convert(&func.args[0])?;
+                let name = if func.args.len() > 1 {
+                    // Extract name if it's a string literal
+                    if let crate::ast::Expression::StringLit(s) = &func.args[1] {
+                        Some(s.value.to_string())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                Ok(IrExpr::WhiteNoise {
+                    power: Box::new(power),
+                    name,
+                })
+            }
+            "$flicker_noise" | "flicker_noise" => {
+                // $flicker_noise(power, exponent, name)
+                if func.args.len() < 2 {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "$flicker_noise requires power and exponent arguments".into(),
+                    ))
+                    .into());
+                }
+                let power = self.convert(&func.args[0])?;
+                let exponent = self.convert(&func.args[1])?;
+                let name = if func.args.len() > 2 {
+                    if let crate::ast::Expression::StringLit(s) = &func.args[2] {
+                        Some(s.value.to_string())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                Ok(IrExpr::FlickerNoise {
+                    power: Box::new(power),
+                    exponent: Box::new(exponent),
+                    name,
+                })
+            }
+            "analysis" => {
+                // analysis("dc"), analysis("ac"), analysis("tran")
+                if func.args.is_empty() {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "analysis() requires analysis type argument".into(),
+                    ))
+                    .into());
+                }
+                // Extract analysis type string
+                let analysis_type = if let crate::ast::Expression::StringLit(s) = &func.args[0] {
+                    s.value.as_str()
+                } else {
+                    "dc" // Default to DC if not a string
+                };
+                Ok(IrExpr::Analysis(analysis_type.to_string()))
+            }
+            "above" => {
+                // above(expr, threshold)
+                if func.args.len() < 2 {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "above() requires expr and threshold arguments".into(),
+                    ))
+                    .into());
+                }
+                let expr = self.convert(&func.args[0])?;
+                let threshold = self.convert(&func.args[1])?;
+                let time_tol = if func.args.len() > 2 {
+                    Some(Box::new(self.convert(&func.args[2])?))
+                } else {
+                    None
+                };
+                Ok(IrExpr::Above {
+                    expr: Box::new(expr),
+                    threshold: Box::new(threshold),
+                    time_tol,
+                })
+            }
+            "timer" => {
+                // timer(start_time, period?) - period is optional
+                if func.args.is_empty() {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "timer() requires at least start_time argument".into(),
+                    ))
+                    .into());
+                }
+                let start_time = self.convert(&func.args[0])?;
+                let period = if func.args.len() > 1 {
+                    Some(Box::new(self.convert(&func.args[1])?))
+                } else {
+                    None
+                };
+                Ok(IrExpr::Timer {
+                    start_time: Box::new(start_time),
+                    period,
+                })
+            }
+            "laplace_zp" => {
+                // laplace_zp(expr, zeros, poles)
+                // For now, simplified: just takes the input expression
+                if func.args.is_empty() {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "laplace_zp() requires input expression".into(),
+                    ))
+                    .into());
+                }
+                let expr = self.convert(&func.args[0])?;
+                // zeros and poles would be parsed from array arguments
+                // For now, treat as empty (passthrough)
+                Ok(IrExpr::LaplaceZP {
+                    expr: Box::new(expr),
+                    zeros: Vec::new(),
+                    poles: Vec::new(),
+                    gain: 1.0, // Unity gain for passthrough
+                })
+            }
+            "laplace_nd" => {
+                // laplace_nd(expr, num_coeffs, den_coeffs)
+                if func.args.is_empty() {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "laplace_nd() requires input expression".into(),
+                    ))
+                    .into());
+                }
+                let expr = self.convert(&func.args[0])?;
+                // num/den coefficients parsed from arrays
+                // For now, unity transfer function [1], [1]
+                Ok(IrExpr::LaplaceND {
+                    expr: Box::new(expr),
+                    numerator: vec![1.0],
+                    denominator: vec![1.0],
+                })
+            }
             _ => Err(
                 CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(format!(
                     "System function: {}",

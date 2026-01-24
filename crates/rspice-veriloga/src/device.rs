@@ -307,8 +307,8 @@ impl VerilogADevice {
     }
 
     /// Evaluate using the bytecode VM interpreter
-    fn evaluate_interpreter(&self) -> Vec<f64> {
-        let mut vm = Vm::new(&self.context);
+    fn evaluate_interpreter(&mut self) -> Vec<f64> {
+        let mut vm = Vm::new(&mut self.context);
         let mut currents = Vec::with_capacity(self.model.stamp_programs.len());
 
         for program in &self.model.stamp_programs {
@@ -336,7 +336,24 @@ impl VerilogADevice {
             temperature: self.context.temperature,
             time: self.context.time,
             timestep: self.context.timestep,
-            state_prev: self.context.state_values_prev.as_ptr(),
+            // Pass null for empty vecs - as_ptr() on empty vec gives dangling non-null pointer
+            state_prev: if self.context.state_values_prev.is_empty() {
+                std::ptr::null()
+            } else {
+                self.context.state_values_prev.as_ptr()
+            },
+            lookup_tables: if self.context.lookup_tables.is_empty() {
+                std::ptr::null()
+            } else {
+                self.context.lookup_tables.as_ptr()
+            },
+            lookup_tables_len: self.context.lookup_tables.len(),
+            laplace_filters: if self.model.laplace_filters.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                self.model.laplace_filters.as_ptr() as *mut _
+            },
+            laplace_filters_len: self.model.laplace_filters.len(),
         };
 
         // First, compute all variable assignments
@@ -355,11 +372,14 @@ impl VerilogADevice {
     /// Compute Jacobian entries
     ///
     /// Returns (value, row_terminal, col_terminal, is_current) for each derivative.
-    pub fn compute_jacobian(&self) -> Vec<JacobianEntry> {
-        let mut vm = Vm::new(&self.context);
+    pub fn compute_jacobian(&mut self) -> Vec<JacobianEntry> {
+        let context = &mut self.context;
+        let model = &self.model;
+
+        let mut vm = Vm::new(context);
         let mut entries = Vec::new();
 
-        for (prog_idx, program) in self.model.stamp_programs.iter().enumerate() {
+        for (prog_idx, program) in model.stamp_programs.iter().enumerate() {
             for (jac_idx, jac_entry) in program.jacobian_programs.iter().enumerate() {
                 match vm.execute(&jac_entry.program) {
                     Ok(value) => {
@@ -395,9 +415,15 @@ impl VerilogADevice {
         // Update context with current voltages
         self.update_voltages(circuit_voltages);
 
-        let mut vm = Vm::new(&self.context);
+        // Extract disjoint fields to satisfy borrow checker
+        let context = &mut self.context;
+        let model = &self.model;
+        let node_mapping = &self.node_mapping;
+        let internal_node_indices = &self.internal_node_indices;
 
-        for program in &self.model.stamp_programs {
+        let mut vm = Vm::new(context);
+
+        for program in &model.stamp_programs {
             // Compute the branch current/value
             let value = match vm.execute(&program.value_program) {
                 Ok(v) => v,
@@ -406,7 +432,7 @@ impl VerilogADevice {
 
             // Stamp RHS contributions
             for loc in &program.stamp_locations {
-                let row_node = self.stamp_index_to_node(&loc.row);
+                let row_node = Self::index_to_node(&loc.row, node_mapping, internal_node_indices);
                 if let Some(row) = row_node {
                     rhs_add(row, loc.sign * value);
                 }
@@ -419,13 +445,32 @@ impl VerilogADevice {
                     Err(_) => continue,
                 };
 
-                let row_node = self.stamp_index_to_node(&jac.row);
-                let col_node = self.stamp_index_to_node(&jac.col);
+                let row_node = Self::index_to_node(&jac.row, node_mapping, internal_node_indices);
+                let col_node = Self::index_to_node(&jac.col, node_mapping, internal_node_indices);
 
                 if let (Some(row), Some(col)) = (row_node, col_node) {
                     matrix_add(row, col, deriv);
                 }
             }
+        }
+    }
+
+    /// Convert a StampIndex to circuit node
+    fn index_to_node(
+        index: &StampIndex,
+        node_mapping: &[usize],
+        internal_node_indices: &[usize],
+    ) -> Option<usize> {
+        match index {
+            StampIndex::Terminal(t) => {
+                let node = node_mapping.get(*t).copied().unwrap_or(0);
+                if node > 0 { Some(node - 1) } else { None }
+            }
+            StampIndex::Internal(i) => {
+                let node = internal_node_indices.get(*i).copied().unwrap_or(0);
+                if node > 0 { Some(node - 1) } else { None }
+            }
+            StampIndex::Ground => None,
         }
     }
 
@@ -585,8 +630,10 @@ mod tests {
                     },
                 ],
             }],
+            lookup_tables: vec![],
             internal_nodes: 0,
             branch_currents: 0,
+            laplace_filters: vec![],
         }
     }
 
@@ -617,8 +664,10 @@ mod tests {
                 value_program,
                 jacobian_programs: vec![],
             }],
+            lookup_tables: vec![],
             internal_nodes: 1,
             branch_currents: 0,
+            laplace_filters: vec![],
         }
     }
 
@@ -663,6 +712,7 @@ mod tests {
             }],
             num_variables: 0,
             assignment_programs: vec![],
+            laplace_filters: vec![],
             stamp_programs: vec![StampProgram {
                 stamp_locations: vec![
                     StampLocation {
@@ -702,6 +752,7 @@ mod tests {
                     },
                 ],
             }],
+            lookup_tables: vec![],
             internal_nodes: 0,
             branch_currents: 0,
         }
@@ -1025,8 +1076,10 @@ mod tests {
                 value_program,
                 jacobian_programs: vec![],
             }],
+            lookup_tables: vec![],
             internal_nodes: 0,
             branch_currents: 0,
+            laplace_filters: vec![],
         };
 
         let mut device = VerilogADevice::new("T1", model, &[1, 0]);
