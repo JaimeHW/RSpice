@@ -117,6 +117,10 @@ pub struct RunArgs {
     #[arg(long, value_name = "TIME")]
     pub max_step: Option<f64>,
 
+    /// DC convergence mode: fast, default, or robust
+    #[arg(long, value_name = "MODE", value_parser = ["fast", "default", "robust"])]
+    pub convergence: Option<String>,
+
     /// Additional include paths for .include directives
     #[arg(short = 'I', long = "include", value_name = "DIR")]
     pub includes: Vec<PathBuf>,

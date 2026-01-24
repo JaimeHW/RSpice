@@ -52,6 +52,9 @@ pub struct SimulationConfig {
 
     /// Compression tolerance
     pub compression_tolerance: f64,
+
+    /// Convergence mode: "fast", "default", or "robust"
+    pub convergence_mode: String,
 }
 
 /// Output-related configuration
@@ -106,6 +109,7 @@ impl Default for SimulationConfig {
             max_timestep: 1e-3,
             compress_waveforms: false,
             compression_tolerance: 1e-4,
+            convergence_mode: "default".to_string(),
         }
     }
 }

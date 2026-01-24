@@ -92,6 +92,7 @@ rspice run <NETLIST> [OPTIONS]
 | `--seed <SEED>` | Random seed for Monte Carlo |
 | `--maxiter <N>` | Maximum Newton-Raphson iterations |
 | `--abstol <TOL>` | Convergence tolerance |
+| `--convergence <MODE>` | DC convergence: `fast`, `default`, `robust` |
 | `-I, --include <DIR>` | Add include path |
 | `-D, --define <NAME=VALUE>` | Define parameter |
 

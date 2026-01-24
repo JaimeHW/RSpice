@@ -10,7 +10,7 @@ use crate::cli::{CliError, Config, OutputFormat, RunArgs};
 use crate::report::{JUnitReporter, JsonMeasReporter, SimulationReport, TapReporter};
 use indicatif::{ProgressBar, ProgressStyle};
 use rspice_core::netlist::AnalysisCommand;
-use rspice_core::{Engine, Netlist, SimulationConfig};
+use rspice_core::{ConvergenceConfig, Engine, Netlist, SimulationConfig};
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
@@ -238,6 +238,18 @@ fn build_sim_config(args: &RunArgs, config: &Config) -> SimulationConfig {
     if let Some(max_step) = args.max_step {
         sim_config.max_timestep = max_step;
     }
+
+    // Convergence mode (CLI > config > default)
+    let convergence_mode = args
+        .convergence
+        .as_deref()
+        .unwrap_or(&config.simulation.convergence_mode);
+
+    sim_config.convergence_config = match convergence_mode {
+        "fast" => ConvergenceConfig::fast(),
+        "robust" => ConvergenceConfig::robust(),
+        _ => ConvergenceConfig::default(), // "default" or any other
+    };
 
     sim_config
 }
@@ -1321,6 +1333,7 @@ mod tests {
             sens_value: None,
             corners: None,
             corner_lib: None,
+            convergence: None,
         };
         let config = Config::default();
         let sim_config = build_sim_config(&args, &config);
@@ -1367,6 +1380,7 @@ mod tests {
             sens_value: None,
             corners: None,
             corner_lib: None,
+            convergence: None,
         };
         let config = Config::default();
         let sim_config = build_sim_config(&args, &config);
