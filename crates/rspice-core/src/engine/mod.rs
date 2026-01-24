@@ -70,6 +70,103 @@ pub struct SimulationConfig {
     pub integration_method: crate::analysis::IntegrationMethod,
     /// Model evaluation bypass configuration for latent device optimization
     pub bypass_config: BypassConfig,
+    /// Convergence configuration for DC operating point
+    pub convergence_config: ConvergenceConfig,
+}
+
+/// Configuration for DC convergence algorithms
+///
+/// Controls which convergence aids are used when Newton-Raphson fails to converge
+/// directly on difficult circuits. Methods are tried in order of increasing
+/// computational cost.
+#[derive(Debug, Clone)]
+pub struct ConvergenceConfig {
+    /// Enable GMIN stepping (small conductances to ground)
+    pub gmin_stepping: bool,
+    /// Enable source stepping (ramp sources from 0 to 100%)
+    pub source_stepping: bool,
+    /// Enable pseudo-transient continuation
+    pub pseudo_transient: bool,
+    /// Enable arc-length continuation for non-monotonic curves
+    pub arc_length: bool,
+    /// Damping strategy for Newton iterations
+    pub damping_strategy: DampingStrategy,
+    /// Initial GMIN value (typically 1e-12)
+    pub gmin_initial: Value,
+    /// Target GMIN value (typically 1e-15)
+    pub gmin_target: Value,
+    /// Verbose convergence logging
+    pub verbose: bool,
+}
+
+/// Damping strategy for Newton-Raphson iterations
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DampingStrategy {
+    /// No damping (full Newton step)
+    #[default]
+    None,
+    /// Backtracking line search (Armijo condition)
+    LineSearch,
+    /// Junction voltage limiting (SPICE-style)
+    VoltageLimiting,
+    /// Bank-Rose adaptive damping
+    BankRose,
+    /// Combined: voltage limiting + line search
+    Combined,
+}
+
+impl Default for ConvergenceConfig {
+    fn default() -> Self {
+        Self {
+            gmin_stepping: true,
+            source_stepping: true,
+            pseudo_transient: true,
+            arc_length: false, // Only for difficult circuits
+            damping_strategy: DampingStrategy::VoltageLimiting,
+            gmin_initial: 1e-12,
+            gmin_target: 1e-15,
+            verbose: false,
+        }
+    }
+}
+
+impl ConvergenceConfig {
+    /// Create a minimal config (direct Newton only)
+    pub fn fast() -> Self {
+        Self {
+            gmin_stepping: false,
+            source_stepping: false,
+            pseudo_transient: false,
+            arc_length: false,
+            damping_strategy: DampingStrategy::None,
+            ..Default::default()
+        }
+    }
+
+    /// Create a robust config (all methods enabled)
+    pub fn robust() -> Self {
+        Self {
+            gmin_stepping: true,
+            source_stepping: true,
+            pseudo_transient: true,
+            arc_length: true,
+            damping_strategy: DampingStrategy::Combined,
+            verbose: false,
+            ..Default::default()
+        }
+    }
+
+    /// Enable verbose logging
+    pub fn with_verbose(mut self, verbose: bool) -> Self {
+        self.verbose = verbose;
+        self
+    }
+
+    /// Set damping strategy
+    pub fn with_damping(mut self, strategy: DampingStrategy) -> Self {
+        self.damping_strategy = strategy;
+        self
+    }
 }
 
 /// Configuration for model evaluation bypass (latent device optimization)
@@ -122,6 +219,7 @@ impl Default for SimulationConfig {
             temperature: 300.0, // Room temperature
             integration_method: crate::analysis::IntegrationMethod::TrapGear,
             bypass_config: BypassConfig::default(),
+            convergence_config: ConvergenceConfig::default(),
         }
     }
 }

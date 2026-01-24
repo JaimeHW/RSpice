@@ -223,6 +223,42 @@ pub struct Bsim4Params {
     pub at: Value,
     /// Parasitic resistance temperature coefficient
     pub prt: Value,
+
+    //==========================================================================
+    // Noise Parameters (BSIM4 Noise Model)
+    //==========================================================================
+    /// Flicker noise coefficient
+    pub kf: Value,
+    /// Flicker noise current exponent
+    pub af: Value,
+    /// Flicker noise frequency exponent
+    pub ef: Value,
+    /// Oxide trap density coefficient A (NOIA)
+    pub noia: Value,
+    /// Oxide trap density coefficient B (NOIB)
+    pub noib: Value,
+    /// Oxide trap density coefficient C (NOIC)
+    pub noic: Value,
+    /// Noise emission coefficient
+    pub em: Value,
+    /// Channel thermal noise coefficient (gamma)
+    pub tnoia: Value,
+    /// Induced gate noise partition factor
+    pub tnoib: Value,
+    /// Noise model selector (0=SPICE2, 1=BSIM4, 2=BSIM4 holistic)
+    pub noimod: usize,
+
+    //==========================================================================
+    // Self-Heating Parameters
+    //==========================================================================
+    /// Thermal resistance (K/W)
+    pub rth0: Value,
+    /// Thermal capacitance (J/K)
+    pub cth0: Value,
+    /// Self-heating enable (0=off, 1=on)
+    pub shmod: usize,
+    /// Number of RC thermal stages
+    pub nrth: usize,
 }
 
 impl Default for Bsim4Params {
@@ -315,6 +351,24 @@ impl Default for Bsim4Params {
             ute: -1.5,
             at: 3.3e4,
             prt: 0.0,
+
+            // Noise parameters (BSIM4 defaults)
+            kf: 1.0e-27,    // Flicker noise coefficient
+            af: 1.0,        // Flicker noise current exponent
+            ef: 1.0,        // Flicker noise frequency exponent
+            noia: 6.25e41,  // Oxide trap density A (for holistic model)
+            noib: 3.125e26, // Oxide trap density B
+            noic: 8.75e9,   // Oxide trap density C
+            em: 4.1e7,      // Saturation field for noise
+            tnoia: 1.5,     // Channel thermal noise coefficient
+            tnoib: 3.5,     // Induced gate noise partition
+            noimod: 1,      // BSIM4 noise model
+
+            // Self-heating parameters
+            rth0: 0.0,    // Thermal resistance (disabled by default)
+            cth0: 1.0e-9, // Thermal capacitance
+            shmod: 0,     // Self-heating disabled by default
+            nrth: 1,      // Single RC thermal stage
         }
     }
 }
@@ -384,6 +438,12 @@ pub struct Bsim4 {
     gm: Value,
     gds: Value,
     gmb: Value,
+
+    // Self-heating state
+    /// Temperature rise above ambient (K)
+    delta_temp: Value,
+    /// Instantaneous power dissipation (W)
+    power_diss: Value,
 }
 
 impl Bsim4 {
@@ -410,6 +470,8 @@ impl Bsim4 {
             gm: 0.0,
             gds: 0.0,
             gmb: 0.0,
+            delta_temp: 0.0,
+            power_diss: 0.0,
         }
     }
 
@@ -516,10 +578,13 @@ impl Bsim4 {
         let t_ratio = (temp + 273.15) / (p.tnom + 273.15);
         let mu0 = p.u0 * 1e-4 * t_ratio.powf(p.ute); // m^2/V·s
 
-        // Effective mobility with vertical field degradation
-        let eeff = (cox * vgst_eff / (EPSILON_SI * 3.0)).max(1e3);
+        // Effective mobility with vertical field degradation (BSIM4 formulation)
+        // Eeff = (Vgst + 2*Vth) / (6 * Toxe) in V/m, but ua/ub expect MV/cm
+        // Convert: 1 MV/cm = 1e8 V/m, so divide by 1e8
+        let eeff_vm = (cox * vgst_eff / EPSILON_SI).max(1e3); // V/m
+        let eeff = eeff_vm / 1e8; // Convert to MV/cm for ua/ub parameters
         let mu = mu0 / (1.0 + p.ua * eeff.powf(p.eu) + p.ub * eeff.powi(2));
-        let mu_eff = mu.max(1e-6);
+        let mu_eff = mu.max(p.umin * 1e-4);
 
         // Velocity saturation
         let esat = 2.0 * p.vsat / mu_eff;
@@ -547,7 +612,14 @@ impl Bsim4 {
         // Calculate small-signal parameters
         let dvth_dvbs = 0.5 * p.k1 / (2.0 * vth.abs() + 0.1).sqrt();
 
-        self.gm = (weff / leff * mu_eff * cox * vds_eff * vsat_factor * clm_factor).max(1e-15);
+        // gm = dId/dVgs
+        // Long-channel saturation: gm = (W/L)*µ*Cox*Vgst = β * Vgst
+        // This properly scales linearly with gate overdrive
+        let beta = weff / leff * mu_eff * cox;
+        let gm_long_channel = beta * vgst_eff;
+
+        // Apply velocity saturation and CLM corrections
+        self.gm = (gm_long_channel * vsat_factor * clm_factor).max(1e-15);
         self.gds = (id * lambda).max(1e-15);
         self.gmb = self.gm * dvth_dvbs;
         self.id = type_sign * id;
@@ -583,6 +655,213 @@ impl Bsim4 {
             "linear"
         } else {
             "saturation"
+        }
+    }
+
+    //=========================================================================
+    // Noise Analysis Methods
+    //=========================================================================
+
+    /// Calculate noise power spectral density at a given frequency
+    ///
+    /// Returns a NoiseSpectrum containing thermal, flicker, and total noise
+    pub fn calculate_noise_psd(&self, freq: Value, temp: Value) -> NoiseSpectrum {
+        let p = &self.params;
+        let (weff, leff) = self.effective_dimensions();
+        let cox = self.cox();
+
+        // Thermal voltage
+        let temp_k = temp + 273.15;
+        let k_t = K_BOLTZMANN * temp_k;
+
+        //---------------------------------------------------------------------
+        // Channel Thermal Noise: Sid_thermal = 4kT * gamma * gm
+        //---------------------------------------------------------------------
+        // gamma is the channel thermal noise coefficient (2/3 for long channel,
+        // can be higher for short channel due to hot electrons)
+        let gamma = p.tnoia * 2.0 / 3.0; // typically 1.0 for 65nm
+        let sid_thermal = 4.0 * k_t * gamma * self.gm;
+
+        //---------------------------------------------------------------------
+        // Flicker (1/f) Noise: Sid_flicker = Kf * Id^Af / (Cox * W * L * f^Ef)
+        //---------------------------------------------------------------------
+        let sid_flicker = if freq > 0.0 {
+            let area = weff * leff;
+            p.kf * self.id.abs().powf(p.af) / (cox * area * freq.powf(p.ef))
+        } else {
+            0.0
+        };
+
+        //---------------------------------------------------------------------
+        // Shot Noise (gate leakage): Sig = 2 * q * Ig
+        //---------------------------------------------------------------------
+        // For deep submicron, gate leakage can contribute shot noise
+        // Simplified: assume Ig ~ 1e-12 A/um^2 for 65nm
+        let ig = 1e-12 * weff * leff * 1e12; // A
+        let sig_shot = 2.0 * Q_ELECTRON * ig.abs();
+
+        //---------------------------------------------------------------------
+        // S/D Resistance Thermal Noise (output-referred current noise)
+        //---------------------------------------------------------------------
+        // Resistance thermal noise: Sv = 4kT * R, Si = 4kT / R
+        let rd = p.rdw / weff.max(1e-9); // Drain resistance (Ω)
+        let rs = p.rsw / weff.max(1e-9); // Source resistance (Ω)
+        let sid_rsd = 4.0 * k_t / (rd + rs).max(1e-3); // Current noise from R
+
+        //---------------------------------------------------------------------
+        // Induced Gate Noise (for high frequencies)
+        //---------------------------------------------------------------------
+        // Sig_induced = 4kT * (2/15) * (w^2 * Cgs^2 / gm)
+        let cgs = p.cgso * weff + 2.0 / 3.0 * cox * weff * leff;
+        let omega = 2.0 * std::f64::consts::PI * freq;
+        let sig_induced = if omega > 0.0 {
+            4.0 * k_t * (p.tnoib / 15.0) * omega.powi(2) * cgs.powi(2) / self.gm.max(1e-15)
+        } else {
+            0.0
+        };
+
+        NoiseSpectrum {
+            frequency: freq,
+            thermal: sid_thermal,
+            flicker: sid_flicker,
+            shot: sig_shot,
+            rsd: sid_rsd,
+            induced_gate: sig_induced,
+            total: sid_thermal + sid_flicker + sig_shot + sid_rsd + sig_induced,
+        }
+    }
+
+    /// Calculate flicker noise corner frequency
+    ///
+    /// Returns the frequency where flicker noise equals thermal noise
+    pub fn flicker_corner_freq(&self, temp: Value) -> Value {
+        let p = &self.params;
+        let (weff, leff) = self.effective_dimensions();
+        let cox = self.cox();
+        let temp_k = temp + 273.15;
+        let k_t = K_BOLTZMANN * temp_k;
+
+        // At corner: Sid_thermal = Sid_flicker
+        // 4kT*gamma*gm = Kf*Id^Af / (Cox*W*L*fc^Ef)
+        // fc^Ef = Kf*Id^Af / (4kT*gamma*gm*Cox*W*L)
+        // fc = (Kf*Id^Af / (4kT*gamma*gm*Cox*W*L))^(1/Ef)
+
+        let gamma = p.tnoia * 2.0 / 3.0;
+        let area = weff * leff;
+        let thermal = 4.0 * k_t * gamma * self.gm;
+
+        if thermal > 0.0 && p.ef != 0.0 {
+            let ratio = p.kf * self.id.abs().powf(p.af) / (thermal * cox * area);
+            ratio.powf(1.0 / p.ef).max(1.0) // At least 1 Hz
+        } else {
+            1e3 // Default 1kHz
+        }
+    }
+
+    //=========================================================================
+    // Self-Heating Methods
+    //=========================================================================
+
+    /// Update self-heating temperature for transient simulation
+    ///
+    /// Uses a first-order RC thermal model: dT/dt = (P*Rth - T) / (Rth*Cth)
+    pub fn update_self_heating(&mut self, dt: Value) {
+        let p = &self.params;
+
+        if p.shmod == 0 || p.rth0 <= 0.0 {
+            // Self-heating disabled
+            self.delta_temp = 0.0;
+            return;
+        }
+
+        // Calculate power dissipation: P = Id * Vds
+        self.power_diss = (self.id * self.vds).abs();
+
+        // Steady-state temperature rise: dT_ss = P * Rth
+        let delta_temp_ss = self.power_diss * p.rth0;
+
+        // Time constant: tau = Rth * Cth
+        let tau = p.rth0 * p.cth0;
+
+        // First-order update: dT/dt = (dT_ss - dT) / tau
+        if tau > 0.0 {
+            let rate = (delta_temp_ss - self.delta_temp) / tau;
+            self.delta_temp += rate * dt;
+            // Clamp to physical limits
+            self.delta_temp = self.delta_temp.max(0.0).min(200.0); // Max 200K rise
+        } else {
+            // Instantaneous (no thermal capacitance)
+            self.delta_temp = delta_temp_ss;
+        }
+    }
+
+    /// Get current device temperature including self-heating
+    pub fn effective_temperature(&self, ambient: Value) -> Value {
+        ambient + self.delta_temp
+    }
+
+    /// Get current temperature rise (delta T)
+    pub fn delta_temp(&self) -> Value {
+        self.delta_temp
+    }
+
+    /// Get current power dissipation
+    pub fn power_dissipation(&self) -> Value {
+        self.power_diss
+    }
+
+    /// Reset self-heating state (for DC analysis)
+    pub fn reset_self_heating(&mut self) {
+        self.delta_temp = 0.0;
+        self.power_diss = 0.0;
+    }
+
+    /// Calculate steady-state self-heating temperature rise
+    pub fn steady_state_delta_temp(&self) -> Value {
+        let p = &self.params;
+        if p.shmod == 0 || p.rth0 <= 0.0 {
+            0.0
+        } else {
+            (self.id * self.vds).abs() * p.rth0
+        }
+    }
+}
+
+//=============================================================================
+// Noise Spectrum Result
+//=============================================================================
+
+/// Noise power spectral density components
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoiseSpectrum {
+    /// Frequency (Hz)
+    pub frequency: Value,
+    /// Channel thermal noise (A²/Hz)
+    pub thermal: Value,
+    /// Flicker (1/f) noise (A²/Hz)
+    pub flicker: Value,
+    /// Shot noise (A²/Hz)
+    pub shot: Value,
+    /// S/D resistance thermal noise (A²/Hz)
+    pub rsd: Value,
+    /// Induced gate noise (A²/Hz)
+    pub induced_gate: Value,
+    /// Total noise (A²/Hz)
+    pub total: Value,
+}
+
+impl NoiseSpectrum {
+    /// Get noise in dB relative to 1 A²/Hz
+    pub fn total_db(&self) -> Value {
+        10.0 * self.total.max(1e-30).log10()
+    }
+
+    /// Get equivalent input-referred noise voltage (V/√Hz)
+    pub fn input_referred_voltage(&self, gm: Value) -> Value {
+        if gm > 0.0 {
+            (self.total / gm.powi(2)).sqrt()
+        } else {
+            0.0
         }
     }
 }
@@ -692,5 +971,416 @@ mod tests {
             );
             prev_id = id;
         }
+    }
+
+    // =========================================================================
+    // Noise Model Tests
+    // =========================================================================
+
+    #[test]
+    fn test_noise_spectrum_structure() {
+        let params = Bsim4Params::nmos();
+        let mut mos = Bsim4::new("M1".to_string(), 1, 2, 3, 4, params);
+        mos.calculate_id(1.0, 1.0, 0.0, 27.0);
+
+        let noise = mos.calculate_noise_psd(1e6, 27.0);
+
+        // All noise components should be non-negative
+        assert!(noise.thermal >= 0.0, "Thermal noise should be non-negative");
+        assert!(noise.flicker >= 0.0, "Flicker noise should be non-negative");
+        assert!(noise.shot >= 0.0, "Shot noise should be non-negative");
+        assert!(noise.rsd >= 0.0, "RSD noise should be non-negative");
+        assert!(noise.total >= 0.0, "Total noise should be non-negative");
+
+        // Total should be sum of components
+        let expected_total =
+            noise.thermal + noise.flicker + noise.shot + noise.rsd + noise.induced_gate;
+        assert!(
+            (noise.total - expected_total).abs() < 1e-30,
+            "Total should equal sum of components"
+        );
+    }
+
+    #[test]
+    fn test_noise_thermal_scales_with_gm() {
+        let params = Bsim4Params::nmos();
+        let mut mos = Bsim4::new("M1".to_string(), 1, 2, 3, 4, params);
+
+        // Low gm (low Vgs)
+        mos.calculate_id(0.5, 1.0, 0.0, 27.0);
+        let noise_low = mos.calculate_noise_psd(1e6, 27.0);
+        let gm_low = mos.gm();
+
+        // High gm (high Vgs)
+        mos.calculate_id(1.5, 1.0, 0.0, 27.0);
+        let noise_high = mos.calculate_noise_psd(1e6, 27.0);
+        let gm_high = mos.gm();
+
+        // Thermal noise should scale with gm
+        assert!(gm_high > gm_low, "Higher Vgs should give higher gm");
+        assert!(
+            noise_high.thermal > noise_low.thermal,
+            "Higher gm should give higher thermal noise"
+        );
+    }
+
+    #[test]
+    fn test_noise_flicker_frequency_dependence() {
+        let params = Bsim4Params::nmos();
+        let mut mos = Bsim4::new("M1".to_string(), 1, 2, 3, 4, params);
+        mos.calculate_id(1.0, 1.0, 0.0, 27.0);
+
+        let noise_1khz = mos.calculate_noise_psd(1e3, 27.0);
+        let noise_1mhz = mos.calculate_noise_psd(1e6, 27.0);
+
+        // Flicker noise should be higher at lower frequency (1/f characteristic)
+        assert!(
+            noise_1khz.flicker > noise_1mhz.flicker,
+            "Flicker noise at 1kHz ({}) should exceed 1MHz ({})",
+            noise_1khz.flicker,
+            noise_1mhz.flicker
+        );
+
+        // Factor should be approximately 1000x for 1/f^1
+        let ratio = noise_1khz.flicker / noise_1mhz.flicker;
+        assert!(
+            ratio > 500.0 && ratio < 2000.0,
+            "Flicker noise ratio should be ~1000x for f^-1, got {}",
+            ratio
+        );
+    }
+
+    #[test]
+    fn test_noise_thermal_independent_of_frequency() {
+        let params = Bsim4Params::nmos();
+        let mut mos = Bsim4::new("M1".to_string(), 1, 2, 3, 4, params);
+        mos.calculate_id(1.0, 1.0, 0.0, 27.0);
+
+        let noise_1khz = mos.calculate_noise_psd(1e3, 27.0);
+        let noise_1mhz = mos.calculate_noise_psd(1e6, 27.0);
+
+        // Thermal noise should be flat (frequency-independent)
+        let ratio = noise_1khz.thermal / noise_1mhz.thermal;
+        assert!(
+            (ratio - 1.0).abs() < 0.01,
+            "Thermal noise should be frequency-flat, ratio={}",
+            ratio
+        );
+    }
+
+    #[test]
+    fn test_noise_temperature_dependence() {
+        let params = Bsim4Params::nmos();
+        let mut mos = Bsim4::new("M1".to_string(), 1, 2, 3, 4, params);
+        mos.calculate_id(1.0, 1.0, 0.0, 27.0);
+
+        let noise_25c = mos.calculate_noise_psd(1e6, 25.0);
+        let noise_100c = mos.calculate_noise_psd(1e6, 100.0);
+
+        // Thermal noise scales with kT, so higher temp = higher noise
+        assert!(
+            noise_100c.thermal > noise_25c.thermal,
+            "Thermal noise should increase with temperature"
+        );
+    }
+
+    #[test]
+    fn test_flicker_corner_frequency() {
+        let params = Bsim4Params::nmos();
+        let mut mos = Bsim4::new("M1".to_string(), 1, 2, 3, 4, params);
+        mos.calculate_id(1.0, 1.0, 0.0, 27.0);
+
+        let fc = mos.flicker_corner_freq(27.0);
+
+        // Corner frequency should be positive and reasonable (1Hz to 10GHz)
+        assert!(fc > 0.0, "Corner frequency should be positive");
+        assert!(fc < 1e10, "Corner frequency should be < 10GHz");
+
+        // At corner frequency, flicker ≈ thermal
+        let noise = mos.calculate_noise_psd(fc, 27.0);
+        let ratio = noise.flicker / noise.thermal.max(1e-30);
+        assert!(
+            ratio > 0.1 && ratio < 10.0,
+            "At corner frequency, flicker should be near thermal, ratio={}",
+            ratio
+        );
+    }
+
+    #[test]
+    fn test_noise_cutoff_region() {
+        let params = Bsim4Params::nmos().with_vth0(0.4);
+        let mut mos = Bsim4::new("M1".to_string(), 1, 2, 3, 4, params);
+
+        // Device in cutoff (very low gm)
+        mos.calculate_id(0.2, 1.0, 0.0, 27.0);
+        let noise = mos.calculate_noise_psd(1e6, 27.0);
+
+        // All noise components should be very small in cutoff
+        assert!(
+            noise.thermal < 1e-20,
+            "Thermal noise in cutoff should be tiny"
+        );
+        assert!(
+            noise.flicker < 1e-20,
+            "Flicker noise in cutoff should be tiny"
+        );
+    }
+
+    #[test]
+    fn test_noise_input_referred_voltage() {
+        let params = Bsim4Params::nmos();
+        let mut mos = Bsim4::new("M1".to_string(), 1, 2, 3, 4, params);
+        mos.calculate_id(1.0, 1.0, 0.0, 27.0);
+
+        let noise = mos.calculate_noise_psd(1e6, 27.0);
+        let gm = mos.gm();
+        let vn = noise.input_referred_voltage(gm);
+
+        // Input-referred voltage should be positive
+        assert!(vn > 0.0, "Input-referred noise voltage should be positive");
+
+        // Should be in nV/√Hz range for typical MOSFET
+        assert!(
+            vn > 1e-12 && vn < 1e-6,
+            "Input-referred voltage {} should be in nV-µV/√Hz range",
+            vn
+        );
+    }
+
+    #[test]
+    fn test_noise_total_db() {
+        let params = Bsim4Params::nmos();
+        let mut mos = Bsim4::new("M1".to_string(), 1, 2, 3, 4, params);
+        mos.calculate_id(1.0, 1.0, 0.0, 27.0);
+
+        let noise = mos.calculate_noise_psd(1e6, 27.0);
+        let db = noise.total_db();
+
+        // dB should be negative for sub-unity values
+        assert!(db < 0.0, "Noise in dB should be negative for small PSD");
+
+        // Typical values around -200 to -150 dB
+        assert!(
+            db > -250.0 && db < -100.0,
+            "Noise dB = {} seems unreasonable",
+            db
+        );
+    }
+
+    // =========================================================================
+    // Self-Heating Tests
+    // =========================================================================
+
+    #[test]
+    fn test_self_heating_disabled_by_default() {
+        let params = Bsim4Params::nmos();
+        let mut mos = Bsim4::new("M1".to_string(), 1, 2, 3, 4, params);
+        mos.calculate_id(1.0, 1.0, 0.0, 27.0);
+
+        // Self-heating should be disabled (shmod=0)
+        assert_eq!(mos.params.shmod, 0);
+
+        mos.update_self_heating(1e-9);
+        assert_eq!(
+            mos.delta_temp(),
+            0.0,
+            "Delta temp should be 0 when disabled"
+        );
+    }
+
+    #[test]
+    fn test_self_heating_enabled() {
+        let mut params = Bsim4Params::nmos();
+        params.shmod = 1;
+        params.rth0 = 1000.0; // 1000 K/W
+        params.cth0 = 1e-9; // 1 nJ/K
+
+        let mut mos = Bsim4::new("M1".to_string(), 1, 2, 3, 4, params);
+        mos.calculate_id(1.0, 1.0, 0.0, 27.0);
+
+        // Run self-heating for a while
+        for _ in 0..100 {
+            mos.update_self_heating(1e-9);
+        }
+
+        // Should have some temperature rise
+        assert!(
+            mos.delta_temp() > 0.0,
+            "Should have temperature rise when self-heating enabled"
+        );
+    }
+
+    #[test]
+    fn test_self_heating_steady_state() {
+        let mut params = Bsim4Params::nmos();
+        params.shmod = 1;
+        params.rth0 = 1000.0; // 1000 K/W
+        params.cth0 = 1e-12; // Very small for fast settling
+        let rth0 = params.rth0; // Save before move
+
+        let mut mos = Bsim4::new("M1".to_string(), 1, 2, 3, 4, params);
+        mos.calculate_id(1.0, 1.0, 0.0, 27.0);
+
+        let power = mos.id().abs() * 1.0; // P = Id * Vds
+        let _expected_delta_t = power * rth0;
+
+        // Run to steady state
+        for _ in 0..1000 {
+            mos.update_self_heating(1e-9);
+        }
+
+        // Should converge to steady state
+        let ss = mos.steady_state_delta_temp();
+        assert!(
+            (mos.delta_temp() - ss).abs() < ss * 0.1,
+            "Should converge to steady state: actual={} expected={}",
+            mos.delta_temp(),
+            ss
+        );
+    }
+
+    #[test]
+    fn test_self_heating_transient_behavior() {
+        let mut params = Bsim4Params::nmos();
+        params.shmod = 1;
+        params.rth0 = 1000.0;
+        params.cth0 = 1e-9;
+
+        let mut mos = Bsim4::new("M1".to_string(), 1, 2, 3, 4, params);
+        mos.calculate_id(1.0, 1.0, 0.0, 27.0);
+
+        // Track temperature rise over time
+        let mut temps: Vec<Value> = Vec::new();
+        for _ in 0..10 {
+            mos.update_self_heating(1e-10);
+            temps.push(mos.delta_temp());
+        }
+
+        // Temperature should monotonically increase toward steady state
+        for i in 1..temps.len() {
+            assert!(
+                temps[i] >= temps[i - 1] * 0.99,
+                "Temperature should increase monotonically"
+            );
+        }
+    }
+
+    #[test]
+    fn test_self_heating_power_dissipation() {
+        let mut params = Bsim4Params::nmos();
+        params.shmod = 1;
+        params.rth0 = 1000.0;
+
+        let mut mos = Bsim4::new("M1".to_string(), 1, 2, 3, 4, params);
+        mos.calculate_id(1.0, 1.0, 0.0, 27.0);
+        mos.update_self_heating(1e-9);
+
+        let power = mos.power_dissipation();
+        let expected = (mos.id() * 1.0).abs(); // P = |Id * Vds|
+
+        assert!(
+            (power - expected).abs() < expected * 0.01,
+            "Power dissipation should be Id*Vds"
+        );
+    }
+
+    #[test]
+    fn test_self_heating_effective_temperature() {
+        let mut params = Bsim4Params::nmos();
+        params.shmod = 1;
+        params.rth0 = 1000.0;
+        params.cth0 = 1e-12;
+
+        let mut mos = Bsim4::new("M1".to_string(), 1, 2, 3, 4, params);
+        mos.calculate_id(1.0, 1.0, 0.0, 27.0);
+
+        // Run to steady state
+        for _ in 0..1000 {
+            mos.update_self_heating(1e-9);
+        }
+
+        let ambient = 27.0;
+        let effective = mos.effective_temperature(ambient);
+
+        assert!(
+            effective > ambient,
+            "Effective temp should exceed ambient when power dissipated"
+        );
+        assert_eq!(
+            effective,
+            ambient + mos.delta_temp(),
+            "Effective temp should be ambient + delta_temp"
+        );
+    }
+
+    #[test]
+    fn test_self_heating_reset() {
+        let mut params = Bsim4Params::nmos();
+        params.shmod = 1;
+        params.rth0 = 1000.0;
+
+        let mut mos = Bsim4::new("M1".to_string(), 1, 2, 3, 4, params);
+        mos.calculate_id(1.0, 1.0, 0.0, 27.0);
+
+        // Heat up
+        for _ in 0..100 {
+            mos.update_self_heating(1e-9);
+        }
+        assert!(mos.delta_temp() > 0.0);
+
+        // Reset
+        mos.reset_self_heating();
+
+        assert_eq!(mos.delta_temp(), 0.0, "Reset should clear delta_temp");
+        assert_eq!(
+            mos.power_dissipation(),
+            0.0,
+            "Reset should clear power_diss"
+        );
+    }
+
+    #[test]
+    fn test_self_heating_temperature_clamped() {
+        let mut params = Bsim4Params::nmos();
+        params.shmod = 1;
+        params.rth0 = 100000.0; // Very high thermal resistance
+        params.cth0 = 1e-15; // Very small capacitance
+
+        let mut mos = Bsim4::new("M1".to_string(), 1, 2, 3, 4, params);
+        mos.calculate_id(1.0, 1.0, 0.0, 27.0);
+
+        // Try to overheat
+        for _ in 0..10000 {
+            mos.update_self_heating(1e-6);
+        }
+
+        // Temperature should be clamped to reasonable value (200K rise max)
+        assert!(
+            mos.delta_temp() <= 200.0,
+            "Temperature rise should be clamped: {}",
+            mos.delta_temp()
+        );
+    }
+
+    #[test]
+    fn test_noise_params_defaults() {
+        let params = Bsim4Params::nmos();
+
+        // Check noise parameter defaults are reasonable
+        assert!(params.kf > 0.0, "Kf should be positive");
+        assert!(params.af > 0.0, "Af should be positive");
+        assert!(params.ef > 0.0, "Ef should be positive");
+        assert!(params.tnoia > 0.0, "tnoia should be positive");
+        assert_eq!(params.noimod, 1, "Default noise model should be BSIM4");
+    }
+
+    #[test]
+    fn test_self_heating_params_defaults() {
+        let params = Bsim4Params::nmos();
+
+        // Check self-heating defaults
+        assert_eq!(params.rth0, 0.0, "Rth0 should default to 0 (disabled)");
+        assert_eq!(params.shmod, 0, "Self-heating should be off by default");
+        assert!(params.cth0 > 0.0, "Cth0 should be positive for stability");
     }
 }

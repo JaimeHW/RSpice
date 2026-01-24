@@ -488,4 +488,188 @@ C1 2 0 1u
         let g = ptran.conductance(1);
         assert!(g > 0.0);
     }
+
+    //=========================================================================
+    // ConvergenceConfig Tests
+    //=========================================================================
+
+    #[test]
+    fn test_convergence_config_default() {
+        use crate::engine::{ConvergenceConfig, DampingStrategy};
+
+        let config = ConvergenceConfig::default();
+        assert!(config.gmin_stepping);
+        assert!(config.source_stepping);
+        assert!(config.pseudo_transient);
+        assert!(!config.arc_length); // Arc-length is off by default
+        assert_eq!(config.damping_strategy, DampingStrategy::VoltageLimiting);
+        assert!(config.gmin_initial > config.gmin_target);
+        assert!(!config.verbose);
+    }
+
+    #[test]
+    fn test_convergence_config_fast() {
+        use crate::engine::{ConvergenceConfig, DampingStrategy};
+
+        let config = ConvergenceConfig::fast();
+        assert!(!config.gmin_stepping);
+        assert!(!config.source_stepping);
+        assert!(!config.pseudo_transient);
+        assert!(!config.arc_length);
+        assert_eq!(config.damping_strategy, DampingStrategy::None);
+    }
+
+    #[test]
+    fn test_convergence_config_robust() {
+        use crate::engine::{ConvergenceConfig, DampingStrategy};
+
+        let config = ConvergenceConfig::robust();
+        assert!(config.gmin_stepping);
+        assert!(config.source_stepping);
+        assert!(config.pseudo_transient);
+        assert!(config.arc_length);
+        assert_eq!(config.damping_strategy, DampingStrategy::Combined);
+    }
+
+    #[test]
+    fn test_convergence_config_with_verbose() {
+        use crate::engine::ConvergenceConfig;
+
+        let config = ConvergenceConfig::default().with_verbose(true);
+        assert!(config.verbose);
+
+        let config = ConvergenceConfig::fast().with_verbose(false);
+        assert!(!config.verbose);
+    }
+
+    #[test]
+    fn test_convergence_config_with_damping() {
+        use crate::engine::{ConvergenceConfig, DampingStrategy};
+
+        let config = ConvergenceConfig::default().with_damping(DampingStrategy::LineSearch);
+        assert_eq!(config.damping_strategy, DampingStrategy::LineSearch);
+
+        let config = ConvergenceConfig::fast().with_damping(DampingStrategy::BankRose);
+        assert_eq!(config.damping_strategy, DampingStrategy::BankRose);
+    }
+
+    #[test]
+    fn test_damping_strategy_default() {
+        use crate::engine::DampingStrategy;
+
+        let strategy = DampingStrategy::default();
+        assert_eq!(strategy, DampingStrategy::None);
+    }
+
+    #[test]
+    fn test_damping_strategy_variants() {
+        use crate::engine::DampingStrategy;
+
+        // All variants should be distinct
+        assert_ne!(DampingStrategy::None, DampingStrategy::LineSearch);
+        assert_ne!(
+            DampingStrategy::LineSearch,
+            DampingStrategy::VoltageLimiting
+        );
+        assert_ne!(DampingStrategy::VoltageLimiting, DampingStrategy::BankRose);
+        assert_ne!(DampingStrategy::BankRose, DampingStrategy::Combined);
+    }
+
+    #[test]
+    fn test_simulation_config_has_convergence_config() {
+        use crate::engine::SimulationConfig;
+
+        let config = SimulationConfig::default();
+        // ConvergenceConfig should be accessible
+        assert!(config.convergence_config.gmin_stepping);
+    }
+
+    #[test]
+    fn test_simulation_config_custom_convergence() {
+        use crate::engine::{ConvergenceConfig, SimulationConfig};
+
+        let mut config = SimulationConfig::default();
+        config.convergence_config = ConvergenceConfig::fast();
+        assert!(!config.convergence_config.gmin_stepping);
+    }
+
+    #[test]
+    fn test_convergence_config_gmin_values() {
+        use crate::engine::ConvergenceConfig;
+
+        let config = ConvergenceConfig::default();
+        assert!(config.gmin_initial > 0.0);
+        assert!(config.gmin_target > 0.0);
+        assert!(config.gmin_initial > config.gmin_target);
+        // GMIN initial should be around 1e-12
+        assert!(config.gmin_initial > 1e-14 && config.gmin_initial < 1e-10);
+        // GMIN target should be around 1e-15
+        assert!(config.gmin_target > 1e-17 && config.gmin_target < 1e-13);
+    }
+
+    #[test]
+    fn test_engine_with_fast_convergence() {
+        use crate::Netlist;
+        use crate::engine::{ConvergenceConfig, Engine, SimulationConfig};
+
+        let netlist_str = r#"
+* Simple resistor (should converge without aids)
+V1 1 0 5
+R1 1 0 1k
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+
+        let mut config = SimulationConfig::default();
+        config.convergence_config = ConvergenceConfig::fast();
+
+        let engine = Engine::new(config);
+        let result = engine.run_dc_op(&netlist).unwrap();
+
+        assert!((result.voltage(1) - 5.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_engine_with_robust_convergence() {
+        use crate::Netlist;
+        use crate::engine::{ConvergenceConfig, Engine, SimulationConfig};
+
+        let netlist_str = r#"
+* Diode with resistor
+V1 1 0 5
+D1 1 2 1N4148
+R1 2 0 1k
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+
+        let mut config = SimulationConfig::default();
+        config.convergence_config = ConvergenceConfig::robust();
+
+        let engine = Engine::new(config);
+        let result = engine.run_dc_op(&netlist).unwrap();
+
+        // Should converge with robust settings
+        assert!(result.voltage(2) > 0.0);
+    }
+
+    #[test]
+    fn test_damping_strategy_clone_eq() {
+        use crate::engine::DampingStrategy;
+
+        let s1 = DampingStrategy::Combined;
+        let s2 = s1;
+        assert_eq!(s1, s2);
+    }
+
+    #[test]
+    fn test_convergence_config_clone() {
+        use crate::engine::ConvergenceConfig;
+
+        let config1 = ConvergenceConfig::robust();
+        let config2 = config1.clone();
+
+        assert_eq!(config1.gmin_stepping, config2.gmin_stepping);
+        assert_eq!(config1.arc_length, config2.arc_length);
+    }
 }
