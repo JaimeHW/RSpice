@@ -9,7 +9,8 @@ use dioxus::prelude::*;
 use rspice_core::library::LibraryManager;
 
 use crate::components::{Panel, ProjectBrowser, SimulationDialog, Toolbar};
-use crate::state::cross_probing::CrossProbeManager;
+use crate::dialogs::{SimulationOptions, SimulationOptionsDialog};
+use crate::services::cross_probing::CrossProbeManager;
 use crate::state::display_settings::SchematicDisplaySettings;
 use crate::state::hierarchy::HierarchyManager;
 use crate::state::simulation_command::SimulationConfig;
@@ -29,6 +30,14 @@ pub struct ConsoleVisible(pub bool);
 #[derive(Clone, Copy)]
 pub struct BrowserVisible(pub bool);
 
+/// Wrapper type for simulation dialog visibility (needed for distinct context type)
+#[derive(Clone, Copy)]
+pub struct SimDialogVisible(pub bool);
+
+/// Wrapper type for simulation options dialog visibility (needed for distinct context type)
+#[derive(Clone, Copy)]
+pub struct SimOptionsVisible(pub bool);
+
 /// Root application component
 #[component]
 pub fn App() -> Element {
@@ -42,7 +51,11 @@ pub fn App() -> Element {
 
     // Simulation configuration (from dialog)
     let mut sim_config = use_signal(SimulationConfig::default);
-    let mut sim_dialog_visible = use_signal(|| false);
+    let mut sim_dialog_visible = use_signal(|| SimDialogVisible(false));
+
+    // Simulation options (advanced solver/convergence settings)
+    let mut sim_options = use_signal(SimulationOptions::default);
+    let mut sim_options_visible = use_signal(|| SimOptionsVisible(false));
 
     // Resizable pane heights (in pixels)
     let mut waveform_height = use_signal(|| 200.0_f64);
@@ -84,6 +97,8 @@ pub fn App() -> Element {
     use_context_provider(|| console_visible);
     use_context_provider(|| sim_config);
     use_context_provider(|| sim_dialog_visible);
+    use_context_provider(|| sim_options);
+    use_context_provider(|| sim_options_visible);
     use_context_provider(|| doc_manager);
     use_context_provider(|| cross_probe);
     use_context_provider(|| display_settings);
@@ -430,14 +445,26 @@ pub fn App() -> Element {
 
             // Simulation setup dialog (modal, rendered on top)
             SimulationDialog {
-                visible: *sim_dialog_visible.read(),
+                visible: sim_dialog_visible.read().0,
                 config: sim_config.read().clone(),
                 on_confirm: move |new_config| {
                     sim_config.set(new_config);
-                    sim_dialog_visible.set(false);
+                    sim_dialog_visible.set(SimDialogVisible(false));
                 },
                 on_cancel: move |_| {
-                    sim_dialog_visible.set(false);
+                    sim_dialog_visible.set(SimDialogVisible(false));
+                },
+            }
+
+            // Simulation options dialog (advanced solver/convergence settings)
+            SimulationOptionsDialog {
+                options: sim_options.read().clone(),
+                is_open: sim_options_visible.read().0,
+                on_close: move |_| {
+                    sim_options_visible.set(SimOptionsVisible(false));
+                },
+                on_save: move |new_options| {
+                    sim_options.set(new_options);
                 },
             }
         }

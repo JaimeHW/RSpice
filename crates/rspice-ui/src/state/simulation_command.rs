@@ -541,6 +541,667 @@ impl SParamConfig {
 }
 
 // =============================================================================
+// PSS (Periodic Steady State) Analysis Configuration
+// =============================================================================
+
+/// PSS analysis configuration for oscillators and periodic circuits
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PssConfig {
+    /// Fundamental frequency (Hz) - use 0 for auto-detection
+    pub fundamental_freq: f64,
+    /// Auto-detect period from circuit behavior
+    pub auto_detect_period: bool,
+    /// Number of harmonics to compute
+    pub num_harmonics: u32,
+    /// Number of stabilization cycles before analysis
+    pub stabilization_cycles: u32,
+    /// Convergence tolerance
+    pub tolerance: f64,
+    /// Maximum Newton iterations per period
+    pub max_iterations: u32,
+    /// Enable Floquet analysis for stability
+    pub floquet_analysis: bool,
+}
+
+impl Default for PssConfig {
+    fn default() -> Self {
+        Self {
+            fundamental_freq: 1e6, // 1 MHz default
+            auto_detect_period: false,
+            num_harmonics: 10,
+            stabilization_cycles: 3,
+            tolerance: 1e-6,
+            max_iterations: 50,
+            floquet_analysis: false,
+        }
+    }
+}
+
+impl PssConfig {
+    /// Generate PSS SPICE command string
+    pub fn to_spice_string(&self) -> String {
+        let freq_str = if self.auto_detect_period {
+            "AUTO".to_string()
+        } else {
+            format_engineering(self.fundamental_freq)
+        };
+        // .PSS fund harmonics [stabilization] [tolerance]
+        format!(
+            ".PSS {} {} {} {}",
+            freq_str, self.num_harmonics, self.stabilization_cycles, self.tolerance
+        )
+    }
+}
+
+// =============================================================================
+// PAC (Periodic AC) Analysis Configuration
+// =============================================================================
+
+/// PAC analysis - small-signal analysis around periodic operating point
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PacConfig {
+    /// Start frequency for sweep (Hz)
+    pub start_freq: f64,
+    /// Stop frequency for sweep (Hz)
+    pub stop_freq: f64,
+    /// Points per decade
+    pub points_per_decade: u32,
+    /// Sweep type
+    pub sweep_type: AcSweepType,
+    /// Sideband index (0 = fundamental, 1 = first sideband, etc.)
+    pub sideband: i32,
+    /// Maximum sideband index to include
+    pub max_sidebands: u32,
+}
+
+impl Default for PacConfig {
+    fn default() -> Self {
+        Self {
+            start_freq: 1.0,
+            stop_freq: 1e9,
+            points_per_decade: 10,
+            sweep_type: AcSweepType::Decade,
+            sideband: 0,
+            max_sidebands: 3,
+        }
+    }
+}
+
+impl PacConfig {
+    /// Generate PAC SPICE command string
+    pub fn to_spice_string(&self) -> String {
+        // .PAC sweep_type points start stop [sidebands]
+        format!(
+            ".PAC {} {} {} {} {}",
+            self.sweep_type.spice_keyword(),
+            self.points_per_decade,
+            format_engineering(self.start_freq),
+            format_engineering(self.stop_freq),
+            self.max_sidebands
+        )
+    }
+}
+
+// =============================================================================
+// Harmonic Balance Analysis Configuration
+// =============================================================================
+
+/// Harmonic balance tone specification
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HbToneSpec {
+    /// Tone frequency (Hz)
+    pub frequency: f64,
+    /// Number of harmonics for this tone
+    pub harmonics: u32,
+    /// Source name associated with this tone
+    pub source: String,
+}
+
+impl Default for HbToneSpec {
+    fn default() -> Self {
+        Self {
+            frequency: 1e9,
+            harmonics: 7,
+            source: "V1".to_string(),
+        }
+    }
+}
+
+/// Harmonic balance analysis configuration
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HbConfig {
+    /// Fundamental tones for multi-tone analysis
+    pub tones: Vec<HbToneSpec>,
+    /// Maximum order for intermodulation products
+    pub max_order: u32,
+    /// Convergence tolerance
+    pub tolerance: f64,
+    /// Maximum iterations
+    pub max_iterations: u32,
+    /// Use Krylov subspace solver for large problems
+    pub use_krylov: bool,
+    /// Oversample factor for accuracy
+    pub oversample: u32,
+}
+
+impl Default for HbConfig {
+    fn default() -> Self {
+        Self {
+            tones: vec![HbToneSpec::default()],
+            max_order: 7,
+            tolerance: 1e-6,
+            max_iterations: 200,
+            use_krylov: true,
+            oversample: 4,
+        }
+    }
+}
+
+impl HbConfig {
+    /// Generate HB SPICE command string
+    pub fn to_spice_string(&self) -> String {
+        // Format: .HB tone1_freq [tone2_freq ...] harmonics [options]
+        if self.tones.is_empty() {
+            return ".HB 1G 7".to_string(); // Default
+        }
+        let tones_str: Vec<String> = self
+            .tones
+            .iter()
+            .map(|t| format_engineering(t.frequency))
+            .collect();
+        format!(
+            ".HB {} {} ORDER={} TOL={}",
+            tones_str.join(" "),
+            self.tones.first().map(|t| t.harmonics).unwrap_or(7),
+            self.max_order,
+            self.tolerance
+        )
+    }
+}
+
+// =============================================================================
+// STB (Loop Stability) Analysis Configuration
+// =============================================================================
+
+/// STB sweep type
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum StbSweepType {
+    /// Frequency sweep for Bode plot
+    #[default]
+    Frequency,
+    /// Parameter sweep at fixed frequency
+    Parameter,
+}
+
+impl StbSweepType {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            StbSweepType::Frequency => "Frequency Sweep",
+            StbSweepType::Parameter => "Parameter Sweep",
+        }
+    }
+}
+
+/// Loop stability analysis configuration
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StbConfig {
+    /// Probe insertion node (positive terminal)
+    pub probe_pos: String,
+    /// Probe insertion node (negative terminal)
+    pub probe_neg: String,
+    /// Start frequency (Hz)
+    pub start_freq: f64,
+    /// Stop frequency (Hz)
+    pub stop_freq: f64,
+    /// Points per decade
+    pub points_per_decade: u32,
+    /// Sweep type
+    pub sweep_type: StbSweepType,
+    /// Show Nyquist plot
+    pub show_nyquist: bool,
+    /// Desired phase margin (degrees)
+    pub target_phase_margin: f64,
+    /// Desired gain margin (dB)
+    pub target_gain_margin: f64,
+}
+
+impl Default for StbConfig {
+    fn default() -> Self {
+        Self {
+            probe_pos: "fb".to_string(),
+            probe_neg: "0".to_string(),
+            start_freq: 1.0,
+            stop_freq: 100e6,
+            points_per_decade: 20,
+            sweep_type: StbSweepType::Frequency,
+            show_nyquist: false,
+            target_phase_margin: 45.0,
+            target_gain_margin: 10.0,
+        }
+    }
+}
+
+impl StbConfig {
+    /// Generate STB SPICE command string
+    pub fn to_spice_string(&self) -> String {
+        // .STB probe_pos probe_neg sweep_type points start stop
+        format!(
+            ".STB {} {} {} {} {} {}",
+            self.probe_pos,
+            self.probe_neg,
+            AcSweepType::Decade.spice_keyword(),
+            self.points_per_decade,
+            format_engineering(self.start_freq),
+            format_engineering(self.stop_freq)
+        )
+    }
+}
+
+// =============================================================================
+// Envelope Transient Analysis Configuration
+// =============================================================================
+
+/// Modulation type for envelope transient
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ModulationType {
+    #[default]
+    Am,
+    Fm,
+    Pm,
+    Iq,
+}
+
+impl ModulationType {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            ModulationType::Am => "AM (Amplitude)",
+            ModulationType::Fm => "FM (Frequency)",
+            ModulationType::Pm => "PM (Phase)",
+            ModulationType::Iq => "IQ (Complex)",
+        }
+    }
+}
+
+/// Envelope transient analysis configuration
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EnvelopeConfig {
+    /// Carrier frequency (Hz)
+    pub carrier_freq: f64,
+    /// Modulation type
+    pub modulation_type: ModulationType,
+    /// Envelope bandwidth (Hz)
+    pub envelope_bandwidth: f64,
+    /// Stop time (s)
+    pub stop_time: f64,
+    /// Maximum envelope time step (s)
+    pub max_step: Option<f64>,
+    /// Number of carrier harmonics
+    pub carrier_harmonics: u32,
+}
+
+impl Default for EnvelopeConfig {
+    fn default() -> Self {
+        Self {
+            carrier_freq: 1e9,
+            modulation_type: ModulationType::Am,
+            envelope_bandwidth: 10e6,
+            stop_time: 1e-6,
+            max_step: None,
+            carrier_harmonics: 3,
+        }
+    }
+}
+
+impl EnvelopeConfig {
+    /// Generate Envelope SPICE command string
+    pub fn to_spice_string(&self) -> String {
+        // .ENVLP carrier stop [modulation_type] [harmonics]
+        let mod_type = match self.modulation_type {
+            ModulationType::Am => "AM",
+            ModulationType::Fm => "FM",
+            ModulationType::Pm => "PM",
+            ModulationType::Iq => "IQ",
+        };
+        format!(
+            ".ENVLP {} {} {} {}",
+            format_engineering(self.carrier_freq),
+            format_engineering(self.stop_time),
+            mod_type,
+            self.carrier_harmonics
+        )
+    }
+}
+
+// =============================================================================
+// Multi-Rate Analysis Configuration
+// =============================================================================
+
+/// Multi-rate partition rate class
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum RateClass {
+    #[default]
+    Fast,
+    Medium,
+    Slow,
+}
+
+impl RateClass {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            RateClass::Fast => "Fast (carrier)",
+            RateClass::Medium => "Medium",
+            RateClass::Slow => "Slow (envelope)",
+        }
+    }
+}
+
+/// Multi-rate analysis configuration
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MultiRateConfig {
+    /// Enable automatic partitioning
+    pub auto_partition: bool,
+    /// Fast partition rate (Hz)
+    pub fast_rate: f64,
+    /// Slow partition rate (Hz)
+    pub slow_rate: f64,
+    /// Stop time (s)
+    pub stop_time: f64,
+    /// Interface latency tolerance
+    pub latency_tolerance: f64,
+}
+
+impl Default for MultiRateConfig {
+    fn default() -> Self {
+        Self {
+            auto_partition: true,
+            fast_rate: 1e9,
+            slow_rate: 1e6,
+            stop_time: 1e-3,
+            latency_tolerance: 1e-12,
+        }
+    }
+}
+
+impl MultiRateConfig {
+    /// Generate MultiRate SPICE command string
+    pub fn to_spice_string(&self) -> String {
+        // .MULTIRATE fast_rate slow_rate stop [AUTO|MANUAL]
+        format!(
+            ".MULTIRATE {} {} {} {}",
+            format_engineering(self.fast_rate),
+            format_engineering(self.slow_rate),
+            format_engineering(self.stop_time),
+            if self.auto_partition {
+                "AUTO"
+            } else {
+                "MANUAL"
+            }
+        )
+    }
+}
+
+// =============================================================================
+// Corner Analysis Configuration
+// =============================================================================
+
+/// Process corner type
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ProcessCorner {
+    #[default]
+    Tt, // Typical-Typical
+    Ff, // Fast-Fast
+    Ss, // Slow-Slow
+    Fs, // Fast-Slow
+    Sf, // Slow-Fast
+}
+
+impl ProcessCorner {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            ProcessCorner::Tt => "TT (Typical)",
+            ProcessCorner::Ff => "FF (Fast)",
+            ProcessCorner::Ss => "SS (Slow)",
+            ProcessCorner::Fs => "FS (Fast NMOS/Slow PMOS)",
+            ProcessCorner::Sf => "SF (Slow NMOS/Fast PMOS)",
+        }
+    }
+
+    pub const ALL: [ProcessCorner; 5] = [
+        ProcessCorner::Tt,
+        ProcessCorner::Ff,
+        ProcessCorner::Ss,
+        ProcessCorner::Fs,
+        ProcessCorner::Sf,
+    ];
+}
+
+/// Corner analysis configuration
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CornerConfig {
+    /// Process corners to simulate
+    pub process_corners: Vec<ProcessCorner>,
+    /// Voltage corners (as percentages, e.g., [90, 100, 110])
+    pub voltage_corners: Vec<f64>,
+    /// Temperature corners (°C)
+    pub temperature_corners: Vec<f64>,
+    /// Run all combinations or selected only
+    pub full_matrix: bool,
+}
+
+impl Default for CornerConfig {
+    fn default() -> Self {
+        Self {
+            process_corners: vec![ProcessCorner::Tt, ProcessCorner::Ff, ProcessCorner::Ss],
+            voltage_corners: vec![90.0, 100.0, 110.0],
+            temperature_corners: vec![-40.0, 25.0, 125.0],
+            full_matrix: false,
+        }
+    }
+}
+
+impl CornerConfig {
+    /// Generate Corner analysis SPICE commands
+    /// Generates .TEMP and .CORNER statements for PVT corner sweeps
+    pub fn to_spice_string(&self) -> String {
+        let mut commands = Vec::new();
+
+        // Generate .CORNER for process corners (RSpice extension)
+        let corners: Vec<&str> = self
+            .process_corners
+            .iter()
+            .map(|c| match c {
+                ProcessCorner::Tt => "TT",
+                ProcessCorner::Ff => "FF",
+                ProcessCorner::Ss => "SS",
+                ProcessCorner::Fs => "FS",
+                ProcessCorner::Sf => "SF",
+            })
+            .collect();
+        commands.push(format!(".CORNER {}", corners.join(" ")));
+
+        // Generate .TEMP for temperature corners
+        let temps: Vec<String> = self
+            .temperature_corners
+            .iter()
+            .map(|t| t.to_string())
+            .collect();
+        commands.push(format!(".TEMP {}", temps.join(" ")));
+
+        commands.join("\n")
+    }
+
+    /// Calculate total number of corner combinations
+    pub fn total_combinations(&self) -> usize {
+        if self.full_matrix {
+            self.process_corners.len() * self.voltage_corners.len() * self.temperature_corners.len()
+        } else {
+            self.process_corners
+                .len()
+                .max(self.voltage_corners.len())
+                .max(self.temperature_corners.len())
+        }
+    }
+}
+
+// =============================================================================
+// Transfer Function Analysis Configuration
+// =============================================================================
+
+/// Transfer function analysis configuration (.TF)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TransferConfig {
+    /// Output variable (e.g., V(out))
+    pub output_var: String,
+    /// Input source name (e.g., Vin)
+    pub input_source: String,
+}
+
+impl Default for TransferConfig {
+    fn default() -> Self {
+        Self {
+            output_var: "V(out)".to_string(),
+            input_source: "Vin".to_string(),
+        }
+    }
+}
+
+impl TransferConfig {
+    pub fn to_spice_string(&self) -> String {
+        format!(".TF {} {}", self.output_var, self.input_source)
+    }
+}
+
+// =============================================================================
+// Fourier Analysis Configuration
+// =============================================================================
+
+/// Fourier analysis configuration
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FourierConfig {
+    /// Fundamental frequency for analysis (Hz)
+    pub fundamental_freq: f64,
+    /// Number of harmonics to compute
+    pub num_harmonics: u32,
+    /// Output variable to analyze
+    pub output_var: String,
+    /// Calculate THD
+    pub calculate_thd: bool,
+}
+
+impl Default for FourierConfig {
+    fn default() -> Self {
+        Self {
+            fundamental_freq: 1e3,
+            num_harmonics: 10,
+            output_var: "V(out)".to_string(),
+            calculate_thd: true,
+        }
+    }
+}
+
+impl FourierConfig {
+    pub fn to_spice_string(&self) -> String {
+        format!(
+            ".FOUR {} {} {}",
+            format_engineering(self.fundamental_freq),
+            self.num_harmonics,
+            self.output_var
+        )
+    }
+}
+
+// =============================================================================
+// Parametric Analysis Configuration
+// =============================================================================
+
+/// Parameter step type
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ParametricStepType {
+    #[default]
+    Linear,
+    Decade,
+    Octave,
+    List,
+}
+
+impl ParametricStepType {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            ParametricStepType::Linear => "Linear",
+            ParametricStepType::Decade => "Decade (Log)",
+            ParametricStepType::Octave => "Octave",
+            ParametricStepType::List => "Value List",
+        }
+    }
+}
+
+/// Parametric sweep configuration
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParametricConfig {
+    /// Parameter name to sweep
+    pub param_name: String,
+    /// Start value
+    pub start_value: f64,
+    /// Stop value
+    pub stop_value: f64,
+    /// Step type
+    pub step_type: ParametricStepType,
+    /// Number of steps (for linear) or points per decade (for log)
+    pub num_steps: u32,
+    /// Explicit value list (for List step type)
+    pub values: Vec<f64>,
+}
+
+impl Default for ParametricConfig {
+    fn default() -> Self {
+        Self {
+            param_name: "R1".to_string(),
+            start_value: 1e3,
+            stop_value: 10e3,
+            step_type: ParametricStepType::Linear,
+            num_steps: 10,
+            values: vec![],
+        }
+    }
+}
+
+impl ParametricConfig {
+    pub fn to_spice_string(&self) -> String {
+        match self.step_type {
+            ParametricStepType::List => {
+                let vals: Vec<String> =
+                    self.values.iter().map(|v| format_engineering(*v)).collect();
+                format!(".STEP PARAM {} LIST {}", self.param_name, vals.join(" "))
+            }
+            ParametricStepType::Linear => {
+                let step = (self.stop_value - self.start_value) / self.num_steps as f64;
+                format!(
+                    ".STEP PARAM {} {} {} {}",
+                    self.param_name,
+                    format_engineering(self.start_value),
+                    format_engineering(self.stop_value),
+                    format_engineering(step)
+                )
+            }
+            _ => {
+                format!(
+                    ".STEP {} PARAM {} {} {} {}",
+                    match self.step_type {
+                        ParametricStepType::Decade => "DEC",
+                        ParametricStepType::Octave => "OCT",
+                        _ => "LIN",
+                    },
+                    self.param_name,
+                    format_engineering(self.start_value),
+                    format_engineering(self.stop_value),
+                    self.num_steps
+                )
+            }
+        }
+    }
+}
+
+// =============================================================================
 // Unified Simulation Configuration
 // =============================================================================
 
@@ -565,6 +1226,30 @@ pub struct SimulationConfig {
     pub sensitivity: Option<SensitivityConfig>,
     /// S-Parameter analysis (enabled if Some)
     pub s_param: Option<SParamConfig>,
+
+    // =========================================================================
+    // Advanced Analysis Types (Phase 1+)
+    // =========================================================================
+    /// Periodic Steady State analysis (enabled if Some)
+    pub pss: Option<PssConfig>,
+    /// Periodic AC analysis (enabled if Some)
+    pub pac: Option<PacConfig>,
+    /// Harmonic Balance analysis (enabled if Some)
+    pub harmonic_balance: Option<HbConfig>,
+    /// Loop Stability analysis (enabled if Some)
+    pub stb: Option<StbConfig>,
+    /// Envelope Transient analysis (enabled if Some)
+    pub envelope: Option<EnvelopeConfig>,
+    /// Multi-Rate analysis (enabled if Some)
+    pub multi_rate: Option<MultiRateConfig>,
+    /// Corner analysis (enabled if Some)
+    pub corner: Option<CornerConfig>,
+    /// Transfer function analysis (enabled if Some)
+    pub transfer: Option<TransferConfig>,
+    /// Fourier/THD analysis (enabled if Some)
+    pub fourier: Option<FourierConfig>,
+    /// Parametric sweep (enabled if Some)
+    pub parametric: Option<ParametricConfig>,
 }
 
 impl SimulationConfig {
@@ -584,6 +1269,17 @@ impl SimulationConfig {
             || self.pole_zero.is_some()
             || self.sensitivity.is_some()
             || self.s_param.is_some()
+            // Advanced analyses
+            || self.pss.is_some()
+            || self.pac.is_some()
+            || self.harmonic_balance.is_some()
+            || self.stb.is_some()
+            || self.envelope.is_some()
+            || self.multi_rate.is_some()
+            || self.corner.is_some()
+            || self.transfer.is_some()
+            || self.fourier.is_some()
+            || self.parametric.is_some()
     }
 
     /// Generate all SPICE command strings
@@ -624,6 +1320,47 @@ impl SimulationConfig {
 
         if let Some(sp) = &self.s_param {
             commands.push(sp.to_spice_string());
+        }
+
+        // Advanced analysis types
+        if let Some(pss) = &self.pss {
+            commands.push(pss.to_spice_string());
+        }
+
+        if let Some(pac) = &self.pac {
+            commands.push(pac.to_spice_string());
+        }
+
+        if let Some(hb) = &self.harmonic_balance {
+            commands.push(hb.to_spice_string());
+        }
+
+        if let Some(stb) = &self.stb {
+            commands.push(stb.to_spice_string());
+        }
+
+        if let Some(env) = &self.envelope {
+            commands.push(env.to_spice_string());
+        }
+
+        if let Some(mr) = &self.multi_rate {
+            commands.push(mr.to_spice_string());
+        }
+
+        if let Some(corner) = &self.corner {
+            commands.push(corner.to_spice_string());
+        }
+
+        if let Some(tf) = &self.transfer {
+            commands.push(tf.to_spice_string());
+        }
+
+        if let Some(four) = &self.fourier {
+            commands.push(four.to_spice_string());
+        }
+
+        if let Some(param) = &self.parametric {
+            commands.push(param.to_spice_string());
         }
 
         commands

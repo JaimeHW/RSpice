@@ -5,17 +5,19 @@
 use dioxus::prelude::*;
 
 use super::button::{Button, ButtonVariant};
-use super::confirm_modal::{SaveDialogResult, UnsavedChangesModal};
 use super::file_handlers;
 use super::icons::{Icon, IconType};
-use super::veriloga_dialog::VerilogAImportDialog;
+use crate::app::{SimDialogVisible, SimOptionsVisible};
+use crate::dialogs::SimulationOptions;
+use crate::dialogs::VerilogAImportDialog;
+use crate::dialogs::{SaveDialogResult, UnsavedChangesModal};
+use crate::services::pdf_export::{PdfExportConfig, SvgExporter, TitleBlock};
 use crate::state::dc_annotation::Annotation;
 use crate::state::hierarchy::HierarchyManager;
-use crate::state::pdf_export::{PdfExportConfig, SvgExporter, TitleBlock};
 use crate::state::simulation_command::SimulationConfig;
 use crate::state::{
-    generate_netlist, run_simulation, ConsoleMessage, Point, SchematicState, SimulationResult,
-    SimulationState, WaveformData,
+    generate_netlist, run_simulation_with_options, ConsoleMessage, Point, SchematicState,
+    SimulationResult, SimulationState, WaveformData,
 };
 use crate::theme::Theme;
 
@@ -39,7 +41,7 @@ pub fn Toolbar() -> Element {
     let mut sim_state: Signal<SimulationState> = use_context();
     let mut schematic: Signal<SchematicState> = use_context();
     let _sim_config: Signal<SimulationConfig> = use_context();
-    let mut sim_dialog_visible: Signal<bool> = use_context();
+    let mut sim_dialog_visible: Signal<SimDialogVisible> = use_context();
     let th = theme.read();
 
     let is_running = sim_state.read().is_running;
@@ -52,6 +54,10 @@ pub fn Toolbar() -> Element {
     let mut veriloga_dialog_visible = use_signal(|| false);
     let mut hierarchy_manager: Signal<HierarchyManager> = use_context();
     let mut pending_action: Signal<Option<PendingAction>> = use_signal(|| None);
+
+    // Simulation options visibility and options state (from app.rs context)
+    let mut sim_options_visible: Signal<SimOptionsVisible> = use_context();
+    let sim_options: Signal<SimulationOptions> = use_context();
 
     // Get current file name for modal display
     let current_filename = schematic
@@ -380,6 +386,26 @@ pub fn Toolbar() -> Element {
                             "
                         }
 
+                        // Simulator Options (advanced settings)
+                        ToolsMenuItem {
+                            label: "Simulator Options...",
+                            icon: "⚙️",
+                            enabled: true,
+                            onclick: move |_| {
+                                tools_menu_open.set(false);
+                                sim_options_visible.set(SimOptionsVisible(true));
+                            },
+                        }
+
+                        // Separator
+                        div {
+                            style: "
+                                height: 1px;
+                                background: {th.border()};
+                                margin: 4px 8px;
+                            "
+                        }
+
                         // Model Browser (placeholder for future)
                         ToolsMenuItem {
                             label: "Model Browser",
@@ -400,7 +426,7 @@ pub fn Toolbar() -> Element {
                     variant: ButtonVariant::Ghost,
                     icon: rsx! { Icon { icon: IconType::Settings, size: 16 } },
                     onclick: move |_| {
-                        sim_dialog_visible.set(true);
+                        sim_dialog_visible.set(SimDialogVisible(true));
                     },
                     "Simulate..."
                 }
@@ -502,12 +528,15 @@ pub fn Toolbar() -> Element {
                                 .collect();
                             let grid_size_for_ann = schematic.read().grid_size;
 
+                            // Clone simulation options for async block
+                            let options_for_sim = sim_options.read().clone();
+
                             // Run simulation in background thread to prevent UI freeze
                             // spawn_blocking is essential for CPU-bound work in async context
                             spawn(async move {
                                 // Use spawn_blocking to run CPU-intensive simulation on thread pool
                                 let result = tokio::task::spawn_blocking(move || {
-                                    run_simulation(&netlist_for_sim)
+                                    run_simulation_with_options(&netlist_for_sim, Some(&options_for_sim))
                                 }).await.unwrap_or_else(|_| SimulationResult {
                                     success: false,
                                     transient: None,
@@ -678,7 +707,7 @@ pub fn Toolbar() -> Element {
             on_close: move |_| {
                 veriloga_dialog_visible.set(false);
             },
-            on_import: move |model_info: super::veriloga_inspector::VerilogAModelInfo| {
+            on_import: move |model_info: crate::dialogs::VerilogAModelInfo| {
                 log::info!("Verilog-A model imported: {}", model_info.name);
                 veriloga_dialog_visible.set(false);
 
