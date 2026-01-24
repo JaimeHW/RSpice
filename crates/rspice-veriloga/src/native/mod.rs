@@ -91,6 +91,8 @@ mod tests {
                 },
                 jacobian_programs: vec![],
             }],
+            lookup_tables: vec![],
+            laplace_filters: vec![],
             internal_nodes: 0,
             branch_currents: 0,
         };
@@ -113,6 +115,10 @@ mod tests {
             time: 0.0,
             timestep: 1e-9,
             state_prev: std::ptr::null(),
+            lookup_tables: std::ptr::null(),
+            lookup_tables_len: 0,
+            laplace_filters: std::ptr::null_mut(),
+            laplace_filters_len: 0,
         };
 
         let current = native.evaluate_stamp(0, &ctx, &vars);
@@ -166,6 +172,8 @@ mod tests {
                 },
                 jacobian_programs: vec![],
             }],
+            lookup_tables: vec![],
+            laplace_filters: vec![],
             internal_nodes: 0,
             branch_currents: 0,
         };
@@ -187,6 +195,10 @@ mod tests {
             time: 0.0,
             timestep: 1e-9,
             state_prev: std::ptr::null(),
+            lookup_tables: std::ptr::null(),
+            lookup_tables_len: 0,
+            laplace_filters: std::ptr::null_mut(),
+            laplace_filters_len: 0,
         };
 
         // First compute assignments

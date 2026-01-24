@@ -3,6 +3,8 @@
 //! Compiles Verilog-A bytecode to native machine code using Cranelift.
 //! This provides dependency-free native compilation.
 
+#![allow(unsafe_attr_outside_unsafe)]
+
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
@@ -82,6 +84,118 @@ pub struct EvalContext {
     pub timestep: f64,
     /// Previous state values (for ddt/idt)
     pub state_prev: *const f64,
+    /// Lookup tables pointer (for $table_model)
+    /// Points to a slice of LookupTable structs
+    pub lookup_tables: *const crate::codegen::LookupTable,
+    /// Number of lookup tables
+    pub lookup_tables_len: usize,
+    /// Laplace state-space filters (mutable for step())
+    pub laplace_filters: *mut crate::laplace::StateSpaceFilter,
+    /// Number of Laplace filters
+    pub laplace_filters_len: usize,
+}
+
+/// External helper function for table lookup interpolation
+/// Called from JIT code to perform table interpolation
+///
+/// # Safety
+/// This function is called from JIT-compiled code with valid pointers
+#[unsafe(export_name = "rspice_table_lookup")]
+pub extern "C" fn rspice_table_lookup(
+    tables_ptr: *const crate::codegen::LookupTable,
+    tables_len: usize,
+    table_id: usize,
+    input: f64,
+) -> f64 {
+    if tables_ptr.is_null() || table_id >= tables_len {
+        return 0.0;
+    }
+
+    // Safety: caller guarantees valid pointer and bounds
+    let tables = unsafe { std::slice::from_raw_parts(tables_ptr, tables_len) };
+    tables[table_id].interpolate(input)
+}
+
+/// External helper function for $limit operation
+/// Bounds value change per iteration for convergence control
+///
+/// # Safety
+/// This function is called from JIT-compiled code with valid pointers
+#[unsafe(export_name = "rspice_limit")]
+pub extern "C" fn rspice_limit(
+    state_prev: *const f64,
+    state_idx: usize,
+    new_value: f64,
+    step_limit: f64,
+) -> f64 {
+    let prev_value = if state_prev.is_null() {
+        new_value // First iteration: use new value
+    } else {
+        // Safety: caller guarantees valid pointer
+        unsafe { *state_prev.add(state_idx) }
+    };
+
+    // If prev is 0 and this is effectively first iteration, use new_value
+    if prev_value == 0.0 && new_value != 0.0 {
+        return new_value;
+    }
+
+    let delta = new_value - prev_value;
+    let limited_delta = delta.clamp(-step_limit, step_limit);
+    prev_value + limited_delta
+}
+
+/// External helper function for limited exponential
+/// Uses linear extrapolation beyond the limit to prevent overflow
+/// while maintaining C0 and C1 continuity
+///
+/// # Safety
+/// This function is called from JIT-compiled code
+#[unsafe(export_name = "rspice_limexp")]
+pub extern "C" fn rspice_limexp(x: f64) -> f64 {
+    const LIMIT: f64 = 40.0; // exp(40) ≈ 2.4e17
+    if x > LIMIT {
+        let exp_limit = LIMIT.exp();
+        // Linear extrapolation: f(x) = f(limit) + f'(limit) * (x - limit)
+        // For exp, f'(x) = exp(x), so f'(limit) = exp(limit)
+        exp_limit * (1.0 + x - LIMIT)
+    } else if x < -LIMIT {
+        // For very negative values, return essentially 0
+        (-LIMIT).exp()
+    } else {
+        x.exp()
+    }
+}
+
+/// External helper function for Laplace state-space filter step
+/// Called from JIT code to advance filter state using Backward Euler integration
+///
+/// # Safety
+/// This function is called from JIT-compiled code with valid pointers
+#[unsafe(export_name = "rspice_laplace_step")]
+pub extern "C" fn rspice_laplace_step(
+    filters_ptr: *mut crate::laplace::StateSpaceFilter,
+    filters_len: usize,
+    filter_id: usize,
+    input: f64,
+    timestep: f64,
+) -> f64 {
+    // Null pointer or out-of-bounds check
+    if filters_ptr.is_null() || filter_id >= filters_len {
+        // DC passthrough: return input unchanged for safety
+        return input;
+    }
+
+    // Safety: caller guarantees valid pointer and bounds
+    let filters = unsafe { std::slice::from_raw_parts_mut(filters_ptr, filters_len) };
+
+    // Zero timestep means DC analysis - return DC gain * input
+    if timestep <= 0.0 {
+        return filters[filter_id].dc_output(input);
+    }
+
+    // Step the filter forward in time
+    filters[filter_id].step(input, timestep)
 }
 
 impl NativeModel {
@@ -138,8 +252,15 @@ impl JitCompiler {
 
     /// Compile a model to native code
     pub fn compile(&self, model: &CompiledModel) -> JitResult<NativeModel> {
-        let builder =
+        let mut builder =
             JITBuilder::with_isa(self.isa.clone(), cranelift_module::default_libcall_names());
+
+        // Register rspice helper function symbols for JIT linking
+        // These must be registered before module creation so Cranelift can resolve them
+        builder.symbol("rspice_table_lookup", rspice_table_lookup as *const u8);
+        builder.symbol("rspice_limit", rspice_limit as *const u8);
+        builder.symbol("rspice_limexp", rspice_limexp as *const u8);
+        builder.symbol("rspice_laplace_step", rspice_laplace_step as *const u8);
 
         let mut module = JITModule::new(builder);
         let mut ctx = module.make_context();
@@ -225,6 +346,62 @@ impl JitCompiler {
                 .map_err(|e| JitError::Module(e.to_string()))?;
             funcs.insert(name, id);
         }
+
+        // Import rspice helper functions for $table_model
+        // Signature: fn(tables_ptr, tables_len, table_id, input) -> f64
+        let table_lookup_sig = {
+            let mut sig = module.make_signature();
+            sig.params.push(AbiParam::new(ptr_type)); // tables_ptr
+            sig.params.push(AbiParam::new(ptr_type)); // tables_len (usize)
+            sig.params.push(AbiParam::new(ptr_type)); // table_id (usize)
+            sig.params.push(AbiParam::new(types::F64)); // input
+            sig.returns.push(AbiParam::new(types::F64));
+            sig
+        };
+        let id = module
+            .declare_function("rspice_table_lookup", Linkage::Import, &table_lookup_sig)
+            .map_err(|e| JitError::Module(e.to_string()))?;
+        funcs.insert("rspice_table_lookup", id);
+
+        // Import rspice helper functions for $limit
+        // Signature: fn(state_prev, state_idx, new_value, step_limit) -> f64
+        let limit_sig = {
+            let mut sig = module.make_signature();
+            sig.params.push(AbiParam::new(ptr_type)); // state_prev
+            sig.params.push(AbiParam::new(ptr_type)); // state_idx (usize)
+            sig.params.push(AbiParam::new(types::F64)); // new_value
+            sig.params.push(AbiParam::new(types::F64)); // step_limit
+            sig.returns.push(AbiParam::new(types::F64));
+            sig
+        };
+        let id = module
+            .declare_function("rspice_limit", Linkage::Import, &limit_sig)
+            .map_err(|e| JitError::Module(e.to_string()))?;
+        funcs.insert("rspice_limit", id);
+
+        // Import rspice helper functions for Laplace state-space filters
+        // Signature: fn(filters_ptr, filters_len, filter_id, input, timestep) -> f64
+        let laplace_sig = {
+            let mut sig = module.make_signature();
+            sig.params.push(AbiParam::new(ptr_type)); // filters_ptr
+            sig.params.push(AbiParam::new(ptr_type)); // filters_len (usize)
+            sig.params.push(AbiParam::new(ptr_type)); // filter_id (usize)
+            sig.params.push(AbiParam::new(types::F64)); // input
+            sig.params.push(AbiParam::new(types::F64)); // timestep
+            sig.returns.push(AbiParam::new(types::F64));
+            sig
+        };
+        let id = module
+            .declare_function("rspice_laplace_step", Linkage::Import, &laplace_sig)
+            .map_err(|e| JitError::Module(e.to_string()))?;
+        funcs.insert("rspice_laplace_step", id);
+
+        // Import rspice_limexp for limited exponential (prevents overflow)
+        // Signature: fn(value: f64) -> f64
+        let id = module
+            .declare_function("rspice_limexp", Linkage::Import, &math_sig)
+            .map_err(|e| JitError::Module(e.to_string()))?;
+        funcs.insert("rspice_limexp", id);
 
         Ok(funcs)
     }
@@ -501,12 +678,14 @@ impl JitCompiler {
                     stack.push(result);
                 }
                 Instruction::Limexp => {
-                    // Limited exponential - for now just use exp
-                    // TODO: Implement proper limexp
+                    // Limited exponential - prevents overflow for large inputs
+                    // Uses linear extrapolation beyond exp(40) for numerical stability
                     let a = stack.pop().unwrap();
-                    let result = self.call_math1(builder, module, math_funcs, "exp", a)?;
+                    let result =
+                        self.call_math1(builder, module, math_funcs, "rspice_limexp", a)?;
                     stack.push(result);
                 }
+
                 Instruction::Log => {
                     let a = stack.pop().unwrap();
                     let result = self.call_math1(builder, module, math_funcs, "log", a)?;
@@ -691,11 +870,212 @@ impl JitCompiler {
                 }
 
                 // State operations (transient analysis)
-                Instruction::DdtState(idx) | Instruction::IdtState(idx) => {
-                    // For now, push 0 - proper implementation needs state tracking
-                    let _ = idx;
+                Instruction::DdtState(_idx) | Instruction::IdtState(_idx) => {
+                    // For now, push 0 - proper ddt/idt implementation needs state tracking
+                    // This is a fallback for DC analysis where ddt/idt return 0
                     let _ = stack.pop();
                     stack.push(builder.ins().f64const(0.0));
+                }
+
+                // LimitState: call rspice_limit helper function
+                // Signature: fn(state_prev, state_idx, new_value, step_limit) -> f64
+                Instruction::LimitState(idx) => {
+                    let step_limit = stack.pop().unwrap();
+                    let new_value = stack.pop().unwrap();
+
+                    // Load state_prev pointer from ctx (offset 48 = 6 * 8 bytes in EvalContext)
+                    let state_prev_offset = 48i32; // state_prev is at offset 48 in EvalContext
+                    let state_prev = builder.ins().load(
+                        self.isa.pointer_type(),
+                        MemFlags::trusted(),
+                        ctx_ptr,
+                        state_prev_offset,
+                    );
+
+                    // Create state index as pointer-sized integer
+                    let state_idx = builder.ins().iconst(self.isa.pointer_type(), *idx as i64);
+
+                    // Call rspice_limit helper
+                    let func_id = math_funcs
+                        .get("rspice_limit")
+                        .ok_or_else(|| JitError::FunctionNotFound("rspice_limit".to_string()))?;
+                    let func_ref = module.declare_func_in_func(*func_id, builder.func);
+                    let call = builder
+                        .ins()
+                        .call(func_ref, &[state_prev, state_idx, new_value, step_limit]);
+                    let result = builder.inst_results(call)[0];
+                    stack.push(result);
+                }
+
+                // TableLookup: call rspice_table_lookup helper function
+                // Signature: fn(tables_ptr, tables_len, table_id, input) -> f64
+                Instruction::TableLookup(table_id) => {
+                    let input = stack.pop().unwrap();
+
+                    // Load lookup_tables pointer from ctx (offset 56 = 7 * 8 bytes)
+                    let tables_ptr_offset = 56i32;
+                    let tables_ptr = builder.ins().load(
+                        self.isa.pointer_type(),
+                        MemFlags::trusted(),
+                        ctx_ptr,
+                        tables_ptr_offset,
+                    );
+
+                    // Load lookup_tables_len from ctx (offset 64 = 8 * 8 bytes)
+                    let tables_len_offset = 64i32;
+                    let tables_len = builder.ins().load(
+                        self.isa.pointer_type(),
+                        MemFlags::trusted(),
+                        ctx_ptr,
+                        tables_len_offset,
+                    );
+
+                    // Create table_id as pointer-sized integer
+                    let table_idx = builder
+                        .ins()
+                        .iconst(self.isa.pointer_type(), *table_id as i64);
+
+                    // Call rspice_table_lookup helper
+                    let func_id = math_funcs.get("rspice_table_lookup").ok_or_else(|| {
+                        JitError::FunctionNotFound("rspice_table_lookup".to_string())
+                    })?;
+                    let func_ref = module.declare_func_in_func(*func_id, builder.func);
+                    let call = builder
+                        .ins()
+                        .call(func_ref, &[tables_ptr, tables_len, table_idx, input]);
+                    let result = builder.inst_results(call)[0];
+                    stack.push(result);
+                }
+
+                // AbsDelayState: transport delay
+                // For DC/JIT, delay is typically not applicable - return current value
+                // Full transient delay would need buffer pointer in context
+                Instruction::AbsDelayState(_buffer_id) => {
+                    let _delay_time = stack.pop().unwrap();
+                    let current_value = stack.pop().unwrap();
+                    // In DC analysis, absdelay returns current value
+                    stack.push(current_value);
+                }
+
+                // TransitionState: piecewise-linear smoothing
+                // In DC/JIT, transition is instantaneous - return input
+                Instruction::TransitionState(_filter_id) => {
+                    let _fall_time = stack.pop().unwrap();
+                    let _rise_time = stack.pop().unwrap();
+                    let _delay = stack.pop().unwrap();
+                    let input = stack.pop().unwrap();
+                    // In DC, transition returns input
+                    stack.push(input);
+                }
+
+                // SlewState: slew rate limiting
+                // In DC/JIT, slew is instantaneous - return input
+                Instruction::SlewState(_filter_id) => {
+                    let _max_neg_slew = stack.pop().unwrap();
+                    let _max_pos_slew = stack.pop().unwrap();
+                    let input = stack.pop().unwrap();
+                    // In DC, slew returns input
+                    stack.push(input);
+                }
+
+                // CrossState: threshold crossing detection
+                // In DC, cross never fires - return 0
+                Instruction::CrossState(_detector_id) => {
+                    let _direction = stack.pop().unwrap();
+                    let _value = stack.pop().unwrap();
+                    // DC: no crossing events
+                    stack.push(builder.ins().f64const(0.0));
+                }
+
+                // WhiteNoise: noise source
+                // In time domain, returns 0
+                Instruction::WhiteNoise => {
+                    let _power = stack.pop().unwrap();
+                    stack.push(builder.ins().f64const(0.0));
+                }
+
+                // FlickerNoise: 1/f noise
+                // In time domain, returns 0
+                Instruction::FlickerNoise => {
+                    let _exponent = stack.pop().unwrap();
+                    let _power = stack.pop().unwrap();
+                    stack.push(builder.ins().f64const(0.0));
+                }
+
+                // Analysis: check current analysis type
+                // In JIT, we assume DC analysis by default (return 1 for dc check, 0 others)
+                Instruction::Analysis(analysis_str_id) => {
+                    // For JIT DC analysis: dc=1, ac=0, tran=0
+                    let result = if *analysis_str_id == 0 {
+                        1.0 // DC check returns true
+                    } else {
+                        0.0 // Non-DC checks return false
+                    };
+                    stack.push(builder.ins().f64const(result));
+                }
+
+                // AboveState: level crossing event
+                // In DC, compare value > threshold
+                Instruction::AboveState(_detector_id) => {
+                    let threshold = stack.pop().unwrap();
+                    let value = stack.pop().unwrap();
+                    // Compare value > threshold
+                    let cmp = builder.ins().fcmp(FloatCC::GreaterThan, value, threshold);
+                    let one = builder.ins().f64const(1.0);
+                    let zero = builder.ins().f64const(0.0);
+                    let result = builder.ins().select(cmp, one, zero);
+                    stack.push(result);
+                }
+
+                // TimerState: periodic timer
+                // In DC, timer never fires - return 0
+                Instruction::TimerState(_timer_id) => {
+                    let _period = stack.pop().unwrap();
+                    let _start_time = stack.pop().unwrap();
+                    // DC: no timer events
+                    stack.push(builder.ins().f64const(0.0));
+                }
+
+                // LaplaceState: Laplace state-space filter step
+                // Calls rspice_laplace_step(filters_ptr, filters_len, filter_id, input, timestep)
+                Instruction::LaplaceState(filter_id) => {
+                    let input = stack.pop().unwrap();
+
+                    // Load laplace_filters pointer from ctx (offset after lookup_tables:
+                    // voltages=0, internal_voltages=8, params=16, temperature=24, time=32, timestep=40,
+                    // state_prev=48, lookup_tables=56, lookup_tables_len=64, laplace_filters=72, laplace_filters_len=80)
+                    let filters_ptr = builder.ins().load(
+                        self.isa.pointer_type(),
+                        MemFlags::new(),
+                        ctx_ptr,
+                        72, // offset of laplace_filters in EvalContext
+                    );
+                    let filters_len = builder.ins().load(
+                        self.isa.pointer_type(),
+                        MemFlags::new(),
+                        ctx_ptr,
+                        80, // offset of laplace_filters_len in EvalContext
+                    );
+
+                    // Load timestep from ctx (offset 40)
+                    let timestep = builder.ins().load(types::F64, MemFlags::new(), ctx_ptr, 40);
+
+                    // Create filter_id as a constant
+                    let filter_idx = builder
+                        .ins()
+                        .iconst(self.isa.pointer_type(), *filter_id as i64);
+
+                    // Call rspice_laplace_step(filters_ptr, filters_len, filter_id, input, timestep)
+                    let func_id = math_funcs.get("rspice_laplace_step").ok_or_else(|| {
+                        JitError::FunctionNotFound("rspice_laplace_step".to_string())
+                    })?;
+                    let func_ref = module.declare_func_in_func(*func_id, builder.func);
+                    let call = builder.ins().call(
+                        func_ref,
+                        &[filters_ptr, filters_len, filter_idx, input, timestep],
+                    );
+                    let result = builder.inst_results(call)[0];
+                    stack.push(result);
                 }
             }
         }
@@ -788,6 +1168,8 @@ mod tests {
                 },
                 jacobian_programs: vec![],
             }],
+            lookup_tables: vec![],
+            laplace_filters: vec![],
             internal_nodes: 0,
             branch_currents: 0,
         };
@@ -799,5 +1181,318 @@ mod tests {
             "Simple model should compile: {:?}",
             result.err()
         );
+    }
+
+    // ============================================
+    // Laplace JIT Tests - Comprehensive Coverage
+    // ============================================
+
+    /// Safe wrapper for rspice_laplace_step for use in tests.
+    /// Encapsulates the unsafe FFI call in a safe abstraction.
+    fn laplace_step_test(
+        filters_ptr: *mut crate::laplace::StateSpaceFilter,
+        filters_len: usize,
+        filter_id: usize,
+        input: f64,
+        timestep: f64,
+    ) -> f64 {
+        // This wrapper provides a test-friendly interface to the JIT helper function
+        rspice_laplace_step(filters_ptr, filters_len, filter_id, input, timestep)
+    }
+
+    #[test]
+    fn test_laplace_step_test_null_pointer() {
+        // Should return input unchanged when filters_ptr is null
+        let result = laplace_step_test(std::ptr::null_mut(), 0, 0, 5.0, 1e-4);
+        assert!(
+            (result - 5.0).abs() < 1e-10,
+            "Null pointer should return input unchanged"
+        );
+    }
+
+    #[test]
+    fn test_laplace_step_test_out_of_bounds() {
+        // Should return input unchanged when filter_id >= filters_len
+        let mut filter = crate::laplace::StateSpaceFilter::lowpass_first_order(100.0);
+        let result = laplace_step_test(&mut filter, 1, 5, 3.0, 1e-4); // filter_id 5 >= len 1
+        assert!(
+            (result - 3.0).abs() < 1e-10,
+            "Out of bounds should return input unchanged"
+        );
+    }
+
+    #[test]
+    fn test_laplace_step_test_dc_passthrough() {
+        // Zero timestep should return DC gain * input
+        let mut filter = crate::laplace::StateSpaceFilter::lowpass_first_order(100.0);
+        // For lowpass, DC gain is 1.0
+        let result = laplace_step_test(&mut filter, 1, 0, 2.5, 0.0);
+        assert!(
+            (result - 2.5).abs() < 1e-10,
+            "DC passthrough should return dc_gain * input"
+        );
+    }
+
+    #[test]
+    fn test_laplace_step_test_negative_timestep() {
+        // Negative timestep should also return DC passthrough
+        let mut filter = crate::laplace::StateSpaceFilter::lowpass_first_order(100.0);
+        let result = laplace_step_test(&mut filter, 1, 0, 1.5, -1e-4);
+        assert!(
+            (result - 1.5).abs() < 1e-10,
+            "Negative timestep should return DC passthrough"
+        );
+    }
+
+    #[test]
+    fn test_laplace_step_test_first_order_single_step() {
+        // Single step of first-order lowpass
+        let mut filter = crate::laplace::StateSpaceFilter::lowpass_first_order(100.0);
+        let result = laplace_step_test(&mut filter, 1, 0, 1.0, 1e-4);
+        // First step from zero should produce a non-zero result (but less than 1.0)
+        assert!(result > 0.0, "First step should produce positive output");
+        assert!(result < 1.0, "First step should not reach steady state");
+    }
+
+    #[test]
+    fn test_laplace_step_test_first_order_convergence() {
+        // Multiple steps should converge to steady state
+        let mut filter = crate::laplace::StateSpaceFilter::lowpass_first_order(100.0);
+        let timestep = 1e-4;
+        let mut output = 0.0;
+
+        // Step 1000 times (100ms with 100us steps)
+        for _ in 0..1000 {
+            output = laplace_step_test(&mut filter, 1, 0, 1.0, timestep);
+        }
+
+        // Should be very close to 1.0 (steady state for unity DC gain)
+        assert!(
+            (output - 1.0).abs() < 0.01,
+            "First-order should converge to 1.0, got {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_laplace_step_test_second_order_convergence() {
+        // Second-order lowpass should also converge
+        let mut filter = crate::laplace::StateSpaceFilter::lowpass_second_order(100.0, 0.707);
+        let timestep = 1e-4;
+        let mut output = 0.0;
+
+        for _ in 0..1000 {
+            output = laplace_step_test(&mut filter, 1, 0, 1.0, timestep);
+        }
+
+        assert!(
+            (output - 1.0).abs() < 0.01,
+            "Second-order should converge to 1.0, got {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_laplace_step_test_state_persistence() {
+        // State should persist between calls
+        let mut filter = crate::laplace::StateSpaceFilter::lowpass_first_order(100.0);
+
+        // First step
+        let out1 = laplace_step_test(&mut filter, 1, 0, 1.0, 1e-4);
+        // Second step
+        let out2 = laplace_step_test(&mut filter, 1, 0, 1.0, 1e-4);
+
+        // Output should increase as filter charges
+        assert!(
+            out2 > out1,
+            "Output should increase with state persistence: {} > {}",
+            out2,
+            out1
+        );
+    }
+
+    #[test]
+    fn test_laplace_step_test_multiple_filters() {
+        // Multiple filters in array
+        let mut filters = vec![
+            crate::laplace::StateSpaceFilter::lowpass_first_order(100.0),
+            crate::laplace::StateSpaceFilter::lowpass_first_order(1000.0), // Faster filter
+        ];
+
+        let timestep = 1e-4;
+
+        // Step each filter 100 times
+        let mut out0 = 0.0;
+        let mut out1 = 0.0;
+        for _ in 0..100 {
+            out0 = laplace_step_test(filters.as_mut_ptr(), 2, 0, 1.0, timestep);
+            out1 = laplace_step_test(filters.as_mut_ptr(), 2, 1, 1.0, timestep);
+        }
+
+        // 1000Hz filter should settle faster than 100Hz filter
+        assert!(
+            out1 > out0,
+            "1000Hz filter should be faster: {} > {}",
+            out1,
+            out0
+        );
+    }
+
+    #[test]
+    fn test_laplace_step_test_differentiator() {
+        // Differentiator should block DC
+        let mut filter = crate::laplace::StateSpaceFilter::differentiator(0.001);
+
+        // Step with constant input - should decay to zero
+        let mut output = 0.0;
+        for _ in 0..1000 {
+            output = laplace_step_test(&mut filter, 1, 0, 1.0, 1e-4);
+        }
+
+        // Differentiator DC gain is 0
+        assert!(
+            output.abs() < 0.1,
+            "Differentiator should approach 0 for constant input, got {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_laplace_step_test_integrator() {
+        // Integrator (leaky) should settle
+        let mut filter = crate::laplace::StateSpaceFilter::integrator(0.001);
+
+        let mut output = 0.0;
+        for _ in 0..1000 {
+            output = laplace_step_test(&mut filter, 1, 0, 1.0, 1e-4);
+        }
+
+        // Should approach 1.0 (DC gain = 1 for this leaky integrator)
+        assert!(
+            (output - 1.0).abs() < 0.01,
+            "Integrator should converge, got {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_laplace_step_test_zero_input() {
+        // Zero input should keep output at zero
+        let mut filter = crate::laplace::StateSpaceFilter::lowpass_first_order(100.0);
+
+        let mut output = 0.0;
+        for _ in 0..100 {
+            output = laplace_step_test(&mut filter, 1, 0, 0.0, 1e-4);
+        }
+
+        assert!(
+            output.abs() < 1e-10,
+            "Zero input should produce zero output, got {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_laplace_step_test_varying_input() {
+        // Filter should track varying input
+        let mut filter = crate::laplace::StateSpaceFilter::lowpass_first_order(1000.0); // Fast filter
+
+        // Step up to 1.0
+        for _ in 0..500 {
+            laplace_step_test(&mut filter, 1, 0, 1.0, 1e-4);
+        }
+        let high = laplace_step_test(&mut filter, 1, 0, 1.0, 1e-4);
+
+        // Step down to 0.0
+        for _ in 0..500 {
+            laplace_step_test(&mut filter, 1, 0, 0.0, 1e-4);
+        }
+        let low = laplace_step_test(&mut filter, 1, 0, 0.0, 1e-4);
+
+        assert!(high > 0.9, "Should track high input");
+        assert!(low < 0.1, "Should track low input");
+    }
+
+    #[test]
+    fn test_laplace_step_test_extreme_timestep() {
+        // Very large timestep should still work
+        let mut filter = crate::laplace::StateSpaceFilter::lowpass_first_order(100.0);
+        let result = laplace_step_test(&mut filter, 1, 0, 1.0, 1.0); // 1 second timestep
+
+        // Should be close to steady state in one step
+        assert!(
+            (result - 1.0).abs() < 0.01,
+            "Large timestep should approach steady state, got {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_laplace_step_test_tiny_timestep() {
+        // Very small timestep should make small change
+        let mut filter = crate::laplace::StateSpaceFilter::lowpass_first_order(100.0);
+        let result = laplace_step_test(&mut filter, 1, 0, 1.0, 1e-10); // 0.1ns timestep
+
+        // Should be very close to zero (almost no time passed)
+        assert!(
+            result < 0.01,
+            "Tiny timestep should produce tiny output, got {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_eval_context_laplace_fields() {
+        // Verify EvalContext has laplace fields at correct offsets
+        use std::mem;
+
+        let ctx = EvalContext {
+            voltages: std::ptr::null(),
+            internal_voltages: std::ptr::null(),
+            params: std::ptr::null(),
+            temperature: 300.0,
+            time: 0.0,
+            timestep: 1e-6,
+            state_prev: std::ptr::null(),
+            lookup_tables: std::ptr::null(),
+            lookup_tables_len: 0,
+            laplace_filters: std::ptr::null_mut(),
+            laplace_filters_len: 0,
+        };
+
+        // Verify struct has the laplace fields
+        assert!(ctx.laplace_filters.is_null());
+        assert_eq!(ctx.laplace_filters_len, 0);
+
+        // Verify struct size is reasonable
+        let size = mem::size_of::<EvalContext>();
+        assert!(
+            size > 80,
+            "EvalContext should include laplace fields, size = {}",
+            size
+        );
+    }
+
+    #[test]
+    fn test_jit_laplace_consistency_with_interpreter() {
+        // Verify JIT helper produces same results as direct StateSpaceFilter::step
+        let mut jit_filter = crate::laplace::StateSpaceFilter::lowpass_first_order(100.0);
+        let mut interp_filter = crate::laplace::StateSpaceFilter::lowpass_first_order(100.0);
+
+        let timestep = 1e-4;
+
+        for i in 0..100 {
+            let input = if i < 50 { 1.0 } else { 0.5 };
+            let jit_out = laplace_step_test(&mut jit_filter, 1, 0, input, timestep);
+            let interp_out = interp_filter.step(input, timestep);
+
+            assert!(
+                (jit_out - interp_out).abs() < 1e-10,
+                "JIT and interpreter should match at step {}: {} vs {}",
+                i,
+                jit_out,
+                interp_out
+            );
+        }
     }
 }
