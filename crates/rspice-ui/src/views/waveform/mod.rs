@@ -5,16 +5,23 @@
 
 pub mod axis;
 mod axis_labels;
+pub mod bode_viewer;
 mod canvas;
 mod controls;
 mod cursor;
 mod export_panel;
+pub mod eye_viewer;
 mod fft_viewer;
 mod global_drag;
+pub mod histogram_viewer;
 mod interpolation;
+pub mod jitter_panel;
 mod measurement_calcs;
 mod measurements;
 mod measurements_panel;
+pub mod noise_viewer;
+pub mod pz_plot;
+pub mod smith_chart;
 mod state;
 mod sweep_panel;
 
@@ -33,7 +40,7 @@ use sweep_panel::SweepPanel;
 
 use dioxus::prelude::*;
 
-use crate::state::cross_probing::CrossProbeManager;
+use crate::services::cross_probing::CrossProbeManager;
 use crate::state::waveform_math;
 use crate::state::SimulationState;
 use crate::theme::Theme;
