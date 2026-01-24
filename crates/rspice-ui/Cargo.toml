@@ -43,6 +43,9 @@ log = "0.4"
 # FFT for frequency analysis
 rustfft = "6.2"
 
+# Complex number support
+num-complex = "0.4"
+
 # GPU rendering (works on web via WebGPU)
 wgpu = "23"
 bytemuck = { version = "1.14", features = ["derive"] }

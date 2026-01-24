@@ -932,9 +932,23 @@ pub fn get_symbol(kind: ComponentType) -> &'static Symbol {
         ComponentType::Pmos => &PMOS,
         ComponentType::Njfet => &NJFET,
         ComponentType::Pjfet => &PJFET,
+        // Power Electronics - reuse MOSFET symbols
+        ComponentType::NVdmos => &NMOS,
+        ComponentType::PVdmos => &PMOS,
+        ComponentType::SaturableInductor => &INDUCTOR,
         ComponentType::VoltageSourceAc => &VOLTAGE_SOURCE_AC,
         ComponentType::VoltageSourcePulse => &VOLTAGE_SOURCE_PULSE,
         ComponentType::VoltageSourceSin => &VOLTAGE_SOURCE_SIN,
+        ComponentType::VoltageSourcePwl => &VOLTAGE_SOURCE_PULSE, // Reuse Pulse symbol for PWL
+        ComponentType::VoltageSourceExp => &VOLTAGE_SOURCE,       // Reuse DC symbol
+        ComponentType::VoltageSourceSffm => &VOLTAGE_SOURCE_AC,   // Reuse AC symbol
+        // Advanced Current Sources - reuse current source symbol
+        ComponentType::CurrentSourceAc
+        | ComponentType::CurrentSourcePulse
+        | ComponentType::CurrentSourceSin
+        | ComponentType::CurrentSourcePwl
+        | ComponentType::CurrentSourceExp
+        | ComponentType::CurrentSourceNoise => &CURRENT_SOURCE,
         ComponentType::Vcvs => &VCVS,
         ComponentType::Vccs => &VCCS,
         ComponentType::Ccvs => &CCVS,

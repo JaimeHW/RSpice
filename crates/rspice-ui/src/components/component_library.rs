@@ -8,8 +8,7 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 use rspice_core::library::{LibraryManager, ModelType};
 
-use super::veriloga_dialog::VerilogAImportDialog;
-use super::veriloga_inspector::VerilogAModelInfo;
+use crate::dialogs::{VerilogAImportDialog, VerilogAModelInfo};
 use crate::state::{use_canvas_focus, ComponentType, Rotation, SchematicState, Tool};
 use crate::theme::Theme;
 
@@ -130,11 +129,23 @@ fn component_info(kind: ComponentType) -> (&'static str, &'static str, &'static 
         ComponentType::Pmos => ("P-MOSFET", "M - P-Channel MOSFET", ""),
         ComponentType::Njfet => ("N-JFET", "J - N-Channel JFET", "J"),
         ComponentType::Pjfet => ("P-JFET", "J - P-Channel JFET", ""),
+        ComponentType::NVdmos => ("N-VDMOS", "M - N-Channel Power MOSFET", ""),
+        ComponentType::PVdmos => ("P-VDMOS", "M - P-Channel Power MOSFET", ""),
+        ComponentType::SaturableInductor => ("Saturable L", "L - Saturable Core Inductor", ""),
         ComponentType::VoltageSource => ("DC Voltage", "V - DC Voltage Source", "V"),
         ComponentType::VoltageSourceAc => ("AC Voltage", "V - AC Voltage Source", ""),
         ComponentType::VoltageSourceSin => ("Sine Source", "V - Sinusoidal Voltage", ""),
         ComponentType::VoltageSourcePulse => ("Pulse Source", "V - Pulse Voltage", ""),
-        ComponentType::CurrentSource => ("Current Source", "I - Current Source", "I"),
+        ComponentType::VoltageSourcePwl => ("PWL Voltage", "V - Piecewise Linear", ""),
+        ComponentType::VoltageSourceExp => ("Exp Voltage", "V - Exponential", ""),
+        ComponentType::VoltageSourceSffm => ("SFFM Voltage", "V - Single-Freq FM", ""),
+        ComponentType::CurrentSource => ("DC Current", "I - DC Current Source", "I"),
+        ComponentType::CurrentSourceAc => ("AC Current", "I - AC Current Source", ""),
+        ComponentType::CurrentSourcePulse => ("Pulse Current", "I - Pulse Current", ""),
+        ComponentType::CurrentSourceSin => ("Sine Current", "I - Sinusoidal Current", ""),
+        ComponentType::CurrentSourcePwl => ("PWL Current", "I - Piecewise Linear", ""),
+        ComponentType::CurrentSourceExp => ("Exp Current", "I - Exponential", ""),
+        ComponentType::CurrentSourceNoise => ("Noise Current", "I - Noise Source", ""),
         ComponentType::Vcvs => ("VCVS", "E - Voltage-Controlled Voltage Source", "E"),
         ComponentType::Vccs => ("VCCS", "G - Voltage-Controlled Current Source", ""),
         ComponentType::Ccvs => ("CCVS", "H - Current-Controlled Voltage Source", ""),
