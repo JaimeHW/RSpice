@@ -163,7 +163,8 @@ impl WgpuCanvasBackend {
 
             // Update renderer with new data
             self.renderer.update_wires(self.bridge.wire_data());
-            self.renderer.update_components(self.bridge.component_data());
+            self.renderer
+                .update_components(self.bridge.component_data());
             self.renderer.update_junctions(self.bridge.junction_data());
             self.renderer.update_grid(&self.camera);
 
@@ -264,7 +265,10 @@ static BACKEND: OnceLock<Mutex<Option<WgpuCanvasBackend>>> = OnceLock::new();
 ///
 /// This is used for efficient rendering across multiple frames
 /// without re-creating GPU resources each time.
-pub async fn get_or_init_backend(width: u32, height: u32) -> Result<&'static Mutex<Option<WgpuCanvasBackend>>, GpuError> {
+pub async fn get_or_init_backend(
+    width: u32,
+    height: u32,
+) -> Result<&'static Mutex<Option<WgpuCanvasBackend>>, GpuError> {
     let mutex = BACKEND.get_or_init(|| Mutex::new(None));
 
     {
@@ -296,7 +300,11 @@ mod tests {
         assert_eq!(camera.zoom, 1.0, "Default zoom should be 1.0");
         assert_eq!(camera.viewport_width, 800.0, "Viewport width mismatch");
         assert_eq!(camera.viewport_height, 600.0, "Viewport height mismatch");
-        assert_eq!(camera.position, [0.0, 0.0], "Default position should be origin");
+        assert_eq!(
+            camera.position,
+            [0.0, 0.0],
+            "Default position should be origin"
+        );
         assert_eq!(camera.grid_size, 10.0, "Grid size mismatch");
     }
 
@@ -311,35 +319,41 @@ mod tests {
     #[test]
     fn test_camera_zoom_clamping() {
         let mut camera = Camera::new(800.0, 600.0, 10.0);
-        
+
         // Test max zoom clamping
         camera.set_zoom(100.0);
-        assert!(camera.zoom <= camera.max_zoom, "Zoom should be clamped to max");
-        
+        assert!(
+            camera.zoom <= camera.max_zoom,
+            "Zoom should be clamped to max"
+        );
+
         // Test min zoom clamping
         camera.set_zoom(0.001);
-        assert!(camera.zoom >= camera.min_zoom, "Zoom should be clamped to min");
+        assert!(
+            camera.zoom >= camera.min_zoom,
+            "Zoom should be clamped to min"
+        );
     }
 
     #[test]
     fn test_camera_zoom_by_factor() {
         let mut camera = Camera::new(800.0, 600.0, 10.0);
         let initial_zoom = camera.zoom;
-        
+
         camera.zoom_by(1.1); // 10% zoom in
         assert!(camera.zoom > initial_zoom, "Zoom should increase");
-        
+
         camera.zoom_by(0.9); // 10% zoom out
-        // Should be approximately back to initial (allowing for floating point)
+                             // Should be approximately back to initial (allowing for floating point)
     }
 
     #[test]
     fn test_camera_pan_by_pixels() {
         let mut camera = Camera::new(800.0, 600.0, 10.0);
         let initial_pos = camera.position;
-        
+
         camera.pan_by_pixels(100.0, 50.0);
-        
+
         // Position should change (exact values depend on zoom)
         assert!(
             camera.position[0] != initial_pos[0] || camera.position[1] != initial_pos[1],
@@ -350,10 +364,10 @@ mod tests {
     #[test]
     fn test_camera_screen_to_world_at_zoom_1() {
         let camera = Camera::new(800.0, 600.0, 10.0);
-        
+
         // At zoom 1, screen center should map to world origin
         let [world_x, world_y] = camera.screen_to_world(400.0, 300.0);
-        
+
         // Allow small floating point tolerance
         assert!((world_x - 0.0).abs() < 0.1, "Center X should be ~0");
         assert!((world_y - 0.0).abs() < 0.1, "Center Y should be ~0");
@@ -362,21 +376,27 @@ mod tests {
     #[test]
     fn test_camera_world_to_screen_round_trip() {
         let camera = Camera::new(800.0, 600.0, 10.0);
-        
+
         // Test round-trip conversion
         let world_point = [100.0f32, 50.0f32];
         let [screen_x, screen_y] = camera.world_to_screen(world_point[0], world_point[1]);
         let [back_x, back_y] = camera.screen_to_world(screen_x, screen_y);
-        
-        assert!((back_x - world_point[0]).abs() < 0.01, "X round-trip failed");
-        assert!((back_y - world_point[1]).abs() < 0.01, "Y round-trip failed");
+
+        assert!(
+            (back_x - world_point[0]).abs() < 0.01,
+            "X round-trip failed"
+        );
+        assert!(
+            (back_y - world_point[1]).abs() < 0.01,
+            "Y round-trip failed"
+        );
     }
 
     #[test]
     fn test_camera_world_bounds() {
         let camera = Camera::new(800.0, 600.0, 10.0);
         let bounds = camera.world_bounds();
-        
+
         // Bounds should be centered on origin for default camera
         assert!(bounds.min_x < 0.0, "Min X should be negative");
         assert!(bounds.max_x > 0.0, "Max X should be positive");
@@ -388,7 +408,7 @@ mod tests {
     fn test_camera_build_uniform() {
         let camera = Camera::new(800.0, 600.0, 10.0);
         let uniform = camera.build_uniform();
-        
+
         // Verify uniform has reasonable values
         assert_eq!(uniform.viewport[0], 800.0);
         assert_eq!(uniform.viewport[1], 600.0);
@@ -406,16 +426,19 @@ mod tests {
         let mut sch = SchematicState::default();
         // Bump version so schematic has non-zero version
         sch.bump_topology_version();
-        
+
         assert!(bridge.needs_sync(&sch), "Should need sync initially");
     }
 
     #[test]
     fn test_bridge_empty_data_initially() {
         let bridge = GpuSchematicBridge::new();
-        
+
         assert!(bridge.wire_data().is_empty(), "No wires initially");
-        assert!(bridge.component_data().is_empty(), "No components initially");
+        assert!(
+            bridge.component_data().is_empty(),
+            "No components initially"
+        );
         assert!(bridge.junction_data().is_empty(), "No junctions initially");
     }
 
@@ -424,10 +447,13 @@ mod tests {
         let mut bridge = GpuSchematicBridge::new();
         let sch = SchematicState::default();
         let ctx = RenderContext::new();
-        
+
         bridge.sync(&sch, &ctx);
-        
-        assert!(!bridge.needs_sync(&sch), "Should not need sync after syncing");
+
+        assert!(
+            !bridge.needs_sync(&sch),
+            "Should not need sync after syncing"
+        );
     }
 
     #[test]
@@ -435,14 +461,22 @@ mod tests {
         let mut bridge = GpuSchematicBridge::new();
         let mut sch = SchematicState::default();
         let ctx = RenderContext::new();
-        
+
         // Add a component
-        sch.components.push(Component::new(1, ComponentType::Resistor, Point::new(100, 200)));
+        sch.components.push(Component::new(
+            1,
+            ComponentType::Resistor,
+            Point::new(100, 200),
+        ));
         sch.bump_topology_version();
-        
+
         bridge.sync(&sch, &ctx);
-        
-        assert_eq!(bridge.component_data().len(), 1, "Should have one component");
+
+        assert_eq!(
+            bridge.component_data().len(),
+            1,
+            "Should have one component"
+        );
     }
 
     #[test]
@@ -450,35 +484,39 @@ mod tests {
         let mut bridge = GpuSchematicBridge::new();
         let mut sch = SchematicState::default();
         let ctx = RenderContext::new();
-        
+
         // Add a wire
-        sch.wires.push(Wire::new(1, vec![Point::new(0, 0), Point::new(100, 0)]));
+        sch.wires
+            .push(Wire::new(1, vec![Point::new(0, 0), Point::new(100, 0)]));
         sch.bump_topology_version();
-        
+
         bridge.sync(&sch, &ctx);
-        
+
         assert_eq!(bridge.wire_data().len(), 1, "Should have one wire");
     }
 
     #[test]
     fn test_bridge_dirty_flags() {
         let mut bridge = GpuSchematicBridge::new();
-        
+
         bridge.mark_camera_dirty();
         assert!(bridge.dirty_flags().camera, "Camera should be dirty");
-        
+
         bridge.mark_grid_dirty();
         assert!(bridge.dirty_flags().grid, "Grid should be dirty");
-        
+
         bridge.clear_dirty();
-        assert!(!bridge.dirty_flags().any(), "No flags should be dirty after clear");
+        assert!(
+            !bridge.dirty_flags().any(),
+            "No flags should be dirty after clear"
+        );
     }
 
     #[test]
     fn test_bridge_hit_test_empty_schematic() {
         let bridge = GpuSchematicBridge::new();
         let sch = SchematicState::default();
-        
+
         let hit = bridge.hit_test(&sch, 0.0, 0.0);
         assert!(!hit.is_hit(), "No hit on empty schematic");
     }
@@ -487,9 +525,13 @@ mod tests {
     fn test_bridge_hit_test_component() {
         let bridge = GpuSchematicBridge::new();
         let mut sch = SchematicState::default();
-        
-        sch.components.push(Component::new(1, ComponentType::Resistor, Point::new(100, 100)));
-        
+
+        sch.components.push(Component::new(
+            1,
+            ComponentType::Resistor,
+            Point::new(100, 100),
+        ));
+
         let hit = bridge.hit_test(&sch, 100.0, 100.0);
         assert!(hit.is_hit(), "Should hit component at its position");
     }
@@ -498,13 +540,21 @@ mod tests {
     fn test_bridge_rect_select() {
         let bridge = GpuSchematicBridge::new();
         let mut sch = SchematicState::default();
-        
-        sch.components.push(Component::new(1, ComponentType::Resistor, Point::new(50, 50)));
-        sch.components.push(Component::new(2, ComponentType::Capacitor, Point::new(200, 200)));
-        
+
+        sch.components.push(Component::new(
+            1,
+            ComponentType::Resistor,
+            Point::new(50, 50),
+        ));
+        sch.components.push(Component::new(
+            2,
+            ComponentType::Capacitor,
+            Point::new(200, 200),
+        ));
+
         // Select region containing only first component
         let (comps, wires) = bridge.rect_select(&sch, 0.0, 0.0, 100.0, 100.0);
-        
+
         assert_eq!(comps.len(), 1, "Should select one component");
         assert!(comps.contains(&1), "Should select component ID 1");
         assert!(wires.is_empty(), "No wires in selection");
@@ -513,7 +563,7 @@ mod tests {
     #[test]
     fn test_bridge_world_to_grid() {
         let bridge = GpuSchematicBridge::new();
-        
+
         // Test snapping to grid
         let point = bridge.world_to_grid(12.3, 17.9, 10);
         assert_eq!(point.x, 10, "X should snap to 10");
@@ -523,7 +573,7 @@ mod tests {
     #[test]
     fn test_bridge_world_to_grid_negative() {
         let bridge = GpuSchematicBridge::new();
-        
+
         let point = bridge.world_to_grid(-12.3, -17.9, 10);
         assert_eq!(point.x, -10, "X should snap to -10");
         assert_eq!(point.y, -20, "Y should snap to -20");
@@ -536,7 +586,7 @@ mod tests {
     #[test]
     fn test_screen_to_world_at_origin() {
         use crate::gpu::integration::screen_to_world;
-        
+
         let (wx, wy) = screen_to_world(0.0, 0.0, 0.0, 0.0, 1.0);
         assert_eq!(wx, 0.0);
         assert_eq!(wy, 0.0);
@@ -545,7 +595,7 @@ mod tests {
     #[test]
     fn test_screen_to_world_with_pan() {
         use crate::gpu::integration::screen_to_world;
-        
+
         let (wx, wy) = screen_to_world(100.0, 100.0, 50.0, 50.0, 1.0);
         // screen - pan = world at zoom 1
         assert_eq!(wx, 50.0);
@@ -555,7 +605,7 @@ mod tests {
     #[test]
     fn test_screen_to_world_with_zoom() {
         use crate::gpu::integration::screen_to_world;
-        
+
         let (wx, wy) = screen_to_world(100.0, 100.0, 0.0, 0.0, 2.0);
         // screen / zoom = world
         assert_eq!(wx, 50.0);
@@ -565,7 +615,7 @@ mod tests {
     #[test]
     fn test_world_to_screen_at_origin() {
         use crate::gpu::integration::world_to_screen;
-        
+
         let (sx, sy) = world_to_screen(0.0, 0.0, 0.0, 0.0, 1.0);
         assert_eq!(sx, 0.0);
         assert_eq!(sy, 0.0);
@@ -574,7 +624,7 @@ mod tests {
     #[test]
     fn test_world_to_screen_with_pan() {
         use crate::gpu::integration::world_to_screen;
-        
+
         let (sx, sy) = world_to_screen(50.0, 50.0, 50.0, 50.0, 1.0);
         // world * zoom + pan = screen
         assert_eq!(sx, 100.0);
@@ -584,7 +634,7 @@ mod tests {
     #[test]
     fn test_world_to_screen_with_zoom() {
         use crate::gpu::integration::world_to_screen;
-        
+
         let (sx, sy) = world_to_screen(50.0, 50.0, 0.0, 0.0, 2.0);
         // world * zoom = screen
         assert_eq!(sx, 100.0);
@@ -594,16 +644,16 @@ mod tests {
     #[test]
     fn test_screen_world_round_trip() {
         use crate::gpu::integration::{screen_to_world, world_to_screen};
-        
+
         let original_x = 123.456f64;
         let original_y = 789.012f64;
         let pan_x = 100.0f64;
         let pan_y = 200.0f64;
         let zoom = 1.5f64;
-        
+
         let (wx, wy) = screen_to_world(original_x, original_y, pan_x, pan_y, zoom);
         let (sx, sy) = world_to_screen(wx, wy, pan_x, pan_y, zoom);
-        
+
         assert!((sx - original_x).abs() < 0.001, "X round-trip failed");
         assert!((sy - original_y).abs() < 0.001, "Y round-trip failed");
     }
@@ -611,7 +661,7 @@ mod tests {
     #[test]
     fn test_snap_to_grid() {
         use crate::gpu::integration::snap_to_grid;
-        
+
         assert_eq!(snap_to_grid(12.3, 10), 10.0);
         assert_eq!(snap_to_grid(17.9, 10), 20.0);
         assert_eq!(snap_to_grid(15.0, 10), 20.0); // Rounds up at midpoint
@@ -621,7 +671,7 @@ mod tests {
     #[test]
     fn test_snap_to_grid_negative() {
         use crate::gpu::integration::snap_to_grid;
-        
+
         assert_eq!(snap_to_grid(-12.3, 10), -10.0);
         assert_eq!(snap_to_grid(-17.9, 10), -20.0);
     }
@@ -629,11 +679,11 @@ mod tests {
     #[test]
     fn test_snap_to_grid_various_sizes() {
         use crate::gpu::integration::snap_to_grid;
-        
+
         // Grid size 5
         assert_eq!(snap_to_grid(12.3, 5), 10.0);
         assert_eq!(snap_to_grid(12.6, 5), 15.0);
-        
+
         // Grid size 20
         assert_eq!(snap_to_grid(35.0, 20), 40.0);
         assert_eq!(snap_to_grid(29.9, 20), 20.0);
@@ -654,7 +704,7 @@ mod tests {
     fn test_camera_very_large_viewport() {
         let camera = Camera::new(10000.0, 10000.0, 10.0);
         let bounds = camera.world_bounds();
-        
+
         // Should have reasonable bounds
         assert!(bounds.max_x > bounds.min_x);
         assert!(bounds.max_y > bounds.min_y);
@@ -664,23 +714,33 @@ mod tests {
     fn test_camera_extreme_zoom_in() {
         let mut camera = Camera::new(800.0, 600.0, 10.0);
         camera.set_zoom(1000.0);
-        
+
         let bounds = camera.world_bounds();
-        // At high zoom, visible world should be small
+        // At high zoom (clamped to max 10.0), visible world should be small
+        // With pixel-based coords: width = viewport_width / zoom = 800 / 10 = 80
         let width = bounds.max_x - bounds.min_x;
-        assert!(width < 10.0, "High zoom should show small area");
+        assert!(
+            width < 100.0,
+            "High zoom should show small area (got {} pixels)",
+            width
+        );
     }
 
     #[test]
     fn test_camera_extreme_zoom_out() {
         let mut camera = Camera::new(800.0, 600.0, 10.0);
         camera.set_zoom(0.1); // Use min_zoom value
-        
+
         let bounds = camera.world_bounds();
         // At low zoom (0.1), visible world should be larger than viewport
         let width = bounds.max_x - bounds.min_x;
         // At zoom 0.1, width should be ~10x viewport = ~8000
-        assert!(width > 500.0, "Low zoom ({}) should show large area, got width {}", camera.zoom, width);
+        assert!(
+            width > 500.0,
+            "Low zoom ({}) should show large area, got width {}",
+            camera.zoom,
+            width
+        );
     }
 
     #[test]
@@ -688,7 +748,7 @@ mod tests {
         let mut bridge = GpuSchematicBridge::new();
         let mut sch = SchematicState::default();
         let ctx = RenderContext::new();
-        
+
         // Add many components
         for i in 0..1000 {
             sch.components.push(Component::new(
@@ -698,9 +758,9 @@ mod tests {
             ));
         }
         sch.bump_topology_version();
-        
+
         bridge.sync(&sch, &ctx);
-        
+
         assert_eq!(bridge.component_data().len(), 1000);
     }
 
@@ -709,17 +769,17 @@ mod tests {
         let mut bridge = GpuSchematicBridge::new();
         let mut sch = SchematicState::default();
         let ctx = RenderContext::new();
-        
+
         // Wire with many segments
         let points: Vec<Point> = (0..50)
             .map(|i| Point::new(i * 10, if i % 2 == 0 { 0 } else { 10 }))
             .collect();
-        
+
         sch.wires.push(Wire::new(1, points));
         sch.bump_topology_version();
-        
+
         bridge.sync(&sch, &ctx);
-        
+
         assert_eq!(bridge.wire_data().len(), 1);
     }
 
@@ -731,10 +791,10 @@ mod tests {
     fn test_schematic_state_topology_version() {
         let mut sch = SchematicState::default();
         let initial = sch.topology_version();
-        
+
         sch.bump_topology_version();
         assert!(sch.topology_version() > initial, "Version should increase");
-        
+
         sch.bump_topology_version();
         sch.bump_topology_version();
         assert_eq!(sch.topology_version(), initial + 3, "Version should be +3");
@@ -743,7 +803,7 @@ mod tests {
     #[test]
     fn test_component_position_integrity() {
         let comp = Component::new(42, ComponentType::Capacitor, Point::new(-500, 300));
-        
+
         assert_eq!(comp.id, 42);
         assert_eq!(comp.pos.x, -500);
         assert_eq!(comp.pos.y, 300);
@@ -751,13 +811,9 @@ mod tests {
 
     #[test]
     fn test_wire_points_integrity() {
-        let points = vec![
-            Point::new(0, 0),
-            Point::new(100, 0),
-            Point::new(100, 100),
-        ];
+        let points = vec![Point::new(0, 0), Point::new(100, 0), Point::new(100, 100)];
         let wire = Wire::new(99, points.clone());
-        
+
         assert_eq!(wire.id, 99);
         assert_eq!(wire.points.len(), 3);
         assert_eq!(wire.points[1], Point::new(100, 0));
@@ -781,8 +837,7 @@ mod tests {
     fn test_label_data_with_color() {
         use crate::gpu::text::LabelData;
 
-        let label = LabelData::new("C1", 50.0, 50.0)
-            .with_color([1.0, 0.0, 0.0, 1.0]);
+        let label = LabelData::new("C1", 50.0, 50.0).with_color([1.0, 0.0, 0.0, 1.0]);
         assert_eq!(label.color, [1.0, 0.0, 0.0, 1.0]);
     }
 
@@ -790,8 +845,7 @@ mod tests {
     fn test_label_data_with_scale() {
         use crate::gpu::text::LabelData;
 
-        let label = LabelData::new("VCC", 0.0, 0.0)
-            .with_scale(2.0);
+        let label = LabelData::new("VCC", 0.0, 0.0).with_scale(2.0);
         assert_eq!(label.scale, 2.0);
     }
 
@@ -799,8 +853,7 @@ mod tests {
     fn test_label_data_with_align() {
         use crate::gpu::text::{LabelData, TextAlign};
 
-        let label = LabelData::new("GND", 0.0, 0.0)
-            .with_align(TextAlign::Center);
+        let label = LabelData::new("GND", 0.0, 0.0).with_align(TextAlign::Center);
         assert_eq!(label.align, TextAlign::Center);
     }
 
@@ -824,7 +877,10 @@ mod tests {
         let label = LabelData::new("", 0.0, 0.0);
         let instances = label.to_instances(&atlas);
 
-        assert!(instances.is_empty(), "Empty text should produce no instances");
+        assert!(
+            instances.is_empty(),
+            "Empty text should produce no instances"
+        );
     }
 
     #[test]
@@ -888,7 +944,10 @@ mod tests {
         assert!(width > 0.0, "Text should have positive width");
 
         let double_width = text_width("Hello", 2.0);
-        assert!((double_width - width * 2.0).abs() < 0.1, "Scaling should double width");
+        assert!(
+            (double_width - width * 2.0).abs() < 0.1,
+            "Scaling should double width"
+        );
     }
 
     #[test]
@@ -923,9 +982,19 @@ mod tests {
         let labels = bridge.generate_component_labels(&sch);
 
         // Should have labels for named components only
-        assert_eq!(labels.len(), 2, "Should generate label for each named component");
-        assert!(labels.iter().any(|l| l.text == "R1"), "Should have R1 label");
-        assert!(labels.iter().any(|l| l.text == "C1"), "Should have C1 label");
+        assert_eq!(
+            labels.len(),
+            2,
+            "Should generate label for each named component"
+        );
+        assert!(
+            labels.iter().any(|l| l.text == "R1"),
+            "Should have R1 label"
+        );
+        assert!(
+            labels.iter().any(|l| l.text == "C1"),
+            "Should have C1 label"
+        );
     }
 
     #[test]

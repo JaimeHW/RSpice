@@ -21,10 +21,11 @@
 //! ```
 
 pub mod canvas;
+pub mod direct_canvas;
 pub mod event_handler;
+pub mod render_integration;
 pub mod render_pass;
 pub mod wgpu_backend;
-pub mod render_integration;
 
 // Re-exports
 pub use canvas::{GpuCanvasState, GpuSchematicCanvas, GpuSchematicCanvasProps};
@@ -32,12 +33,12 @@ pub use event_handler::{
     BoxSelection, DragOperation, EventAction, EventHandlerConfig, InteractionState, Modifiers,
     MouseButton, MouseEvent, PanOperation, SchematicEventHandler,
 };
+pub use render_integration::{GpuRenderState, RenderManager, RenderRequest};
 pub use render_pass::{
     GridState, LayerDirtyFlags, OverlayState, RenderLayer, RenderPass, RenderState, RenderStats,
     ViewportState,
 };
 pub use wgpu_backend::{get_or_init_backend, WgpuCanvasBackend};
-pub use render_integration::{GpuRenderState, RenderManager, RenderRequest};
 
 // =============================================================================
 // Tests

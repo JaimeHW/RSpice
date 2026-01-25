@@ -20,8 +20,8 @@
 use crate::gpu::gpu_cache::{DirtyFlags, GpuRenderCache};
 use crate::gpu::integration::GpuSchematicBridge;
 use crate::gpu::renderer::{ComponentData, JunctionData, WireData};
-use crate::state::{Point, SchematicState, Tool};
 use crate::state::render_context::RenderContext;
+use crate::state::{Point, SchematicState, Tool};
 
 // =============================================================================
 // Render Layers
@@ -88,10 +88,10 @@ impl RenderLayer {
     /// Check if this layer needs geometry update
     pub fn needs_geometry(&self) -> bool {
         match self {
-            RenderLayer::Grid => false, // Grid is procedural
+            RenderLayer::Grid => false,         // Grid is procedural
             RenderLayer::BoxSelection => false, // Computed per-frame
-            RenderLayer::Cursor => false, // Computed per-frame
-            RenderLayer::DragPreview => false, // Computed per-frame
+            RenderLayer::Cursor => false,       // Computed per-frame
+            RenderLayer::DragPreview => false,  // Computed per-frame
             _ => true,
         }
     }
@@ -102,7 +102,7 @@ impl RenderLayer {
             RenderLayer::WirePreview => wire_drawing,
             RenderLayer::ComponentPreview => matches!(tool, Tool::Place(_)),
             RenderLayer::BoxSelection => false, // Controlled separately
-            RenderLayer::DragPreview => false, // Controlled separately
+            RenderLayer::DragPreview => false,  // Controlled separately
             RenderLayer::WiresSelected | RenderLayer::ComponentsSelected => has_selection,
             _ => true,
         }
@@ -193,13 +193,18 @@ pub struct GridState {
 
 impl GridState {
     /// Create default grid state
-    pub fn new(grid_size: i32) -> Self {
+    /// Uses fixed 20px minor / 100px major grid to match SVG renderer
+    pub fn new(_grid_size: i32) -> Self {
         Self {
             visible: true,
-            minor_spacing: grid_size as f32,
+            // SVG uses hardcoded 20px minor grid, not schematic.grid_size
+            minor_spacing: 20.0,
+            // Major grid every 5 minor lines = 100px (matching SVG)
             major_interval: 5,
-            minor_color: [0.15, 0.15, 0.15, 1.0],
-            major_color: [0.25, 0.25, 0.25, 1.0],
+            // Colors matching SVG's rgba(128, 128, 128, 0.08) for minor
+            minor_color: [0.5, 0.5, 0.5, 0.08],
+            // Colors matching SVG's rgba(128, 128, 128, 0.2) for major
+            major_color: [0.5, 0.5, 0.5, 0.2],
         }
     }
 }
@@ -293,7 +298,7 @@ impl LayerDirtyFlags {
             wires: flags.wires,
             components: flags.components,
             junctions: flags.junctions,
-            labels: false, // Labels have separate tracking
+            labels: false,   // Labels have separate tracking
             overlays: false, // Overlays always update
         }
     }
@@ -417,8 +422,8 @@ impl RenderPass {
 
     /// Get visible layers in draw order
     pub fn visible_layers(&self, tool: &Tool, wire_drawing: bool) -> Vec<RenderLayer> {
-        let has_selection = self.state.wires.selected_count > 0
-            || self.state.components.selected_count > 0;
+        let has_selection =
+            self.state.wires.selected_count > 0 || self.state.components.selected_count > 0;
 
         RenderLayer::all_in_order()
             .iter()
@@ -431,12 +436,12 @@ impl RenderPass {
     pub fn layer_needs_update(&self, layer: RenderLayer) -> bool {
         match layer {
             RenderLayer::Grid => self.state.dirty_layers.grid,
-            RenderLayer::WiresNormal | RenderLayer::WiresSelected | RenderLayer::WiresHighlighted => {
-                self.state.dirty_layers.wires
-            }
-            RenderLayer::ComponentsNormal | RenderLayer::ComponentsSelected | RenderLayer::ComponentsHighlighted => {
-                self.state.dirty_layers.components
-            }
+            RenderLayer::WiresNormal
+            | RenderLayer::WiresSelected
+            | RenderLayer::WiresHighlighted => self.state.dirty_layers.wires,
+            RenderLayer::ComponentsNormal
+            | RenderLayer::ComponentsSelected
+            | RenderLayer::ComponentsHighlighted => self.state.dirty_layers.components,
             RenderLayer::Junctions => self.state.dirty_layers.junctions,
             RenderLayer::Labels | RenderLayer::NetLabels => self.state.dirty_layers.labels,
             _ => self.state.dirty_layers.overlays,
@@ -520,7 +525,11 @@ mod tests {
     #[test]
     fn test_render_layer_visibility_component_preview() {
         assert!(!RenderLayer::ComponentPreview.is_visible(&Tool::Select, false, false));
-        assert!(RenderLayer::ComponentPreview.is_visible(&Tool::Place(ComponentType::Resistor), false, false));
+        assert!(RenderLayer::ComponentPreview.is_visible(
+            &Tool::Place(ComponentType::Resistor),
+            false,
+            false
+        ));
     }
 
     #[test]
@@ -601,7 +610,8 @@ mod tests {
     fn test_grid_state_new() {
         let grid = GridState::new(10);
         assert!(grid.visible);
-        assert_eq!(grid.minor_spacing, 10.0);
+        // GridState uses fixed 20px minor grid matching SVG (ignores grid_size)
+        assert_eq!(grid.minor_spacing, 20.0);
         assert_eq!(grid.major_interval, 5);
     }
 
@@ -760,16 +770,28 @@ mod tests {
         assert_eq!(layers[0], RenderLayer::Grid);
 
         // Wires before components
-        let wire_idx = layers.iter().position(|l| *l == RenderLayer::WiresNormal).unwrap();
-        let comp_idx = layers.iter().position(|l| *l == RenderLayer::ComponentsNormal).unwrap();
+        let wire_idx = layers
+            .iter()
+            .position(|l| *l == RenderLayer::WiresNormal)
+            .unwrap();
+        let comp_idx = layers
+            .iter()
+            .position(|l| *l == RenderLayer::ComponentsNormal)
+            .unwrap();
         assert!(wire_idx < comp_idx);
 
         // Junctions after components
-        let junction_idx = layers.iter().position(|l| *l == RenderLayer::Junctions).unwrap();
+        let junction_idx = layers
+            .iter()
+            .position(|l| *l == RenderLayer::Junctions)
+            .unwrap();
         assert!(junction_idx > comp_idx);
 
         // Overlays last
-        let box_idx = layers.iter().position(|l| *l == RenderLayer::BoxSelection).unwrap();
+        let box_idx = layers
+            .iter()
+            .position(|l| *l == RenderLayer::BoxSelection)
+            .unwrap();
         assert!(box_idx > junction_idx);
     }
 }
