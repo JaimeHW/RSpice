@@ -186,14 +186,17 @@ impl Camera {
 
     /// Pan by screen pixels
     pub fn pan_by_pixels(&mut self, dx: f32, dy: f32) {
-        // Convert screen pixels to world units
-        let world_dx = dx / (self.zoom * self.grid_size);
-        let world_dy = dy / (self.zoom * self.grid_size);
+        // Convert screen pixels to world units (matching SVG: wx = screen / zoom)
+        let world_dx = dx / self.zoom;
+        let world_dy = dy / self.zoom;
         self.position[0] -= world_dx;
         self.position[1] -= world_dy;
     }
 
     /// Convert screen coordinates to world coordinates
+    ///
+    /// Match SVG formula: world = (screen - pan) / zoom
+    /// Camera position represents the world coordinate at screen center.
     pub fn screen_to_world(&self, screen_x: f32, screen_y: f32) -> [f32; 2] {
         // Screen center
         let cx = self.viewport_width / 2.0;
@@ -203,28 +206,34 @@ impl Camera {
         let dx = screen_x - cx;
         let dy = screen_y - cy;
 
-        // Convert to world coordinates
-        let world_x = self.position[0] + dx / (self.zoom * self.grid_size);
-        let world_y = self.position[1] - dy / (self.zoom * self.grid_size); // Y is flipped
+        // Convert to world coordinates (no grid_size scaling - work in pixels)
+        let world_x = self.position[0] + dx / self.zoom;
+        let world_y = self.position[1] + dy / self.zoom; // Same Y direction as screen
 
         [world_x, world_y]
     }
 
     /// Convert world coordinates to screen coordinates
+    ///
+    /// Match SVG formula: screen = world * zoom + pan
     pub fn world_to_screen(&self, world_x: f32, world_y: f32) -> [f32; 2] {
         let cx = self.viewport_width / 2.0;
         let cy = self.viewport_height / 2.0;
 
-        let screen_x = cx + (world_x - self.position[0]) * self.zoom * self.grid_size;
-        let screen_y = cy - (world_y - self.position[1]) * self.zoom * self.grid_size;
+        let screen_x = cx + (world_x - self.position[0]) * self.zoom;
+        let screen_y = cy + (world_y - self.position[1]) * self.zoom;
 
         [screen_x, screen_y]
     }
 
     /// Get the visible world bounds
+    ///
+    /// World bounds in pixel coordinates matching SVG transform.
     pub fn world_bounds(&self) -> WorldBounds {
-        let half_width = self.viewport_width / (2.0 * self.zoom * self.grid_size);
-        let half_height = self.viewport_height / (2.0 * self.zoom * self.grid_size);
+        // World coordinates = screen pixels when zoom=1, pan=(0,0)
+        // No grid_size scaling - camera works directly in pixel coords
+        let half_width = self.viewport_width / (2.0 * self.zoom);
+        let half_height = self.viewport_height / (2.0 * self.zoom);
 
         WorldBounds {
             min_x: self.position[0] - half_width,
