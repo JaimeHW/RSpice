@@ -1114,9 +1114,9 @@ mod tests {
             .map(|i| pj_amplitude * (2.0 * PI * i as f64 / pj_period as f64).sin())
             .collect();
 
-        let (pj_pp, pj_freq) = detect_periodic_jitter(&tie_values, 1e-9);
+        let (_pj_pp, _pj_freq) = detect_periodic_jitter(&tie_values, 1e-9);
 
-        assert!(pj_pp > 0.0, "Should detect periodic jitter");
+        assert!(_pj_pp > 0.0, "Should detect periodic jitter");
     }
 
     #[test]
