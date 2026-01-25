@@ -262,27 +262,33 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Grid line rendering
-    let grid = camera.grid_size;
-    let major_grid = grid * 10.0;
+    // Grid line rendering using fwidth for proper anti-aliasing at all zoom levels
+    // Visual grid is 2x snap grid (20px when grid_size=10) for cleaner appearance
+    let minor_grid = camera.grid_size * 2.0;
+    let major_grid = camera.grid_size * 10.0;
     
-    // Distance to nearest grid line
-    let minor_dist = min(
-        abs(fract(in.world_pos.x / grid + 0.5) - 0.5),
-        abs(fract(in.world_pos.y / grid + 0.5) - 0.5)
-    ) * grid * camera.zoom;
+    // Use modulo to find distance to nearest grid line
+    // abs(fract(x/grid + 0.5) - 0.5) * grid gives distance to nearest line
+    let minor_dist_x = abs(fract(in.world_pos.x / minor_grid + 0.5) - 0.5) * minor_grid;
+    let minor_dist_y = abs(fract(in.world_pos.y / minor_grid + 0.5) - 0.5) * minor_grid;
+    let minor_dist = min(minor_dist_x, minor_dist_y);
     
-    let major_dist = min(
-        abs(fract(in.world_pos.x / major_grid + 0.5) - 0.5),
-        abs(fract(in.world_pos.y / major_grid + 0.5) - 0.5)
-    ) * major_grid * camera.zoom;
+    let major_dist_x = abs(fract(in.world_pos.x / major_grid + 0.5) - 0.5) * major_grid;
+    let major_dist_y = abs(fract(in.world_pos.y / major_grid + 0.5) - 0.5) * major_grid;
+    let major_dist = min(major_dist_x, major_dist_y);
     
-    // Draw grid lines
-    let minor_line = 1.0 - smoothstep(0.0, 1.5, minor_dist);
-    let major_line = 1.0 - smoothstep(0.0, 1.5, major_dist);
+    // Use fwidth for screen-space anti-aliasing - gets the pixel size in world coords
+    // This ensures consistent 1-pixel lines at any zoom level
+    let pixel_size = fwidth(in.world_pos.x);
+    let line_width = max(pixel_size, 0.5); // At least 0.5 world units
     
-    let minor_color = vec4<f32>(0.15, 0.15, 0.15, minor_line * 0.3);
-    let major_color = vec4<f32>(0.2, 0.2, 0.2, major_line * 0.5);
+    // Create anti-aliased lines using smoothstep with fwidth-based threshold
+    let minor_line = 1.0 - smoothstep(0.0, line_width, minor_dist);
+    let major_line = 1.0 - smoothstep(0.0, line_width, major_dist);
+    
+    // Colors matching SVG grid (subtle gray)
+    let minor_color = vec4<f32>(0.5, 0.5, 0.5, minor_line * 0.08);
+    let major_color = vec4<f32>(0.5, 0.5, 0.5, major_line * 0.2);
     
     // Blend major over minor
     let grid_alpha = max(minor_color.a, major_color.a);

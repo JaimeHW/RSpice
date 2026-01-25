@@ -195,6 +195,61 @@ fn arc_outline(cx: f32, cy: f32, radius: f32, start_angle: f32, end_angle: f32, 
 }
 
 // =============================================================================
+// Selection Box Geometry
+// =============================================================================
+
+/// Generate selection box border vertices (hollow rectangle)
+///
+/// Creates 4 border quads (top, bottom, left, right) for the selection overlay.
+/// The fill is semi-transparent and rendered separately.
+pub fn selection_box_border_vertices(
+    min_x: f32,
+    min_y: f32,
+    max_x: f32,
+    max_y: f32,
+    border_width: f32,
+    color: [f32; 4],
+) -> Vec<Vertex> {
+    // Normalize coordinates (handle inverted selection)
+    let x1 = min_x.min(max_x);
+    let y1 = min_y.min(max_y);
+    let x2 = min_x.max(max_x);
+    let y2 = min_y.max(max_y);
+    
+    let mut verts = Vec::with_capacity(24); // 4 sides × 6 vertices
+    
+    // Top border
+    verts.extend_from_slice(&rect(x1, y2 - border_width, x2, y2, color));
+    
+    // Bottom border
+    verts.extend_from_slice(&rect(x1, y1, x2, y1 + border_width, color));
+    
+    // Left border (between top and bottom)
+    verts.extend_from_slice(&rect(x1, y1 + border_width, x1 + border_width, y2 - border_width, color));
+    
+    // Right border (between top and bottom)
+    verts.extend_from_slice(&rect(x2 - border_width, y1 + border_width, x2, y2 - border_width, color));
+    
+    verts
+}
+
+/// Generate selection box fill vertices (semi-transparent interior)
+pub fn selection_box_fill_vertices(
+    min_x: f32,
+    min_y: f32,
+    max_x: f32,
+    max_y: f32,
+    color: [f32; 4],
+) -> [Vertex; 6] {
+    let x1 = min_x.min(max_x);
+    let y1 = min_y.min(max_y);
+    let x2 = min_x.max(max_x);
+    let y2 = min_y.max(max_y);
+    
+    rect(x1, y1, x2, y2, color)
+}
+
+// =============================================================================
 // Wire Geometry
 // =============================================================================
 
@@ -1058,4 +1113,58 @@ mod tests {
             }
         }
     }
+
+    // =========================================================================
+    // Selection Box Geometry Tests
+    // =========================================================================
+
+    #[test]
+    fn test_selection_box_border_vertices_count() {
+        let verts = selection_box_border_vertices(0.0, 0.0, 100.0, 100.0, 2.0, [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(verts.len(), 24); // 4 sides × 6 vertices
+    }
+
+    #[test]
+    fn test_selection_box_border_vertices_inverted() {
+        // Inverted coordinates (drag right-to-left)
+        let verts = selection_box_border_vertices(100.0, 100.0, 0.0, 0.0, 2.0, [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(verts.len(), 24);
+    }
+
+    #[test]
+    fn test_selection_box_fill_vertices_count() {
+        let verts = selection_box_fill_vertices(10.0, 20.0, 50.0, 80.0, [0.2, 0.4, 0.8, 0.3]);
+        assert_eq!(verts.len(), 6); // 1 quad = 2 triangles = 6 vertices
+    }
+
+    #[test]
+    fn test_selection_box_fill_vertices_inverted() {
+        let verts = selection_box_fill_vertices(50.0, 80.0, 10.0, 20.0, [0.2, 0.4, 0.8, 0.3]);
+        assert_eq!(verts.len(), 6);
+    }
+
+    #[test]
+    fn test_selection_box_border_zero_width() {
+        let verts = selection_box_border_vertices(50.0, 50.0, 50.0, 50.0, 2.0, [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(verts.len(), 24); // Still generates geometry (degenerate case)
+    }
+
+    #[test]
+    fn test_selection_box_color_preserved() {
+        let color = [0.5, 0.6, 0.7, 0.8];
+        let verts = selection_box_fill_vertices(0.0, 0.0, 10.0, 10.0, color);
+        for v in verts.iter() {
+            assert_eq!(v.color, color);
+        }
+    }
+
+    #[test]
+    fn test_selection_box_border_color_preserved() {
+        let color = [0.1, 0.2, 0.3, 1.0];
+        let verts = selection_box_border_vertices(0.0, 0.0, 100.0, 100.0, 2.0, color);
+        for v in verts.iter() {
+            assert_eq!(v.color, color);
+        }
+    }
 }
+
