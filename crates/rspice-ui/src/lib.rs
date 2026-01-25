@@ -13,13 +13,21 @@ mod components;
 pub mod dialogs;
 pub mod gpu;
 pub mod services;
-mod state;
+pub mod state;
 mod theme;
 pub mod utils;
 mod views;
 
+// egui-based application (commercial-grade GPU-native UI)
+#[cfg(feature = "egui")]
+pub mod egui_app;
+
 pub use app::App;
 pub use theme::Theme;
+
+// Re-export egui app for feature-gated builds
+#[cfg(feature = "egui")]
+pub use egui_app::RSpiceApp;
 
 // =============================================================================
 // Platform-specific initialization
