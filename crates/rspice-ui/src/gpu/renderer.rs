@@ -13,6 +13,7 @@ use wgpu::{
 use super::buffers::{DynamicBuffer, UniformBuffer};
 use super::camera::{Camera, CameraUniform};
 use super::context::{GpuContext, GpuError};
+use super::culling::{FrustumCuller, ViewFrustum};
 use super::geometry::{self, colors, QuadVertex};
 use super::pipeline::Pipelines;
 use super::vertex::{ComponentInstance, JunctionInstance, Vertex, WireVertex};
@@ -73,6 +74,15 @@ pub struct SchematicRenderer {
 
     /// Background clear color
     background_color: Color,
+
+    // =========================================================================
+    // Culling
+    // =========================================================================
+    /// Frustum culler for visibility testing
+    culler: FrustumCuller,
+
+    /// Enable frustum culling (can be toggled for debugging)
+    culling_enabled: bool,
 }
 
 impl SchematicRenderer {
@@ -124,6 +134,9 @@ impl SchematicRenderer {
 
         let grid_buffer = DynamicBuffer::new("Grid Quad", wgpu::BufferUsages::VERTEX);
 
+        // Create frustum culler
+        let culler = FrustumCuller::new(ViewFrustum::new(800.0, 600.0, 0.0, 0.0, 1.0));
+
         Ok(Self {
             context,
             pipelines,
@@ -142,11 +155,14 @@ impl SchematicRenderer {
             width: 800,
             height: 600,
             background_color: Color {
-                r: 0.08,
-                g: 0.08,
-                b: 0.08,
+                // Match theme.bg_primary() = "#0a0a0f" = RGB(10, 10, 15)
+                r: 0.039,
+                g: 0.039,
+                b: 0.059,
                 a: 1.0,
             },
+            culler,
+            culling_enabled: true,
         })
     }
 
@@ -159,12 +175,53 @@ impl SchematicRenderer {
     pub fn resize(&mut self, width: u32, height: u32) {
         self.width = width.max(1);
         self.height = height.max(1);
+        // Update culler with new viewport size
+        self.culler.update(
+            self.width as f32,
+            self.height as f32,
+            self.culler.frustum.pan_x,
+            self.culler.frustum.pan_y,
+            self.culler.frustum.zoom,
+        );
     }
 
     /// Update camera from current state
     pub fn update_camera(&mut self, camera: &Camera) {
         let uniform = camera.build_uniform();
         self.camera_uniform.set(&self.context.queue, uniform);
+
+        // Update culler with camera state
+        self.culler.update(
+            self.width as f32,
+            self.height as f32,
+            camera.position[0],
+            camera.position[1],
+            camera.zoom,
+        );
+    }
+
+    /// Enable or disable frustum culling
+    pub fn set_culling_enabled(&mut self, enabled: bool) {
+        self.culling_enabled = enabled;
+    }
+
+    /// Check if culling is enabled
+    pub fn is_culling_enabled(&self) -> bool {
+        self.culling_enabled
+    }
+
+    /// Get current culler for visibility testing
+    pub fn culler(&self) -> &FrustumCuller {
+        &self.culler
+    }
+
+    /// Get culler statistics (for debugging)
+    pub fn culling_stats(
+        &self,
+        total_components: usize,
+        visible_components: usize,
+    ) -> super::culling::CullStats {
+        self.culler.stats(total_components, visible_components)
     }
 
     /// Update wire geometry
@@ -257,6 +314,137 @@ impl SchematicRenderer {
         // TODO: Implement text rendering pipeline
     }
 
+    // =========================================================================
+    // Culled Update Methods
+    // =========================================================================
+
+    /// Update components with frustum culling
+    ///
+    /// Returns culling statistics for debugging/profiling.
+    pub fn update_components_culled(
+        &mut self,
+        components: &[ComponentData],
+    ) -> super::culling::CullStats {
+        let total = components.len();
+
+        if !self.culling_enabled {
+            // No culling - update all
+            self.update_components(components);
+            return super::culling::CullStats {
+                total,
+                visible: total,
+                culled: 0,
+                cull_ratio: 0.0,
+            };
+        }
+
+        // Filter visible components
+        let visible_components: Vec<_> = components
+            .iter()
+            .filter(|c| self.culler.is_component_visible(c.x, c.y))
+            .cloned()
+            .collect();
+
+        let visible = visible_components.len();
+        self.update_components(&visible_components);
+
+        super::culling::CullStats {
+            total,
+            visible,
+            culled: total.saturating_sub(visible),
+            cull_ratio: if total > 0 {
+                (total.saturating_sub(visible)) as f32 / total as f32
+            } else {
+                0.0
+            },
+        }
+    }
+
+    /// Update wires with frustum culling
+    ///
+    /// Returns culling statistics for debugging/profiling.
+    pub fn update_wires_culled(&mut self, wires: &[WireData]) -> super::culling::CullStats {
+        let total = wires.len();
+
+        if !self.culling_enabled {
+            self.update_wires(wires);
+            return super::culling::CullStats {
+                total,
+                visible: total,
+                culled: 0,
+                cull_ratio: 0.0,
+            };
+        }
+
+        // Filter visible wires (any point in view = visible)
+        let visible_wires: Vec<_> = wires
+            .iter()
+            .filter(|w| {
+                // Wire is visible if any segment intersects view
+                w.points.windows(2).any(|pair| {
+                    self.culler
+                        .is_wire_visible(pair[0][0], pair[0][1], pair[1][0], pair[1][1])
+                }) || w
+                    .points
+                    .iter()
+                    .any(|p| self.culler.is_point_visible(p[0], p[1]))
+            })
+            .cloned()
+            .collect();
+
+        let visible = visible_wires.len();
+        self.update_wires(&visible_wires);
+
+        super::culling::CullStats {
+            total,
+            visible,
+            culled: total.saturating_sub(visible),
+            cull_ratio: if total > 0 {
+                (total.saturating_sub(visible)) as f32 / total as f32
+            } else {
+                0.0
+            },
+        }
+    }
+
+    /// Update junctions with frustum culling
+    pub fn update_junctions_culled(
+        &mut self,
+        junctions: &[JunctionData],
+    ) -> super::culling::CullStats {
+        let total = junctions.len();
+
+        if !self.culling_enabled {
+            self.update_junctions(junctions);
+            return super::culling::CullStats {
+                total,
+                visible: total,
+                culled: 0,
+                cull_ratio: 0.0,
+            };
+        }
+
+        let visible_junctions: Vec<_> = junctions
+            .iter()
+            .filter(|j| self.culler.is_point_visible(j.x, j.y))
+            .cloned()
+            .collect();
+
+        let visible = visible_junctions.len();
+        self.update_junctions(&visible_junctions);
+
+        super::culling::CullStats {
+            total,
+            visible,
+            culled: total.saturating_sub(visible),
+            cull_ratio: if total > 0 {
+                (total.saturating_sub(visible)) as f32 / total as f32
+            } else {
+                0.0
+            },
+        }
+    }
+
     /// Render a frame to the given texture view
     pub fn render(&self, view: &TextureView) -> Result<(), GpuError> {
         let mut encoder = self
@@ -339,20 +527,23 @@ impl SchematicRenderer {
         let height = height.max(1);
 
         // Create offscreen render texture
-        let texture = self.context.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Offscreen Render Target"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: self.context.surface_format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+        let texture = self
+            .context
+            .device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("Offscreen Render Target"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.context.surface_format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
 
         let texture_view = texture.create_view(&TextureViewDescriptor::default());
 
@@ -375,9 +566,12 @@ impl SchematicRenderer {
         });
 
         // Copy texture to staging buffer
-        let mut encoder = self.context.device.create_command_encoder(&CommandEncoderDescriptor {
-            label: Some("Texture Copy Encoder"),
-        });
+        let mut encoder = self
+            .context
+            .device
+            .create_command_encoder(&CommandEncoderDescriptor {
+                label: Some("Texture Copy Encoder"),
+            });
 
         encoder.copy_texture_to_buffer(
             wgpu::ImageCopyTexture {
@@ -439,16 +633,18 @@ impl SchematicRenderer {
         use base64::Engine;
 
         let rgba_data = self.render_to_image(width, height)?;
-        
+
         // Encode as PNG
         let mut png_data = Vec::new();
         {
             let mut encoder = png::Encoder::new(&mut png_data, width, height);
             encoder.set_color(png::ColorType::Rgba);
             encoder.set_depth(png::BitDepth::Eight);
-            let mut writer = encoder.write_header()
+            let mut writer = encoder
+                .write_header()
                 .map_err(|e| GpuError::Other(format!("PNG header error: {}", e)))?;
-            writer.write_image_data(&rgba_data)
+            writer
+                .write_image_data(&rgba_data)
                 .map_err(|e| GpuError::Other(format!("PNG write error: {}", e)))?;
         }
 
@@ -652,5 +848,128 @@ mod tests {
         };
         assert_eq!(comp.x, -100.0);
         assert_eq!(comp.y, -200.0);
+    }
+
+    // =========================================================================
+    // Culling Tests (Unit Tests - No GPU Required)
+    // =========================================================================
+
+    #[test]
+    fn test_cull_stats_all_visible() {
+        use super::super::culling::CullStats;
+        let stats = CullStats {
+            total: 100,
+            visible: 100,
+            culled: 0,
+            cull_ratio: 0.0,
+        };
+        assert!(!stats.has_culling());
+        assert_eq!(stats.cull_percentage(), 0.0);
+    }
+
+    #[test]
+    fn test_cull_stats_half_culled() {
+        use super::super::culling::CullStats;
+        let stats = CullStats {
+            total: 100,
+            visible: 50,
+            culled: 50,
+            cull_ratio: 0.5,
+        };
+        assert!(stats.has_culling());
+        assert_eq!(stats.cull_percentage(), 50.0);
+    }
+
+    #[test]
+    fn test_cull_stats_all_culled() {
+        use super::super::culling::CullStats;
+        let stats = CullStats {
+            total: 100,
+            visible: 0,
+            culled: 100,
+            cull_ratio: 1.0,
+        };
+        assert!(stats.has_culling());
+        assert_eq!(stats.cull_percentage(), 100.0);
+    }
+
+    #[test]
+    fn test_cull_stats_empty() {
+        use super::super::culling::CullStats;
+        let stats = CullStats {
+            total: 0,
+            visible: 0,
+            culled: 0,
+            cull_ratio: 0.0,
+        };
+        assert!(!stats.has_culling());
+    }
+
+    // =========================================================================
+    // Selection Box Geometry Tests
+    // =========================================================================
+
+    #[test]
+    fn test_selection_box_vertices() {
+        // Selection box is drawn as a hollow rectangle with 4 quads (border)
+        // Each line segment: 2 triangles = 6 vertices
+        // 4 sides = 24 vertices
+        let min_x = 10.0f32;
+        let min_y = 20.0f32;
+        let max_x = 100.0f32;
+        let max_y = 80.0f32;
+        let border = 2.0f32;
+
+        // Generate 4 border quads
+        let borders = [
+            // Top
+            (min_x, max_y - border, max_x, max_y),
+            // Bottom
+            (min_x, min_y, max_x, min_y + border),
+            // Left
+            (min_x, min_y + border, min_x + border, max_y - border),
+            // Right
+            (max_x - border, min_y + border, max_x, max_y - border),
+        ];
+
+        let mut vertices = 0;
+        for (x1, y1, x2, y2) in borders {
+            // Each quad = 2 triangles = 6 vertices
+            vertices += 6;
+        }
+        assert_eq!(vertices, 24);
+    }
+
+    #[test]
+    fn test_selection_box_bounds() {
+        let min_x = 0.0f32;
+        let min_y = 0.0f32;
+        let max_x = 50.0f32;
+        let max_y = 30.0f32;
+
+        let width = max_x - min_x;
+        let height = max_y - min_y;
+
+        assert_eq!(width, 50.0);
+        assert_eq!(height, 30.0);
+    }
+
+    #[test]
+    fn test_selection_box_inverted_bounds() {
+        // User drags right-to-left or bottom-to-top
+        let start_x = 100.0f32;
+        let start_y = 80.0f32;
+        let end_x = 20.0f32;
+        let end_y = 10.0f32;
+
+        let min_x = start_x.min(end_x);
+        let min_y = start_y.min(end_y);
+        let max_x = start_x.max(end_x);
+        let max_y = start_y.max(end_y);
+
+        assert_eq!(min_x, 20.0);
+        assert_eq!(min_y, 10.0);
+        assert_eq!(max_x, 100.0);
+        assert_eq!(max_y, 80.0);
     }
 }

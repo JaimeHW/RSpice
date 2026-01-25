@@ -138,6 +138,70 @@ pub fn GpuCanvas(props: GpuCanvasProps) -> Element {
         }
     });
 
+    // Initialize GPU renderer and trigger rendering when needed
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use_coroutine(
+            move |mut _rx: dioxus::prelude::UnboundedReceiver<()>| async move {
+                // Initialize renderer once
+                let renderer_result = SchematicRenderer::new().await;
+                let mut renderer = match renderer_result {
+                    Ok(r) => r,
+                    Err(e) => {
+                        log::error!("Failed to initialize GPU renderer: {:?}", e);
+                        return;
+                    }
+                };
+
+                log::info!("GPU renderer initialized successfully");
+
+                // Initial render
+                {
+                    let sch = schematic.read();
+                    let state = canvas_state.read();
+                    if let Ok(data_url) = render_to_data_url(
+                        &mut renderer,
+                        &sch,
+                        &state.camera,
+                        props.width,
+                        props.height,
+                    )
+                    .await
+                    {
+                        drop(state);
+                        canvas_state.write().image_data = data_url;
+                        canvas_state.write().needs_render = false;
+                    }
+                }
+
+                // Render loop - check periodically for changes
+                // Use 50ms (~20fps) to reduce PNG encoding overhead during pan/zoom
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+                    let needs_render = canvas_state.read().needs_render;
+                    if needs_render {
+                        let sch = schematic.read();
+                        let state = canvas_state.read();
+                        if let Ok(data_url) = render_to_data_url(
+                            &mut renderer,
+                            &sch,
+                            &state.camera,
+                            props.width,
+                            props.height,
+                        )
+                        .await
+                        {
+                            drop(state);
+                            canvas_state.write().image_data = data_url;
+                            canvas_state.write().needs_render = false;
+                        }
+                    }
+                }
+            },
+        );
+    }
+
     // Mouse event handlers
     let onmousedown = move |evt: MouseEvent| {
         let coords = evt.data().coordinates().client();
@@ -182,7 +246,9 @@ pub fn GpuCanvas(props: GpuCanvasProps) -> Element {
         let mut state = canvas_state.write();
         // Extract camera, modify it, put it back to avoid double mutable borrow
         let mut camera = state.camera.clone();
-        state.controller.zoom_at(&mut camera, mx as f32, my as f32, normalized_delta);
+        state
+            .controller
+            .zoom_at(&mut camera, mx as f32, my as f32, normalized_delta);
         state.camera = camera;
         state.needs_render = true;
     };

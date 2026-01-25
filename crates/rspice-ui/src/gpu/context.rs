@@ -71,8 +71,9 @@ impl GpuContext {
             .await
             .map_err(|e| GpuError::DeviceCreation(e.to_string()))?;
 
-        // Prefer sRGB format for accurate colors
-        let surface_format = TextureFormat::Bgra8UnormSrgb;
+        // Use linear format for accurate colors in offscreen rendering
+        // sRGB format applies gamma correction which distorts dark colors
+        let surface_format = TextureFormat::Bgra8Unorm;
 
         Ok(Self {
             instance,

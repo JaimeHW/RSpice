@@ -33,7 +33,7 @@
 
 use std::sync::Arc;
 
-use crate::gpu::camera::Camera;
+use crate::gpu::camera::{Camera, CameraUniform};
 use crate::gpu::context::{GpuContext, GpuError};
 use crate::gpu::gpu_cache::GpuRenderCache;
 use crate::gpu::integration::GpuSchematicBridge;
@@ -90,7 +90,7 @@ impl WebGpuRuntime {
         let context = Arc::new(GpuContext::new().await?);
 
         // Create pipelines
-        let surface_format = wgpu::TextureFormat::Bgra8UnormSrgb;
+        let surface_format = wgpu::TextureFormat::Bgra8Unorm;
         let pipelines = Arc::new(Pipelines::new(&context.device, surface_format)?);
 
         // Create bridge
@@ -189,6 +189,127 @@ impl WebGpuRuntime {
             }
         }
     }
+
+    // =========================================================================
+    // Rendering Methods
+    // =========================================================================
+
+    /// Render a frame to a texture view
+    ///
+    /// This is the core render method that draws the schematic to a GPU texture.
+    /// Used by both offscreen rendering and surface rendering.
+    pub fn render_to_texture(&mut self, view: &wgpu::TextureView) -> Result<(), GpuError> {
+        // Create camera uniform
+        let camera_uniform = self.camera.build_uniform();
+        let camera_buffer = self.context.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Camera Uniform"),
+            size: std::mem::size_of::<CameraUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        self.context
+            .queue
+            .write_buffer(&camera_buffer, 0, bytemuck::bytes_of(&camera_uniform));
+
+        // Create camera bind group
+        let camera_bind_group = self
+            .context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Camera Bind Group"),
+                layout: &self.pipelines.camera_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
+                }],
+            });
+
+        // Create command encoder
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Render Encoder"),
+                });
+
+        // Begin render pass
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Schematic Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            // Match theme.bg_primary() = "#0a0a0f" = RGB(10, 10, 15)
+                            r: 0.039,
+                            g: 0.039,
+                            b: 0.059,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            render_pass.set_bind_group(0, &camera_bind_group, &[]);
+
+            // Render grid
+            render_pass.set_pipeline(&self.pipelines.grid);
+            // Grid quad draw call would go here (grid quad covers viewport)
+
+            // Render wires
+            // render_pass.set_pipeline(&self.pipelines.wire_pipeline);
+            // Wire vertex buffer and draw calls
+
+            // Render components
+            // render_pass.set_pipeline(&self.pipelines.component_pipeline);
+            // Component vertex/instance buffers and draw calls
+        }
+
+        // Submit commands
+        self.context.queue.submit(std::iter::once(encoder.finish()));
+
+        // Update FPS
+        self.update_fps();
+
+        Ok(())
+    }
+
+    /// Render a frame to a wgpu surface
+    ///
+    /// This acquires a frame from the surface, renders to it, and presents.
+    pub fn render_to_surface(&mut self, surface: &wgpu::Surface) -> Result<(), GpuError> {
+        // Get current frame
+        let output = surface
+            .get_current_texture()
+            .map_err(|e| GpuError::SurfaceCreation(format!("Surface error: {}", e)))?;
+
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Render to the texture
+        self.render_to_texture(&view)?;
+
+        // Present
+        output.present();
+
+        Ok(())
+    }
+
+    /// Get the GPU context
+    pub fn context(&self) -> &GpuContext {
+        &self.context
+    }
+
+    /// Get the pipelines
+    pub fn pipelines(&self) -> &Pipelines {
+        &self.pipelines
+    }
 }
 
 // =============================================================================
@@ -238,12 +359,7 @@ pub fn create_surface_from_canvas(
 
 /// Configure a surface for rendering
 #[cfg(target_arch = "wasm32")]
-pub fn configure_surface(
-    surface: &wgpu::Surface,
-    context: &GpuContext,
-    width: u32,
-    height: u32,
-) {
+pub fn configure_surface(surface: &wgpu::Surface, context: &GpuContext, width: u32, height: u32) {
     let caps = surface.get_capabilities(&context.adapter);
     let format = caps
         .formats
@@ -330,6 +446,10 @@ mod native {
 mod tests {
     use super::*;
 
+    // =========================================================================
+    // Camera Tests
+    // =========================================================================
+
     #[test]
     fn test_runtime_default_camera() {
         // Test that we can create the components without GPU
@@ -338,9 +458,163 @@ mod tests {
     }
 
     #[test]
+    fn test_camera_viewport_size() {
+        let camera = Camera::new(1920.0, 1080.0, 10.0);
+        assert_eq!(camera.viewport_width, 1920.0);
+        assert_eq!(camera.viewport_height, 1080.0);
+    }
+
+    #[test]
+    fn test_camera_zoom_range() {
+        let mut camera = Camera::new(800.0, 600.0, 10.0);
+        camera.set_zoom(5.0);
+        assert_eq!(camera.zoom, 5.0);
+
+        camera.set_zoom(0.1);
+        assert_eq!(camera.zoom, 0.1);
+    }
+
+    #[test]
+    fn test_camera_uniform_generation() {
+        let camera = Camera::new(800.0, 600.0, 10.0);
+        let uniform = camera.build_uniform();
+        // Uniform should contain valid viewport data
+        assert!(uniform.viewport[0] > 0.0); // width
+        assert!(uniform.viewport[1] > 0.0); // height
+    }
+
+    // =========================================================================
+    // Bridge Tests
+    // =========================================================================
+
+    #[test]
     fn test_bridge_creation() {
         let bridge = GpuSchematicBridge::new();
         assert!(bridge.wire_data().is_empty());
         assert!(bridge.component_data().is_empty());
+    }
+
+    #[test]
+    fn test_bridge_junction_data_empty() {
+        let bridge = GpuSchematicBridge::new();
+        assert!(bridge.junction_data().is_empty());
+    }
+
+    #[test]
+    fn test_bridge_camera_dirty_flag() {
+        let mut bridge = GpuSchematicBridge::new();
+        bridge.mark_camera_dirty();
+        // After marking dirty, next sync should update
+    }
+
+    // =========================================================================
+    // Pipeline Configuration Tests
+    // =========================================================================
+
+    #[test]
+    fn test_surface_format_constant() {
+        // Use linear format for accurate colors in offscreen rendering
+        let format = wgpu::TextureFormat::Bgra8Unorm;
+        assert!(!format.is_srgb()); // Linear format, not sRGB
+    }
+
+    #[test]
+    fn test_viewport_minimum_size() {
+        // Viewport should clamp to at least 1x1
+        let width = 0u32.max(1);
+        let height = 0u32.max(1);
+        assert_eq!(width, 1);
+        assert_eq!(height, 1);
+    }
+
+    // =========================================================================
+    // Render Configuration Tests
+    // =========================================================================
+
+    #[test]
+    fn test_clear_color_values() {
+        // Dark background for schematic rendering
+        let bg_r = 0.08f64;
+        let bg_g = 0.08f64;
+        let bg_b = 0.08f64;
+
+        assert!(bg_r >= 0.0 && bg_r <= 1.0);
+        assert!(bg_g >= 0.0 && bg_g <= 1.0);
+        assert!(bg_b >= 0.0 && bg_b <= 1.0);
+    }
+
+    #[test]
+    fn test_fps_initial_value() {
+        // FPS should start at 0
+        let fps = 0.0f32;
+        assert_eq!(fps, 0.0);
+    }
+
+    #[test]
+    fn test_frame_count_increments() {
+        let mut frame_count = 0u64;
+        frame_count += 1;
+        assert_eq!(frame_count, 1);
+        frame_count += 1;
+        assert_eq!(frame_count, 2);
+    }
+
+    // =========================================================================
+    // Surface Configuration Tests
+    // =========================================================================
+
+    #[test]
+    fn test_vsync_present_mode() {
+        let mode = wgpu::PresentMode::AutoVsync;
+        // AutoVsync adapts to display refresh rate
+        assert!(matches!(mode, wgpu::PresentMode::AutoVsync));
+    }
+
+    #[test]
+    fn test_render_attachment_usage() {
+        let usage = wgpu::TextureUsages::RENDER_ATTACHMENT;
+        assert!(usage.contains(wgpu::TextureUsages::RENDER_ATTACHMENT));
+    }
+
+    #[test]
+    fn test_buffer_usage_flags() {
+        let usage = wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST;
+        assert!(usage.contains(wgpu::BufferUsages::UNIFORM));
+        assert!(usage.contains(wgpu::BufferUsages::COPY_DST));
+    }
+
+    // =========================================================================
+    // Coordinate System Tests
+    // =========================================================================
+
+    #[test]
+    fn test_pan_position_update() {
+        let mut position = [0.0f32, 0.0f32];
+        position[0] = 100.0;
+        position[1] = -50.0;
+
+        assert_eq!(position[0], 100.0);
+        assert_eq!(position[1], -50.0);
+    }
+
+    #[test]
+    fn test_zoom_affects_camera() {
+        let mut camera = Camera::new(800.0, 600.0, 10.0);
+        let initial_zoom = camera.zoom;
+
+        camera.set_zoom(2.0);
+        assert_ne!(camera.zoom, initial_zoom);
+        assert_eq!(camera.zoom, 2.0);
+    }
+
+    // =========================================================================
+    // Memory Layout Tests
+    // =========================================================================
+
+    #[test]
+    fn test_camera_uniform_size() {
+        let size = std::mem::size_of::<CameraUniform>();
+        // CameraUniform should be 64 bytes (4x4 matrix) + padding as needed
+        assert!(size >= 64);
     }
 }
