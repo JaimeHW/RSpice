@@ -11,11 +11,18 @@ pub mod document;
 pub mod fft;
 pub mod hierarchy;
 pub mod history;
+pub mod junction_cache;
+pub mod label_cache;
 pub mod leader_line;
+pub mod preferences;
+pub mod recent_files;
+pub mod render_context;
 mod schematic;
 pub mod schematic_file;
+pub mod shortcuts;
 mod simulation;
 pub mod simulation_command;
+pub mod spatial_index;
 pub mod viewport;
 pub mod waveform_math;
 

@@ -112,6 +112,12 @@ pub struct SchematicState {
     /// Set to true when a file is loaded, cleared after history is reset.
     #[serde(skip)]
     pub needs_history_reset: bool,
+
+    /// Topology version counter for cache invalidation (runtime state, not persisted)
+    /// Incremented on any structural change (add/remove/move component/wire/junction)
+    /// Used by LabelPositionCache and JunctionCache to detect stale data
+    #[serde(skip)]
+    topology_version: u64,
 }
 
 impl Default for SchematicState {
@@ -137,6 +143,7 @@ impl Default for SchematicState {
             is_dirty: false,
             needs_fit: false,
             needs_history_reset: false,
+            topology_version: 0,
         }
     }
 }
@@ -151,6 +158,24 @@ impl SchematicState {
         let id = self.next_id;
         self.next_id += 1;
         id
+    }
+
+    /// Get the current topology version
+    ///
+    /// This version is incremented whenever the schematic topology changes
+    /// (components, wires, junctions added/removed/moved). Used by caches
+    /// to detect when they need to be rebuilt.
+    pub fn topology_version(&self) -> u64 {
+        self.topology_version
+    }
+
+    /// Increment the topology version
+    ///
+    /// Call this after any structural change to invalidate caches.
+    /// This is automatically called by mutation methods like add_component,
+    /// add_wire, move_component_with_wires, etc.
+    pub fn bump_topology_version(&mut self) {
+        self.topology_version = self.topology_version.wrapping_add(1);
     }
 
     /// Recalculate runtime state after loading from file
@@ -306,6 +331,7 @@ impl SchematicState {
 
         self.components.push(component);
         self.is_dirty = true;
+        self.bump_topology_version();
         id
     }
 
@@ -337,6 +363,7 @@ impl SchematicState {
             }
         }
         self.is_dirty = true;
+        self.bump_topology_version();
     }
 
     /// Remove selected components and wires
@@ -346,6 +373,7 @@ impl SchematicState {
         self.wires.retain(|w| !self.selection.has_wire(w.id));
         self.selection.clear();
         self.is_dirty = true;
+        self.bump_topology_version();
     }
 
     // =========================================================================
@@ -360,6 +388,7 @@ impl SchematicState {
         let id = self.next_id();
         self.wires.push(Wire::new(id, points));
         self.is_dirty = true;
+        self.bump_topology_version();
         Some(id)
     }
 
@@ -547,6 +576,7 @@ impl SchematicState {
         let id = self.next_id();
         self.junctions.push(Junction::new(id, pos));
         self.is_dirty = true;
+        self.bump_topology_version();
         id
     }
 
@@ -557,6 +587,7 @@ impl SchematicState {
         let removed = self.junctions.len() < len_before;
         if removed {
             self.is_dirty = true;
+            self.bump_topology_version();
         }
         removed
     }
@@ -651,6 +682,7 @@ impl SchematicState {
         }
 
         self.is_dirty = true;
+        self.bump_topology_version();
     }
 
     // =========================================================================
@@ -754,6 +786,7 @@ impl SchematicState {
         }
 
         self.is_dirty = true;
+        self.bump_topology_version();
     }
 
     /// Move all points of a wire by a delta
@@ -789,6 +822,7 @@ impl SchematicState {
         }
 
         self.is_dirty = true;
+        self.bump_topology_version();
     }
 
     /// Move all selected components and wires by a delta
@@ -869,6 +903,7 @@ impl SchematicState {
         }
 
         self.is_dirty = true;
+        self.bump_topology_version();
     }
 
     /// Move all wire points at a junction to a new position

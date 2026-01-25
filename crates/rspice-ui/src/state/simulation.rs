@@ -13,6 +13,10 @@ pub struct SimulationState {
     /// Whether a simulation is currently running
     pub is_running: bool,
 
+    /// Flag to trigger simulation from menu (toolbar watches this)
+    /// When set to true, toolbar will start simulation and reset to false
+    pub trigger_simulation: bool,
+
     /// Current simulation progress (0.0 to 1.0)
     pub progress: f64,
 

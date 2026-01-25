@@ -301,6 +301,18 @@ impl Viewport {
     pub fn visible_area(&self) -> i64 {
         (self.bounds.width() as i64) * (self.bounds.height() as i64)
     }
+
+    /// Get viewport bounds as tuple of i32 values for R-tree queries
+    ///
+    /// Returns (min_x, min_y, max_x, max_y) in grid coordinates.
+    pub fn bounds_i32(&self) -> (i32, i32, i32, i32) {
+        (
+            self.bounds.min_x,
+            self.bounds.min_y,
+            self.bounds.max_x,
+            self.bounds.max_y,
+        )
+    }
 }
 
 // =============================================================================
