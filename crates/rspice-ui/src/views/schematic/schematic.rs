@@ -487,7 +487,24 @@ pub fn Schematic() -> Element {
                         }
                     },
 
-                // Pure SVG canvas
+                // GPU Canvas Overlay (shown when GPU mode enabled)
+                {
+                    if display_settings.read().render_mode.is_gpu() {
+                        rsx! {
+                            div {
+                                style: "position: absolute; inset: 0; z-index: 10;",
+                                super::gpu_canvas::GpuSchematicCanvas {
+                                    width: 800,
+                                    height: 600,
+                                }
+                            }
+                        }
+                    } else {
+                        rsx! {}
+                    }
+                }
+
+                // Pure SVG canvas (always rendered, hidden when GPU mode)
                 {
                     let cursor = match schematic.read().tool {
                         Tool::Probe => "crosshair",
