@@ -22,8 +22,9 @@ use crate::dialogs::{SaveDialogResult, UnsavedChangesModal};
 use crate::services::cross_probing::CrossProbeManager;
 use crate::state::dc_annotation::{Annotation, AnnotationMode};
 use crate::state::{
-    CanvasFocusState, ComponentType, ConsoleMessage, DocumentManager, Point, Rotation,
-    SchematicHistory, SchematicState, SimulationState, Tool, Viewport,
+    display_settings::SchematicDisplaySettings, CanvasFocusState, ComponentType, ConsoleMessage,
+    DocumentManager, Point, Rotation, SchematicHistory, SchematicState, SimulationState, Tool,
+    Viewport,
 };
 use crate::theme::Theme;
 use crate::views::symbol_assets;
@@ -47,6 +48,7 @@ pub fn Schematic() -> Element {
     let mut waveform_visible: Signal<WaveformVisible> = use_context();
     let mut doc_manager: Signal<DocumentManager> = use_context();
     let cross_probe: Signal<CrossProbeManager> = use_context();
+    let display_settings: Signal<SchematicDisplaySettings> = use_context();
 
     // Viewport state - pan/zoom stored in SchematicState for per-document persistence
     // Local signals mirror SchematicState and sync back on changes
@@ -99,6 +101,11 @@ pub fn Schematic() -> Element {
 
     // Undo/Redo history (local for now, will integrate with SchematicHistory later)
     let mut history = use_signal(|| SchematicHistory::new(schematic.read().clone(), 100));
+
+    // PERFORMANCE: Frame-coherent render context with cached data
+    // This provides O(1) lookups for label positions, junction points, and terminal positions
+    // Only rebuilds when topology_version changes (not on every mouse move)
+    let mut render_ctx = use_signal(|| crate::state::render_context::RenderContext::new());
 
     // Helper closure that pushes to history AND marks document dirty
     // This encapsulates the dirty tracking logic in one place
@@ -1157,7 +1164,7 @@ pub fn Schematic() -> Element {
 
                     // Definitions for patterns
                     defs {
-                        // Minor grid pattern
+                        // Minor grid pattern (for Lines style)
                         pattern {
                             id: "minorGrid",
                             width: "20",
@@ -1165,7 +1172,7 @@ pub fn Schematic() -> Element {
                             pattern_units: "userSpaceOnUse",
                             rect { width: "20", height: "20", fill: "none", stroke: "{th.border()}", stroke_width: "0.5", opacity: "0.2" }
                         }
-                        // Major grid pattern
+                        // Major grid pattern (for Lines style)
                         pattern {
                             id: "majorGrid",
                             width: "100",
@@ -1173,6 +1180,14 @@ pub fn Schematic() -> Element {
                             pattern_units: "userSpaceOnUse",
                             rect { width: "100", height: "100", fill: "url(#minorGrid)" }
                             rect { width: "100", height: "100", fill: "none", stroke: "{th.border()}", stroke_width: "1", opacity: "0.3" }
+                        }
+                        // Dot grid pattern (for Dots style)
+                        pattern {
+                            id: "dotGrid",
+                            width: "20",
+                            height: "20",
+                            pattern_units: "userSpaceOnUse",
+                            circle { cx: "0", cy: "0", r: "1.5", fill: "{th.border()}", opacity: "0.75" }
                         }
                     }
 
@@ -1184,13 +1199,31 @@ pub fn Schematic() -> Element {
                             format!("translate({px},{py}) scale({z})")
                         },
 
-                        // Grid background rectangle
-                        rect {
-                            x: "-5000",
-                            y: "-5000",
-                            width: "10000",
-                            height: "10000",
-                            fill: "url(#majorGrid)",
+                        // Grid background rectangle - render based on grid_style
+                        {
+                            use crate::state::display_settings::GridStyle;
+                            let grid_style = display_settings.read().grid_style;
+                            match grid_style {
+                                GridStyle::Lines => rsx! {
+                                    rect {
+                                        x: "-5000",
+                                        y: "-5000",
+                                        width: "10000",
+                                        height: "10000",
+                                        fill: "url(#majorGrid)",
+                                    }
+                                },
+                                GridStyle::Dots => rsx! {
+                                    rect {
+                                        x: "-5000",
+                                        y: "-5000",
+                                        width: "10000",
+                                        height: "10000",
+                                        fill: "url(#dotGrid)",
+                                    }
+                                },
+                                GridStyle::Hidden => rsx! {},
+                            }
                         }
 
                         // Origin marker
@@ -1359,13 +1392,10 @@ pub fn Schematic() -> Element {
                                 crate::state::Point::new(0, 0)
                             };
 
-                            // Collect all component terminal positions to exclude from junction circles
-                            // Standard simulators don't show junction circles at component terminals
-                            let terminal_positions: std::collections::HashSet<Point> = schematic.read()
-                                .components.iter()
-                                .flat_map(|comp| comp.terminal_positions())
-                                .map(|(_, pos)| pos)
-                                .collect();
+                            // PERFORMANCE: Use cached terminal positions from RenderContext (O(1))
+                            // instead of rebuilding HashSet every frame (O(n))
+                            let ctx = render_ctx.read();
+                            let terminal_positions = ctx.terminal_positions();
 
                             // For multi-selection, we need to know if wire is selected
                             let is_multi_drag = d.active && d.multi_selection;
@@ -1384,10 +1414,11 @@ pub fn Schematic() -> Element {
                             let cross_probe_nodes = cross_probe.read().highlighted_schematic().clone();
                             let net_map = schematic.read().net_mapping.clone();
 
-                            // Collect wire endpoint segment counts to identify true junctions
-                            // A junction exists only where 3+ wire segments meet
-                            // Each wire endpoint contributes 1 segment to that point
-                            // (Middle points of a wire are NOT junctions even if multiple wires cross)
+                            // PERFORMANCE: Get cached junction segment counts (O(1))
+                            // However, segment counts must be recomputed per-frame when dragging
+                            // because display positions change. The terminal_positions cache
+                            // still provides the main performance benefit.
+                            let _cached_segment_counts = ctx.junction_segment_counts(); // Available for non-drag case
                             let mut point_segment_count: std::collections::HashMap<Point, usize> = std::collections::HashMap::new();
                             let mut point_selected_count: std::collections::HashMap<Point, usize> = std::collections::HashMap::new();
                             let mut point_probed: std::collections::HashMap<Point, bool> = std::collections::HashMap::new();
@@ -1599,25 +1630,35 @@ pub fn Schematic() -> Element {
                             let current_zoom = *zoom.read();
                             let viewport = Viewport::from_transform(canvas_w, canvas_h, (pan_x, pan_y), current_zoom, gs);
 
-                            // Pre-filter components for visibility (O(visible) rendering)
-                            // Component symbols typically span ~60 grid units, so use half_size of 30
-                            let visible_components: Vec<_> = schematic.read().components.iter()
-                                .filter(|c| viewport.is_component_visible(c.pos, 40))
-                                .cloned()
-                                .collect();
+                            // PERFORMANCE: Check if render context needs rebuilding
+                            // Only rebuilds on topology changes (add/delete/move), not on every mouse move
+                            let topology_version = schematic.read().topology_version();
+                            if render_ctx.read().needs_rebuild(topology_version) {
+                                let sch = schematic.read();
+                                render_ctx.write().rebuild(&sch.components, &sch.wires, gs, topology_version);
+                            }
+
+                            // PERFORMANCE: Use spatial index for O(log n + k) visibility filtering
+                            // instead of O(n) linear scan
+                            let visible_ids = render_ctx.read().visible_component_ids(&viewport);
+                            let visible_components: Vec<_> = {
+                                let sch = schematic.read();
+                                visible_ids
+                                    .iter()
+                                    .filter_map(|id| sch.components.iter().find(|c| c.id == *id))
+                                    .cloned()
+                                    .collect()
+                            };
+
+                            // Get cached context for O(1) label lookups
+                            let ctx = render_ctx.read();
 
                             rsx! {
                                 for comp in visible_components.iter() {
                                     {
-                                        // Compute smart label positions using LabelPlacer
-                                        let wires: Vec<_> = schematic.read().wires.clone();
-                                        let components: Vec<_> = schematic.read().components.clone();
-                                        let (name_pos, value_pos) = crate::views::label_placement::compute_label_positions(
-                                            comp,
-                                            &wires,
-                                            &components,
-                                            gs,
-                                        );
+                                        // PERFORMANCE: O(1) cached label position lookup
+                                        // Eliminates per-frame O(n²) label computation
+                                        let label_pos = ctx.label_position_or_default(comp.id);
 
                                         rsx! {
                                             CompSvg {
@@ -1635,10 +1676,10 @@ pub fn Schematic() -> Element {
                                                 value: comp.value.clone(),
                                                 grid_size: gs,
                                                 selected: selection.has_component(comp.id),
-                                                name_label_x: name_pos.x,
-                                                name_label_y: name_pos.y,
-                                                value_label_x: value_pos.x,
-                                                value_label_y: value_pos.y,
+                                                name_label_x: label_pos.name_x,
+                                                name_label_y: label_pos.name_y,
+                                                value_label_x: label_pos.value_x,
+                                                value_label_y: label_pos.value_y,
                                                 on_label_drag: move |(comp_id, is_name, new_x, new_y): (u64, bool, f64, f64)| {
                                                     // Update component label position in state
                                                     let old_state = schematic.read().clone();
