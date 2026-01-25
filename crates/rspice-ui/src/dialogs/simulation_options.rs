@@ -13,6 +13,9 @@ use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use super::resizable_dialog::ResizeEdge;
+use crate::theme::Theme;
+
 // =============================================================================
 // Integration Method
 // =============================================================================
@@ -966,6 +969,9 @@ pub struct SimulationOptionsDialogProps {
 /// Simulation options dialog component with editable fields
 #[component]
 pub fn SimulationOptionsDialog(props: SimulationOptionsDialogProps) -> Element {
+    let theme: Signal<Theme> = use_context();
+    let th = theme.read();
+
     let mut active_category = use_signal(|| OptionCategory::Transient);
 
     // Local mutable state for all options - initialized from props
@@ -976,9 +982,30 @@ pub fn SimulationOptionsDialog(props: SimulationOptionsDialogProps) -> Element {
         local_options.set(props.options.clone());
     });
 
+    // Draggable dialog state
+    let mut dialog_pos = use_signal(|| (150.0_f64, 80.0_f64));
+    let mut dragging = use_signal(|| false);
+    let mut drag_offset = use_signal(|| (0.0_f64, 0.0_f64));
+
+    // Resizable dialog state
+    let mut dialog_size = use_signal(|| (750.0_f64, 600.0_f64));
+    let mut resize_edge: Signal<ResizeEdge> = use_signal(|| ResizeEdge::None);
+    let mut resize_start_mouse = use_signal(|| (0.0_f64, 0.0_f64));
+    let mut resize_start_size = use_signal(|| (0.0_f64, 0.0_f64));
+    let mut resize_start_pos = use_signal(|| (0.0_f64, 0.0_f64));
+
     if !props.is_open {
         return rsx! {};
     }
+
+    // Size constraints
+    let min_w = 650.0_f64;
+    let min_h = 500.0_f64;
+    let max_w = 1200.0_f64;
+    let max_h = 900.0_f64;
+
+    let (pos_x, pos_y) = *dialog_pos.read();
+    let (dialog_w, dialog_h) = *dialog_size.read();
 
     // Preset application handlers
     let apply_fast = move |_| {
@@ -1009,154 +1036,324 @@ pub fn SimulationOptionsDialog(props: SimulationOptionsDialogProps) -> Element {
         local_options.set(SimulationOptions::default());
     };
 
+    // Check if we're currently interacting (drag or resize)
+    let is_interacting = *dragging.read() || *resize_edge.read() != ResizeEdge::None;
+
+    // Get theme values for inline styles
+    let bg_secondary = th.bg_secondary();
+    let bg_primary = th.bg_primary();
+    let bg_tertiary = th.bg_tertiary();
+    let border = th.border();
+    let text_primary = th.text_primary();
+    let text_muted = th.text_muted();
+    let accent_primary = th.accent_primary();
+
     rsx! {
-        // Backdrop overlay
-        div {
-            class: "dialog-backdrop",
-            style: "position: fixed; top: 0; left: 0; right: 0; bottom: 0; \
-                    background: rgba(0, 0, 0, 0.6); z-index: 999;",
-            onclick: move |_| props.on_close.call(()),
+        // Full-screen capture overlay (only during drag/resize)
+        if is_interacting {
+            div {
+                style: "position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 9999; cursor: inherit;",
+                onmousemove: move |e| {
+                    let page = e.page_coordinates();
+
+                    if *dragging.read() {
+                        let (ox, oy) = *drag_offset.read();
+                        dialog_pos.set((page.x - ox, page.y - oy));
+                        return;
+                    }
+
+                    let edge = *resize_edge.read();
+                    if edge != ResizeEdge::None {
+                        let (start_mx, start_my) = *resize_start_mouse.read();
+                        let (start_w, start_h) = *resize_start_size.read();
+                        let (start_px, start_py) = *resize_start_pos.read();
+
+                        let delta_x = page.x - start_mx;
+                        let delta_y = page.y - start_my;
+
+                        let mut new_w = start_w;
+                        let mut new_h = start_h;
+                        let mut new_px = start_px;
+                        let mut new_py = start_py;
+
+                        match edge {
+                            ResizeEdge::Right => new_w = start_w + delta_x,
+                            ResizeEdge::Left => {
+                                new_w = start_w - delta_x;
+                                new_px = start_px + delta_x;
+                            }
+                            ResizeEdge::Bottom => new_h = start_h + delta_y,
+                            ResizeEdge::Top => {
+                                new_h = start_h - delta_y;
+                                new_py = start_py + delta_y;
+                            }
+                            ResizeEdge::BottomRight => {
+                                new_w = start_w + delta_x;
+                                new_h = start_h + delta_y;
+                            }
+                            ResizeEdge::BottomLeft => {
+                                new_w = start_w - delta_x;
+                                new_h = start_h + delta_y;
+                                new_px = start_px + delta_x;
+                            }
+                            ResizeEdge::TopRight => {
+                                new_w = start_w + delta_x;
+                                new_h = start_h - delta_y;
+                                new_py = start_py + delta_y;
+                            }
+                            ResizeEdge::TopLeft => {
+                                new_w = start_w - delta_x;
+                                new_h = start_h - delta_y;
+                                new_px = start_px + delta_x;
+                                new_py = start_py + delta_y;
+                            }
+                            ResizeEdge::None => {}
+                        }
+
+                        let clamped_w = new_w.clamp(min_w, max_w);
+                        let clamped_h = new_h.clamp(min_h, max_h);
+
+                        if edge.moves_left() && clamped_w != new_w {
+                            new_px = start_px + (start_w - clamped_w);
+                        }
+                        if edge.moves_top() && clamped_h != new_h {
+                            new_py = start_py + (start_h - clamped_h);
+                        }
+
+                        dialog_size.set((clamped_w, clamped_h));
+                        dialog_pos.set((new_px, new_py));
+                    }
+                },
+                onmouseup: move |_| {
+                    dragging.set(false);
+                    resize_edge.set(ResizeEdge::None);
+                },
+            }
         }
 
-        // Dialog content
+        // Positioned draggable/resizable dialog (non-modal)
         div {
-            class: "simulation-options-dialog",
-            style: "position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); \
-                    background: #1a1a2e; border: 1px solid #333; border-radius: 8px; \
-                    padding: 20px; min-width: 650px; max-width: 800px; max-height: 85vh; overflow: auto; \
-                    color: #fff; font-family: system-ui, sans-serif; box-shadow: 0 10px 40px rgba(0,0,0,0.5); \
-                    z-index: 1000;",
-            // Prevent clicks inside dialog from closing it
-            onclick: move |evt| evt.stop_propagation(),
+            style: "position: fixed; left: {pos_x}px; top: {pos_y}px; z-index: 1000;",
 
-            // Header with close button
+            // Dialog container
             div {
-                style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid #333;",
-                h2 { style: "margin: 0; font-size: 18px; color: #fff;", "Simulation Options" }
-                button {
-                    style: "background: transparent; border: none; color: #888; font-size: 20px; \
-                            cursor: pointer; padding: 4px 8px; border-radius: 4px;",
-                    onclick: move |_| props.on_close.call(()),
-                    title: "Close (Esc)",
-                    "✕"
+                style: "position: relative; display: flex; flex-direction: column; background: {bg_secondary}; border: 1px solid {border}; border-radius: 8px; width: {dialog_w}px; height: {dialog_h}px; overflow: visible; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);",
+
+                // Resize handles (8 edges/corners)
+                div {
+                    style: "position: absolute; top: -4px; left: 14px; right: 14px; height: 8px; cursor: n-resize; z-index: 10;",
+                    onmousedown: move |e: Event<MouseData>| {
+                        e.stop_propagation();
+                        resize_edge.set(ResizeEdge::Top);
+                        resize_start_mouse.set((e.page_coordinates().x, e.page_coordinates().y));
+                        resize_start_size.set((dialog_w, dialog_h));
+                        resize_start_pos.set((pos_x, pos_y));
+                    },
                 }
-            }
+                div {
+                    style: "position: absolute; bottom: -4px; left: 14px; right: 14px; height: 8px; cursor: s-resize; z-index: 10;",
+                    onmousedown: move |e: Event<MouseData>| {
+                        e.stop_propagation();
+                        resize_edge.set(ResizeEdge::Bottom);
+                        resize_start_mouse.set((e.page_coordinates().x, e.page_coordinates().y));
+                        resize_start_size.set((dialog_w, dialog_h));
+                        resize_start_pos.set((pos_x, pos_y));
+                    },
+                }
+                div {
+                    style: "position: absolute; left: -4px; top: 14px; bottom: 14px; width: 8px; cursor: w-resize; z-index: 10;",
+                    onmousedown: move |e: Event<MouseData>| {
+                        e.stop_propagation();
+                        resize_edge.set(ResizeEdge::Left);
+                        resize_start_mouse.set((e.page_coordinates().x, e.page_coordinates().y));
+                        resize_start_size.set((dialog_w, dialog_h));
+                        resize_start_pos.set((pos_x, pos_y));
+                    },
+                }
+                div {
+                    style: "position: absolute; right: -4px; top: 14px; bottom: 14px; width: 8px; cursor: e-resize; z-index: 10;",
+                    onmousedown: move |e: Event<MouseData>| {
+                        e.stop_propagation();
+                        resize_edge.set(ResizeEdge::Right);
+                        resize_start_mouse.set((e.page_coordinates().x, e.page_coordinates().y));
+                        resize_start_size.set((dialog_w, dialog_h));
+                        resize_start_pos.set((pos_x, pos_y));
+                    },
+                }
+                div {
+                    style: "position: absolute; top: -4px; left: -4px; width: 18px; height: 18px; cursor: nw-resize; z-index: 11;",
+                    onmousedown: move |e: Event<MouseData>| {
+                        e.stop_propagation();
+                        resize_edge.set(ResizeEdge::TopLeft);
+                        resize_start_mouse.set((e.page_coordinates().x, e.page_coordinates().y));
+                        resize_start_size.set((dialog_w, dialog_h));
+                        resize_start_pos.set((pos_x, pos_y));
+                    },
+                }
+                div {
+                    style: "position: absolute; top: -4px; right: -4px; width: 18px; height: 18px; cursor: ne-resize; z-index: 11;",
+                    onmousedown: move |e: Event<MouseData>| {
+                        e.stop_propagation();
+                        resize_edge.set(ResizeEdge::TopRight);
+                        resize_start_mouse.set((e.page_coordinates().x, e.page_coordinates().y));
+                        resize_start_size.set((dialog_w, dialog_h));
+                        resize_start_pos.set((pos_x, pos_y));
+                    },
+                }
+                div {
+                    style: "position: absolute; bottom: -4px; left: -4px; width: 18px; height: 18px; cursor: sw-resize; z-index: 11;",
+                    onmousedown: move |e: Event<MouseData>| {
+                        e.stop_propagation();
+                        resize_edge.set(ResizeEdge::BottomLeft);
+                        resize_start_mouse.set((e.page_coordinates().x, e.page_coordinates().y));
+                        resize_start_size.set((dialog_w, dialog_h));
+                        resize_start_pos.set((pos_x, pos_y));
+                    },
+                }
+                div {
+                    style: "position: absolute; bottom: -4px; right: -4px; width: 18px; height: 18px; cursor: se-resize; z-index: 11;",
+                    onmousedown: move |e: Event<MouseData>| {
+                        e.stop_propagation();
+                        resize_edge.set(ResizeEdge::BottomRight);
+                        resize_start_mouse.set((e.page_coordinates().x, e.page_coordinates().y));
+                        resize_start_size.set((dialog_w, dialog_h));
+                        resize_start_pos.set((pos_x, pos_y));
+                    },
+                }
 
-            // Category tabs - interactive
-            div {
-                style: "display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid #333;",
-                for cat in OptionCategory::all() {
+                // Draggable header
+                div {
+                    style: "display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid {border}; background: {bg_tertiary}; cursor: move; user-select: none; flex-shrink: 0;",
+                    onmousedown: move |e| {
+                        let page = e.page_coordinates();
+                        let (px, py) = *dialog_pos.read();
+                        drag_offset.set((page.x - px, page.y - py));
+                        dragging.set(true);
+                    },
+                    h2 {
+                        style: "margin: 0; font-size: 16px; font-weight: 600; color: {text_primary}; pointer-events: none;",
+                        "Simulation Options"
+                    }
+                    button {
+                        style: "background: none; border: none; color: {text_muted}; font-size: 20px; cursor: pointer; padding: 4px; line-height: 1;",
+                        onmousedown: move |e| e.stop_propagation(),
+                        onclick: move |_| props.on_close.call(()),
+                        "×"
+                    }
+                }
+
+                // Scrollable content area
+                div {
+                    style: "flex: 1; overflow: auto; padding: 0 20px 20px 20px;",
+
+                    // Category tabs
+                    div {
+                        style: "display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid {border}; padding-top: 10px;",
+                        for cat in OptionCategory::all() {
+                            {
+                                let cat_val = *cat;
+                                let is_active = *active_category.read() == cat_val;
+                                let bg = if is_active { bg_tertiary.to_string() } else { "transparent".to_string() };
+                                let color = if is_active { text_primary.to_string() } else { text_muted.to_string() };
+                                let border_bottom = if is_active { format!("2px solid {}", accent_primary) } else { "2px solid transparent".to_string() };
+                                rsx! {
+                                    button {
+                                        style: "background: {bg}; color: {color}; border: none; padding: 10px 18px; cursor: pointer; font-size: 13px; font-weight: 500; border-bottom: {border_bottom}; transition: all 0.15s ease;",
+                                        onclick: move |_| {
+                                            active_category.set(cat_val);
+                                        },
+                                        "{cat_val.display_name()}"
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Content based on active category
+                    div {
+                        style: "min-height: 250px;",
+                        match *active_category.read() {
+                            OptionCategory::Transient => rsx! {
+                                TransientOptionsPanel { options: local_options }
+                            },
+                            OptionCategory::Ac => rsx! {
+                                AcOptionsPanel { options: local_options }
+                            },
+                            OptionCategory::Dc => rsx! {
+                                DcOptionsPanel { options: local_options }
+                            },
+                            OptionCategory::Convergence => rsx! {
+                                ConvergenceOptionsPanel { options: local_options }
+                            },
+                            OptionCategory::Advanced => rsx! {
+                                AdvancedOptionsPanel { options: local_options }
+                            },
+                        }
+                    }
+
+                    // Validation errors
                     {
-                        let cat_val = *cat;
-                        let is_active = *active_category.read() == cat_val;
-                        let bg = if is_active { "#2a2a3e" } else { "transparent" };
-                        let color = if is_active { "#fff" } else { "#888" };
-                        let border_bottom = if is_active { "2px solid #4CAF50" } else { "2px solid transparent" };
-                        rsx! {
-                            button {
-                                style: "background: {bg}; color: {color}; border: none; padding: 10px 18px; \
-                                        cursor: pointer; font-size: 13px; font-weight: 500; \
-                                        border-bottom: {border_bottom}; transition: all 0.15s ease;",
-                                onclick: move |_| {
-                                    active_category.set(cat_val);
-                                },
-                                "{cat_val.display_name()}"
+                        let errors = local_options.read().validate();
+                        if !errors.is_empty() {
+                            rsx! {
+                                div {
+                                    style: "margin-top: 15px; padding: 12px; background: #3a2222; border: 1px solid #552222; border-radius: 6px;",
+                                    div { style: "color: #f44336; font-weight: 600; margin-bottom: 8px; font-size: 13px;", "⚠ Validation Errors" }
+                                    for error in errors {
+                                        div { style: "color: #ff9999; font-size: 12px; margin-left: 8px;", "• {error}" }
+                                    }
+                                }
                             }
+                        } else {
+                            rsx! {}
+                        }
+                    }
+
+                    // Presets bar
+                    div {
+                        style: "margin-top: 20px; padding: 12px; background: {bg_primary}; border-radius: 6px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;",
+                        span { style: "color: {text_muted}; font-size: 12px; margin-right: 8px;", "Quick Presets:" }
+                        button {
+                            style: "background: #ff980022; color: #ff9800; border: 1px solid #ff9800; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500;",
+                            onclick: apply_fast,
+                            "⚡ Fast"
+                        }
+                        button {
+                            style: "background: #4CAF5022; color: #4CAF50; border: 1px solid #4CAF50; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500;",
+                            onclick: apply_accurate,
+                            "✓ Accurate"
+                        }
+                        button {
+                            style: "background: #2196F322; color: #2196F3; border: 1px solid #2196F3; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500;",
+                            onclick: apply_rf,
+                            "📡 RF"
+                        }
+                        button {
+                            style: "background: #9c27b022; color: #9c27b0; border: 1px solid #9c27b0; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500;",
+                            onclick: apply_power,
+                            "⚡ Power"
+                        }
+                        button {
+                            style: "background: transparent; color: {text_muted}; border: 1px solid {border}; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; margin-left: auto;",
+                            onclick: reset_defaults,
+                            "Reset Defaults"
                         }
                     }
                 }
-            }
 
-            // Content based on active category - now with editable fields
-            div {
-                style: "min-height: 320px; padding: 10px 0;",
-                match *active_category.read() {
-                    OptionCategory::Transient => rsx! {
-                        TransientOptionsPanel { options: local_options }
-                    },
-                    OptionCategory::Ac => rsx! {
-                        AcOptionsPanel { options: local_options }
-                    },
-                    OptionCategory::Dc => rsx! {
-                        DcOptionsPanel { options: local_options }
-                    },
-                    OptionCategory::Convergence => rsx! {
-                        ConvergenceOptionsPanel { options: local_options }
-                    },
-                    OptionCategory::Advanced => rsx! {
-                        AdvancedOptionsPanel { options: local_options }
-                    },
-                }
-            }
-
-            // Validation errors
-            {
-                let errors = local_options.read().validate();
-                if !errors.is_empty() {
-                    rsx! {
-                        div {
-                            style: "margin-top: 15px; padding: 12px; background: #3a2222; border: 1px solid #552222; border-radius: 6px;",
-                            div { style: "color: #f44336; font-weight: 600; margin-bottom: 8px; font-size: 13px;", "⚠ Validation Errors" }
-                            for error in errors {
-                                div { style: "color: #ff9999; font-size: 12px; margin-left: 8px;", "• {error}" }
-                            }
-                        }
+                // Footer with action buttons
+                div {
+                    style: "padding: 12px 16px; border-top: 1px solid {border}; display: flex; justify-content: flex-end; gap: 10px; background: {bg_tertiary}; flex-shrink: 0;",
+                    button {
+                        style: "background: transparent; color: {text_muted}; border: 1px solid {border}; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 13px;",
+                        onclick: move |_| props.on_close.call(()),
+                        "Cancel"
                     }
-                } else {
-                    rsx! {}
-                }
-            }
-
-            // Presets bar
-            div {
-                style: "margin-top: 20px; padding: 12px; background: #222233; border-radius: 6px; display: flex; align-items: center; gap: 10px;",
-                span { style: "color: #888; font-size: 12px; margin-right: 8px;", "Quick Presets:" }
-                button {
-                    style: "background: #ff980022; color: #ff9800; border: 1px solid #ff9800; \
-                            padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500;",
-                    onclick: apply_fast,
-                    "⚡ Fast"
-                }
-                button {
-                    style: "background: #4CAF5022; color: #4CAF50; border: 1px solid #4CAF50; \
-                            padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500;",
-                    onclick: apply_accurate,
-                    "✓ Accurate"
-                }
-                button {
-                    style: "background: #2196F322; color: #2196F3; border: 1px solid #2196F3; \
-                            padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500;",
-                    onclick: apply_rf,
-                    "📡 RF"
-                }
-                button {
-                    style: "background: #9c27b022; color: #9c27b0; border: 1px solid #9c27b0; \
-                            padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500;",
-                    onclick: apply_power,
-                    "⚡ Power"
-                }
-                button {
-                    style: "background: transparent; color: #666; border: 1px solid #444; \
-                            padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; margin-left: auto;",
-                    onclick: reset_defaults,
-                    "Reset Defaults"
-                }
-            }
-
-            // Footer with action buttons
-            div {
-                style: "margin-top: 20px; padding-top: 15px; border-top: 1px solid #333; display: flex; justify-content: flex-end; gap: 10px;",
-                button {
-                    style: "background: transparent; color: #888; border: 1px solid #444; \
-                            padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 13px;",
-                    onclick: move |_| props.on_close.call(()),
-                    "Cancel"
-                }
-                button {
-                    style: "background: #4CAF50; color: #fff; border: none; \
-                            padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600;",
-                    onclick: save_and_close,
-                    "Apply Changes"
+                    button {
+                        style: "background: {accent_primary}; color: #fff; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600;",
+                        onclick: save_and_close,
+                        "Apply Changes"
+                    }
                 }
             }
         }

@@ -4,6 +4,7 @@
 
 use dioxus::prelude::*;
 
+use super::super::resizable_dialog::ResizeEdge;
 use super::form_components::{format_value, SidebarButton};
 use super::tabs::{
     AcTab, CornerTab, DcSweepTab, EnvelopeTab, FourierTab, HarmonicBalanceTab, MonteCarloTab,
@@ -42,6 +43,13 @@ pub fn SimulationDialog(props: SimulationDialogProps) -> Element {
     let mut dialog_pos = use_signal(|| (100.0_f64, 100.0_f64)); // (x, y) in pixels
     let mut dragging = use_signal(|| false);
     let mut drag_offset = use_signal(|| (0.0_f64, 0.0_f64));
+
+    // Resizable dialog state
+    let mut dialog_size = use_signal(|| (560.0_f64, 650.0_f64)); // (width, height)
+    let mut resize_edge: Signal<ResizeEdge> = use_signal(|| ResizeEdge::None);
+    let mut resize_start_mouse = use_signal(|| (0.0_f64, 0.0_f64));
+    let mut resize_start_size = use_signal(|| (0.0_f64, 0.0_f64));
+    let mut resize_start_pos = use_signal(|| (0.0_f64, 0.0_f64));
 
     // Form values - stored as strings for editing, parsed on confirm
     let tran_stop = use_signal(|| {
@@ -1235,6 +1243,13 @@ pub fn SimulationDialog(props: SimulationDialogProps) -> Element {
     };
 
     let (pos_x, pos_y) = *dialog_pos.read();
+    let (dialog_w, dialog_h) = *dialog_size.read();
+
+    // Size constraints
+    let min_w = 450.0_f64;
+    let min_h = 400.0_f64;
+    let max_w = 1200.0_f64;
+    let max_h = 900.0_f64;
 
     // Read enabled states for sidebar buttons
     let is_tran_enabled = *transient_enabled.read();
@@ -1258,27 +1273,200 @@ pub fn SimulationDialog(props: SimulationDialogProps) -> Element {
     let is_param_enabled = *param_enabled.read();
     let current_tab = *active_tab.read();
 
+    // Check if we're currently interacting (drag or resize)
+    let is_interacting = *dragging.read() || *resize_edge.read() != ResizeEdge::None;
+
     rsx! {
-        // Positioned draggable dialog (no modal backdrop - allows interaction with schematic)
+        // Full-screen capture overlay (only during drag/resize to capture mouse everywhere)
+        if is_interacting {
+            div {
+                style: "position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 9999; cursor: inherit;",
+                onmousemove: move |e| {
+                    let page = e.page_coordinates();
+
+                    // Handle drag
+                    if *dragging.read() {
+                        let (ox, oy) = *drag_offset.read();
+                        dialog_pos.set((page.x - ox, page.y - oy));
+                        return;
+                    }
+
+                    // Handle resize
+                    let edge = *resize_edge.read();
+                    if edge != ResizeEdge::None {
+                        let (start_mx, start_my) = *resize_start_mouse.read();
+                        let (start_w, start_h) = *resize_start_size.read();
+                        let (start_px, start_py) = *resize_start_pos.read();
+
+                        let delta_x = page.x - start_mx;
+                        let delta_y = page.y - start_my;
+
+                        let mut new_w = start_w;
+                        let mut new_h = start_h;
+                        let mut new_px = start_px;
+                        let mut new_py = start_py;
+
+                        match edge {
+                            ResizeEdge::Right => new_w = start_w + delta_x,
+                            ResizeEdge::Left => {
+                                new_w = start_w - delta_x;
+                                new_px = start_px + delta_x;
+                            }
+                            ResizeEdge::Bottom => new_h = start_h + delta_y,
+                            ResizeEdge::Top => {
+                                new_h = start_h - delta_y;
+                                new_py = start_py + delta_y;
+                            }
+                            ResizeEdge::BottomRight => {
+                                new_w = start_w + delta_x;
+                                new_h = start_h + delta_y;
+                            }
+                            ResizeEdge::BottomLeft => {
+                                new_w = start_w - delta_x;
+                                new_h = start_h + delta_y;
+                                new_px = start_px + delta_x;
+                            }
+                            ResizeEdge::TopRight => {
+                                new_w = start_w + delta_x;
+                                new_h = start_h - delta_y;
+                                new_py = start_py + delta_y;
+                            }
+                            ResizeEdge::TopLeft => {
+                                new_w = start_w - delta_x;
+                                new_h = start_h - delta_y;
+                                new_px = start_px + delta_x;
+                                new_py = start_py + delta_y;
+                            }
+                            ResizeEdge::None => {}
+                        }
+
+                        // Clamp size
+                        let clamped_w = new_w.clamp(min_w, max_w);
+                        let clamped_h = new_h.clamp(min_h, max_h);
+
+                        // Adjust position if clamped
+                        if edge.moves_left() && clamped_w != new_w {
+                            new_px = start_px + (start_w - clamped_w);
+                        }
+                        if edge.moves_top() && clamped_h != new_h {
+                            new_py = start_py + (start_h - clamped_h);
+                        }
+
+                        dialog_size.set((clamped_w, clamped_h));
+                        dialog_pos.set((new_px, new_py));
+                    }
+                },
+                onmouseup: move |_| {
+                    dragging.set(false);
+                    resize_edge.set(ResizeEdge::None);
+                },
+            }
+        }
+
+        // Positioned draggable/resizable dialog
         div {
             style: "position: fixed; left: {pos_x}px; top: {pos_y}px; z-index: 1000;",
-            onmousemove: move |e| {
-                if *dragging.read() {
-                    let (ox, oy) = *drag_offset.read();
-                    let page = e.page_coordinates();
-                    dialog_pos.set((page.x - ox, page.y - oy));
-                }
-            },
-            onmouseup: move |_| dragging.set(false),
-            onmouseleave: move |_| dragging.set(false),
 
             // Dialog container
             div {
-                style: "display: flex; flex-direction: column; background: {th.bg_secondary()}; border: 1px solid {th.border()}; border-radius: 8px; width: 520px; max-height: 80vh; overflow: hidden; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);",
+                style: "position: relative; display: flex; flex-direction: column; background: {th.bg_secondary()}; border: 1px solid {th.border()}; border-radius: 8px; width: {dialog_w}px; height: {dialog_h}px; overflow: visible; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);",
+
+                // =======================================================
+                // RESIZE HANDLES
+                // =======================================================
+
+                // Top edge
+                div {
+                    style: "position: absolute; top: -4px; left: 14px; right: 14px; height: 8px; cursor: n-resize; z-index: 10;",
+                    onmousedown: move |e: Event<MouseData>| {
+                        e.stop_propagation();
+                        resize_edge.set(ResizeEdge::Top);
+                        resize_start_mouse.set((e.page_coordinates().x, e.page_coordinates().y));
+                        resize_start_size.set((dialog_w, dialog_h));
+                        resize_start_pos.set((pos_x, pos_y));
+                    },
+                }
+                // Bottom edge
+                div {
+                    style: "position: absolute; bottom: -4px; left: 14px; right: 14px; height: 8px; cursor: s-resize; z-index: 10;",
+                    onmousedown: move |e: Event<MouseData>| {
+                        e.stop_propagation();
+                        resize_edge.set(ResizeEdge::Bottom);
+                        resize_start_mouse.set((e.page_coordinates().x, e.page_coordinates().y));
+                        resize_start_size.set((dialog_w, dialog_h));
+                        resize_start_pos.set((pos_x, pos_y));
+                    },
+                }
+                // Left edge
+                div {
+                    style: "position: absolute; left: -4px; top: 14px; bottom: 14px; width: 8px; cursor: w-resize; z-index: 10;",
+                    onmousedown: move |e: Event<MouseData>| {
+                        e.stop_propagation();
+                        resize_edge.set(ResizeEdge::Left);
+                        resize_start_mouse.set((e.page_coordinates().x, e.page_coordinates().y));
+                        resize_start_size.set((dialog_w, dialog_h));
+                        resize_start_pos.set((pos_x, pos_y));
+                    },
+                }
+                // Right edge
+                div {
+                    style: "position: absolute; right: -4px; top: 14px; bottom: 14px; width: 8px; cursor: e-resize; z-index: 10;",
+                    onmousedown: move |e: Event<MouseData>| {
+                        e.stop_propagation();
+                        resize_edge.set(ResizeEdge::Right);
+                        resize_start_mouse.set((e.page_coordinates().x, e.page_coordinates().y));
+                        resize_start_size.set((dialog_w, dialog_h));
+                        resize_start_pos.set((pos_x, pos_y));
+                    },
+                }
+                // Top-left corner
+                div {
+                    style: "position: absolute; top: -4px; left: -4px; width: 18px; height: 18px; cursor: nw-resize; z-index: 11;",
+                    onmousedown: move |e: Event<MouseData>| {
+                        e.stop_propagation();
+                        resize_edge.set(ResizeEdge::TopLeft);
+                        resize_start_mouse.set((e.page_coordinates().x, e.page_coordinates().y));
+                        resize_start_size.set((dialog_w, dialog_h));
+                        resize_start_pos.set((pos_x, pos_y));
+                    },
+                }
+                // Top-right corner
+                div {
+                    style: "position: absolute; top: -4px; right: -4px; width: 18px; height: 18px; cursor: ne-resize; z-index: 11;",
+                    onmousedown: move |e: Event<MouseData>| {
+                        e.stop_propagation();
+                        resize_edge.set(ResizeEdge::TopRight);
+                        resize_start_mouse.set((e.page_coordinates().x, e.page_coordinates().y));
+                        resize_start_size.set((dialog_w, dialog_h));
+                        resize_start_pos.set((pos_x, pos_y));
+                    },
+                }
+                // Bottom-left corner
+                div {
+                    style: "position: absolute; bottom: -4px; left: -4px; width: 18px; height: 18px; cursor: sw-resize; z-index: 11;",
+                    onmousedown: move |e: Event<MouseData>| {
+                        e.stop_propagation();
+                        resize_edge.set(ResizeEdge::BottomLeft);
+                        resize_start_mouse.set((e.page_coordinates().x, e.page_coordinates().y));
+                        resize_start_size.set((dialog_w, dialog_h));
+                        resize_start_pos.set((pos_x, pos_y));
+                    },
+                }
+                // Bottom-right corner
+                div {
+                    style: "position: absolute; bottom: -4px; right: -4px; width: 18px; height: 18px; cursor: se-resize; z-index: 11;",
+                    onmousedown: move |e: Event<MouseData>| {
+                        e.stop_propagation();
+                        resize_edge.set(ResizeEdge::BottomRight);
+                        resize_start_mouse.set((e.page_coordinates().x, e.page_coordinates().y));
+                        resize_start_size.set((dialog_w, dialog_h));
+                        resize_start_pos.set((pos_x, pos_y));
+                    },
+                }
 
                 // Draggable header
                 div {
-                    style: "display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid {th.border()}; background: {th.bg_tertiary()}; cursor: move; user-select: none;",
+                    style: "display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid {th.border()}; background: {th.bg_tertiary()}; cursor: move; user-select: none; flex-shrink: 0;",
                     onmousedown: move |e| {
                         let page = e.page_coordinates();
                         let (px, py) = *dialog_pos.read();
@@ -1286,7 +1474,7 @@ pub fn SimulationDialog(props: SimulationDialogProps) -> Element {
                         dragging.set(true);
                     },
                     h2 {
-                        style: "margin: 0; font-size: 16px; font-weight: 600; color: {th.text_primary()};",
+                        style: "margin: 0; font-size: 16px; font-weight: 600; color: {th.text_primary()}; pointer-events: none;",
                         "Edit Simulation Command"
                     }
                     button {
@@ -1654,7 +1842,7 @@ pub fn SimulationDialog(props: SimulationDialogProps) -> Element {
 
                 // Footer with buttons
                 div {
-                    style: "display: flex; justify-content: flex-end; gap: 10px; padding: 16px 20px; border-top: 1px solid {th.border()}; background: {th.bg_tertiary()};",
+                    style: "display: flex; justify-content: flex-end; gap: 10px; padding: 12px 16px; border-top: 1px solid {th.border()}; background: {th.bg_tertiary()};",
                     button {
                         style: "padding: 8px 16px; background: transparent; border: 1px solid {th.border()}; border-radius: 4px; color: {th.text_secondary()}; font-size: 13px; cursor: pointer;",
                         onclick: move |_| props.on_cancel.call(()),

@@ -18,7 +18,7 @@ pub fn FormRow(label: &'static str, help: &'static str, children: Element) -> El
 
     rsx! {
         div {
-            style: "display: grid; grid-template-columns: 140px 1fr; gap: 12px; align-items: center; margin-bottom: 14px;",
+            style: "display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 12px; align-items: center; margin-bottom: 14px; overflow: hidden;",
             div {
                 label {
                     style: "font-size: 13px; font-weight: 500; color: {th.text_secondary()};",
@@ -54,7 +54,7 @@ pub fn FormInput(
             style: "display: flex; align-items: center; gap: 6px;",
             input {
                 r#type: "text",
-                style: "flex: 1; padding: 8px 10px; background: {th.bg_primary()}; border: 1px solid {th.border()}; border-radius: 4px; color: {th.text_primary()}; font-size: 13px; font-family: 'JetBrains Mono', 'Fira Code', monospace;",
+                style: "flex: 1; min-width: 0; padding: 8px 10px; background: {th.bg_primary()}; border: 1px solid {th.border()}; border-radius: 4px; color: {th.text_primary()}; font-size: 13px; font-family: 'JetBrains Mono', 'Fira Code', monospace;",
                 placeholder: "{placeholder}",
                 value: "{value}",
                 oninput: move |e| onchange.call(e.value()),
@@ -81,7 +81,7 @@ pub fn FormSelect(value: String, options: Vec<String>, onchange: EventHandler<St
 
     rsx! {
         select {
-            style: "flex: 1; padding: 8px 10px; background: {th.bg_primary()}; border: 1px solid {th.border()}; border-radius: 4px; color: {th.text_primary()}; font-size: 13px; cursor: pointer;",
+            style: "flex: 1; min-width: 0; padding: 8px 10px; background: {th.bg_primary()}; border: 1px solid {th.border()}; border-radius: 4px; color: {th.text_primary()}; font-size: 13px; cursor: pointer;",
             value: "{value}",
             onchange: move |e| onchange.call(e.value()),
             for opt in options.iter() {

@@ -59,6 +59,16 @@ pub fn Toolbar() -> Element {
     let mut sim_options_visible: Signal<SimOptionsVisible> = use_context();
     let sim_options: Signal<SimulationOptions> = use_context();
 
+    // Check if menu triggered simulation (commercial-grade: menu Run → actual run)
+    // When trigger_simulation is set, we reset it and start the simulation
+    let trigger_requested = sim_state.read().trigger_simulation;
+    if trigger_requested && !is_running {
+        // Reset the flag immediately
+        sim_state.write().trigger_simulation = false;
+        // Call the shared run_simulation function from simulation_runner module
+        super::simulation_runner::run_simulation(schematic, sim_state, _sim_config, sim_options);
+    }
+
     // Get current file name for modal display
     let current_filename = schematic
         .read()
@@ -143,181 +153,12 @@ pub fn Toolbar() -> Element {
                 background: {th.bg_secondary()};
                 border-bottom: 1px solid {th.border()};
                 gap: {Theme::SPACING_MD};
+                flex-wrap: nowrap;
+                overflow: hidden;
+                min-width: 0;
             ",
 
-            // Logo / App name
-            div {
-                style: "
-                    display: flex;
-                    align-items: center;
-                    gap: {Theme::SPACING_SM};
-                    padding-right: {Theme::SPACING_MD};
-                    border-right: 1px solid {th.border()};
-                ",
-                // Inline SVG logo
-                svg {
-                    width: "28",
-                    height: "28",
-                    view_box: "0 0 512 512",
-                    fill: "none",
-
-                    // Hexagon Background
-                    path {
-                        d: "M256 32 L464 140 V372 L256 480 L48 372 V140 Z",
-                        fill: "#2a2a3a"
-                    }
-
-                    // Inner Border Highlight
-                    path {
-                        d: "M256 32 L464 140 V372 L256 480 L48 372 V140 Z",
-                        stroke: "#FF5F15",
-                        stroke_opacity: "0.3",
-                        stroke_width: "12"
-                    }
-
-                    // Signal Pulse
-                    path {
-                        d: "M100 256 L160 256 L200 150 L256 360 L312 150 L352 256 L412 256",
-                        stroke: "#FF5F15",
-                        stroke_width: "28",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round"
-                    }
-                }
-
-                span {
-                    style: "
-                        font-size: {Theme::FONT_SIZE_LG};
-                        font-weight: 700;
-                        color: {th.text_primary()};
-                    ",
-                    "RSpice"
-                }
-            }
-
-            // File operations (Schematic-focused)
-            ToolbarGroup {
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    icon: rsx! { Icon { icon: IconType::File, size: 16 } },
-                    title: "New Schematic (Ctrl+N)",
-                    onclick: move |_| {
-                        // Check for unsaved changes
-                        if schematic.read().is_dirty {
-                            pending_action.set(Some(PendingAction::New));
-                            show_save_modal.set(true);
-                        } else {
-                            do_new();
-                        }
-                    },
-                    "New"
-                }
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    icon: rsx! { Icon { icon: IconType::FolderOpen, size: 16 } },
-                    title: "Open Schematic (Ctrl+O)",
-                    onclick: move |_| {
-                        // Check for unsaved changes
-                        if schematic.read().is_dirty {
-                            pending_action.set(Some(PendingAction::Open));
-                            show_save_modal.set(true);
-                        } else {
-                            do_open();
-                        }
-                    },
-                    "Open"
-                }
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    icon: rsx! { Icon { icon: IconType::Save, size: 16 } },
-                    title: "Save Schematic (Ctrl+S)",
-                    onclick: move |_| {
-                        spawn(file_handlers::save_schematic(schematic, sim_state));
-                    },
-                    "Save"
-                }
-                // Export SVG - Schematic export for documentation
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    icon: rsx! { Icon { icon: IconType::Export, size: 16 } },
-                    title: "Export Schematic as SVG",
-                    onclick: move |_| {
-                        spawn(async move {
-                            // Use file dialog to get save path
-                            let dialog = rfd::AsyncFileDialog::new()
-                                .set_title("Export Schematic as SVG")
-                                .add_filter("SVG Files", &["svg"])
-                                .set_file_name("schematic.svg")
-                                .save_file()
-                                .await;
-
-                            if let Some(handle) = dialog {
-                                let path = handle.path();
-
-                                // Generate SVG using export config
-                                let sch = schematic.read();
-                                let doc_name = sch.current_file
-                                    .as_ref()
-                                    .and_then(|p| p.file_stem())
-                                    .map(|n| n.to_string_lossy().to_string())
-                                    .unwrap_or_else(|| "Untitled".to_string());
-
-                                // Create export config with title block
-                                let config = PdfExportConfig::a4_landscape()
-                                    .with_title_block(TitleBlock::new("RSpice", &doc_name))
-                                    .with_margin(15.0);
-
-                                let mut exporter = SvgExporter::new(config);
-                                exporter.begin_document();
-                                exporter.add_border();
-                                exporter.add_title_block();
-
-                                // Add wires
-                                let gs = sch.grid_size as f64;
-                                for wire in &sch.wires {
-                                    let points: Vec<(f64, f64)> = wire.points.iter()
-                                        .map(|p| (p.x as f64 * gs / 20.0 + 50.0, p.y as f64 * gs / 20.0 + 50.0))
-                                        .collect();
-                                    exporter.add_wire(&points);
-                                }
-
-                                // Add component labels
-                                for comp in &sch.components {
-                                    let x = comp.pos.x as f64 * gs / 20.0 + 50.0;
-                                    let y = comp.pos.y as f64 * gs / 20.0 + 50.0;
-                                    exporter.add_text(x, y - 10.0, &comp.name, "text-label");
-                                    exporter.add_text(x, y + 5.0, &comp.value, "text-value");
-                                }
-
-                                let svg_content = exporter.export_svg();
-                                drop(sch);
-
-                                // Write to file
-                                match std::fs::write(path, svg_content) {
-                                    Ok(_) => {
-                                        sim_state.write().console_messages.push(
-                                            ConsoleMessage::success(format!("Exported SVG to {}", path.display()))
-                                        );
-                                        log::info!("Exported schematic to SVG: {}", path.display());
-                                    }
-                                    Err(e) => {
-                                        sim_state.write().console_messages.push(
-                                            ConsoleMessage::error(format!("Failed to export SVG: {}", e))
-                                        );
-                                        log::error!("Failed to export SVG: {}", e);
-                                    }
-                                }
-                            }
-                        });
-                    },
-                    "Export"
-                }
-            }
-
-            // Divider
-            ToolbarDivider {}
-
-            // Edit operations (Undo/Redo) - placeholder, actual undo/redo uses keyboard shortcuts
+            // Edit operations (Undo/Redo)
             ToolbarGroup {
                 Button {
                     variant: ButtonVariant::Ghost,
@@ -335,87 +176,6 @@ pub fn Toolbar() -> Element {
 
             // Divider
             ToolbarDivider {}
-
-            // Tools dropdown menu
-            div {
-                style: "position: relative;",
-
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    icon: rsx! { Icon { icon: IconType::Settings, size: 16 } },
-                    onclick: move |_| {
-                        let is_open = *tools_menu_open.read();
-                        tools_menu_open.set(!is_open);
-                    },
-                    "Tools ▾"
-                }
-
-                // Dropdown menu
-                if *tools_menu_open.read() {
-                    div {
-                        style: "
-                            position: absolute;
-                            top: 100%;
-                            left: 0;
-                            min-width: 220px;
-                            background: {th.surface()};
-                            border: 1px solid {th.border()};
-                            border-radius: 6px;
-                            box-shadow: 0 4px 16px rgba(0,0,0,0.3);
-                            z-index: 1000;
-                            padding: 4px 0;
-                        ",
-
-                        // Import Verilog-A Model
-                        ToolsMenuItem {
-                            label: "Import Verilog-A Model...",
-                            icon: "📦",
-                            enabled: true,
-                            onclick: move |_| {
-                                tools_menu_open.set(false);
-                                veriloga_dialog_visible.set(true);
-                            },
-                        }
-
-                        // Separator
-                        div {
-                            style: "
-                                height: 1px;
-                                background: {th.border()};
-                                margin: 4px 8px;
-                            "
-                        }
-
-                        // Simulator Options (advanced settings)
-                        ToolsMenuItem {
-                            label: "Simulator Options...",
-                            icon: "⚙️",
-                            enabled: true,
-                            onclick: move |_| {
-                                tools_menu_open.set(false);
-                                sim_options_visible.set(SimOptionsVisible(true));
-                            },
-                        }
-
-                        // Separator
-                        div {
-                            style: "
-                                height: 1px;
-                                background: {th.border()};
-                                margin: 4px 8px;
-                            "
-                        }
-
-                        // Model Browser (placeholder for future)
-                        ToolsMenuItem {
-                            label: "Model Browser",
-                            icon: "📚",
-                            enabled: false,
-                            onclick: |_| {},
-                        }
-                    }
-                }
-            }
 
             // Spacer
             div { style: "flex: 1;" }
@@ -747,6 +507,7 @@ fn ToolbarGroup(children: Element) -> Element {
                 display: flex;
                 align-items: center;
                 gap: 2px;
+                flex-shrink: 0;
             ",
             {children}
         }
@@ -766,6 +527,7 @@ fn ToolbarDivider() -> Element {
                 height: 24px;
                 background: {th.border()};
                 margin: 0 {Theme::SPACING_XS};
+                flex-shrink: 0;
             "
         }
     }
