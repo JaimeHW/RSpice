@@ -67,6 +67,14 @@ pub struct SchematicDisplaySettings {
     /// Background grid style in schematic editor
     /// Commercial simulators (Cadence Virtuoso) offer Lines, Dots, or Hidden
     pub grid_style: GridStyle,
+
+    // =========================================================================
+    // Render Backend
+    // =========================================================================
+    /// Rendering backend for the schematic canvas.
+    /// SVG is the default for compatibility; GPU offers better performance
+    /// for large designs with 1000+ components.
+    pub render_mode: RenderMode,
 }
 
 /// Pin name visibility modes
@@ -158,6 +166,56 @@ impl GridStyle {
     }
 }
 
+/// Rendering backend for schematic canvas.
+///
+/// Commercial EDA tools increasingly offer GPU-accelerated rendering
+/// for large designs. SVG remains the default for maximum compatibility.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum RenderMode {
+    /// SVG rendering via DOM (Default - maximum compatibility)
+    /// Best for: small to medium designs (<500 components)
+    #[default]
+    Svg,
+    /// GPU-accelerated rendering via wgpu
+    /// Best for: large designs (1000+ components), smooth pan/zoom
+    Gpu,
+}
+
+impl RenderMode {
+    /// Check if this is GPU rendering mode
+    #[must_use]
+    pub fn is_gpu(self) -> bool {
+        matches!(self, RenderMode::Gpu)
+    }
+
+    /// Get display label for this mode
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            RenderMode::Svg => "SVG",
+            RenderMode::Gpu => "GPU",
+        }
+    }
+
+    /// Get icon for this mode
+    #[must_use]
+    pub fn icon(self) -> &'static str {
+        match self {
+            RenderMode::Svg => "🖼️",
+            RenderMode::Gpu => "🚀",
+        }
+    }
+
+    /// Toggle between SVG and GPU
+    #[must_use]
+    pub fn toggle(self) -> Self {
+        match self {
+            RenderMode::Svg => RenderMode::Gpu,
+            RenderMode::Gpu => RenderMode::Svg,
+        }
+    }
+}
+
 impl Default for SchematicDisplaySettings {
     fn default() -> Self {
         Self {
@@ -183,6 +241,9 @@ impl Default for SchematicDisplaySettings {
 
             // Grid display - Lines is the commercial standard default
             grid_style: GridStyle::Lines,
+
+            // Render backend - SVG for compatibility (GPU for performance)
+            render_mode: RenderMode::Svg,
         }
     }
 }
