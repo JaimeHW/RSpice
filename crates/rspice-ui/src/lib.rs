@@ -11,6 +11,7 @@
 mod app;
 mod components;
 pub mod dialogs;
+pub mod gpu;
 pub mod services;
 mod state;
 mod theme;
