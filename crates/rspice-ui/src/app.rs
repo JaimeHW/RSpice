@@ -8,11 +8,17 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 use rspice_core::library::LibraryManager;
 
-use crate::components::{Panel, ProjectBrowser, SimulationDialog, Toolbar};
-use crate::dialogs::{SimulationOptions, SimulationOptionsDialog};
+use crate::components::menu_bar::{MenuAction as AppMenuAction, MenuBar};
+use crate::components::{Panel, ProjectBrowser, SimulationDialog};
+use crate::dialogs::{
+    AboutDialog, PreferencesDialog, ShortcutsHelpDialog, SimulationOptions, SimulationOptionsDialog,
+};
 use crate::services::cross_probing::CrossProbeManager;
 use crate::state::display_settings::SchematicDisplaySettings;
 use crate::state::hierarchy::HierarchyManager;
+use crate::state::preferences::Preferences;
+use crate::state::recent_files::RecentFiles;
+use crate::state::shortcuts::{ShortcutAction, ShortcutRegistry};
 use crate::state::simulation_command::SimulationConfig;
 use crate::state::{DocumentManager, SchematicState, SimulationState};
 use crate::theme::Theme;
@@ -38,13 +44,25 @@ pub struct SimDialogVisible(pub bool);
 #[derive(Clone, Copy)]
 pub struct SimOptionsVisible(pub bool);
 
+/// Wrapper type for about dialog visibility
+#[derive(Clone, Copy)]
+pub struct AboutDialogVisible(pub bool);
+
+/// Wrapper type for shortcuts help visibility
+#[derive(Clone, Copy)]
+pub struct ShortcutsHelpVisible(pub bool);
+
+/// Wrapper type for preferences dialog visibility
+#[derive(Clone, Copy)]
+pub struct PreferencesDialogVisible(pub bool);
+
 /// Root application component
 #[component]
 pub fn App() -> Element {
     // Initialize global state
     let theme = use_signal(|| Theme::DARK);
-    let sim_state = use_signal(SimulationState::default);
-    let schematic_state = use_signal(SchematicState::default);
+    let mut sim_state = use_signal(SimulationState::default);
+    let mut schematic_state = use_signal(SchematicState::default);
 
     // Display settings for schematic rendering (label visibility, fonts, etc.)
     let display_settings = use_signal(SchematicDisplaySettings::default);
@@ -62,9 +80,9 @@ pub fn App() -> Element {
     let mut console_height = use_signal(|| 120.0_f64);
 
     // Panel visibility state (using wrapper types for distinct context lookup)
-    let waveform_visible = use_signal(|| WaveformVisible(true));
-    let console_visible = use_signal(|| ConsoleVisible(true));
-    let browser_visible = use_signal(|| BrowserVisible(false)); // Default hidden to maximize canvas
+    let mut waveform_visible = use_signal(|| WaveformVisible(true));
+    let mut console_visible = use_signal(|| ConsoleVisible(true));
+    let mut browser_visible = use_signal(|| BrowserVisible(false)); // Default hidden to maximize canvas
 
     // Drag state for resizable dividers: None = not dragging, Some("waveform" or "console")
     let mut resize_dragging: Signal<Option<&'static str>> = use_signal(|| None);
@@ -88,6 +106,20 @@ pub fn App() -> Element {
         mgr
     });
 
+    // Keyboard shortcuts registry
+    let shortcuts = use_signal(ShortcutRegistry::default);
+
+    // User preferences (load from disk or use defaults)
+    let mut preferences = use_signal(Preferences::load_or_default);
+
+    // Recent files (load from disk or use defaults)
+    let recent_files = use_signal(RecentFiles::load_or_default);
+
+    // Dialog visibility states for new dialogs
+    let mut about_visible = use_signal(|| AboutDialogVisible(false));
+    let mut shortcuts_visible = use_signal(|| ShortcutsHelpVisible(false));
+    let mut prefs_visible = use_signal(|| PreferencesDialogVisible(false));
+
     // Provide contexts to all children
     use_context_provider(|| theme);
     use_context_provider(|| sim_state);
@@ -104,6 +136,12 @@ pub fn App() -> Element {
     use_context_provider(|| display_settings);
     use_context_provider(|| hierarchy_manager);
     use_context_provider(|| browser_visible);
+    use_context_provider(|| shortcuts);
+    use_context_provider(|| preferences);
+    use_context_provider(|| recent_files);
+    use_context_provider(|| about_visible);
+    use_context_provider(|| shortcuts_visible);
+    use_context_provider(|| prefs_visible);
 
     let th = theme.read();
 
@@ -125,6 +163,55 @@ pub fn App() -> Element {
                 font-size: {Theme::FONT_SIZE_BASE};
                 overflow: hidden;
             ",
+
+            // Global keyboard event handler for shortcuts
+            tabindex: 0,
+            onkeydown: {
+                let shortcuts = shortcuts.clone();
+                let mut waveform_vis = waveform_visible;
+                let mut console_vis = console_visible;
+                let mut browser_vis = browser_visible;
+                let mut sim_dialog_vis = sim_dialog_visible;
+                let mut about_vis = about_visible;
+                let mut shortcuts_vis = shortcuts_visible;
+                let mut prefs_vis = prefs_visible;
+                move |evt: Event<KeyboardData>| {
+                    let key_code = format!("{:?}", evt.key());
+                    let ctrl = evt.modifiers().contains(Modifiers::CONTROL);
+                    let shift = evt.modifiers().contains(Modifiers::SHIFT);
+                    let alt = evt.modifiers().contains(Modifiers::ALT);
+
+                    // Try to match keyboard event to a shortcut action
+                    if let Some(action) = shortcuts.read().get_action(&key_code, ctrl, shift, alt) {
+                        evt.prevent_default();
+                        match action {
+                            ShortcutAction::ToggleWaveform => {
+                                let current = waveform_vis.read().0;
+                                waveform_vis.set(WaveformVisible(!current));
+                            }
+                            ShortcutAction::ToggleConsole => {
+                                let current = console_vis.read().0;
+                                console_vis.set(ConsoleVisible(!current));
+                            }
+                            ShortcutAction::ToggleLibrary => {
+                                let current = browser_vis.read().0;
+                                browser_vis.set(BrowserVisible(!current));
+                            }
+                            ShortcutAction::SimulationDialog => {
+                                sim_dialog_vis.set(SimDialogVisible(true));
+                            }
+                            ShortcutAction::ShowShortcuts => {
+                                shortcuts_vis.set(ShortcutsHelpVisible(true));
+                            }
+                            ShortcutAction::ShowAbout => {
+                                about_vis.set(AboutDialogVisible(true));
+                            }
+                            // Other actions can be added here
+                            _ => {}
+                        }
+                    }
+                }
+            },
 
             // Global mouse handlers for resize dragging
             onmousemove: move |evt| {
@@ -152,8 +239,243 @@ pub fn App() -> Element {
                 resize_dragging.set(None);
             },
 
-            // Top toolbar
-            Toolbar {}
+            // Menu bar
+            MenuBar {
+                on_action: move |action: AppMenuAction| {
+                    match action {
+                        // ====================================================================
+                        // FILE MENU ACTIONS
+                        // ====================================================================
+                        AppMenuAction::FileNew => {
+                            // Check for unsaved changes before creating new
+                            if schematic_state.read().is_dirty {
+                                // TODO: Show save confirmation dialog
+                                log::warn!("New schematic requested but current has unsaved changes");
+                            }
+                            *schematic_state.write() = crate::state::SchematicState::default();
+                            sim_state.write().console_messages.push(
+                                crate::state::ConsoleMessage::info("Created new schematic".to_string())
+                            );
+                        }
+                        AppMenuAction::FileOpen => {
+                            spawn(crate::components::file_handlers::open_schematic(schematic_state, sim_state));
+                        }
+                        AppMenuAction::FileSave => {
+                            spawn(crate::components::file_handlers::save_schematic(schematic_state, sim_state));
+                        }
+                        AppMenuAction::FileSaveAs => {
+                            // Force save dialog even if file exists
+                            let mut sch = schematic_state.write();
+                            sch.current_file = None; // Clear to force "Save As" dialog
+                            drop(sch);
+                            spawn(crate::components::file_handlers::save_schematic(schematic_state, sim_state));
+                        }
+                        AppMenuAction::FileExportSvg => {
+                            sim_state.write().console_messages.push(
+                                crate::state::ConsoleMessage::info("SVG export: Coming soon".to_string())
+                            );
+                        }
+                        AppMenuAction::FileExportPdf => {
+                            sim_state.write().console_messages.push(
+                                crate::state::ConsoleMessage::info("PDF export: use File → Export → SVG and convert".to_string())
+                            );
+                        }
+                        AppMenuAction::FileExportCsv => {
+                            if sim_state.read().waveforms.is_empty() {
+                                sim_state.write().console_messages.push(
+                                    crate::state::ConsoleMessage::warning("No simulation data to export".to_string())
+                                );
+                            } else {
+                                sim_state.write().console_messages.push(
+                                    crate::state::ConsoleMessage::info("CSV export: Coming soon".to_string())
+                                );
+                            }
+                        }
+                        AppMenuAction::FilePreferences => {
+                            prefs_visible.set(PreferencesDialogVisible(true));
+                        }
+                        AppMenuAction::FileExit => {
+                            // Check for unsaved changes then exit
+                            if schematic_state.read().is_dirty {
+                                log::warn!("Exit requested with unsaved changes");
+                            }
+                            std::process::exit(0);
+                        }
+
+
+                        // ====================================================================
+                        // EDIT MENU ACTIONS
+                        // ====================================================================
+                        AppMenuAction::EditUndo => {
+                            // Undo is handled via keyboard shortcut (Ctrl+Z)
+                            sim_state.write().console_messages.push(
+                                crate::state::ConsoleMessage::info("Undo: Use Ctrl+Z".to_string())
+                            );
+                        }
+                        AppMenuAction::EditRedo => {
+                            // Redo is handled via keyboard shortcut (Ctrl+Y)
+                            sim_state.write().console_messages.push(
+                                crate::state::ConsoleMessage::info("Redo: Use Ctrl+Y".to_string())
+                            );
+                        }
+                        AppMenuAction::EditCut => {
+                            schematic_state.write().copy_selection();
+                            schematic_state.write().delete_selection();
+                        }
+                        AppMenuAction::EditCopy => {
+                            schematic_state.write().copy_selection();
+                        }
+                        AppMenuAction::EditPaste => {
+                            // Paste at center of viewport
+                            let center = crate::state::Point { x: 200, y: 200 };
+                            schematic_state.write().paste_at(center);
+                        }
+                        AppMenuAction::EditDelete => {
+                            schematic_state.write().delete_selection();
+                        }
+                        AppMenuAction::EditSelectAll => {
+                            let mut sch = schematic_state.write();
+                            // Select all components and wires using their IDs
+                            sch.selection.clear();
+                            let comp_ids: Vec<u64> = sch.components.iter().map(|c| c.id).collect();
+                            let wire_ids: Vec<u64> = sch.wires.iter().map(|w| w.id).collect();
+                            for id in comp_ids {
+                                sch.selection.select_component(id);
+                            }
+                            for id in wire_ids {
+                                sch.selection.select_wire(id);
+                            }
+                        }
+                        AppMenuAction::EditDuplicate => {
+                            // Copy then paste with offset
+                            schematic_state.write().copy_selection();
+                            let offset = crate::state::Point { x: 20, y: 20 };
+                            schematic_state.write().paste_at(offset);
+                        }
+                        AppMenuAction::EditFind => {
+                            // TODO: Open find dialog when implemented
+                            sim_state.write().console_messages.push(
+                                crate::state::ConsoleMessage::info("Find: Ctrl+F (coming soon)".to_string())
+                            );
+                        }
+
+                        // ====================================================================
+                        // VIEW MENU ACTIONS
+                        // ====================================================================
+                        AppMenuAction::ViewZoomIn => {
+                            let mut sch = schematic_state.write();
+                            sch.zoom = (sch.zoom * 1.25).min(4.0);
+                        }
+                        AppMenuAction::ViewZoomOut => {
+                            let mut sch = schematic_state.write();
+                            sch.zoom = (sch.zoom / 1.25).max(0.25);
+                        }
+                        AppMenuAction::ViewZoomFit => {
+                            // Zoom to fit all content (use standard viewport size)
+                            schematic_state.write().zoom_to_fit(800.0, 600.0);
+                        }
+                        AppMenuAction::ViewZoom100 => {
+                            schematic_state.write().zoom = 1.0;
+                        }
+                        AppMenuAction::ViewGrid => {
+                            // Grid toggle is managed via display settings/preferences
+                            sim_state.write().console_messages.push(
+                                crate::state::ConsoleMessage::info("Grid: Toggle via View → Preferences".to_string())
+                            );
+                        }
+                        AppMenuAction::ViewConsole => {
+                            let current = console_visible.read().0;
+                            console_visible.set(ConsoleVisible(!current));
+                        }
+                        AppMenuAction::ViewWaveforms => {
+                            let current = waveform_visible.read().0;
+                            waveform_visible.set(WaveformVisible(!current));
+                        }
+                        AppMenuAction::ViewLibrary => {
+                            let current = browser_visible.read().0;
+                            browser_visible.set(BrowserVisible(!current));
+                        }
+
+                        // ====================================================================
+                        // SIMULATE MENU ACTIONS
+                        // ====================================================================
+                        AppMenuAction::SimulateRun => {
+                            // Commercial-grade behavior (like Cadence Spectre):
+                            // Run → actually runs simulation; Setup → opens configuration dialog
+                            let has_components = !schematic_state.read().components.is_empty();
+                            if !has_components {
+                                sim_state.write().console_messages.push(
+                                    crate::state::ConsoleMessage::warning("No circuit to simulate. Add components first.".to_string())
+                                );
+                            } else {
+                                let has_analysis = sim_config.read().has_analysis();
+                                if !has_analysis {
+                                    // No analysis configured - open setup dialog
+                                    sim_dialog_visible.set(SimDialogVisible(true));
+                                } else {
+                                    // Analysis is configured - trigger simulation
+                                    // The toolbar watches trigger_simulation and runs when set
+                                    sim_state.write().trigger_simulation = true;
+                                }
+                            }
+                        }
+                        AppMenuAction::SimulateStop => {
+                            sim_state.write().is_running = false;
+                            sim_state.write().console_messages.push(
+                                crate::state::ConsoleMessage::warning("Simulation stopped".to_string())
+                            );
+                        }
+                        AppMenuAction::SimulateSetup => {
+                            sim_dialog_visible.set(SimDialogVisible(true));
+                        }
+                        AppMenuAction::SimulateOptions => {
+                            sim_options_visible.set(SimOptionsVisible(true));
+                        }
+
+                        // ====================================================================
+                        // TOOLS MENU ACTIONS
+                        // ====================================================================
+                        AppMenuAction::ToolsVerilogA => {
+                            // Open Verilog-A import dialog
+                            // Note: This requires veriloga_dialog_visible signal
+                            sim_state.write().console_messages.push(
+                                crate::state::ConsoleMessage::info("Verilog-A: Use toolbar Tools menu for now".to_string())
+                            );
+                        }
+                        AppMenuAction::ToolsModelBrowser => {
+                            sim_state.write().console_messages.push(
+                                crate::state::ConsoleMessage::info("Model Browser: Coming soon".to_string())
+                            );
+                        }
+                        AppMenuAction::ToolsDrc => {
+                            sim_state.write().console_messages.push(
+                                crate::state::ConsoleMessage::info("Design Rule Check: Coming soon".to_string())
+                            );
+                        }
+
+                        // ====================================================================
+                        // HELP MENU ACTIONS
+                        // ====================================================================
+                        AppMenuAction::HelpShortcuts => {
+                            shortcuts_visible.set(ShortcutsHelpVisible(true));
+                        }
+                        AppMenuAction::HelpAbout => {
+                            about_visible.set(AboutDialogVisible(true));
+                        }
+                    }
+                },
+                recent_files: recent_files.read().get_paths(),
+                is_dirty: schematic_state.read().is_dirty,
+                is_running: sim_state.read().is_running,
+                has_selection: !schematic_state.read().selection.is_empty(),
+                grid_visible: true,
+                console_visible: console_visible.read().0,
+                waveforms_visible: waveform_visible.read().0,
+                library_visible: browser_visible.read().0,
+            }
+
+            // Main toolbar removed - simulation controls consolidated into schematic toolbar
+            // for professional EDA layout (single context-aware toolbar per view)
 
             // Main layout: Icon rail on left (full height) + Content area on right
             div {
@@ -465,6 +787,36 @@ pub fn App() -> Element {
                 },
                 on_save: move |new_options| {
                     sim_options.set(new_options);
+                },
+            }
+
+            // About dialog
+            AboutDialog {
+                visible: about_visible.read().0,
+                on_close: move |_| {
+                    about_visible.set(AboutDialogVisible(false));
+                },
+            }
+
+            // Keyboard shortcuts help
+            ShortcutsHelpDialog {
+                visible: shortcuts_visible.read().0,
+                on_close: move |_| {
+                    shortcuts_visible.set(ShortcutsHelpVisible(false));
+                },
+            }
+
+            // Preferences dialog
+            PreferencesDialog {
+                visible: prefs_visible.read().0,
+                preferences: preferences.read().clone(),
+                on_close: move |_| {
+                    prefs_visible.set(PreferencesDialogVisible(false));
+                },
+                on_save: move |new_prefs: Preferences| {
+                    preferences.set(new_prefs.clone());
+                    // Persist to disk
+                    let _ = new_prefs.save();
                 },
             }
         }

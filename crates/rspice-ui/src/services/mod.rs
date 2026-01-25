@@ -7,12 +7,14 @@
 //!
 //! - `analysis_results` - Unified result types for all analysis types
 //! - `cross_probing` - Cross-probe between schematic and waveform viewer
+//! - `drc` - Design Rule Checker (DRC/ERC)
 //! - `netlist_generator` - Generate SPICE netlists from schematic
 //! - `pdf_export` - Export schematics to PDF format
 //! - `simulation_runner` - Run simulations and manage results
 
 pub mod analysis_results;
 pub mod cross_probing;
+pub mod drc;
 pub mod netlist_generator;
 pub mod pdf_export;
 pub mod simulation_runner;
