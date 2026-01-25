@@ -54,12 +54,16 @@ Bridging the gap between academic tools and commercial EDA, RSpice features a **
 | **Time** | **Transient** | Time-domain simulation with adaptive timestepping |
 | | **Shooting PSS** | Periodic Steady State for switching converters & oscillators |
 | | **Fourier** | THD and spectral decomposition |
+| | **Envelope** | Multi-rate envelope transient for modulated signals |
 | **Freq** | **AC Small-Signal** | Frequency domain response |
 | | **Harmonic Balance** | Nonlinear steady-state solution for RF circuits |
 | | **PNoise** | Phase noise and cyclostationary noise analysis |
 | | **Noise** | Thermal, Shot, and Flicker (1/f) noise summary |
 | | **S-Parameter** | N-port network scattering parameters |
+| | **STB** | Loop gain and stability analysis |
+| | **Transfer Function** | Transfer function computation |
 | **Param** | **DC Sweep** | Nested voltage/current/parameter sweeps |
+| | **Temperature** | Temperature sweep analysis |
 | | **Monte Carlo** | Statistical yield verification with histogram & 3-sigma |
 | | **Corner Analysis** | PVT (Process-Voltage-Temperature) sweep with TT/SS/FF/SF/FS |
 | | **Sensitivity** | DC/AC sensitivity to component variations |
@@ -132,6 +136,7 @@ The RSpice CLI provides a subcommand-based interface designed for automation:
 | `rspice check` | Validate syntax and connectivity |
 | `rspice compare` | Golden file regression testing |
 | `rspice convert` | Format conversion |
+| `rspice compile-va` | Compile Verilog-A models |
 
 ### CI/CD Integration
 

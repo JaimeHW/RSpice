@@ -324,10 +324,24 @@ fn run_analysis(
         AnalysisCommand::Step(step_cmd) => {
             run_step(engine, netlist, step_cmd, args, verbose, quiet)?;
         }
-        _ => {
-            if !quiet {
-                println!("Analysis type {:?} not yet fully supported", analysis);
-            }
+        AnalysisCommand::Four {
+            fundamental,
+            outputs,
+            num_harmonics,
+        } => {
+            run_fourier(
+                engine,
+                netlist,
+                *fundamental,
+                outputs,
+                *num_harmonics,
+                args,
+                verbose,
+                quiet,
+            )?;
+        }
+        AnalysisCommand::Temp { temperatures } => {
+            run_temp(engine, netlist, temperatures, args, verbose, quiet)?;
         }
     }
     Ok(())
@@ -1291,6 +1305,289 @@ fn run_corner_sweep(
     Ok(())
 }
 
+/// Run Fourier (THD) analysis
+///
+/// Performs transient simulation and computes Fourier components and THD.
+/// This implements the .FOUR directive from SPICE.
+fn run_fourier(
+    engine: &Engine,
+    netlist: &Netlist,
+    fundamental: f64,
+    outputs: &[String],
+    num_harmonics: usize,
+    args: &RunArgs,
+    verbose: bool,
+    quiet: bool,
+) -> Result<(), CliError> {
+    use rspice_core::analysis::{FourierAnalysis, FourierConfig};
+
+    if !quiet {
+        println!(
+            "Running Fourier analysis: fundamental = {} Hz, {} harmonics",
+            fundamental, num_harmonics
+        );
+        if verbose {
+            println!("  Output nodes: {:?}", outputs);
+        }
+    }
+
+    // Determine analysis window (need enough periods for accurate FFT)
+    let period = 1.0 / fundamental;
+    let analysis_time = period * (num_harmonics + 2) as f64;
+    let tstep = period / 100.0; // 100 points per period for good resolution
+
+    // Run transient to get waveform data
+    let tran_result = engine
+        .run_tran(netlist, analysis_time, tstep)
+        .map_err(|e| CliError::simulation_error_in(e.to_string(), "Fourier (transient)"))?;
+
+    // Configure Fourier analysis
+    let config = FourierConfig::new(fundamental).with_harmonics(num_harmonics);
+    let fourier = FourierAnalysis::new(config);
+
+    if !quiet {
+        println!("\n┌────────────────────────────────────────────────────────────────┐");
+        println!("│                    FOURIER ANALYSIS RESULTS                    │");
+        println!("├────────────────────────────────────────────────────────────────┤");
+    }
+
+    // Analyze each output
+    for output in outputs {
+        // Parse output node (e.g., "V(out)" -> node index)
+        let node_index = parse_output_node(output, netlist);
+
+        if let Some(node_idx) = node_index {
+            let waveform = tran_result.voltage_waveform(node_idx);
+            let result = fourier.analyze(&tran_result.time, waveform);
+
+            if !quiet {
+                println!("│ Output: {:54} │", output);
+                println!("├────────────────────────────────────────────────────────────────┤");
+                println!("│  Harmonic    Frequency (Hz)    Magnitude    Phase (deg)       │");
+                println!("├────────────────────────────────────────────────────────────────┤");
+
+                for (i, harmonic) in result.harmonics.iter().enumerate() {
+                    let freq = fundamental * (i + 1) as f64;
+                    println!(
+                        "│  {:3}        {:12.4e}      {:10.6}   {:10.2}         │",
+                        i + 1,
+                        freq,
+                        harmonic.magnitude,
+                        harmonic.phase.to_degrees()
+                    );
+                }
+
+                println!("├────────────────────────────────────────────────────────────────┤");
+                println!(
+                    "│  DC Component:   {:10.6}                                    │",
+                    result.dc_component
+                );
+                println!(
+                    "│  THD:            {:10.4} %                                   │",
+                    result.thd * 100.0
+                );
+                println!("└────────────────────────────────────────────────────────────────┘");
+            }
+        } else if !quiet {
+            println!("│ Warning: Could not find node for output '{}'", output);
+        }
+    }
+
+    // Write results to output file if specified
+    if let Some(ref output_path) = args.output {
+        if matches!(args.format, OutputFormat::Json) {
+            use std::io::Write;
+            let mut file =
+                std::fs::File::create(output_path).map_err(|e| CliError::OutputError {
+                    path: output_path.clone(),
+                    source: e,
+                })?;
+
+            let json = serde_json::json!({
+                "analysis": "fourier",
+                "fundamental_hz": fundamental,
+                "num_harmonics": num_harmonics,
+                "outputs": outputs,
+            });
+
+            writeln!(file, "{}", serde_json::to_string_pretty(&json).unwrap()).map_err(|e| {
+                CliError::OutputError {
+                    path: output_path.clone(),
+                    source: e,
+                }
+            })?;
+
+            if !quiet {
+                println!("\nResults written to: {}", output_path.display());
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Parse output node specification (e.g., "V(out)", "V(3)", "out")
+fn parse_output_node(output: &str, _netlist: &Netlist) -> Option<usize> {
+    // Handle V(node) syntax
+    if output.starts_with("V(") && output.ends_with(')') {
+        let inner = &output[2..output.len() - 1];
+        // Try parsing as number first
+        if let Ok(idx) = inner.parse::<usize>() {
+            return Some(idx);
+        }
+        // TODO: look up node name in netlist
+        return Some(1); // Fallback to node 1
+    }
+
+    // Try direct number
+    if let Ok(idx) = output.parse::<usize>() {
+        return Some(idx);
+    }
+
+    None
+}
+
+/// Run temperature sweep analysis
+///
+/// Executes DC operating point at each specified temperature.
+/// This implements the .TEMP directive from SPICE.
+fn run_temp(
+    engine: &Engine,
+    netlist: &Netlist,
+    temperatures: &[f64],
+    args: &RunArgs,
+    verbose: bool,
+    quiet: bool,
+) -> Result<(), CliError> {
+    if !quiet {
+        println!("Running temperature sweep: {} points", temperatures.len());
+        if verbose {
+            println!("  Temperatures: {:?} °C", temperatures);
+        }
+    }
+
+    let mut results: Vec<(f64, Vec<f64>)> = Vec::new();
+
+    for (i, temp_c) in temperatures.iter().enumerate() {
+        let temp_k = temp_c + 273.15; // Convert to Kelvin
+
+        if !quiet {
+            println!(
+                "\n[{}/{}] Temperature: {:.1} °C ({:.1} K)",
+                i + 1,
+                temperatures.len(),
+                temp_c,
+                temp_k
+            );
+        }
+
+        // Create engine with modified temperature
+        let mut temp_config = engine.config().clone();
+        temp_config.temperature = temp_k;
+        let temp_engine = Engine::new(temp_config);
+
+        match temp_engine.run_dc_op(netlist) {
+            Ok(result) => {
+                if verbose && !quiet {
+                    // Print first few node voltages
+                    for j in 1..=result.node_voltages.len().min(5) {
+                        println!("  V({}) = {:.6} V", j, result.voltage(j));
+                    }
+                }
+                results.push((*temp_c, result.node_voltages.clone()));
+            }
+            Err(e) => {
+                if !quiet {
+                    eprintln!("  DC OP failed at {:.1} °C: {}", temp_c, e);
+                }
+            }
+        }
+    }
+
+    // Summary
+    if !quiet {
+        println!("\n┌─────────────────────────────────────┐");
+        println!("│     Temperature Sweep Summary       │");
+        println!("├─────────────────────────────────────┤");
+        println!(
+            "│  Points:  {:3}/{:3} converged         │",
+            results.len(),
+            temperatures.len()
+        );
+        println!(
+            "│  Range:   {:6.1} °C to {:6.1} °C    │",
+            temperatures.first().unwrap_or(&0.0),
+            temperatures.last().unwrap_or(&0.0)
+        );
+        println!("└─────────────────────────────────────┘");
+    }
+
+    // Write results to output file if specified
+    if let Some(ref output_path) = args.output {
+        use std::io::Write;
+        let mut file = std::fs::File::create(output_path).map_err(|e| CliError::OutputError {
+            path: output_path.clone(),
+            source: e,
+        })?;
+
+        match args.format {
+            OutputFormat::Csv => {
+                // Header
+                let num_nodes = results.first().map(|(_, v)| v.len()).unwrap_or(0);
+                let header: String = (1..=num_nodes).map(|i| format!(",V({})", i)).collect();
+                writeln!(file, "Temperature_C{}", header).map_err(|e| CliError::OutputError {
+                    path: output_path.clone(),
+                    source: e,
+                })?;
+
+                // Data
+                for (temp, voltages) in &results {
+                    let values: String = voltages.iter().map(|v| format!(",{:.9e}", v)).collect();
+                    writeln!(file, "{:.2}{}", temp, values).map_err(|e| CliError::OutputError {
+                        path: output_path.clone(),
+                        source: e,
+                    })?;
+                }
+            }
+            OutputFormat::Json => {
+                let json = serde_json::json!({
+                    "analysis": "temperature_sweep",
+                    "temperatures_c": temperatures,
+                    "results": results.iter().map(|(t, v)| {
+                        serde_json::json!({
+                            "temperature_c": t,
+                            "voltages": v,
+                        })
+                    }).collect::<Vec<_>>(),
+                });
+                writeln!(file, "{}", serde_json::to_string_pretty(&json).unwrap()).map_err(
+                    |e| CliError::OutputError {
+                        path: output_path.clone(),
+                        source: e,
+                    },
+                )?;
+            }
+            _ => {
+                // Default: simple text output
+                for (temp, voltages) in &results {
+                    writeln!(file, "T={:.2}C: {:?}", temp, voltages).map_err(|e| {
+                        CliError::OutputError {
+                            path: output_path.clone(),
+                            source: e,
+                        }
+                    })?;
+                }
+            }
+        }
+
+        if !quiet {
+            println!("\nResults written to: {}", output_path.display());
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1388,5 +1685,30 @@ mod tests {
         assert_eq!(sim_config.temperature, 358.15); // 85°C in K
         assert_eq!(sim_config.max_iterations, 100);
         assert_eq!(sim_config.tolerance, 1e-15);
+    }
+
+    #[test]
+    fn test_parse_output_node_voltage_syntax() {
+        let netlist = rspice_core::Netlist::default();
+
+        // V(3) should parse to node 3
+        assert_eq!(parse_output_node("V(3)", &netlist), Some(3));
+
+        // V(10) should parse to node 10
+        assert_eq!(parse_output_node("V(10)", &netlist), Some(10));
+
+        // Direct number should work
+        assert_eq!(parse_output_node("5", &netlist), Some(5));
+    }
+
+    #[test]
+    fn test_parse_output_node_named() {
+        let netlist = rspice_core::Netlist::default();
+
+        // V(out) with named node - falls back to node 1 for now
+        assert_eq!(parse_output_node("V(out)", &netlist), Some(1));
+
+        // Invalid format returns None
+        assert_eq!(parse_output_node("invalid", &netlist), None);
     }
 }

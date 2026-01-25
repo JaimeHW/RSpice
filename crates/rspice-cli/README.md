@@ -45,6 +45,8 @@ rspice check circuit.sp --connectivity
 | DC Sweep | Built-in | Nested voltage/current/parameter sweeps |
 | Transient | Built-in | Time-domain with adaptive timestepping |
 | AC Small-Signal | Built-in | Frequency response |
+| Fourier | Built-in | THD and spectral decomposition (`.FOUR` command) |
+| Temperature | Built-in | Temperature sweep analysis (`.TEMP` command) |
 | Noise | `--noise` | Thermal, Shot, and Flicker (1/f) noise |
 | Monte Carlo | `--monte-carlo N` | Statistical yield with histogram & 3σ |
 | Corner Analysis | `--corners tt,ss,ff` | PVT sweep with NMOS/PMOS scaling |
