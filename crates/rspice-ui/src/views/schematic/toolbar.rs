@@ -187,6 +187,28 @@ pub fn SchematicToolbar(schematic: Signal<SchematicState>) -> Element {
                 }
             }
 
+            // GPU/SVG Render Mode toggle
+            {
+                use crate::state::display_settings::RenderMode;
+                let render_mode = settings.render_mode;
+                let is_gpu = render_mode.is_gpu();
+                let mode_bg = if is_gpu { th.accent_primary() } else { th.surface() };
+                let mode_color = if is_gpu { "#fff".to_string() } else { th.text_primary().to_string() };
+                let mode_label = format!("{} {}", render_mode.icon(), render_mode.label());
+
+                rsx! {
+                    button {
+                        style: "padding: 4px 8px; background: {mode_bg}; border: 1px solid {th.border()}; border-radius: 4px; color: {mode_color}; font-size: 12px; cursor: pointer; flex-shrink: 0; white-space: nowrap;",
+                        title: "Toggle render mode (SVG ↔ GPU)",
+                        onclick: move |_| {
+                            let current = display_settings.read().render_mode;
+                            display_settings.write().render_mode = current.toggle();
+                        },
+                        "{mode_label}"
+                    }
+                }
+            }
+
             // Simulation divider
             div { style: "width: 1px; height: 18px; background: {th.border()}; margin: 0 8px; flex-shrink: 0;" }
 
