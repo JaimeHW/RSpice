@@ -137,6 +137,320 @@ fn test_rotate_selection() {
 }
 
 #[test]
+fn test_mirror_selection_h() {
+    let mut state = SchematicState::default();
+    let id = state.add_component(ComponentType::Nmos, Point::new(10, 10));
+    state.selection.select_component(id);
+
+    assert!(!state.components[0].mirror_h);
+    assert!(!state.components[0].mirror_v);
+
+    state.mirror_selection_h();
+    assert!(state.components[0].mirror_h);
+    assert!(!state.components[0].mirror_v);
+
+    // Toggle back
+    state.mirror_selection_h();
+    assert!(!state.components[0].mirror_h);
+}
+
+#[test]
+fn test_mirror_selection_v() {
+    let mut state = SchematicState::default();
+    let id = state.add_component(ComponentType::Nmos, Point::new(10, 10));
+    state.selection.select_component(id);
+
+    assert!(!state.components[0].mirror_v);
+
+    state.mirror_selection_v();
+    assert!(state.components[0].mirror_v);
+
+    // Toggle back
+    state.mirror_selection_v();
+    assert!(!state.components[0].mirror_v);
+}
+
+#[test]
+fn test_mirror_selection_multiple_components() {
+    let mut state = SchematicState::default();
+    let id1 = state.add_component(ComponentType::Nmos, Point::new(0, 0));
+    let id2 = state.add_component(ComponentType::Pmos, Point::new(10, 0));
+    let _id3 = state.add_component(ComponentType::Resistor, Point::new(20, 0)); // Not selected
+
+    state.selection.select_component(id1);
+    state.selection.select_component(id2);
+
+    state.mirror_selection_h();
+
+    assert!(state.components[0].mirror_h); // id1 selected -> mirrored
+    assert!(state.components[1].mirror_h); // id2 selected -> mirrored
+    assert!(!state.components[2].mirror_h); // id3 not selected -> not mirrored
+}
+
+#[test]
+fn test_mirror_selection_marks_dirty() {
+    let mut state = SchematicState::default();
+    let id = state.add_component(ComponentType::Nmos, Point::new(0, 0));
+    state.is_dirty = false;
+    state.selection.select_component(id);
+
+    state.mirror_selection_h();
+    assert!(state.is_dirty);
+}
+
+#[test]
+fn test_mirror_selection_bumps_topology() {
+    let mut state = SchematicState::default();
+    let id = state.add_component(ComponentType::Nmos, Point::new(0, 0));
+    state.selection.select_component(id);
+    let initial_version = state.topology_version();
+
+    state.mirror_selection_h();
+    assert!(state.topology_version() > initial_version);
+}
+
+#[test]
+fn test_mirror_and_rotate_combined() {
+    let mut state = SchematicState::default();
+    let id = state.add_component(ComponentType::Nmos, Point::new(0, 0));
+    state.selection.select_component(id);
+
+    // Mirror horizontal, then rotate
+    state.mirror_selection_h();
+    state.rotate_selection();
+
+    // Both transformations should be applied
+    assert!(state.components[0].mirror_h);
+    assert_eq!(state.components[0].rotation, Rotation::R90);
+}
+
+// =========================================================================
+// Box Selection (select_in_rect) Tests
+// =========================================================================
+
+#[test]
+fn test_select_in_rect_components() {
+    let mut state = SchematicState::default();
+    // Create components at various positions
+    let r1 = state.add_component(ComponentType::Resistor, Point::new(10, 10));
+    let r2 = state.add_component(ComponentType::Resistor, Point::new(20, 20));
+    let r3 = state.add_component(ComponentType::Resistor, Point::new(50, 50)); // Outside rect
+
+    // Select rectangle from (0,0) to (30,30)
+    let count = state.select_in_rect(0, 0, 30, 30, false);
+
+    assert_eq!(count, 2);
+    assert!(state.selection.has_component(r1));
+    assert!(state.selection.has_component(r2));
+    assert!(!state.selection.has_component(r3)); // Outside
+}
+
+#[test]
+fn test_select_in_rect_wires() {
+    let mut state = SchematicState::default();
+    // Wire inside rectangle
+    let w1 = state
+        .add_wire(vec![Point::new(5, 5), Point::new(15, 5)])
+        .unwrap();
+    // Wire outside rectangle
+    let w2 = state
+        .add_wire(vec![Point::new(50, 50), Point::new(60, 50)])
+        .unwrap();
+
+    let count = state.select_in_rect(0, 0, 30, 30, false);
+
+    assert_eq!(count, 1);
+    assert!(state.selection.has_wire(w1));
+    assert!(!state.selection.has_wire(w2));
+}
+
+#[test]
+fn test_select_in_rect_mixed() {
+    let mut state = SchematicState::default();
+    let c1 = state.add_component(ComponentType::Capacitor, Point::new(10, 10));
+    let w1 = state
+        .add_wire(vec![Point::new(5, 20), Point::new(25, 20)])
+        .unwrap();
+
+    let count = state.select_in_rect(0, 0, 30, 30, false);
+
+    assert_eq!(count, 2);
+    assert!(state.selection.has_component(c1));
+    assert!(state.selection.has_wire(w1));
+}
+
+#[test]
+fn test_select_in_rect_add_mode() {
+    let mut state = SchematicState::default();
+    let c1 = state.add_component(ComponentType::Resistor, Point::new(10, 10));
+    let c2 = state.add_component(ComponentType::Resistor, Point::new(50, 50));
+
+    // First select c1
+    state.selection.select_component(c1);
+
+    // Now add c2 with add_mode=true
+    state.select_in_rect(40, 40, 60, 60, true);
+
+    assert!(state.selection.has_component(c1)); // Still selected
+    assert!(state.selection.has_component(c2)); // Added
+}
+
+#[test]
+fn test_select_in_rect_replace_mode() {
+    let mut state = SchematicState::default();
+    let c1 = state.add_component(ComponentType::Resistor, Point::new(10, 10));
+    let c2 = state.add_component(ComponentType::Resistor, Point::new(50, 50));
+
+    // First select c1
+    state.selection.select_component(c1);
+
+    // Now replace with c2 (add_mode=false)
+    state.select_in_rect(40, 40, 60, 60, false);
+
+    assert!(!state.selection.has_component(c1)); // Cleared
+    assert!(state.selection.has_component(c2)); // Selected
+}
+
+#[test]
+fn test_select_in_rect_empty() {
+    let mut state = SchematicState::default();
+    state.add_component(ComponentType::Resistor, Point::new(50, 50));
+
+    // Select in area with no components
+    let count = state.select_in_rect(0, 0, 20, 20, false);
+
+    assert_eq!(count, 0);
+    assert!(state.selection.is_empty());
+}
+
+#[test]
+fn test_select_in_rect_boundary() {
+    let mut state = SchematicState::default();
+    // Component exactly on boundary
+    let c1 = state.add_component(ComponentType::Resistor, Point::new(20, 20));
+
+    // Rectangle boundary includes the component position
+    let count = state.select_in_rect(20, 20, 30, 30, false);
+
+    assert_eq!(count, 1);
+    assert!(state.selection.has_component(c1));
+}
+
+// =========================================================================
+// Move Selection with Rubber-banding Tests
+// =========================================================================
+
+#[test]
+fn test_move_selection_rubber_band_single_component() {
+    let mut state = SchematicState::default();
+    // Resistor at (0,0) has terminals at (-2,0) and (2,0)
+    let r1 = state.add_component(ComponentType::Resistor, Point::new(0, 0));
+    // Wire connected to terminal at (2,0)
+    state
+        .add_wire(vec![Point::new(2, 0), Point::new(30, 0)])
+        .unwrap();
+
+    // Select the resistor
+    state.selection.select_component(r1);
+
+    // Move by (+5, +5)
+    state.move_selection_with_rubber_band(Point::new(5, 5));
+
+    // Resistor should have moved
+    let comp = state.components.iter().find(|c| c.id == r1).unwrap();
+    assert_eq!(comp.pos, Point::new(5, 5));
+
+    // Wire endpoint at terminal should have stretched
+    let wire = &state.wires[0];
+    assert_eq!(wire.points[0], Point::new(7, 5)); // Moved with terminal (2+5, 0+5)
+    assert_eq!(wire.points[1], Point::new(30, 0)); // Original position
+}
+
+#[test]
+fn test_move_selection_rubber_band_wire_between_selected() {
+    let mut state = SchematicState::default();
+    // Two resistors with terminals
+    let r1 = state.add_component(ComponentType::Resistor, Point::new(0, 0));
+    let r2 = state.add_component(ComponentType::Resistor, Point::new(20, 0));
+    // Wire connecting them (R1 terminal at 2,0 and R2 terminal at 18,0)
+    state
+        .add_wire(vec![Point::new(2, 0), Point::new(18, 0)])
+        .unwrap();
+
+    // Select both resistors
+    state.selection.select_component(r1);
+    state.selection.select_component(r2);
+
+    // Move by (+10, +10)
+    state.move_selection_with_rubber_band(Point::new(10, 10));
+
+    // Both resistors moved
+    let comp1 = state.components.iter().find(|c| c.id == r1).unwrap();
+    let comp2 = state.components.iter().find(|c| c.id == r2).unwrap();
+    assert_eq!(comp1.pos, Point::new(10, 10));
+    assert_eq!(comp2.pos, Point::new(30, 10));
+
+    // Wire should have moved entirely (both ends connected to selection)
+    let wire = &state.wires[0];
+    assert_eq!(wire.points[0], Point::new(12, 10));
+    assert_eq!(wire.points[1], Point::new(28, 10));
+}
+
+#[test]
+fn test_move_selection_rubber_band_no_connection() {
+    let mut state = SchematicState::default();
+    let r1 = state.add_component(ComponentType::Resistor, Point::new(0, 0));
+    // Wire not connected to any terminal
+    state
+        .add_wire(vec![Point::new(100, 100), Point::new(120, 100)])
+        .unwrap();
+
+    state.selection.select_component(r1);
+    state.move_selection_with_rubber_band(Point::new(5, 5));
+
+    // Wire should be unchanged
+    let wire = &state.wires[0];
+    assert_eq!(wire.points[0], Point::new(100, 100));
+    assert_eq!(wire.points[1], Point::new(120, 100));
+}
+
+#[test]
+fn test_move_selection_rubber_band_empty_selection() {
+    let mut state = SchematicState::default();
+    state.add_component(ComponentType::Resistor, Point::new(0, 0));
+    state
+        .add_wire(vec![Point::new(2, 0), Point::new(30, 0)])
+        .unwrap();
+
+    // Empty selection - should do nothing
+    state.move_selection_with_rubber_band(Point::new(5, 5));
+
+    // Component unchanged
+    assert_eq!(state.components[0].pos, Point::new(0, 0));
+    // Wire unchanged
+    assert_eq!(state.wires[0].points[0], Point::new(2, 0));
+}
+
+#[test]
+fn test_move_selection_rubber_band_selected_wire() {
+    let mut state = SchematicState::default();
+    let w1 = state
+        .add_wire(vec![Point::new(0, 0), Point::new(20, 0)])
+        .unwrap();
+
+    // Select the wire
+    state.selection.select_wire(w1);
+
+    // Move by (+10, +10)
+    state.move_selection_with_rubber_band(Point::new(10, 10));
+
+    // Wire should have moved entirely
+    let wire = &state.wires[0];
+    assert_eq!(wire.points[0], Point::new(10, 10));
+    assert_eq!(wire.points[1], Point::new(30, 10));
+}
+
+#[test]
 fn test_copy_paste() {
     let mut state = SchematicState::default();
     let id = state.add_component(ComponentType::Resistor, Point::new(10, 10));
@@ -150,6 +464,65 @@ fn test_copy_paste() {
     assert_eq!(state.components.len(), 2);
     assert_eq!(state.components[1].pos, Point::new(30, 30));
     assert_eq!(state.components[1].name, "R2"); // New name
+}
+
+#[test]
+fn test_copy_paste_includes_connected_wires() {
+    let mut state = SchematicState::default();
+    // Two resistors at (0,0) and (20,0) - terminals at (2,0) and (18,0)
+    let r1 = state.add_component(ComponentType::Resistor, Point::new(0, 0));
+    let r2 = state.add_component(ComponentType::Resistor, Point::new(20, 0));
+    // Wire connecting them (NOT explicitly selected)
+    state
+        .add_wire(vec![Point::new(2, 0), Point::new(18, 0)])
+        .unwrap();
+
+    // Select only the components (not the wire)
+    state.selection.select_component(r1);
+    state.selection.select_component(r2);
+
+    state.copy_selection();
+
+    // Wire should be included because both endpoints connect to selected components
+    assert!(state.clipboard.has_content());
+    assert_eq!(state.clipboard.components.len(), 2);
+    assert_eq!(state.clipboard.wires.len(), 1);
+}
+
+#[test]
+fn test_copy_paste_excludes_disconnected_wires() {
+    let mut state = SchematicState::default();
+    let r1 = state.add_component(ComponentType::Resistor, Point::new(0, 0));
+    // Wire not connected to component terminals
+    state
+        .add_wire(vec![Point::new(100, 100), Point::new(120, 100)])
+        .unwrap();
+
+    state.selection.select_component(r1);
+    state.copy_selection();
+
+    // Disconnected wire should NOT be included
+    assert_eq!(state.clipboard.components.len(), 1);
+    assert_eq!(state.clipboard.wires.len(), 0);
+}
+
+#[test]
+fn test_copy_paste_partial_connected_wire_excluded() {
+    let mut state = SchematicState::default();
+    // Resistor at (0,0) with terminal at (2,0)
+    let r1 = state.add_component(ComponentType::Resistor, Point::new(0, 0));
+    // Wire from terminal to unselected location
+    state
+        .add_wire(vec![Point::new(2, 0), Point::new(50, 0)])
+        .unwrap();
+
+    // Only select one component - wire only connects to one selected component
+    state.selection.select_component(r1);
+    state.copy_selection();
+
+    // Wire with only one endpoint connected should NOT be included
+    // (it would be stretched/disconnected on paste)
+    assert_eq!(state.clipboard.wires.len(), 0);
 }
 
 #[test]
@@ -964,4 +1337,386 @@ fn test_update_wire_junctions_comprehensive() {
     // Should have junction at T-intersection, orphan removed
     assert_eq!(state.junctions.len(), 1);
     assert_eq!(state.junctions[0].pos, Point::new(10, 10));
+}
+
+// =============================================================================
+// Degenerate Segment Cleanup Tests (Commercial-Grade)
+// =============================================================================
+
+#[test]
+fn test_remove_degenerate_segments_single_wire() {
+    let mut state = SchematicState::default();
+    // Wire with consecutive duplicate points (zero-length segments)
+    let wire_id = state.next_id();
+    state.wires.push(Wire::new(
+        wire_id,
+        vec![
+            Point::new(0, 0),
+            Point::new(5, 0),
+            Point::new(5, 0), // Duplicate - zero-length segment
+            Point::new(10, 0),
+        ],
+    ));
+
+    let (modified, removed) = state.remove_degenerate_segments();
+
+    assert_eq!(modified, 1);
+    assert_eq!(removed, 0);
+    assert_eq!(state.wires[0].points.len(), 3);
+}
+
+#[test]
+fn test_remove_degenerate_segments_multiple_duplicates() {
+    let mut state = SchematicState::default();
+    let wire_id = state.next_id();
+    state.wires.push(Wire::new(
+        wire_id,
+        vec![
+            Point::new(0, 0),
+            Point::new(0, 0), // Duplicate at start
+            Point::new(5, 0),
+            Point::new(5, 0), // Duplicate in middle
+            Point::new(5, 0), // Triple duplicate
+            Point::new(10, 0),
+            Point::new(10, 0), // Duplicate at end
+        ],
+    ));
+
+    let (modified, _) = state.remove_degenerate_segments();
+
+    assert_eq!(modified, 1);
+    // Should only have: (0,0), (5,0), (10,0)
+    assert_eq!(state.wires[0].points.len(), 3);
+}
+
+#[test]
+fn test_remove_degenerate_segments_wire_becomes_invalid() {
+    let mut state = SchematicState::default();
+    // Wire that's entirely duplicates - should be removed
+    let wire_id = state.next_id();
+    state.wires.push(Wire::new(
+        wire_id,
+        vec![
+            Point::new(5, 5),
+            Point::new(5, 5), // Same point
+        ],
+    ));
+
+    let (_, removed) = state.remove_degenerate_segments();
+
+    assert_eq!(removed, 1);
+    assert!(state.wires.is_empty());
+}
+
+#[test]
+fn test_remove_degenerate_segments_no_changes_needed() {
+    let mut state = SchematicState::default();
+    state
+        .add_wire(vec![Point::new(0, 0), Point::new(10, 0)])
+        .unwrap();
+    state
+        .add_wire(vec![Point::new(0, 10), Point::new(10, 10)])
+        .unwrap();
+    state.is_dirty = false;
+
+    let (modified, removed) = state.remove_degenerate_segments();
+
+    assert_eq!(modified, 0);
+    assert_eq!(removed, 0);
+    assert!(!state.is_dirty); // No changes, should remain clean
+}
+
+#[test]
+fn test_remove_degenerate_segments_marks_dirty() {
+    let mut state = SchematicState::default();
+    let wire_id = state.next_id();
+    state.wires.push(Wire::new(
+        wire_id,
+        vec![Point::new(0, 0), Point::new(0, 0), Point::new(10, 0)],
+    ));
+    state.is_dirty = false;
+    let initial_version = state.topology_version();
+
+    state.remove_degenerate_segments();
+
+    assert!(state.is_dirty);
+    assert!(state.topology_version() > initial_version);
+}
+
+#[test]
+fn test_remove_degenerate_segments_for_wire_specific() {
+    let mut state = SchematicState::default();
+    // Wire 1: has duplicates
+    let id1 = state.next_id();
+    state.wires.push(Wire::new(
+        id1,
+        vec![Point::new(0, 0), Point::new(0, 0), Point::new(10, 0)],
+    ));
+    // Wire 2: no duplicates
+    let id2 = state.next_id();
+    state
+        .wires
+        .push(Wire::new(id2, vec![Point::new(0, 10), Point::new(10, 10)]));
+
+    let modified = state.remove_degenerate_segments_for_wire(id1);
+
+    assert!(modified);
+    // Wire 1 should be cleaned
+    let wire1 = state.wires.iter().find(|w| w.id == id1).unwrap();
+    assert_eq!(wire1.points.len(), 2);
+    // Wire 2 should be unchanged
+    let wire2 = state.wires.iter().find(|w| w.id == id2).unwrap();
+    assert_eq!(wire2.points.len(), 2);
+}
+
+#[test]
+fn test_remove_degenerate_segments_for_wire_invalid_id() {
+    let mut state = SchematicState::default();
+    state
+        .add_wire(vec![Point::new(0, 0), Point::new(10, 0)])
+        .unwrap();
+
+    let modified = state.remove_degenerate_segments_for_wire(9999);
+
+    assert!(!modified);
+}
+
+#[test]
+fn test_remove_degenerate_segments_for_wire_removes_invalid() {
+    let mut state = SchematicState::default();
+    let id = state.next_id();
+    state.wires.push(Wire::new(
+        id,
+        vec![Point::new(5, 5), Point::new(5, 5)], // Entirely degenerate
+    ));
+
+    let modified = state.remove_degenerate_segments_for_wire(id);
+
+    assert!(modified);
+    assert!(state.wires.is_empty()); // Wire removed entirely
+}
+
+#[test]
+fn test_cleanup_wire_topology_comprehensive() {
+    let mut state = SchematicState::default();
+
+    // Wire with duplicates AND collinear points
+    let id1 = state.next_id();
+    state.wires.push(Wire::new(
+        id1,
+        vec![
+            Point::new(0, 0),
+            Point::new(5, 0),
+            Point::new(5, 0),  // Duplicate
+            Point::new(10, 0), // Collinear with (0,0) and (5,0)
+        ],
+    ));
+
+    // Create T-junction topology for junction test
+    state
+        .add_wire(vec![Point::new(20, 0), Point::new(30, 0)])
+        .unwrap();
+    state
+        .add_wire(vec![Point::new(30, 0), Point::new(40, 0)])
+        .unwrap();
+    state
+        .add_wire(vec![Point::new(30, 0), Point::new(30, 10)])
+        .unwrap();
+
+    state.cleanup_wire_topology();
+
+    // First wire should be cleaned: no duplicates, collinear points removed
+    let wire1 = state.wires.iter().find(|w| w.id == id1).unwrap();
+    assert_eq!(wire1.points.len(), 2); // Just start and end
+
+    // T-junction should have junction marker
+    assert!(state.junctions.iter().any(|j| j.pos == Point::new(30, 0)));
+}
+
+// =============================================================================
+// Additional Edge Case Tests for Commercial Parity
+// =============================================================================
+
+#[test]
+fn test_multi_wire_rubber_banding() {
+    let mut state = SchematicState::default();
+
+    // Add component at (10, 10) - it has terminals at (8, 10) and (12, 10)
+    let comp_id = state.add_component(ComponentType::Resistor, Point::new(10, 10));
+    let terminals: Vec<Point> = state.components[0]
+        .terminal_positions()
+        .into_iter()
+        .map(|(_, pos)| pos)
+        .collect();
+
+    // Add wires connected to BOTH terminals
+    state
+        .add_wire(vec![
+            terminals[0],
+            Point::new(terminals[0].x - 10, terminals[0].y),
+        ])
+        .unwrap();
+    state
+        .add_wire(vec![
+            terminals[1],
+            Point::new(terminals[1].x + 10, terminals[1].y),
+        ])
+        .unwrap();
+
+    // Move component by (5, 3)
+    state.move_component_with_wires(comp_id, Point::new(5, 3));
+
+    // BOTH wire endpoints should have moved with the component
+    for wire in &state.wires {
+        let new_terminals: Vec<Point> = state.components[0]
+            .terminal_positions()
+            .into_iter()
+            .map(|(_, pos)| pos)
+            .collect();
+
+        // Wire endpoint should be at new terminal position
+        assert!(
+            new_terminals.contains(&wire.points[0])
+                || wire.points[0].x == terminals[0].x - 10 + 5
+                || wire.points[0].x == terminals[1].x + 10 + 5,
+            "Wire endpoint should be moved: {:?}",
+            wire.points[0]
+        );
+    }
+}
+
+#[test]
+fn test_complex_multi_junction_topology() {
+    let mut state = SchematicState::default();
+
+    // Create a star topology: 5 wires all meeting at center (10, 10)
+    state
+        .add_wire(vec![Point::new(0, 10), Point::new(10, 10)])
+        .unwrap();
+    state
+        .add_wire(vec![Point::new(10, 10), Point::new(20, 10)])
+        .unwrap();
+    state
+        .add_wire(vec![Point::new(10, 0), Point::new(10, 10)])
+        .unwrap();
+    state
+        .add_wire(vec![Point::new(10, 10), Point::new(10, 20)])
+        .unwrap();
+    state
+        .add_wire(vec![Point::new(10, 10), Point::new(20, 20)])
+        .unwrap(); // Diagonal
+
+    let intersections = state.find_wire_intersections();
+
+    // Should find one major intersection at (10, 10)
+    let center_intersection = intersections.iter().find(|(p, _)| *p == Point::new(10, 10));
+    assert!(center_intersection.is_some());
+
+    let (_, wire_ids) = center_intersection.unwrap();
+    assert_eq!(wire_ids.len(), 5, "All 5 wires should meet at center");
+
+    // Junction classification should report Complex
+    let junction_type = state.classify_junction_type(Point::new(10, 10));
+    assert!(
+        matches!(
+            junction_type,
+            crate::state::schematic::wire::JunctionType::Complex { wire_count: 5 }
+        ),
+        "Should be Complex junction with 5 wires"
+    );
+}
+
+#[test]
+fn test_merge_very_short_wires() {
+    let mut state = SchematicState::default();
+
+    // Two single-segment wires, each just 1 unit long
+    let id1 = state
+        .add_wire(vec![Point::new(0, 0), Point::new(1, 0)])
+        .unwrap();
+    let id2 = state
+        .add_wire(vec![Point::new(1, 0), Point::new(2, 0)])
+        .unwrap();
+
+    let merged = state.merge_wires(id1, id2);
+    assert!(merged.is_some());
+
+    let merged_wire = &state.wires[0];
+    assert_eq!(merged_wire.start(), Some(Point::new(0, 0)));
+    assert_eq!(merged_wire.end(), Some(Point::new(2, 0)));
+}
+
+#[test]
+fn test_split_two_point_wire() {
+    let mut state = SchematicState::default();
+
+    // Minimal valid wire (2 points)
+    let wire_id = state
+        .add_wire(vec![Point::new(0, 0), Point::new(10, 0)])
+        .unwrap();
+
+    // Split at midpoint
+    let result = state.split_wire(wire_id, Point::new(5, 0));
+    assert!(result.is_some());
+
+    let (id1, id2) = result.unwrap();
+    assert_eq!(state.wires.len(), 2);
+
+    // Both resulting wires should be valid
+    let wire1 = state.wires.iter().find(|w| w.id == id1).unwrap();
+    let wire2 = state.wires.iter().find(|w| w.id == id2).unwrap();
+    assert_eq!(wire1.points.len(), 2);
+    assert_eq!(wire2.points.len(), 2);
+}
+
+#[test]
+fn test_wire_operations_preserve_other_wires() {
+    let mut state = SchematicState::default();
+
+    // Add multiple wires
+    let id1 = state
+        .add_wire(vec![Point::new(0, 0), Point::new(10, 0)])
+        .unwrap();
+    let id2 = state
+        .add_wire(vec![Point::new(0, 10), Point::new(10, 10)])
+        .unwrap();
+    let id3 = state
+        .add_wire(vec![Point::new(0, 20), Point::new(10, 20)])
+        .unwrap();
+
+    // Perform various operations on wire 2
+    state.split_wire(id2, Point::new(5, 10));
+
+    // Wires 1 and 3 should be unchanged
+    let wire1 = state.wires.iter().find(|w| w.id == id1).unwrap();
+    let wire3 = state.wires.iter().find(|w| w.id == id3).unwrap();
+
+    assert_eq!(wire1.points, vec![Point::new(0, 0), Point::new(10, 0)]);
+    assert_eq!(wire3.points, vec![Point::new(0, 20), Point::new(10, 20)]);
+}
+
+#[test]
+fn test_junction_update_after_wire_delete() {
+    let mut state = SchematicState::default();
+
+    // Create T-junction
+    state
+        .add_wire(vec![Point::new(0, 0), Point::new(10, 0)])
+        .unwrap();
+    state
+        .add_wire(vec![Point::new(10, 0), Point::new(20, 0)])
+        .unwrap();
+    let id3 = state
+        .add_wire(vec![Point::new(10, 0), Point::new(10, 10)])
+        .unwrap();
+
+    state.auto_place_junctions();
+    assert!(!state.junctions.is_empty());
+
+    // Delete the third wire (breaks T-junction)
+    state.delete_wire(id3);
+    state.update_wire_junctions();
+
+    // Junction should be removed (only 2 wires now = corner, not junction)
+    assert!(state.junctions.is_empty());
 }

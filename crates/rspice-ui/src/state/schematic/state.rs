@@ -14,6 +14,7 @@ use super::net_label::{Junction, NetLabel};
 use super::point::Point;
 use super::rotation::Rotation;
 use super::selection::Selection;
+use super::snap::{SnapEngine, SnapResult};
 use super::tool::Tool;
 use super::wire::{Wire, WireConnection, WireDrawing, WireSegment};
 
@@ -118,6 +119,21 @@ pub struct SchematicState {
     /// Used by LabelPositionCache and JunctionCache to detect stale data
     #[serde(skip)]
     topology_version: u64,
+
+    /// Snap engine configuration (runtime state, not persisted)
+    /// Controls cursor snapping behavior during wire drawing
+    #[serde(skip)]
+    pub snap_engine: SnapEngine,
+
+    /// Rubber-band box selection rectangle (runtime state, not persisted)
+    /// Used for drag-to-select operations
+    #[serde(skip)]
+    pub selection_rect: super::selection::SelectionRect,
+
+    /// Net highlighting state (runtime state, not persisted)
+    /// Tracks which wires are part of the highlighted net
+    #[serde(skip)]
+    pub net_highlight: super::net_highlight::NetHighlightState,
 }
 
 impl Default for SchematicState {
@@ -144,6 +160,9 @@ impl Default for SchematicState {
             needs_fit: false,
             needs_history_reset: false,
             topology_version: 0,
+            snap_engine: SnapEngine::default(),
+            selection_rect: super::selection::SelectionRect::default(),
+            net_highlight: super::net_highlight::NetHighlightState::default(),
         }
     }
 }
@@ -364,6 +383,103 @@ impl SchematicState {
         }
         self.is_dirty = true;
         self.bump_topology_version();
+    }
+
+    /// Mirror selected components horizontally (flip about Y-axis)
+    ///
+    /// This flips components left-to-right, swapping terminal positions.
+    /// Essential for proper transistor orientation in circuit design.
+    /// Matches Cadence Virtuoso 'H' key behavior.
+    pub fn mirror_selection_h(&mut self) {
+        for id in &self.selection.components {
+            if let Some(c) = self.components.iter_mut().find(|c| c.id == *id) {
+                c.toggle_mirror_h();
+            }
+        }
+        self.is_dirty = true;
+        self.bump_topology_version();
+    }
+
+    /// Mirror selected components vertically (flip about X-axis)
+    ///
+    /// This flips components up-to-down, swapping terminal positions.
+    /// Matches Cadence Virtuoso 'V' key behavior.
+    pub fn mirror_selection_v(&mut self) {
+        for id in &self.selection.components {
+            if let Some(c) = self.components.iter_mut().find(|c| c.id == *id) {
+                c.toggle_mirror_v();
+            }
+        }
+        self.is_dirty = true;
+        self.bump_topology_version();
+    }
+
+    /// Select all components and wires within a rectangular region
+    ///
+    /// This is used for rubber-band box selection. The user drags to create
+    /// a selection rectangle, and all items within the rectangle are selected.
+    ///
+    /// # Arguments
+    /// * `min_x`, `min_y`, `max_x`, `max_y` - The selection rectangle bounds (in grid coordinates)
+    /// * `add_to_selection` - If true, add to existing selection; if false, replace selection
+    ///
+    /// # Returns
+    /// The number of items selected
+    pub fn select_in_rect(
+        &mut self,
+        min_x: i32,
+        min_y: i32,
+        max_x: i32,
+        max_y: i32,
+        add_to_selection: bool,
+    ) -> usize {
+        if !add_to_selection {
+            self.selection.clear();
+        }
+
+        let mut count = 0;
+
+        // Select components whose center is within the rectangle
+        for comp in &self.components {
+            if comp.pos.x >= min_x
+                && comp.pos.x <= max_x
+                && comp.pos.y >= min_y
+                && comp.pos.y <= max_y
+            {
+                if !self.selection.has_component(comp.id) {
+                    self.selection.select_component(comp.id);
+                    count += 1;
+                }
+            }
+        }
+
+        // Select wires that have at least one point within the rectangle
+        for wire in &self.wires {
+            let wire_in_rect = wire
+                .points
+                .iter()
+                .any(|p| p.x >= min_x && p.x <= max_x && p.y >= min_y && p.y <= max_y);
+            if wire_in_rect && !self.selection.has_wire(wire.id) {
+                self.selection.select_wire(wire.id);
+                count += 1;
+            }
+        }
+
+        // Select junctions within the rectangle
+        for junction in &self.junctions {
+            if junction.pos.x >= min_x
+                && junction.pos.x <= max_x
+                && junction.pos.y >= min_y
+                && junction.pos.y <= max_y
+            {
+                if !self.selection.has_junction(junction.pos) {
+                    self.selection.select_junction(junction.pos);
+                    count += 1;
+                }
+            }
+        }
+
+        count
     }
 
     /// Remove selected components and wires
@@ -788,6 +904,106 @@ impl SchematicState {
         }
     }
 
+    /// Remove degenerate segments from all wires
+    ///
+    /// This is a cleanup operation that removes:
+    /// 1. Zero-length segments (consecutive identical points)
+    /// 2. Wires that become invalid after cleanup (< 2 points)
+    ///
+    /// This is called automatically after wire editing operations to ensure
+    /// the schematic maintains valid topology. Matches Cadence Virtuoso behavior.
+    ///
+    /// # Returns
+    /// A tuple of (wires_modified, wires_removed) counts
+    pub fn remove_degenerate_segments(&mut self) -> (usize, usize) {
+        let mut wires_modified = 0;
+        let initial_wire_count = self.wires.len();
+
+        // Phase 1: Remove zero-length segments from each wire
+        for wire in &mut self.wires {
+            let original_len = wire.points.len();
+
+            // Remove consecutive duplicate points (zero-length segments)
+            let mut cleaned = Vec::with_capacity(wire.points.len());
+            for point in &wire.points {
+                if cleaned.last() != Some(point) {
+                    cleaned.push(*point);
+                }
+            }
+
+            if cleaned.len() != original_len {
+                wire.points = cleaned;
+                wires_modified += 1;
+            }
+        }
+
+        // Phase 2: Remove wires that are now invalid (< 2 points)
+        self.wires.retain(|w| w.points.len() >= 2);
+
+        let wires_removed = initial_wire_count - self.wires.len();
+
+        if wires_modified > 0 || wires_removed > 0 {
+            self.is_dirty = true;
+            self.bump_topology_version();
+        }
+
+        (wires_modified, wires_removed)
+    }
+
+    /// Remove degenerate segments from a specific wire
+    ///
+    /// Returns true if the wire was modified, false if unchanged or not found.
+    /// If the wire becomes invalid (< 2 points), it is removed entirely.
+    pub fn remove_degenerate_segments_for_wire(&mut self, wire_id: u64) -> bool {
+        let wire_idx = match self.wires.iter().position(|w| w.id == wire_id) {
+            Some(idx) => idx,
+            None => return false,
+        };
+
+        let wire = &mut self.wires[wire_idx];
+        let original_len = wire.points.len();
+
+        // Remove consecutive duplicate points
+        let mut cleaned = Vec::with_capacity(wire.points.len());
+        for point in &wire.points {
+            if cleaned.last() != Some(point) {
+                cleaned.push(*point);
+            }
+        }
+
+        let was_modified = cleaned.len() != original_len;
+
+        if cleaned.len() < 2 {
+            // Wire is now invalid, remove it
+            self.wires.remove(wire_idx);
+            self.is_dirty = true;
+            self.bump_topology_version();
+            return true;
+        }
+
+        if was_modified {
+            self.wires[wire_idx].points = cleaned;
+            self.is_dirty = true;
+            self.bump_topology_version();
+        }
+
+        was_modified
+    }
+
+    /// Clean up wire topology after editing operations
+    ///
+    /// This comprehensive cleanup method should be called after bulk editing:
+    /// 1. Removes degenerate (zero-length) segments
+    /// 2. Optimizes wire paths (removes collinear points)
+    /// 3. Updates junction markers
+    ///
+    /// This matches commercial EDA tool behavior for maintaining clean topology.
+    pub fn cleanup_wire_topology(&mut self) {
+        self.remove_degenerate_segments();
+        self.optimize_all_wires();
+        self.update_wire_junctions();
+    }
+
     /// Delete a wire by ID
     ///
     /// Returns true if a wire was deleted
@@ -910,6 +1126,10 @@ impl SchematicState {
     // =========================================================================
 
     /// Copy selected components and wires to clipboard
+    ///
+    /// In addition to explicitly selected wires, automatically includes
+    /// any wires that have both endpoints connected to selected components.
+    /// This preserves circuit connectivity when copying/pasting.
     pub fn copy_selection(&mut self) {
         if self.selection.is_empty() {
             return;
@@ -922,14 +1142,37 @@ impl SchematicState {
             .cloned()
             .collect();
 
-        let selected_wires: Vec<Wire> = self
-            .wires
+        // Get all terminal positions for selected components
+        let selected_terminals: Vec<Point> = selected_comps
             .iter()
-            .filter(|w| self.selection.has_wire(w.id))
-            .cloned()
+            .flat_map(|c| c.terminal_positions().into_iter().map(|(_, pos)| pos))
             .collect();
 
-        self.clipboard = ClipboardData::from_selection(selected_comps, selected_wires);
+        // Find wires that have both endpoints at selected component terminals
+        let mut wires_to_copy: Vec<Wire> = Vec::new();
+
+        for wire in &self.wires {
+            // Check if explicitly selected
+            if self.selection.has_wire(wire.id) {
+                wires_to_copy.push(wire.clone());
+                continue;
+            }
+
+            // Check if both endpoints connect to selected components
+            if wire.points.len() >= 2 {
+                let start = wire.points[0];
+                let end = *wire.points.last().unwrap();
+
+                let start_connected = selected_terminals.contains(&start);
+                let end_connected = selected_terminals.contains(&end);
+
+                if start_connected && end_connected {
+                    wires_to_copy.push(wire.clone());
+                }
+            }
+        }
+
+        self.clipboard = ClipboardData::from_selection(selected_comps, wires_to_copy);
     }
 
     /// Check if clipboard has content
@@ -1073,6 +1316,111 @@ impl SchematicState {
 
         // Apply wire updates
         for (wire_id, point_idx, new_pos) in wire_updates {
+            if let Some(wire) = self.wires.iter_mut().find(|w| w.id == wire_id) {
+                if point_idx < wire.points.len() {
+                    wire.points[point_idx] = new_pos;
+                }
+            }
+        }
+
+        self.is_dirty = true;
+        self.bump_topology_version();
+    }
+
+    /// Move all selected components and rubber-band connected wires
+    ///
+    /// This is the multi-component version of move_component_with_wires.
+    /// Wires connected to selected components are stretched to maintain
+    /// the connection. Wires that connect two selected components are
+    /// moved entirely (not stretched).
+    pub fn move_selection_with_rubber_band(&mut self, delta: Point) {
+        let selected_components: Vec<u64> = self.selection.components.iter().copied().collect();
+        if selected_components.is_empty() && self.selection.wires.is_empty() {
+            return;
+        }
+
+        // Collect all terminal positions for selected components BEFORE moving
+        let mut all_terminals: Vec<(u64, Point)> = Vec::new();
+        for comp_id in &selected_components {
+            if let Some(comp) = self.components.iter().find(|c| c.id == *comp_id) {
+                for (_, pos) in comp.terminal_positions() {
+                    all_terminals.push((*comp_id, pos));
+                }
+            }
+        }
+
+        // Find wires that should be stretched (one end connected to selection)
+        // vs moved entirely (both ends connected to selection)
+        let mut wire_updates: Vec<(u64, usize, Point)> = Vec::new();
+        let mut wires_to_move: Vec<u64> = Vec::new();
+
+        for wire in &self.wires {
+            let start = wire.points.first().copied();
+            let end = wire.points.last().copied();
+
+            // Check if endpoints connect to selected components
+            let start_connected = start.map_or(false, |p| {
+                all_terminals.iter().any(|(_, term_pos)| *term_pos == p)
+            });
+            let end_connected = end.map_or(false, |p| {
+                all_terminals.iter().any(|(_, term_pos)| *term_pos == p)
+            });
+
+            if start_connected && end_connected {
+                // Both ends connected to selection - move entire wire
+                wires_to_move.push(wire.id);
+            } else {
+                // Stretch endpoints that are connected
+                for (point_idx, point) in wire.points.iter().enumerate() {
+                    for (_, term_pos) in &all_terminals {
+                        if *point == *term_pos {
+                            let new_pos = Point::new(point.x + delta.x, point.y + delta.y);
+                            wire_updates.push((wire.id, point_idx, new_pos));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Move selected components
+        for comp_id in &selected_components {
+            if let Some(comp) = self.components.iter_mut().find(|c| c.id == *comp_id) {
+                comp.pos.x += delta.x;
+                comp.pos.y += delta.y;
+            }
+        }
+
+        // Move selected wires (from selection, not from rubber-banding)
+        for wire_id in self.selection.wires.iter() {
+            if let Some(wire) = self.wires.iter_mut().find(|w| w.id == *wire_id) {
+                for point in &mut wire.points {
+                    point.x += delta.x;
+                    point.y += delta.y;
+                }
+            }
+        }
+
+        // Move wires that have both ends connected to selection
+        for wire_id in wires_to_move {
+            // Skip if already in selection (already moved above)
+            if self.selection.wires.contains(&wire_id) {
+                continue;
+            }
+            if let Some(wire) = self.wires.iter_mut().find(|w| w.id == wire_id) {
+                for point in &mut wire.points {
+                    point.x += delta.x;
+                    point.y += delta.y;
+                }
+            }
+        }
+
+        // Apply stretch updates for partially connected wires
+        for (wire_id, point_idx, new_pos) in wire_updates {
+            // Skip if wire was already moved entirely
+            if self.selection.wires.contains(&wire_id) {
+                continue;
+            }
             if let Some(wire) = self.wires.iter_mut().find(|w| w.id == wire_id) {
                 if point_idx < wire.points.len() {
                     wire.points[point_idx] = new_pos;

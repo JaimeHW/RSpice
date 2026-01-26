@@ -1223,27 +1223,254 @@ impl Wire {
 // Wire Routing Mode
 // =============================================================================
 
-/// Wire routing mode for orthogonal drawing
+/// Wire routing mode for drawing
 ///
 /// Controls how the cursor position is connected to the last wire point
-/// when drawing wires interactively.
+/// when drawing wires interactively. Professional EDA tools like Cadence
+/// and Altium support multiple routing modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum WireRoutingMode {
     /// Horizontal first, then vertical (L-shape: →↓)
+    /// Standard orthogonal routing with X movement before Y
     #[default]
     HorizontalFirst,
+
     /// Vertical first, then horizontal (inverted L-shape: ↓→)
+    /// Standard orthogonal routing with Y movement before X
     VerticalFirst,
+
+    /// Direct diagonal connection (line from start to end)
+    /// Allows any angle, not just orthogonal or 45°
+    Diagonal,
+
+    /// 45-degree routing mode (octagonal)
+    /// Routes in H/V plus 45° diagonal segments
+    /// Similar to what PCB routing tools use
+    FortyFiveDegree,
 }
 
 impl WireRoutingMode {
     /// Toggle between routing modes
+    ///
+    /// Cycles: HorizontalFirst -> VerticalFirst -> Diagonal -> FortyFiveDegree -> HorizontalFirst
     pub fn toggle(self) -> Self {
         match self {
             WireRoutingMode::HorizontalFirst => WireRoutingMode::VerticalFirst,
-            WireRoutingMode::VerticalFirst => WireRoutingMode::HorizontalFirst,
+            WireRoutingMode::VerticalFirst => WireRoutingMode::Diagonal,
+            WireRoutingMode::Diagonal => WireRoutingMode::FortyFiveDegree,
+            WireRoutingMode::FortyFiveDegree => WireRoutingMode::HorizontalFirst,
         }
     }
+
+    /// Toggle only between orthogonal modes (for compatibility)
+    pub fn toggle_orthogonal(self) -> Self {
+        match self {
+            WireRoutingMode::HorizontalFirst => WireRoutingMode::VerticalFirst,
+            WireRoutingMode::VerticalFirst => WireRoutingMode::HorizontalFirst,
+            // Non-orthogonal modes default to HorizontalFirst
+            _ => WireRoutingMode::HorizontalFirst,
+        }
+    }
+
+    /// Check if this mode is orthogonal-only (no diagonals)
+    pub fn is_orthogonal(&self) -> bool {
+        matches!(
+            self,
+            WireRoutingMode::HorizontalFirst | WireRoutingMode::VerticalFirst
+        )
+    }
+
+    /// Get a human-readable name for this mode
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            WireRoutingMode::HorizontalFirst => "Orthogonal (H→V)",
+            WireRoutingMode::VerticalFirst => "Orthogonal (V→H)",
+            WireRoutingMode::Diagonal => "Diagonal",
+            WireRoutingMode::FortyFiveDegree => "45° Routing",
+        }
+    }
+
+    /// Suggest a route from one point to another
+    ///
+    /// Returns a list of intermediate points (excluding start, including end).
+    /// The result depends on the routing mode.
+    pub fn suggest_route(&self, from: Point, to: Point) -> Vec<Point> {
+        if from == to {
+            return vec![];
+        }
+
+        match self {
+            WireRoutingMode::HorizontalFirst => {
+                if from.x == to.x || from.y == to.y {
+                    vec![to]
+                } else {
+                    // L-shape: horizontal first
+                    vec![Point::new(to.x, from.y), to]
+                }
+            }
+            WireRoutingMode::VerticalFirst => {
+                if from.x == to.x || from.y == to.y {
+                    vec![to]
+                } else {
+                    // L-shape: vertical first
+                    vec![Point::new(from.x, to.y), to]
+                }
+            }
+            WireRoutingMode::Diagonal => {
+                // Direct line
+                vec![to]
+            }
+            WireRoutingMode::FortyFiveDegree => Self::suggest_45_degree_route(from, to),
+        }
+    }
+
+    /// Suggest a 45-degree route between two points
+    ///
+    /// Creates a route using only horizontal, vertical, and 45° diagonal segments.
+    fn suggest_45_degree_route(from: Point, to: Point) -> Vec<Point> {
+        let dx = (to.x - from.x).abs();
+        let dy = (to.y - from.y).abs();
+
+        if dx == 0 || dy == 0 || dx == dy {
+            // Already aligned (H/V/45°)
+            return vec![to];
+        }
+
+        // Determine which dimension is larger
+        let (diag_dist, remaining) = if dx > dy {
+            (dy, dx - dy)
+        } else {
+            (dx, dy - dx)
+        };
+
+        let _ = remaining; // Used implicitly below
+
+        // Route: orthogonal segment, then 45° diagonal
+        if dx > dy {
+            // More horizontal: go H first for 'remaining', then 45° diagonal for 'diag_dist'
+            let mid_x = if to.x > from.x {
+                from.x + (dx - dy)
+            } else {
+                from.x - (dx - dy)
+            };
+            let mid = Point::new(mid_x, from.y);
+            vec![mid, to]
+        } else {
+            // More vertical: go V first for 'remaining', then 45° diagonal
+            let mid_y = if to.y > from.y {
+                from.y + (dy - dx)
+            } else {
+                from.y - (dy - dx)
+            };
+            let mid = Point::new(from.x, mid_y);
+            vec![mid, to]
+        }
+    }
+}
+
+/// Optimize a route by removing redundant points
+///
+/// Removes points that are collinear (on the same line as neighbors).
+/// This cleans up routes that have accumulated unnecessary vertices.
+pub fn optimize_route(points: &[Point]) -> Vec<Point> {
+    if points.len() <= 2 {
+        return points.to_vec();
+    }
+
+    let mut result = Vec::with_capacity(points.len());
+    result.push(points[0]);
+
+    for window in points.windows(3) {
+        let (p1, p2, p3) = (window[0], window[1], window[2]);
+
+        // Check if p2 is collinear with p1 and p3
+        // For orthogonal: same X or same Y for all three
+        let collinear_h = p1.y == p2.y && p2.y == p3.y;
+        let collinear_v = p1.x == p2.x && p2.x == p3.x;
+
+        // For diagonal: check if on same line using cross product
+        let dx1 = p2.x - p1.x;
+        let dy1 = p2.y - p1.y;
+        let dx2 = p3.x - p2.x;
+        let dy2 = p3.y - p2.y;
+        let cross = dx1 * dy2 - dy1 * dx2;
+        let collinear_diag = cross == 0;
+
+        if !collinear_h && !collinear_v && !collinear_diag {
+            // p2 is a true corner, keep it
+            result.push(p2);
+        }
+    }
+
+    result.push(*points.last().unwrap());
+    result
+}
+
+/// Convert a route to orthogonal-only segments
+///
+/// Takes any route and converts diagonal segments into orthogonal (H/V) segments.
+/// Useful when the user wants to clean up hand-drawn diagonal wires.
+pub fn convert_to_orthogonal(points: &[Point]) -> Vec<Point> {
+    if points.len() <= 1 {
+        return points.to_vec();
+    }
+
+    let mut result = Vec::with_capacity(points.len() * 2);
+    result.push(points[0]);
+
+    for window in points.windows(2) {
+        let (p1, p2) = (window[0], window[1]);
+
+        // If already orthogonal, just add the endpoint
+        if p1.x == p2.x || p1.y == p2.y {
+            result.push(p2);
+        } else {
+            // Diagonal - convert to L-shape (horizontal first)
+            result.push(Point::new(p2.x, p1.y));
+            result.push(p2);
+        }
+    }
+
+    optimize_route(&result)
+}
+
+/// Calculate the total wire length of a route
+///
+/// Sums up the length of all segments in the route.
+pub fn route_length(points: &[Point]) -> f64 {
+    points
+        .windows(2)
+        .map(|w| {
+            let dx = (w[1].x - w[0].x) as f64;
+            let dy = (w[1].y - w[0].y) as f64;
+            (dx * dx + dy * dy).sqrt()
+        })
+        .sum()
+}
+
+/// Count the number of bends (direction changes) in a route
+pub fn count_bends(points: &[Point]) -> usize {
+    if points.len() <= 2 {
+        return 0;
+    }
+
+    let mut bends = 0;
+    for window in points.windows(3) {
+        let (p1, p2, p3) = (window[0], window[1], window[2]);
+        let dx1 = p2.x - p1.x;
+        let dy1 = p2.y - p1.y;
+        let dx2 = p3.x - p2.x;
+        let dy2 = p3.y - p2.y;
+
+        // Normalize directions to signs
+        let dir1 = (dx1.signum(), dy1.signum());
+        let dir2 = (dx2.signum(), dy2.signum());
+
+        if dir1 != dir2 {
+            bends += 1;
+        }
+    }
+    bends
 }
 
 // =============================================================================
@@ -1293,6 +1520,20 @@ impl WireDrawing {
             WireRoutingMode::VerticalFirst => {
                 // Go vertical first, then horizontal
                 Some(Point::new(last.x, target.y))
+            }
+            WireRoutingMode::Diagonal => {
+                // No corner needed - direct line
+                None
+            }
+            WireRoutingMode::FortyFiveDegree => {
+                // Use the 45-degree routing: return first intermediate point
+                let route = self.routing_mode.suggest_route(*last, target);
+                if route.len() > 1 {
+                    // Return the first intermediate point (before final target)
+                    Some(route[0])
+                } else {
+                    None
+                }
             }
         }
     }
@@ -1474,9 +1715,214 @@ mod tests {
 
     #[test]
     fn test_routing_mode_toggle() {
+        // Test full toggle cycle through all 4 modes
         let mode = WireRoutingMode::HorizontalFirst;
-        assert_eq!(mode.toggle(), WireRoutingMode::VerticalFirst);
-        assert_eq!(mode.toggle().toggle(), WireRoutingMode::HorizontalFirst);
+        let mode2 = mode.toggle();
+        assert_eq!(mode2, WireRoutingMode::VerticalFirst);
+
+        let mode3 = mode2.toggle();
+        assert_eq!(mode3, WireRoutingMode::Diagonal);
+
+        let mode4 = mode3.toggle();
+        assert_eq!(mode4, WireRoutingMode::FortyFiveDegree);
+
+        let mode5 = mode4.toggle();
+        assert_eq!(mode5, WireRoutingMode::HorizontalFirst);
+    }
+
+    #[test]
+    fn test_routing_mode_toggle_orthogonal() {
+        // toggle_orthogonal should only switch between H-first and V-first
+        let h = WireRoutingMode::HorizontalFirst;
+        assert_eq!(h.toggle_orthogonal(), WireRoutingMode::VerticalFirst);
+
+        let v = WireRoutingMode::VerticalFirst;
+        assert_eq!(v.toggle_orthogonal(), WireRoutingMode::HorizontalFirst);
+
+        // Non-orthogonal modes should reset to HorizontalFirst
+        let d = WireRoutingMode::Diagonal;
+        assert_eq!(d.toggle_orthogonal(), WireRoutingMode::HorizontalFirst);
+
+        let f = WireRoutingMode::FortyFiveDegree;
+        assert_eq!(f.toggle_orthogonal(), WireRoutingMode::HorizontalFirst);
+    }
+
+    #[test]
+    fn test_routing_mode_is_orthogonal() {
+        assert!(WireRoutingMode::HorizontalFirst.is_orthogonal());
+        assert!(WireRoutingMode::VerticalFirst.is_orthogonal());
+        assert!(!WireRoutingMode::Diagonal.is_orthogonal());
+        assert!(!WireRoutingMode::FortyFiveDegree.is_orthogonal());
+    }
+
+    #[test]
+    fn test_routing_mode_display_name() {
+        assert!(!WireRoutingMode::HorizontalFirst.display_name().is_empty());
+        assert!(!WireRoutingMode::VerticalFirst.display_name().is_empty());
+        assert!(!WireRoutingMode::Diagonal.display_name().is_empty());
+        assert!(!WireRoutingMode::FortyFiveDegree.display_name().is_empty());
+    }
+
+    #[test]
+    fn test_suggest_route_horizontal_first() {
+        let mode = WireRoutingMode::HorizontalFirst;
+        let from = Point::new(0, 0);
+        let to = Point::new(10, 5);
+
+        let route = mode.suggest_route(from, to);
+        assert_eq!(route.len(), 2);
+        assert_eq!(route[0], Point::new(10, 0)); // Corner
+        assert_eq!(route[1], Point::new(10, 5)); // End
+    }
+
+    #[test]
+    fn test_suggest_route_vertical_first() {
+        let mode = WireRoutingMode::VerticalFirst;
+        let from = Point::new(0, 0);
+        let to = Point::new(10, 5);
+
+        let route = mode.suggest_route(from, to);
+        assert_eq!(route.len(), 2);
+        assert_eq!(route[0], Point::new(0, 5)); // Corner
+        assert_eq!(route[1], Point::new(10, 5)); // End
+    }
+
+    #[test]
+    fn test_suggest_route_diagonal() {
+        let mode = WireRoutingMode::Diagonal;
+        let from = Point::new(0, 0);
+        let to = Point::new(10, 5);
+
+        let route = mode.suggest_route(from, to);
+        assert_eq!(route.len(), 1);
+        assert_eq!(route[0], Point::new(10, 5)); // Direct
+    }
+
+    #[test]
+    fn test_suggest_route_45_degree() {
+        let mode = WireRoutingMode::FortyFiveDegree;
+        let from = Point::new(0, 0);
+        let to = Point::new(10, 5);
+
+        let route = mode.suggest_route(from, to);
+        // Should have 2 points: intermediate and final
+        assert_eq!(route.len(), 2);
+        // First segment should be orthogonal, second should be 45 degrees
+        // dx=10, dy=5, so horizontal segment of 5, then diagonal of 5
+        assert_eq!(route[0], Point::new(5, 0)); // End of horizontal
+        assert_eq!(route[1], Point::new(10, 5)); // Final position via 45°
+    }
+
+    #[test]
+    fn test_suggest_route_same_point() {
+        let mode = WireRoutingMode::HorizontalFirst;
+        let from = Point::new(5, 5);
+        let to = Point::new(5, 5);
+
+        let route = mode.suggest_route(from, to);
+        assert!(route.is_empty());
+    }
+
+    #[test]
+    fn test_suggest_route_aligned() {
+        let mode = WireRoutingMode::HorizontalFirst;
+
+        // Horizontally aligned
+        let route = mode.suggest_route(Point::new(0, 0), Point::new(10, 0));
+        assert_eq!(route.len(), 1);
+        assert_eq!(route[0], Point::new(10, 0));
+
+        // Vertically aligned
+        let route = mode.suggest_route(Point::new(0, 0), Point::new(0, 10));
+        assert_eq!(route.len(), 1);
+        assert_eq!(route[0], Point::new(0, 10));
+    }
+
+    #[test]
+    fn test_optimize_route_removes_collinear() {
+        // Three collinear points on horizontal line
+        let points = vec![
+            Point::new(0, 0),
+            Point::new(5, 0), // Collinear, should be removed
+            Point::new(10, 0),
+        ];
+        let optimized = optimize_route(&points);
+        assert_eq!(optimized.len(), 2);
+        assert_eq!(optimized[0], Point::new(0, 0));
+        assert_eq!(optimized[1], Point::new(10, 0));
+    }
+
+    #[test]
+    fn test_optimize_route_keeps_corners() {
+        // L-shape - corner should be preserved
+        let points = vec![
+            Point::new(0, 0),
+            Point::new(10, 0), // Corner
+            Point::new(10, 10),
+        ];
+        let optimized = optimize_route(&points);
+        assert_eq!(optimized.len(), 3);
+    }
+
+    #[test]
+    fn test_convert_to_orthogonal_diagonal() {
+        // Single diagonal segment
+        let points = vec![Point::new(0, 0), Point::new(10, 10)];
+        let ortho = convert_to_orthogonal(&points);
+
+        // Should become L-shape
+        assert!(ortho.len() >= 2);
+        // Every segment should be H or V
+        for w in ortho.windows(2) {
+            let is_h = w[0].y == w[1].y;
+            let is_v = w[0].x == w[1].x;
+            assert!(is_h || is_v, "Segment should be orthogonal");
+        }
+    }
+
+    #[test]
+    fn test_convert_to_orthogonal_already_orthogonal() {
+        let points = vec![Point::new(0, 0), Point::new(10, 0), Point::new(10, 10)];
+        let ortho = convert_to_orthogonal(&points);
+        // Should be unchanged (or optimized)
+        assert!(ortho.len() <= 3);
+    }
+
+    #[test]
+    fn test_route_length_single_segment() {
+        let points = vec![Point::new(0, 0), Point::new(3, 4)];
+        let len = route_length(&points);
+        assert!((len - 5.0).abs() < 0.001); // 3-4-5 triangle
+    }
+
+    #[test]
+    fn test_route_length_l_shape() {
+        let points = vec![Point::new(0, 0), Point::new(10, 0), Point::new(10, 5)];
+        let len = route_length(&points);
+        assert!((len - 15.0).abs() < 0.001); // 10 + 5
+    }
+
+    #[test]
+    fn test_count_bends_straight() {
+        let points = vec![Point::new(0, 0), Point::new(10, 0)];
+        assert_eq!(count_bends(&points), 0);
+    }
+
+    #[test]
+    fn test_count_bends_l_shape() {
+        let points = vec![Point::new(0, 0), Point::new(10, 0), Point::new(10, 10)];
+        assert_eq!(count_bends(&points), 1);
+    }
+
+    #[test]
+    fn test_count_bends_u_shape() {
+        let points = vec![
+            Point::new(0, 0),
+            Point::new(10, 0),
+            Point::new(10, 10),
+            Point::new(0, 10),
+        ];
+        assert_eq!(count_bends(&points), 2);
     }
 
     #[test]
