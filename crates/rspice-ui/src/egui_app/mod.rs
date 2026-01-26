@@ -29,37 +29,32 @@
 //! │  └─────────────────────────────────────────────────────┘│
 //! └─────────────────────────────────────────────────────────┘
 //! ```
-//!
-//! # Usage
-//!
-//! ```bash
-//! cargo run -p rspice-ui --features egui --no-default-features
-//! ```
 
-#[cfg(feature = "egui")]
 pub mod app;
-
-#[cfg(feature = "egui")]
+pub mod bode;
+pub mod cross_probe;
+pub mod eye_diagram;
+pub mod fft;
+pub mod histogram;
+pub mod integrated_viewer;
 pub mod menu_bar;
-
-#[cfg(feature = "egui")]
-pub mod toolbar;
-
-#[cfg(feature = "egui")]
+pub mod nyquist;
 pub mod panels;
-
-#[cfg(feature = "egui")]
+pub mod pole_zero;
+pub mod properties_dialog;
+pub mod schematic_export;
 pub mod schematic_view;
-
-#[cfg(feature = "egui")]
+pub mod simulation;
+pub mod simulation_controller;
+pub mod simulation_dialog;
+pub mod smith_chart;
 pub mod status_bar;
-
-#[cfg(feature = "egui")]
+pub mod symbol_library;
 pub mod theme;
+pub mod toolbar;
+pub mod waveform;
 
 // Re-exports for convenient access
-#[cfg(feature = "egui")]
 pub use app::RSpiceApp;
-
-#[cfg(feature = "egui")]
+pub use integrated_viewer::{ActiveViewer, IntegratedViewerState, ViewerStates};
 pub use theme::RSpiceTheme;
