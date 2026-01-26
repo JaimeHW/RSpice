@@ -41,7 +41,15 @@ pub fn render_schematic_view(
     // Draw wires
     for wire in &state.schematic.wires {
         let is_selected = state.schematic.selection.wires.contains(&wire.id);
-        draw_wire(&painter, &viewport, wire, is_selected, state);
+        let is_highlighted = state.schematic.net_highlight.is_wire_highlighted(wire.id);
+        draw_wire(
+            &painter,
+            &viewport,
+            wire,
+            is_selected,
+            is_highlighted,
+            state,
+        );
     }
 
     // Draw components
@@ -137,8 +145,9 @@ pub fn render_schematic_view(
         Point::new(grid_x * grid_size as i32, grid_y * grid_size as i32)
     };
 
-    // Convert screen position to half-grid snapped position (for wires)
-    // This allows wires to connect to component terminals at half-grid positions
+    // Convert screen position to grid snapped position (for wires)
+    // Commercial-grade: wires snap to FULL grid (same as components) for consistent alignment
+    // This ensures all connection points are grid-aligned (Cadence Virtuoso standard)
     let screen_to_wire_grid = |screen_pos: Pos2| -> Point {
         let zoom = tool_viewport.zoom as f64;
         let pan_x = tool_viewport.offset.x as f64;
@@ -148,21 +157,83 @@ pub fn render_schematic_view(
 
         let schematic_x = (screen_pos.x as f64 - bounds_min_x - pan_x) / zoom;
         let schematic_y = (screen_pos.y as f64 - bounds_min_y - pan_y) / zoom;
-        // Snap to half grid (grid_size / 2)
-        let half_grid = grid_size as f64 / 2.0;
-        let grid_x = (schematic_x / half_grid).round() as i32;
-        let grid_y = (schematic_y / half_grid).round() as i32;
-        Point::new(
-            grid_x * (grid_size / 2) as i32,
-            grid_y * (grid_size / 2) as i32,
-        )
+        // Snap to full grid (same as components) for commercial-grade alignment
+        let grid_x = (schematic_x / grid_size as f64).round() as i32;
+        let grid_y = (schematic_y / grid_size as f64).round() as i32;
+        Point::new(grid_x * grid_size as i32, grid_y * grid_size as i32)
     };
 
-    // Left click handling
+    // Left click handling - now includes drag detection for box selection
+    let current_tool = state.schematic.tool; // Copy to avoid borrow conflict
+
+    // Handle box selection drag for Select tool
+    if matches!(current_tool, Tool::Select) {
+        // On drag start, check if we're dragging a selected component (move) or empty space (box select)
+        if response.drag_started_by(egui::PointerButton::Primary)
+            && !ui.input(|i| i.modifiers.shift)
+        {
+            if let Some(pos) = response.interact_pointer_pos() {
+                let grid_pos = screen_to_grid(pos);
+
+                // Check if drag started on a selected component
+                let comp_at_pos = state.schematic.component_at(grid_pos);
+                let dragging_selection = comp_at_pos
+                    .map(|id| state.schematic.selection.has_component(id))
+                    .unwrap_or(false);
+
+                if dragging_selection {
+                    // Record drag start position for delta calculation
+                    state.dialogs.drag_start = Some((grid_pos.x, grid_pos.y));
+                    state.dialogs.last_drag_pos = Some((grid_pos.x, grid_pos.y));
+                } else {
+                    // Start box selection
+                    state.schematic.selection_rect.start_at(grid_pos);
+                }
+            }
+        }
+
+        // Handle ongoing drag - either move selection or update box selection
+        if response.dragged_by(egui::PointerButton::Primary) {
+            if let Some(pos) = response.hover_pos() {
+                let grid_pos = screen_to_grid(pos);
+
+                if state.dialogs.last_drag_pos.is_some() {
+                    // Moving selection with rubber-banding
+                    let (last_x, last_y) = state.dialogs.last_drag_pos.unwrap();
+                    let delta = Point::new(grid_pos.x - last_x, grid_pos.y - last_y);
+
+                    if delta.x != 0 || delta.y != 0 {
+                        state.schematic.move_selection_with_rubber_band(delta);
+                        state.dialogs.last_drag_pos = Some((grid_pos.x, grid_pos.y));
+                    }
+                } else if state.schematic.selection_rect.is_active() {
+                    // Update box selection
+                    state.schematic.selection_rect.update(grid_pos);
+                }
+            }
+        }
+
+        // Finish drag - complete box selection or finalize move
+        if response.drag_stopped_by(egui::PointerButton::Primary) {
+            if state.dialogs.last_drag_pos.is_some() {
+                // Finished moving selection
+                state.dialogs.drag_start = None;
+                state.dialogs.last_drag_pos = None;
+            } else if let Some((min_x, min_y, max_x, max_y)) =
+                state.schematic.selection_rect.finish()
+            {
+                // Finished box selection - Ctrl key adds to selection; otherwise replace
+                let add_mode = ui.input(|i| i.modifiers.ctrl);
+                state
+                    .schematic
+                    .select_in_rect(min_x, min_y, max_x, max_y, add_mode);
+            }
+        }
+    }
+
+    // Single click handling (for single item selection and placement)
     if response.clicked_by(egui::PointerButton::Primary) {
         if let Some(pos) = response.interact_pointer_pos() {
-            let current_tool = state.schematic.tool; // Copy to avoid borrow conflict
-
             match current_tool {
                 Tool::Place(component_type) => {
                     // Components snap to full grid
@@ -180,18 +251,54 @@ pub fn render_schematic_view(
                     }
                 }
                 Tool::Select => {
-                    // Select component or wire at position (uses full grid for hit testing)
+                    // Single click: select component or wire at position
+                    // Only trigger if not dragging (prevent double action)
                     let grid_pos = screen_to_grid(pos);
+                    let ctrl_held = ui.input(|i| i.modifiers.ctrl);
+                    let alt_held = ui.input(|i| i.modifiers.alt);
+
                     let comp_id = state.schematic.component_at(grid_pos);
                     let wire_id = state.schematic.wire_at(grid_pos);
+
                     if let Some(id) = comp_id {
-                        state.schematic.selection.clear();
-                        state.schematic.selection.select_component(id);
+                        // Clear any net highlighting when selecting components
+                        state.schematic.net_highlight.clear();
+                        if ctrl_held {
+                            state.schematic.selection.toggle_component(id);
+                        } else {
+                            state.schematic.selection.clear();
+                            state.schematic.selection.select_component(id);
+                        }
                     } else if let Some(id) = wire_id {
+                        if alt_held {
+                            // Alt+Click: Highlight entire connected net
+                            // Build net graph and find all connected wires
+                            use crate::state::NetGraph;
+                            let net_graph = NetGraph::build_from_wires(&state.schematic.wires);
+                            let connected_wires = net_graph.get_connected_wires(id);
+
+                            // Clear selection and highlight the net
+                            state.schematic.selection.clear();
+                            state
+                                .schematic
+                                .net_highlight
+                                .highlight_wires(connected_wires);
+                            log::info!(
+                                "Highlighted net with {} wires",
+                                state.schematic.net_highlight.highlighted_wires.len()
+                            );
+                        } else if ctrl_held {
+                            state.schematic.net_highlight.clear();
+                            state.schematic.selection.toggle_wire(id);
+                        } else {
+                            state.schematic.net_highlight.clear();
+                            state.schematic.selection.clear();
+                            state.schematic.selection.select_wire(id);
+                        }
+                    } else if !ctrl_held {
+                        // Click on empty space clears selection and highlighting
                         state.schematic.selection.clear();
-                        state.schematic.selection.select_wire(id);
-                    } else {
-                        state.schematic.selection.clear();
+                        state.schematic.net_highlight.clear();
                     }
                 }
                 _ => {}
@@ -370,6 +477,29 @@ pub fn render_schematic_view(
                 }
             }
         }
+    }
+
+    // Draw box selection rectangle if active (commercial-grade dashed rectangle)
+    if state.schematic.selection_rect.is_active() {
+        let (min_x, min_y, max_x, max_y) = state.schematic.selection_rect.bounds();
+        let top_left = tool_viewport.schematic_to_screen(Point::new(min_x, min_y));
+        let bottom_right = tool_viewport.schematic_to_screen(Point::new(max_x, max_y));
+
+        let selection_rect = Rect::from_min_max(top_left, bottom_right);
+
+        // Draw filled rectangle with semi-transparent blue (matches Cadence Virtuoso style)
+        painter.rect_filled(
+            selection_rect,
+            0.0,
+            Color32::from_rgba_unmultiplied(100, 150, 255, 40),
+        );
+
+        // Draw border with solid blue stroke
+        painter.rect_stroke(
+            selection_rect,
+            0.0,
+            Stroke::new(1.0, Color32::from_rgb(100, 150, 255)),
+        );
     }
 
     // Draw in-canvas status bar overlay (bottom of schematic area only)
@@ -574,16 +704,18 @@ fn draw_wire(
     viewport: &Viewport,
     wire: &crate::state::Wire,
     selected: bool,
+    highlighted: bool, // Net highlighting - orange color for connected net
     state: &AppState,
 ) {
     // Wire is a polyline - draw all segments
-    let color = if selected {
-        Color32::from_rgb(0, 255, 255) // Cyan for selected
+    // Priority: selected > highlighted > default
+    let (color, width) = if selected {
+        (Color32::from_rgb(0, 255, 255), 2.0) // Cyan for selected
+    } else if highlighted {
+        (Color32::from_rgb(255, 165, 0), 2.0) // Orange for net highlight (Cadence Virtuoso style)
     } else {
-        state.theme.wire_default
+        (state.theme.wire_default, 1.0)
     };
-
-    let width = if selected { 1.5 } else { 1.0 }; // Match component symbol stroke width
 
     // Draw each segment of the wire polyline
     for segment in wire.points.windows(2) {
