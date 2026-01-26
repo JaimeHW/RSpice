@@ -249,6 +249,12 @@ pub struct DialogState {
     pub stb_state: super::simulation_dialog::stb::StbDialogState,
     // --- Temperature Sweep ---
     pub temp_state: super::simulation_dialog::temp::TempDialogState,
+
+    // --- Selection Drag State (for rubber-banding) ---
+    /// Starting position of selection drag (grid coords)
+    pub drag_start: Option<(i32, i32)>,
+    /// Last drag position for computing delta (grid coords)
+    pub last_drag_pos: Option<(i32, i32)>,
 }
 
 /// Main application state container
@@ -268,6 +274,8 @@ pub struct AppState {
     pub theme: RSpiceTheme,
     /// Console messages
     pub console_messages: Vec<ConsoleMessage>,
+    /// Component property editor state
+    pub property_editor: super::properties_dialog::PropertyEditorState,
 }
 
 impl Default for AppState {
@@ -280,6 +288,7 @@ impl Default for AppState {
             dialogs: DialogState::default(),
             theme: RSpiceTheme::dark(),
             console_messages: Vec::new(),
+            property_editor: super::properties_dialog::PropertyEditorState::default(),
         }
     }
 }
@@ -495,11 +504,50 @@ impl RSpiceApp {
                     self.state.schematic.rotate_selection();
                 }
             }
+            // Mirror horizontal (H key) - Cadence Virtuoso convention
+            if ctx.input(|i| i.key_pressed(Key::H) && !i.modifiers.ctrl) {
+                if !self.state.schematic.selection.is_empty() {
+                    self.state.schematic.mirror_selection_h();
+                }
+            }
+            // Mirror vertical (Y key) - since V is voltage source
+            if ctx.input(|i| i.key_pressed(Key::Y) && !i.modifiers.ctrl) {
+                if !self.state.schematic.selection.is_empty() {
+                    self.state.schematic.mirror_selection_v();
+                }
+            }
+            // Edit properties (E key) - Cadence Virtuoso convention
+            if ctx.input(|i| i.key_pressed(Key::E) && !i.modifiers.ctrl) {
+                if let Some(comp_id) = self.state.schematic.selection.single_component() {
+                    if let Some(comp) = self
+                        .state
+                        .schematic
+                        .components
+                        .iter()
+                        .find(|c| c.id == comp_id)
+                    {
+                        let props = super::properties_dialog::EditedProperties {
+                            name: comp.name.clone(),
+                            value: comp.value.clone(),
+                            model: String::new(), // Component doesn't have model field yet
+                            parameters: vec![],
+                        };
+                        self.state.property_editor.open_for(comp_id, props);
+                    }
+                }
+            }
             // Escape to cancel/deselect
             if ctx.input(|i| i.key_pressed(Key::Escape)) {
-                self.state.schematic.tool = Tool::Select;
-                self.state.schematic.cancel_wire();
-                self.state.schematic.selection.clear();
+                // Cancel property editor if open
+                if self.state.property_editor.open {
+                    self.state.property_editor.cancel();
+                } else {
+                    self.state.schematic.tool = Tool::Select;
+                    self.state.schematic.cancel_wire();
+                    self.state.schematic.selection.clear();
+                    // Cancel box selection
+                    self.state.schematic.selection_rect.cancel();
+                }
             }
         }
     }
@@ -1030,6 +1078,38 @@ impl eframe::App for RSpiceApp {
         // =====================================================================
         // Modal Dialogs
         // =====================================================================
+
+        // Component Properties Dialog
+        {
+            use super::properties_dialog::{render_properties_dialog, PropertiesDialogResult};
+            let result = render_properties_dialog(ctx, &mut self.state.property_editor);
+            match result {
+                PropertiesDialogResult::Apply(id, props) => {
+                    // TODO: Create undo checkpoint before modifying (Phase 2: Undo/Redo)
+                    // Update component in schematic
+                    if let Some(comp) = self
+                        .state
+                        .schematic
+                        .components
+                        .iter_mut()
+                        .find(|c| c.id == id)
+                    {
+                        comp.name = props.name;
+                        comp.value = props.value;
+                        // Note: model field can be used for params if needed
+                    }
+                    self.state.schematic.is_dirty = true;
+                    self.state.schematic.bump_topology_version();
+                }
+                PropertiesDialogResult::Cancel => {
+                    // Dialog was cancelled, nothing to do
+                }
+                PropertiesDialogResult::None => {
+                    // Dialog still open or not shown
+                }
+            }
+        }
+
         // Simulation Setup Dialog
         if self.state.dialogs.simulation_dialog {
             // Initialize defaults if empty
