@@ -23,7 +23,6 @@
 //! - Priority-based direction preference (above > sides > below)
 
 use crate::state::{Component, Point, Wire};
-use crate::views::label_placement;
 
 // =============================================================================
 // Bounding Box Types
@@ -110,12 +109,16 @@ impl SchematicGeometry {
     ///
     /// This extracts bounding boxes for:
     /// - Component bodies (with padding for terminals)
-    /// - Component name labels (at their computed positions)
-    /// - Component value labels (at their computed positions)
+    /// - Component name labels (at default positions)
+    /// - Component value labels (at default positions)
     /// - Wire segments (horizontal and vertical)
     pub fn from_schematic(components: &[Component], wires: &[Wire], grid_size: i32) -> Self {
         let mut boxes = Vec::with_capacity(components.len() * 3 + wires.len() * 2);
         let gs = grid_size as f64;
+
+        // Default label offsets (in grid units) relative to component center
+        let name_y_offset = -3.0; // Above component
+        let value_y_offset = 4.5; // Below component
 
         // Component geometry
         for comp in components {
@@ -127,18 +130,12 @@ impl SchematicGeometry {
             // This accounts for terminals extending from the body
             boxes.push(BoundingBox::from_center(cx, cy, 2.5, 1.5));
 
-            // Compute actual label positions using the same algorithm as rendering
-            let (name_pos, value_pos) =
-                label_placement::compute_label_positions(comp, wires, components, grid_size);
-
-            // Name label bounding box
-            // Label dimensions based on character count and font metrics
+            // Name label bounding box - simple default position (above)
             let name_len = comp.name.len() as f64;
-            let name_half_w = (name_len * 0.4).max(1.0); // ~7px per char, converted to grid units
-            let name_half_h = 0.5; // ~10px height in grid units
-
-            let name_cx = cx + name_pos.x / gs;
-            let name_cy = cy + name_pos.y / gs;
+            let name_half_w = (name_len * 0.4).max(1.0);
+            let name_half_h = 0.5;
+            let name_cx = cx;
+            let name_cy = cy + name_y_offset;
             boxes.push(BoundingBox::from_center(
                 name_cx,
                 name_cy,
@@ -146,13 +143,12 @@ impl SchematicGeometry {
                 name_half_h,
             ));
 
-            // Value label bounding box
+            // Value label bounding box - simple default position (below)
             let value_len = comp.value.len() as f64;
             let value_half_w = (value_len * 0.35).max(1.0);
             let value_half_h = 0.45;
-
-            let value_cx = cx + value_pos.x / gs;
-            let value_cy = cy + value_pos.y / gs;
+            let value_cx = cx;
+            let value_cy = cy + value_y_offset;
             boxes.push(BoundingBox::from_center(
                 value_cx,
                 value_cy,
@@ -162,7 +158,6 @@ impl SchematicGeometry {
         }
 
         // Wire segment geometry
-        // Each segment is a thin bounding box along the wire
         let wire_margin = 0.3; // Clearance around wire in grid units
 
         for wire in wires {
@@ -200,6 +195,9 @@ impl SchematicGeometry {
                 boxes.push(bbox);
             }
         }
+
+        // Unused but kept for API compatibility
+        let _ = gs;
 
         Self { boxes, grid_size }
     }

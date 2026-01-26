@@ -149,23 +149,24 @@ impl RenderContext {
     fn rebuild_label_positions(
         &mut self,
         components: &[Component],
-        wires: &[Wire],
+        _wires: &[Wire],
         grid_size: i32,
     ) {
         self.label_positions.clear();
 
-        for comp in components {
-            let (name_pos, value_pos) = crate::views::label_placement::compute_label_positions(
-                comp, wires, components, grid_size,
-            );
+        // Default label offsets based on grid size
+        let name_offset = grid_size as f64 * 3.0;
+        let value_offset = grid_size as f64 * 4.5;
 
+        for comp in components {
+            // Simple default positioning - above component for name, below value offset for value
             self.label_positions.insert(
                 comp.id,
                 LabelPosition {
-                    name_x: name_pos.x,
-                    name_y: name_pos.y,
-                    value_x: value_pos.x,
-                    value_y: value_pos.y,
+                    name_x: 0.0,
+                    name_y: -name_offset,
+                    value_x: 0.0,
+                    value_y: value_offset,
                 },
             );
         }

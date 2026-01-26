@@ -14,21 +14,21 @@
 //! - Each SchematicState has a `topology_version` counter
 //! - The counter increments on any topology change (add/remove/move)
 //! - Cache is invalidated when versions mismatch
-//!
-//! # Usage
-//!
-//! ```ignore
-//! let mut cache = LabelPositionCache::new();
-//! cache.ensure_fresh(schematic.topology_version());
-//!
-//! let positions = cache.get_or_compute(component_id, || {
-//!     compute_label_positions(component, wires, components, grid_size)
-//! });
-//! ```
 
 use std::collections::HashMap;
 
-use crate::views::label_placement::ComputedLabelPos;
+// =============================================================================
+// ComputedLabelPos - Inline definition (was in deleted views module)
+// =============================================================================
+
+/// Computed label position in pixels relative to component center
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ComputedLabelPos {
+    /// X offset from component center in pixels
+    pub x: f64,
+    /// Y offset from component center in pixels
+    pub y: f64,
+}
 
 // =============================================================================
 // LabelPositionCache

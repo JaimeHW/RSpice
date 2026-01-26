@@ -2,7 +2,6 @@
 //!
 //! Application state for simulation, project, and UI state.
 
-pub mod canvas_focus;
 pub mod dc_annotation;
 pub mod dc_annotation_placement;
 pub mod digital_waveform;
@@ -26,7 +25,6 @@ pub mod spatial_index;
 pub mod viewport;
 pub mod waveform_math;
 
-pub use canvas_focus::{use_canvas_focus, CanvasFocus, CanvasFocusState};
 pub use dc_annotation::{AnnotationKind, AnnotationMode, DcAnnotationState};
 pub use display_settings::{PinNameVisibility, SchematicDisplaySettings};
 pub use document::{Document, DocumentManager};
