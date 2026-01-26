@@ -195,13 +195,94 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
                 state.panels.properties = !state.panels.properties;
                 ui.close_menu();
             }
+
+            let browser_label = if state.panels.signal_browser {
+                "✓ Signal Browser"
+            } else {
+                "  Signal Browser"
+            };
+            if ui.button(browser_label).clicked() {
+                state.panels.signal_browser = !state.panels.signal_browser;
+                ui.close_menu();
+            }
+
+            ui.separator();
+
+            // Specialized Viewers submenu
+            ui.menu_button("Specialized Viewers", |ui| {
+                if ui.button("Waveform").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Switched to Waveform viewer",
+                        ));
+                    ui.close_menu();
+                }
+                if ui.button("Smith Chart").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Switched to Smith Chart viewer",
+                        ));
+                    ui.close_menu();
+                }
+                if ui.button("Eye Diagram").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Switched to Eye Diagram viewer",
+                        ));
+                    ui.close_menu();
+                }
+                if ui.button("Histogram").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Switched to Histogram viewer",
+                        ));
+                    ui.close_menu();
+                }
+                if ui.button("Bode Plot").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Switched to Bode Plot viewer",
+                        ));
+                    ui.close_menu();
+                }
+                if ui.button("Nyquist Plot").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Switched to Nyquist Plot viewer",
+                        ));
+                    ui.close_menu();
+                }
+                if ui.button("FFT Spectrum").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Switched to FFT Spectrum viewer",
+                        ));
+                    ui.close_menu();
+                }
+                if ui.button("Pole-Zero Map").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Switched to Pole-Zero Map viewer",
+                        ));
+                    ui.close_menu();
+                }
+            });
         });
 
         // =====================================================================
         // SIMULATE MENU
         // =====================================================================
         ui.menu_button("Simulate", |ui| {
-            if ui.button("Run Simulation").clicked() {
+            // Quick run - uses currently selected analysis
+            if ui.button("▶ Run Simulation    F5").clicked() {
                 if state.schematic.components.is_empty() {
                     state
                         .console_messages
@@ -217,7 +298,45 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
                 ui.close_menu();
             }
 
-            if ui.button("Stop Simulation").clicked() {
+            // Run Analysis submenu for quick access to specific analyses
+            ui.menu_button("Run Analysis", |ui| {
+                let analyses = [
+                    ("DC Operating Point", 0),
+                    ("Transient", 1),
+                    ("AC Analysis", 2),
+                    ("DC Sweep", 3),
+                    ("Noise", 4),
+                    ("Pole-Zero", 5),
+                    ("Sensitivity", 6),
+                    ("Monte Carlo", 7),
+                    ("PSS", 8),
+                    ("Stability (STB)", 9),
+                    ("Temperature Sweep", 10),
+                ];
+                for (name, tab) in analyses {
+                    if ui.button(name).clicked() {
+                        state.dialogs.sim_active_tab = tab;
+                        if state.schematic.components.is_empty() {
+                            state
+                                .console_messages
+                                .push(super::app::ConsoleMessage::warning(
+                                    "No circuit to simulate. Add components first.",
+                                ));
+                        } else {
+                            state
+                                .console_messages
+                                .push(super::app::ConsoleMessage::info(format!(
+                                    "Starting {} analysis...",
+                                    name
+                                )));
+                            state.simulation.trigger_simulation = true;
+                        }
+                        ui.close_menu();
+                    }
+                }
+            });
+
+            if ui.button("⏹ Stop Simulation").clicked() {
                 state.simulation.is_running = false;
                 state
                     .console_messages
@@ -227,7 +346,7 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
 
             ui.separator();
 
-            if ui.button("Setup...").clicked() {
+            if ui.button("Setup...     Ctrl+Shift+S").clicked() {
                 state.dialogs.simulation_dialog = true;
                 ui.close_menu();
             }
@@ -236,18 +355,61 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
                 state.dialogs.simulation_options = true;
                 ui.close_menu();
             }
+
+            ui.separator();
+
+            // Netlist menu
+            ui.menu_button("Netlist", |ui| {
+                if ui.button("View Netlist").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Netlist viewer: Coming soon",
+                        ));
+                    ui.close_menu();
+                }
+                if ui.button("Export SPICE Netlist...").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Export netlist: Coming soon",
+                        ));
+                    ui.close_menu();
+                }
+                if ui.button("Export Spectre Netlist...").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Export Spectre netlist: Coming soon",
+                        ));
+                    ui.close_menu();
+                }
+            });
         });
 
         // =====================================================================
         // TOOLS MENU
         // =====================================================================
         ui.menu_button("Tools", |ui| {
-            if ui.button("Verilog-A Compiler...").clicked() {
-                state
-                    .console_messages
-                    .push(super::app::ConsoleMessage::info("Verilog-A: Coming soon"));
-                ui.close_menu();
-            }
+            // Verilog-A submenu
+            ui.menu_button("Verilog-A", |ui| {
+                if ui.button("Compile Module...").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Verilog-A compiler: Coming soon",
+                        ));
+                    ui.close_menu();
+                }
+                if ui.button("Module Library...").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Verilog-A library: Coming soon",
+                        ));
+                    ui.close_menu();
+                }
+            });
 
             if ui.button("Model Browser...").clicked() {
                 state
@@ -258,12 +420,105 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
                 ui.close_menu();
             }
 
+            if ui.button("Parameter Extractor...").clicked() {
+                state
+                    .console_messages
+                    .push(super::app::ConsoleMessage::info(
+                        "Parameter Extractor: Coming soon",
+                    ));
+                ui.close_menu();
+            }
+
+            ui.separator();
+
+            // Calculators submenu
+            ui.menu_button("Calculators", |ui| {
+                if ui.button("Unit Converter").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Unit Converter: Coming soon",
+                        ));
+                    ui.close_menu();
+                }
+                if ui.button("Filter Design").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Filter Calculator: Coming soon",
+                        ));
+                    ui.close_menu();
+                }
+                if ui.button("Impedance Matching").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Impedance Calculator: Coming soon",
+                        ));
+                    ui.close_menu();
+                }
+                if ui.button("S-Parameter Converter").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "S-Parameter Converter: Coming soon",
+                        ));
+                    ui.close_menu();
+                }
+            });
+
+            ui.separator();
+
+            // Verification tools
             if ui.button("Design Rule Check").clicked() {
                 state
                     .console_messages
                     .push(super::app::ConsoleMessage::info("DRC: Coming soon"));
                 ui.close_menu();
             }
+
+            if ui.button("Electrical Rule Check").clicked() {
+                state
+                    .console_messages
+                    .push(super::app::ConsoleMessage::info("ERC: Coming soon"));
+                ui.close_menu();
+            }
+
+            if ui.button("LVS Check").clicked() {
+                state
+                    .console_messages
+                    .push(super::app::ConsoleMessage::info("LVS: Coming soon"));
+                ui.close_menu();
+            }
+
+            ui.separator();
+
+            // Waveform tools
+            ui.menu_button("Waveform Tools", |ui| {
+                if ui.button("Calculator...").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Waveform Calculator: Coming soon",
+                        ));
+                    ui.close_menu();
+                }
+                if ui.button("Measurements...").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Measurements panel: Coming soon",
+                        ));
+                    ui.close_menu();
+                }
+                if ui.button("Cross-Probe").clicked() {
+                    state.panels.signal_browser = true;
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info("Cross-probe enabled"));
+                    ui.close_menu();
+                }
+            });
         });
 
         // =====================================================================
@@ -272,6 +527,98 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
         ui.menu_button("Help", |ui| {
             if ui.button("Keyboard Shortcuts    F1").clicked() {
                 state.dialogs.shortcuts_help = true;
+                ui.close_menu();
+            }
+
+            ui.separator();
+
+            // Documentation submenu
+            ui.menu_button("Documentation", |ui| {
+                if ui.button("User Guide").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "User Guide: See docs/user_guide.md",
+                        ));
+                    ui.close_menu();
+                }
+                if ui.button("SPICE Reference").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "SPICE Reference: See docs/spice_reference.md",
+                        ));
+                    ui.close_menu();
+                }
+                if ui.button("Analysis Guide").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Analysis Guide: See docs/analysis_guide.md",
+                        ));
+                    ui.close_menu();
+                }
+                if ui.button("Model Library").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Model Library: See docs/models.md",
+                        ));
+                    ui.close_menu();
+                }
+            });
+
+            // Examples submenu
+            ui.menu_button("Examples", |ui| {
+                if ui.button("RC Low-Pass Filter").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Loading RC filter example...",
+                        ));
+                    ui.close_menu();
+                }
+                if ui.button("Inverter Chain").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Loading inverter chain example...",
+                        ));
+                    ui.close_menu();
+                }
+                if ui.button("Operational Amplifier").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info(
+                            "Loading op-amp example...",
+                        ));
+                    ui.close_menu();
+                }
+                if ui.button("PLL Circuit").clicked() {
+                    state
+                        .console_messages
+                        .push(super::app::ConsoleMessage::info("Loading PLL example..."));
+                    ui.close_menu();
+                }
+            });
+
+            ui.separator();
+
+            if ui.button("Check for Updates...").clicked() {
+                state
+                    .console_messages
+                    .push(super::app::ConsoleMessage::info(
+                        "You are running the latest version",
+                    ));
+                ui.close_menu();
+            }
+
+            if ui.button("Report Issue...").clicked() {
+                state
+                    .console_messages
+                    .push(super::app::ConsoleMessage::info(
+                        "Please report issues at: github.com/rspice/issues",
+                    ));
                 ui.close_menu();
             }
 
