@@ -1,60 +1,32 @@
 //! RSpice UI - Modern Circuit Simulator Interface
 //!
 //! A high-performance GUI for the RSpice circuit simulation engine,
-//! built with Dioxus for cross-platform desktop and web deployment.
+//! built with egui for commercial-grade GPU-accelerated desktop deployment.
 
-// Suppress warnings for incomplete features (schematic editor, symbols, etc.)
+// Suppress warnings for incomplete features
 #![allow(non_snake_case)]
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
-mod app;
-mod components;
-pub mod dialogs;
-pub mod gpu;
-pub mod services;
-pub mod state;
-mod theme;
-pub mod utils;
-mod views;
+// =============================================================================
+// Core Modules
+// =============================================================================
 
-// egui-based application (commercial-grade GPU-native UI)
-#[cfg(feature = "egui")]
+/// Application services (file I/O, simulation runner, etc.)
+pub mod services;
+
+/// Application state management
+pub mod state;
+
+/// Utility functions and helpers
+pub mod utils;
+
+// =============================================================================
+// egui Application
+// =============================================================================
+
+/// Commercial-grade egui application with GPU-native rendering
 pub mod egui_app;
 
-pub use app::App;
-pub use theme::Theme;
-
-// Re-export egui app for feature-gated builds
-#[cfg(feature = "egui")]
+/// Re-export the main application type
 pub use egui_app::RSpiceApp;
-
-// =============================================================================
-// Platform-specific initialization
-// =============================================================================
-
-/// Initialize and launch the web application.
-/// Called from main.rs for WASM builds.
-#[cfg(target_arch = "wasm32")]
-pub fn launch_web() {
-    // Set up better panic messages for debugging
-    console_error_panic_hook::set_once();
-
-    // Initialize console logging
-    console_log::init_with_level(log::Level::Info).ok();
-
-    log::info!("RSpice Web UI starting...");
-
-    // Spawn async GPU initialization in the background
-    // This runs concurrently with Dioxus startup for faster perceived load time
-    wasm_bindgen_futures::spawn_local(async {
-        log::info!("Initializing WebGPU...");
-        match views::waveform_gpu::init_web_gpu().await {
-            Some(_) => log::info!("WebGPU initialized successfully"),
-            None => log::warn!("WebGPU not available, using SVG fallback"),
-        }
-    });
-
-    // Launch Dioxus web application
-    dioxus::launch(App);
-}

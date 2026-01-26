@@ -110,7 +110,7 @@ pub fn run_simulation(netlist_text: &str) -> SimulationResult {
 /// Allows passing UI-configured SimulationOptions to control the solver behavior.
 pub fn run_simulation_with_options(
     netlist_text: &str,
-    options: Option<&crate::dialogs::SimulationOptions>,
+    options: Option<&crate::egui_app::simulation_dialog::SimulationOptions>,
 ) -> SimulationResult {
     let mut stats = SimulationStats::default();
 

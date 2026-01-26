@@ -1,16 +1,13 @@
 //! RSpice Application Entry Point
 //!
 //! Cross-platform entry point for RSpice UI.
-//! - Desktop: Uses dioxus desktop runtime
-//! - Web: Delegates to library's launch_web() function
+//! Uses egui for commercial-grade GPU-accelerated rendering.
 
 // =============================================================================
-// egui Entry Point - Commercial-grade GPU-native UI
+// Desktop Entry Point - Commercial-grade GPU-native UI
 // =============================================================================
-// This is the recommended entry point for production use.
-// Provides 60fps GPU-accelerated rendering without webview overhead.
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "egui"))]
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     // Initialize logging
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -41,56 +38,11 @@ fn main() {
 }
 
 // =============================================================================
-// Dioxus Native Entry Point (experimental)
+// Web Entry Point (placeholder for future web support)
 // =============================================================================
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "native", not(feature = "egui")))]
-fn main() {
-    use rspice_ui::App;
-
-    // Initialize logging
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-
-    log::info!("Starting RSpice UI with dioxus-native (experimental)...");
-
-    // Launch with native renderer (direct wgpu, no webview)
-    dioxus::native::launch(App);
-}
-
-// =============================================================================
-// Dioxus Desktop Entry Point (webview fallback)
-// =============================================================================
-
-#[cfg(all(
-    not(target_arch = "wasm32"),
-    not(feature = "egui"),
-    not(feature = "native")
-))]
-fn main() {
-    use dioxus::desktop::{Config, WindowBuilder};
-    use rspice_ui::App;
-
-    // Initialize logging
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-
-    log::info!("Starting RSpice UI with desktop webview...");
-
-    // Configure window
-    let config = Config::new().with_menu(None).with_window(
-        WindowBuilder::new()
-            .with_title("RSpice - Circuit Simulator")
-            .with_inner_size(dioxus::desktop::LogicalSize::new(1400.0, 900.0))
-            .with_position(dioxus::desktop::LogicalPosition::new(100.0, 100.0)),
-    );
-
-    // Launch desktop application
-    dioxus::LaunchBuilder::desktop()
-        .with_cfg(config)
-        .launch(App);
-}
-
-// Web entry point
 #[cfg(target_arch = "wasm32")]
 fn main() {
-    rspice_ui::launch_web();
+    // Web support can be added in the future using egui web
+    panic!("Web support is not yet implemented. Use desktop version.");
 }
