@@ -2,27 +2,14 @@
 //!
 //! Main toolbar with simulation controls, zoom, and tool selection.
 
-use egui::{Ui, Vec2};
+use egui::{Color32, Ui, Vec2};
 
 use super::app::AppState;
+use crate::state::{ComponentType, Tool};
 
-/// Tool selection mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ToolMode {
-    /// Selection/pointer tool
-    #[default]
-    Select,
-    /// Wire drawing tool
-    Wire,
-    /// Component placement tool
-    Component,
-    /// Voltage probe tool
-    ProbeVoltage,
-    /// Current probe tool
-    ProbeCurrent,
-    /// Text annotation tool
-    Text,
-}
+// =============================================================================
+// Toolbar Rendering
+// =============================================================================
 
 /// Render the main toolbar
 pub fn render_toolbar(ui: &mut Ui, state: &mut AppState) {
@@ -36,48 +23,104 @@ pub fn render_toolbar(ui: &mut Ui, state: &mut AppState) {
         ui.add_space(4.0);
 
         // Select tool
+        let is_select = state.schematic.tool.is_select();
         if ui
-            .add(egui::Button::new("⬚").min_size(Vec2::splat(28.0)))
+            .add(tool_button("⬚", is_select))
             .on_hover_text("Select (S)")
             .clicked()
         {
-            state
-                .console_messages
-                .push(super::app::ConsoleMessage::info("Select tool active"));
+            state.schematic.tool = Tool::Select;
         }
 
         // Wire tool
+        let is_wire = state.schematic.tool.is_wire();
         if ui
-            .add(egui::Button::new("↝").min_size(Vec2::splat(28.0)))
+            .add(tool_button("↝", is_wire))
             .on_hover_text("Wire (W)")
             .clicked()
         {
-            state
-                .console_messages
-                .push(super::app::ConsoleMessage::info("Wire tool active"));
+            state.schematic.tool = Tool::Wire;
         }
 
-        // Component tool
+        // Component dropdown
+        let is_place = state.schematic.tool.is_place_tool();
+        ui.menu_button(egui::RichText::new("⊕").size(14.0), |ui| {
+            ui.set_min_width(120.0);
+            ui.label("Components");
+            ui.separator();
+
+            if ui.button("Resistor (R+Shift)").clicked() {
+                state.schematic.tool = Tool::Place(ComponentType::Resistor);
+                ui.close_menu();
+            }
+            if ui.button("Capacitor (C)").clicked() {
+                state.schematic.tool = Tool::Place(ComponentType::Capacitor);
+                ui.close_menu();
+            }
+            if ui.button("Inductor (L)").clicked() {
+                state.schematic.tool = Tool::Place(ComponentType::Inductor);
+                ui.close_menu();
+            }
+
+            ui.separator();
+
+            if ui.button("Voltage Source (V)").clicked() {
+                state.schematic.tool = Tool::Place(ComponentType::VoltageSource);
+                ui.close_menu();
+            }
+            if ui.button("Current Source (I)").clicked() {
+                state.schematic.tool = Tool::Place(ComponentType::CurrentSource);
+                ui.close_menu();
+            }
+            if ui.button("Ground (G)").clicked() {
+                state.schematic.tool = Tool::Place(ComponentType::Ground);
+                ui.close_menu();
+            }
+
+            ui.separator();
+
+            if ui.button("Diode (D)").clicked() {
+                state.schematic.tool = Tool::Place(ComponentType::Diode);
+                ui.close_menu();
+            }
+            if ui.button("NMOS (M)").clicked() {
+                state.schematic.tool = Tool::Place(ComponentType::Nmos);
+                ui.close_menu();
+            }
+            if ui.button("PMOS").clicked() {
+                state.schematic.tool = Tool::Place(ComponentType::Pmos);
+                ui.close_menu();
+            }
+            if ui.button("NPN BJT (Q)").clicked() {
+                state.schematic.tool = Tool::Place(ComponentType::NpnBjt);
+                ui.close_menu();
+            }
+            if ui.button("PNP BJT").clicked() {
+                state.schematic.tool = Tool::Place(ComponentType::PnpBjt);
+                ui.close_menu();
+            }
+        })
+        .response
+        .on_hover_text(if is_place {
+            format!("Placing: {}", state.schematic.tool.display_name())
+        } else {
+            "Add Component".to_string()
+        });
+
+        // Probe tool
+        let is_probe = matches!(state.schematic.tool, Tool::Probe);
         if ui
-            .add(egui::Button::new("⊕").min_size(Vec2::splat(28.0)))
-            .on_hover_text("Add Component (C)")
+            .add(tool_button("🔬", is_probe))
+            .on_hover_text("Probe (P)")
             .clicked()
         {
-            state
-                .console_messages
-                .push(super::app::ConsoleMessage::info("Component tool active"));
+            state.schematic.tool = Tool::Probe;
         }
 
-        // Probe tools
-        if ui
-            .add(egui::Button::new("🔬").min_size(Vec2::splat(28.0)))
-            .on_hover_text("Voltage Probe (V)")
-            .clicked()
-        {
-            state
-                .console_messages
-                .push(super::app::ConsoleMessage::info("Voltage probe active"));
-        }
+        // Current tool indicator
+        ui.separator();
+        let tool_name = state.schematic.tool.display_name();
+        ui.label(format!("Mode: {}", tool_name));
 
         ui.separator();
 
@@ -175,17 +218,27 @@ pub fn render_toolbar(ui: &mut Ui, state: &mut AppState) {
         // =====================================================================
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if state.simulation.is_running {
-                ui.colored_label(egui::Color32::from_rgb(100, 200, 255), "⏳ Simulating...");
+                ui.colored_label(Color32::from_rgb(100, 200, 255), "⏳ Simulating...");
             } else if !state.simulation.waveforms.is_empty() {
-                ui.colored_label(egui::Color32::from_rgb(100, 200, 100), "✓ Results ready");
+                ui.colored_label(Color32::from_rgb(100, 200, 100), "✓ Results ready");
             }
 
             // Dirty indicator
             if state.schematic.is_dirty {
-                ui.colored_label(egui::Color32::from_rgb(255, 180, 50), "●");
+                ui.colored_label(Color32::from_rgb(255, 180, 50), "●");
             }
         });
     });
+}
+
+/// Create a tool button with active highlighting
+fn tool_button(icon: &str, active: bool) -> egui::Button<'_> {
+    let btn = egui::Button::new(icon).min_size(Vec2::splat(28.0));
+    if active {
+        btn.fill(Color32::from_rgb(60, 100, 160))
+    } else {
+        btn
+    }
 }
 
 // =============================================================================
@@ -197,25 +250,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_tool_mode_default() {
-        let mode = ToolMode::default();
-        assert_eq!(mode, ToolMode::Select);
+    fn test_tool_button_creates_button() {
+        // Just verify it compiles and creates a button
+        let _btn = tool_button("⬚", true);
+        let _btn2 = tool_button("⬚", false);
     }
 
     #[test]
-    fn test_tool_mode_variants() {
-        // Ensure all variants can be created
-        let _select = ToolMode::Select;
-        let _wire = ToolMode::Wire;
-        let _component = ToolMode::Component;
-        let _probe_v = ToolMode::ProbeVoltage;
-        let _probe_i = ToolMode::ProbeCurrent;
-        let _text = ToolMode::Text;
-    }
-
-    #[test]
-    fn test_tool_mode_equality() {
-        assert_eq!(ToolMode::Wire, ToolMode::Wire);
-        assert_ne!(ToolMode::Wire, ToolMode::Select);
+    fn test_tool_button_different_icons() {
+        let _select = tool_button("⬚", false);
+        let _wire = tool_button("↝", false);
+        let _probe = tool_button("🔬", true);
     }
 }

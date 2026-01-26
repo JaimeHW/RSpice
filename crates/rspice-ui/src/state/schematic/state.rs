@@ -15,7 +15,7 @@ use super::point::Point;
 use super::rotation::Rotation;
 use super::selection::Selection;
 use super::tool::Tool;
-use super::wire::{Wire, WireConnection, WireDrawing};
+use super::wire::{Wire, WireConnection, WireDrawing, WireSegment};
 
 // =============================================================================
 // Constants
@@ -563,6 +563,301 @@ impl SchematicState {
     }
 
     // =========================================================================
+    // Wire Operations (Commercial-Grade)
+    // =========================================================================
+
+    /// Split a wire into two wires at the given point
+    ///
+    /// If the point is exactly on the wire (either at a vertex or on a segment),
+    /// this will create two new wires: one from the original start to the split point,
+    /// and one from the split point to the original end.
+    ///
+    /// Returns `Some((wire_before_id, wire_after_id))` if successful, `None` otherwise.
+    ///
+    /// # Arguments
+    /// * `wire_id` - The ID of the wire to split
+    /// * `at_point` - The point at which to split (must be on the wire)
+    pub fn split_wire(&mut self, wire_id: u64, at_point: Point) -> Option<(u64, u64)> {
+        // Find the wire
+        let wire_idx = self.wires.iter().position(|w| w.id == wire_id)?;
+        let wire = &self.wires[wire_idx];
+
+        // Validate that the point is on the wire
+        if !wire.contains_point(at_point) {
+            return None;
+        }
+
+        // Don't split at endpoints - nothing to split
+        if wire.start() == Some(at_point) || wire.end() == Some(at_point) {
+            return None;
+        }
+
+        // Find where to split
+        let points = wire.points.clone();
+
+        // Check if split point is at an existing vertex
+        let vertex_idx = points.iter().position(|p| *p == at_point);
+
+        let (before_points, after_points) = if let Some(v_idx) = vertex_idx {
+            // Split at vertex - both wires share this point
+            let before: Vec<Point> = points[..=v_idx].to_vec();
+            let after: Vec<Point> = points[v_idx..].to_vec();
+            (before, after)
+        } else {
+            // Point is on a segment, need to find which one and insert it
+            let mut before_points = Vec::new();
+            let mut after_points = Vec::new();
+            let mut found_segment = false;
+
+            for i in 0..points.len() - 1 {
+                let seg = WireSegment::new(points[i], points[i + 1]);
+                if !found_segment {
+                    before_points.push(points[i]);
+                    if seg.contains_point(at_point) && points[i] != at_point {
+                        before_points.push(at_point);
+                        after_points.push(at_point);
+                        found_segment = true;
+                    }
+                }
+                if found_segment {
+                    after_points.push(points[i + 1]);
+                }
+            }
+
+            if !found_segment {
+                return None;
+            }
+
+            (before_points, after_points)
+        };
+
+        // Validate both parts are valid wires
+        if before_points.len() < 2 || after_points.len() < 2 {
+            return None;
+        }
+
+        // Remove original wire
+        self.wires.remove(wire_idx);
+
+        // Create two new wires
+        let id1 = self.next_id();
+        let id2 = self.next_id();
+
+        self.wires.push(Wire::new(id1, before_points));
+        self.wires.push(Wire::new(id2, after_points));
+
+        self.is_dirty = true;
+        self.bump_topology_version();
+
+        Some((id1, id2))
+    }
+
+    /// Split a wire at a specific segment, inserting a corner point at the midpoint
+    ///
+    /// This is useful for creating corners in straight wire runs.
+    ///
+    /// # Arguments
+    /// * `wire_id` - The wire to modify
+    /// * `segment_index` - Which segment to split (0 = first segment)
+    ///
+    /// Returns the modified wire ID if successful
+    pub fn split_wire_at_segment(&mut self, wire_id: u64, segment_index: usize) -> Option<u64> {
+        let wire = self.wires.iter_mut().find(|w| w.id == wire_id)?;
+
+        if segment_index >= wire.segment_count() {
+            return None;
+        }
+
+        let segment = wire.segment_at(segment_index)?;
+        let midpoint = segment.midpoint();
+
+        // Don't insert if midpoint equals an endpoint (zero-length segment)
+        if midpoint == segment.start || midpoint == segment.end {
+            return None;
+        }
+
+        // Insert the midpoint as a new vertex
+        wire.points.insert(segment_index + 1, midpoint);
+
+        self.is_dirty = true;
+        self.bump_topology_version();
+
+        Some(wire_id)
+    }
+
+    /// Merge two wires that share an endpoint
+    ///
+    /// The wires must be connected at exactly one endpoint. After merging,
+    /// the first wire is removed and the second wire is modified to include
+    /// all points from both.
+    ///
+    /// # Arguments
+    /// * `wire_a` - First wire ID
+    /// * `wire_b` - Second wire ID
+    ///
+    /// Returns the ID of the merged wire if successful
+    pub fn merge_wires(&mut self, wire_a: u64, wire_b: u64) -> Option<u64> {
+        if wire_a == wire_b {
+            return None;
+        }
+
+        // Find both wires
+        let idx_a = self.wires.iter().position(|w| w.id == wire_a)?;
+        let idx_b = self.wires.iter().position(|w| w.id == wire_b)?;
+
+        // Check if they share an endpoint
+        let (a_start, a_end) = (self.wires[idx_a].start()?, self.wires[idx_a].end()?);
+        let (b_start, b_end) = (self.wires[idx_b].start()?, self.wires[idx_b].end()?);
+
+        // Determine connection type and build merged points
+        let merged_points: Vec<Point> = if a_end == b_start {
+            // A's end connects to B's start: A.start → A.end/B.start → B.end
+            let mut pts = self.wires[idx_a].points.clone();
+            pts.extend(self.wires[idx_b].points.iter().skip(1));
+            pts
+        } else if a_end == b_end {
+            // A's end connects to B's end: A.start → A.end/B.end → B.start
+            let mut pts = self.wires[idx_a].points.clone();
+            pts.extend(self.wires[idx_b].points.iter().rev().skip(1));
+            pts
+        } else if a_start == b_end {
+            // B's end connects to A's start: B.start → B.end/A.start → A.end
+            let mut pts = self.wires[idx_b].points.clone();
+            pts.extend(self.wires[idx_a].points.iter().skip(1));
+            pts
+        } else if a_start == b_start {
+            // A's start connects to B's start: A.end ← A.start/B.start → B.end
+            let mut pts: Vec<Point> = self.wires[idx_a].points.iter().rev().cloned().collect();
+            pts.extend(self.wires[idx_b].points.iter().skip(1));
+            pts
+        } else {
+            // Wires don't share an endpoint
+            return None;
+        };
+
+        // Remove both wires (higher index first to avoid shifting)
+        let (remove_first, remove_second) = if idx_a > idx_b {
+            (idx_a, idx_b)
+        } else {
+            (idx_b, idx_a)
+        };
+        self.wires.remove(remove_first);
+        self.wires.remove(remove_second);
+
+        // Create merged wire
+        let merged_id = self.next_id();
+        self.wires.push(Wire::new(merged_id, merged_points));
+
+        self.is_dirty = true;
+        self.bump_topology_version();
+
+        Some(merged_id)
+    }
+
+    /// Remove unnecessary intermediate vertices from a wire
+    ///
+    /// This removes collinear points (points that lie on a straight line
+    /// between their neighbors) to simplify the wire path.
+    ///
+    /// # Arguments
+    /// * `wire_id` - The wire to straighten
+    pub fn straighten_wire(&mut self, wire_id: u64) {
+        if let Some(wire) = self.wires.iter_mut().find(|w| w.id == wire_id) {
+            let simplified = Self::simplify_wire_path(wire.points.clone());
+            if simplified != wire.points {
+                wire.points = simplified;
+                self.is_dirty = true;
+                self.bump_topology_version();
+            }
+        }
+    }
+
+    /// Optimize all wires by removing collinear intermediate points
+    pub fn optimize_all_wires(&mut self) {
+        let mut changed = false;
+        for wire in &mut self.wires {
+            let simplified = Self::simplify_wire_path(wire.points.clone());
+            if simplified != wire.points {
+                wire.points = simplified;
+                changed = true;
+            }
+        }
+        if changed {
+            self.is_dirty = true;
+            self.bump_topology_version();
+        }
+    }
+
+    /// Delete a wire by ID
+    ///
+    /// Returns true if a wire was deleted
+    pub fn delete_wire(&mut self, wire_id: u64) -> bool {
+        let len_before = self.wires.len();
+        self.wires.retain(|w| w.id != wire_id);
+        let deleted = self.wires.len() < len_before;
+        if deleted {
+            self.is_dirty = true;
+            self.bump_topology_version();
+        }
+        deleted
+    }
+
+    /// Insert a corner vertex into an existing wire at a specific location
+    ///
+    /// # Arguments
+    /// * `wire_id` - The wire to modify
+    /// * `at_point` - The point on the wire where to insert the corner
+    /// * `corner_offset` - The offset to move the new corner point
+    ///
+    /// Returns true if successful
+    pub fn insert_wire_corner(
+        &mut self,
+        wire_id: u64,
+        at_point: Point,
+        corner_offset: Point,
+    ) -> bool {
+        let wire = match self.wires.iter_mut().find(|w| w.id == wire_id) {
+            Some(w) => w,
+            None => return false,
+        };
+
+        // Find the segment containing the point
+        if let Some((seg_idx, _)) = wire.segment_containing_point(at_point) {
+            // Insert two new vertices: the original point and the offset corner
+            let new_corner = Point::new(at_point.x + corner_offset.x, at_point.y + corner_offset.y);
+
+            // Insert after the segment start
+            wire.points.insert(seg_idx + 1, at_point);
+            wire.points.insert(seg_idx + 2, new_corner);
+
+            self.is_dirty = true;
+            self.bump_topology_version();
+            return true;
+        }
+
+        false
+    }
+
+    /// Move a specific vertex of a wire
+    ///
+    /// # Arguments
+    /// * `wire_id` - The wire to modify
+    /// * `vertex_index` - Which vertex to move
+    /// * `new_pos` - The new position
+    ///
+    /// Returns true if successful
+    pub fn move_wire_vertex(&mut self, wire_id: u64, vertex_index: usize, new_pos: Point) -> bool {
+        if let Some(wire) = self.wires.iter_mut().find(|w| w.id == wire_id) {
+            if wire.move_vertex(vertex_index, new_pos) {
+                self.is_dirty = true;
+                self.bump_topology_version();
+                return true;
+            }
+        }
+        false
+    }
+
+    // =========================================================================
     // Junction Management
     // =========================================================================
 
@@ -996,5 +1291,252 @@ impl SchematicState {
         }
 
         self.rebuild_connections();
+    }
+
+    // =========================================================================
+    // Automatic Junction Detection System (Commercial-Grade)
+    // =========================================================================
+
+    /// Find all intersection points between wires
+    ///
+    /// This detects where wires cross or connect, which is essential for
+    /// automatic junction placement. Like Cadence, we check both:
+    /// 1. Wire-to-wire segment intersections
+    /// 2. Wire endpoints touching other wires
+    pub fn find_wire_intersections(&self) -> Vec<(Point, Vec<u64>)> {
+        use std::collections::HashMap;
+
+        let mut intersection_map: HashMap<Point, Vec<u64>> = HashMap::new();
+
+        // Phase 1: Find all wire endpoint connections
+        for wire in &self.wires {
+            if let Some(start) = wire.start() {
+                intersection_map.entry(start).or_default().push(wire.id);
+            }
+            if let Some(end) = wire.end() {
+                if wire.points.len() > 1 {
+                    intersection_map.entry(end).or_default().push(wire.id);
+                }
+            }
+        }
+
+        // Phase 2: Find wire-to-wire segment intersections
+        let wires: Vec<_> = self.wires.iter().collect();
+        for i in 0..wires.len() {
+            for j in (i + 1)..wires.len() {
+                let wire_a = wires[i];
+                let wire_b = wires[j];
+
+                // Get all intersection points between these two wires
+                let intersections = wire_a.intersections_with_wire(wire_b);
+                for point in intersections {
+                    let entry = intersection_map.entry(point).or_default();
+                    if !entry.contains(&wire_a.id) {
+                        entry.push(wire_a.id);
+                    }
+                    if !entry.contains(&wire_b.id) {
+                        entry.push(wire_b.id);
+                    }
+                }
+            }
+        }
+
+        // Phase 3: Check if any wire passes through another wire's vertex
+        for wire in &self.wires {
+            for other_wire in &self.wires {
+                if wire.id == other_wire.id {
+                    continue;
+                }
+                // Check if other_wire passes through any vertex of wire
+                for vertex in &wire.points {
+                    if other_wire.contains_point(*vertex) {
+                        let entry = intersection_map.entry(*vertex).or_default();
+                        if !entry.contains(&wire.id) {
+                            entry.push(wire.id);
+                        }
+                        if !entry.contains(&other_wire.id) {
+                            entry.push(other_wire.id);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Convert to sorted vector - only include points with 2+ wires (actual connections)
+        let mut result: Vec<_> = intersection_map
+            .into_iter()
+            .filter(|(_, wire_ids)| wire_ids.len() >= 2)
+            .collect();
+        result.sort_by(|a, b| a.0.x.cmp(&b.0.x).then_with(|| a.0.y.cmp(&b.0.y)));
+        result
+    }
+
+    /// Detect junction points that need visual markers
+    ///
+    /// A junction needs a marker (dot) when:
+    /// - 3+ wire segments meet at a point (T-junction or cross)
+    /// - Multiple wires share an endpoint (not just two wires forming a corner)
+    pub fn detect_junction_points(&self) -> Vec<Point> {
+        self.find_wire_intersections()
+            .into_iter()
+            .filter(|(_, wire_ids)| wire_ids.len() >= 3)
+            .map(|(point, _)| point)
+            .collect()
+    }
+
+    /// Classify the type of junction at a given point
+    pub fn classify_junction_type(&self, pos: Point) -> super::wire::JunctionType {
+        let wire_count = self.wires.iter().filter(|w| w.contains_point(pos)).count();
+        super::wire::JunctionType::from_wire_count(wire_count)
+    }
+
+    /// Automatically place junctions at all detected intersection points
+    ///
+    /// This is the main entry point for automatic junction management.
+    /// Call this after wire operations to maintain junction consistency.
+    pub fn auto_place_junctions(&mut self) {
+        let junction_points = self.detect_junction_points();
+
+        // Add junctions at detected points that don't have one
+        for point in &junction_points {
+            let has_junction = self.junctions.iter().any(|j| j.pos == *point);
+            if !has_junction {
+                self.add_junction(*point);
+            }
+        }
+
+        // Remove junctions that are no longer at intersection points
+        self.junctions.retain(|j| junction_points.contains(&j.pos));
+
+        self.is_dirty = true;
+        self.bump_topology_version();
+    }
+
+    /// Remove orphaned junctions that no longer have wire connections
+    pub fn remove_orphan_junctions(&mut self) -> usize {
+        let initial_count = self.junctions.len();
+
+        self.junctions.retain(|junction| {
+            // Keep junction if any wire passes through it
+            self.wires.iter().any(|w| w.contains_point(junction.pos))
+        });
+
+        let removed = initial_count - self.junctions.len();
+        if removed > 0 {
+            self.is_dirty = true;
+            self.bump_topology_version();
+        }
+        removed
+    }
+
+    /// Update junction markers based on current wire topology
+    ///
+    /// This is a more comprehensive update that:
+    /// 1. Removes orphan junctions
+    /// 2. Places new junctions where needed
+    /// 3. Updates junction types
+    pub fn update_wire_junctions(&mut self) {
+        self.remove_orphan_junctions();
+        self.auto_place_junctions();
+    }
+
+    /// Find all points where wires could potentially be split
+    /// (where they cross other wires without connecting)
+    pub fn find_potential_splits(&self) -> Vec<(u64, Point)> {
+        let mut splits = Vec::new();
+
+        for wire in &self.wires {
+            for other_wire in &self.wires {
+                if wire.id == other_wire.id {
+                    continue;
+                }
+
+                let intersections = wire.intersections_with_wire(other_wire);
+                for point in intersections {
+                    // Check if this intersection point is already a vertex on wire
+                    let is_vertex = wire.points.iter().any(|p| *p == point);
+                    if !is_vertex {
+                        splits.push((wire.id, point));
+                    }
+                }
+            }
+        }
+
+        // Deduplicate
+        splits.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.x.cmp(&b.1.x)));
+        splits.dedup();
+        splits
+    }
+
+    /// Create T-junctions by splitting wires at intersection points
+    ///
+    /// When a wire endpoint touches another wire mid-segment,
+    /// this will split the second wire and create proper junction.
+    pub fn create_t_junctions_from_endpoints(&mut self) {
+        // Find all points where one wire ends on another wire's segment
+        let mut splits_needed: Vec<(u64, Point)> = Vec::new();
+
+        for wire in &self.wires {
+            let endpoints = [wire.start(), wire.end()];
+            for endpoint in endpoints.into_iter().flatten() {
+                for other_wire in &self.wires {
+                    if other_wire.id == wire.id {
+                        continue;
+                    }
+
+                    // Check if endpoint is on other_wire but not at a vertex
+                    if other_wire.contains_point(endpoint) {
+                        let is_at_vertex = other_wire.points.iter().any(|p| *p == endpoint);
+                        if !is_at_vertex {
+                            splits_needed.push((other_wire.id, endpoint));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Perform splits and add junctions
+        let has_splits = !splits_needed.is_empty();
+        for (wire_id, point) in splits_needed {
+            // Insert vertex at the intersection point
+            if let Some(wire) = self.wires.iter_mut().find(|w| w.id == wire_id) {
+                if let Some((segment_idx, _segment)) = wire.segment_containing_point(point) {
+                    wire.insert_vertex(segment_idx + 1, point);
+                }
+            }
+
+            // Ensure junction exists at this point
+            let has_junction = self.junctions.iter().any(|j| j.pos == point);
+            if !has_junction {
+                self.add_junction(point);
+            }
+        }
+
+        if has_splits {
+            self.is_dirty = true;
+            self.bump_topology_version();
+        }
+    }
+
+    /// Count how many wire segments connect at a given point
+    pub fn count_connections_at(&self, pos: Point) -> usize {
+        let mut count = 0;
+        for wire in &self.wires {
+            // Count endpoints
+            if wire.start() == Some(pos) {
+                count += 1;
+            }
+            if wire.end() == Some(pos) && wire.points.len() > 1 {
+                count += 1;
+            }
+
+            // Count mid-wire vertices (each vertex connects 2 segments)
+            for (i, point) in wire.points.iter().enumerate() {
+                if *point == pos && i > 0 && i < wire.points.len() - 1 {
+                    count += 2; // This vertex connects two segments
+                }
+            }
+        }
+        count
     }
 }

@@ -8,8 +8,14 @@ use egui::{Color32, Painter, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use crate::egui_app::app::AppState;
 use crate::state::{ComponentType, Point, Rotation};
 
+use super::symbol_library::SymbolLibrary;
+
 /// Render the schematic view (central canvas)
-pub fn render_schematic_view(ui: &mut Ui, state: &mut AppState) {
+pub fn render_schematic_view(
+    ui: &mut Ui,
+    state: &mut AppState,
+    symbol_library: Option<&SymbolLibrary>,
+) {
     // Get available space
     let available = ui.available_rect_before_wrap();
 
@@ -41,7 +47,14 @@ pub fn render_schematic_view(ui: &mut Ui, state: &mut AppState) {
     // Draw components
     for component in &state.schematic.components {
         let is_selected = state.schematic.selection.components.contains(&component.id);
-        draw_component(&painter, &viewport, component, is_selected, state);
+        draw_component(
+            &painter,
+            &viewport,
+            component,
+            is_selected,
+            state,
+            symbol_library,
+        );
     }
 
     // Draw junctions
@@ -90,6 +103,271 @@ pub fn render_schematic_view(ui: &mut Ui, state: &mut AppState) {
                     cursor_pos.x as f64 - available.min.x as f64 - cursor_schematic_x * new_zoom;
                 state.schematic.pan.1 =
                     cursor_pos.y as f64 - available.min.y as f64 - cursor_schematic_y * new_zoom;
+            }
+        }
+    }
+
+    // ==========================================================================
+    // Tool-based interactions (placing, wiring, selecting)
+    // ==========================================================================
+    use crate::state::Point;
+    use crate::state::Tool;
+
+    // Create fresh viewport AFTER pan/zoom changes for tool interactions
+    let tool_viewport = Viewport {
+        offset: Pos2::new(state.schematic.pan.0 as f32, state.schematic.pan.1 as f32),
+        zoom: state.schematic.zoom as f32,
+        bounds: available,
+    };
+    let grid_size = state.schematic.grid_size;
+
+    // Convert screen position to snapped grid position (full grid - for components)
+    let screen_to_grid = |screen_pos: Pos2| -> Point {
+        let zoom = tool_viewport.zoom as f64;
+        let pan_x = tool_viewport.offset.x as f64;
+        let pan_y = tool_viewport.offset.y as f64;
+        let bounds_min_x = tool_viewport.bounds.min.x as f64;
+        let bounds_min_y = tool_viewport.bounds.min.y as f64;
+
+        let schematic_x = (screen_pos.x as f64 - bounds_min_x - pan_x) / zoom;
+        let schematic_y = (screen_pos.y as f64 - bounds_min_y - pan_y) / zoom;
+        // Snap to full grid
+        let grid_x = (schematic_x / grid_size as f64).round() as i32;
+        let grid_y = (schematic_y / grid_size as f64).round() as i32;
+        Point::new(grid_x * grid_size as i32, grid_y * grid_size as i32)
+    };
+
+    // Convert screen position to half-grid snapped position (for wires)
+    // This allows wires to connect to component terminals at half-grid positions
+    let screen_to_wire_grid = |screen_pos: Pos2| -> Point {
+        let zoom = tool_viewport.zoom as f64;
+        let pan_x = tool_viewport.offset.x as f64;
+        let pan_y = tool_viewport.offset.y as f64;
+        let bounds_min_x = tool_viewport.bounds.min.x as f64;
+        let bounds_min_y = tool_viewport.bounds.min.y as f64;
+
+        let schematic_x = (screen_pos.x as f64 - bounds_min_x - pan_x) / zoom;
+        let schematic_y = (screen_pos.y as f64 - bounds_min_y - pan_y) / zoom;
+        // Snap to half grid (grid_size / 2)
+        let half_grid = grid_size as f64 / 2.0;
+        let grid_x = (schematic_x / half_grid).round() as i32;
+        let grid_y = (schematic_y / half_grid).round() as i32;
+        Point::new(
+            grid_x * (grid_size / 2) as i32,
+            grid_y * (grid_size / 2) as i32,
+        )
+    };
+
+    // Left click handling
+    if response.clicked_by(egui::PointerButton::Primary) {
+        if let Some(pos) = response.interact_pointer_pos() {
+            let current_tool = state.schematic.tool; // Copy to avoid borrow conflict
+
+            match current_tool {
+                Tool::Place(component_type) => {
+                    // Components snap to full grid
+                    let grid_pos = screen_to_grid(pos);
+                    state.schematic.add_component(component_type, grid_pos);
+                    log::info!("Placed {:?} at {:?}", component_type, grid_pos);
+                }
+                Tool::Wire => {
+                    // Wires snap to half grid for connecting to component terminals
+                    let wire_pos = screen_to_wire_grid(pos);
+                    if state.schematic.wire_drawing.active {
+                        state.schematic.extend_wire(wire_pos);
+                    } else {
+                        state.schematic.start_wire(wire_pos);
+                    }
+                }
+                Tool::Select => {
+                    // Select component or wire at position (uses full grid for hit testing)
+                    let grid_pos = screen_to_grid(pos);
+                    let comp_id = state.schematic.component_at(grid_pos);
+                    let wire_id = state.schematic.wire_at(grid_pos);
+                    if let Some(id) = comp_id {
+                        state.schematic.selection.clear();
+                        state.schematic.selection.select_component(id);
+                    } else if let Some(id) = wire_id {
+                        state.schematic.selection.clear();
+                        state.schematic.selection.select_wire(id);
+                    } else {
+                        state.schematic.selection.clear();
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Right click to finish wire or cancel
+    if response.clicked_by(egui::PointerButton::Secondary) {
+        if state.schematic.wire_drawing.active {
+            state.schematic.finish_wire();
+        }
+    }
+
+    // Draw wire preview if active
+    let wire_active = state.schematic.wire_drawing.active;
+
+    // Update wire preview position first (mutable borrow)
+    if wire_active {
+        if let Some(hover_pos) = response.hover_pos() {
+            let grid_pos = screen_to_wire_grid(hover_pos);
+            state.schematic.update_wire_preview(grid_pos);
+        }
+    }
+
+    // Now draw the wire (gather data, then draw)
+    if wire_active {
+        let wire_points: Vec<Point> = state.schematic.wire_drawing.points.clone();
+        let preview_pos_opt = state.schematic.wire_drawing.preview_pos;
+
+        if !wire_points.is_empty() {
+            let wire_color = Color32::from_rgb(100, 200, 255);
+            let stroke = Stroke::new(1.0 * tool_viewport.zoom, wire_color); // Match wire stroke
+
+            // Draw existing segments
+            for segment in wire_points.windows(2) {
+                let p1 = tool_viewport.schematic_to_screen(segment[0]);
+                let p2 = tool_viewport.schematic_to_screen(segment[1]);
+                painter.line_segment([p1, p2], stroke);
+            }
+
+            // Draw preview to current mouse position
+            if let Some(preview) = preview_pos_opt {
+                if let Some(last) = wire_points.last() {
+                    let p1 = tool_viewport.schematic_to_screen(*last);
+                    let p2 = tool_viewport.schematic_to_screen(preview);
+                    painter.line_segment(
+                        [p1, p2],
+                        Stroke::new(1.0 * tool_viewport.zoom, wire_color.gamma_multiply(0.6)),
+                    );
+                }
+            }
+
+            // Draw start point marker
+            if let Some(start) = wire_points.first() {
+                let start_screen = tool_viewport.schematic_to_screen(*start);
+                painter.circle_filled(start_screen, 4.0 * tool_viewport.zoom, wire_color);
+            }
+        }
+    }
+
+    // Draw component preview if placing (copy values to avoid borrow conflict)
+    let preview_tool = state.schematic.tool;
+    let preview_rotation = rotation_to_index(state.schematic.preview_rotation);
+    if let Tool::Place(component_type) = preview_tool {
+        if let Some(hover_pos) = response.hover_pos() {
+            let grid_pos = screen_to_grid(hover_pos);
+            let preview_pos = tool_viewport.schematic_to_screen(grid_pos);
+
+            let preview_stroke = Stroke::new(
+                1.0 * tool_viewport.zoom,
+                Color32::from_rgba_unmultiplied(100, 200, 100, 180),
+            );
+
+            // Try to use SVG symbol for preview (matches placed component appearance)
+            let svg_rendered = if let Some(library) = symbol_library {
+                if let Some(symbol) = library.get(component_type) {
+                    super::symbol_library::draw_symbol(
+                        &painter,
+                        symbol,
+                        preview_pos,
+                        viewport.zoom,
+                        preview_rotation,
+                        preview_stroke,
+                    );
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            // Fall back to procedural drawing for preview if SVG not available
+            if !svg_rendered {
+                match component_type {
+                    ComponentType::Resistor => draw_resistor_symbol(
+                        &painter,
+                        preview_pos,
+                        viewport.zoom,
+                        preview_rotation,
+                        preview_stroke,
+                    ),
+                    ComponentType::Capacitor => draw_capacitor_symbol(
+                        &painter,
+                        preview_pos,
+                        viewport.zoom,
+                        preview_rotation,
+                        preview_stroke,
+                    ),
+                    ComponentType::Inductor => draw_inductor_symbol(
+                        &painter,
+                        preview_pos,
+                        viewport.zoom,
+                        preview_rotation,
+                        preview_stroke,
+                    ),
+                    ComponentType::VoltageSource => draw_vsource_symbol(
+                        &painter,
+                        preview_pos,
+                        viewport.zoom,
+                        preview_rotation,
+                        preview_stroke,
+                    ),
+                    ComponentType::CurrentSource => draw_isource_symbol(
+                        &painter,
+                        preview_pos,
+                        viewport.zoom,
+                        preview_rotation,
+                        preview_stroke,
+                    ),
+                    ComponentType::Ground => {
+                        draw_ground_symbol(&painter, preview_pos, viewport.zoom, preview_stroke)
+                    }
+                    ComponentType::Diode => draw_diode_symbol(
+                        &painter,
+                        preview_pos,
+                        viewport.zoom,
+                        preview_rotation,
+                        preview_stroke,
+                    ),
+                    ComponentType::Nmos => draw_nmos_symbol(
+                        &painter,
+                        preview_pos,
+                        viewport.zoom,
+                        preview_rotation,
+                        preview_stroke,
+                    ),
+                    ComponentType::Pmos => draw_pmos_symbol(
+                        &painter,
+                        preview_pos,
+                        viewport.zoom,
+                        preview_rotation,
+                        preview_stroke,
+                    ),
+                    ComponentType::NpnBjt => draw_npn_symbol(
+                        &painter,
+                        preview_pos,
+                        viewport.zoom,
+                        preview_rotation,
+                        preview_stroke,
+                    ),
+                    ComponentType::PnpBjt => draw_pnp_symbol(
+                        &painter,
+                        preview_pos,
+                        viewport.zoom,
+                        preview_rotation,
+                        preview_stroke,
+                    ),
+                    _ => {
+                        // Generic preview
+                        let rect =
+                            Rect::from_center_size(preview_pos, Vec2::splat(30.0 * viewport.zoom));
+                        painter.rect_stroke(rect, 2.0, preview_stroke);
+                    }
+                }
             }
         }
     }
@@ -241,17 +519,25 @@ fn draw_grid(painter: &Painter, bounds: Rect, state: &AppState) {
     let minor_color = state.theme.grid_minor;
     let major_color = state.theme.grid_major;
 
-    // Calculate the grid coordinate range visible in the viewport
-    // Convert screen bounds to schematic (grid) coordinates
-    let left_grid = ((bounds.min.x - pan_x) / grid_spacing).floor() as i32;
-    let right_grid = ((bounds.max.x - pan_x) / grid_spacing).ceil() as i32;
-    let top_grid = ((bounds.min.y - pan_y) / grid_spacing).floor() as i32;
-    let bottom_grid = ((bounds.max.y - pan_y) / grid_spacing).ceil() as i32;
+    // Grid lines are at schematic coordinates that are multiples of grid_size.
+    // In screen space: screen_x = bounds.min.x + pan_x + (schematic_x * zoom)
+    // For grid line at schematic_x = gx * grid_size:
+    //   screen_x = bounds.min.x + pan_x + gx * grid_size * zoom
+    //            = bounds.min.x + pan_x + gx * grid_spacing
+
+    // Calculate visible grid index range
+    let left_grid = ((0.0 - pan_x) / grid_spacing).floor() as i32 - 1;
+    let right_grid = ((bounds.width() - pan_x) / grid_spacing).ceil() as i32 + 1;
+    let top_grid = ((0.0 - pan_y) / grid_spacing).floor() as i32 - 1;
+    let bottom_grid = ((bounds.height() - pan_y) / grid_spacing).ceil() as i32 + 1;
 
     // Draw vertical lines (for each grid x-coordinate)
     for gx in left_grid..=right_grid {
-        // Convert grid coordinate back to screen coordinate
-        let screen_x = (gx as f32) * grid_spacing + pan_x;
+        // Convert grid index to screen coordinate (include bounds.min.x offset)
+        let screen_x = bounds.min.x + pan_x + (gx as f32) * grid_spacing;
+        if screen_x < bounds.min.x || screen_x > bounds.max.x {
+            continue;
+        }
         let is_major = gx % 10 == 0;
         let color = if is_major { major_color } else { minor_color };
         painter.line_segment(
@@ -265,8 +551,11 @@ fn draw_grid(painter: &Painter, bounds: Rect, state: &AppState) {
 
     // Draw horizontal lines (for each grid y-coordinate)
     for gy in top_grid..=bottom_grid {
-        // Convert grid coordinate back to screen coordinate
-        let screen_y = (gy as f32) * grid_spacing + pan_y;
+        // Convert grid index to screen coordinate (include bounds.min.y offset)
+        let screen_y = bounds.min.y + pan_y + (gy as f32) * grid_spacing;
+        if screen_y < bounds.min.y || screen_y > bounds.max.y {
+            continue;
+        }
         let is_major = gy % 10 == 0;
         let color = if is_major { major_color } else { minor_color };
         painter.line_segment(
@@ -294,7 +583,7 @@ fn draw_wire(
         state.theme.wire_default
     };
 
-    let width = if selected { 2.5 } else { 1.5 };
+    let width = if selected { 1.5 } else { 1.0 }; // Match component symbol stroke width
 
     // Draw each segment of the wire polyline
     for segment in wire.points.windows(2) {
@@ -311,10 +600,13 @@ fn draw_component(
     component: &crate::state::Component,
     selected: bool,
     state: &AppState,
+    symbol_library: Option<&SymbolLibrary>,
 ) {
     // Component uses `pos` not `position`, `kind` not `component_type`
     let pos = viewport.schematic_to_screen(component.pos);
     let scale = viewport.zoom;
+
+    // Grid lines now visible through components (no opaque background)
 
     let outline_color = if selected {
         Color32::from_rgb(0, 255, 255) // Cyan for selected
@@ -322,50 +614,84 @@ fn draw_component(
         state.theme.component_outline
     };
 
-    let stroke = Stroke::new(if selected { 2.0 } else { 1.5 } * scale, outline_color);
+    let stroke = Stroke::new(if selected { 1.5 } else { 1.0 } * scale, outline_color);
 
     // Convert Rotation enum to i32 for drawing functions
     let rotation_deg = rotation_to_index(component.rotation);
 
-    // Draw based on component type (use `kind` field)
-    match component.kind {
-        ComponentType::Resistor => {
-            draw_resistor_symbol(painter, pos, scale, rotation_deg, stroke);
+    // Try to use SVG symbol if available
+    let svg_rendered = if let Some(library) = symbol_library {
+        if let Some(symbol) = library.get(component.kind) {
+            log::info!(
+                "SVG rendering {:?} with {} paths",
+                component.kind,
+                symbol.paths.len()
+            );
+            super::symbol_library::draw_symbol(painter, symbol, pos, scale, rotation_deg, stroke);
+            true
+        } else {
+            log::warn!("No SVG symbol for {:?}, using procedural", component.kind);
+            false
         }
-        ComponentType::Capacitor => {
-            draw_capacitor_symbol(painter, pos, scale, rotation_deg, stroke);
-        }
-        ComponentType::Inductor => {
-            draw_inductor_symbol(painter, pos, scale, rotation_deg, stroke);
-        }
-        ComponentType::VoltageSource => {
-            draw_vsource_symbol(painter, pos, scale, rotation_deg, stroke);
-        }
-        ComponentType::CurrentSource => {
-            draw_isource_symbol(painter, pos, scale, rotation_deg, stroke);
-        }
-        ComponentType::Ground => {
-            draw_ground_symbol(painter, pos, scale, stroke);
-        }
-        ComponentType::Diode => {
-            draw_diode_symbol(painter, pos, scale, rotation_deg, stroke);
-        }
-        ComponentType::Nmos => {
-            draw_nmos_symbol(painter, pos, scale, rotation_deg, stroke);
-        }
-        ComponentType::Pmos => {
-            draw_pmos_symbol(painter, pos, scale, rotation_deg, stroke);
-        }
-        ComponentType::NpnBjt => {
-            draw_npn_symbol(painter, pos, scale, rotation_deg, stroke);
-        }
-        ComponentType::PnpBjt => {
-            draw_pnp_symbol(painter, pos, scale, rotation_deg, stroke);
-        }
-        _ => {
-            // Generic component: draw a rectangle
-            let rect = Rect::from_center_size(pos, Vec2::splat(30.0 * scale));
-            painter.rect_stroke(rect, 2.0, stroke);
+    } else {
+        log::warn!("Symbol library is None, using procedural fallback");
+        false
+    };
+
+    // Fall back to procedural drawing if SVG not available
+    if !svg_rendered {
+        log::info!("Procedural drawing {:?}", component.kind);
+        match component.kind {
+            ComponentType::Resistor => {
+                draw_resistor_symbol(painter, pos, scale, rotation_deg, stroke);
+            }
+            ComponentType::Capacitor => {
+                draw_capacitor_symbol(painter, pos, scale, rotation_deg, stroke);
+            }
+            ComponentType::Inductor => {
+                draw_inductor_symbol(painter, pos, scale, rotation_deg, stroke);
+            }
+            ComponentType::VoltageSource => {
+                draw_vsource_symbol(painter, pos, scale, rotation_deg, stroke);
+            }
+            ComponentType::CurrentSource => {
+                draw_isource_symbol(painter, pos, scale, rotation_deg, stroke);
+            }
+            ComponentType::Ground => {
+                draw_ground_symbol(painter, pos, scale, stroke);
+            }
+            ComponentType::Diode => {
+                draw_diode_symbol(painter, pos, scale, rotation_deg, stroke);
+            }
+            ComponentType::Nmos => {
+                draw_nmos_symbol(painter, pos, scale, rotation_deg, stroke);
+            }
+            ComponentType::Pmos => {
+                draw_pmos_symbol(painter, pos, scale, rotation_deg, stroke);
+            }
+            ComponentType::NpnBjt => {
+                draw_npn_symbol(painter, pos, scale, rotation_deg, stroke);
+            }
+            ComponentType::PnpBjt => {
+                draw_pnp_symbol(painter, pos, scale, rotation_deg, stroke);
+            }
+            ComponentType::Vcvs => {
+                draw_vcvs_symbol(painter, pos, scale, rotation_deg, stroke);
+            }
+            ComponentType::Vccs => {
+                draw_vccs_symbol(painter, pos, scale, rotation_deg, stroke);
+            }
+            ComponentType::Ccvs => {
+                draw_ccvs_symbol(painter, pos, scale, rotation_deg, stroke);
+            }
+            ComponentType::Cccs => {
+                draw_cccs_symbol(painter, pos, scale, rotation_deg, stroke);
+            }
+            _ => {
+                // Generic component: draw a rectangle
+                let rect = Rect::from_center_size(pos, Vec2::splat(30.0 * scale));
+                painter.rect_stroke(rect, 2.0, stroke);
+            }
         }
     }
 
@@ -393,7 +719,7 @@ fn draw_component(
 /// Draw a junction (net connection point)
 fn draw_junction(painter: &Painter, viewport: &Viewport, position: Point, state: &AppState) {
     let pos = viewport.schematic_to_screen(position);
-    let radius = 3.0 * viewport.zoom;
+    let radius = 1.5 * viewport.zoom; // Match wire/symbol stroke width
     painter.circle_filled(pos, radius, state.theme.wire_default);
 }
 
@@ -765,6 +1091,86 @@ fn draw_pnp_symbol(painter: &Painter, pos: Pos2, scale: f32, _rotation: i32, str
         ],
         stroke,
     );
+}
+
+// =============================================================================
+// Controlled Source Symbols
+// =============================================================================
+
+/// Draw VCVS (Voltage-Controlled Voltage Source) - diamond with + and -
+fn draw_vcvs_symbol(painter: &Painter, pos: Pos2, scale: f32, _rotation: i32, stroke: Stroke) {
+    draw_diamond_source(painter, pos, scale, stroke);
+    // Add + and - for voltage output
+    let size = 12.0 * scale;
+    painter.text(
+        Pos2::new(pos.x - size * 0.3, pos.y - size * 0.3),
+        egui::Align2::CENTER_CENTER,
+        "+",
+        egui::FontId::proportional(10.0 * scale),
+        stroke.color,
+    );
+    painter.text(
+        Pos2::new(pos.x + size * 0.3, pos.y + size * 0.3),
+        egui::Align2::CENTER_CENTER,
+        "−",
+        egui::FontId::proportional(12.0 * scale),
+        stroke.color,
+    );
+}
+
+/// Draw VCCS (Voltage-Controlled Current Source) - diamond with arrow
+fn draw_vccs_symbol(painter: &Painter, pos: Pos2, scale: f32, _rotation: i32, stroke: Stroke) {
+    draw_diamond_source(painter, pos, scale, stroke);
+    // Add arrow for current output
+    let arr_len = 8.0 * scale;
+    let head = 3.0 * scale;
+    painter.line_segment(
+        [
+            Pos2::new(pos.x, pos.y + arr_len / 2.0),
+            Pos2::new(pos.x, pos.y - arr_len / 2.0),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            Pos2::new(pos.x, pos.y - arr_len / 2.0),
+            Pos2::new(pos.x - head, pos.y - arr_len / 2.0 + head),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            Pos2::new(pos.x, pos.y - arr_len / 2.0),
+            Pos2::new(pos.x + head, pos.y - arr_len / 2.0 + head),
+        ],
+        stroke,
+    );
+}
+
+/// Draw CCVS (Current-Controlled Voltage Source) - diamond with + and -
+fn draw_ccvs_symbol(painter: &Painter, pos: Pos2, scale: f32, rotation: i32, stroke: Stroke) {
+    // CCVS looks like VCVS but input is current-sensing
+    draw_vcvs_symbol(painter, pos, scale, rotation, stroke);
+}
+
+/// Draw CCCS (Current-Controlled Current Source) - diamond with arrow
+fn draw_cccs_symbol(painter: &Painter, pos: Pos2, scale: f32, rotation: i32, stroke: Stroke) {
+    // CCCS looks like VCCS but input is current-sensing
+    draw_vccs_symbol(painter, pos, scale, rotation, stroke);
+}
+
+/// Helper: Draw diamond shape for controlled sources
+fn draw_diamond_source(painter: &Painter, pos: Pos2, scale: f32, stroke: Stroke) {
+    let size = 12.0 * scale;
+    let top = Pos2::new(pos.x, pos.y - size);
+    let right = Pos2::new(pos.x + size, pos.y);
+    let bottom = Pos2::new(pos.x, pos.y + size);
+    let left = Pos2::new(pos.x - size, pos.y);
+
+    painter.line_segment([top, right], stroke);
+    painter.line_segment([right, bottom], stroke);
+    painter.line_segment([bottom, left], stroke);
+    painter.line_segment([left, top], stroke);
 }
 
 /// Convert rotation index (0-3 for 0°, 90°, 180°, 270°) to direction deltas
