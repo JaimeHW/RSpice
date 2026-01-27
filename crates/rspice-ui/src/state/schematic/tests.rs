@@ -343,11 +343,11 @@ fn test_select_in_rect_boundary() {
 #[test]
 fn test_move_selection_rubber_band_single_component() {
     let mut state = SchematicState::default();
-    // Resistor at (0,0) has terminals at (-2,0) and (2,0)
+    // Resistor at (0,0) has terminals at (-20,0) and (20,0) with 40x20 dimensions
     let r1 = state.add_component(ComponentType::Resistor, Point::new(0, 0));
-    // Wire connected to terminal at (2,0)
+    // Wire connected to terminal at (20,0)
     state
-        .add_wire(vec![Point::new(2, 0), Point::new(30, 0)])
+        .add_wire(vec![Point::new(20, 0), Point::new(50, 0)])
         .unwrap();
 
     // Select the resistor
@@ -362,19 +362,20 @@ fn test_move_selection_rubber_band_single_component() {
 
     // Wire endpoint at terminal should have stretched
     let wire = &state.wires[0];
-    assert_eq!(wire.points[0], Point::new(7, 5)); // Moved with terminal (2+5, 0+5)
-    assert_eq!(wire.points[1], Point::new(30, 0)); // Original position
+    assert_eq!(wire.points[0], Point::new(25, 5)); // Moved with terminal (20+5, 0+5)
+    assert_eq!(wire.points[1], Point::new(50, 0)); // Original position
 }
 
 #[test]
 fn test_move_selection_rubber_band_wire_between_selected() {
     let mut state = SchematicState::default();
-    // Two resistors with terminals
+    // Two resistors: R1 at (0,0), R2 at (80,0) - separated so terminals can connect
+    // With 40x20 dimensions: R1 terminal at (20,0), R2 terminal at (60,0)
     let r1 = state.add_component(ComponentType::Resistor, Point::new(0, 0));
-    let r2 = state.add_component(ComponentType::Resistor, Point::new(20, 0));
-    // Wire connecting them (R1 terminal at 2,0 and R2 terminal at 18,0)
+    let r2 = state.add_component(ComponentType::Resistor, Point::new(80, 0));
+    // Wire connecting R1's right terminal (20,0) to R2's left terminal (60,0)
     state
-        .add_wire(vec![Point::new(2, 0), Point::new(18, 0)])
+        .add_wire(vec![Point::new(20, 0), Point::new(60, 0)])
         .unwrap();
 
     // Select both resistors
@@ -388,12 +389,12 @@ fn test_move_selection_rubber_band_wire_between_selected() {
     let comp1 = state.components.iter().find(|c| c.id == r1).unwrap();
     let comp2 = state.components.iter().find(|c| c.id == r2).unwrap();
     assert_eq!(comp1.pos, Point::new(10, 10));
-    assert_eq!(comp2.pos, Point::new(30, 10));
+    assert_eq!(comp2.pos, Point::new(90, 10));
 
     // Wire should have moved entirely (both ends connected to selection)
     let wire = &state.wires[0];
-    assert_eq!(wire.points[0], Point::new(12, 10));
-    assert_eq!(wire.points[1], Point::new(28, 10));
+    assert_eq!(wire.points[0], Point::new(30, 10)); // (20+10, 0+10)
+    assert_eq!(wire.points[1], Point::new(70, 10)); // (60+10, 0+10)
 }
 
 #[test]
@@ -418,8 +419,9 @@ fn test_move_selection_rubber_band_no_connection() {
 fn test_move_selection_rubber_band_empty_selection() {
     let mut state = SchematicState::default();
     state.add_component(ComponentType::Resistor, Point::new(0, 0));
+    // Wire at terminal position (20,0) for 40x20 resistor
     state
-        .add_wire(vec![Point::new(2, 0), Point::new(30, 0)])
+        .add_wire(vec![Point::new(20, 0), Point::new(50, 0)])
         .unwrap();
 
     // Empty selection - should do nothing
@@ -428,7 +430,7 @@ fn test_move_selection_rubber_band_empty_selection() {
     // Component unchanged
     assert_eq!(state.components[0].pos, Point::new(0, 0));
     // Wire unchanged
-    assert_eq!(state.wires[0].points[0], Point::new(2, 0));
+    assert_eq!(state.wires[0].points[0], Point::new(20, 0));
 }
 
 #[test]
@@ -469,12 +471,12 @@ fn test_copy_paste() {
 #[test]
 fn test_copy_paste_includes_connected_wires() {
     let mut state = SchematicState::default();
-    // Two resistors at (0,0) and (20,0) - terminals at (2,0) and (18,0)
+    // Two resistors at (0,0) and (80,0) - terminals at (20,0) and (60,0) with 40x20 dimensions
     let r1 = state.add_component(ComponentType::Resistor, Point::new(0, 0));
-    let r2 = state.add_component(ComponentType::Resistor, Point::new(20, 0));
+    let r2 = state.add_component(ComponentType::Resistor, Point::new(80, 0));
     // Wire connecting them (NOT explicitly selected)
     state
-        .add_wire(vec![Point::new(2, 0), Point::new(18, 0)])
+        .add_wire(vec![Point::new(20, 0), Point::new(60, 0)])
         .unwrap();
 
     // Select only the components (not the wire)
@@ -509,11 +511,11 @@ fn test_copy_paste_excludes_disconnected_wires() {
 #[test]
 fn test_copy_paste_partial_connected_wire_excluded() {
     let mut state = SchematicState::default();
-    // Resistor at (0,0) with terminal at (2,0)
+    // Resistor at (0,0) with terminal at (20,0) with 40x20 dimensions
     let r1 = state.add_component(ComponentType::Resistor, Point::new(0, 0));
     // Wire from terminal to unselected location
     state
-        .add_wire(vec![Point::new(2, 0), Point::new(50, 0)])
+        .add_wire(vec![Point::new(20, 0), Point::new(80, 0)])
         .unwrap();
 
     // Only select one component - wire only connects to one selected component
