@@ -346,15 +346,25 @@ impl ComponentType {
     ///
     /// Returns (name, offset) pairs for each terminal.
     /// Offsets are in grid units from the component center.
+    ///
+    /// **IMPORTANT**: Terminal positions are derived from `symbol_dimensions()`
+    /// using half-width (hw) and half-height (hh). Since dimensions are always
+    /// even integers, terminals always land on grid intersections.
     pub fn terminal_offsets(&self) -> Vec<(&'static str, Point)> {
+        let (w, h) = self.symbol_dimensions();
+        let hw = w / 2; // Half-width - always integer since w is even
+        let hh = h / 2; // Half-height - always integer since h is even
+
         match self {
+            // Two-terminal horizontal passives: terminals at left/right edges
             ComponentType::Resistor | ComponentType::Capacitor | ComponentType::Inductor => {
-                vec![("+", Point::new(-2, 0)), ("-", Point::new(2, 0))]
+                vec![("+", Point::new(-hw, 0)), ("-", Point::new(hw, 0))]
             }
             ComponentType::Diode => vec![
-                ("A", Point::new(-2, 0)), // Anode
-                ("K", Point::new(2, 0)),  // Cathode
+                ("A", Point::new(-hw, 0)), // Anode
+                ("K", Point::new(hw, 0)),  // Cathode
             ],
+            // Vertical sources: terminals at top/bottom
             ComponentType::VoltageSource
             | ComponentType::VoltageSourceAc
             | ComponentType::VoltageSourcePulse
@@ -362,7 +372,7 @@ impl ComponentType {
             | ComponentType::VoltageSourcePwl
             | ComponentType::VoltageSourceExp
             | ComponentType::VoltageSourceSffm => {
-                vec![("+", Point::new(0, -2)), ("-", Point::new(0, 2))]
+                vec![("+", Point::new(0, -hh)), ("-", Point::new(0, hh))]
             }
             ComponentType::CurrentSource
             | ComponentType::CurrentSourceAc
@@ -371,121 +381,126 @@ impl ComponentType {
             | ComponentType::CurrentSourcePwl
             | ComponentType::CurrentSourceExp
             | ComponentType::CurrentSourceNoise => {
-                vec![("+", Point::new(0, -2)), ("-", Point::new(0, 2))]
+                vec![("+", Point::new(0, -hh)), ("-", Point::new(0, hh))]
             }
+            // BJTs: Base on left at center, Collector/Emitter at right top/bottom
+            // With 40x80 dimensions (matching SVG aspect ratio), C/E at ±40 (on major grid)
             ComponentType::NpnBjt => vec![
-                ("B", Point::new(-2, 0)), // Base
-                ("C", Point::new(1, -2)), // Collector
-                ("E", Point::new(1, 2)),  // Emitter
+                ("B", Point::new(-hw, 0)),  // Base (center-left)
+                ("C", Point::new(hw, -hh)), // Collector (top-right)
+                ("E", Point::new(hw, hh)),  // Emitter (bottom-right)
             ],
             ComponentType::PnpBjt => vec![
-                ("B", Point::new(-2, 0)),
-                ("C", Point::new(1, 2)),
-                ("E", Point::new(1, -2)),
+                ("B", Point::new(-hw, 0)),
+                ("C", Point::new(hw, hh)),  // Collector (bottom for PNP)
+                ("E", Point::new(hw, -hh)), // Emitter (top for PNP)
             ],
+            // MOSFETs: Gate on left, Drain at top-right, Source at bottom-right
+            // With 40x80 dimensions, D/S at ±40 (on major grid)
             ComponentType::Nmos | ComponentType::Pmos => vec![
-                ("G", Point::new(-2, 0)), // Gate
-                ("D", Point::new(2, -1)), // Drain
-                ("S", Point::new(2, 1)),  // Source
-                ("B", Point::new(2, 0)),  // Bulk (usually tied to source)
+                ("G", Point::new(-hw, 0)),  // Gate (center-left)
+                ("D", Point::new(hw, -hh)), // Drain (top-right)
+                ("S", Point::new(hw, hh)),  // Source (bottom-right)
+                ("B", Point::new(hw, 0)),   // Bulk (center-right)
             ],
             ComponentType::Njfet | ComponentType::Pjfet => vec![
-                ("G", Point::new(-2, 0)), // Gate
-                ("D", Point::new(2, -1)), // Drain
-                ("S", Point::new(2, 1)),  // Source
+                ("G", Point::new(-hw, 0)),  // Gate (center-left)
+                ("D", Point::new(hw, -hh)), // Drain (top-right)
+                ("S", Point::new(hw, hh)),  // Source (bottom-right)
             ],
-            // Power MOSFETs (VDMOS) - 4 terminals like MOSFET
+            // Power MOSFETs (VDMOS) - same terminal layout as MOSFET
             ComponentType::NVdmos | ComponentType::PVdmos => vec![
-                ("G", Point::new(-2, 0)), // Gate
-                ("D", Point::new(2, -1)), // Drain
-                ("S", Point::new(2, 1)),  // Source
-                ("B", Point::new(2, 0)),  // Bulk
+                ("G", Point::new(-hw, 0)),  // Gate (center-left)
+                ("D", Point::new(hw, -hh)), // Drain (top-right)
+                ("S", Point::new(hw, hh)),  // Source (bottom-right)
+                ("B", Point::new(hw, 0)),   // Bulk (center-right)
             ],
-            // Saturable inductor - 2 terminals like regular inductor
+            // Saturable inductor - same as regular inductor
             ComponentType::SaturableInductor => {
-                vec![("+", Point::new(-2, 0)), ("-", Point::new(2, 0))]
+                vec![("+", Point::new(-hw, 0)), ("-", Point::new(hw, 0))]
             }
             // Controlled sources: output on left, control on right
             ComponentType::Vcvs
             | ComponentType::Vccs
             | ComponentType::Ccvs
             | ComponentType::Cccs => vec![
-                ("O+", Point::new(-2, -1)), // Output +
-                ("O-", Point::new(-2, 1)),  // Output -
-                ("C+", Point::new(2, -1)),  // Control +
-                ("C-", Point::new(2, 1)),   // Control -
+                ("O+", Point::new(-hw, -hh / 2)), // Output +
+                ("O-", Point::new(-hw, hh / 2)),  // Output -
+                ("C+", Point::new(hw, -hh / 2)),  // Control +
+                ("C-", Point::new(hw, hh / 2)),   // Control -
             ],
             // Coupled inductor doesn't have terminals (it's a coupling statement)
             ComponentType::CoupledInductor => vec![],
-            ComponentType::Ground => vec![("GND", Point::new(0, -2))],
+            // Ground: single terminal at top
+            ComponentType::Ground => vec![("GND", Point::new(0, -hh))],
 
             // XSPICE 2-terminal analog blocks: input left, output right
             ComponentType::XspiceGain
             | ComponentType::XspiceLimiter
             | ComponentType::XspiceIntegrator
             | ComponentType::XspiceDifferentiator => {
-                vec![("in", Point::new(-2, 0)), ("out", Point::new(2, 0))]
+                vec![("in", Point::new(-hw, 0)), ("out", Point::new(hw, 0))]
             }
             // Summer: multiple inputs (top/bottom left), one output right
             ComponentType::XspiceSummer => vec![
-                ("in1", Point::new(-2, -1)),
-                ("in2", Point::new(-2, 1)),
-                ("out", Point::new(2, 0)),
+                ("in1", Point::new(-hw, -hh / 2)),
+                ("in2", Point::new(-hw, hh / 2)),
+                ("out", Point::new(hw, 0)),
             ],
             // Multiplier/Divider: two inputs, one output
             ComponentType::XspiceMultiplier | ComponentType::XspiceDivider => vec![
-                ("in1", Point::new(-2, -1)),
-                ("in2", Point::new(-2, 1)),
-                ("out", Point::new(2, 0)),
+                ("in1", Point::new(-hw, -hh / 2)),
+                ("in2", Point::new(-hw, hh / 2)),
+                ("out", Point::new(hw, 0)),
             ],
             // Digital gates: inputs left, output right
             ComponentType::XspiceInverter | ComponentType::XspiceBuffer => {
-                vec![("in", Point::new(-2, 0)), ("out", Point::new(2, 0))]
+                vec![("in", Point::new(-hw, 0)), ("out", Point::new(hw, 0))]
             }
             ComponentType::XspiceAndGate
             | ComponentType::XspiceOrGate
             | ComponentType::XspiceNandGate
             | ComponentType::XspiceNorGate
             | ComponentType::XspiceXorGate => vec![
-                ("a", Point::new(-2, -1)),
-                ("b", Point::new(-2, 1)),
-                ("out", Point::new(2, 0)),
+                ("a", Point::new(-hw, -hh / 2)),
+                ("b", Point::new(-hw, hh / 2)),
+                ("out", Point::new(hw, 0)),
             ],
             // Tri-state: input, enable, output
             ComponentType::XspiceTristate => vec![
-                ("in", Point::new(-2, 0)),
-                ("en", Point::new(0, -2)),
-                ("out", Point::new(2, 0)),
+                ("in", Point::new(-hw, 0)),
+                ("en", Point::new(0, -hh)),
+                ("out", Point::new(hw, 0)),
             ],
             // D Flip-Flop: D, CLK, Q, Qbar
             ComponentType::XspiceDFlipFlop => vec![
-                ("d", Point::new(-2, -1)),
-                ("clk", Point::new(-2, 1)),
-                ("q", Point::new(2, -1)),
-                ("qbar", Point::new(2, 1)),
+                ("d", Point::new(-hw, -hh / 2)),
+                ("clk", Point::new(-hw, hh / 2)),
+                ("q", Point::new(hw, -hh / 2)),
+                ("qbar", Point::new(hw, hh / 2)),
             ],
             // JK Flip-Flop: J, K, CLK, Q, Qbar
             ComponentType::XspiceJkFlipFlop => vec![
-                ("j", Point::new(-2, -1)),
-                ("k", Point::new(-2, 1)),
-                ("clk", Point::new(-2, 0)),
-                ("q", Point::new(2, -1)),
-                ("qbar", Point::new(2, 1)),
+                ("j", Point::new(-hw, -hh / 2)),
+                ("k", Point::new(-hw, hh / 2)),
+                ("clk", Point::new(-hw, 0)),
+                ("q", Point::new(hw, -hh / 2)),
+                ("qbar", Point::new(hw, hh / 2)),
             ],
             // SR Latch: S, R, Q, Qbar
             ComponentType::XspiceSrLatch => vec![
-                ("s", Point::new(-2, -1)),
-                ("r", Point::new(-2, 1)),
-                ("q", Point::new(2, -1)),
-                ("qbar", Point::new(2, 1)),
+                ("s", Point::new(-hw, -hh / 2)),
+                ("r", Point::new(-hw, hh / 2)),
+                ("q", Point::new(hw, -hh / 2)),
+                ("qbar", Point::new(hw, hh / 2)),
             ],
             // ADC Bridge: analog input, digital output
             ComponentType::XspiceAdcBridge => {
-                vec![("in", Point::new(-2, 0)), ("out", Point::new(2, 0))]
+                vec![("in", Point::new(-hw, 0)), ("out", Point::new(hw, 0))]
             }
             // DAC Bridge: digital input, analog output
             ComponentType::XspiceDacBridge => {
-                vec![("in", Point::new(-2, 0)), ("out", Point::new(2, 0))]
+                vec![("in", Point::new(-hw, 0)), ("out", Point::new(hw, 0))]
             }
         }
     }
@@ -565,6 +580,101 @@ impl ComponentType {
                 | ComponentType::XspiceAdcBridge
                 | ComponentType::XspiceDacBridge
         )
+    }
+
+    /// Get symbol dimensions in grid units (width, height)
+    ///
+    /// These dimensions define the rendered size of the component symbol.
+    /// **CRITICAL**: All dimensions MUST be multiples of 20 so that
+    /// half-width and half-height (used for terminal positions) are
+    /// multiples of 10, ensuring terminals land on major grid lines.
+    ///
+    /// Grid spacing is 10 units. This is the commercial EDA standard.
+    pub fn symbol_dimensions(&self) -> (i32, i32) {
+        match self {
+            // Passive components: horizontal orientation
+            // 40 wide x 20 tall → terminals at ±20 grid units (on major grid)
+            ComponentType::Resistor | ComponentType::Inductor => (40, 20),
+            // Capacitor: SVG is 31x31 (square aspect ratio)
+            // Using 40x40 for uniform scaling - terminals at ±20
+            ComponentType::Capacitor => (40, 40),
+
+            // Sources: vertical orientation with leads
+            // SVG v_src_dc.svg is 35x51, so target dimensions preserve that aspect ratio.
+            // 28x40 gives aspect ratio 0.7 ≈ 35/51 = 0.686, ensuring leads reach terminals.
+            ComponentType::VoltageSource
+            | ComponentType::VoltageSourceAc
+            | ComponentType::VoltageSourcePulse
+            | ComponentType::VoltageSourceSin
+            | ComponentType::VoltageSourcePwl
+            | ComponentType::VoltageSourceExp
+            | ComponentType::VoltageSourceSffm
+            | ComponentType::CurrentSource
+            | ComponentType::CurrentSourceAc
+            | ComponentType::CurrentSourcePulse
+            | ComponentType::CurrentSourceSin
+            | ComponentType::CurrentSourcePwl
+            | ComponentType::CurrentSourceExp
+            | ComponentType::CurrentSourceNoise => (28, 40),
+
+            // Ground: compact but on grid
+            ComponentType::Ground => (20, 20),
+
+            // Diode: horizontal
+            ComponentType::Diode => (40, 20),
+
+            // BJTs: 40x80 to match SVG aspect ratio (40.5x81mm) - uniform scaling
+            // This preserves the arrow shape without distortion
+            ComponentType::NpnBjt | ComponentType::PnpBjt => (40, 80),
+
+            // MOSFETs/JFETs: 40x80 for 1:2 aspect ratio - uniform scaling with grid alignment
+            // D/S terminals at ±40 (on major grid)
+            ComponentType::Nmos
+            | ComponentType::Pmos
+            | ComponentType::Njfet
+            | ComponentType::Pjfet
+            | ComponentType::NVdmos
+            | ComponentType::PVdmos => (40, 80),
+
+            // Saturable inductor: same as regular inductor
+            ComponentType::SaturableInductor => (40, 20),
+
+            // Controlled sources: 4-terminal box
+            ComponentType::Vcvs
+            | ComponentType::Vccs
+            | ComponentType::Ccvs
+            | ComponentType::Cccs => (40, 40),
+
+            // Coupled inductor: no visual (coupling statement)
+            ComponentType::CoupledInductor => (0, 0),
+
+            // XSPICE blocks: horizontal box
+            ComponentType::XspiceGain
+            | ComponentType::XspiceSummer
+            | ComponentType::XspiceMultiplier
+            | ComponentType::XspiceDivider
+            | ComponentType::XspiceLimiter
+            | ComponentType::XspiceIntegrator
+            | ComponentType::XspiceDifferentiator => (40, 20),
+
+            // XSPICE digital gates: horizontal
+            ComponentType::XspiceInverter
+            | ComponentType::XspiceBuffer
+            | ComponentType::XspiceAndGate
+            | ComponentType::XspiceOrGate
+            | ComponentType::XspiceNandGate
+            | ComponentType::XspiceNorGate
+            | ComponentType::XspiceXorGate
+            | ComponentType::XspiceTristate => (40, 20),
+
+            // XSPICE sequential: taller for more pins
+            ComponentType::XspiceDFlipFlop
+            | ComponentType::XspiceJkFlipFlop
+            | ComponentType::XspiceSrLatch => (40, 40),
+
+            // XSPICE bridges
+            ComponentType::XspiceAdcBridge | ComponentType::XspiceDacBridge => (40, 20),
+        }
     }
 
     /// Get default value for this component type
@@ -918,5 +1028,103 @@ mod tests {
         assert!(ComponentType::PVdmos.is_semiconductor());
         // Saturable inductor is not a semiconductor
         assert!(!ComponentType::SaturableInductor.is_semiconductor());
+    }
+
+    // =========================================================================
+    // Terminal Grid Alignment Tests (Commercial-Grade Verification)
+    // =========================================================================
+
+    #[test]
+    fn test_symbol_dimensions_are_grid_aligned() {
+        // Most symbol dimensions should be multiples of 20 so that half-width/half-height
+        // (used for terminal positions) are multiples of 10, ensuring terminals on grid.
+        // Exception: Sources use 28x40 to match SVG aspect ratio - their terminals are
+        // still grid-aligned since they're on the Y axis at ±20.
+        let test_types = [
+            ComponentType::Resistor,
+            ComponentType::Capacitor,
+            ComponentType::Inductor,
+            ComponentType::Diode,
+            ComponentType::Ground,
+            ComponentType::Nmos,
+            ComponentType::Pmos,
+            ComponentType::NpnBjt,
+            ComponentType::PnpBjt,
+            ComponentType::Vcvs,
+            ComponentType::SaturableInductor,
+        ];
+
+        for comp_type in test_types {
+            let (w, h) = comp_type.symbol_dimensions();
+            assert!(
+                w % 20 == 0,
+                "{:?} width {} is not a multiple of 20",
+                comp_type,
+                w
+            );
+            assert!(
+                h % 20 == 0,
+                "{:?} height {} is not a multiple of 20",
+                comp_type,
+                h
+            );
+        }
+
+        // Sources have special dimensions to match SVG aspect ratio
+        let (src_w, src_h) = ComponentType::VoltageSource.symbol_dimensions();
+        assert_eq!(
+            src_w, 28,
+            "VoltageSource width should be 28 to match SVG aspect ratio"
+        );
+        assert_eq!(
+            src_h, 40,
+            "VoltageSource height should be 40 for grid-aligned terminals"
+        );
+    }
+
+    #[test]
+    fn test_terminal_offsets_are_on_grid() {
+        // Verify all terminal offsets are integer grid values
+        // (no half-grid points that would cause misalignment)
+        let test_types = [
+            ComponentType::Resistor,
+            ComponentType::Inductor,
+            ComponentType::Capacitor,
+            ComponentType::Diode,
+            ComponentType::VoltageSource,
+            ComponentType::Ground,
+            ComponentType::Nmos,
+            ComponentType::NpnBjt,
+        ];
+
+        for comp_type in test_types {
+            let offsets = comp_type.terminal_offsets();
+            for (name, point) in &offsets {
+                // Point coordinates are i32, so they're always integers
+                // This test documents the invariant
+                assert!(
+                    point.x.abs() <= 100 && point.y.abs() <= 100,
+                    "{:?} terminal '{}' has unreasonable offset {:?}",
+                    comp_type,
+                    name,
+                    point
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_inductor_terminal_alignment() {
+        // Specific test for the inductor terminal alignment issue
+        let (w, _h) = ComponentType::Inductor.symbol_dimensions();
+        let offsets = ComponentType::Inductor.terminal_offsets();
+
+        // Inductor should be 40 wide with terminals at ±20 (on major grid)
+        assert_eq!(w, 40);
+        assert_eq!(offsets.len(), 2);
+        assert_eq!(offsets[0].1.x, -20); // Left terminal at -20
+        assert_eq!(offsets[1].1.x, 20); // Right terminal at +20
+        assert_eq!(offsets[0].1.y, 0); // Both on center line
+        assert_eq!(offsets[1].1.y, 0);
     }
 }

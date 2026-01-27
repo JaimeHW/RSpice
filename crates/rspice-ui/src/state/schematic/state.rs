@@ -134,6 +134,11 @@ pub struct SchematicState {
     /// Tracks which wires are part of the highlighted net
     #[serde(skip)]
     pub net_highlight: super::net_highlight::NetHighlightState,
+
+    /// Undo/redo history (runtime state, not persisted)
+    /// Manages snapshots for undo/redo operations
+    #[serde(skip)]
+    pub undo_history: super::undo_history::UndoHistory,
 }
 
 impl Default for SchematicState {
@@ -163,6 +168,7 @@ impl Default for SchematicState {
             snap_engine: SnapEngine::default(),
             selection_rect: super::selection::SelectionRect::default(),
             net_highlight: super::net_highlight::NetHighlightState::default(),
+            undo_history: super::undo_history::UndoHistory::default(),
         }
     }
 }
@@ -195,6 +201,156 @@ impl SchematicState {
     /// add_wire, move_component_with_wires, etc.
     pub fn bump_topology_version(&mut self) {
         self.topology_version = self.topology_version.wrapping_add(1);
+    }
+
+    // =========================================================================
+    // Undo/Redo System (Commercial-Grade Transaction-Based)
+    // =========================================================================
+
+    /// Initialize undo history
+    ///
+    /// This should be called once at startup or after loading a file.
+    /// Establishes the baseline for the undo system.
+    pub fn init_undo_history(&mut self) {
+        self.undo_history.initialize();
+    }
+
+    /// Begin an undoable operation
+    ///
+    /// Call this BEFORE modifying state. Captures current state as the
+    /// "before" snapshot. Must be followed by `end_operation()`.
+    ///
+    /// # Example
+    /// ```ignore
+    /// state.begin_operation("Add resistor R1");
+    /// state.add_component(ComponentType::Resistor, Point::new(10, 20));
+    /// state.end_operation();
+    /// ```
+    pub fn begin_operation(&mut self, description: impl Into<String>) {
+        // Auto-initialize if needed
+        if !self.undo_history.is_initialized() {
+            self.init_undo_history();
+        }
+
+        let snapshot = super::undo_history::SchematicSnapshot::capture(self);
+        self.undo_history.begin_operation(snapshot, description);
+    }
+
+    /// End an undoable operation
+    ///
+    /// Call this AFTER modifying state. Compares before/after and creates
+    /// an undo entry only if state actually changed.
+    ///
+    /// # Returns
+    /// `true` if an undo entry was created, `false` if nothing changed.
+    pub fn end_operation(&mut self) -> bool {
+        let snapshot = super::undo_history::SchematicSnapshot::capture(self);
+        self.undo_history.end_operation(snapshot)
+    }
+
+    /// Cancel a pending operation without creating an undo entry
+    ///
+    /// Use this if an operation was started but then cancelled (e.g., user
+    /// pressed Escape during drag).
+    pub fn cancel_operation(&mut self) {
+        self.undo_history.cancel_operation();
+    }
+
+    /// Convenience method for simple undoable operations
+    ///
+    /// Wraps begin_operation/operation/end_operation in a single call.
+    ///
+    /// # Example
+    /// ```ignore
+    /// state.with_undo("Add component", |s| {
+    ///     s.add_component(ComponentType::Resistor, Point::new(10, 20));
+    /// });
+    /// ```
+    pub fn with_undo<F>(&mut self, description: impl Into<String>, operation: F) -> bool
+    where
+        F: FnOnce(&mut Self),
+    {
+        self.begin_operation(description);
+        operation(self);
+        self.end_operation()
+    }
+
+    /// Undo the last operation
+    ///
+    /// Returns `true` if undo was successful, `false` if nothing to undo.
+    pub fn undo(&mut self) -> bool {
+        if !self.undo_history.can_undo() {
+            return false;
+        }
+
+        // Capture current state for redo
+        let current = super::undo_history::SchematicSnapshot::capture(self);
+
+        if let Some((snapshot, _desc)) = self.undo_history.undo(current) {
+            snapshot.apply(self);
+            self.recalculate_runtime_state();
+            return true;
+        }
+
+        false
+    }
+
+    /// Redo the last undone operation
+    ///
+    /// Returns `true` if redo was successful, `false` if nothing to redo.
+    pub fn redo(&mut self) -> bool {
+        if !self.undo_history.can_redo() {
+            return false;
+        }
+
+        // Capture current state for undo
+        let current = super::undo_history::SchematicSnapshot::capture(self);
+
+        if let Some((snapshot, _desc)) = self.undo_history.redo(current) {
+            snapshot.apply(self);
+            self.recalculate_runtime_state();
+            return true;
+        }
+
+        false
+    }
+
+    /// Check if undo is available
+    pub fn can_undo(&self) -> bool {
+        self.undo_history.can_undo()
+    }
+
+    /// Check if redo is available
+    pub fn can_redo(&self) -> bool {
+        self.undo_history.can_redo()
+    }
+
+    /// Get description of the next undo operation
+    pub fn undo_description(&self) -> Option<&str> {
+        self.undo_history.undo_description()
+    }
+
+    /// Get description of the next redo operation
+    pub fn redo_description(&self) -> Option<&str> {
+        self.undo_history.redo_description()
+    }
+
+    /// Clear undo history
+    pub fn clear_undo_history(&mut self) {
+        self.undo_history.clear();
+    }
+
+    /// Reset undo history with current state as baseline
+    ///
+    /// Clears all undo/redo. Use after loading a file.
+    pub fn reset_undo_history(&mut self) {
+        self.undo_history.clear();
+        self.init_undo_history();
+    }
+
+    /// Check if an operation is currently pending
+    pub fn has_pending_operation(&self) -> bool {
+        self.undo_history.has_pending_operation()
     }
 
     /// Recalculate runtime state after loading from file

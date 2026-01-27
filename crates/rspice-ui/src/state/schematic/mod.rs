@@ -26,6 +26,7 @@ mod selection;
 mod snap;
 mod state;
 mod tool;
+mod undo_history;
 mod wire;
 
 // Re-export all public types for backwards compatibility
@@ -40,7 +41,34 @@ pub use selection::{JunctionSelection, Selection, WireSegmentSelection, WireVert
 pub use snap::{SnapEngine, SnapResult, SnapTarget, SnapTargetType};
 pub use state::SchematicState;
 pub use tool::Tool;
-pub use wire::{Wire, WireConnection, WireDrawing, WireRoutingMode};
+pub use undo_history::{SchematicSnapshot, UndoHistory, MAX_UNDO_STEPS};
+pub use wire::{
+    convert_to_orthogonal,
+    count_bends,
+    // Convenience functions
+    create_wire,
+    find_wire_intersections,
+    is_valid_route,
+    // Routing utilities
+    optimize_route,
+    route_length,
+    wires_connected,
+    // Connection types
+    ConnectionSet,
+    DragConstraint,
+    JunctionType,
+    // Core types
+    Wire,
+    WireConnection,
+    WireDragContext,
+    // Drag types
+    WireDragMode,
+    WireDrawing,
+    WireHitResult,
+    WireRoutingMode,
+    // Segment types
+    WireSegment,
+};
 
 #[cfg(test)]
 mod tests;

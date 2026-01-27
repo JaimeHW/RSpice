@@ -3,9 +3,92 @@
 //! Manages simulation execution state and results.
 
 use super::dc_annotation::{AnnotationMode, DcAnnotationState};
+use super::schematic::Point;
+use crate::services::safety::SoAViolation;
+use crate::services::yield_manager::YieldResult;
+use crate::simulation::optimizer::OptimizerState;
+use crate::simulation::reliability_engine::ReliabilityResult;
 use rspice_core::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
+
+//=============================================================================
+// Cross-Probing Infrastructure
+//=============================================================================
+
+/// Bidirectional mapping between schematic grid points and SPICE net names.
+///
+/// This enables professional-grade cross-probing between schematic and waveform viewer:
+/// - Click on schematic wire → find corresponding waveform
+/// - Click on waveform → highlight corresponding wire on schematic
+///
+/// The mapping is populated during netlist generation and persists until the next
+/// simulation run or schematic modification.
+#[derive(Debug, Clone, Default)]
+pub struct CrossProbeMapping {
+    /// Grid point to net name lookup (e.g., Point(280, 200) → "NET3")
+    /// Enables: click on wire → find net name → find waveform
+    pub point_to_net: HashMap<Point, String>,
+
+    /// Net name to grid points lookup (e.g., "NET3" → [Point(280, 200), ...])
+    /// Enables: select waveform → highlight all connected wire segments
+    pub net_to_points: HashMap<String, Vec<Point>>,
+
+    /// Version counter - incremented when mapping is updated
+    /// Used to detect when probe cache needs refresh
+    pub version: u64,
+}
+
+impl CrossProbeMapping {
+    /// Create a new empty mapping
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Update mapping from netlist generation result
+    pub fn update(
+        &mut self,
+        point_to_net: HashMap<Point, String>,
+        net_to_points: HashMap<String, Vec<Point>>,
+    ) {
+        self.point_to_net = point_to_net;
+        self.net_to_points = net_to_points;
+        self.version += 1;
+    }
+
+    /// Clear the mapping
+    pub fn clear(&mut self) {
+        self.point_to_net.clear();
+        self.net_to_points.clear();
+        self.version += 1;
+    }
+
+    /// Look up net name for a grid point
+    ///
+    /// Returns None if the point is not on a net (e.g., empty space)
+    pub fn net_at(&self, point: Point) -> Option<&String> {
+        self.point_to_net.get(&point)
+    }
+
+    /// Look up all grid points for a net name
+    ///
+    /// Returns empty slice if net not found
+    pub fn points_for_net(&self, net_name: &str) -> &[Point] {
+        self.net_to_points
+            .get(net_name)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Check if mapping is populated
+    pub fn is_populated(&self) -> bool {
+        !self.point_to_net.is_empty()
+    }
+}
+
+//=============================================================================
+// Simulation State
+//=============================================================================
 
 /// Simulation execution state
 #[derive(Debug, Clone, Default)]
@@ -25,6 +108,10 @@ pub struct SimulationState {
 
     /// Waveform data for display
     pub waveforms: Vec<WaveformData>,
+
+    /// Data version counter - incremented whenever waveforms change.
+    /// Used by the waveform viewer to detect when to reload traces.
+    pub data_version: u64,
 
     /// Console log messages
     pub console_messages: Vec<ConsoleMessage>,
@@ -46,10 +133,28 @@ pub struct SimulationState {
     /// When probing this node, we show a message that it's the ground reference
     pub ground_node: Option<String>,
 
+    /// Cross-probing mapping between schematic grid points and SPICE net names
+    /// Populated during netlist generation, used for probe mode
+    pub cross_probe: CrossProbeMapping,
+
     /// DC operating point annotations for display on schematic
     /// Populated after DC OP simulation, shows node voltages and branch currents
     pub dc_annotations: DcAnnotationState,
+
+    /// Yield analysis results from Monte Carlo runs
+    pub yield_results: Vec<YieldResult>,
+
+    /// Current optimizer state (if running)
+    pub optimizer_state: Option<OptimizerState>,
+
+    /// Safety Operating Area violations
+    pub soa_violations: Vec<SoAViolation>,
+
+    /// Long-term reliability results
+    pub reliability_results: Vec<ReliabilityResult>,
 }
+
+// SimulationState implementation continues at line 210
 
 /// Waveform trace data
 #[derive(Debug, Clone, PartialEq)]
@@ -125,12 +230,20 @@ pub struct ConsoleMessage {
 }
 
 impl ConsoleMessage {
+    /// Get current timestamp as epoch seconds
+    fn current_timestamp() -> f64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0)
+    }
+
     /// Create an info message
     pub fn info(message: impl Into<String>) -> Self {
         Self {
             severity: MessageSeverity::Info,
             message: message.into(),
-            timestamp: None,
+            timestamp: Some(Self::current_timestamp()),
         }
     }
 
@@ -139,7 +252,7 @@ impl ConsoleMessage {
         Self {
             severity: MessageSeverity::Warning,
             message: message.into(),
-            timestamp: None,
+            timestamp: Some(Self::current_timestamp()),
         }
     }
 
@@ -148,7 +261,7 @@ impl ConsoleMessage {
         Self {
             severity: MessageSeverity::Error,
             message: message.into(),
-            timestamp: None,
+            timestamp: Some(Self::current_timestamp()),
         }
     }
 
@@ -157,7 +270,7 @@ impl ConsoleMessage {
         Self {
             severity: MessageSeverity::Success,
             message: message.into(),
-            timestamp: None,
+            timestamp: Some(Self::current_timestamp()),
         }
     }
 }
@@ -173,14 +286,16 @@ impl SimulationState {
         self.console_messages.clear();
     }
 
-    /// Clear waveforms
+    /// Clear waveforms and increment version
     pub fn clear_waveforms(&mut self) {
         self.waveforms.clear();
+        self.data_version = self.data_version.wrapping_add(1);
     }
 
-    /// Add a waveform trace
+    /// Add a waveform trace and increment version
     pub fn add_waveform(&mut self, waveform: WaveformData) {
         self.waveforms.push(waveform);
+        self.data_version = self.data_version.wrapping_add(1);
     }
 
     /// Toggle visibility of a waveform by name, returns true if found
