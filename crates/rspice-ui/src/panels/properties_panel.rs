@@ -17,11 +17,8 @@ use crate::state::{Point, Rotation, SchematicSnapshot};
 // Public API
 // =============================================================================
 
-/// Render the properties panel
+/// Render the properties panel content (header is rendered separately in app.rs)
 pub fn render_properties_panel(ui: &mut Ui, state: &mut AppState) {
-    ui.heading("Properties");
-    ui.separator();
-
     // Copy selection data to avoid borrow conflict with mutable state
     let has_selection = !state.schematic.selection.is_empty();
     let selected_component_ids: Vec<u64> = state

@@ -283,6 +283,11 @@ impl Cell {
     pub fn view_count(&self) -> usize {
         self.views.len()
     }
+
+    /// Remove a view by name
+    pub fn remove_view(&mut self, name: &str) -> bool {
+        self.views.remove(name).is_some()
+    }
 }
 
 // =============================================================================
@@ -395,6 +400,11 @@ impl Library {
     /// Total view count across all cells
     pub fn total_view_count(&self) -> usize {
         self.cells.values().map(|c| c.view_count()).sum()
+    }
+
+    /// Remove a cell by name
+    pub fn remove_cell(&mut self, name: &str) -> bool {
+        self.cells.remove(name).is_some()
     }
 }
 
@@ -633,6 +643,165 @@ impl LibraryManager {
         self.selected_library = None;
         self.selected_cell = None;
         self.selected_view = None;
+    }
+
+    // =========================================================================
+    // Primitives Library Initialization
+    // =========================================================================
+
+    /// Primitives library name constant
+    pub const PRIMITIVES_LIBRARY: &'static str = "primitives";
+
+    /// User library name constant
+    pub const USER_LIBRARY: &'static str = "user";
+
+    /// Create a LibraryManager with built-in primitives library pre-populated
+    pub fn with_primitives() -> Self {
+        let mut mgr = Self::new();
+        mgr.create_primitives_library();
+        mgr.create_user_library();
+        mgr
+    }
+
+    /// Create the built-in primitives library with all standard SPICE components
+    pub fn create_primitives_library(&mut self) {
+        let mut lib = Library::new(Self::PRIMITIVES_LIBRARY);
+        lib.read_only = true;
+        lib.technology = "SPICE".to_string();
+
+        // Helper to add a primitive cell with schematic view
+        fn add_primitive(lib: &mut Library, name: &str, category: &str, description: &str) {
+            let mut cell = Cell::new(name);
+            cell.description = description.to_string();
+            cell.category = category.to_string();
+            cell.add_view(View::new("schematic", ViewType::Schematic));
+            cell.add_view(View::new("symbol", ViewType::Symbol));
+            lib.add_cell(cell);
+        }
+
+        // ===== PASSIVES =====
+        add_primitive(&mut lib, "Resistor", "Passives", "Two-terminal resistor");
+        add_primitive(&mut lib, "Capacitor", "Passives", "Two-terminal capacitor");
+        add_primitive(&mut lib, "Inductor", "Passives", "Two-terminal inductor");
+        add_primitive(&mut lib, "Ground", "Passives", "Ground reference node");
+
+        // ===== SOURCES =====
+        add_primitive(&mut lib, "VSource DC", "Sources", "DC voltage source");
+        add_primitive(&mut lib, "VSource AC", "Sources", "AC small-signal source");
+        add_primitive(
+            &mut lib,
+            "VSource Pulse",
+            "Sources",
+            "Pulse waveform voltage source",
+        );
+        add_primitive(
+            &mut lib,
+            "VSource Sin",
+            "Sources",
+            "Sinusoidal voltage source",
+        );
+        add_primitive(&mut lib, "ISource DC", "Sources", "DC current source");
+        add_primitive(
+            &mut lib,
+            "ISource AC",
+            "Sources",
+            "AC small-signal current source",
+        );
+
+        // ===== CONTROLLED SOURCES =====
+        add_primitive(
+            &mut lib,
+            "VCVS",
+            "Controlled Sources",
+            "Voltage-controlled voltage source",
+        );
+        add_primitive(
+            &mut lib,
+            "VCCS",
+            "Controlled Sources",
+            "Voltage-controlled current source",
+        );
+        add_primitive(
+            &mut lib,
+            "CCVS",
+            "Controlled Sources",
+            "Current-controlled voltage source",
+        );
+        add_primitive(
+            &mut lib,
+            "CCCS",
+            "Controlled Sources",
+            "Current-controlled current source",
+        );
+
+        // ===== SEMICONDUCTORS =====
+        add_primitive(&mut lib, "Diode", "Semiconductors", "PN junction diode");
+        add_primitive(&mut lib, "NMOS", "Semiconductors", "N-channel MOSFET");
+        add_primitive(&mut lib, "PMOS", "Semiconductors", "P-channel MOSFET");
+        add_primitive(
+            &mut lib,
+            "NPN",
+            "Semiconductors",
+            "NPN bipolar junction transistor",
+        );
+        add_primitive(
+            &mut lib,
+            "PNP",
+            "Semiconductors",
+            "PNP bipolar junction transistor",
+        );
+        add_primitive(
+            &mut lib,
+            "NJFET",
+            "Semiconductors",
+            "N-channel junction FET",
+        );
+        add_primitive(
+            &mut lib,
+            "PJFET",
+            "Semiconductors",
+            "P-channel junction FET",
+        );
+
+        self.add_library(lib);
+    }
+
+    /// Create an empty user library for custom cells
+    pub fn create_user_library(&mut self) {
+        let lib = Library::new(Self::USER_LIBRARY);
+        self.add_library(lib);
+    }
+
+    /// Check if a cell is a primitive (from the primitives library)
+    pub fn is_primitive(&self, cell_name: &str) -> bool {
+        self.get_library(Self::PRIMITIVES_LIBRARY)
+            .and_then(|lib| lib.get_cell(cell_name))
+            .is_some()
+    }
+
+    /// Get all cells in a category
+    pub fn cells_in_category(&self, library: &str, category: &str) -> Vec<&Cell> {
+        self.get_library(library)
+            .map(|lib| {
+                lib.cells
+                    .values()
+                    .filter(|c| c.category == category)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Get unique categories from a library
+    pub fn categories(&self, library: &str) -> Vec<String> {
+        self.get_library(library)
+            .map(|lib| {
+                let mut cats: Vec<String> =
+                    lib.cells.values().map(|c| c.category.clone()).collect();
+                cats.sort();
+                cats.dedup();
+                cats
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -1058,5 +1227,207 @@ mod tests {
         mgr.clear();
         assert_eq!(mgr.library_count(), 0);
         assert!(mgr.selected_library.is_none());
+    }
+
+    // =========================================================================
+    // Primitives Library Tests
+    // =========================================================================
+
+    #[test]
+    fn test_with_primitives_creates_two_libraries() {
+        let mgr = LibraryManager::with_primitives();
+        assert_eq!(mgr.library_count(), 2);
+        assert!(mgr
+            .get_library(LibraryManager::PRIMITIVES_LIBRARY)
+            .is_some());
+        assert!(mgr.get_library(LibraryManager::USER_LIBRARY).is_some());
+    }
+
+    #[test]
+    fn test_primitives_library_has_21_components() {
+        let mgr = LibraryManager::with_primitives();
+        let lib = mgr
+            .get_library(LibraryManager::PRIMITIVES_LIBRARY)
+            .expect("primitives library must exist");
+        assert_eq!(lib.cell_count(), 21);
+    }
+
+    #[test]
+    fn test_primitives_library_is_read_only() {
+        let mgr = LibraryManager::with_primitives();
+        let lib = mgr
+            .get_library(LibraryManager::PRIMITIVES_LIBRARY)
+            .expect("primitives library must exist");
+        assert!(lib.read_only);
+    }
+
+    #[test]
+    fn test_primitives_library_has_technology() {
+        let mgr = LibraryManager::with_primitives();
+        let lib = mgr
+            .get_library(LibraryManager::PRIMITIVES_LIBRARY)
+            .expect("primitives library must exist");
+        assert_eq!(lib.technology, "SPICE");
+    }
+
+    #[test]
+    fn test_user_library_is_empty() {
+        let mgr = LibraryManager::with_primitives();
+        let lib = mgr
+            .get_library(LibraryManager::USER_LIBRARY)
+            .expect("user library must exist");
+        assert_eq!(lib.cell_count(), 0);
+        assert!(!lib.read_only);
+    }
+
+    #[test]
+    fn test_primitives_passives_category() {
+        let mgr = LibraryManager::with_primitives();
+        let passives = mgr.cells_in_category(LibraryManager::PRIMITIVES_LIBRARY, "Passives");
+        assert_eq!(passives.len(), 4);
+        let names: Vec<&str> = passives.iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"Resistor"));
+        assert!(names.contains(&"Capacitor"));
+        assert!(names.contains(&"Inductor"));
+        assert!(names.contains(&"Ground"));
+    }
+
+    #[test]
+    fn test_primitives_sources_category() {
+        let mgr = LibraryManager::with_primitives();
+        let sources = mgr.cells_in_category(LibraryManager::PRIMITIVES_LIBRARY, "Sources");
+        assert_eq!(sources.len(), 6);
+    }
+
+    #[test]
+    fn test_primitives_controlled_sources_category() {
+        let mgr = LibraryManager::with_primitives();
+        let controlled =
+            mgr.cells_in_category(LibraryManager::PRIMITIVES_LIBRARY, "Controlled Sources");
+        assert_eq!(controlled.len(), 4);
+        let names: Vec<&str> = controlled.iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"VCVS"));
+        assert!(names.contains(&"VCCS"));
+        assert!(names.contains(&"CCVS"));
+        assert!(names.contains(&"CCCS"));
+    }
+
+    #[test]
+    fn test_primitives_semiconductors_category() {
+        let mgr = LibraryManager::with_primitives();
+        let semis = mgr.cells_in_category(LibraryManager::PRIMITIVES_LIBRARY, "Semiconductors");
+        assert_eq!(semis.len(), 7);
+        let names: Vec<&str> = semis.iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"NMOS"));
+        assert!(names.contains(&"PMOS"));
+        assert!(names.contains(&"NPN"));
+        assert!(names.contains(&"PNP"));
+        assert!(names.contains(&"Diode"));
+        assert!(names.contains(&"NJFET"));
+        assert!(names.contains(&"PJFET"));
+    }
+
+    #[test]
+    fn test_categories_returns_expected_list() {
+        let mgr = LibraryManager::with_primitives();
+        let categories = mgr.categories(LibraryManager::PRIMITIVES_LIBRARY);
+        assert_eq!(categories.len(), 4);
+        assert!(categories.contains(&"Passives".to_string()));
+        assert!(categories.contains(&"Sources".to_string()));
+        assert!(categories.contains(&"Semiconductors".to_string()));
+        assert!(categories.contains(&"Controlled Sources".to_string()));
+    }
+
+    #[test]
+    fn test_categories_are_sorted() {
+        let mgr = LibraryManager::with_primitives();
+        let categories = mgr.categories(LibraryManager::PRIMITIVES_LIBRARY);
+        for i in 0..categories.len() - 1 {
+            assert!(
+                categories[i] <= categories[i + 1],
+                "Categories should be sorted"
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_primitive_resistor() {
+        let mgr = LibraryManager::with_primitives();
+        assert!(mgr.is_primitive("Resistor"));
+        assert!(mgr.is_primitive("NMOS"));
+        assert!(mgr.is_primitive("VSource DC"));
+    }
+
+    #[test]
+    fn test_is_primitive_non_existent() {
+        let mgr = LibraryManager::with_primitives();
+        assert!(!mgr.is_primitive("NonExistentCell"));
+        assert!(!mgr.is_primitive("my_custom_opamp"));
+    }
+
+    #[test]
+    fn test_primitive_cells_have_schematic_view() {
+        let mgr = LibraryManager::with_primitives();
+        let lib = mgr
+            .get_library(LibraryManager::PRIMITIVES_LIBRARY)
+            .expect("primitives library must exist");
+        for cell in lib.cells.values() {
+            assert!(
+                cell.get_view("schematic").is_some(),
+                "Cell {} should have schematic view",
+                cell.name
+            );
+        }
+    }
+
+    #[test]
+    fn test_primitive_cells_have_symbol_view() {
+        let mgr = LibraryManager::with_primitives();
+        let lib = mgr
+            .get_library(LibraryManager::PRIMITIVES_LIBRARY)
+            .expect("primitives library must exist");
+        for cell in lib.cells.values() {
+            assert!(
+                cell.get_view("symbol").is_some(),
+                "Cell {} should have symbol view",
+                cell.name
+            );
+        }
+    }
+
+    #[test]
+    fn test_cells_in_category_non_existent() {
+        let mgr = LibraryManager::with_primitives();
+        let cells = mgr.cells_in_category(LibraryManager::PRIMITIVES_LIBRARY, "FakeCategory");
+        assert!(cells.is_empty());
+    }
+
+    #[test]
+    fn test_categories_non_existent_library() {
+        let mgr = LibraryManager::with_primitives();
+        let categories = mgr.categories("fake_library");
+        assert!(categories.is_empty());
+    }
+
+    #[test]
+    fn test_user_library_can_add_cells() {
+        let mut mgr = LibraryManager::with_primitives();
+        let lib = mgr
+            .get_library_mut(LibraryManager::USER_LIBRARY)
+            .expect("user library must exist");
+        lib.add_cell(Cell::new("my_opamp"));
+        assert_eq!(lib.cell_count(), 1);
+    }
+
+    #[test]
+    fn test_create_primitives_is_idempotent() {
+        // Calling create_primitives_library twice should just add again (overwrite)
+        let mut mgr = LibraryManager::new();
+        mgr.create_primitives_library();
+        let count1 = mgr.total_cell_count();
+        mgr.create_primitives_library();
+        // Second lib added separately, so count doubles
+        assert_eq!(mgr.total_cell_count(), count1); // Actually same lib name = overwrites
+        assert_eq!(mgr.library_count(), 1);
     }
 }

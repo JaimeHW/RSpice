@@ -283,4 +283,455 @@ impl DocumentManager {
 
         serde_json::from_str(&content).map_err(|e| format!("Parse error: {}", e))
     }
+
+    /// Get a document by index
+    pub fn get(&self, index: usize) -> Option<&Document> {
+        self.documents.get(index)
+    }
+
+    /// Get a mutable document by index
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut Document> {
+        self.documents.get_mut(index)
+    }
+
+    /// Find document index by file path
+    pub fn find_by_path(&self, path: &PathBuf) -> Option<usize> {
+        self.documents
+            .iter()
+            .position(|d| d.file_path.as_ref() == Some(path))
+    }
+
+    /// Get the active document index
+    pub fn active_index(&self) -> usize {
+        self.active_index
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // Document Tests
+    // =========================================================================
+
+    #[test]
+    fn test_document_new_untitled_first() {
+        let doc = Document::new_untitled(1);
+        assert_eq!(doc.name, "Untitled");
+        assert!(doc.file_path.is_none());
+        assert!(!doc.is_dirty);
+    }
+
+    #[test]
+    fn test_document_new_untitled_subsequent() {
+        let doc = Document::new_untitled(2);
+        assert_eq!(doc.name, "Untitled 2");
+
+        let doc3 = Document::new_untitled(5);
+        assert_eq!(doc3.name, "Untitled 5");
+    }
+
+    #[test]
+    fn test_document_unique_ids() {
+        let doc1 = Document::new_untitled(1);
+        let doc2 = Document::new_untitled(2);
+        assert_ne!(doc1.id, doc2.id);
+    }
+
+    #[test]
+    fn test_document_from_path() {
+        let path = PathBuf::from("/projects/my_circuit.rspice");
+        let schematic = SchematicState::default();
+        let doc = Document::from_path(path.clone(), schematic);
+
+        assert_eq!(doc.name, "my_circuit");
+        assert_eq!(doc.file_path, Some(path));
+        assert!(!doc.is_dirty);
+    }
+
+    #[test]
+    fn test_document_from_path_no_extension() {
+        let path = PathBuf::from("/projects/test_schematic");
+        let doc = Document::from_path(path.clone(), SchematicState::default());
+        assert_eq!(doc.name, "test_schematic");
+    }
+
+    #[test]
+    fn test_document_from_path_complex_name() {
+        let path = PathBuf::from("/home/user/designs/opamp_v2.1.rspice");
+        let doc = Document::from_path(path, SchematicState::default());
+        assert_eq!(doc.name, "opamp_v2.1");
+    }
+
+    #[test]
+    fn test_document_mark_dirty() {
+        let mut doc = Document::new_untitled(1);
+        assert!(!doc.is_dirty);
+
+        doc.mark_dirty();
+        assert!(doc.is_dirty);
+    }
+
+    #[test]
+    fn test_document_mark_clean() {
+        let mut doc = Document::new_untitled(1);
+        doc.mark_dirty();
+        assert!(doc.is_dirty);
+
+        doc.mark_clean();
+        assert!(!doc.is_dirty);
+    }
+
+    #[test]
+    fn test_document_display_title_clean() {
+        let doc = Document::new_untitled(1);
+        assert_eq!(doc.display_title(), "Untitled");
+    }
+
+    #[test]
+    fn test_document_display_title_dirty() {
+        let mut doc = Document::new_untitled(1);
+        doc.mark_dirty();
+        assert_eq!(doc.display_title(), "Untitled*");
+    }
+
+    #[test]
+    fn test_document_display_title_with_path_dirty() {
+        let path = PathBuf::from("/test/circuit.rspice");
+        let mut doc = Document::from_path(path, SchematicState::default());
+        doc.mark_dirty();
+        assert_eq!(doc.display_title(), "circuit*");
+    }
+
+    #[test]
+    fn test_document_has_hierarchy_manager() {
+        let doc = Document::new_untitled(1);
+        assert!(doc.hierarchy_nav.libraries.is_empty());
+    }
+
+    // =========================================================================
+    // DocumentManager Creation Tests
+    // =========================================================================
+
+    #[test]
+    fn test_document_manager_default() {
+        let mgr = DocumentManager::default();
+        assert_eq!(mgr.len(), 1);
+        assert!(!mgr.is_empty());
+        assert_eq!(mgr.active().name, "Untitled");
+    }
+
+    #[test]
+    fn test_document_manager_new_document() {
+        let mut mgr = DocumentManager::default();
+        let initial_count = mgr.len();
+
+        let idx = mgr.new_document();
+        assert_eq!(mgr.len(), initial_count + 1);
+        assert_eq!(mgr.active_index, idx);
+        assert_eq!(mgr.active().name, "Untitled 2");
+    }
+
+    #[test]
+    fn test_document_manager_multiple_new_documents() {
+        let mut mgr = DocumentManager::default();
+        mgr.new_document();
+        mgr.new_document();
+        mgr.new_document();
+
+        assert_eq!(mgr.len(), 4);
+        assert_eq!(mgr.documents[0].name, "Untitled");
+        assert_eq!(mgr.documents[1].name, "Untitled 2");
+        assert_eq!(mgr.documents[2].name, "Untitled 3");
+        assert_eq!(mgr.documents[3].name, "Untitled 4");
+    }
+
+    // =========================================================================
+    // DocumentManager Open/Close Tests
+    // =========================================================================
+
+    #[test]
+    fn test_document_manager_open_document() {
+        let mut mgr = DocumentManager::default();
+        let path = PathBuf::from("/test/circuit.rspice");
+
+        let idx = mgr.open_document(path.clone(), SchematicState::default());
+        assert_eq!(mgr.len(), 2);
+        assert_eq!(mgr.active_index, idx);
+        assert_eq!(mgr.active().file_path, Some(path));
+    }
+
+    #[test]
+    fn test_document_manager_open_same_path_twice() {
+        let mut mgr = DocumentManager::default();
+        let path = PathBuf::from("/test/circuit.rspice");
+
+        let idx1 = mgr.open_document(path.clone(), SchematicState::default());
+        let idx2 = mgr.open_document(path.clone(), SchematicState::default());
+
+        assert_eq!(idx1, idx2);
+        assert_eq!(mgr.len(), 2);
+    }
+
+    #[test]
+    fn test_document_manager_open_different_paths() {
+        let mut mgr = DocumentManager::default();
+        let path1 = PathBuf::from("/test/circuit1.rspice");
+        let path2 = PathBuf::from("/test/circuit2.rspice");
+
+        mgr.open_document(path1, SchematicState::default());
+        mgr.open_document(path2, SchematicState::default());
+
+        assert_eq!(mgr.len(), 3);
+    }
+
+    #[test]
+    fn test_document_manager_close_document() {
+        let mut mgr = DocumentManager::default();
+        mgr.new_document();
+
+        assert!(mgr.close_document(0));
+        assert_eq!(mgr.len(), 1);
+    }
+
+    #[test]
+    fn test_document_manager_close_invalid_index() {
+        let mut mgr = DocumentManager::default();
+        assert!(!mgr.close_document(999));
+        assert_eq!(mgr.len(), 1);
+    }
+
+    #[test]
+    fn test_document_manager_close_last_document_creates_new() {
+        let mut mgr = DocumentManager::default();
+        assert_eq!(mgr.len(), 1);
+
+        mgr.close_document(0);
+        assert_eq!(mgr.len(), 1);
+        assert_eq!(mgr.active().name, "Untitled 2");
+    }
+
+    #[test]
+    fn test_document_manager_close_adjusts_active_index_when_after() {
+        let mut mgr = DocumentManager::default();
+        mgr.new_document();
+        mgr.new_document();
+        mgr.set_active(2);
+
+        mgr.close_document(0);
+        assert_eq!(mgr.active_index, 1);
+    }
+
+    #[test]
+    fn test_document_manager_close_adjusts_active_index_at_end() {
+        let mut mgr = DocumentManager::default();
+        mgr.new_document();
+        mgr.set_active(1);
+
+        mgr.close_document(1);
+        assert_eq!(mgr.active_index, 0);
+    }
+
+    // =========================================================================
+    // DocumentManager Active Document Tests
+    // =========================================================================
+
+    #[test]
+    fn test_document_manager_set_active() {
+        let mut mgr = DocumentManager::default();
+        mgr.new_document();
+        mgr.new_document();
+
+        mgr.set_active(0);
+        assert_eq!(mgr.active_index, 0);
+
+        mgr.set_active(2);
+        assert_eq!(mgr.active_index, 2);
+    }
+
+    #[test]
+    fn test_document_manager_set_active_invalid_ignored() {
+        let mut mgr = DocumentManager::default();
+        mgr.set_active(999);
+        assert_eq!(mgr.active_index, 0);
+    }
+
+    #[test]
+    fn test_document_manager_active_mut() {
+        let mut mgr = DocumentManager::default();
+        mgr.active_mut().mark_dirty();
+        assert!(mgr.active().is_dirty);
+    }
+
+    #[test]
+    fn test_document_manager_get_by_index() {
+        let mut mgr = DocumentManager::default();
+        mgr.new_document();
+
+        assert!(mgr.get(0).is_some());
+        assert!(mgr.get(1).is_some());
+        assert!(mgr.get(999).is_none());
+    }
+
+    #[test]
+    fn test_document_manager_get_mut_by_index() {
+        let mut mgr = DocumentManager::default();
+        mgr.new_document();
+
+        if let Some(doc) = mgr.get_mut(1) {
+            doc.mark_dirty();
+        }
+        assert!(mgr.get(1).unwrap().is_dirty);
+    }
+
+    // =========================================================================
+    // DocumentManager Dirty State Tests
+    // =========================================================================
+
+    #[test]
+    fn test_document_manager_has_unsaved_changes_none() {
+        let mgr = DocumentManager::default();
+        assert!(!mgr.has_unsaved_changes());
+    }
+
+    #[test]
+    fn test_document_manager_has_unsaved_changes_one() {
+        let mut mgr = DocumentManager::default();
+        mgr.active_mut().mark_dirty();
+        assert!(mgr.has_unsaved_changes());
+    }
+
+    #[test]
+    fn test_document_manager_has_unsaved_changes_multiple() {
+        let mut mgr = DocumentManager::default();
+        mgr.new_document();
+        mgr.new_document();
+
+        mgr.get_mut(0).unwrap().mark_dirty();
+        mgr.get_mut(2).unwrap().mark_dirty();
+
+        assert!(mgr.has_unsaved_changes());
+    }
+
+    #[test]
+    fn test_document_manager_unsaved_documents_empty() {
+        let mgr = DocumentManager::default();
+        assert!(mgr.unsaved_documents().is_empty());
+    }
+
+    #[test]
+    fn test_document_manager_unsaved_documents_some() {
+        let mut mgr = DocumentManager::default();
+        mgr.new_document();
+        mgr.new_document();
+
+        mgr.get_mut(0).unwrap().mark_dirty();
+        mgr.get_mut(2).unwrap().mark_dirty();
+
+        let unsaved = mgr.unsaved_documents();
+        assert_eq!(unsaved.len(), 2);
+        assert!(unsaved.contains(&0));
+        assert!(unsaved.contains(&2));
+    }
+
+    // =========================================================================
+    // DocumentManager Find/Query Tests
+    // =========================================================================
+
+    #[test]
+    fn test_document_manager_find_by_path() {
+        let mut mgr = DocumentManager::default();
+        let path = PathBuf::from("/test/circuit.rspice");
+        mgr.open_document(path.clone(), SchematicState::default());
+
+        assert_eq!(mgr.find_by_path(&path), Some(1));
+        assert_eq!(mgr.find_by_path(&PathBuf::from("/nonexistent")), None);
+    }
+
+    #[test]
+    fn test_document_manager_active_index_getter() {
+        let mut mgr = DocumentManager::default();
+        assert_eq!(mgr.active_index(), 0);
+
+        mgr.new_document();
+        assert_eq!(mgr.active_index(), 1);
+    }
+
+    // =========================================================================
+    // DocumentManager Save Tests
+    // =========================================================================
+
+    #[test]
+    fn test_document_manager_save_active_no_path_fails() {
+        let mut mgr = DocumentManager::default();
+        let result = mgr.save_active_document();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No file path set"));
+    }
+
+    // =========================================================================
+    // Edge Case Tests
+    // =========================================================================
+
+    #[test]
+    fn test_document_manager_never_empty() {
+        let mut mgr = DocumentManager::default();
+
+        while mgr.len() > 1 {
+            mgr.close_document(0);
+        }
+        mgr.close_document(0);
+
+        assert!(!mgr.is_empty());
+        assert_eq!(mgr.len(), 1);
+    }
+
+    #[test]
+    fn test_document_manager_close_middle_document() {
+        let mut mgr = DocumentManager::default();
+        let path1 = PathBuf::from("/test/a.rspice");
+        let path2 = PathBuf::from("/test/b.rspice");
+        let path3 = PathBuf::from("/test/c.rspice");
+
+        mgr.open_document(path1, SchematicState::default());
+        mgr.open_document(path2, SchematicState::default());
+        mgr.open_document(path3, SchematicState::default());
+
+        mgr.set_active(1);
+        mgr.close_document(2);
+
+        assert_eq!(mgr.len(), 3);
+        assert_eq!(mgr.active_index, 1);
+    }
+
+    #[test]
+    fn test_document_manager_rapid_create_close() {
+        let mut mgr = DocumentManager::default();
+
+        for _ in 0..10 {
+            mgr.new_document();
+        }
+        assert_eq!(mgr.len(), 11);
+
+        for _ in 0..10 {
+            mgr.close_document(1);
+        }
+        assert_eq!(mgr.len(), 1);
+    }
+
+    #[test]
+    fn test_document_dirty_state_preserved_across_operations() {
+        let mut mgr = DocumentManager::default();
+        mgr.active_mut().mark_dirty();
+
+        mgr.new_document();
+        mgr.set_active(0);
+
+        assert!(mgr.active().is_dirty);
+    }
 }

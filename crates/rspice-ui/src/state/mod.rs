@@ -36,6 +36,7 @@ pub use dc_annotation::{AnnotationKind, AnnotationMode, DcAnnotationState};
 pub use display_settings::{PinNameVisibility, SchematicDisplaySettings};
 pub use document::{Document, DocumentManager};
 pub use history::SchematicHistory;
+pub use library_browser::{Cell, Library, LibraryManager, View, ViewType};
 pub use property_types::{
     PropertyDefinition, PropertyRegistry, PropertySheet, PropertyType, PropertyValue,
 };

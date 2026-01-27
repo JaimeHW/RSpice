@@ -187,27 +187,13 @@ impl Component {
 
     /// Get the bounding box of this component in grid coordinates
     ///
-    /// Returns (min_x, min_y, max_x, max_y) representing the approximate
-    /// footprint of the component symbol.
+    /// Returns (min_x, min_y, max_x, max_y) representing the
+    /// footprint of the component symbol, matching the actual rendered size.
     pub fn bounding_box(&self) -> (i32, i32, i32, i32) {
-        // Approximate symbol size depends on component type
-        let (half_w, half_h) = match self.kind {
-            ComponentType::Ground => (1, 2),
-            ComponentType::Resistor
-            | ComponentType::Capacitor
-            | ComponentType::Inductor
-            | ComponentType::Diode => (3, 2),
-            ComponentType::NpnBjt
-            | ComponentType::PnpBjt
-            | ComponentType::Nmos
-            | ComponentType::Pmos => (3, 3),
-            ComponentType::VoltageSource
-            | ComponentType::CurrentSource
-            | ComponentType::VoltageSourceAc
-            | ComponentType::VoltageSourcePulse
-            | ComponentType::VoltageSourceSin => (2, 3),
-            _ => (2, 2),
-        };
+        // Use actual symbol dimensions for accurate hit detection
+        let (width, height) = self.kind.symbol_dimensions();
+        let half_w = width / 2;
+        let half_h = height / 2;
 
         // Swap dimensions if rotated 90 or 270 degrees
         let (hw, hh) = if self.rotation.is_vertical() {
