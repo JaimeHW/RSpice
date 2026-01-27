@@ -1199,16 +1199,16 @@ mod tests {
             "VoltageSource should be vertical"
         );
 
-        // Verify transistors have 40x40 dimensions for consistent sizing
-        // G/B at ±20, D/S or C/E at ±20 - all on major grid
+        // Verify transistors have 40x80 dimensions for consistent sizing with grid alignment
+        // G at ±20, D/S at ±40 - all on major grid
         let nmos = library.get(crate::state::ComponentType::Nmos).unwrap();
         assert_eq!(
             nmos.target_width, 40.0,
             "NMOS should have 40.0 target width"
         );
         assert_eq!(
-            nmos.target_height, 40.0,
-            "NMOS should have 40.0 target height"
+            nmos.target_height, 80.0,
+            "NMOS should have 80.0 target height"
         );
 
         let npn = library.get(crate::state::ComponentType::NpnBjt).unwrap();
@@ -1217,8 +1217,8 @@ mod tests {
             "NPN BJT should have 40.0 target width"
         );
         assert_eq!(
-            npn.target_height, 40.0,
-            "NPN BJT should have 40.0 target height"
+            npn.target_height, 80.0,
+            "NPN BJT should have 80.0 target height"
         );
 
         // Verify ground is 20x20 for grid alignment

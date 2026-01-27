@@ -327,7 +327,8 @@ impl SimulationController {
                     )));
 
                 // Auto-show console panel so user sees results
-                state.panels.console = true;
+                state.panels.bottom_panel = true;
+                state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Console;
             }
 
             SimulationResult::Transient { time, waveforms } => {
@@ -353,9 +354,9 @@ impl SimulationController {
                         waveforms.len()
                     )));
 
-                // Auto-show waveform panel and hide console for better visibility
-                state.panels.waveform = true;
-                state.panels.console = false;
+                // Auto-show waveform panel for better visibility
+                state.panels.bottom_panel = true;
+                state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
             }
 
             SimulationResult::Ac {
@@ -388,7 +389,8 @@ impl SimulationController {
                         waveforms.len()
                     )));
 
-                state.panels.waveform = true;
+                state.panels.bottom_panel = true;
+                state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
             }
 
             SimulationResult::DcSweep {
@@ -419,7 +421,8 @@ impl SimulationController {
                         waveforms.len()
                     )));
 
-                state.panels.waveform = true;
+                state.panels.bottom_panel = true;
+                state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
             }
 
             SimulationResult::Noise {
@@ -477,7 +480,8 @@ impl SimulationController {
                         integrated
                     )));
 
-                state.panels.waveform = true;
+                state.panels.bottom_panel = true;
+                state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
             }
 
             SimulationResult::PoleZero { poles, zeros, gain } => {

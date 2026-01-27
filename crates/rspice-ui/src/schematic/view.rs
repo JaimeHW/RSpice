@@ -175,18 +175,22 @@ pub fn render_schematic_view(
             if let Some(pos) = response.interact_pointer_pos() {
                 let grid_pos = screen_to_grid(pos);
 
-                // Check if drag started on a selected component
+                // Check if there's a component at the drag start position
                 let comp_at_pos = state.schematic.component_at(grid_pos);
-                let dragging_selection = comp_at_pos
-                    .map(|id| state.schematic.selection.has_component(id))
-                    .unwrap_or(false);
 
-                if dragging_selection {
-                    // Record drag start position for delta calculation
+                if let Some(comp_id) = comp_at_pos {
+                    // Drag started on a component
+                    if !state.schematic.selection.has_component(comp_id) {
+                        // Component not selected - select it first (professional behavior)
+                        // This enables click-and-drag in one motion like Cadence Virtuoso
+                        state.schematic.selection.clear();
+                        state.schematic.selection.select_component(comp_id);
+                    }
+                    // Now start dragging the selection
                     state.dialogs.drag_start = Some((grid_pos.x, grid_pos.y));
                     state.dialogs.last_drag_pos = Some((grid_pos.x, grid_pos.y));
                 } else {
-                    // Start box selection
+                    // Drag started on empty space - start box selection
                     state.schematic.selection_rect.start_at(grid_pos);
                 }
             }
@@ -216,7 +220,9 @@ pub fn render_schematic_view(
         // Finish drag - complete box selection or finalize move
         if response.drag_stopped_by(egui::PointerButton::Primary) {
             if state.dialogs.last_drag_pos.is_some() {
-                // Finished moving selection
+                // Finished moving selection - clean up any degenerate wires
+                // (e.g., zero-length wires created by moving component terminal to wire endpoint)
+                state.schematic.cleanup_wire_topology();
                 state.dialogs.drag_start = None;
                 state.dialogs.last_drag_pos = None;
             } else if let Some((min_x, min_y, max_x, max_y)) =
