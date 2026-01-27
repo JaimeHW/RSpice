@@ -138,12 +138,7 @@ pub fn render_waveform_viewer(ui: &mut Ui, app_state: &mut AppState) {
 
     // Render each section
     // Use split borrows to avoid borrow checker issues
-    render_header(
-        ui,
-        &layout,
-        &mut app_state.waveform_viewer,
-        &mut app_state.panels.waveform,
-    );
+    render_header(ui, &layout, &mut app_state.waveform_viewer);
     render_y_axis(ui, &layout, &app_state.waveform_viewer);
     render_plot_area(ui, &layout, &mut app_state.waveform_viewer);
     render_x_axis(ui, &layout, &app_state.waveform_viewer);
@@ -219,12 +214,7 @@ fn calculate_layout(available: Rect) -> ViewerLayout {
 // Header Rendering
 // =============================================================================
 
-fn render_header(
-    ui: &mut Ui,
-    layout: &ViewerLayout,
-    viewer_state: &mut WaveformViewerState,
-    panel_visible: &mut bool,
-) {
+fn render_header(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut WaveformViewerState) {
     let painter = ui.painter();
 
     // Header background
@@ -277,11 +267,6 @@ fn render_header(
             // Right-aligned controls
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(8.0);
-
-                // Close button
-                if ui.small_button("✕").clicked() {
-                    *panel_visible = false;
-                }
 
                 // Toggle buttons
                 let meas_text = if viewer_state.show_measurements {
