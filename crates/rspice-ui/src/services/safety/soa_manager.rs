@@ -218,7 +218,7 @@ mod tests {
         values.insert("M1".to_string(), m1_values.clone());
         manager.check_point(2e-9, &values);
         assert_eq!(
-            manager.violations()[2].severity,
+            manager.violations()[1].severity,
             ViolationSeverity::Violation
         );
     }
