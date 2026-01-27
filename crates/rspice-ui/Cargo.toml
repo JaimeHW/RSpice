@@ -80,3 +80,4 @@ rfd = "0.15"
 env_logger = "0.11"
 
 [dev-dependencies]
+tempfile = "3"

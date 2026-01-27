@@ -9,8 +9,11 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
-    // Initialize logging
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    // Initialize logging with wgpu_core set to warn to reduce noise
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("info,wgpu_core=warn"),
+    )
+    .init();
 
     log::info!("Starting RSpice UI with egui (commercial-grade GPU rendering)...");
 
