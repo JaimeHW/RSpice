@@ -52,7 +52,33 @@ use super::theme::RSpiceTheme;
 
 // =============================================================================
 // Application State
-// =============================================================================
+/// Active tab in the unified bottom panel
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BottomPanelTab {
+    /// Console output and messages
+    #[default]
+    Console,
+    /// Waveform viewer / results
+    Waveform,
+    /// Log / history
+    Log,
+}
+
+impl BottomPanelTab {
+    /// Display name for tab
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Console => "Console",
+            Self::Waveform => "Waveform",
+            Self::Log => "Log",
+        }
+    }
+
+    /// All available tabs in display order
+    pub fn all() -> &'static [BottomPanelTab] {
+        &[Self::Console, Self::Waveform, Self::Log]
+    }
+}
 
 /// Panel visibility state
 #[derive(Debug, Clone)]
@@ -61,10 +87,10 @@ pub struct PanelVisibility {
     pub project_browser: bool,
     /// Properties panel (right side)
     pub properties: bool,
-    /// Waveform viewer (bottom)
-    pub waveform: bool,
-    /// Console output (bottom)
-    pub console: bool,
+    /// Unified bottom panel visible
+    pub bottom_panel: bool,
+    /// Active tab in bottom panel
+    pub active_bottom_tab: BottomPanelTab,
     /// Smith chart viewer
     pub smith_chart: bool,
     /// Cross-probe signal browser
@@ -78,8 +104,8 @@ impl Default for PanelVisibility {
         Self {
             project_browser: false,
             properties: true,
-            waveform: false, // Hidden by default, shown when sim results arrive
-            console: true,
+            bottom_panel: true, // Visible by default with Console tab
+            active_bottom_tab: BottomPanelTab::Console,
             smith_chart: false,
             signal_browser: false,
             script_console: false,
@@ -128,8 +154,34 @@ pub struct DialogState {
     pub new_cell_dialog: bool,
     /// New Cell name input
     pub new_cell_name: String,
+    /// New Cell target library
+    pub new_cell_library: String,
+    /// New Cell description
+    pub new_cell_description: String,
+    /// New Cell view types to create
+    pub new_cell_create_schematic: bool,
+    /// Create symbol view for new cell
+    pub new_cell_create_symbol: bool,
+    /// Create testbench view for new cell
+    pub new_cell_create_testbench: bool,
+    /// New Cell validation error message
+    pub new_cell_error: Option<String>,
+    /// New View creation dialog
+    pub new_view_dialog: bool,
+    /// New View target library
+    pub new_view_library: String,
+    /// New View target cell
+    pub new_view_cell: String,
+    /// New View name input
+    pub new_view_name: String,
+    /// New View type selection
+    pub new_view_type: crate::state::ViewType,
+    /// New View validation error message
+    pub new_view_error: Option<String>,
     /// Active simulation tab (0=OP, 1=Tran, 2=AC, 3=DC, 4=Noise, 5=PZ, 6=Sens, 7=MC, 8=PSS, 9=STB, 10=Temp)
     pub sim_active_tab: usize,
+    /// Set of enabled analysis indices
+    pub enabled_analyses: std::collections::HashSet<usize>,
     // --- Transient Analysis ---
     /// Transient stop time
     pub tran_stop: String,
@@ -338,6 +390,12 @@ pub struct AppState {
     pub active_viewer: crate::viewers::ActiveViewer,
     /// Waveform viewer state (persists across frames for pan/zoom)
     pub waveform_viewer: WaveformViewerState,
+    /// Library/Cell/View manager for design hierarchy
+    pub library_manager: crate::state::LibraryManager,
+    /// Pending cell deletion (library, cell_name)
+    pub pending_delete_cell: Option<(String, String)>,
+    /// Pending view deletion (library, cell, view_name)
+    pub pending_delete_view: Option<(String, String, String)>,
 }
 
 impl Default for AppState {
@@ -354,6 +412,9 @@ impl Default for AppState {
             script_console: crate::panels::ScriptConsoleState::default(),
             active_viewer: crate::viewers::ActiveViewer::default(),
             waveform_viewer: WaveformViewerState::default(),
+            library_manager: crate::state::LibraryManager::with_primitives(),
+            pending_delete_cell: None,
+            pending_delete_view: None,
         }
     }
 }
@@ -807,11 +868,27 @@ impl RSpiceApp {
     }
 
     fn toggle_panel_console(&mut self) {
-        self.state.panels.console = !self.state.panels.console;
+        // Show bottom panel and switch to Console tab
+        if self.state.panels.bottom_panel
+            && self.state.panels.active_bottom_tab == BottomPanelTab::Console
+        {
+            self.state.panels.bottom_panel = false;
+        } else {
+            self.state.panels.bottom_panel = true;
+            self.state.panels.active_bottom_tab = BottomPanelTab::Console;
+        }
     }
 
     fn toggle_panel_waveform(&mut self) {
-        self.state.panels.waveform = !self.state.panels.waveform;
+        // Show bottom panel and switch to Waveform tab
+        if self.state.panels.bottom_panel
+            && self.state.panels.active_bottom_tab == BottomPanelTab::Waveform
+        {
+            self.state.panels.bottom_panel = false;
+        } else {
+            self.state.panels.bottom_panel = true;
+            self.state.panels.active_bottom_tab = BottomPanelTab::Waveform;
+        }
     }
 
     fn toggle_panel_properties(&mut self) {
@@ -1225,39 +1302,163 @@ impl eframe::App for RSpiceApp {
             });
 
         // =====================================================================
-        // Waveform Panel (bottom) - rendered first to claim space for plots
+        // Unified Bottom Panel (tabbed: Console, Waveform, Log)
         // =====================================================================
-        if self.state.panels.waveform {
-            TopBottomPanel::bottom("waveform")
+        if self.state.panels.bottom_panel {
+            TopBottomPanel::bottom("bottom_panel")
                 .resizable(true)
                 .default_height(self.state.panel_sizes.waveform_height)
-                .height_range(150.0..=600.0)
-                .frame(
-                    Frame::none()
-                        .fill(egui::Color32::from_rgb(25, 27, 33))
-                        .inner_margin(egui::Margin {
-                            left: 0.0,
-                            right: 0.0,
-                            top: 8.0,
-                            bottom: 4.0,
-                        }),
-                )
-                .show(ctx, |ui| {
-                    self.render_waveform_panel(ui);
-                });
-        }
-
-        // =====================================================================
-        // Console Panel (bottom) - spans full width except icon rail
-        // =====================================================================
-        if self.state.panels.console {
-            TopBottomPanel::bottom("console")
-                .resizable(true)
-                .default_height(self.state.panel_sizes.console_height)
-                .height_range(60.0..=400.0)
+                .height_range(100.0..=500.0)
                 .frame(Frame::none().fill(egui::Color32::from_rgb(25, 27, 33)))
                 .show(ctx, |ui| {
-                    self.render_console_panel(ui);
+                    // Professional tab bar with underline-style selection
+                    // Remove vertical spacing to eliminate gap below tabs
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    // Tab bar styling constants
+                    let accent_color = egui::Color32::from_rgb(100, 150, 255);
+                    let inactive_text = egui::Color32::from_rgb(160, 165, 175);
+                    let active_text = egui::Color32::WHITE;
+                    let hover_text = egui::Color32::from_rgb(200, 205, 215);
+                    let tab_height = 28.0; // Full bar height
+                    let tab_min_width = 80.0;
+                    let tab_padding = 16.0;
+                    let underline_height = 2.0;
+
+                    ui.horizontal(|ui| {
+                        // Remove gaps between tabs
+                        ui.spacing_mut().item_spacing.x = 0.0;
+
+                        for &tab in BottomPanelTab::all() {
+                            let selected = self.state.panels.active_bottom_tab == tab;
+
+                            // Calculate tab size
+                            let text = tab.name();
+                            let galley = ui.fonts(|f| {
+                                f.layout_no_wrap(
+                                    text.to_string(),
+                                    egui::FontId::proportional(12.0),
+                                    active_text,
+                                )
+                            });
+                            let text_width = galley.rect.width();
+                            let tab_width = (text_width + tab_padding * 2.0).max(tab_min_width);
+
+                            // Allocate space for the tab
+                            let (rect, response) = ui.allocate_exact_size(
+                                egui::vec2(tab_width, tab_height),
+                                egui::Sense::click(),
+                            );
+
+                            // Determine visual state
+                            let text_color = if selected {
+                                active_text
+                            } else if response.hovered() {
+                                hover_text
+                            } else {
+                                inactive_text
+                            };
+
+                            // Draw the tab
+                            let painter = ui.painter();
+
+                            // Hover background (subtle)
+                            if response.hovered() && !selected {
+                                painter.rect_filled(
+                                    rect,
+                                    egui::Rounding::ZERO,
+                                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 8),
+                                );
+                            }
+
+                            // Tab text (centered)
+                            painter.text(
+                                rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                text,
+                                egui::FontId::proportional(12.0),
+                                text_color,
+                            );
+
+                            // Selected indicator (underline)
+                            if selected {
+                                let underline_rect = egui::Rect::from_min_size(
+                                    egui::pos2(rect.min.x, rect.max.y - underline_height),
+                                    egui::vec2(rect.width(), underline_height),
+                                );
+                                painter.rect_filled(
+                                    underline_rect,
+                                    egui::Rounding::ZERO,
+                                    accent_color,
+                                );
+                            }
+
+                            // Handle click
+                            if response.clicked() {
+                                self.state.panels.active_bottom_tab = tab;
+                            }
+                        }
+
+                        // Right-aligned close button
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            // Close button (square, minimal style)
+                            let close_size = egui::vec2(tab_height, tab_height);
+                            let (close_rect, close_response) =
+                                ui.allocate_exact_size(close_size, egui::Sense::click());
+
+                            let close_color = if close_response.hovered() {
+                                egui::Color32::from_rgb(255, 100, 100)
+                            } else {
+                                inactive_text
+                            };
+
+                            // Draw hover background for close button
+                            if close_response.hovered() {
+                                ui.painter().rect_filled(
+                                    close_rect,
+                                    egui::Rounding::same(2.0),
+                                    egui::Color32::from_rgba_unmultiplied(255, 80, 80, 30),
+                                );
+                            }
+
+                            // Draw X using lines for a clean look
+                            let center = close_rect.center();
+                            let cross_size = 4.0;
+                            let stroke = egui::Stroke::new(1.5, close_color);
+                            ui.painter().line_segment(
+                                [
+                                    center + egui::vec2(-cross_size, -cross_size),
+                                    center + egui::vec2(cross_size, cross_size),
+                                ],
+                                stroke,
+                            );
+                            ui.painter().line_segment(
+                                [
+                                    center + egui::vec2(cross_size, -cross_size),
+                                    center + egui::vec2(-cross_size, cross_size),
+                                ],
+                                stroke,
+                            );
+
+                            if close_response.on_hover_text("Close panel").clicked() {
+                                self.state.panels.bottom_panel = false;
+                            }
+                        });
+                    });
+
+                    // Subtle separator line (painted directly, no spacing)
+                    let separator_rect = ui.available_rect_before_wrap();
+                    ui.painter().hline(
+                        separator_rect.x_range(),
+                        separator_rect.top(),
+                        egui::Stroke::new(1.0, egui::Color32::from_rgb(50, 54, 62)),
+                    );
+
+                    // Render active tab content
+                    match self.state.panels.active_bottom_tab {
+                        BottomPanelTab::Console => self.render_console_panel(ui),
+                        BottomPanelTab::Waveform => self.render_waveform_panel(ui),
+                        BottomPanelTab::Log => self.render_log_panel(ui),
+                    }
                 });
         }
 
@@ -1317,6 +1518,82 @@ impl eframe::App for RSpiceApp {
                         .inner_margin(egui::Margin::same(8.0)),
                 )
                 .show(ctx, |ui| {
+                    // Header row with title and close button (matching tab bar style)
+                    let header_height = 16.0;
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), header_height),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.label(
+                                egui::RichText::new("Properties")
+                                    .size(14.0)
+                                    .color(egui::Color32::from_rgb(180, 180, 190)),
+                            );
+
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    // Close button (square, matching tab bar style)
+                                    let close_size = egui::vec2(18.0, 18.0);
+                                    let (close_rect, close_response) =
+                                        ui.allocate_exact_size(close_size, egui::Sense::click());
+
+                                    let inactive_text = egui::Color32::from_rgb(120, 125, 135);
+                                    let close_color = if close_response.hovered() {
+                                        egui::Color32::from_rgb(255, 100, 100)
+                                    } else {
+                                        inactive_text
+                                    };
+
+                                    // Draw hover background
+                                    if close_response.hovered() {
+                                        ui.painter().rect_filled(
+                                            close_rect,
+                                            egui::Rounding::same(2.0),
+                                            egui::Color32::from_rgba_unmultiplied(255, 80, 80, 30),
+                                        );
+                                    }
+
+                                    // Draw X using lines
+                                    let center = close_rect.center();
+                                    let cross_size = 4.0;
+                                    let stroke = egui::Stroke::new(1.5, close_color);
+                                    ui.painter().line_segment(
+                                        [
+                                            center + egui::vec2(-cross_size, -cross_size),
+                                            center + egui::vec2(cross_size, cross_size),
+                                        ],
+                                        stroke,
+                                    );
+                                    ui.painter().line_segment(
+                                        [
+                                            center + egui::vec2(cross_size, -cross_size),
+                                            center + egui::vec2(-cross_size, cross_size),
+                                        ],
+                                        stroke,
+                                    );
+
+                                    if close_response.on_hover_text("Close panel").clicked() {
+                                        self.state.panels.properties = false;
+                                    }
+                                },
+                            );
+                        },
+                    );
+
+                    // Full-width separator line (extends past inner margin)
+                    let separator_rect = ui.available_rect_before_wrap();
+                    let panel_left = separator_rect.left() - 8.0; // Extend past left margin
+                    let panel_right = separator_rect.right() + 8.0; // Extend past right margin
+                    ui.painter().hline(
+                        panel_left..=panel_right,
+                        separator_rect.top(),
+                        egui::Stroke::new(1.0, egui::Color32::from_rgb(50, 54, 62)),
+                    );
+
+                    // Add spacing after header
+                    ui.add_space(8.0);
+
                     crate::panels::render_properties_panel(ui, &mut self.state);
                 });
         }
@@ -1421,7 +1698,10 @@ impl eframe::App for RSpiceApp {
 
             // Use egui::Window with proper layout that avoids height feedback loops
             // The key is using allocate_ui_with_layout with fixed heights for scroll areas
+            // Note: We extract dialog_open to avoid borrow conflict with .open() and closure
+            let mut dialog_open = self.state.dialogs.simulation_dialog;
             egui::Window::new("Simulation Setup")
+                .open(&mut dialog_open)
                 .collapsible(false)
                 .resizable(true)
                 .default_width(700.0)
@@ -1446,80 +1726,233 @@ impl eframe::App for RSpiceApp {
                                     .id_salt("sim_list")
                                     .auto_shrink([false, false])
                                     .show(ui, |ui| {
-                                        let item_width = ui.available_width();
-                                        let item_height = 24.0;
+                                        let item_width = ui.available_width() - 4.0;
+                                        let item_height = 28.0;
+                                        let header_height = 26.0;
 
-                                        // Readable names, organized by category
-                                        let analyses = [
-                                            // Core Time/Freq Domain
-                                            (2, "AC Analysis"),
-                                            (3, "DC Sweep"),
-                                            (0, "DC Operating Point"),
-                                            (4, "Noise"),
-                                            (1, "Transient"),
-                                            // Steady-State
-                                            (11, "Harmonic Balance (HB)"),
-                                            (8, "PSS (Periodic Steady State)"),
-                                            // Periodic Small-Signal
-                                            (13, "PAC (Periodic AC)"),
-                                            (14, "PNoise (Periodic Noise)"),
-                                            (16, "PSTB (Periodic Stability)"),
-                                            (15, "PXF (Periodic Transfer)"),
-                                            // RF / S-Parameters
-                                            (12, "S-Parameter"),
-                                            // Transfer / Stability
-                                            (5, "Pole-Zero"),
-                                            (6, "Sensitivity"),
-                                            (9, "Stability (STB)"),
-                                            (17, "Transfer Function (XF)"),
-                                            // Statistical / Sweep
-                                            (18, "Corner Analysis"),
-                                            (19, "Envelope Transient"),
-                                            (20, "Fourier Analysis"),
-                                            (7, "Monte Carlo"),
-                                            (10, "Temperature Sweep"),
-                                            // Advanced Analysis (Integrated)
-                                            (21, "Reliability (Aging)"),
-                                            (22, "Optimization Engine"),
-                                            (23, "Safety (SOA)"),
+                                        // Organized analysis categories
+                                        let categories: &[(&str, &[(usize, &str)])] = &[
+                                            (
+                                                "Time & Frequency Domain",
+                                                &[
+                                                    (1, "Transient"),
+                                                    (2, "AC Analysis"),
+                                                    (3, "DC Sweep"),
+                                                    (0, "DC Operating Point"),
+                                                    (4, "Noise"),
+                                                ],
+                                            ),
+                                            (
+                                                "Steady-State",
+                                                &[(8, "PSS (Periodic)"), (11, "Harmonic Balance")],
+                                            ),
+                                            (
+                                                "Periodic Small-Signal",
+                                                &[
+                                                    (13, "PAC"),
+                                                    (14, "PNoise"),
+                                                    (15, "PXF"),
+                                                    (16, "PSTB"),
+                                                ],
+                                            ),
+                                            (
+                                                "Transfer & Stability",
+                                                &[
+                                                    (5, "Pole-Zero"),
+                                                    (6, "Sensitivity"),
+                                                    (9, "Stability (STB)"),
+                                                    (17, "Transfer Func (XF)"),
+                                                ],
+                                            ),
+                                            ("RF & S-Parameters", &[(12, "S-Parameter")]),
+                                            (
+                                                "Statistical & Sweep",
+                                                &[
+                                                    (7, "Monte Carlo"),
+                                                    (10, "Temperature"),
+                                                    (18, "Corner"),
+                                                    (19, "Envelope"),
+                                                    (20, "Fourier"),
+                                                ],
+                                            ),
+                                            (
+                                                "Advanced",
+                                                &[
+                                                    (21, "Reliability"),
+                                                    (22, "Optimization"),
+                                                    (23, "Safety (SOA)"),
+                                                ],
+                                            ),
                                         ];
 
                                         let selection_color = ui.visuals().selection.bg_fill;
                                         let hover_color = ui.visuals().widgets.hovered.bg_fill;
                                         let text_color = ui.visuals().text_color();
+                                        let dim_color = text_color.gamma_multiply(0.6);
+                                        let header_bg = ui.visuals().faint_bg_color;
 
-                                        for (idx, name) in analyses {
-                                            let selected = self.state.dialogs.sim_active_tab == idx;
-
-                                            // Allocate full-width clickable rect
-                                            let (rect, response) = ui.allocate_exact_size(
-                                                egui::vec2(item_width, item_height),
-                                                egui::Sense::click(),
+                                        for (category_name, analyses) in categories {
+                                            // Category header
+                                            let (header_rect, _) = ui.allocate_exact_size(
+                                                egui::vec2(item_width, header_height),
+                                                egui::Sense::hover(),
                                             );
-
-                                            // Draw background
-                                            if selected {
-                                                ui.painter().rect_filled(
-                                                    rect,
-                                                    3.0,
-                                                    selection_color,
-                                                );
-                                            } else if response.hovered() {
-                                                ui.painter().rect_filled(rect, 3.0, hover_color);
-                                            }
-
-                                            // Draw left-aligned text
+                                            ui.painter().rect_filled(header_rect, 0.0, header_bg);
                                             ui.painter().text(
-                                                rect.left_center() + egui::vec2(8.0, 0.0),
+                                                header_rect.left_center() + egui::vec2(8.0, 0.0),
                                                 egui::Align2::LEFT_CENTER,
-                                                name,
-                                                egui::FontId::proportional(13.0),
-                                                text_color,
+                                                *category_name,
+                                                egui::FontId::proportional(11.0),
+                                                dim_color,
                                             );
 
-                                            if response.clicked() {
-                                                self.state.dialogs.sim_active_tab = idx;
+                                            // Analysis items in this category
+                                            for &(idx, name) in *analyses {
+                                                let selected =
+                                                    self.state.dialogs.sim_active_tab == idx;
+                                                let enabled = self
+                                                    .state
+                                                    .dialogs
+                                                    .enabled_analyses
+                                                    .contains(&idx);
+
+                                                // Allocate full-width clickable rect
+                                                let (rect, response) = ui.allocate_exact_size(
+                                                    egui::vec2(item_width, item_height),
+                                                    egui::Sense::click(),
+                                                );
+
+                                                // Draw background
+                                                if selected {
+                                                    ui.painter().rect_filled(
+                                                        rect,
+                                                        4.0,
+                                                        selection_color,
+                                                    );
+                                                } else if response.hovered() {
+                                                    ui.painter().rect_filled(
+                                                        rect,
+                                                        4.0,
+                                                        hover_color,
+                                                    );
+                                                }
+
+                                                // Draw modern checkbox (left side)
+                                                let checkbox_center =
+                                                    rect.left_center() + egui::vec2(16.0, 0.0);
+                                                let box_size = 16.0;
+                                                let checkbox_rect = egui::Rect::from_center_size(
+                                                    checkbox_center,
+                                                    egui::vec2(box_size, box_size),
+                                                );
+
+                                                if enabled {
+                                                    // Filled checkbox when enabled
+                                                    ui.painter().rect_filled(
+                                                        checkbox_rect,
+                                                        3.0,
+                                                        egui::Color32::from_rgb(80, 160, 80),
+                                                    );
+                                                    // Checkmark
+                                                    let check_color = egui::Color32::WHITE;
+                                                    let s = box_size * 0.25;
+                                                    let c = checkbox_center;
+                                                    ui.painter().line_segment(
+                                                        [
+                                                            egui::pos2(c.x - s * 1.2, c.y),
+                                                            egui::pos2(
+                                                                c.x - s * 0.3,
+                                                                c.y + s * 0.9,
+                                                            ),
+                                                        ],
+                                                        egui::Stroke::new(2.0, check_color),
+                                                    );
+                                                    ui.painter().line_segment(
+                                                        [
+                                                            egui::pos2(
+                                                                c.x - s * 0.3,
+                                                                c.y + s * 0.9,
+                                                            ),
+                                                            egui::pos2(
+                                                                c.x + s * 1.2,
+                                                                c.y - s * 0.8,
+                                                            ),
+                                                        ],
+                                                        egui::Stroke::new(2.0, check_color),
+                                                    );
+                                                } else {
+                                                    // Empty checkbox
+                                                    ui.painter().rect_stroke(
+                                                        checkbox_rect,
+                                                        3.0,
+                                                        egui::Stroke::new(1.5, dim_color),
+                                                    );
+                                                }
+
+                                                // Draw text (shifted right for checkbox)
+                                                let text_col = if selected {
+                                                    egui::Color32::WHITE
+                                                } else {
+                                                    text_color
+                                                };
+                                                ui.painter().text(
+                                                    rect.left_center() + egui::vec2(34.0, 0.0),
+                                                    egui::Align2::LEFT_CENTER,
+                                                    name,
+                                                    egui::FontId::proportional(13.0),
+                                                    text_col,
+                                                );
+
+                                                // Click handling
+                                                if response.clicked() {
+                                                    let click_pos = response
+                                                        .interact_pointer_pos()
+                                                        .unwrap_or_default();
+                                                    if checkbox_rect.contains(click_pos) {
+                                                        // Toggle enabled state
+                                                        if self
+                                                            .state
+                                                            .dialogs
+                                                            .enabled_analyses
+                                                            .contains(&idx)
+                                                        {
+                                                            self.state
+                                                                .dialogs
+                                                                .enabled_analyses
+                                                                .remove(&idx);
+                                                        } else {
+                                                            self.state
+                                                                .dialogs
+                                                                .enabled_analyses
+                                                                .insert(idx);
+                                                        }
+                                                    } else {
+                                                        // Select this analysis
+                                                        self.state.dialogs.sim_active_tab = idx;
+                                                    }
+                                                }
+                                                if response.double_clicked() {
+                                                    if self
+                                                        .state
+                                                        .dialogs
+                                                        .enabled_analyses
+                                                        .contains(&idx)
+                                                    {
+                                                        self.state
+                                                            .dialogs
+                                                            .enabled_analyses
+                                                            .remove(&idx);
+                                                    } else {
+                                                        self.state
+                                                            .dialogs
+                                                            .enabled_analyses
+                                                            .insert(idx);
+                                                    }
+                                                }
                                             }
+
+                                            // Space between categories
+                                            ui.add_space(4.0);
                                         }
                                     });
                             },
@@ -1548,68 +1981,26 @@ impl eframe::App for RSpiceApp {
                     ui.add_space(8.0);
 
                     ui.horizontal(|ui| {
-                        let analysis_names = [
-                            "DC OP",        // 0
-                            "Transient",    // 1
-                            "AC",           // 2
-                            "DC Sweep",     // 3
-                            "Noise",        // 4
-                            "Pole-Zero",    // 5
-                            "Sensitivity",  // 6
-                            "Monte Carlo",  // 7
-                            "PSS",          // 8
-                            "STB",          // 9
-                            "Temp Sweep",   // 10
-                            "HB",           // 11
-                            "S-Param",      // 12
-                            "PAC",          // 13
-                            "PNoise",       // 14
-                            "PXF",          // 15
-                            "PSTB",         // 16
-                            "XF",           // 17
-                            "Corner",       // 18
-                            "Envelope",     // 19
-                            "Fourier",      // 20
-                            "Reliability",  // 21
-                            "Optimization", // 22
-                            "Safety/SOA",   // 23
-                        ];
-                        let tab = self
-                            .state
-                            .dialogs
-                            .sim_active_tab
-                            .min(analysis_names.len() - 1);
-
-                        if ui
-                            .button(format!("▶ Run {}", analysis_names[tab]))
-                            .clicked()
-                        {
-                            self.state
-                                .console_messages
-                                .push(ConsoleMessage::info(format!(
-                                    "Starting {} analysis...",
-                                    analysis_names[tab]
-                                )));
-                            self.state.dialogs.simulation_dialog = false;
-                        }
-                        if ui.button("Apply").clicked() {
-                            self.state
-                                .console_messages
-                                .push(ConsoleMessage::info("Simulation settings saved"));
-                        }
-                        if ui.button("Cancel").clicked() {
-                            self.state.dialogs.simulation_dialog = false;
-                        }
-
+                        // Right-align all buttons
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.button("Help").clicked() {
                                 self.state
                                     .console_messages
                                     .push(ConsoleMessage::info("Analysis help: See documentation"));
                             }
+                            if ui.button("Cancel").clicked() {
+                                self.state.dialogs.simulation_dialog = false;
+                            }
+                            if ui.button("Apply").clicked() {
+                                self.state
+                                    .console_messages
+                                    .push(ConsoleMessage::info("Simulation settings saved"));
+                            }
                         });
                     });
                 });
+            // Write back dialog state (handles X button close)
+            self.state.dialogs.simulation_dialog = dialog_open;
         }
 
         // About Dialog
@@ -1681,6 +2072,351 @@ impl eframe::App for RSpiceApp {
                     }
                 });
         }
+
+        // New Cell Creation Dialog
+        if self.state.dialogs.new_cell_dialog {
+            let mut should_close = false;
+            let mut should_create = false;
+
+            egui::Window::new("📦 Create New Cell")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(400.0)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.spacing_mut().item_spacing.y = 8.0;
+
+                    // Library selection
+                    ui.horizontal(|ui| {
+                        ui.label("Library:");
+                        ui.add_space(20.0);
+
+                        // Get editable library names (non-readonly)
+                        let lib_names: Vec<String> = self
+                            .state
+                            .library_manager
+                            .libraries_sorted()
+                            .iter()
+                            .filter(|lib| !lib.read_only)
+                            .map(|lib| lib.name.clone())
+                            .collect();
+
+                        // Default to user library if empty
+                        if self.state.dialogs.new_cell_library.is_empty() && !lib_names.is_empty() {
+                            self.state.dialogs.new_cell_library = lib_names[0].clone();
+                        }
+
+                        egui::ComboBox::from_id_salt("cell_library_combo")
+                            .selected_text(&self.state.dialogs.new_cell_library)
+                            .width(200.0)
+                            .show_ui(ui, |ui| {
+                                for name in &lib_names {
+                                    ui.selectable_value(
+                                        &mut self.state.dialogs.new_cell_library,
+                                        name.clone(),
+                                        name,
+                                    );
+                                }
+                            });
+                    });
+
+                    // Cell name input
+                    ui.horizontal(|ui| {
+                        ui.label("Cell Name:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.state.dialogs.new_cell_name)
+                                .hint_text("e.g., my_opamp")
+                                .desired_width(200.0),
+                        );
+                    });
+
+                    // Description input
+                    ui.horizontal(|ui| {
+                        ui.label("Description:");
+                        ui.add(
+                            egui::TextEdit::singleline(
+                                &mut self.state.dialogs.new_cell_description,
+                            )
+                            .hint_text("Optional description")
+                            .desired_width(200.0),
+                        );
+                    });
+
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+
+                    // View types to create
+                    ui.label("Views to Create:");
+                    ui.indent("views_indent", |ui| {
+                        ui.checkbox(
+                            &mut self.state.dialogs.new_cell_create_schematic,
+                            "📋 Schematic",
+                        );
+                        ui.checkbox(&mut self.state.dialogs.new_cell_create_symbol, "🔲 Symbol");
+                        ui.checkbox(
+                            &mut self.state.dialogs.new_cell_create_testbench,
+                            "🧪 Testbench",
+                        );
+                    });
+
+                    // Error message display
+                    if let Some(ref error) = self.state.dialogs.new_cell_error {
+                        ui.add_space(4.0);
+                        ui.colored_label(egui::Color32::RED, format!("⚠ {}", error));
+                    }
+
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(8.0);
+
+                    // Action buttons
+                    ui.horizontal(|ui| {
+                        if ui.button("Create").clicked() {
+                            should_create = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            should_close = true;
+                        }
+                    });
+                });
+
+            // Handle create action outside of UI closure (borrow checker)
+            if should_create {
+                let name = self.state.dialogs.new_cell_name.trim();
+                let library = self.state.dialogs.new_cell_library.clone();
+
+                // Validation
+                if name.is_empty() {
+                    self.state.dialogs.new_cell_error =
+                        Some("Cell name cannot be empty".to_string());
+                } else if !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                    self.state.dialogs.new_cell_error = Some(
+                        "Cell name must contain only letters, numbers, and underscores".to_string(),
+                    );
+                } else if library.is_empty() {
+                    self.state.dialogs.new_cell_error = Some("Please select a library".to_string());
+                } else if self
+                    .state
+                    .library_manager
+                    .get_library(&library)
+                    .and_then(|lib| lib.get_cell(name))
+                    .is_some()
+                {
+                    self.state.dialogs.new_cell_error = Some(format!(
+                        "Cell '{}' already exists in library '{}'",
+                        name, library
+                    ));
+                } else {
+                    // Create the cell
+                    use crate::state::{Cell, View, ViewType};
+
+                    let mut cell = Cell::new(name);
+                    cell.description = self.state.dialogs.new_cell_description.clone();
+
+                    if self.state.dialogs.new_cell_create_schematic {
+                        cell.add_view(View::new("schematic", ViewType::Schematic));
+                    }
+                    if self.state.dialogs.new_cell_create_symbol {
+                        cell.add_view(View::new("symbol", ViewType::Symbol));
+                    }
+                    if self.state.dialogs.new_cell_create_testbench {
+                        cell.add_view(View::new("testbench", ViewType::Testbench));
+                    }
+
+                    // Add cell to library
+                    if let Some(lib) = self.state.library_manager.get_library_mut(&library) {
+                        lib.add_cell(cell);
+                        self.state
+                            .console_messages
+                            .push(ConsoleMessage::info(format!(
+                                "Created cell '{}' in library '{}'",
+                                name, library
+                            )));
+                        should_close = true;
+                    } else {
+                        self.state.dialogs.new_cell_error =
+                            Some(format!("Library '{}' not found", library));
+                    }
+                }
+            }
+
+            if should_close {
+                // Reset dialog state
+                self.state.dialogs.new_cell_dialog = false;
+                self.state.dialogs.new_cell_name.clear();
+                self.state.dialogs.new_cell_description.clear();
+                self.state.dialogs.new_cell_error = None;
+                self.state.dialogs.new_cell_create_schematic = true;
+                self.state.dialogs.new_cell_create_symbol = false;
+                self.state.dialogs.new_cell_create_testbench = false;
+            }
+        }
+
+        // New View Creation Dialog
+        if self.state.dialogs.new_view_dialog {
+            let mut should_close = false;
+            let mut should_create = false;
+
+            egui::Window::new("📐 Create New View")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(350.0)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.spacing_mut().item_spacing.y = 8.0;
+
+                    // Show target library and cell (read-only)
+                    ui.horizontal(|ui| {
+                        ui.label("Library:");
+                        ui.add_space(16.0);
+                        ui.label(&self.state.dialogs.new_view_library);
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Cell:");
+                        ui.add_space(38.0);
+                        ui.label(&self.state.dialogs.new_view_cell);
+                    });
+
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+
+                    // View name input
+                    ui.horizontal(|ui| {
+                        ui.label("View Name:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.state.dialogs.new_view_name)
+                                .hint_text("e.g., schematic")
+                                .desired_width(150.0),
+                        );
+                    });
+
+                    // View type selection
+                    ui.horizontal(|ui| {
+                        ui.label("View Type:");
+                        ui.add_space(4.0);
+                        egui::ComboBox::from_id_salt("view_type_combo")
+                            .selected_text(self.state.dialogs.new_view_type.display_name())
+                            .width(150.0)
+                            .show_ui(ui, |ui| {
+                                use crate::state::ViewType;
+                                for vt in ViewType::ALL.iter() {
+                                    ui.selectable_value(
+                                        &mut self.state.dialogs.new_view_type,
+                                        *vt,
+                                        vt.display_name(),
+                                    );
+                                }
+                            });
+                    });
+
+                    // Error message display
+                    if let Some(ref error) = self.state.dialogs.new_view_error {
+                        ui.add_space(4.0);
+                        ui.colored_label(egui::Color32::RED, format!("⚠ {}", error));
+                    }
+
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(8.0);
+
+                    // Action buttons
+                    ui.horizontal(|ui| {
+                        if ui.button("Create").clicked() {
+                            should_create = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            should_close = true;
+                        }
+                    });
+                });
+
+            // Handle create action
+            if should_create {
+                let view_name = self.state.dialogs.new_view_name.trim();
+                let library = self.state.dialogs.new_view_library.clone();
+                let cell = self.state.dialogs.new_view_cell.clone();
+
+                // Validation
+                if view_name.is_empty() {
+                    self.state.dialogs.new_view_error =
+                        Some("View name cannot be empty".to_string());
+                } else if !view_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                    self.state.dialogs.new_view_error = Some(
+                        "View name must contain only letters, numbers, and underscores".to_string(),
+                    );
+                } else {
+                    // Check if view exists
+                    let exists = self
+                        .state
+                        .library_manager
+                        .get_library(&library)
+                        .and_then(|lib| lib.get_cell(&cell))
+                        .map(|c| c.get_view(view_name).is_some())
+                        .unwrap_or(false);
+
+                    if exists {
+                        self.state.dialogs.new_view_error = Some(format!(
+                            "View '{}' already exists in cell '{}'",
+                            view_name, cell
+                        ));
+                    } else {
+                        // Create the view
+                        use crate::state::View;
+                        if let Some(lib) = self.state.library_manager.get_library_mut(&library) {
+                            if let Some(cell_ref) = lib.get_cell_mut(&cell) {
+                                cell_ref.add_view(View::new(
+                                    view_name,
+                                    self.state.dialogs.new_view_type,
+                                ));
+                                self.state
+                                    .console_messages
+                                    .push(ConsoleMessage::info(format!(
+                                        "Created view '{}' in cell '{}'",
+                                        view_name, cell
+                                    )));
+                                should_close = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if should_close {
+                self.state.dialogs.new_view_dialog = false;
+                self.state.dialogs.new_view_name.clear();
+                self.state.dialogs.new_view_error = None;
+            }
+        }
+
+        // Process pending cell deletion
+        if let Some((lib_name, cell_name)) = self.state.pending_delete_cell.take() {
+            if let Some(lib) = self.state.library_manager.get_library_mut(&lib_name) {
+                lib.remove_cell(&cell_name);
+                self.state
+                    .console_messages
+                    .push(ConsoleMessage::info(format!(
+                        "Deleted cell '{}' from library '{}'",
+                        cell_name, lib_name
+                    )));
+            }
+        }
+
+        // Process pending view deletion
+        if let Some((lib_name, cell_name, view_name)) = self.state.pending_delete_view.take() {
+            if let Some(lib) = self.state.library_manager.get_library_mut(&lib_name) {
+                if let Some(cell) = lib.get_cell_mut(&cell_name) {
+                    cell.remove_view(&view_name);
+                    self.state
+                        .console_messages
+                        .push(ConsoleMessage::info(format!(
+                            "Deleted view '{}' from cell '{}'",
+                            view_name, cell_name
+                        )));
+                }
+            }
+        }
     }
 
     /// Save state on exit
@@ -1689,26 +2425,90 @@ impl eframe::App for RSpiceApp {
     }
 }
 
+// =============================================================================
+// Icon Rail Helper Functions
+// =============================================================================
+
+/// Create an icon button for the icon rail (32x32 procedural icon)
+fn rail_icon_button(
+    ui: &mut Ui,
+    icon: crate::schematic::toolbar::IconType,
+    active: bool,
+    accent: Color32,
+) -> egui::Response {
+    use crate::schematic::toolbar::paint_icon;
+    use egui::Rect;
+
+    let size = Vec2::splat(32.0);
+    let fill = if active {
+        accent
+    } else {
+        Color32::from_rgb(58, 62, 74)
+    };
+
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.visuals().widgets.style(&response);
+        let rounding = egui::Rounding::same(4.0);
+        let stroke = visuals.bg_stroke;
+
+        ui.painter().rect(rect, rounding, fill, stroke);
+
+        let icon_color = if active {
+            Color32::WHITE
+        } else {
+            visuals.text_color()
+        };
+        paint_icon(ui, rect, icon, icon_color);
+    }
+
+    response
+}
+
+/// Create a disabled icon button for the icon rail
+fn rail_icon_button_disabled(
+    ui: &mut Ui,
+    icon: crate::schematic::toolbar::IconType,
+) -> egui::Response {
+    use crate::schematic::toolbar::paint_icon;
+
+    let size = Vec2::splat(32.0);
+    let fill = Color32::from_rgb(45, 48, 56);
+
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
+
+    if ui.is_rect_visible(rect) {
+        let rounding = egui::Rounding::same(4.0);
+
+        ui.painter().rect(rect, rounding, fill, egui::Stroke::NONE);
+
+        let icon_color = ui.visuals().widgets.noninteractive.text_color();
+        paint_icon(ui, rect, icon, icon_color);
+    }
+
+    response
+}
+
 impl RSpiceApp {
     /// Render the left icon rail (VSCode style)
     fn render_icon_rail(&mut self, ui: &mut Ui) {
+        use crate::schematic::toolbar::{paint_icon, IconType};
+        use egui::{pos2, Rect, Sense};
+
         ui.vertical_centered(|ui| {
             ui.add_space(4.0);
 
             // Project browser toggle
             let browser_active = self.state.panels.project_browser;
-            if ui
-                .add(
-                    egui::Button::new("📁")
-                        .min_size(Vec2::splat(32.0))
-                        .fill(if browser_active {
-                            self.state.theme.accent
-                        } else {
-                            egui::Color32::from_rgb(58, 62, 74)
-                        }),
-                )
-                .on_hover_text("Library Browser (Ctrl+Shift+L)")
-                .clicked()
+            if rail_icon_button(
+                ui,
+                IconType::Folder,
+                browser_active,
+                self.state.theme.accent,
+            )
+            .on_hover_text("Library Browser (Ctrl+Shift+L)")
+            .clicked()
             {
                 self.toggle_panel_browser();
             }
@@ -1719,19 +2519,16 @@ impl RSpiceApp {
             ui.add_space(ui.available_height() - 80.0);
 
             // Console toggle
-            let console_active = self.state.panels.console;
-            if ui
-                .add(
-                    egui::Button::new("⌨")
-                        .min_size(Vec2::splat(32.0))
-                        .fill(if console_active {
-                            self.state.theme.accent
-                        } else {
-                            egui::Color32::from_rgb(58, 62, 74)
-                        }),
-                )
-                .on_hover_text("Toggle Console")
-                .clicked()
+            let console_active = self.state.panels.bottom_panel
+                && self.state.panels.active_bottom_tab == BottomPanelTab::Console;
+            if rail_icon_button(
+                ui,
+                IconType::Keyboard,
+                console_active,
+                self.state.theme.accent,
+            )
+            .on_hover_text("Toggle Console")
+            .clicked()
             {
                 self.toggle_panel_console();
             }
@@ -1740,19 +2537,21 @@ impl RSpiceApp {
 
             // Waveform toggle
             let has_waveforms = !self.state.simulation.waveforms.is_empty();
-            let waveform_active = self.state.panels.waveform && has_waveforms;
-            let waveform_btn =
-                egui::Button::new("∿")
-                    .min_size(Vec2::splat(32.0))
-                    .fill(if waveform_active {
-                        self.state.theme.accent
-                    } else if has_waveforms {
-                        egui::Color32::from_rgb(58, 62, 74)
-                    } else {
-                        egui::Color32::from_rgb(45, 48, 56)
-                    });
+            let waveform_active = self.state.panels.bottom_panel
+                && self.state.panels.active_bottom_tab == BottomPanelTab::Waveform
+                && has_waveforms;
 
-            let response = ui.add_enabled(has_waveforms, waveform_btn);
+            let response = if has_waveforms {
+                rail_icon_button(
+                    ui,
+                    IconType::Waveform,
+                    waveform_active,
+                    self.state.theme.accent,
+                )
+            } else {
+                rail_icon_button_disabled(ui, IconType::Waveform)
+            };
+
             if has_waveforms {
                 if response.on_hover_text("Toggle Waveform Viewer").clicked() {
                     self.toggle_panel_waveform();
@@ -1765,16 +2564,7 @@ impl RSpiceApp {
 
             // Scripting console toggle
             let script_active = self.state.panels.script_console;
-            if ui
-                .add(
-                    egui::Button::new("🐚") // Seashell/Console icon
-                        .min_size(Vec2::splat(32.0))
-                        .fill(if script_active {
-                            self.state.theme.accent
-                        } else {
-                            egui::Color32::from_rgb(58, 62, 74)
-                        }),
-                )
+            if rail_icon_button(ui, IconType::Shell, script_active, self.state.theme.accent)
                 .on_hover_text("Automation Console")
                 .clicked()
             {
@@ -1785,47 +2575,32 @@ impl RSpiceApp {
 
     /// Render the console panel
     fn render_console_panel(&mut self, ui: &mut Ui) {
-        // Top padding for header
-        ui.add_space(6.0);
-
-        // Header row with proper vertical centering
+        // Header row with Clear button only (no close button - that's in tab bar)
         ui.allocate_ui_with_layout(
             egui::vec2(ui.available_width(), 26.0),
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
                 ui.add_space(8.0);
                 ui.label(
-                    egui::RichText::new("Console")
-                        .size(13.0)
-                        .strong()
-                        .color(egui::Color32::from_rgb(200, 200, 210)),
+                    egui::RichText::new("Output")
+                        .size(12.0)
+                        .color(egui::Color32::from_rgb(160, 160, 170)),
                 );
 
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(8.0);
-
-                    // Close button - styled like Clear button
-                    let close_btn = ui.add(
-                        egui::Button::new(egui::RichText::new("x").size(11.0).strong())
-                            .fill(egui::Color32::from_rgb(55, 60, 75))
-                            .min_size(egui::vec2(28.0, 22.0)),
-                    );
-                    if close_btn.on_hover_text("Close Console").clicked() {
-                        self.state.panels.console = false;
-                    }
-
-                    // ui.add_space(8.0);
-
-                    // Clear button
-                    let clear_btn = ui.add(
-                        egui::Button::new(egui::RichText::new("Clear").size(11.0))
-                            .fill(egui::Color32::from_rgb(55, 60, 75))
-                            .min_size(egui::vec2(50.0, 22.0)),
-                    );
-                    if clear_btn.clicked() {
-                        self.state.console_messages.clear();
-                    }
-                });
+                // Dim, underlined "Clear" text link
+                ui.add_space(6.0);
+                let clear_text = egui::RichText::new("Clear")
+                    .size(11.0)
+                    .color(egui::Color32::from_rgb(100, 100, 110))
+                    .underline();
+                let clear_response =
+                    ui.add(egui::Label::new(clear_text).sense(egui::Sense::click()));
+                if clear_response.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                if clear_response.clicked() {
+                    self.state.console_messages.clear();
+                }
             },
         );
 
@@ -1860,6 +2635,45 @@ impl RSpiceApp {
     fn render_waveform_panel(&mut self, ui: &mut Ui) {
         // Use the new commercial-grade waveform viewer
         crate::waveform::render_waveform_panel(ui, &mut self.state);
+    }
+
+    /// Render the log panel (placeholder for future implementation)
+    fn render_log_panel(&mut self, ui: &mut Ui) {
+        // Header row styled consistently with console panel
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), 26.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new("Log History")
+                        .size(12.0)
+                        .color(egui::Color32::from_rgb(160, 160, 170)),
+                );
+            },
+        );
+
+        // Custom separator line with no extra spacing
+        let rect = ui.available_rect_before_wrap();
+        ui.painter().hline(
+            rect.left()..=rect.right(),
+            rect.top(),
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(50, 52, 58)),
+        );
+
+        egui::ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(8.0);
+                    ui.label(
+                        egui::RichText::new("No log entries yet.")
+                            .size(11.0)
+                            .color(egui::Color32::from_rgb(120, 120, 130)),
+                    );
+                });
+            });
     }
 }
 
@@ -1907,8 +2721,10 @@ impl<'de> serde::Deserialize<'de> for AppState {
 struct PanelVisibilitySer {
     project_browser: bool,
     properties: bool,
-    waveform: bool,
-    console: bool,
+    #[serde(default = "default_bottom_panel")]
+    bottom_panel: bool,
+    #[serde(default)]
+    active_bottom_tab: usize, // Serialize as index for backwards compat
     #[serde(default)]
     smith_chart: bool,
     #[serde(default)]
@@ -1917,13 +2733,21 @@ struct PanelVisibilitySer {
     script_console: bool,
 }
 
+fn default_bottom_panel() -> bool {
+    true
+}
+
 impl From<&PanelVisibility> for PanelVisibilitySer {
     fn from(p: &PanelVisibility) -> Self {
         Self {
             project_browser: p.project_browser,
             properties: p.properties,
-            waveform: p.waveform,
-            console: p.console,
+            bottom_panel: p.bottom_panel,
+            active_bottom_tab: match p.active_bottom_tab {
+                BottomPanelTab::Console => 0,
+                BottomPanelTab::Waveform => 1,
+                BottomPanelTab::Log => 2,
+            },
             smith_chart: p.smith_chart,
             signal_browser: p.signal_browser,
             script_console: p.script_console,
@@ -1936,8 +2760,13 @@ impl From<PanelVisibilitySer> for PanelVisibility {
         Self {
             project_browser: s.project_browser,
             properties: s.properties,
-            waveform: s.waveform,
-            console: s.console,
+            bottom_panel: s.bottom_panel,
+            active_bottom_tab: match s.active_bottom_tab {
+                0 => BottomPanelTab::Console,
+                1 => BottomPanelTab::Waveform,
+                2 => BottomPanelTab::Log,
+                _ => BottomPanelTab::Console,
+            },
             smith_chart: s.smith_chart,
             signal_browser: s.signal_browser,
             script_console: s.script_console,
@@ -1995,16 +2824,20 @@ mod tests {
             "Properties should be visible by default"
         );
         assert!(
-            state.panels.waveform,
-            "Waveform should be visible by default"
+            state.panels.bottom_panel,
+            "Bottom panel should be visible by default"
         );
-        assert!(state.panels.console, "Console should be visible by default");
+        assert_eq!(
+            state.panels.active_bottom_tab,
+            BottomPanelTab::Console,
+            "Console tab should be active by default"
+        );
     }
 
     #[test]
     fn test_panel_sizes_default() {
         let sizes = PanelSizes::default();
-        assert_eq!(sizes.waveform_height, 200.0);
+        assert_eq!(sizes.waveform_height, 300.0);
         assert_eq!(sizes.console_height, 120.0);
         assert_eq!(sizes.browser_width, 220.0);
         assert_eq!(sizes.properties_width, 250.0);
@@ -2044,8 +2877,8 @@ mod tests {
         let panels = PanelVisibility {
             project_browser: true,
             properties: false,
-            waveform: true,
-            console: false,
+            bottom_panel: true,
+            active_bottom_tab: BottomPanelTab::Waveform,
             smith_chart: false,
             signal_browser: false,
             script_console: false,
@@ -2053,10 +2886,14 @@ mod tests {
         let ser = PanelVisibilitySer::from(&panels);
         assert!(ser.project_browser);
         assert!(!ser.properties);
+        assert!(ser.bottom_panel);
+        assert_eq!(ser.active_bottom_tab, 1); // Waveform = 1
 
         let panels2: PanelVisibility = ser.into();
         assert!(panels2.project_browser);
         assert!(!panels2.properties);
+        assert!(panels2.bottom_panel);
+        assert_eq!(panels2.active_bottom_tab, BottomPanelTab::Waveform);
     }
 
     #[test]

@@ -190,23 +190,44 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
                 ui.close_menu();
             }
 
-            let waveform_label = if state.panels.waveform {
+            let waveform_label = if state.panels.bottom_panel
+                && state.panels.active_bottom_tab == crate::common::app::BottomPanelTab::Waveform
+            {
                 "✓ Waveform Viewer"
             } else {
                 "  Waveform Viewer"
             };
             if ui.button(waveform_label).clicked() {
-                state.panels.waveform = !state.panels.waveform;
+                // Toggle: if already on Waveform tab, hide panel; otherwise show and switch to it
+                if state.panels.bottom_panel
+                    && state.panels.active_bottom_tab
+                        == crate::common::app::BottomPanelTab::Waveform
+                {
+                    state.panels.bottom_panel = false;
+                } else {
+                    state.panels.bottom_panel = true;
+                    state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
+                }
                 ui.close_menu();
             }
 
-            let console_label = if state.panels.console {
+            let console_label = if state.panels.bottom_panel
+                && state.panels.active_bottom_tab == crate::common::app::BottomPanelTab::Console
+            {
                 "✓ Console"
             } else {
                 "  Console"
             };
             if ui.button(console_label).clicked() {
-                state.panels.console = !state.panels.console;
+                // Toggle: if already on Console tab, hide panel; otherwise show and switch to it
+                if state.panels.bottom_panel
+                    && state.panels.active_bottom_tab == crate::common::app::BottomPanelTab::Console
+                {
+                    state.panels.bottom_panel = false;
+                } else {
+                    state.panels.bottom_panel = true;
+                    state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Console;
+                }
                 ui.close_menu();
             }
 

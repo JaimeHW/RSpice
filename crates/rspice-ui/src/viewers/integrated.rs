@@ -4,12 +4,13 @@
 //! to all viewer states for commercial-grade integration.
 
 use crate::analysis::bode::state::BodePlotState;
-use crate::cross_probing::CrossProbeState;
 use crate::analysis::eye_diagram::state::EyeDiagramState;
 use crate::analysis::fft::state::FftState;
 use crate::analysis::histogram::state::HistogramState;
 use crate::analysis::nyquist::state::NyquistState;
 use crate::analysis::pole_zero::state::PoleZeroState;
+use crate::analysis::smith_chart::state::SmithChartState;
+use crate::cross_probing::CrossProbeState;
 use crate::simulation::dialog::ac::AcConfig;
 use crate::simulation::dialog::corner::CornerConfig;
 use crate::simulation::dialog::dc::DcConfig;
@@ -25,7 +26,6 @@ use crate::simulation::dialog::pxf::PxfConfig;
 use crate::simulation::dialog::sp::SpConfig;
 use crate::simulation::dialog::transient::TransientConfig;
 use crate::simulation::dialog::xf::XfConfig;
-use crate::analysis::smith_chart::state::SmithChartState;
 
 // =============================================================================
 // Active Viewer
@@ -244,6 +244,8 @@ pub struct SimulationConfigs {
     // Dialog state
     pub dialog: SimulationDialog,
     pub active_tab: usize,
+    /// Set of enabled analysis indices
+    pub enabled_analyses: std::collections::HashSet<usize>,
 }
 
 impl SimulationConfigs {
@@ -309,6 +311,25 @@ impl SimulationConfigs {
             Some(AnalysisTab::Fourier) => self.fourier.to_spice(),
             None => String::new(),
         }
+    }
+
+    /// Check if an analysis is enabled
+    pub fn is_analysis_enabled(&self, index: usize) -> bool {
+        self.enabled_analyses.contains(&index)
+    }
+
+    /// Toggle an analysis enabled/disabled
+    pub fn toggle_analysis(&mut self, index: usize) {
+        if self.enabled_analyses.contains(&index) {
+            self.enabled_analyses.remove(&index);
+        } else {
+            self.enabled_analyses.insert(index);
+        }
+    }
+
+    /// Get count of enabled analyses
+    pub fn enabled_count(&self) -> usize {
+        self.enabled_analyses.len()
     }
 }
 
