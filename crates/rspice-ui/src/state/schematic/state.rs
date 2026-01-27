@@ -512,7 +512,7 @@ impl SchematicState {
 
     /// Find component at grid position
     pub fn component_at(&self, pos: Point) -> Option<u64> {
-        // Check terminals and component bounds
+        // Check terminals first (precise connection points)
         for comp in &self.components {
             let terminals = comp.terminal_positions();
             for (_, term_pos) in terminals {
@@ -520,10 +520,10 @@ impl SchematicState {
                     return Some(comp.id);
                 }
             }
-            // Check if within component bounding box (simplified)
-            let dx = (pos.x - comp.pos.x).abs();
-            let dy = (pos.y - comp.pos.y).abs();
-            if dx <= 2 && dy <= 2 {
+        }
+        // Then check component bounding boxes (uses symbol_dimensions for accurate hit detection)
+        for comp in &self.components {
+            if comp.contains_point(pos) {
                 return Some(comp.id);
             }
         }
@@ -1094,6 +1094,17 @@ impl SchematicState {
         }
 
         // Phase 2: Remove wires that are now invalid (< 2 points)
+        let wires_to_remove: Vec<u64> = self
+            .wires
+            .iter()
+            .filter(|w| w.points.len() < 2)
+            .map(|w| w.id)
+            .collect();
+
+        for wire_id in &wires_to_remove {
+            log::info!("Removing zero-length wire id={}", wire_id);
+        }
+
         self.wires.retain(|w| w.points.len() >= 2);
 
         let wires_removed = initial_wire_count - self.wires.len();
