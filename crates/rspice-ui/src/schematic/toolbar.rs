@@ -611,7 +611,8 @@ pub fn render_toolbar(ui: &mut Ui, state: &mut AppState) {
             .on_hover_text("Zoom to Fit")
             .clicked()
         {
-            state.schematic.zoom_to_fit(800.0, 600.0);
+            // Set flag to trigger zoom-to-fit on next render with actual canvas dimensions
+            state.schematic.needs_fit = true;
         }
 
         ui.separator();
