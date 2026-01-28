@@ -39,6 +39,7 @@ pub enum IconType {
     Keyboard,
     Waveform,
     Shell,
+    Results,
 }
 
 /// Paint an icon into a given rect using the painter
@@ -430,6 +431,27 @@ pub fn paint_icon(ui: &mut Ui, rect: Rect, icon: IconType, color: Color32) {
                 Stroke::new(2.0, color),
             );
         }
+        IconType::Results => {
+            // Results icon: stack of horizontal lines with bullet points
+            // Account for bullet offset in center calculation for visual balance
+            let bullet_offset = 3.0; // Space for bullet points on left
+            let line_w = w * 0.65; // Slightly narrower to fit bullets
+            let line_spacing = h * 0.25;
+
+            // Shift content right by half the bullet offset for visual centering
+            let content_center_x = center.x + bullet_offset * 0.5;
+            let start_x = content_center_x - line_w * 0.5;
+            let end_x = content_center_x + line_w * 0.5;
+
+            // Three horizontal lines representing analysis results
+            for i in 0..3 {
+                let y = center.y + (i as f32 - 1.0) * line_spacing;
+                painter.line_segment([pos2(start_x, y), pos2(end_x, y)], stroke);
+
+                // Bullet point at the start of each line
+                painter.circle_filled(pos2(start_x - bullet_offset, y), 1.5, color);
+            }
+        }
     }
 }
 
@@ -439,7 +461,8 @@ pub fn paint_icon(ui: &mut Ui, rect: Rect, icon: IconType, color: Color32) {
 
 /// Render the main toolbar
 pub fn render_toolbar(ui: &mut Ui, state: &mut AppState) {
-    ui.horizontal(|ui| {
+    // Use horizontal_centered for proper vertical alignment of all elements
+    ui.horizontal_centered(|ui| {
         ui.add_space(8.0);
 
         // =====================================================================
@@ -599,37 +622,17 @@ pub fn render_toolbar(ui: &mut Ui, state: &mut AppState) {
         ui.label(RichText::new("Simulation:").size(TOOLBAR_FONT_SIZE));
         ui.add_space(4.0);
 
-        // Run button - log once when components become available
-        static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-        if !LOGGED.load(std::sync::atomic::Ordering::Relaxed)
-            && !state.schematic.components.is_empty()
-        {
-            log::info!(
-                "Run button now enabled: {} components",
-                state.schematic.components.len()
-            );
-            LOGGED.store(true, std::sync::atomic::Ordering::Relaxed);
-        }
+        // Run button
         let run_enabled = !state.schematic.components.is_empty() && !state.simulation.is_running;
-
-        // Run button with dropdown for enabled analyses
-        let run_id = ui.make_persistent_id("run_analyses_dropdown");
-        let enabled_count = state.dialogs.enabled_analyses.len();
-
-        // Create a custom button with dropdown arrow
-        let button_text = if enabled_count > 0 {
-            format!("Run ({})", enabled_count)
-        } else {
-            "Run".to_string()
-        };
-
-        let run_response = icon_text_button(ui, IconType::Play, &button_text, run_enabled);
-
-        // Capture rect for popup positioning BEFORE consuming response
-        let run_rect = run_response.rect;
-
-        // Left-click runs
-        if run_response.clicked() {
+        if icon_text_button(ui, IconType::Play, "Run", run_enabled)
+            .on_hover_text("Run Simulation")
+            .on_disabled_hover_text(if state.simulation.is_running {
+                "Simulation running"
+            } else {
+                "Add components first"
+            })
+            .clicked()
+        {
             log::info!(
                 "Toolbar Run clicked! Components: {}",
                 state.schematic.components.len()
@@ -640,114 +643,6 @@ pub fn render_toolbar(ui: &mut Ui, state: &mut AppState) {
                 .push(crate::common::app::ConsoleMessage::info(
                     "Simulation started...",
                 ));
-        }
-
-        run_response
-            .on_hover_text("Run Simulation")
-            .on_disabled_hover_text(if state.simulation.is_running {
-                "Simulation running"
-            } else {
-                "Add components first"
-            });
-
-        // Dropdown arrow button (separate small button)
-        let dropdown_btn = ui.add_sized(
-            [20.0, 24.0],
-            egui::Button::new(RichText::new("▼").size(10.0)).min_size(egui::vec2(20.0, 24.0)),
-        );
-
-        if dropdown_btn.clicked() {
-            ui.memory_mut(|mem| mem.toggle_popup(run_id));
-        }
-
-        dropdown_btn.on_hover_text("Show enabled analyses");
-
-        // Dropdown popup showing enabled analyses
-        let popup_open = ui.memory(|mem| mem.is_popup_open(run_id));
-        if popup_open {
-            egui::Area::new(run_id)
-                .order(egui::Order::Foreground)
-                .fixed_pos(run_rect.left_bottom())
-                .show(ui.ctx(), |ui| {
-                    egui::Frame::popup(ui.style()).show(ui, |ui| {
-                        ui.set_min_width(180.0);
-                        ui.label(RichText::new("Enabled Analyses").strong().size(13.0));
-                        ui.separator();
-
-                        // Analysis name lookup
-                        let analysis_names: &[(usize, &str)] = &[
-                            (0, "DC Operating Point"),
-                            (1, "Transient"),
-                            (2, "AC Analysis"),
-                            (3, "DC Sweep"),
-                            (4, "Noise"),
-                            (5, "Pole-Zero"),
-                            (6, "Sensitivity"),
-                            (7, "Monte Carlo"),
-                            (8, "PSS"),
-                            (9, "Stability (STB)"),
-                            (10, "Temperature"),
-                            (11, "Harmonic Balance"),
-                            (12, "S-Parameter"),
-                            (13, "PAC"),
-                            (14, "PNoise"),
-                            (15, "PXF"),
-                            (16, "PSTB"),
-                            (17, "Transfer Func"),
-                            (18, "Corner"),
-                            (19, "Envelope"),
-                            (20, "Fourier"),
-                            (21, "Reliability"),
-                            (22, "Optimization"),
-                            (23, "Safety (SOA)"),
-                        ];
-
-                        if enabled_count == 0 {
-                            ui.label(RichText::new("No analyses enabled").weak().italics());
-                            ui.add_space(4.0);
-                        } else {
-                            // Show enabled analyses with toggle checkboxes
-                            for &(idx, name) in analysis_names {
-                                let mut enabled = state.dialogs.enabled_analyses.contains(&idx);
-                                if enabled {
-                                    if ui.checkbox(&mut enabled, name).changed() {
-                                        if enabled {
-                                            state.dialogs.enabled_analyses.insert(idx);
-                                        } else {
-                                            state.dialogs.enabled_analyses.remove(&idx);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        ui.separator();
-
-                        // Quick actions
-                        ui.horizontal(|ui| {
-                            if ui.small_button("Setup...").clicked() {
-                                state.dialogs.simulation_dialog = true;
-                                ui.memory_mut(|mem| mem.close_popup());
-                            }
-                            if ui.small_button("Clear All").clicked() {
-                                state.dialogs.enabled_analyses.clear();
-                            }
-                        });
-                    });
-                });
-
-            // Close on click outside
-            if ui.input(|i| i.pointer.any_click()) && !ui.memory(|mem| mem.is_popup_open(run_id)) {
-                // Already closed
-            } else if ui.input(|i| i.pointer.any_click()) {
-                let popup_rect =
-                    egui::Rect::from_min_size(run_rect.left_bottom(), egui::vec2(200.0, 300.0));
-                if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
-                    if !popup_rect.contains(pos) && !run_rect.contains(pos) {
-                        ui.memory_mut(|mem| mem.close_popup());
-                    }
-                }
-            }
         }
 
         // Stop button
