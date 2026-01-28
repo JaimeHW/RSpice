@@ -13,10 +13,9 @@
 //! - Registration in hierarchy
 
 use std::path::PathBuf;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 
 /// State for the Verilog-A model loading dialog
-#[derive(Debug, Default, Clone)]
 pub struct VerilogALoadDialogState {
     /// Whether the dialog is open
     pub open: bool,
@@ -34,6 +33,62 @@ pub struct VerilogALoadDialogState {
     pub compiled_module: Option<CompiledModuleInfo>,
     /// Whether to show advanced options
     pub show_advanced_options: bool,
+    /// Background compilation task receiver
+    compile_task_receiver: Option<Arc<Mutex<mpsc::Receiver<CompileTaskResult>>>>,
+}
+
+impl Default for VerilogALoadDialogState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            file_path: None,
+            file_path_text: String::new(),
+            options: VerilogADialogOptions::default(),
+            compilation_state: CompilationState::Idle,
+            errors: Vec::new(),
+            compiled_module: None,
+            show_advanced_options: false,
+            compile_task_receiver: None,
+        }
+    }
+}
+
+impl Clone for VerilogALoadDialogState {
+    fn clone(&self) -> Self {
+        Self {
+            open: self.open,
+            file_path: self.file_path.clone(),
+            file_path_text: self.file_path_text.clone(),
+            options: self.options.clone(),
+            compilation_state: self.compilation_state,
+            errors: self.errors.clone(),
+            compiled_module: self.compiled_module.clone(),
+            show_advanced_options: self.show_advanced_options,
+            // Clone the Arc, not the receiver itself
+            compile_task_receiver: self.compile_task_receiver.clone(),
+        }
+    }
+}
+
+impl std::fmt::Debug for VerilogALoadDialogState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VerilogALoadDialogState")
+            .field("open", &self.open)
+            .field("file_path", &self.file_path)
+            .field("file_path_text", &self.file_path_text)
+            .field("compilation_state", &self.compilation_state)
+            .field("errors", &self.errors.len())
+            .field(
+                "compiled_module",
+                &self.compiled_module.as_ref().map(|m| &m.name),
+            )
+            .field("show_advanced_options", &self.show_advanced_options)
+            .field(
+                "compile_task_receiver",
+                &self.compile_task_receiver.is_some(),
+            )
+            .finish()
+    }
 }
 
 impl VerilogALoadDialogState {
@@ -383,6 +438,9 @@ pub fn render_veriloga_load_dialog(
         return VerilogADialogResult::None;
     }
 
+    // Poll for async compilation result
+    poll_compile(state);
+
     let mut result = VerilogADialogResult::None;
     let mut should_close = false;
 
@@ -478,11 +536,8 @@ pub fn render_veriloga_load_dialog(
                             .add_enabled(can_compile, egui::Button::new("Compile"))
                             .clicked()
                         {
-                            // Start compilation
-                            state.compilation_state = CompilationState::Compiling;
-                            // TODO: Actually spawn compilation task
-                            // For now, mock compilation
-                            mock_compile(state);
+                            // Start async compilation
+                            start_compile(state);
                         }
 
                         if !can_compile && state.file_path.is_none() {
@@ -711,54 +766,140 @@ fn render_error_section(ui: &mut Ui, state: &mut VerilogALoadDialogState) {
 
     ui.add_space(4.0);
     if ui.button("Retry Compilation").clicked() {
-        state.compilation_state = CompilationState::Compiling;
-        mock_compile(state);
+        start_compile(state);
     }
 }
 
-/// Mock compile for testing UI without actual compiler
-fn mock_compile(state: &mut VerilogALoadDialogState) {
-    // Check if file exists
-    if let Some(path) = &state.file_path {
-        if !path.exists() {
-            state.errors = vec![CompileErrorDisplay::error("File not found")];
+/// Start async compilation using rspice-veriloga
+fn start_compile(state: &mut VerilogALoadDialogState) {
+    // Validate file path first
+    let path = match &state.file_path {
+        Some(p) => p.clone(),
+        None => {
+            state.errors = vec![CompileErrorDisplay::error("No file selected")];
             state.compilation_state = CompilationState::Failed;
             return;
         }
+    };
 
-        // Check extension
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        if ext != "va" && ext != "vams" {
-            state.errors = vec![CompileErrorDisplay::error(
-                "Invalid file extension. Expected .va or .vams",
-            )];
-            state.compilation_state = CompilationState::Failed;
-            return;
-        }
-
-        // For now, create a mock success result
-        // TODO: Replace with actual compilation
-        state.compiled_module = Some(CompiledModuleInfo {
-            name: path
-                .file_stem()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_else(|| "unknown".to_string()),
-            ports: vec!["p".to_string(), "n".to_string()],
-            parameters: vec![ParameterInfo {
-                name: "r".to_string(),
-                default_value: "1000".to_string(),
-                min: Some(0.0),
-                max: Some(1e12),
-                description: Some("Resistance value".to_string()),
-            }],
-            source_path: path.clone(),
-            internal_nodes: 0,
-            num_variables: 1,
-        });
-        state.compilation_state = CompilationState::Success;
-    } else {
-        state.errors = vec![CompileErrorDisplay::error("No file selected")];
+    if !path.exists() {
+        state.errors = vec![CompileErrorDisplay::error("File not found")];
         state.compilation_state = CompilationState::Failed;
+        return;
+    }
+
+    // Check extension
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    if ext != "va" && ext != "vams" {
+        state.errors = vec![CompileErrorDisplay::error(
+            "Invalid file extension. Expected .va or .vams",
+        )];
+        state.compilation_state = CompilationState::Failed;
+        return;
+    }
+
+    // Build compiler options
+    let options = rspice_veriloga::CompilerOptions {
+        enable_ams: state.options.enable_ams,
+        include_paths: state.options.include_paths.clone(),
+        defines: state
+            .options
+            .defines
+            .iter()
+            .map(|(n, v)| (n.clone(), if v.is_empty() { None } else { Some(v.clone()) }))
+            .collect(),
+        strict_mode: state.options.strict_mode,
+        ..Default::default()
+    };
+
+    // Create channel for result
+    let (tx, rx) = mpsc::channel();
+    let source_path = path.clone();
+
+    // Spawn compilation thread
+    std::thread::spawn(move || {
+        log::info!("Starting Verilog-A compilation: {}", source_path.display());
+
+        let compiler = rspice_veriloga::VerilogACompiler::new(options);
+        let result = compiler.compile_file(&source_path);
+
+        let task_result = match result {
+            Ok(model) => {
+                log::info!("Verilog-A compilation succeeded: module '{}'", model.name);
+                CompileTaskResult::Success(CompiledModuleInfo {
+                    name: model.name.to_string(),
+                    ports: model.terminal_names.iter().map(|s| s.to_string()).collect(),
+                    parameters: model
+                        .parameters
+                        .iter()
+                        .map(|p| ParameterInfo {
+                            name: p.name.to_string(),
+                            default_value: format!("{}", p.default),
+                            min: p.min,
+                            max: p.max,
+                            description: None,
+                        })
+                        .collect(),
+                    source_path,
+                    internal_nodes: model.internal_nodes,
+                    num_variables: model.num_variables,
+                })
+            }
+            Err(e) => {
+                log::error!("Verilog-A compilation failed: {}", e);
+                let errors = vec![CompileErrorDisplay::error(e.to_string())];
+                CompileTaskResult::Failure(errors)
+            }
+        };
+
+        let _ = tx.send(task_result);
+    });
+
+    // Store receiver and set state to compiling
+    state.compile_task_receiver = Some(Arc::new(Mutex::new(rx)));
+    state.compilation_state = CompilationState::Compiling;
+    state.errors.clear();
+    state.compiled_module = None;
+}
+
+/// Poll for compilation result (non-blocking)
+fn poll_compile(state: &mut VerilogALoadDialogState) {
+    if !matches!(state.compilation_state, CompilationState::Compiling) {
+        return;
+    }
+
+    // Check if we have a task receiver
+    let receiver = match &state.compile_task_receiver {
+        Some(rx) => rx.clone(),
+        None => return,
+    };
+
+    // Try to get result (non-blocking) - separate scope for the lock
+    let received = if let Ok(guard) = receiver.try_lock() {
+        match guard.try_recv() {
+            Ok(result) => Some(result),
+            Err(mpsc::TryRecvError::Empty) => None, // Still compiling
+            Err(mpsc::TryRecvError::Disconnected) => Some(CompileTaskResult::Failure(vec![
+                CompileErrorDisplay::error("Compilation thread disconnected unexpectedly"),
+            ])),
+        }
+    } else {
+        None // Lock not available, try again later
+    };
+
+    // Now update state based on received result
+    if let Some(task_result) = received {
+        match task_result {
+            CompileTaskResult::Success(module_info) => {
+                state.compiled_module = Some(module_info);
+                state.compilation_state = CompilationState::Success;
+            }
+            CompileTaskResult::Failure(errors) => {
+                state.errors = errors;
+                state.compilation_state = CompilationState::Failed;
+            }
+        }
+        state.compile_task_receiver = None;
     }
 }
 
