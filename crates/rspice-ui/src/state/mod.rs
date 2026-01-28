@@ -42,7 +42,8 @@ pub use property_types::{
 };
 pub use schematic::*;
 pub use simulation::{
-    ConsoleMessage, CrossProbeMapping, MessageSeverity, SimulationState, WaveformData,
+    AnalysisResult, AnalysisType, ConsoleMessage, CrossProbeMapping, DcOpResult, MessageSeverity,
+    OperatingPointValue, SimulationRun, SimulationState, WaveformData,
 };
 pub use viewport::{BoundingBox, Viewport, VisibilityFilter};
 
