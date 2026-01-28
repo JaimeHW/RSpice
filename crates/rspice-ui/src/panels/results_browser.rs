@@ -27,9 +27,6 @@ use crate::state::AnalysisType;
 /// This displays a tree view of simulation runs and their analyses,
 /// allowing users to navigate and view results from different runs.
 pub fn render_results_browser(ui: &mut Ui, state: &mut AppState) {
-    ui.heading("Simulation Results");
-    ui.separator();
-
     // Show run count and status
     let run_count = state.simulation.run_count();
     if run_count == 0 {
