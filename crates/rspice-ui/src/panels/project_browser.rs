@@ -22,9 +22,6 @@ use crate::state::{Component, ComponentType, LibraryManager, Tool};
 
 /// Render the project browser panel
 pub fn render_project_browser(ui: &mut Ui, state: &mut AppState) {
-    ui.heading("Library Browser");
-    ui.separator();
-
     // Search filter
     ui.horizontal(|ui| {
         ui.label("🔍");
