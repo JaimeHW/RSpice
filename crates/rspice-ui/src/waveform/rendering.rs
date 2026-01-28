@@ -104,6 +104,21 @@ pub fn render_waveform_viewer(ui: &mut Ui, app_state: &mut AppState) {
         // Always fit on data reload
         app_state.waveform_viewer.fit_to_data_bounds();
 
+        // Set axis labels based on current analysis type
+        if let Some(run_idx) = app_state.simulation.active_run_idx {
+            if let Some(analysis_idx) = app_state.simulation.active_analysis_idx {
+                if let Some(run) = app_state.simulation.runs.get(run_idx) {
+                    if let Some(analysis) = run.analyses.get(analysis_idx) {
+                        let (x_label, x_unit, y_label, y_unit) = analysis.analysis_type.axis_info();
+                        app_state.waveform_viewer.x_axis_label = x_label.to_string();
+                        app_state.waveform_viewer.x_axis_unit = x_unit.to_string();
+                        app_state.waveform_viewer.y_axis_label = y_label.to_string();
+                        app_state.waveform_viewer.y_axis_unit = y_unit.to_string();
+                    }
+                }
+            }
+        }
+
         log::info!(
             "Data bounds: x=[{:.6e}, {:.6e}], y=[{:.3e}, {:.3e}], valid={}",
             app_state.waveform_viewer.data_bounds.x_min,
@@ -312,9 +327,10 @@ fn render_y_axis(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &WaveformView
     // Calculate ticks
     let y_ticks = axis::calculate_ticks(viewer_state.view.y_min, viewer_state.view.y_max, 6);
 
+    // Generate tick labels
     let labels = axis::generate_tick_labels(&y_ticks.major_ticks, y_ticks.scale, y_ticks.precision);
 
-    // Render labels
+    // Render tick labels (numeric values) - properly aligned with plot grid
     let font = FontId::proportional(10.0);
     let text_color = Color32::from_rgb(160, 165, 175);
 
@@ -334,14 +350,19 @@ fn render_y_axis(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &WaveformView
         }
     }
 
-    // Unit label
-    let unit_label = format!("{}V", y_ticks.prefix);
+    // Y-axis unit label at top-left corner (compact format like professional tools)
+    let unit = if viewer_state.y_axis_unit.is_empty() {
+        "V"
+    } else {
+        &viewer_state.y_axis_unit
+    };
+    let unit_label = format!("[{}{}]", y_ticks.prefix, unit);
     painter.text(
-        Pos2::new(layout.y_axis.min.x + 4.0, layout.y_axis.min.y + 12.0),
+        Pos2::new(layout.y_axis.min.x + 2.0, layout.y_axis.min.y + 2.0),
         egui::Align2::LEFT_TOP,
-        unit_label,
+        &unit_label,
         FontId::proportional(9.0),
-        Color32::from_rgb(120, 125, 135),
+        Color32::from_rgb(130, 135, 145),
     );
 }
 
@@ -380,8 +401,18 @@ fn render_x_axis(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &WaveformView
         }
     }
 
-    // Unit label
-    let unit_label = format!("Time ({}s)", x_ticks.prefix);
+    // Unit label (analysis-aware: Time/Frequency/Voltage)
+    let label = if viewer_state.x_axis_label.is_empty() {
+        "Time"
+    } else {
+        &viewer_state.x_axis_label
+    };
+    let unit = if viewer_state.x_axis_unit.is_empty() {
+        "s"
+    } else {
+        &viewer_state.x_axis_unit
+    };
+    let unit_label = format!("{} ({}{})", label, x_ticks.prefix, unit);
     painter.text(
         Pos2::new(layout.x_axis.center().x, layout.x_axis.max.y - 4.0),
         egui::Align2::CENTER_BOTTOM,
@@ -816,6 +847,8 @@ fn handle_plot_interactions(
                 viewer_state.view.x_max = x_max;
                 viewer_state.view.y_min = y_min;
                 viewer_state.view.y_max = y_max;
+                // Enforce minimum zoom to prevent numerical issues
+                viewer_state.view.enforce_minimum_range();
             }
         }
         viewer_state.view.did_drag = false;
