@@ -193,7 +193,10 @@ pub fn calculate_ticks(min: f64, max: f64, target_major_ticks: usize) -> TickSpe
     let mut tick = tick_start;
     let epsilon = best_interval * 1e-9; // For floating point comparison
 
-    while tick <= tick_end + epsilon {
+    // Safety limit: prevent runaway memory allocation from extreme zoom
+    const MAX_MAJOR_TICKS: usize = 50;
+
+    while tick <= tick_end + epsilon && major_ticks.len() < MAX_MAJOR_TICKS {
         if tick >= min - epsilon && tick <= max + epsilon {
             major_ticks.push(tick);
         }
@@ -204,9 +207,15 @@ pub fn calculate_ticks(min: f64, max: f64, target_major_ticks: usize) -> TickSpe
     let minor_interval = best_interval / 5.0;
     let mut minor_ticks = Vec::new();
 
+    // Safety limit: prevent runaway memory allocation from extreme zoom
+    const MAX_MINOR_TICKS: usize = 250;
+
     tick = tick_start;
-    while tick <= tick_end + epsilon {
+    while tick <= tick_end + epsilon && minor_ticks.len() < MAX_MINOR_TICKS {
         for i in 1..5 {
+            if minor_ticks.len() >= MAX_MINOR_TICKS {
+                break;
+            }
             let minor = tick + i as f64 * minor_interval;
             if minor > min - epsilon && minor < max + epsilon {
                 // Don't add minor tick at major tick position

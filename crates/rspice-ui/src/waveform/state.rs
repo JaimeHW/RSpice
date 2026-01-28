@@ -65,6 +65,35 @@ impl Default for ViewTransform {
     }
 }
 
+/// Minimum zoom range limits (Spectre-style)
+/// These prevent numerical precision issues and infinite grid/tick generation
+impl ViewTransform {
+    /// Minimum X-axis range (prevents extreme zoom-in)
+    /// 1 femtosecond is a reasonable minimum for circuit simulation
+    pub const MIN_X_RANGE: f64 = 1e-15;
+
+    /// Minimum Y-axis range (prevents extreme zoom-in)
+    pub const MIN_Y_RANGE: f64 = 1e-15;
+
+    /// Enforce minimum zoom range to prevent numerical issues
+    /// Call this after any zoom or pan operation
+    pub fn enforce_minimum_range(&mut self) {
+        let x_range = self.x_range();
+        if x_range < Self::MIN_X_RANGE {
+            let center = (self.x_min + self.x_max) / 2.0;
+            self.x_min = center - Self::MIN_X_RANGE / 2.0;
+            self.x_max = center + Self::MIN_X_RANGE / 2.0;
+        }
+
+        let y_range = self.y_range();
+        if y_range < Self::MIN_Y_RANGE {
+            let center = (self.y_min + self.y_max) / 2.0;
+            self.y_min = center - Self::MIN_Y_RANGE / 2.0;
+            self.y_max = center + Self::MIN_Y_RANGE / 2.0;
+        }
+    }
+}
+
 impl ViewTransform {
     /// Create a new view transform with specified bounds
     pub fn new(x_min: f64, x_max: f64, y_min: f64, y_max: f64) -> Self {
@@ -132,6 +161,9 @@ impl ViewTransform {
         self.x_max = center_x + (1.0 - center_x_frac) * new_x_range;
         self.y_min = center_y - center_y_frac * new_y_range;
         self.y_max = center_y + (1.0 - center_y_frac) * new_y_range;
+
+        // Enforce minimum zoom to prevent numerical issues
+        self.enforce_minimum_range();
     }
 
     /// Apply horizontal-only zoom (time axis)
@@ -141,6 +173,7 @@ impl ViewTransform {
 
         self.x_min = center_x - center_x_frac * new_x_range;
         self.x_max = center_x + (1.0 - center_x_frac) * new_x_range;
+        self.enforce_minimum_range();
     }
 
     /// Apply vertical-only zoom (amplitude axis)
@@ -150,6 +183,7 @@ impl ViewTransform {
 
         self.y_min = center_y - center_y_frac * new_y_range;
         self.y_max = center_y + (1.0 - center_y_frac) * new_y_range;
+        self.enforce_minimum_range();
     }
 
     /// Pan by a delta in data coordinates
@@ -246,6 +280,10 @@ impl ViewTransform {
     /// This implements commercial-grade behavior where users cannot pan
     /// to see areas where no data exists (e.g., before t=0 or beyond simulation end).
     /// Allows a small margin (5%) beyond data bounds for context.
+    ///
+    /// When the viewport range exceeds the data bounds range (e.g., when switching
+    /// between analysis types), this forces the viewport to fit the data bounds
+    /// rather than showing empty gaps.
     pub fn clamp_to_bounds(&mut self, bounds: &DataBounds) {
         if !bounds.valid {
             return;
@@ -262,31 +300,49 @@ impl ViewTransform {
         let clamp_y_min = bounds.y_min - y_margin;
         let clamp_y_max = bounds.y_max + y_margin;
 
-        // Clamp X range
-        if self.x_min < clamp_x_min {
-            let shift = clamp_x_min - self.x_min;
+        let clamp_x_range = clamp_x_max - clamp_x_min;
+        let clamp_y_range = clamp_y_max - clamp_y_min;
+
+        // If the current viewport range is larger than the clamping bounds,
+        // force-fit to the clamping bounds. This handles switching between
+        // analysis types (e.g., transient time domain to AC frequency domain)
+        // where the scales are completely different.
+        if self.x_range() >= clamp_x_range {
             self.x_min = clamp_x_min;
-            self.x_max += shift;
-        }
-        if self.x_max > clamp_x_max {
-            let shift = self.x_max - clamp_x_max;
             self.x_max = clamp_x_max;
-            self.x_min -= shift;
+        } else {
+            // Clamp X range while preserving zoom level
+            if self.x_min < clamp_x_min {
+                let shift = clamp_x_min - self.x_min;
+                self.x_min = clamp_x_min;
+                self.x_max += shift;
+            }
+            if self.x_max > clamp_x_max {
+                let shift = self.x_max - clamp_x_max;
+                self.x_max = clamp_x_max;
+                self.x_min -= shift;
+            }
         }
 
-        // Clamp Y range
-        if self.y_min < clamp_y_min {
-            let shift = clamp_y_min - self.y_min;
+        if self.y_range() >= clamp_y_range {
             self.y_min = clamp_y_min;
-            self.y_max += shift;
-        }
-        if self.y_max > clamp_y_max {
-            let shift = self.y_max - clamp_y_max;
             self.y_max = clamp_y_max;
-            self.y_min -= shift;
+        } else {
+            // Clamp Y range while preserving zoom level
+            if self.y_min < clamp_y_min {
+                let shift = clamp_y_min - self.y_min;
+                self.y_min = clamp_y_min;
+                self.y_max += shift;
+            }
+            if self.y_max > clamp_y_max {
+                let shift = self.y_max - clamp_y_max;
+                self.y_max = clamp_y_max;
+                self.y_min -= shift;
+            }
         }
 
         // Final bounds check to ensure we don't exceed clamp bounds
+        // This handles edge cases from floating-point arithmetic
         self.x_min = self.x_min.max(clamp_x_min);
         self.x_max = self.x_max.min(clamp_x_max);
         self.y_min = self.y_min.max(clamp_y_min);
@@ -837,8 +893,36 @@ impl DataBounds {
             }
         }
 
-        if !has_data || x_min >= x_max || y_min >= y_max {
+        if !has_data || x_min > x_max {
             return Self::default();
+        }
+
+        // Handle flat data (constant value across all points)
+        // Add epsilon margin to ensure valid range for rendering
+        const EPSILON: f64 = 1e-12;
+
+        // For X axis: if all points at same X, expand by small amount
+        if x_max <= x_min {
+            let center = x_min;
+            let margin = if center.abs() > EPSILON {
+                center.abs() * 0.1
+            } else {
+                1.0
+            };
+            x_min = center - margin;
+            x_max = center + margin;
+        }
+
+        // For Y axis: if all points at same Y (flat line), expand by small amount
+        if y_max <= y_min {
+            let center = y_min;
+            let margin = if center.abs() > EPSILON {
+                center.abs() * 0.1
+            } else {
+                1.0
+            };
+            y_min = center - margin;
+            y_max = center + margin;
         }
 
         Self {
@@ -892,6 +976,16 @@ pub struct WaveformViewerState {
     /// Last expression evaluation error
     pub expression_error: Option<String>,
 
+    // === Axis Labels (analysis-aware) ===
+    /// X-axis label (e.g., "Time", "Frequency", "Voltage")
+    pub x_axis_label: String,
+    /// X-axis unit base (e.g., "s", "Hz", "V")
+    pub x_axis_unit: String,
+    /// Y-axis label (e.g., "Voltage", "Magnitude")
+    pub y_axis_label: String,
+    /// Y-axis unit base (e.g., "V", "A", "dB")
+    pub y_axis_unit: String,
+
     // === State persistence fields ===
     /// Data version - tracks which simulation data is loaded.
     /// When simulation.data_version differs, we reload traces.
@@ -921,12 +1015,10 @@ impl WaveformViewerState {
             .map(|(i, wf)| {
                 let mut trace = TraceData::new(&wf.name, wf.x.clone(), wf.y.clone());
                 trace.visible = wf.visible;
-                // Parse color from string or use default palette
-                trace.style = TraceStyle::with_color(
-                    Self::palette_color(i).0,
-                    Self::palette_color(i).1,
-                    Self::palette_color(i).2,
-                );
+                // Parse color from waveform or use default palette as fallback
+                let (r, g, b) =
+                    Self::parse_hex_color(&wf.color).unwrap_or_else(|| Self::palette_color(i));
+                trace.style = TraceStyle::with_color(r, g, b);
                 trace
             })
             .collect();
@@ -956,6 +1048,18 @@ impl WaveformViewerState {
         self.view.y_max = bounds.y_max + y_margin;
 
         self.has_initial_fit = true;
+    }
+
+    /// Parse a hex color string like "#3B82F6" to RGB tuple
+    fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
+        let hex = hex.trim_start_matches('#');
+        if hex.len() != 6 {
+            return None;
+        }
+        let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+        let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+        let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+        Some((r, g, b))
     }
 
     /// Get a color from the default palette
