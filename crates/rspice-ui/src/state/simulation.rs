@@ -161,6 +161,21 @@ impl AnalysisType {
             AnalysisType::Pss => "PSS",
         }
     }
+
+    /// Get axis labels and units for this analysis type
+    ///
+    /// Returns (x_axis_label, x_axis_unit, y_axis_label, y_axis_unit)
+    pub fn axis_info(&self) -> (&'static str, &'static str, &'static str, &'static str) {
+        match self {
+            AnalysisType::Transient | AnalysisType::Pss => ("Time", "s", "Voltage", "V"),
+            AnalysisType::Ac | AnalysisType::Noise => ("Frequency", "Hz", "Magnitude", "V"),
+            AnalysisType::DcSweep => ("Voltage", "V", "Voltage", "V"),
+            AnalysisType::DcOp => ("", "", "Voltage", "V"),
+            AnalysisType::PoleZero => ("Real", "", "Imaginary", ""),
+            AnalysisType::Sensitivity => ("Parameter", "", "Sensitivity", ""),
+            AnalysisType::HarmonicBalance => ("Harmonic", "", "Magnitude", "V"),
+        }
+    }
 }
 
 impl std::fmt::Display for AnalysisType {
@@ -752,18 +767,10 @@ impl SimulationState {
     pub fn complete_run(&mut self) {
         if let Some(run_idx) = self.active_run_idx {
             if let Some(run) = self.runs.get(run_idx) {
-                // Sync waveforms from all analyses to legacy flat list
-                self.waveforms.clear();
-                for analysis in &run.analyses {
-                    for wf in &analysis.waveforms {
-                        self.waveforms.push(wf.clone());
-                    }
-                }
-                self.data_version = self.data_version.wrapping_add(1);
-
-                // Auto-select first analysis if available
+                // Auto-select first analysis if available - this will sync only that analysis's waveforms
                 if !run.analyses.is_empty() {
-                    self.active_analysis_idx = Some(0);
+                    // Use select_analysis to properly load only the selected analysis's waveforms
+                    self.select_analysis(0);
                 }
             }
         }
@@ -777,15 +784,11 @@ impl SimulationState {
             self.active_run_idx = Some(run_idx);
             self.active_analysis_idx = None;
 
-            // Sync waveforms from selected run
+            // Auto-select first analysis in this run (this will sync only that analysis's waveforms)
             if let Some(run) = self.runs.get(run_idx) {
-                self.waveforms.clear();
-                for analysis in &run.analyses {
-                    for wf in &analysis.waveforms {
-                        self.waveforms.push(wf.clone());
-                    }
+                if !run.analyses.is_empty() {
+                    self.select_analysis(0);
                 }
-                self.data_version = self.data_version.wrapping_add(1);
             }
             true
         } else {
