@@ -9,6 +9,9 @@ use crate::common::app::AppState;
 
 /// Render the menu bar
 pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
+    // Add spacing between menu items for a cleaner look
+    ui.spacing_mut().item_spacing.x = 8.0;
+
     menu::bar(ui, |ui| {
         // =====================================================================
         // FILE MENU
@@ -47,6 +50,13 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
                 }
                 if ui.button("CSV (Waveforms)...").clicked() {
                     action_export_csv(state);
+                    ui.close_menu();
+                }
+            });
+
+            ui.menu_button("Import", |ui| {
+                if ui.button("Verilog-A Model...").clicked() {
+                    state.dialogs.veriloga_dialog.open();
                     ui.close_menu();
                 }
             });

@@ -62,6 +62,8 @@ pub enum BottomPanelTab {
     Waveform,
     /// Log / history
     Log,
+    /// Automation / scripting console
+    Automation,
 }
 
 impl BottomPanelTab {
@@ -71,12 +73,13 @@ impl BottomPanelTab {
             Self::Console => "Console",
             Self::Waveform => "Waveform",
             Self::Log => "Log",
+            Self::Automation => "Automation",
         }
     }
 
     /// All available tabs in display order
     pub fn all() -> &'static [BottomPanelTab] {
-        &[Self::Console, Self::Waveform, Self::Log]
+        &[Self::Console, Self::Waveform, Self::Log, Self::Automation]
     }
 }
 
@@ -85,6 +88,8 @@ impl BottomPanelTab {
 pub struct PanelVisibility {
     /// Project browser (Library/Cell/View tree)
     pub project_browser: bool,
+    /// Results browser (Simulation runs/analyses tree)
+    pub results_browser: bool,
     /// Properties panel (right side)
     pub properties: bool,
     /// Unified bottom panel visible
@@ -103,6 +108,7 @@ impl Default for PanelVisibility {
     fn default() -> Self {
         Self {
             project_browser: false,
+            results_browser: false,
             properties: true,
             bottom_panel: true, // Visible by default with Console tab
             active_bottom_tab: BottomPanelTab::Console,
@@ -363,6 +369,10 @@ pub struct DialogState {
     pub impedance_calculator_dialog: bool,
     /// S-parameter converter dialog open
     pub sparam_converter_dialog: bool,
+
+    // --- Verilog-A Model Loading ---
+    /// Verilog-A model loading dialog state
+    pub veriloga_dialog: crate::panels::VerilogALoadDialogState,
 }
 
 /// Main application state container
@@ -864,6 +874,10 @@ impl RSpiceApp {
     }
 
     fn toggle_panel_browser(&mut self) {
+        // Close results browser when opening library browser (mutually exclusive)
+        if !self.state.panels.project_browser {
+            self.state.panels.results_browser = false;
+        }
         self.state.panels.project_browser = !self.state.panels.project_browser;
     }
 
@@ -1262,7 +1276,11 @@ impl eframe::App for RSpiceApp {
         // Menu Bar - slightly lighter than panels
         // =====================================================================
         TopBottomPanel::top("menu_bar")
-            .frame(Frame::none().fill(egui::Color32::from_rgb(38, 42, 52)))
+            .frame(
+                Frame::none()
+                    .fill(egui::Color32::from_rgb(38, 42, 52))
+                    .inner_margin(egui::Margin::symmetric(8.0, 4.0)),
+            )
             .show(ctx, |ui| {
                 super::menu_bar::render_menu_bar(ui, &mut self.state);
             });
@@ -1458,38 +1476,16 @@ impl eframe::App for RSpiceApp {
                         BottomPanelTab::Console => self.render_console_panel(ui),
                         BottomPanelTab::Waveform => self.render_waveform_panel(ui),
                         BottomPanelTab::Log => self.render_log_panel(ui),
+                        BottomPanelTab::Automation => self.render_automation_panel(ui),
                     }
                 });
         }
 
         // =====================================================================
-        // Automation Console (bottom)
-        // =====================================================================
-        if self.state.panels.script_console {
-            TopBottomPanel::bottom("script_console")
-                .resizable(true)
-                .default_height(200.0)
-                .frame(Frame::none().fill(egui::Color32::from_rgb(20, 22, 28)))
-                .show(ctx, |ui| {
-                    crate::panels::render_script_console(
-                        ui,
-                        &mut self.state.script_console,
-                        &mut self.state.simulation,
-                    );
-
-                    // Add close button to console area
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                        if ui.button("x").clicked() {
-                            self.state.panels.script_console = false;
-                        }
-                    });
-                });
-        }
-
-        // =====================================================================
         // Project Browser (left, optional) - slightly lighter
+        // Mutually exclusive with Results Browser (Results takes precedence)
         // =====================================================================
-        if self.state.panels.project_browser {
+        if self.state.panels.project_browser && !self.state.panels.results_browser {
             SidePanel::left("project_browser")
                 .resizable(true)
                 .default_width(self.state.panel_sizes.browser_width)
@@ -1501,6 +1497,24 @@ impl eframe::App for RSpiceApp {
                 )
                 .show(ctx, |ui| {
                     crate::panels::render_project_browser(ui, &mut self.state);
+                });
+        }
+
+        // =====================================================================
+        // Results Browser (left, optional) - for simulation results navigation
+        // =====================================================================
+        if self.state.panels.results_browser {
+            SidePanel::left("results_browser")
+                .resizable(true)
+                .default_width(self.state.panel_sizes.browser_width)
+                .width_range(150.0..=350.0)
+                .frame(
+                    Frame::none()
+                        .fill(egui::Color32::from_rgb(30, 33, 40))
+                        .inner_margin(egui::Margin::same(8.0)),
+                )
+                .show(ctx, |ui| {
+                    crate::panels::render_results_browser(ui, &mut self.state);
                 });
         }
 
@@ -1645,6 +1659,9 @@ impl eframe::App for RSpiceApp {
                 }
             }
         }
+
+        // Verilog-A Model Loading Dialog
+        crate::panels::render_veriloga_load_dialog(ctx, &mut self.state.dialogs.veriloga_dialog);
 
         // Simulation Setup Dialog
         if self.state.dialogs.simulation_dialog {
@@ -1981,26 +1998,21 @@ impl eframe::App for RSpiceApp {
                     ui.add_space(8.0);
 
                     ui.horizontal(|ui| {
-                        // Right-align all buttons
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("Help").clicked() {
-                                self.state
-                                    .console_messages
-                                    .push(ConsoleMessage::info("Analysis help: See documentation"));
-                            }
                             if ui.button("Cancel").clicked() {
                                 self.state.dialogs.simulation_dialog = false;
                             }
-                            if ui.button("Apply").clicked() {
-                                self.state
-                                    .console_messages
-                                    .push(ConsoleMessage::info("Simulation settings saved"));
+                            if ui.button("OK").clicked() {
+                                self.state.dialogs.simulation_dialog = false;
                             }
                         });
                     });
                 });
-            // Write back dialog state (handles X button close)
-            self.state.dialogs.simulation_dialog = dialog_open;
+            // Only write back dialog state if dialog wasn't closed by buttons
+            // (X button close sets dialog_open to false)
+            if !dialog_open {
+                self.state.dialogs.simulation_dialog = false;
+            }
         }
 
         // About Dialog
@@ -2430,6 +2442,7 @@ impl eframe::App for RSpiceApp {
 // =============================================================================
 
 /// Create an icon button for the icon rail (32x32 procedural icon)
+/// Uses direct positioning to ensure pixel-perfect centering
 fn rail_icon_button(
     ui: &mut Ui,
     icon: crate::schematic::toolbar::IconType,
@@ -2437,7 +2450,6 @@ fn rail_icon_button(
     accent: Color32,
 ) -> egui::Response {
     use crate::schematic::toolbar::paint_icon;
-    use egui::Rect;
 
     let size = Vec2::splat(32.0);
     let fill = if active {
@@ -2446,7 +2458,22 @@ fn rail_icon_button(
         Color32::from_rgb(58, 62, 74)
     };
 
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    // Allocate vertical space for the button height
+    let (full_rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), size.y),
+        egui::Sense::hover(),
+    );
+
+    // Calculate centered rect within the allocated space
+    let center_x = full_rect.center().x;
+    let rect = egui::Rect::from_center_size(egui::pos2(center_x, full_rect.center().y), size);
+
+    // Register the actual button interaction area
+    let response = ui.interact(
+        rect,
+        ui.id().with("rail_btn").with(icon as u8),
+        egui::Sense::click(),
+    );
 
     if ui.is_rect_visible(rect) {
         let visuals = ui.visuals().widgets.style(&response);
@@ -2467,6 +2494,7 @@ fn rail_icon_button(
 }
 
 /// Create a disabled icon button for the icon rail
+/// Uses direct positioning to ensure pixel-perfect centering
 fn rail_icon_button_disabled(
     ui: &mut Ui,
     icon: crate::schematic::toolbar::IconType,
@@ -2476,7 +2504,22 @@ fn rail_icon_button_disabled(
     let size = Vec2::splat(32.0);
     let fill = Color32::from_rgb(45, 48, 56);
 
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
+    // Allocate vertical space for the button height
+    let (full_rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), size.y),
+        egui::Sense::hover(),
+    );
+
+    // Calculate centered rect within the allocated space
+    let center_x = full_rect.center().x;
+    let rect = egui::Rect::from_center_size(egui::pos2(center_x, full_rect.center().y), size);
+
+    // Register the actual button interaction area (hover only for disabled)
+    let response = ui.interact(
+        rect,
+        ui.id().with("rail_btn_dis").with(icon as u8),
+        egui::Sense::hover(),
+    );
 
     if ui.is_rect_visible(rect) {
         let rounding = egui::Rounding::same(4.0);
@@ -2496,7 +2539,10 @@ impl RSpiceApp {
         use crate::schematic::toolbar::{paint_icon, IconType};
         use egui::{pos2, Rect, Sense};
 
-        ui.vertical_centered(|ui| {
+        // Use zero item spacing for precise centering control
+        ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
+
+        ui.vertical(|ui| {
             ui.add_space(4.0);
 
             // Project browser toggle
@@ -2511,6 +2557,37 @@ impl RSpiceApp {
             .clicked()
             {
                 self.toggle_panel_browser();
+            }
+
+            ui.add_space(4.0);
+
+            // Results browser toggle
+            let results_active = self.state.panels.results_browser;
+            let has_results = self.state.simulation.has_results();
+            let results_response = if has_results {
+                rail_icon_button(
+                    ui,
+                    IconType::Results,
+                    results_active,
+                    self.state.theme.accent,
+                )
+            } else {
+                rail_icon_button_disabled(ui, IconType::Results)
+            };
+            if results_response
+                .on_hover_text(if has_results {
+                    "Results Browser"
+                } else {
+                    "Results Browser (no results)"
+                })
+                .clicked()
+                && has_results
+            {
+                // Toggle results browser, and close library browser if opening results
+                if !self.state.panels.results_browser {
+                    self.state.panels.project_browser = false;
+                }
+                self.state.panels.results_browser = !self.state.panels.results_browser;
             }
 
             ui.add_space(4.0);
@@ -2558,17 +2635,6 @@ impl RSpiceApp {
                 }
             } else {
                 response.on_disabled_hover_text("No waveforms available");
-            }
-
-            ui.add_space(4.0);
-
-            // Scripting console toggle
-            let script_active = self.state.panels.script_console;
-            if rail_icon_button(ui, IconType::Shell, script_active, self.state.theme.accent)
-                .on_hover_text("Automation Console")
-                .clicked()
-            {
-                self.state.panels.script_console = !self.state.panels.script_console;
             }
         });
     }
@@ -2675,6 +2741,16 @@ impl RSpiceApp {
                 });
             });
     }
+
+    /// Render the automation/scripting panel
+    fn render_automation_panel(&mut self, ui: &mut Ui) {
+        // Delegate to the existing script console renderer
+        crate::panels::render_script_console(
+            ui,
+            &mut self.state.script_console,
+            &mut self.state.simulation,
+        );
+    }
 }
 
 // =============================================================================
@@ -2720,6 +2796,8 @@ impl<'de> serde::Deserialize<'de> for AppState {
 #[derive(serde::Serialize, serde::Deserialize)]
 struct PanelVisibilitySer {
     project_browser: bool,
+    #[serde(default)]
+    results_browser: bool,
     properties: bool,
     #[serde(default = "default_bottom_panel")]
     bottom_panel: bool,
@@ -2741,12 +2819,14 @@ impl From<&PanelVisibility> for PanelVisibilitySer {
     fn from(p: &PanelVisibility) -> Self {
         Self {
             project_browser: p.project_browser,
+            results_browser: p.results_browser,
             properties: p.properties,
             bottom_panel: p.bottom_panel,
             active_bottom_tab: match p.active_bottom_tab {
                 BottomPanelTab::Console => 0,
                 BottomPanelTab::Waveform => 1,
                 BottomPanelTab::Log => 2,
+                BottomPanelTab::Automation => 3,
             },
             smith_chart: p.smith_chart,
             signal_browser: p.signal_browser,
@@ -2759,12 +2839,14 @@ impl From<PanelVisibilitySer> for PanelVisibility {
     fn from(s: PanelVisibilitySer) -> Self {
         Self {
             project_browser: s.project_browser,
+            results_browser: s.results_browser,
             properties: s.properties,
             bottom_panel: s.bottom_panel,
             active_bottom_tab: match s.active_bottom_tab {
                 0 => BottomPanelTab::Console,
                 1 => BottomPanelTab::Waveform,
                 2 => BottomPanelTab::Log,
+                3 => BottomPanelTab::Automation,
                 _ => BottomPanelTab::Console,
             },
             smith_chart: s.smith_chart,
@@ -2876,6 +2958,7 @@ mod tests {
     fn test_panel_visibility_serialization() {
         let panels = PanelVisibility {
             project_browser: true,
+            results_browser: false,
             properties: false,
             bottom_panel: true,
             active_bottom_tab: BottomPanelTab::Waveform,
