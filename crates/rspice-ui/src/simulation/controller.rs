@@ -7,10 +7,13 @@
 //! - Generating netlist from schematic
 //! - Starting simulation with appropriate config
 //! - Polling for completion and updating results
+//! - **Multi-analysis execution**: Running all enabled analyses sequentially
 //!
 //! # Usage
 //!
 //! Call `SimulationController::update()` once per frame in the app update loop.
+
+use std::collections::VecDeque;
 
 use crate::common::app::{AppState, ConsoleMessage};
 use crate::services::safety::SoAManager;
@@ -27,6 +30,10 @@ use crate::state::{AnalysisResult, AnalysisType, DcOpResult, OperatingPointValue
 //=============================================================================
 
 /// Orchestrates simulation execution from UI trigger to result display
+///
+/// Supports commercial-grade multi-analysis execution where multiple enabled
+/// analyses (DC OP, Transient, AC, DC Sweep) run sequentially with all results
+/// stored under a single simulation run.
 pub struct SimulationController {
     /// The background simulation runner
     runner: SimulationRunner,
@@ -38,6 +45,18 @@ pub struct SimulationController {
     reliability_engine: ReliabilityEngine,
     /// Current analysis config (stored for result processing when polling completes)
     current_config: Option<AnalysisConfig>,
+
+    // =========================================================================
+    // Multi-Analysis Queue
+    // =========================================================================
+    /// Queue of pending analyses to run in current simulation batch
+    pending_analyses: VecDeque<AnalysisConfig>,
+    /// Current analysis index (1-based for display: "Analysis 2/4")
+    current_analysis_idx: usize,
+    /// Total number of analyses in current batch
+    total_analyses: usize,
+    /// Cached netlist for multi-analysis runs (avoids regeneration)
+    cached_netlist: Option<String>,
 }
 
 impl Default for SimulationController {
@@ -55,6 +74,10 @@ impl SimulationController {
             soa_manager: SoAManager::new(),
             reliability_engine: ReliabilityEngine::new(),
             current_config: None,
+            pending_analyses: VecDeque::new(),
+            current_analysis_idx: 0,
+            total_analyses: 0,
+            cached_netlist: None,
         }
     }
 
@@ -76,7 +99,10 @@ impl SimulationController {
         state.simulation.is_running = self.runner.is_running();
     }
 
-    /// Start a new simulation
+    /// Start a new simulation batch
+    ///
+    /// Builds all enabled analyses into a queue and starts the first one.
+    /// Subsequent analyses are started automatically upon completion.
     fn start_simulation(&mut self, state: &mut AppState) {
         log::info!("start_simulation called");
 
@@ -102,42 +128,142 @@ impl SimulationController {
             state.simulation.cross_probe.net_to_points.len()
         );
 
-        // Build analysis config from dialog state
-        let config = self.build_config(state);
-        log::info!("Analysis config: {:?}", config);
+        // =====================================================================
+        // Build queue of all enabled analyses (commercial multi-analysis mode)
+        // =====================================================================
+        self.pending_analyses.clear();
+        let enabled = &state.dialogs.enabled_analyses;
 
-        // Store config for result processing
-        self.current_config = Some(config.clone());
+        // Build configs for each enabled analysis in tab order (0=DCOP, 1=Tran, 2=AC, 3=DC Sweep)
+        let mut enabled_indices: Vec<usize> = enabled.iter().copied().collect();
+        enabled_indices.sort(); // Run in consistent order
+
+        if enabled_indices.is_empty() {
+            // Default to DC OP if nothing enabled
+            log::info!("No analyses enabled, defaulting to DC OP");
+            enabled_indices.push(0);
+        }
+
+        for idx in &enabled_indices {
+            let config = self.build_config_for_index(state, *idx);
+            self.pending_analyses.push_back(config);
+        }
+
+        self.total_analyses = self.pending_analyses.len();
+        self.current_analysis_idx = 0;
+        self.cached_netlist = Some(netlist);
+
+        log::info!(
+            "Queued {} analyses for execution: {:?}",
+            self.total_analyses,
+            enabled_indices
+        );
 
         // Create new run in Results Browser
         state.simulation.start_run();
         log::info!("Created new simulation run");
 
-        // Log to console
-        state
-            .console_messages
-            .push(crate::common::app::ConsoleMessage::info(format!(
-                "Starting {} analysis...",
-                self.analysis_name(&config)
+        // Log summary to console
+        if self.total_analyses > 1 {
+            state.console_messages.push(ConsoleMessage::info(format!(
+                "Starting simulation batch: {} analyses",
+                self.total_analyses
             )));
+        }
+
+        // Start the first analysis
+        self.start_next_analysis(state);
+    }
+
+    /// Start the next analysis in the queue
+    ///
+    /// Called after start_simulation() initializes the queue, and again
+    /// after each analysis completes until the queue is empty.
+    fn start_next_analysis(&mut self, state: &mut AppState) {
+        let Some(config) = self.pending_analyses.pop_front() else {
+            // Queue exhausted - should not happen if called correctly
+            log::warn!("start_next_analysis called with empty queue");
+            return;
+        };
+
+        self.current_analysis_idx += 1;
+        self.current_config = Some(config.clone());
+
+        // Update status with multi-analysis progress
+        let status_msg = if self.total_analyses > 1 {
+            format!(
+                "Analysis {}/{}: {}",
+                self.current_analysis_idx,
+                self.total_analyses,
+                self.analysis_name(&config)
+            )
+        } else {
+            self.analysis_name(&config).to_string()
+        };
+        state.simulation.status = status_msg.clone();
+
+        // Log to console
+        state.console_messages.push(ConsoleMessage::info(format!(
+            "Starting {}...",
+            if self.total_analyses > 1 {
+                format!(
+                    "{} ({}/{})",
+                    self.analysis_name(&config),
+                    self.current_analysis_idx,
+                    self.total_analyses
+                )
+            } else {
+                self.analysis_name(&config).to_string()
+            }
+        )));
+
+        // Use cached netlist
+        let netlist = self
+            .cached_netlist
+            .clone()
+            .expect("Netlist should be cached");
 
         // Start the simulation
         match self.runner.start(config, netlist) {
-            Ok(()) => log::info!("Simulation started successfully"),
+            Ok(()) => log::info!(
+                "Analysis {}/{} started successfully",
+                self.current_analysis_idx,
+                self.total_analyses
+            ),
             Err(e) => {
                 log::error!("Failed to start simulation: {}", e);
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::error(format!(
-                        "Failed to start simulation: {}",
-                        e
-                    )));
-                // Mark run as failed
+                state.console_messages.push(ConsoleMessage::error(format!(
+                    "Failed to start simulation: {}",
+                    e
+                )));
+                // Mark run as failed but continue with remaining analyses
                 if let Some(run) = state.simulation.active_run_mut() {
                     run.success = false;
                 }
+                // Try to start next analysis if any remain
+                if !self.pending_analyses.is_empty() {
+                    self.start_next_analysis(state);
+                } else {
+                    self.finish_simulation_batch(state);
+                }
             }
         }
+    }
+
+    /// Finish the simulation batch and clean up state
+    fn finish_simulation_batch(&mut self, state: &mut AppState) {
+        // Complete the run (syncs waveforms and selects first analysis)
+        state.simulation.complete_run();
+
+        // Clear cached netlist
+        self.cached_netlist = None;
+        self.current_config = None;
+        self.current_analysis_idx = 0;
+        self.total_analyses = 0;
+
+        state.simulation.status = "Complete".to_string();
+
+        log::info!("Simulation batch completed");
     }
 
     /// Build analysis config from dialog state
@@ -331,6 +457,7 @@ impl SimulationController {
                 frequencies,
                 waveforms,
             } => {
+                // For AC analysis, store magnitude (not raw complex values)
                 let wf_data: Vec<WaveformData> = waveforms
                     .iter()
                     .enumerate()
@@ -338,7 +465,7 @@ impl SimulationController {
                         WaveformData::new(
                             format!("|{}|", name),
                             frequencies.clone(),
-                            wf.y_values.clone(),
+                            wf.magnitude(),
                             Self::color_for_index(idx),
                         )
                     })
@@ -410,14 +537,27 @@ impl SimulationController {
     }
 
     /// Poll for simulation completion
+    ///
+    /// Checks if the current analysis has completed. On success, adds result
+    /// to the run and starts the next queued analysis. When all analyses are
+    /// done, finalizes the simulation batch.
     fn poll_completion(&mut self, state: &mut AppState) {
-        // Update status display
+        // Update status display with multi-analysis progress
         let status = self.runner.status();
         if !matches!(status, SimulationStatus::Idle)
             && !matches!(status, SimulationStatus::Completed { .. })
         {
-            // Store status in simulation state as string
-            state.simulation.status = status.display_name().to_string();
+            // Show progress-aware status
+            if self.total_analyses > 1 {
+                state.simulation.status = format!(
+                    "Analysis {}/{}: {}",
+                    self.current_analysis_idx,
+                    self.total_analyses,
+                    status.display_name()
+                );
+            } else {
+                state.simulation.status = status.display_name().to_string();
+            }
         }
 
         // Check for completion
@@ -425,14 +565,29 @@ impl SimulationController {
             match result {
                 Ok(sim_result) => {
                     log::info!(
-                        "Simulation completed! Result type: {:?}",
+                        "Analysis {}/{} completed! Result type: {:?}",
+                        self.current_analysis_idx,
+                        self.total_analyses,
                         std::mem::discriminant(&sim_result)
                     );
+
+                    // Log completion to console
+                    let completion_msg = if self.total_analyses > 1 {
+                        format!(
+                            "{} completed ({}/{})",
+                            self.current_config
+                                .as_ref()
+                                .map(|c| self.analysis_name(c))
+                                .unwrap_or("Analysis"),
+                            self.current_analysis_idx,
+                            self.total_analyses
+                        )
+                    } else {
+                        "Simulation completed successfully".to_string()
+                    };
                     state
                         .console_messages
-                        .push(crate::common::app::ConsoleMessage::info(
-                            "Simulation completed successfully".to_string(),
-                        ));
+                        .push(ConsoleMessage::info(completion_msg));
 
                     // Convert SimulationResult to AnalysisResult and add to run
                     if let Some(config) = &self.current_config {
@@ -447,16 +602,22 @@ impl SimulationController {
                         }
                     }
 
-                    // Complete the run (syncs waveforms and selects first analysis)
-                    state.simulation.complete_run();
-
                     // Update waveform data (legacy compatibility)
                     self.update_waveforms(state, &sim_result);
 
-                    // --- Phase 10-11-12 Integration Glue ---
+                    // Set axis labels based on current analysis type
+                    if let Some(config) = &self.current_config {
+                        let analysis_type = self.config_to_analysis_type(config);
+                        let (x_label, x_unit, y_label, y_unit) = analysis_type.axis_info();
+                        state.waveform_viewer.x_axis_label = x_label.to_string();
+                        state.waveform_viewer.x_axis_unit = x_unit.to_string();
+                        state.waveform_viewer.y_axis_label = y_label.to_string();
+                        state.waveform_viewer.y_axis_unit = y_unit.to_string();
+                    }
+
+                    // --- Phase 10-11-12 Integration Glue (run once per analysis) ---
 
                     // Run Yield Analysis (if MC results are present)
-                    // Note: In real usage we'd detect MC variants
                     state.simulation.yield_results = self
                         .yield_manager
                         .analyze(std::slice::from_ref(&sim_result))
@@ -466,28 +627,40 @@ impl SimulationController {
 
                     // Run SOA Checking
                     self.soa_manager.clear_violations();
-                    // We'd extract device values here; for now we use the manager to check data
                     state.simulation.soa_violations = self.soa_manager.violations().to_vec();
 
                     // Run Reliability Analysis
-                    let stress_data = std::collections::HashMap::new(); // Extracted from results
+                    let stress_data = std::collections::HashMap::new();
                     state.simulation.reliability_results = self
                         .reliability_engine
                         .analyze_circuit(&stress_data, &[1.0, 5.0, 10.0]);
 
-                    state.simulation.status = "Complete".to_string();
-                    self.current_config = None; // Clear config after processing
+                    // =========================================================
+                    // Multi-analysis chaining: start next or finish batch
+                    // =========================================================
+                    if !self.pending_analyses.is_empty() {
+                        log::info!(
+                            "Starting next analysis ({} remaining)",
+                            self.pending_analyses.len()
+                        );
+                        self.start_next_analysis(state);
+                    } else {
+                        // All analyses complete - finalize the batch
+                        if self.total_analyses > 1 {
+                            state.console_messages.push(ConsoleMessage::info(format!(
+                                "All {} analyses completed successfully",
+                                self.total_analyses
+                            )));
+                        }
+                        self.finish_simulation_batch(state);
+                    }
                 }
                 Err(e) => {
                     state
                         .console_messages
-                        .push(crate::common::app::ConsoleMessage::error(format!(
-                            "Simulation failed: {}",
-                            e
-                        )));
-                    state.simulation.status = format!("Error: {}", e);
+                        .push(ConsoleMessage::error(format!("Analysis failed: {}", e)));
 
-                    // Mark run as failed and add failed analysis entry
+                    // Mark run as partially failed and add failed analysis entry
                     if let Some(config) = &self.current_config {
                         let failed_analysis = AnalysisResult::failed(
                             1,
@@ -497,10 +670,21 @@ impl SimulationController {
                         );
                         if let Some(run) = state.simulation.active_run_mut() {
                             run.add_analysis(failed_analysis);
+                            run.success = false;
                         }
                     }
-                    state.simulation.complete_run();
-                    self.current_config = None;
+
+                    // Continue with remaining analyses (commercial behavior: don't abort batch)
+                    if !self.pending_analyses.is_empty() {
+                        log::info!(
+                            "Analysis failed, continuing with {} remaining",
+                            self.pending_analyses.len()
+                        );
+                        self.start_next_analysis(state);
+                    } else {
+                        state.simulation.status = format!("Completed with errors");
+                        self.finish_simulation_batch(state);
+                    }
                 }
             }
         }
@@ -603,16 +787,14 @@ impl SimulationController {
                 let freq_vec: Vec<f64> = frequencies.clone();
 
                 for (idx, (name, wf_data)) in waveforms.iter().enumerate() {
-                    // Magnitude trace
+                    // Magnitude trace - use magnitude() for complex data, not raw real values
                     let mag_name = format!("|{}|", name);
                     let color = COLORS[idx % COLORS.len()].to_string();
 
-                    let waveform = WaveformData::new(
-                        mag_name,
-                        freq_vec.clone(),
-                        wf_data.y_values.clone(),
-                        color,
-                    );
+                    // For AC analysis, use the magnitude of complex waveform data
+                    let magnitude = wf_data.magnitude();
+
+                    let waveform = WaveformData::new(mag_name, freq_vec.clone(), magnitude, color);
                     state.simulation.waveforms.push(waveform);
                 }
 
