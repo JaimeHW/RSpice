@@ -49,7 +49,8 @@ pub struct SchematicState {
     /// Current selection
     pub selection: Selection,
 
-    /// Current tool
+    /// Current tool (runtime state, not persisted - always starts as Select)
+    #[serde(skip)]
     pub tool: Tool,
 
     /// Wire drawing state
@@ -636,6 +637,48 @@ impl SchematicState {
         }
 
         count
+    }
+
+    /// Preview selection in rectangle during drag (live highlight feedback)
+    ///
+    /// This updates the selection to show what would be selected when the drag
+    /// is released. It replaces the current selection with items in the rect.
+    pub fn preview_selection_in_rect(&mut self, min_x: i32, min_y: i32, max_x: i32, max_y: i32) {
+        // Clear and rebuild selection based on current rect
+        self.selection.clear();
+
+        // Select components whose center is within the rectangle
+        for comp in &self.components {
+            if comp.pos.x >= min_x
+                && comp.pos.x <= max_x
+                && comp.pos.y >= min_y
+                && comp.pos.y <= max_y
+            {
+                self.selection.select_component(comp.id);
+            }
+        }
+
+        // Select wires that have at least one point within the rectangle
+        for wire in &self.wires {
+            let wire_in_rect = wire
+                .points
+                .iter()
+                .any(|p| p.x >= min_x && p.x <= max_x && p.y >= min_y && p.y <= max_y);
+            if wire_in_rect {
+                self.selection.select_wire(wire.id);
+            }
+        }
+
+        // Select junctions within the rectangle
+        for junction in &self.junctions {
+            if junction.pos.x >= min_x
+                && junction.pos.x <= max_x
+                && junction.pos.y >= min_y
+                && junction.pos.y <= max_y
+            {
+                self.selection.select_junction(junction.pos);
+            }
+        }
     }
 
     /// Remove selected components and wires

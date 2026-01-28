@@ -38,9 +38,29 @@ pub fn render_schematic_view(
         bounds: available,
     };
 
+    // Get preview selection bounds if a selection rect is active (for live preview highlighting)
+    let preview_bounds = if state.schematic.selection_rect.is_active() {
+        let (min_x, min_y, max_x, max_y) = state.schematic.selection_rect.bounds();
+        Some((min_x, min_y, max_x, max_y))
+    } else {
+        None
+    };
+
     // Draw wires
     for wire in &state.schematic.wires {
-        let is_selected = state.schematic.selection.wires.contains(&wire.id);
+        let mut is_selected = state.schematic.selection.wires.contains(&wire.id);
+
+        // Live preview: if dragging selection rect, highlight wires inside the rect
+        if !is_selected {
+            if let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
+                // Check if any point of the wire is inside the selection rect
+                is_selected = wire
+                    .points
+                    .iter()
+                    .any(|p| p.x >= min_x && p.x <= max_x && p.y >= min_y && p.y <= max_y);
+            }
+        }
+
         let is_highlighted = state.schematic.net_highlight.is_wire_highlighted(wire.id);
         draw_wire(
             &painter,
@@ -54,7 +74,19 @@ pub fn render_schematic_view(
 
     // Draw components
     for component in &state.schematic.components {
-        let is_selected = state.schematic.selection.components.contains(&component.id);
+        let mut is_selected = state.schematic.selection.components.contains(&component.id);
+
+        // Live preview: if dragging selection rect, highlight components inside the rect
+        if !is_selected {
+            if let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
+                // Check if component center is inside the selection rect
+                is_selected = component.pos.x >= min_x
+                    && component.pos.x <= max_x
+                    && component.pos.y >= min_y
+                    && component.pos.y <= max_y;
+            }
+        }
+
         draw_component(
             &painter,
             &viewport,
@@ -211,7 +243,7 @@ pub fn render_schematic_view(
                         state.dialogs.last_drag_pos = Some((grid_pos.x, grid_pos.y));
                     }
                 } else if state.schematic.selection_rect.is_active() {
-                    // Update box selection
+                    // Update box selection rectangle position
                     state.schematic.selection_rect.update(grid_pos);
                 }
             }
@@ -431,6 +463,23 @@ pub fn render_schematic_view(
                     }
                 }
                 _ => {}
+            }
+        }
+    }
+
+    // Double-click handling - open properties panel for selected component
+    if response.double_clicked_by(egui::PointerButton::Primary) {
+        if let Some(pos) = response.interact_pointer_pos() {
+            let grid_pos = screen_to_grid(pos);
+            if let Some(comp_id) = state.schematic.component_at(grid_pos) {
+                // Select the component and open properties panel
+                state.schematic.selection.clear();
+                state.schematic.selection.select_component(comp_id);
+                state.panels.properties = true;
+                log::info!(
+                    "Double-clicked component {}, opening properties panel",
+                    comp_id
+                );
             }
         }
     }
@@ -773,12 +822,25 @@ fn draw_grid(painter: &Painter, bounds: Rect, state: &AppState) {
     let pan_x = state.schematic.pan.0 as f32;
     let pan_y = state.schematic.pan.1 as f32;
 
-    let grid_spacing = grid_size * zoom;
+    let base_grid_spacing = grid_size * zoom;
 
-    // Skip grid if too zoomed out
-    if grid_spacing < 5.0 {
+    // Dynamically adjust grid step to ensure reasonable visual spacing
+    // At very low zoom, show fewer grid lines (every 10th or 100th)
+    let (grid_step, is_all_major) = if base_grid_spacing >= 5.0 {
+        // Normal: draw every grid line, with every 10th as major
+        (1, false)
+    } else if base_grid_spacing * 10.0 >= 5.0 {
+        // Medium zoom out: draw every 10th grid line (all appear as major)
+        (10, true)
+    } else if base_grid_spacing * 100.0 >= 5.0 {
+        // Very zoomed out: draw every 100th grid line
+        (100, true)
+    } else {
+        // Extremely zoomed out: skip grid entirely
         return;
-    }
+    };
+
+    let grid_spacing = base_grid_spacing * grid_step as f32;
 
     let minor_color = state.theme.grid_minor;
     let major_color = state.theme.grid_major;
@@ -789,20 +851,22 @@ fn draw_grid(painter: &Painter, bounds: Rect, state: &AppState) {
     //   screen_x = bounds.min.x + pan_x + gx * grid_size * zoom
     //            = bounds.min.x + pan_x + gx * grid_spacing
 
-    // Calculate visible grid index range
+    // Calculate visible grid index range (now in terms of grid_step multiples)
     let left_grid = ((0.0 - pan_x) / grid_spacing).floor() as i32 - 1;
     let right_grid = ((bounds.width() - pan_x) / grid_spacing).ceil() as i32 + 1;
     let top_grid = ((0.0 - pan_y) / grid_spacing).floor() as i32 - 1;
     let bottom_grid = ((bounds.height() - pan_y) / grid_spacing).ceil() as i32 + 1;
 
-    // Draw vertical lines (for each grid x-coordinate)
+    // Draw vertical lines (for each visible grid x-coordinate)
     for gx in left_grid..=right_grid {
         // Convert grid index to screen coordinate (include bounds.min.x offset)
         let screen_x = bounds.min.x + pan_x + (gx as f32) * grid_spacing;
         if screen_x < bounds.min.x || screen_x > bounds.max.x {
             continue;
         }
-        let is_major = gx % 10 == 0;
+        // In stepped mode, determine if this is a "super major" line
+        let actual_gx = gx * grid_step;
+        let is_major = is_all_major || (actual_gx % 10 == 0);
         let color = if is_major { major_color } else { minor_color };
         painter.line_segment(
             [
@@ -813,14 +877,15 @@ fn draw_grid(painter: &Painter, bounds: Rect, state: &AppState) {
         );
     }
 
-    // Draw horizontal lines (for each grid y-coordinate)
+    // Draw horizontal lines (for each visible grid y-coordinate)
     for gy in top_grid..=bottom_grid {
         // Convert grid index to screen coordinate (include bounds.min.y offset)
         let screen_y = bounds.min.y + pan_y + (gy as f32) * grid_spacing;
         if screen_y < bounds.min.y || screen_y > bounds.max.y {
             continue;
         }
-        let is_major = gy % 10 == 0;
+        let actual_gy = gy * grid_step;
+        let is_major = is_all_major || (actual_gy % 10 == 0);
         let color = if is_major { major_color } else { minor_color };
         painter.line_segment(
             [
