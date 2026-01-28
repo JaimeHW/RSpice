@@ -373,6 +373,10 @@ pub struct DialogState {
     // --- Verilog-A Model Loading ---
     /// Verilog-A model loading dialog state
     pub veriloga_dialog: crate::panels::VerilogALoadDialogState,
+
+    // --- Runtime Interaction State ---
+    /// Runtime interaction state for drag, hover, etc.
+    pub interaction: crate::ui::dialog_state::InteractionState,
 }
 
 /// Main application state container
@@ -1486,7 +1490,7 @@ impl eframe::App for RSpiceApp {
         // Mutually exclusive with Results Browser (Results takes precedence)
         // =====================================================================
         if self.state.panels.project_browser && !self.state.panels.results_browser {
-            SidePanel::left("project_browser")
+            SidePanel::left("left_browser")
                 .resizable(true)
                 .default_width(self.state.panel_sizes.browser_width)
                 .width_range(150.0..=400.0)
@@ -1496,6 +1500,32 @@ impl eframe::App for RSpiceApp {
                         .inner_margin(egui::Margin::same(8.0)),
                 )
                 .show(ctx, |ui| {
+                    // Header row matching Properties panel style (without close button)
+                    let header_height = 16.0;
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), header_height),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.label(
+                                egui::RichText::new("Library Browser")
+                                    .size(14.0)
+                                    .color(egui::Color32::from_rgb(180, 180, 190)),
+                            );
+                        },
+                    );
+
+                    // Full-width separator line
+                    let separator_rect = ui.available_rect_before_wrap();
+                    let panel_left = separator_rect.left() - 8.0;
+                    let panel_right = separator_rect.right() + 8.0;
+                    ui.painter().hline(
+                        panel_left..=panel_right,
+                        separator_rect.top(),
+                        egui::Stroke::new(1.0, egui::Color32::from_rgb(50, 54, 62)),
+                    );
+
+                    ui.add_space(8.0);
+
                     crate::panels::render_project_browser(ui, &mut self.state);
                 });
         }
@@ -1504,16 +1534,42 @@ impl eframe::App for RSpiceApp {
         // Results Browser (left, optional) - for simulation results navigation
         // =====================================================================
         if self.state.panels.results_browser {
-            SidePanel::left("results_browser")
+            SidePanel::left("left_browser")
                 .resizable(true)
                 .default_width(self.state.panel_sizes.browser_width)
-                .width_range(150.0..=350.0)
+                .width_range(150.0..=400.0)
                 .frame(
                     Frame::none()
                         .fill(egui::Color32::from_rgb(30, 33, 40))
                         .inner_margin(egui::Margin::same(8.0)),
                 )
                 .show(ctx, |ui| {
+                    // Header row matching Properties panel style (without close button)
+                    let header_height = 16.0;
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), header_height),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.label(
+                                egui::RichText::new("Simulation Results")
+                                    .size(14.0)
+                                    .color(egui::Color32::from_rgb(180, 180, 190)),
+                            );
+                        },
+                    );
+
+                    // Full-width separator line
+                    let separator_rect = ui.available_rect_before_wrap();
+                    let panel_left = separator_rect.left() - 8.0;
+                    let panel_right = separator_rect.right() + 8.0;
+                    ui.painter().hline(
+                        panel_left..=panel_right,
+                        separator_rect.top(),
+                        egui::Stroke::new(1.0, egui::Color32::from_rgb(50, 54, 62)),
+                    );
+
+                    ui.add_space(8.0);
+
                     crate::panels::render_results_browser(ui, &mut self.state);
                 });
         }
@@ -1661,7 +1717,71 @@ impl eframe::App for RSpiceApp {
         }
 
         // Verilog-A Model Loading Dialog
-        crate::panels::render_veriloga_load_dialog(ctx, &mut self.state.dialogs.veriloga_dialog);
+        let veriloga_result = crate::panels::render_veriloga_load_dialog(
+            ctx,
+            &mut self.state.dialogs.veriloga_dialog,
+        );
+        if veriloga_result == crate::panels::VerilogADialogResult::AddToLibrary {
+            // Register the compiled model in the library
+            if let Some(module) = &self.state.dialogs.veriloga_dialog.compiled_module {
+                // Create or get the veriloga library
+                const VERILOGA_LIBRARY: &str = "veriloga";
+                if self
+                    .state
+                    .library_manager
+                    .get_library(VERILOGA_LIBRARY)
+                    .is_none()
+                {
+                    let mut lib = crate::state::library_browser::Library::new(VERILOGA_LIBRARY);
+                    lib.read_only = false;
+                    self.state.library_manager.add_library(lib);
+                }
+
+                // Create a cell for the Verilog-A model
+                if let Some(lib) = self.state.library_manager.get_library_mut(VERILOGA_LIBRARY) {
+                    let mut cell = crate::state::library_browser::Cell::new(&module.name);
+                    cell.description = format!(
+                        "Verilog-A model with {} terminals: {}",
+                        module.ports.len(),
+                        module.ports.join(", ")
+                    );
+                    cell.category = "Verilog-A".to_string();
+
+                    // Add a VerilogA view
+                    let mut view = crate::state::library_browser::View::new(
+                        "veriloga",
+                        crate::state::library_browser::ViewType::VerilogA,
+                    );
+                    view.file_path = Some(module.source_path.clone());
+                    cell.add_view(view);
+
+                    // Store parameters in metadata
+                    for param in &module.parameters {
+                        cell.metadata
+                            .insert(format!("param_{}", param.name), param.default_value.clone());
+                    }
+
+                    lib.add_cell(cell);
+                }
+
+                // Log confirmation
+                log::info!(
+                    "Registered Verilog-A model '{}' with {} terminals and {} parameters",
+                    module.name,
+                    module.ports.len(),
+                    module.parameters.len()
+                );
+
+                // Add console message
+                self.state
+                    .console_messages
+                    .push(crate::common::app::ConsoleMessage::info(format!(
+                        "Verilog-A model '{}' added to library with terminals: {}",
+                        module.name,
+                        module.ports.join(", ")
+                    )));
+            }
+        }
 
         // Simulation Setup Dialog
         if self.state.dialogs.simulation_dialog {
@@ -2561,27 +2681,22 @@ impl RSpiceApp {
 
             ui.add_space(4.0);
 
-            // Results browser toggle
+            // Results browser toggle - always clickable, shows empty state if no results
             let results_active = self.state.panels.results_browser;
             let has_results = self.state.simulation.has_results();
-            let results_response = if has_results {
-                rail_icon_button(
-                    ui,
-                    IconType::Results,
-                    results_active,
-                    self.state.theme.accent,
-                )
-            } else {
-                rail_icon_button_disabled(ui, IconType::Results)
-            };
+            let results_response = rail_icon_button(
+                ui,
+                IconType::Results,
+                results_active,
+                self.state.theme.accent,
+            );
             if results_response
                 .on_hover_text(if has_results {
                     "Results Browser"
                 } else {
-                    "Results Browser (no results)"
+                    "Results Browser (no results yet)"
                 })
                 .clicked()
-                && has_results
             {
                 // Toggle results browser, and close library browser if opening results
                 if !self.state.panels.results_browser {
@@ -2653,18 +2768,9 @@ impl RSpiceApp {
                         .color(egui::Color32::from_rgb(160, 160, 170)),
                 );
 
-                // Dim, underlined "Clear" text link
+                // Small "Clear" button
                 ui.add_space(6.0);
-                let clear_text = egui::RichText::new("Clear")
-                    .size(11.0)
-                    .color(egui::Color32::from_rgb(100, 100, 110))
-                    .underline();
-                let clear_response =
-                    ui.add(egui::Label::new(clear_text).sense(egui::Sense::click()));
-                if clear_response.hovered() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                }
-                if clear_response.clicked() {
+                if ui.small_button("Clear").clicked() {
                     self.state.console_messages.clear();
                 }
             },

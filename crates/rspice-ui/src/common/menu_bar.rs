@@ -414,22 +414,14 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
             // Verilog-A submenu
             ui.menu_button("Verilog-A", |ui| {
                 if ui.button("Compile Module...").clicked() {
-                    // TODO: Open file dialog to select .va file, then compile via rspice-veriloga
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::info(
-                            "Verilog-A: Select File > Open to load a .va module for compilation",
-                        ));
+                    // Open the Verilog-A import/compile dialog
+                    state.dialogs.veriloga_dialog.open();
                     ui.close_menu();
                 }
                 if ui.button("Module Library...").clicked() {
-                    // Verilog-A compiled modules are managed through Model Browser
-                    state.dialogs.model_browser_dialog = true;
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::info(
-                            "Opening Model Browser to view compiled Verilog-A modules",
-                        ));
+                    // Open library browser and select the veriloga library
+                    state.library_manager.select_library("veriloga");
+                    state.panels.project_browser = true;
                     ui.close_menu();
                 }
             });
