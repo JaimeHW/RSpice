@@ -402,7 +402,7 @@ impl SchematicState {
     /// - `viewport_width`: Width of the schematic canvas in pixels
     /// - `viewport_height`: Height of the schematic canvas in pixels
     pub fn zoom_to_fit(&mut self, viewport_width: f64, viewport_height: f64) {
-        // Calculate bounding box of all content (in grid units)
+        // Calculate bounding box of all content (in schematic pixel coordinates)
         let bounds = self.content_bounds();
 
         if bounds.is_none() {
@@ -413,18 +413,20 @@ impl SchematicState {
         }
 
         let (min_x, min_y, max_x, max_y) = bounds.unwrap();
-        let gs = self.grid_size as f64;
 
-        // Convert grid units to pixels for proper pan/zoom calculation
-        let min_px = min_x as f64 * gs;
-        let min_py = min_y as f64 * gs;
-        let max_px = max_x as f64 * gs;
-        let max_py = max_y as f64 * gs;
+        // content_bounds returns schematic pixel coordinates, not grid cell indices
+        // So we use them directly without multiplying by grid_size
+        let min_px = min_x as f64;
+        let min_py = min_y as f64;
+        let max_px = max_x as f64;
+        let max_py = max_y as f64;
 
-        // Add margin (5% of content size, minimum 20 pixels) for a comfortable fit
-        let content_width = max_px - min_px;
-        let content_height = max_py - min_py;
-        let margin = (content_width.max(content_height) * 0.05).max(20.0);
+        // Content size in schematic pixels
+        let content_width = (max_px - min_px).max(1.0);
+        let content_height = (max_py - min_py).max(1.0);
+
+        // Add margin (10% of content size, minimum 50 pixels) for a comfortable fit
+        let margin = (content_width.max(content_height) * 0.10).max(50.0);
 
         let total_width = content_width + margin * 2.0;
         let total_height = content_height + margin * 2.0;
@@ -434,21 +436,31 @@ impl SchematicState {
         let zoom_y = viewport_height / total_height;
         let fit_zoom = zoom_x.min(zoom_y);
 
-        // Clamp zoom to reasonable bounds (0.1x to 5x)
-        self.zoom = fit_zoom.clamp(0.1, 5.0);
+        // Clamp zoom to reasonable bounds (0.25x to 4x)
+        self.zoom = fit_zoom.clamp(0.25, 4.0);
 
-        // Calculate pan to center the content
-        let center_px = (min_px + max_px) / 2.0;
-        let center_py = (min_py + max_py) / 2.0;
+        // Calculate pan to center the content in the viewport
+        // Screen position formula: screen = bounds.min + pan + schematic * zoom
+        // We want the center of content to appear at center of viewport:
+        // viewport_width/2 = pan + center_schematic * zoom
+        // pan = viewport_width/2 - center_schematic * zoom
+        let center_schematic_x = (min_px + max_px) / 2.0;
+        let center_schematic_y = (min_py + max_py) / 2.0;
 
         self.pan = (
-            viewport_width / 2.0 - center_px * self.zoom,
-            viewport_height / 2.0 - center_py * self.zoom - 15.0,
+            viewport_width / 2.0 - center_schematic_x * self.zoom,
+            viewport_height / 2.0 - center_schematic_y * self.zoom,
+        );
+
+        log::debug!(
+            "zoom_to_fit: content=[{:.0},{:.0}]-[{:.0},{:.0}], viewport={:.0}x{:.0}, zoom={:.2}, pan=({:.0},{:.0})",
+            min_px, min_py, max_px, max_py, viewport_width, viewport_height, self.zoom, self.pan.0, self.pan.1
         );
     }
 
     /// Calculate the bounding box of all schematic content.
-    /// Returns (min_x, min_y, max_x, max_y) in grid coordinates, or None if empty.
+    /// Returns (min_x, min_y, max_x, max_y) in schematic pixel coordinates, or None if empty.
+    /// Note: These are pixel coordinates snapped to grid, not grid cell indices.
     pub fn content_bounds(&self) -> Option<(i32, i32, i32, i32)> {
         if self.components.is_empty() && self.wires.is_empty() && self.junctions.is_empty() {
             return None;
@@ -752,6 +764,43 @@ impl SchematicState {
         result
     }
 
+    /// Find wire vertex at a grid position for dragging
+    ///
+    /// Returns (wire_id, vertex_index) if there's a wire vertex at this position.
+    /// This is used for wire corner dragging - a professional EDA feature.
+    pub fn wire_vertex_at(&self, pos: Point) -> Option<(u64, usize)> {
+        for wire in &self.wires {
+            for (idx, point) in wire.points.iter().enumerate() {
+                if *point == pos {
+                    return Some((wire.id, idx));
+                }
+            }
+        }
+        None
+    }
+
+    /// Check if a position is a draggable wire point
+    ///
+    /// Returns true if there's either:
+    /// - A wire vertex at this position
+    /// - A junction marker at this position
+    /// - A wire segment that passes through this position
+    ///
+    /// This is used for detecting draggable points to enable T-junction dragging.
+    pub fn is_draggable_wire_point(&self, pos: Point) -> bool {
+        // Check for wire vertices
+        if self.wire_vertex_at(pos).is_some() {
+            return true;
+        }
+
+        // Check for junction markers
+        if self.junctions.iter().any(|j| j.pos == pos) {
+            return true;
+        }
+
+        false
+    }
+
     /// Start drawing a wire at position
     pub fn start_wire(&mut self, pos: Point) {
         log::info!("[Wire] start_wire at {:?}", pos);
@@ -821,6 +870,12 @@ impl SchematicState {
     }
 
     /// Finish drawing the current wire
+    ///
+    /// Implements professional EDA behavior:
+    /// - When a wire endpoint lands on another wire mid-segment, the other wire
+    ///   is automatically split at that point (creating a proper vertex)
+    /// - This ensures correct rubber-banding: all wires at a T-junction share
+    ///   a common endpoint vertex, so moving any wire keeps the junction intact
     pub fn finish_wire(&mut self) -> Option<u64> {
         if !self.wire_drawing.active {
             return None;
@@ -851,25 +906,43 @@ impl SchematicState {
             }
         }
 
-        // Auto-create junctions where wire endpoints land on existing wires
-        for pt in endpoints_to_check {
-            let wires_at_point: Vec<u64> = self
-                .wires
-                .iter()
-                .filter(|w| {
-                    let is_just_created =
-                        w.points.first() == Some(&pt) || w.points.last() == Some(&pt);
-                    w.contains_point(pt) && !is_just_created
-                })
-                .map(|w| w.id)
-                .collect();
-
-            if !wires_at_point.is_empty() && !self.has_junction(pt) {
-                self.add_junction(pt);
-            }
+        // Professional EDA behavior: split existing wires at T-junction points
+        // This ensures all wires at a junction share a common endpoint vertex
+        for pt in &endpoints_to_check {
+            self.split_wires_at_t_junction(*pt);
         }
 
+        // Add junction markers where 3+ wire endpoints meet
+        self.update_wire_junctions();
+
         last_wire_id
+    }
+
+    /// Split all wires that pass through a point mid-segment (T-junction creation)
+    ///
+    /// When a wire endpoint lands on another wire's mid-segment, we split the
+    /// through wire at that point. This implements professional EDA behavior
+    /// where T-junctions are formed by splitting wires, not just by visual overlap.
+    ///
+    /// This ensures correct rubber-banding: since all wires at the junction
+    /// share the same endpoint vertex, moving any attached wire keeps the
+    /// junction topology intact.
+    pub fn split_wires_at_t_junction(&mut self, point: Point) {
+        // Find wires that pass through this point but don't have it as a vertex
+        let wires_to_split: Vec<u64> = self
+            .wires
+            .iter()
+            .filter(|w| {
+                // Wire passes through point mid-segment (not at a vertex)
+                w.contains_point(point) && !w.points.contains(&point)
+            })
+            .map(|w| w.id)
+            .collect();
+
+        // Split each wire at the junction point
+        for wire_id in wires_to_split {
+            let _ = self.split_wire(wire_id, point);
+        }
     }
 
     /// Cancel wire drawing
@@ -1281,6 +1354,59 @@ impl SchematicState {
             }
         }
         false
+    }
+
+    /// Move ALL wire vertices at a given position to a new position
+    ///
+    /// This is the professional EDA behavior for junction/corner dragging:
+    /// when you drag a point where multiple wires meet, all of them move together.
+    ///
+    /// For T-junctions where a wire passes through without a vertex, we first
+    /// split that wire at the junction point so it can move with the others.
+    ///
+    /// # Arguments
+    /// * `old_pos` - The current position of the vertices to move
+    /// * `new_pos` - The new position
+    ///
+    /// Returns true if any vertices were moved
+    pub fn move_all_vertices_at(&mut self, old_pos: Point, new_pos: Point) -> bool {
+        if old_pos == new_pos {
+            return false;
+        }
+
+        // First, check if this is a junction point where wires might pass through
+        // without having a vertex. If so, split those wires first.
+        let is_junction = self.junctions.iter().any(|j| j.pos == old_pos);
+        if is_junction {
+            // Split any wires that pass through this junction point but don't have a vertex there
+            self.split_wires_at_t_junction(old_pos);
+        }
+
+        let mut moved = false;
+
+        // Move all wire vertices at this position
+        for wire in &mut self.wires {
+            for point in &mut wire.points {
+                if *point == old_pos {
+                    *point = new_pos;
+                    moved = true;
+                }
+            }
+        }
+
+        // Also move any junction at this position
+        for junction in &mut self.junctions {
+            if junction.pos == old_pos {
+                junction.pos = new_pos;
+            }
+        }
+
+        if moved {
+            self.is_dirty = true;
+            self.bump_topology_version();
+        }
+
+        moved
     }
 
     // =========================================================================
@@ -1933,11 +2059,47 @@ impl SchematicState {
     ///
     /// A junction needs a marker (dot) when:
     /// - 3+ wire segments meet at a point (T-junction or cross)
-    /// - Multiple wires share an endpoint (not just two wires forming a corner)
+    /// - A wire endpoint meets another wire mid-segment (T-junction)
+    ///
+    /// This counts SEGMENTS meeting at each point, not wire IDs:
+    /// - A wire endpoint contributes 1 segment
+    /// - A wire passing through mid-segment contributes 2 segments
     pub fn detect_junction_points(&self) -> Vec<Point> {
-        self.find_wire_intersections()
+        use std::collections::HashMap;
+
+        let mut segment_counts: HashMap<Point, usize> = HashMap::new();
+
+        for wire in &self.wires {
+            // Check each point on the wire
+            for (i, point) in wire.points.iter().enumerate() {
+                let is_endpoint = i == 0 || i == wire.points.len() - 1;
+                let count = if is_endpoint { 1 } else { 2 }; // Mid-point = 2 segments
+                *segment_counts.entry(*point).or_insert(0) += count;
+            }
+
+            // Also check if wire passes through any point on another wire
+            for other_wire in &self.wires {
+                if wire.id == other_wire.id {
+                    continue;
+                }
+                // Check if other_wire vertices lie on this wire's segments
+                for vertex in &other_wire.points {
+                    if wire.contains_point(*vertex) {
+                        // Check if this is already counted as a wire vertex
+                        let is_vertex_of_wire = wire.points.contains(vertex);
+                        if !is_vertex_of_wire {
+                            // Wire passes through this point mid-segment = 2 segments
+                            *segment_counts.entry(*vertex).or_insert(0) += 2;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Return points where 3+ segments meet (T-junction or more)
+        segment_counts
             .into_iter()
-            .filter(|(_, wire_ids)| wire_ids.len() >= 3)
+            .filter(|(_, count)| *count >= 3)
             .map(|(point, _)| point)
             .collect()
     }

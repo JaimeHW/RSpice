@@ -19,6 +19,14 @@ pub fn render_schematic_view(
     // Get available space
     let available = ui.available_rect_before_wrap();
 
+    // Handle deferred zoom-to-fit (uses actual canvas dimensions)
+    if state.schematic.needs_fit {
+        state.schematic.needs_fit = false;
+        state
+            .schematic
+            .zoom_to_fit(available.width() as f64, available.height() as f64);
+    }
+
     // Create a sense for interaction
     let response = ui.allocate_rect(available, Sense::click_and_drag());
 
@@ -100,6 +108,23 @@ pub fn render_schematic_view(
     // Draw junctions
     for junction in &state.schematic.junctions {
         draw_junction(&painter, &viewport, junction.pos, state);
+    }
+
+    // Draw hover highlight for wire vertices (if not already a junction)
+    // This provides visual feedback that wire corners/endpoints can be dragged
+    if let Some((hx, hy)) = state.dialogs.interaction.hover_wire_vertex {
+        let hover_pos = Point::new(hx, hy);
+        // Only draw if not already a junction (junctions draw their own highlight)
+        let is_junction = state.schematic.junctions.iter().any(|j| j.pos == hover_pos);
+        if !is_junction {
+            let pos = viewport.schematic_to_screen(hover_pos);
+            let radius = 3.0 * viewport.zoom;
+            painter.circle_stroke(
+                pos,
+                radius,
+                egui::Stroke::new(1.0 * viewport.zoom, egui::Color32::from_rgb(100, 200, 255)),
+            );
+        }
     }
 
     // Handle interactions
@@ -200,17 +225,41 @@ pub fn render_schematic_view(
 
     // Handle box selection drag for Select tool
     if matches!(current_tool, Tool::Select) {
+        // Detect hover over wire vertices for visual feedback
+        if let Some(pos) = response.hover_pos() {
+            let wire_grid_pos = screen_to_wire_grid(pos);
+            if state.schematic.wire_vertex_at(wire_grid_pos).is_some() {
+                state.dialogs.interaction.hover_wire_vertex =
+                    Some((wire_grid_pos.x, wire_grid_pos.y));
+            } else {
+                state.dialogs.interaction.hover_wire_vertex = None;
+            }
+        } else {
+            state.dialogs.interaction.hover_wire_vertex = None;
+        }
         // On drag start, check if we're dragging a selected component (move) or empty space (box select)
         if response.drag_started_by(egui::PointerButton::Primary)
             && !ui.input(|i| i.modifiers.shift)
         {
             if let Some(pos) = response.interact_pointer_pos() {
                 let grid_pos = screen_to_grid(pos);
+                // Also check wire grid for more precise vertex detection
+                let wire_grid_pos = screen_to_wire_grid(pos);
 
-                // Check if there's a component at the drag start position
-                let comp_at_pos = state.schematic.component_at(grid_pos);
-
-                if let Some(comp_id) = comp_at_pos {
+                // Priority 1: Check for wire vertex at position (for wire corner/junction dragging)
+                // Use wire grid for more precise positioning
+                if state.schematic.wire_vertex_at(wire_grid_pos).is_some() {
+                    // Start vertex/junction drag - track the POSITION, not specific wire
+                    // This allows dragging all wires meeting at a junction together
+                    state.dialogs.interaction.vertex_drag_pos =
+                        Some((wire_grid_pos.x, wire_grid_pos.y));
+                    state.dialogs.interaction.drag.start(
+                        (wire_grid_pos.x, wire_grid_pos.y),
+                        crate::ui::dialog_state::interaction::DragType::WireVertex,
+                    );
+                }
+                // Priority 2: Check if there's a component at the drag start position
+                else if let Some(comp_id) = state.schematic.component_at(grid_pos) {
                     // Drag started on a component
                     if !state.schematic.selection.has_component(comp_id) {
                         // Component not selected - select it first (professional behavior)
@@ -228,12 +277,28 @@ pub fn render_schematic_view(
             }
         }
 
-        // Handle ongoing drag - either move selection or update box selection
+        // Handle ongoing drag - either move selection, update box selection, or move wire vertex
         if response.dragged_by(egui::PointerButton::Primary) {
             if let Some(pos) = response.hover_pos() {
                 let grid_pos = screen_to_grid(pos);
+                let wire_grid_pos = screen_to_wire_grid(pos);
 
-                if state.dialogs.last_drag_pos.is_some() {
+                // Check if we're dragging a wire vertex/junction
+                if let Some((old_x, old_y)) = state.dialogs.interaction.vertex_drag_pos {
+                    let old_pos = Point::new(old_x, old_y);
+                    // Move ALL wire vertices at the old position to the new position
+                    // This is professional EDA behavior - junctions move as a unit
+                    if state.schematic.move_all_vertices_at(old_pos, wire_grid_pos) {
+                        // Update the tracked position to the new location
+                        state.dialogs.interaction.vertex_drag_pos =
+                            Some((wire_grid_pos.x, wire_grid_pos.y));
+                        state
+                            .dialogs
+                            .interaction
+                            .drag
+                            .update((wire_grid_pos.x, wire_grid_pos.y));
+                    }
+                } else if state.dialogs.last_drag_pos.is_some() {
                     // Moving selection with rubber-banding
                     let (last_x, last_y) = state.dialogs.last_drag_pos.unwrap();
                     let delta = Point::new(grid_pos.x - last_x, grid_pos.y - last_y);
@@ -249,9 +314,15 @@ pub fn render_schematic_view(
             }
         }
 
-        // Finish drag - complete box selection or finalize move
+        // Finish drag - complete box selection, finalize move, or finish wire vertex drag
         if response.drag_stopped_by(egui::PointerButton::Primary) {
-            if state.dialogs.last_drag_pos.is_some() {
+            // Check if we were dragging a wire vertex
+            if state.dialogs.interaction.vertex_drag_pos.is_some() {
+                // Clean up wire topology after vertex move
+                state.schematic.cleanup_wire_topology();
+                state.dialogs.interaction.vertex_drag_pos = None;
+                state.dialogs.interaction.drag.cancel();
+            } else if state.dialogs.last_drag_pos.is_some() {
                 // Finished moving selection - clean up any degenerate wires
                 // (e.g., zero-length wires created by moving component terminal to wire endpoint)
                 state.schematic.cleanup_wire_topology();
@@ -1033,31 +1104,193 @@ fn draw_component(
         }
     }
 
-    // Draw component name
-    let label_pos = Pos2::new(pos.x, pos.y - 20.0 * scale);
-    painter.text(
-        label_pos,
-        egui::Align2::CENTER_BOTTOM,
-        &component.name,
-        egui::FontId::proportional(10.0 * scale),
-        state.theme.text_primary,
+    // Smart label placement based on component type, rotation, and dimensions
+    // Commercial EDA tools (Cadence Virtuoso) place labels to avoid overlapping
+    // terminals and component body, with name/value on opposite sides
+    draw_component_labels(painter, pos, scale, component, state);
+}
+
+/// Smart label placement for components
+///
+/// Places name and value labels optimally based on:
+/// - Component dimensions and aspect ratio
+/// - Rotation (horizontal vs vertical orientation)
+/// - Terminal positions (avoid overlapping terminals)
+///
+/// Matches commercial EDA tool behavior (Cadence Virtuoso style).
+fn draw_component_labels(
+    painter: &Painter,
+    pos: Pos2,
+    scale: f32,
+    component: &crate::state::Component,
+    state: &AppState,
+) {
+    // Skip labels for Ground (too small, clutters schematic)
+    if matches!(component.kind, crate::state::ComponentType::Ground) {
+        return;
+    }
+
+    let (width, height) = component.kind.symbol_dimensions();
+    let is_rotated_vertical = component.rotation.is_vertical(); // R90 or R270
+
+    // Determine effective dimensions after rotation
+    let (eff_w, eff_h) = if is_rotated_vertical {
+        (height as f32, width as f32) // Swap for rotated
+    } else {
+        (width as f32, height as f32)
+    };
+
+    // Determine label placement based on component shape and orientation
+    // Horizontal components: name above, value below
+    // Vertical components: name to the left, value to the right
+    // Tall components (BJTs, MOSFETs): name above, value below regardless of rotation
+
+    let is_tall_device = matches!(
+        component.kind,
+        crate::state::ComponentType::NpnBjt
+            | crate::state::ComponentType::PnpBjt
+            | crate::state::ComponentType::Nmos
+            | crate::state::ComponentType::Pmos
+            | crate::state::ComponentType::Njfet
+            | crate::state::ComponentType::Pjfet
+            | crate::state::ComponentType::NVdmos
+            | crate::state::ComponentType::PVdmos
     );
 
+    let is_source = component.kind.is_source()
+        && !matches!(
+            component.kind,
+            crate::state::ComponentType::Vcvs
+                | crate::state::ComponentType::Vccs
+                | crate::state::ComponentType::Ccvs
+                | crate::state::ComponentType::Cccs
+        );
+
+    // Calculate label margin from component edge
+    let margin = 4.0 * scale;
+    let name_font = egui::FontId::proportional(10.0 * scale);
+    let value_font = egui::FontId::proportional(9.0 * scale);
+
+    // Check if ORIGINAL component is horizontally-oriented (width > height)
+    // This is important because terminals are on left/right for horizontal components
+    let is_horizontal_component = width > height;
+
+    // Choose placement strategy based on component type and orientation
+    let (name_pos, name_align, value_pos, value_align) = if is_tall_device {
+        // Tall devices (transistors): name above, value on the terminal side
+        // For transistors, value goes on the side with terminals (right side typically)
+        let half_h = (eff_h / 2.0) * scale;
+        let half_w = (eff_w / 2.0) * scale;
+
+        let name_y = pos.y - half_h - margin;
+        let value_x = pos.x + half_w + margin;
+
+        (
+            Pos2::new(pos.x, name_y),
+            egui::Align2::CENTER_BOTTOM,
+            Pos2::new(value_x, pos.y),
+            egui::Align2::LEFT_CENTER,
+        )
+    } else if is_source && !is_rotated_vertical {
+        // Vertical sources (V, I): name to the left, value to the right
+        let half_w = (eff_w / 2.0) * scale;
+
+        (
+            Pos2::new(pos.x - half_w - margin, pos.y),
+            egui::Align2::RIGHT_CENTER,
+            Pos2::new(pos.x + half_w + margin, pos.y),
+            egui::Align2::LEFT_CENTER,
+        )
+    } else if is_source && is_rotated_vertical {
+        // Rotated sources: name above, value below
+        let half_h = (eff_h / 2.0) * scale;
+
+        (
+            Pos2::new(pos.x, pos.y - half_h - margin),
+            egui::Align2::CENTER_BOTTOM,
+            Pos2::new(pos.x, pos.y + half_h + margin),
+            egui::Align2::CENTER_TOP,
+        )
+    } else if is_horizontal_component && !is_rotated_vertical {
+        // Horizontal components (R, L, etc.) not rotated: name above, value below
+        // Terminals are on left/right, so top/bottom are safe for labels
+        let half_h = (eff_h / 2.0) * scale;
+
+        (
+            Pos2::new(pos.x, pos.y - half_h - margin),
+            egui::Align2::CENTER_BOTTOM,
+            Pos2::new(pos.x, pos.y + half_h + margin),
+            egui::Align2::CENTER_TOP,
+        )
+    } else if is_horizontal_component && is_rotated_vertical {
+        // Horizontal component rotated 90°/270°: terminals now at top/bottom
+        // Place labels on left/right to avoid terminals
+        let half_w = (eff_w / 2.0) * scale;
+
+        (
+            Pos2::new(pos.x - half_w - margin, pos.y),
+            egui::Align2::RIGHT_CENTER,
+            Pos2::new(pos.x + half_w + margin, pos.y),
+            egui::Align2::LEFT_CENTER,
+        )
+    } else {
+        // Default: name above, value below (for square-ish components)
+        let half_h = (eff_h / 2.0).max(10.0) * scale;
+
+        (
+            Pos2::new(pos.x, pos.y - half_h - margin),
+            egui::Align2::CENTER_BOTTOM,
+            Pos2::new(pos.x, pos.y + half_h + margin),
+            egui::Align2::CENTER_TOP,
+        )
+    };
+
+    // Draw component name (reference designator)
+    if !component.name.is_empty() {
+        painter.text(
+            name_pos,
+            name_align,
+            &component.name,
+            name_font,
+            state.theme.text_primary,
+        );
+    }
+
     // Draw component value
-    let value_pos = Pos2::new(pos.x, pos.y + 22.0 * scale);
-    painter.text(
-        value_pos,
-        egui::Align2::CENTER_TOP,
-        &component.value,
-        egui::FontId::proportional(9.0 * scale),
-        state.theme.text_secondary,
-    );
+    if !component.value.is_empty() {
+        painter.text(
+            value_pos,
+            value_align,
+            &component.value,
+            value_font,
+            state.theme.text_secondary,
+        );
+    }
 }
 
 /// Draw a junction (net connection point)
 fn draw_junction(painter: &Painter, viewport: &Viewport, position: Point, state: &AppState) {
     let pos = viewport.schematic_to_screen(position);
     let radius = 1.5 * viewport.zoom; // Match wire/symbol stroke width
+
+    // Check if this junction is being hovered (for visual feedback)
+    let is_hovered = state
+        .dialogs
+        .interaction
+        .hover_wire_vertex
+        .map(|(x, y)| x == position.x && y == position.y)
+        .unwrap_or(false);
+
+    if is_hovered {
+        // Draw larger highlight ring when hovered
+        let highlight_radius = radius * 2.5;
+        painter.circle_stroke(
+            pos,
+            highlight_radius,
+            Stroke::new(1.0 * viewport.zoom, Color32::from_rgb(100, 200, 255)),
+        );
+    }
+
     painter.circle_filled(pos, radius, state.theme.wire_default);
 }
 
