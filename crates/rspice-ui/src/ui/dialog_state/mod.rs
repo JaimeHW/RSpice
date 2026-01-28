@@ -13,11 +13,11 @@
 //! - Clean serialization boundaries
 
 mod analysis;
-mod interaction;
+pub mod interaction;
 mod visibility;
 
 pub use analysis::AnalysisDialogState;
-pub use interaction::InteractionState;
+pub use interaction::{DragType, InteractionState};
 pub use visibility::DialogVisibility;
 
 // =============================================================================

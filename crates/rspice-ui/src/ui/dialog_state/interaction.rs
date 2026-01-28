@@ -27,6 +27,13 @@ pub struct InteractionState {
 
     /// Last click position in grid coordinates
     pub last_click_pos: Option<(i32, i32)>,
+
+    /// Wire vertex/junction position being dragged
+    /// When dragging, ALL wires meeting at this point move together
+    pub vertex_drag_pos: Option<(i32, i32)>,
+
+    /// Whether hovering over a wire vertex (for visual feedback)
+    pub hover_wire_vertex: Option<(i32, i32)>,
 }
 
 impl InteractionState {
@@ -46,6 +53,8 @@ impl InteractionState {
         self.hover_component_id = None;
         self.hover_wire_id = None;
         self.last_click_pos = None;
+        self.vertex_drag_pos = None;
+        self.hover_wire_vertex = None;
     }
 }
 
