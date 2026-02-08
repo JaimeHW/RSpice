@@ -6,7 +6,9 @@
 //! - Linear and nonlinear solver interfaces
 
 use super::{DampingStrategy, Engine, SimulationError};
-use crate::solver::{SolverError, StaticMatrix};
+use crate::solver::{
+    ArcLengthConfig, ArcLengthContinuation, PseudoTransient, SolverError, StaticMatrix,
+};
 use crate::{CircuitData, Value};
 
 #[derive(Debug, Clone, Copy)]
@@ -32,10 +34,16 @@ impl Engine {
     const ARMIJO_C1: Value = 1e-4;
     const LINE_SEARCH_BACKTRACK: Value = 0.5;
     const LINE_SEARCH_MAX_ITERS: usize = 8;
+    const ARC_LENGTH_MAX_STEPS: usize = 128;
 
     #[inline]
     fn nonlinear_iteration_budget(&self, multiplier: usize) -> usize {
         self.config.max_iterations.saturating_mul(multiplier).max(1)
+    }
+
+    #[inline]
+    fn continuation_iteration_budget(&self, multiplier: usize, minimum: usize) -> usize {
+        self.nonlinear_iteration_budget(multiplier).max(minimum)
     }
 
     #[inline]
@@ -257,6 +265,119 @@ impl Engine {
             }
             circuit.stamp_dc_direct(matrix, rhs);
         })
+    }
+
+    fn nonlinear_merit_with_pseudo_transient(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+        anchor_solution: &[Value],
+        pseudo_conductance: Value,
+    ) -> Option<Value> {
+        self.nonlinear_merit_with_linear_stamp(circuit, matrix, solution, |circuit, matrix, rhs| {
+            for i in 0..rhs.len() {
+                matrix.add(i, i, 1e-12 + pseudo_conductance);
+                rhs[i] += pseudo_conductance * anchor_solution[i];
+            }
+            circuit.stamp_dc_direct(matrix, rhs);
+        })
+    }
+
+    fn normalize_initial_guess(initial_guess: &[Value], size: usize) -> Vec<Value> {
+        if initial_guess.len() == size {
+            initial_guess.to_vec()
+        } else {
+            let mut guess = vec![0.0; size];
+            let copy_len = initial_guess.len().min(size);
+            guess[..copy_len].copy_from_slice(&initial_guess[..copy_len]);
+            guess
+        }
+    }
+
+    fn solve_scaled_nonlinear_corrector(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        source_scale: Value,
+        initial_solution: &[Value],
+        damping_state: &mut NewtonDampingState,
+        max_iterations: usize,
+    ) -> (Vec<Value>, bool, usize) {
+        let mut solution = initial_solution.to_vec();
+        let mut used_iterations = 0usize;
+
+        for iter in 0..max_iterations {
+            used_iterations = iter + 1;
+            let mut rhs = vec![0.0; solution.len()];
+            matrix.clear_values();
+
+            for i in 0..solution.len() {
+                matrix.add(i, i, 1e-12);
+            }
+
+            circuit.stamp_dc_direct_scaled(matrix, &mut rhs, source_scale);
+            circuit.update_nonlinear(&solution);
+            circuit.stamp_nonlinear(matrix, &mut rhs, &solution);
+
+            let raw_solution = match matrix.solve(&rhs) {
+                Ok(sol) => sol,
+                Err(_) => return (solution, false, used_iterations),
+            };
+
+            let mut new_solution =
+                self.apply_damping_strategy(&solution, &raw_solution, damping_state, |trial| {
+                    self.nonlinear_merit_scaled(circuit, matrix, trial, source_scale)
+                });
+            Self::clamp_solution_to_physical_bounds(&mut new_solution);
+
+            let voltage_converged =
+                Self::check_voltage_convergence(&solution, &new_solution, self.config.tolerance);
+            circuit.update_nonlinear(&new_solution);
+            solution = new_solution;
+
+            if voltage_converged && circuit.nonlinear_converged(self.config.tolerance) {
+                return (solution, true, used_iterations);
+            }
+        }
+
+        (solution, false, used_iterations)
+    }
+
+    fn evaluate_fallback_candidate(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        candidate: Vec<Value>,
+        method_name: &str,
+    ) -> Option<Vec<Value>> {
+        let suspicious = Self::is_suspicious_solution(&candidate);
+        let validated =
+            !suspicious && self.validate_nonlinear_solution(circuit, matrix, &candidate);
+        if validated {
+            return Some(candidate);
+        }
+
+        if suspicious {
+            if Self::has_clamped_values(&candidate) {
+                log::warn!(
+                    "{} produced clamped/non-finite values; candidate rejected.",
+                    method_name
+                );
+            } else {
+                log::warn!(
+                    "{} produced suspiciously uniform values; candidate rejected.",
+                    method_name
+                );
+            }
+        } else {
+            log::warn!(
+                "{} candidate failed convergence re-validation; candidate rejected.",
+                method_name
+            );
+        }
+
+        None
     }
 
     fn validate_nonlinear_solution(
@@ -599,20 +720,10 @@ impl Engine {
         initial_guess: Option<&[Value]>,
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
-        // Use provided initial guess or start from zero
-        let mut solution = match initial_guess {
-            Some(guess) if guess.len() == size => guess.to_vec(),
-            Some(guess) => {
-                // Mismatched size - log warning and use zero
-                // This can happen if circuit topology changed
-                let mut sol = vec![0.0; size];
-                // Copy as much as we can
-                let copy_len = guess.len().min(size);
-                sol[..copy_len].copy_from_slice(&guess[..copy_len]);
-                sol
-            }
-            None => vec![0.0; size],
-        };
+        // Use provided initial guess or start from zero.
+        let mut solution = initial_guess
+            .map(|guess| Self::normalize_initial_guess(guess, size))
+            .unwrap_or_else(|| vec![0.0; size]);
         let mut rhs = vec![0.0; size];
         // Newton-Raphson iteration
         let mut hit_voltage_limit = false;
@@ -702,27 +813,30 @@ impl Engine {
                 return Ok(solution);
             }
         }
-        // Log diagnostic information when falling back to source stepping
+        // Log diagnostic information when falling back to convergence aids.
         if hit_voltage_limit {
             log::warn!(
                 "DC Newton-Raphson did not converge after {} iterations. \
-                Voltage limiting triggered on {} node(s). Trying source stepping...",
+                Voltage limiting triggered on {} node(s). Trying configured convergence aids...",
                 dc_max_iterations,
                 limited_nodes.len()
             );
         } else {
             log::info!(
-                "DC Newton-Raphson did not converge after {} iterations. Trying source stepping...",
+                "DC Newton-Raphson did not converge after {} iterations. Trying configured convergence aids...",
                 dc_max_iterations
             );
         }
         let conv_cfg = &self.config.convergence_config;
         let allow_source = conv_cfg.source_stepping;
+        let allow_pseudo = conv_cfg.pseudo_transient;
         let allow_gmin = conv_cfg.gmin_stepping;
-        if !allow_source && !allow_gmin {
+        let allow_arc = conv_cfg.arc_length;
+        if !allow_source && !allow_pseudo && !allow_gmin && !allow_arc {
             return Err(SimulationError::ConvergenceFailed(dc_max_iterations));
         }
         let mut fallback_seed = solution.clone();
+
         if allow_source {
             match self.source_stepping_nonlinear_with_guess(circuit, matrix, &solution) {
                 Ok(source_stepped) => {
@@ -731,52 +845,93 @@ impl Engine {
                         source_stepped.len(),
                         source_stepped.iter().take(10).collect::<Vec<_>>()
                     );
-                    let suspicious = Self::is_suspicious_solution(&source_stepped);
-                    let validated = !suspicious
-                        && self.validate_nonlinear_solution(circuit, matrix, &source_stepped);
-                    if validated {
-                        return Ok(source_stepped);
-                    }
-                    if suspicious {
-                        if Self::has_clamped_values(&source_stepped) {
-                            log::warn!(
-                                "Source stepping produced clamped values; candidate rejected."
-                            );
-                        } else {
-                            log::warn!(
-                                "Source stepping produced suspiciously uniform values; candidate rejected."
-                            );
-                        }
-                    } else {
-                        log::warn!(
-                            "Source stepping candidate failed convergence re-validation; candidate rejected."
-                        );
+                    if let Some(candidate) = self.evaluate_fallback_candidate(
+                        circuit,
+                        matrix,
+                        source_stepped.clone(),
+                        "Source stepping",
+                    ) {
+                        return Ok(candidate);
                     }
                     fallback_seed = source_stepped;
                 }
                 Err(e) => {
-                    if !allow_gmin {
+                    if !allow_pseudo && !allow_gmin && !allow_arc {
                         return Err(e);
                     }
                     log::warn!(
-                        "Source stepping failed with {}. Escalating to GMIN stepping.",
+                        "Source stepping failed with {}. Escalating to next configured aid.",
                         e
                     );
                 }
             }
         }
-        if allow_gmin {
-            let gmin_solution = self.gmin_stepping_nonlinear(circuit, matrix, &fallback_seed)?;
-            let suspicious = Self::is_suspicious_solution(&gmin_solution);
-            let validated =
-                !suspicious && self.validate_nonlinear_solution(circuit, matrix, &gmin_solution);
-            if validated {
-                return Ok(gmin_solution);
+
+        if allow_pseudo {
+            match self.pseudo_transient_nonlinear_with_guess(circuit, matrix, &fallback_seed) {
+                Ok(pseudo_solution) => {
+                    log::info!(
+                        "DC operating point after pseudo-transient continuation ({} nodes): {:?}",
+                        pseudo_solution.len(),
+                        pseudo_solution.iter().take(10).collect::<Vec<_>>()
+                    );
+                    if let Some(candidate) = self.evaluate_fallback_candidate(
+                        circuit,
+                        matrix,
+                        pseudo_solution.clone(),
+                        "Pseudo-transient continuation",
+                    ) {
+                        return Ok(candidate);
+                    }
+                    fallback_seed = pseudo_solution;
+                }
+                Err(e) => {
+                    if !allow_gmin && !allow_arc {
+                        return Err(e);
+                    }
+                    log::warn!(
+                        "Pseudo-transient continuation failed with {}. Escalating to next configured aid.",
+                        e
+                    );
+                }
             }
-            if suspicious {
-                log::warn!("GMIN stepping candidate rejected due to suspicious/clamped values.");
-            } else {
-                log::warn!("GMIN stepping candidate failed convergence re-validation.");
+        }
+
+        if allow_gmin {
+            match self.gmin_stepping_nonlinear(circuit, matrix, &fallback_seed) {
+                Ok(gmin_solution) => {
+                    if let Some(candidate) = self.evaluate_fallback_candidate(
+                        circuit,
+                        matrix,
+                        gmin_solution.clone(),
+                        "GMIN stepping",
+                    ) {
+                        return Ok(candidate);
+                    }
+                    fallback_seed = gmin_solution;
+                }
+                Err(e) => {
+                    if !allow_arc {
+                        return Err(e);
+                    }
+                    log::warn!(
+                        "GMIN stepping failed with {}. Escalating to arc-length continuation.",
+                        e
+                    );
+                }
+            }
+        }
+
+        if allow_arc {
+            let arc_solution =
+                self.arc_length_continuation_nonlinear_with_guess(circuit, matrix, &fallback_seed)?;
+            if let Some(candidate) = self.evaluate_fallback_candidate(
+                circuit,
+                matrix,
+                arc_solution.clone(),
+                "Arc-length continuation",
+            ) {
+                return Ok(candidate);
             }
         }
         Err(SimulationError::ConvergenceFailed(dc_max_iterations))
@@ -847,12 +1002,13 @@ impl Engine {
             vec![0.0; size]
         };
         let mut damping_state = NewtonDampingState::default();
+        let source_iterations = self.continuation_iteration_budget(20, 16);
 
         for &scale in SOURCE_SCALES {
             // Run Newton iterations at this source level
-            // Use significantly more iterations for damped convergence (20x base)
-            // With MAX_DELTA_V=2V damping, need 500+ iterations to traverse full range
-            for _iteration in 0..self.nonlinear_iteration_budget(20) {
+            // Use robust iteration budget so continuation still has work even
+            // when the base direct-Newton budget is intentionally small.
+            for _iteration in 0..source_iterations {
                 let mut rhs = vec![0.0; size];
 
                 matrix.clear_values();
@@ -903,6 +1059,165 @@ impl Engine {
         Ok(solution)
     }
 
+    /// Pseudo-transient continuation for difficult nonlinear circuits.
+    ///
+    /// Uses pseudo-capacitor anchoring (`Gpseudo * (x - x_prev)`) and grows the
+    /// pseudo timestep as the solution stabilizes. This is a robust fallback for
+    /// hard DC operating points where direct Newton/source/GMIN struggle.
+    pub(crate) fn pseudo_transient_nonlinear_with_guess(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: &[Value],
+    ) -> Result<Vec<Value>, SimulationError> {
+        let size = circuit.matrix_size();
+        let mut solution = Self::normalize_initial_guess(initial_guess, size);
+        if Self::is_suspicious_solution(&solution) {
+            solution.fill(0.0);
+        }
+        let mut anchor_solution = solution.clone();
+        Self::clamp_solution_to_physical_bounds(&mut solution);
+        Self::clamp_solution_to_physical_bounds(&mut anchor_solution);
+
+        let mut pseudo = PseudoTransient::new();
+        let mut damping_state = NewtonDampingState::default();
+        let pseudo_iterations = self.continuation_iteration_budget(12, 16);
+
+        while !pseudo.is_complete() {
+            let pseudo_conductance = pseudo.conductance(0);
+            let mut stage_converged = false;
+
+            for _ in 0..pseudo_iterations {
+                let mut rhs = vec![0.0; size];
+                matrix.clear_values();
+
+                for i in 0..size {
+                    matrix.add(i, i, 1e-12 + pseudo_conductance);
+                    rhs[i] += pseudo.current(anchor_solution[i]);
+                }
+
+                circuit.stamp_dc_direct(matrix, &mut rhs);
+                circuit.update_nonlinear(&solution);
+                circuit.stamp_nonlinear(matrix, &mut rhs, &solution);
+
+                let raw_solution = match matrix.solve(&rhs) {
+                    Ok(sol) => sol,
+                    Err(_) => break,
+                };
+
+                let mut new_solution = self.apply_damping_strategy(
+                    &solution,
+                    &raw_solution,
+                    &mut damping_state,
+                    |trial| {
+                        self.nonlinear_merit_with_pseudo_transient(
+                            circuit,
+                            matrix,
+                            trial,
+                            &anchor_solution,
+                            pseudo_conductance,
+                        )
+                    },
+                );
+                Self::clamp_solution_to_physical_bounds(&mut new_solution);
+
+                let converged = Self::check_voltage_convergence(
+                    &solution,
+                    &new_solution,
+                    self.config.tolerance,
+                );
+                circuit.update_nonlinear(&new_solution);
+                solution = new_solution;
+
+                if converged && circuit.nonlinear_converged(self.config.tolerance) {
+                    stage_converged = true;
+                    break;
+                }
+            }
+
+            if stage_converged {
+                anchor_solution = solution.clone();
+                pseudo.advance_on_success();
+            } else if !pseudo.reduce_on_failure() {
+                return Err(SimulationError::ConvergenceFailed(pseudo_iterations));
+            }
+        }
+
+        Ok(solution)
+    }
+
+    /// Arc-length continuation fallback for strongly nonlinear or multi-solution circuits.
+    ///
+    /// Uses predictor-corrector continuation on source scale (lambda: 0 -> 1) with
+    /// adaptive arc-length control. This improves robustness near turning points.
+    pub(crate) fn arc_length_continuation_nonlinear_with_guess(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: &[Value],
+    ) -> Result<Vec<Value>, SimulationError> {
+        let size = circuit.matrix_size();
+        let mut current_solution = Self::normalize_initial_guess(initial_guess, size);
+        if Self::is_suspicious_solution(&current_solution) {
+            current_solution.fill(0.0);
+        }
+        Self::clamp_solution_to_physical_bounds(&mut current_solution);
+        let arc_newton_iters = self.continuation_iteration_budget(8, 16);
+
+        let mut arc_cfg = ArcLengthConfig {
+            tolerance: self.config.tolerance,
+            max_steps: Self::ARC_LENGTH_MAX_STEPS,
+            max_newton_iters: arc_newton_iters,
+            ..ArcLengthConfig::default()
+        };
+        // Keep arc steps conservative for DC fallback stability.
+        arc_cfg.initial_step = arc_cfg.initial_step.min(0.15);
+        arc_cfg.max_step = arc_cfg.max_step.min(0.25);
+
+        let mut arc = ArcLengthContinuation::with_config(size, arc_cfg.clone());
+        let mut damping_state = NewtonDampingState::default();
+        // Bootstrap to a consistent lambda=0 operating point before continuation.
+        let (bootstrap_solution, _, _) = self.solve_scaled_nonlinear_corrector(
+            circuit,
+            matrix,
+            0.0,
+            &current_solution,
+            &mut damping_state,
+            arc_newton_iters,
+        );
+        current_solution = bootstrap_solution;
+        arc.initialize(&current_solution);
+
+        while !arc.is_complete() && !arc.is_failed() {
+            let (predicted_solution, target_lambda) = arc.predict(&current_solution);
+            let (corrected_solution, converged, newton_iters) = self
+                .solve_scaled_nonlinear_corrector(
+                    circuit,
+                    matrix,
+                    target_lambda,
+                    &predicted_solution,
+                    &mut damping_state,
+                    arc_cfg.max_newton_iters,
+                );
+
+            if converged {
+                arc.accept_step(&corrected_solution, target_lambda, newton_iters);
+                current_solution = corrected_solution;
+            } else if !arc.reject_step() {
+                break;
+            }
+        }
+
+        if arc.is_complete() {
+            Ok(current_solution)
+        } else {
+            log::warn!(
+                "Arc-length continuation did not reach lambda=1. Falling back to monotonic source continuation."
+            );
+            self.source_stepping_nonlinear_with_guess(circuit, matrix, &current_solution)
+        }
+    }
+
     /// GMIN stepping for very difficult nonlinear circuits
     ///
     /// GMIN stepping starts with a large GMIN (1e-3) added to each node,
@@ -940,12 +1255,13 @@ impl Engine {
                 .collect()
         };
         let mut damping_state = NewtonDampingState::default();
+        let gmin_iterations = self.continuation_iteration_budget(10, 12);
 
         for (step, &gmin) in GMIN_SCALES.iter().enumerate() {
             log::debug!("GMIN stepping: step {} with GMIN = {:.2e}", step + 1, gmin);
 
             // Use more iterations for GMIN stepping to allow convergence
-            for _iteration in 0..self.nonlinear_iteration_budget(10) {
+            for _iteration in 0..gmin_iterations {
                 let mut rhs = vec![0.0; size];
 
                 matrix.clear_values();
@@ -1288,5 +1604,25 @@ mod tests {
 
         assert!((damped[0] - Engine::MAX_DELTA_VOLTAGE_LIMIT).abs() < 1e-12);
         assert!((damped[1] + Engine::MAX_DELTA_VOLTAGE_LIMIT).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_normalize_initial_guess_handles_size_mismatch() {
+        let guess = vec![1.0, 2.0, 3.0];
+        let normalized_short = Engine::normalize_initial_guess(&guess, 2);
+        let normalized_long = Engine::normalize_initial_guess(&guess, 5);
+
+        assert_eq!(normalized_short, vec![1.0, 2.0]);
+        assert_eq!(normalized_long, vec![1.0, 2.0, 3.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_clamp_solution_to_physical_bounds_limits_extremes() {
+        let mut solution = vec![f64::INFINITY, -5000.0, 12.5];
+        Engine::clamp_solution_to_physical_bounds(&mut solution);
+
+        assert_eq!(solution[0], 0.0);
+        assert_eq!(solution[1], -Engine::MAX_NODE_VOLTAGE);
+        assert_eq!(solution[2], 12.5);
     }
 }
