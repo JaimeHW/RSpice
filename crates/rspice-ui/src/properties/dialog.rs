@@ -182,6 +182,11 @@ pub fn parse_engineering_value(input: &str) -> Result<f64, String> {
 pub fn format_engineering_value(value: f64) -> String {
     let abs_value = value.abs();
 
+    // Special case: zero should never have a suffix
+    if abs_value == 0.0 {
+        return "0".to_string();
+    }
+
     let (scaled, suffix) = if abs_value >= 1e12 {
         (value / 1e12, "T")
     } else if abs_value >= 1e9 {

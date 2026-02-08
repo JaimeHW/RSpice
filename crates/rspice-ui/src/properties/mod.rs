@@ -3,9 +3,12 @@
 //! Property editing and design variable management.
 //! Provides UI components for editing component properties and design parameters.
 //!
-//! - `dialog` - Component properties dialog
-//! - `enhanced_editor` - Enhanced property editor with validation
+//! - `dialog` - Component properties dialog (basic)
 //! - `design_variables` - Design variable manager (parameterized values)
+//! - `tabbed_dialog` - Commercial-grade tabbed property dialog (Virtuoso-style)
+//! - `model_browser` - Model library browser
+//! - `property_bridge` - Bidirectional property synchronization
+//! - `pwl_editor` - Piecewise-linear waveform editor
 //!
 //! # Architecture
 //!
@@ -14,7 +17,10 @@
 
 pub mod design_variables;
 pub mod dialog;
-pub mod enhanced_editor;
+pub mod model_browser;
+pub mod property_bridge;
+pub mod pwl_editor;
+pub mod tabbed_dialog;
 
 // Re-export main types
 pub use design_variables::{DesignVariable, DesignVariablesState};
@@ -22,4 +28,7 @@ pub use dialog::{
     format_engineering_value, parse_engineering_value, render_properties_dialog, EditedProperties,
     PropertiesDialogResult, PropertyEditorState,
 };
-pub use enhanced_editor::{render_enhanced_property_editor, EnhancedPropertyEditorState};
+pub use property_bridge::parse_params_string;
+pub use tabbed_dialog::{
+    render_tabbed_property_dialog, TabInfo, TabbedDialogResult, TabbedPropertyDialogState,
+};
