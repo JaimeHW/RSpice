@@ -453,10 +453,10 @@ impl BatchBjts {
                 matrix.stamp_direct(idx, -go);
             }
             if let Some(idx) = self.idx_eb[i] {
-                matrix.stamp_direct(idx, -gm);
+                matrix.stamp_direct(idx, -gm - gbe);
             }
             if let Some(idx) = self.idx_ee[i] {
-                matrix.stamp_direct(idx, gm + go);
+                matrix.stamp_direct(idx, gm + go + gbe);
             }
 
             // RHS
@@ -473,13 +473,24 @@ impl BatchBjts {
     }
 
     /// Check convergence.
+    ///
+    /// Uses both absolute and relative tolerance to avoid false non-convergence
+    /// when junction voltages are large or oscillating slightly.
     #[inline]
     pub fn all_converged(&self, tolerance: Value) -> bool {
+        // Use a relative tolerance of 0.1% plus absolute tolerance
+        // This prevents tiny oscillations at larger voltages from blocking convergence
+        const REL_TOL: Value = 1e-3; // 0.1% relative tolerance
+
         for i in 0..self.len() {
-            if (self.vbe[i] - self.vbe_prev[i]).abs() >= tolerance {
-                return false;
-            }
-            if (self.vbc[i] - self.vbc_prev[i]).abs() >= tolerance {
+            let delta_vbe = (self.vbe[i] - self.vbe_prev[i]).abs();
+            let delta_vbc = (self.vbc[i] - self.vbc_prev[i]).abs();
+
+            // Effective tolerance = max(abs_tol, rel_tol * |V|)
+            let tol_vbe = tolerance.max(REL_TOL * self.vbe[i].abs());
+            let tol_vbc = tolerance.max(REL_TOL * self.vbc[i].abs());
+
+            if delta_vbe >= tol_vbe || delta_vbc >= tol_vbc {
                 return false;
             }
         }
@@ -501,6 +512,7 @@ use crate::simd::{exp_f64x4 as simd_exp, sqrt_f64x4 as simd_sqrt, store_f64x4};
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::solver::StaticMatrix;
 
     #[test]
     fn test_batch_bjts_creation() {
@@ -577,5 +589,66 @@ mod tests {
             assert!(batch.ic[i] > batch.ib[i] * 10.0, "Expected Ic > 10*Ib");
             assert!(batch.gm[i] > 0.0);
         }
+    }
+
+    #[test]
+    fn test_batch_stamp_emitter_row_includes_gbe_and_preserves_kcl() {
+        let mut batch = BatchBjts::new();
+        batch.add(
+            3,
+            2,
+            1,
+            BjtType::Npn,
+            1e-14,
+            1.0,
+            1.0,
+            0.026,
+            100.0,
+            1.0,
+            100.0,
+            0.1,
+        );
+
+        let mut triplets = Vec::new();
+        for row in 0..3 {
+            for col in 0..3 {
+                triplets.push((row, col, 0.0));
+            }
+        }
+        let mut matrix = StaticMatrix::from_triplets(3, 3, &triplets).unwrap();
+        batch.link(&matrix);
+
+        batch.gm[0] = 1.0;
+        batch.go[0] = 2.0;
+        batch.gbe[0] = 4.0;
+        batch.gbc[0] = 8.0;
+        batch.ic_eq[0] = 0.3;
+        batch.ib_eq[0] = -0.1;
+
+        let idx_cc = matrix.get_index(2, 2).unwrap().0;
+        let idx_cb = matrix.get_index(2, 1).unwrap().0;
+        let idx_ce = matrix.get_index(2, 0).unwrap().0;
+        let idx_bc = matrix.get_index(1, 2).unwrap().0;
+        let idx_bb = matrix.get_index(1, 1).unwrap().0;
+        let idx_be = matrix.get_index(1, 0).unwrap().0;
+        let idx_ec = matrix.get_index(0, 2).unwrap().0;
+        let idx_eb = matrix.get_index(0, 1).unwrap().0;
+        let idx_ee = matrix.get_index(0, 0).unwrap().0;
+
+        let mut rhs = vec![0.0; 3];
+        batch.stamp(&mut matrix, &mut rhs);
+        let values = matrix.values_mut().to_vec();
+
+        assert!((values[idx_ec] - (-(2.0))).abs() < 1e-12);
+        assert!((values[idx_eb] - (-(1.0 + 4.0))).abs() < 1e-12);
+        assert!((values[idx_ee] - (1.0 + 2.0 + 4.0)).abs() < 1e-12);
+
+        // Emitter row is -(collector + base) for each column.
+        assert!((values[idx_ec] + values[idx_cc] + values[idx_bc]).abs() < 1e-12);
+        assert!((values[idx_eb] + values[idx_cb] + values[idx_bb]).abs() < 1e-12);
+        assert!((values[idx_ee] + values[idx_ce] + values[idx_be]).abs() < 1e-12);
+
+        // Current source KCL.
+        assert!((rhs[2] + rhs[1] + rhs[0]).abs() < 1e-12);
     }
 }

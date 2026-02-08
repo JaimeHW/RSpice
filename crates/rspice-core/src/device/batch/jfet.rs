@@ -7,9 +7,6 @@ use crate::circuit::NodeId;
 use crate::device::mosfet::JfetType;
 use crate::solver::{CscIndex, StaticMatrix};
 
-#[cfg(feature = "simd")]
-use wide::f64x4;
-
 //=============================================================================
 // Batch JFET Storage
 //=============================================================================
@@ -87,6 +84,10 @@ pub struct BatchJfets {
     pub ggd: Vec<Value>,
     /// Equivalent current source
     pub ids_eq: Vec<Value>,
+    /// Gate-source diode equivalent current source
+    pub igs_eq: Vec<Value>,
+    /// Gate-drain diode equivalent current source
+    pub igd_eq: Vec<Value>,
     /// Operating region
     pub region: Vec<JfetRegion>,
 
@@ -134,6 +135,8 @@ impl BatchJfets {
             ggs: Vec::with_capacity(capacity),
             ggd: Vec::with_capacity(capacity),
             ids_eq: Vec::with_capacity(capacity),
+            igs_eq: Vec::with_capacity(capacity),
+            igd_eq: Vec::with_capacity(capacity),
             region: Vec::with_capacity(capacity),
             rhs_drain: Vec::with_capacity(capacity),
             rhs_gate: Vec::with_capacity(capacity),
@@ -153,6 +156,7 @@ impl BatchJfets {
         beta: Value,
         lambda: Value,
         is: Value,
+        n_vt: Value,
         mult: Value,
     ) {
         self.node_drain.push(node_drain);
@@ -164,7 +168,7 @@ impl BatchJfets {
         self.beta.push(beta);
         self.lambda.push(lambda);
         self.is.push(is);
-        self.n_vt.push(0.026); // Thermal voltage at 300K
+        self.n_vt.push(n_vt.max(1e-12));
         self.mult.push(mult);
 
         // Initialize indices
@@ -189,6 +193,8 @@ impl BatchJfets {
         self.ggs.push(1e-12);
         self.ggd.push(1e-12);
         self.ids_eq.push(0.0);
+        self.igs_eq.push(0.0);
+        self.igd_eq.push(0.0);
         self.region.push(JfetRegion::Cutoff);
 
         self.rhs_drain.push(if node_drain > 0 {
@@ -291,118 +297,103 @@ impl BatchJfets {
     /// Evaluate using SIMD.
     #[cfg(feature = "simd")]
     pub fn evaluate(&mut self) {
-        let len = self.len();
-        let simd_len = len - (len % 4);
-
-        let mut i = 0;
-        while i < simd_len {
-            self.evaluate_simd_chunk(i);
-            i += 4;
-        }
-
-        for j in simd_len..len {
-            self.evaluate_scalar(j);
-        }
-    }
-
-    /// SIMD evaluation for 4 JFETs.
-    #[cfg(feature = "simd")]
-    fn evaluate_simd_chunk(&mut self, i: usize) {
-        let vgs = f64x4::from(&self.vgs[i..i + 4]);
-        let vds = f64x4::from(&self.vds[i..i + 4]);
-        let polarity = f64x4::from(&self.polarity[i..i + 4]);
-        let vto = f64x4::from(&self.vto[i..i + 4]);
-        let beta = f64x4::from(&self.beta[i..i + 4]);
-        let lambda = f64x4::from(&self.lambda[i..i + 4]);
-        let mult = f64x4::from(&self.mult[i..i + 4]);
-
-        // Effective voltages
-        let vgs_eff = polarity * vgs;
-        let vds_eff = polarity * vds;
-
-        // Gate overdrive: Vgt = Vgs - Vto (Vto is negative for NJF)
-        let vgt = vgs_eff - vto;
-
-        // Shichman-Hodges model
-        // Cutoff: Vgt <= 0 -> Ids = 0
-        // Linear: 0 < Vds < Vgt -> Ids = beta * (2*Vgt*Vds - Vds²) * (1 + lambda*Vds)
-        // Saturation: Vds >= Vgt -> Ids = beta * Vgt² * (1 + lambda*Vds)
-
-        let vgt_pos = vgt.max(f64x4::splat(0.0));
-        let vds_pos = vds_eff.max(f64x4::splat(1e-12));
-        let vdsat = vgt_pos.min(vds_pos);
-
-        // Unified current
-        let ids_core = beta * (f64x4::splat(2.0) * vgt_pos * vdsat - vdsat * vdsat);
-        let ids = mult * polarity * ids_core * (f64x4::splat(1.0) + lambda * vds_pos);
-
-        // Conductances
-        let gm = mult * beta * f64x4::splat(2.0) * vdsat * (f64x4::splat(1.0) + lambda * vds_pos);
-        let in_sat = simd_step(vds_pos - vgt_pos);
-        let gds_lin = mult
-            * beta
-            * f64x4::splat(2.0)
-            * (vgt_pos - vdsat)
-            * (f64x4::splat(1.0) + lambda * vds_pos);
-        let gds_sat = ids_core.abs() * lambda * mult;
-        let gds = simd_blend(in_sat, gds_sat, gds_lin).max(f64x4::splat(1e-12));
-
-        // Equivalent current
-        let ids_eq = ids - gm * vgs - gds * vds;
-
-        // Store results
-        store_f64x4(ids, &mut self.ids[i..]);
-        store_f64x4(gm, &mut self.gm[i..]);
-        store_f64x4(gds, &mut self.gds[i..]);
-        store_f64x4(ids_eq, &mut self.ids_eq[i..]);
-
-        // Update regions
-        for j in 0..4 {
-            let idx = i + j;
-            let p = self.polarity[idx];
-            let vgt_val = p * self.vgs[idx] - self.vto[idx];
-            let vds_val = p * self.vds[idx];
-            self.region[idx] = if vgt_val <= 0.0 {
-                JfetRegion::Cutoff
-            } else if vds_val < vgt_val {
-                JfetRegion::Linear
-            } else {
-                JfetRegion::Saturation
-            };
+        // Accuracy-first path: use the full scalar model (reverse conduction
+        // and gate junction Jacobians) for each device. This keeps SIMD and
+        // non-SIMD behavior identical.
+        for i in 0..self.len() {
+            self.evaluate_scalar(i);
         }
     }
 
     /// Scalar evaluation.
     fn evaluate_scalar(&mut self, i: usize) {
         let p = self.polarity[i];
-        let vgs_eff = p * self.vgs[i];
-        let vds_eff = (p * self.vds[i]).max(1e-12);
+        let vgs = self.vgs[i];
+        let vds = self.vds[i];
+        let vgd = vgs - vds;
+        let vto = self.vto[i];
+        let beta = self.beta[i] * self.mult[i];
+        let lambda = self.lambda[i];
 
-        let vgt = vgs_eff - self.vto[i];
-        let vgt_pos = vgt.max(0.0);
-        let vdsat = vgt_pos.min(vds_eff);
+        // Channel current and Jacobian match scalar JFET model implementation.
+        let vgs_int = p * vgs;
+        let vds_int = p * vds;
+        let vgst = vgs_int - vto;
 
-        let ids_core = self.beta[i] * (2.0 * vgt_pos * vdsat - vdsat * vdsat);
-        self.ids[i] = self.mult[i] * p * ids_core * (1.0 + self.lambda[i] * vds_eff);
+        let (ids, gm, gds, region) = if vgst <= 0.0 {
+            (0.0, 0.0, 0.0, JfetRegion::Cutoff)
+        } else if vds_int < 0.0 {
+            let vds_rev = -vds_int;
+            let vgs_rev = vgs_int - vds_int;
+            let vgst_rev = vgs_rev - vto;
 
-        self.gm[i] = self.mult[i] * self.beta[i] * 2.0 * vdsat * (1.0 + self.lambda[i] * vds_eff);
-        let gds_lin = self.mult[i]
-            * self.beta[i]
-            * 2.0
-            * (vgt_pos - vdsat)
-            * (1.0 + self.lambda[i] * vds_eff);
-        let gds_sat = ids_core.abs() * self.lambda[i] * self.mult[i];
-        self.gds[i] = if vds_eff >= vgt_pos { gds_sat } else { gds_lin }.max(1e-12);
-
-        self.ids_eq[i] = self.ids[i] - self.gm[i] * self.vgs[i] - self.gds[i] * self.vds[i];
-
-        self.region[i] = if vgt <= 0.0 {
-            JfetRegion::Cutoff
-        } else if vds_eff < vgt_pos {
-            JfetRegion::Linear
+            if vgst_rev <= 0.0 {
+                (0.0, 0.0, 0.0, JfetRegion::Cutoff)
+            } else if vds_rev <= vgst_rev {
+                let ids_fwd = beta
+                    * (2.0 * vgst_rev * vds_rev - vds_rev * vds_rev)
+                    * (1.0 + lambda * vds_rev);
+                let gm_fwd = 2.0 * beta * vds_rev * (1.0 + lambda * vds_rev);
+                let gds_fwd = beta * 2.0 * (vgst_rev - vds_rev) * (1.0 + lambda * vds_rev)
+                    + beta * (2.0 * vgst_rev * vds_rev - vds_rev * vds_rev) * lambda;
+                (-ids_fwd, -gm_fwd, gm_fwd + gds_fwd, JfetRegion::Linear)
+            } else {
+                let ids_fwd = beta * vgst_rev * vgst_rev * (1.0 + lambda * vds_rev);
+                let gm_fwd = 2.0 * beta * vgst_rev * (1.0 + lambda * vds_rev);
+                let gds_fwd = beta * vgst_rev * vgst_rev * lambda;
+                (-ids_fwd, -gm_fwd, gm_fwd + gds_fwd, JfetRegion::Saturation)
+            }
+        } else if vds_int <= vgst {
+            let ids = beta * (2.0 * vgst * vds_int - vds_int * vds_int) * (1.0 + lambda * vds_int);
+            let gm = 2.0 * beta * vds_int * (1.0 + lambda * vds_int);
+            let gds = beta * 2.0 * (vgst - vds_int) * (1.0 + lambda * vds_int)
+                + beta * (2.0 * vgst * vds_int - vds_int * vds_int) * lambda;
+            (ids, gm, gds, JfetRegion::Linear)
         } else {
-            JfetRegion::Saturation
+            let ids = beta * vgst * vgst * (1.0 + lambda * vds_int);
+            let gm = 2.0 * beta * vgst * (1.0 + lambda * vds_int);
+            let gds = beta * vgst * vgst * lambda;
+            (ids, gm, gds, JfetRegion::Saturation)
         };
+
+        self.ids[i] = p * ids;
+        self.gm[i] = gm;
+        self.gds[i] = gds.max(1e-12);
+        self.ids_eq[i] = self.ids[i] - self.gm[i] * vgs - self.gds[i] * vds;
+        self.region[i] = region;
+
+        // Gate junction diodes with SPICE-style limiting.
+        let isat = self.is[i] * self.mult[i];
+        let nvt = self.n_vt[i].max(1e-12);
+        let v_crit = 80.0 * nvt;
+        let v_rev = -5.0 * nvt;
+
+        let eval_diode = |v_ak: Value| -> (Value, Value) {
+            if v_ak > v_crit {
+                let exp_crit = (v_crit / nvt).exp();
+                let i_crit = isat * (exp_crit - 1.0);
+                let g_crit = (isat / nvt) * exp_crit;
+                (i_crit + g_crit * (v_ak - v_crit), g_crit.max(1e-15))
+            } else if v_ak < v_rev {
+                (-isat, 1e-15)
+            } else {
+                let exp_term = (v_ak / nvt).exp();
+                (
+                    isat * (exp_term - 1.0),
+                    ((isat / nvt) * exp_term).max(1e-15),
+                )
+            }
+        };
+
+        let (igs_int, ggs) = eval_diode(p * vgs);
+        let (igd_int, ggd) = eval_diode(p * vgd);
+        self.ggs[i] = ggs;
+        self.ggd[i] = ggd;
+
+        let igs = p * igs_int; // current from gate to source
+        let igd = p * igd_int; // current from gate to drain
+        self.igs_eq[i] = igs - ggs * vgs;
+        self.igd_eq[i] = igd - ggd * vgd;
     }
 
     #[cfg(not(feature = "simd"))]
@@ -418,34 +409,54 @@ impl BatchJfets {
         for i in 0..self.len() {
             let gm = self.gm[i];
             let gds = self.gds[i];
+            let ggs = self.ggs[i];
+            let ggd = self.ggd[i];
             let ids_eq = self.ids_eq[i];
+            let igs_eq = self.igs_eq[i];
+            let igd_eq = self.igd_eq[i];
 
-            // Simplified stamp (ignoring gate junction currents for speed)
+            // Drain row
             if let Some(idx) = self.idx_dd[i] {
-                matrix.stamp_direct(idx, gds);
+                matrix.stamp_direct(idx, gds + ggd);
             }
             if let Some(idx) = self.idx_dg[i] {
-                matrix.stamp_direct(idx, gm);
+                matrix.stamp_direct(idx, gm - ggd);
             }
             if let Some(idx) = self.idx_ds[i] {
                 matrix.stamp_direct(idx, -gm - gds);
             }
+
+            // Gate row
+            if let Some(idx) = self.idx_gd[i] {
+                matrix.stamp_direct(idx, -ggd);
+            }
+            if let Some(idx) = self.idx_gg[i] {
+                matrix.stamp_direct(idx, ggs + ggd);
+            }
+            if let Some(idx) = self.idx_gs[i] {
+                matrix.stamp_direct(idx, -ggs);
+            }
+
+            // Source row
             if let Some(idx) = self.idx_sd[i] {
                 matrix.stamp_direct(idx, -gds);
             }
             if let Some(idx) = self.idx_sg[i] {
-                matrix.stamp_direct(idx, -gm);
+                matrix.stamp_direct(idx, -gm - ggs);
             }
             if let Some(idx) = self.idx_ss[i] {
-                matrix.stamp_direct(idx, gm + gds);
+                matrix.stamp_direct(idx, gm + gds + ggs);
             }
 
             // RHS
             if let Some(idx) = self.rhs_drain[i] {
-                rhs[idx] -= ids_eq;
+                rhs[idx] -= ids_eq - igd_eq;
+            }
+            if let Some(idx) = self.rhs_gate[i] {
+                rhs[idx] -= igs_eq + igd_eq;
             }
             if let Some(idx) = self.rhs_source[i] {
-                rhs[idx] += ids_eq;
+                rhs[idx] += ids_eq + igs_eq;
             }
         }
     }
@@ -466,13 +477,6 @@ impl BatchJfets {
 }
 
 //=============================================================================
-// SIMD Helper Functions - Import from centralized simd module
-//=============================================================================
-
-#[cfg(feature = "simd")]
-use crate::simd::{blend_f64x4 as simd_blend, step_f64x4 as simd_step, store_f64x4};
-
-//=============================================================================
 // Tests
 //=============================================================================
 
@@ -483,8 +487,8 @@ mod tests {
     #[test]
     fn test_batch_jfets_creation() {
         let mut batch = BatchJfets::new();
-        batch.add(1, 2, 0, JfetType::NJF, -2.0, 1e-4, 0.01, 1e-14, 1.0);
-        batch.add(3, 4, 0, JfetType::PJF, 2.0, 1e-4, 0.01, 1e-14, 1.0);
+        batch.add(1, 2, 0, JfetType::NJF, -2.0, 1e-4, 0.01, 1e-14, 0.026, 1.0);
+        batch.add(3, 4, 0, JfetType::PJF, 2.0, 1e-4, 0.01, 1e-14, 0.026, 1.0);
 
         assert_eq!(batch.len(), 2);
         assert!(!batch.is_empty());
@@ -496,7 +500,7 @@ mod tests {
 
         // Add 8 NJFETs
         for _ in 0..8 {
-            batch.add(1, 2, 0, JfetType::NJF, -2.0, 1e-4, 0.01, 1e-14, 1.0);
+            batch.add(1, 2, 0, JfetType::NJF, -2.0, 1e-4, 0.01, 1e-14, 0.026, 1.0);
         }
 
         // Set to saturation region
@@ -511,5 +515,62 @@ mod tests {
             assert!(batch.ids[i] > 0.0, "Expected positive drain current");
             assert!(batch.gm[i] > 0.0);
         }
+    }
+
+    #[test]
+    fn test_batch_jfet_reverse_vds_changes_current_sign() {
+        let mut batch = BatchJfets::new();
+        batch.add(1, 2, 0, JfetType::NJF, -2.0, 1e-3, 0.0, 1e-14, 0.026, 1.0);
+
+        batch.vgs[0] = 0.0;
+        batch.vds[0] = 1.0;
+        batch.evaluate();
+        let ids_fwd = batch.ids[0];
+        let gm_fwd = batch.gm[0];
+
+        batch.vds[0] = -1.0;
+        batch.evaluate();
+        let ids_rev = batch.ids[0];
+        let gm_rev = batch.gm[0];
+
+        assert!(
+            ids_fwd > 0.0,
+            "forward Ids should be positive, got {}",
+            ids_fwd
+        );
+        assert!(
+            gm_fwd > 0.0,
+            "forward gm should be positive, got {}",
+            gm_fwd
+        );
+        assert!(
+            ids_rev < 0.0,
+            "reverse Vds should invert Ids sign in batch evaluator, got {}",
+            ids_rev
+        );
+        assert!(
+            gm_rev < 0.0,
+            "reverse Vds should invert gm sign in batch evaluator, got {}",
+            gm_rev
+        );
+    }
+
+    #[test]
+    fn test_batch_jfet_forward_gate_bias_generates_gate_junction_terms() {
+        let mut batch = BatchJfets::new();
+        batch.add(1, 2, 0, JfetType::NJF, -2.0, 1e-4, 0.0, 1e-12, 0.026, 1.0);
+
+        batch.vgs[0] = 0.6;
+        batch.vds[0] = 0.0;
+        batch.evaluate();
+
+        assert!(
+            batch.ggs[0] > 1e-9,
+            "expected substantial forward gate conductance"
+        );
+        assert!(
+            batch.igs_eq[0].abs() > 1e-9,
+            "expected non-trivial gate-source equivalent current under forward bias"
+        );
     }
 }
