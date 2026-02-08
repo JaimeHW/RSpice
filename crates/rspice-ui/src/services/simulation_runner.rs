@@ -3,7 +3,7 @@
 //! Async wrapper around rspice-core for running simulations from the GUI.
 
 use crate::output_spec::{
-    collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
+    ac_output_value, collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
     normalized_sensitivity, parse_output_spec, resolve_node_or_ground_index,
     resolve_sensitivity_ac_frequency, run_ac_output_at_frequency, run_dc_output_sensitivity,
     validate_sensitivity_output_spec, OutputSpec, OutputVoltageSpec,
@@ -384,6 +384,289 @@ pub fn run_ac_analysis(
         .map_err(|e| format!("AC analysis error: {}", e))?;
 
     Ok(AcData::from_results(results, &node_names))
+}
+
+// =============================================================================
+// Transfer Function (XF) Analysis
+// =============================================================================
+
+/// Frequency sweep type for transfer function analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TfFrequencySweep {
+    Decade,
+    Octave,
+    Linear,
+}
+
+impl TfFrequencySweep {
+    fn keyword(self) -> &'static str {
+        match self {
+            Self::Decade => "dec",
+            Self::Octave => "oct",
+            Self::Linear => "lin",
+        }
+    }
+}
+
+/// Explicit configuration for transfer-function execution.
+#[derive(Debug, Clone)]
+pub struct TfRunConfig {
+    pub start_freq: Value,
+    pub stop_freq: Value,
+    pub points_per_unit: usize,
+    pub sweep: TfFrequencySweep,
+    pub input_source: String,
+    pub output_node: String,
+    pub output_ref: Option<String>,
+    pub group_delay: bool,
+    pub input_impedance: bool,
+    pub output_impedance: bool,
+}
+
+impl Default for TfRunConfig {
+    fn default() -> Self {
+        Self {
+            start_freq: 1.0,
+            stop_freq: 1e9,
+            points_per_unit: 10,
+            sweep: TfFrequencySweep::Decade,
+            input_source: "VIN".to_string(),
+            output_node: "VOUT".to_string(),
+            output_ref: None,
+            group_delay: false,
+            input_impedance: false,
+            output_impedance: false,
+        }
+    }
+}
+
+impl TfRunConfig {
+    fn validate(&self) -> Result<(), String> {
+        if !self.start_freq.is_finite() || self.start_freq <= 0.0 {
+            return Err("TF start frequency must be positive".to_string());
+        }
+        if !self.stop_freq.is_finite() || self.stop_freq < self.start_freq {
+            return Err("TF stop frequency must be >= start frequency".to_string());
+        }
+        if self.points_per_unit == 0 {
+            return Err("TF points per unit must be greater than zero".to_string());
+        }
+        if self.input_source.trim().is_empty() {
+            return Err("TF input source must be specified".to_string());
+        }
+        if self.output_node.trim().is_empty() {
+            return Err("TF output node must be specified".to_string());
+        }
+        Ok(())
+    }
+}
+
+/// Transfer-function analysis data.
+#[derive(Debug, Clone)]
+pub struct TfData {
+    /// Frequency points (Hz).
+    pub frequencies: Vec<Value>,
+    /// Complex transfer function H(jw).
+    pub transfer: Vec<Complex64>,
+    /// Magnitude response in dB.
+    pub magnitude_db: Vec<Value>,
+    /// Phase response in degrees.
+    pub phase_deg: Vec<Value>,
+    /// Group delay curve: (frequency_hz, delay_s).
+    pub group_delay: Option<Vec<(Value, Value)>>,
+    /// Input impedance vs frequency (Ohms), if requested.
+    pub input_impedance: Option<Vec<Complex64>>,
+    /// Output impedance vs frequency (Ohms), if requested.
+    pub output_impedance: Option<Vec<Complex64>>,
+    /// Output trace label (for display).
+    pub output_label: String,
+    /// Input source name (for display).
+    pub input_source: String,
+    /// Low-frequency gain magnitude (linear).
+    pub dc_gain: Option<Value>,
+}
+
+/// Run transfer-function analysis with explicit configuration.
+pub fn run_tf_analysis_with_config(
+    netlist_text: &str,
+    config: &TfRunConfig,
+) -> Result<TfData, String> {
+    config.validate()?;
+
+    let parsed_netlist = rspice_core::netlist::parse_netlist(netlist_text)
+        .map_err(|e| format!("Parse error: {}", e))?;
+
+    // Build a baseline netlist with all AC source magnitudes forced to zero.
+    // We then explicitly excite only the requested input source to keep the
+    // transfer denominator deterministic and independent of unrelated sources.
+    let mut tf_netlist = parsed_netlist.clone();
+    zero_all_source_ac(&mut tf_netlist);
+    set_source_ac_excitation(&mut tf_netlist, &config.input_source, 1.0, 0.0)?;
+
+    let engine = Engine::new(build_engine_config(&tf_netlist, None));
+    let dc_result = engine
+        .run_dc_op(&tf_netlist)
+        .map_err(|e| format!("DC OP error (required for TF): {}", e))?;
+    let circuit = engine
+        .build_circuit(&tf_netlist)
+        .map_err(|e| format!("Circuit build error (required for TF): {}", e))?;
+
+    let output_expr =
+        build_voltage_output_expr(config.output_node.trim(), config.output_ref.as_deref());
+    let output_spec = parse_output_spec(&output_expr, &dc_result.node_names, &circuit)
+        .ok_or_else(|| format!("TF output '{}' could not be resolved", output_expr))?;
+
+    let frequencies = generate_freq_points(
+        config.start_freq,
+        config.stop_freq,
+        config.points_per_unit,
+        config.sweep.keyword(),
+    );
+    if frequencies.is_empty() {
+        return Err("TF frequency sweep produced no points".to_string());
+    }
+
+    let ac_results = engine
+        .run_ac(&tf_netlist, &frequencies)
+        .map_err(|e| format!("TF AC analysis error: {}", e))?;
+    if ac_results.len() != frequencies.len() {
+        return Err(format!(
+            "TF AC analysis returned {} points for {} requested frequencies",
+            ac_results.len(),
+            frequencies.len()
+        ));
+    }
+
+    let transfer: Vec<Complex64> = ac_results
+        .iter()
+        .map(|point| ac_output_value(point, &output_spec))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("TF output extraction error: {}", e))?;
+    let magnitude_db: Vec<Value> = transfer
+        .iter()
+        .map(|h| 20.0 * h.norm().max(1e-30).log10())
+        .collect();
+    let phase_deg: Vec<Value> = transfer.iter().map(|h| h.arg().to_degrees()).collect();
+
+    let input_impedance = if config.input_impedance {
+        let branch_ordinal = circuit
+            .get_branch_by_name(config.input_source.trim())
+            .ok_or_else(|| {
+                format!(
+                    "TF input source '{}' does not expose an AC branch current; cannot compute Zin",
+                    config.input_source
+                )
+            })? as usize;
+        let branch_idx = branch_ordinal.saturating_sub(1);
+        Some(
+            ac_results
+                .iter()
+                .map(|point| {
+                    let iin = point.currents.get(branch_idx).copied().ok_or_else(|| {
+                        format!(
+                            "TF input source '{}' branch index {} is unavailable in AC result",
+                            config.input_source, branch_idx
+                        )
+                    })?;
+                    if iin.norm() <= 1e-30 {
+                        Ok(Complex64::new(f64::INFINITY, 0.0))
+                    } else {
+                        Ok(Complex64::new(1.0, 0.0) / iin)
+                    }
+                })
+                .collect::<Result<Vec<_>, String>>()?,
+        )
+    } else {
+        None
+    };
+
+    let output_impedance = if config.output_impedance {
+        let mut zout_netlist = parsed_netlist.clone();
+        zero_all_source_ac(&mut zout_netlist);
+        inject_tf_output_test_source(
+            &mut zout_netlist,
+            config.output_node.trim(),
+            config.output_ref.as_deref(),
+        )?;
+
+        let zout_engine = Engine::new(build_engine_config(&zout_netlist, None));
+        let zout_dc = zout_engine
+            .run_dc_op(&zout_netlist)
+            .map_err(|e| format!("DC OP error (required for TF Zout): {}", e))?;
+        let zout_circuit = zout_engine
+            .build_circuit(&zout_netlist)
+            .map_err(|e| format!("Circuit build error (required for TF Zout): {}", e))?;
+        let zout_spec = parse_output_spec(&output_expr, &zout_dc.node_names, &zout_circuit)
+            .ok_or_else(|| format!("TF output '{}' could not be resolved for Zout", output_expr))?;
+
+        let zout_points = zout_engine
+            .run_ac(&zout_netlist, &frequencies)
+            .map_err(|e| format!("TF output-impedance AC analysis error: {}", e))?;
+        Some(
+            zout_points
+                .iter()
+                .map(|point| {
+                    ac_output_value(point, &zout_spec)
+                        .map_err(|e| format!("TF output-impedance extraction error: {}", e))
+                })
+                .collect::<Result<Vec<_>, String>>()?,
+        )
+    } else {
+        None
+    };
+
+    let group_delay = if config.group_delay && frequencies.len() >= 2 {
+        use std::f64::consts::PI;
+        let mut points = Vec::with_capacity(frequencies.len().saturating_sub(1));
+        let mut prev_phase = transfer[0].arg();
+        for idx in 1..frequencies.len() {
+            let df = frequencies[idx] - frequencies[idx - 1];
+            if df <= 0.0 {
+                prev_phase = transfer[idx].arg();
+                continue;
+            }
+            let mut phase = transfer[idx].arg();
+            while phase - prev_phase > PI {
+                phase -= 2.0 * PI;
+            }
+            while phase - prev_phase < -PI {
+                phase += 2.0 * PI;
+            }
+            let delay = -(phase - prev_phase) / (2.0 * PI * df);
+            let mid = (frequencies[idx - 1] + frequencies[idx]) * 0.5;
+            points.push((mid, delay));
+            prev_phase = phase;
+        }
+        Some(points)
+    } else {
+        None
+    };
+
+    Ok(TfData {
+        dc_gain: transfer.first().map(|h| h.norm()),
+        frequencies,
+        transfer,
+        magnitude_db,
+        phase_deg,
+        group_delay,
+        input_impedance,
+        output_impedance,
+        output_label: output_expr,
+        input_source: config.input_source.clone(),
+    })
+}
+
+/// Run transfer-function analysis using inferred/default settings.
+pub fn run_tf_analysis(netlist_text: &str) -> Result<TfData, String> {
+    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
+        .map_err(|e| format!("Parse error: {}", e))?;
+    let engine = Engine::new(build_engine_config(&netlist, None));
+    let dc_result = engine
+        .run_dc_op(&netlist)
+        .map_err(|e| format!("DC OP error (required for TF defaults): {}", e))?;
+
+    let cfg = infer_tf_run_config(&netlist, &dc_result.node_names)?;
+    run_tf_analysis_with_config(netlist_text, &cfg)
 }
 
 // =============================================================================
@@ -1113,6 +1396,316 @@ pub fn run_pac_analysis(netlist_text: &str, config: &PacRunConfig) -> Result<Pac
         spectra,
         converged: true,
     })
+}
+
+/// Run PAC analysis using inferred/default settings.
+pub fn run_pac_analysis_auto(netlist_text: &str) -> Result<PacData, String> {
+    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
+        .map_err(|e| format!("Parse error: {}", e))?;
+    let engine = Engine::new(build_engine_config(&netlist, None));
+    let dc_result = engine
+        .run_dc_op(&netlist)
+        .map_err(|e| format!("DC OP error (required for PAC defaults): {}", e))?;
+    let input_source = infer_primary_source_name(&netlist)
+        .ok_or_else(|| "PAC requires at least one independent source in the netlist".to_string())?;
+    let output_node = infer_primary_output_node(&dc_result.node_names).ok_or_else(|| {
+        "PAC could not infer an output node; ensure at least one non-ground node exists".to_string()
+    })?;
+
+    let cfg = PacRunConfig {
+        input_source,
+        output_node,
+        ..PacRunConfig::default()
+    };
+    run_pac_analysis(netlist_text, &cfg)
+}
+
+// =============================================================================
+// PNOISE (Periodic Noise) Analysis
+// =============================================================================
+
+/// Frequency sweep type for periodic-noise analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PnoiseFrequencySweep {
+    Decade,
+    Octave,
+    Linear,
+}
+
+impl PnoiseFrequencySweep {
+    fn keyword(self) -> &'static str {
+        match self {
+            Self::Decade => "dec",
+            Self::Octave => "oct",
+            Self::Linear => "lin",
+        }
+    }
+}
+
+/// PNoise noise-reference mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PnoiseReference {
+    Output,
+    Input,
+    Phase,
+}
+
+/// Explicit configuration for PNoise execution.
+#[derive(Debug, Clone)]
+pub struct PnoiseRunConfig {
+    pub pss_fundamental_freq: Value,
+    pub pss_num_harmonics: usize,
+    pub pss_tolerance: Value,
+    pub start_freq: Value,
+    pub stop_freq: Value,
+    pub points_per_unit: usize,
+    pub sweep: PnoiseFrequencySweep,
+    pub max_sideband: i32,
+    pub output_node: String,
+    pub output_ref: Option<String>,
+    pub noise_ref: PnoiseReference,
+    pub integrated_noise: bool,
+    pub noise_summary: bool,
+    pub reltol: Value,
+    pub abstol: Value,
+}
+
+impl Default for PnoiseRunConfig {
+    fn default() -> Self {
+        Self {
+            pss_fundamental_freq: 1e6,
+            pss_num_harmonics: 10,
+            pss_tolerance: 1e-3,
+            start_freq: 1.0,
+            stop_freq: 1e6,
+            points_per_unit: 10,
+            sweep: PnoiseFrequencySweep::Decade,
+            max_sideband: 5,
+            output_node: "VOUT".to_string(),
+            output_ref: None,
+            noise_ref: PnoiseReference::Output,
+            integrated_noise: false,
+            noise_summary: true,
+            reltol: 1e-3,
+            abstol: 1e-18,
+        }
+    }
+}
+
+impl PnoiseRunConfig {
+    fn validate(&self) -> Result<(), String> {
+        if !self.pss_fundamental_freq.is_finite() || self.pss_fundamental_freq <= 0.0 {
+            return Err("PNOISE requires a positive PSS fundamental frequency".to_string());
+        }
+        if self.pss_num_harmonics == 0 {
+            return Err("PNOISE requires at least one PSS harmonic".to_string());
+        }
+        if !self.pss_tolerance.is_finite() || self.pss_tolerance <= 0.0 {
+            return Err("PNOISE requires a positive PSS tolerance".to_string());
+        }
+        if !self.start_freq.is_finite() || self.start_freq <= 0.0 {
+            return Err("PNOISE start frequency must be positive".to_string());
+        }
+        if !self.stop_freq.is_finite() || self.stop_freq < self.start_freq {
+            return Err("PNOISE stop frequency must be >= start frequency".to_string());
+        }
+        if self.points_per_unit == 0 {
+            return Err("PNOISE points per unit must be greater than zero".to_string());
+        }
+        if self.max_sideband < 0 {
+            return Err("PNOISE max sideband must be non-negative".to_string());
+        }
+        if self.output_node.trim().is_empty() {
+            return Err("PNOISE output node must be specified".to_string());
+        }
+        if !self.reltol.is_finite() || self.reltol <= 0.0 {
+            return Err("PNOISE relative tolerance must be positive".to_string());
+        }
+        if !self.abstol.is_finite() || self.abstol < 0.0 {
+            return Err("PNOISE absolute tolerance must be non-negative".to_string());
+        }
+        Ok(())
+    }
+}
+
+/// PNoise analysis data.
+#[derive(Debug, Clone)]
+pub struct PnoiseData {
+    /// Offset frequencies (Hz).
+    pub frequencies: Vec<Value>,
+    /// Noise values. Units depend on `reference`:
+    /// - Output/Input: V^2/Hz
+    /// - Phase: dBc/Hz
+    pub output_noise: Vec<Value>,
+    /// Optional input-referred noise vector (V^2/Hz), when available.
+    pub input_noise: Option<Vec<Value>>,
+    /// Optional total integrated output noise (RMS).
+    pub total_output_noise: Option<Value>,
+    /// Device contributors (name, percentage) from base noise analysis.
+    pub contributors: Vec<(String, Value)>,
+    /// Carrier frequency used for the analysis (Hz).
+    pub carrier_frequency: Value,
+    /// Effective sideband folding multiplier.
+    pub sideband_factor: usize,
+    /// Requested noise reference.
+    pub reference: PnoiseReference,
+    /// Non-fatal caveats for approximations/fallbacks.
+    pub warnings: Vec<String>,
+}
+
+/// Run PNoise analysis with explicit configuration.
+pub fn run_pnoise_analysis_with_config(
+    netlist_text: &str,
+    config: &PnoiseRunConfig,
+) -> Result<PnoiseData, String> {
+    config.validate()?;
+
+    if let Some(reference) = config.output_ref.as_deref() {
+        let trimmed = reference.trim();
+        if !trimmed.is_empty() && !is_ground_like(trimmed) {
+            return Err(
+                "PNOISE differential output references are not supported by the current engine path"
+                    .to_string(),
+            );
+        }
+    }
+
+    // PNOISE requires a periodic operating point. We run PSS first and reuse
+    // its carrier for phase-noise normalization.
+    let pss_data = run_pss_analysis(
+        netlist_text,
+        config.pss_fundamental_freq,
+        config.pss_num_harmonics,
+        config.pss_tolerance,
+    )?;
+
+    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
+        .map_err(|e| format!("Parse error: {}", e))?;
+    let mut sim_config = build_engine_config(&netlist, None);
+    sim_config.tolerance = config.pss_tolerance;
+    let engine = Engine::new(sim_config);
+
+    let dc_result = engine
+        .run_dc_op(&netlist)
+        .map_err(|e| format!("DC OP error (required for PNOISE): {}", e))?;
+    let output_idx = resolve_node_or_ground_index(config.output_node.trim(), &dc_result.node_names)
+        .ok_or_else(|| {
+            format!(
+                "PNOISE output node '{}' not found in node list {:?}",
+                config.output_node, dc_result.node_names
+            )
+        })?;
+    if output_idx == 0 {
+        return Err("PNOISE output node cannot be ground".to_string());
+    }
+
+    let frequencies = generate_freq_points(
+        config.start_freq,
+        config.stop_freq,
+        config.points_per_unit,
+        config.sweep.keyword(),
+    );
+    if frequencies.is_empty() {
+        return Err("PNOISE frequency sweep produced no points".to_string());
+    }
+
+    let noise_results = engine
+        .run_noise(&netlist, output_idx, &frequencies, 300.0)
+        .map_err(|e| format!("PNOISE base noise analysis error: {}", e))?;
+    let noise_data = NoiseData::from_results(noise_results);
+
+    let sideband_factor = (2_i64
+        .saturating_mul(config.max_sideband.max(0) as i64)
+        .saturating_add(1)) as usize;
+    let folded_output_noise: Vec<Value> = noise_data
+        .output_noise
+        .iter()
+        .map(|value| *value * sideband_factor as Value)
+        .collect();
+
+    let mut warnings = Vec::new();
+    if sideband_factor > 1 {
+        warnings.push(format!(
+            "PNOISE sideband folding approximated with scalar factor {}",
+            sideband_factor
+        ));
+    }
+
+    let mut output_noise = folded_output_noise.clone();
+    let mut input_noise = None;
+    let total_output_noise = if config.integrated_noise {
+        Some(integrate_noise_rms(
+            &noise_data.frequencies,
+            &folded_output_noise,
+        ))
+    } else {
+        None
+    };
+
+    match config.noise_ref {
+        PnoiseReference::Output => {}
+        PnoiseReference::Input => {
+            // True input-referred PNOISE requires large-signal periodic conversion gain.
+            // Until that path is available in rspice-core, preserve the output vector and
+            // expose it as a fallback input-referred estimate.
+            input_noise = Some(output_noise.clone());
+            warnings.push(
+                "PNOISE input-referred conversion currently uses unity-gain fallback".to_string(),
+            );
+        }
+        PnoiseReference::Phase => {
+            let carrier_rms = estimate_carrier_rms_for_node(&pss_data, config.output_node.trim())
+                .ok_or_else(|| {
+                format!(
+                    "PNOISE phase-noise conversion could not determine carrier amplitude at '{}'",
+                    config.output_node
+                )
+            })?;
+            let carrier_power = (carrier_rms * carrier_rms).max(1e-30);
+            output_noise = output_noise
+                .iter()
+                .map(|psd| 10.0 * (psd.max(1e-30) / carrier_power).log10())
+                .collect();
+        }
+    }
+
+    let contributors = if config.noise_summary {
+        noise_data.contributions
+    } else {
+        Vec::new()
+    };
+
+    Ok(PnoiseData {
+        frequencies: noise_data.frequencies,
+        output_noise,
+        input_noise,
+        total_output_noise,
+        contributors,
+        carrier_frequency: pss_data.frequency,
+        sideband_factor,
+        reference: config.noise_ref,
+        warnings,
+    })
+}
+
+/// Run PNoise analysis using inferred/default settings.
+pub fn run_pnoise_analysis(netlist_text: &str) -> Result<PnoiseData, String> {
+    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
+        .map_err(|e| format!("Parse error: {}", e))?;
+    let engine = Engine::new(build_engine_config(&netlist, None));
+    let dc_result = engine
+        .run_dc_op(&netlist)
+        .map_err(|e| format!("DC OP error (required for PNOISE defaults): {}", e))?;
+    let output_node = infer_primary_output_node(&dc_result.node_names).ok_or_else(|| {
+        "PNOISE could not infer an output node; ensure at least one non-ground node exists"
+            .to_string()
+    })?;
+
+    let cfg = PnoiseRunConfig {
+        output_node,
+        ..PnoiseRunConfig::default()
+    };
+    run_pnoise_analysis_with_config(netlist_text, &cfg)
 }
 
 fn normalize_pac_node_name(raw: &str) -> String {
@@ -2048,6 +2641,240 @@ fn describe_step_target(step_cmd: &StepCommand) -> String {
         }
         StepTarget::Temp => "TEMP".to_string(),
     }
+}
+
+fn build_voltage_output_expr(output_node: &str, output_ref: Option<&str>) -> String {
+    let output_node = output_node.trim();
+    let output_ref = output_ref
+        .map(str::trim)
+        .filter(|name| !name.is_empty() && !is_ground_like(name));
+    match output_ref {
+        Some(reference) => format!("V({},{})", output_node, reference),
+        None => format!("V({})", output_node),
+    }
+}
+
+fn is_ground_like(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "0" | "gnd" | "ground"
+    )
+}
+
+fn infer_primary_source_name(netlist: &rspice_core::Netlist) -> Option<String> {
+    netlist
+        .elements
+        .iter()
+        .find_map(|element| match &element.kind {
+            ElementKind::VoltageSource(_) | ElementKind::CurrentSource(_) => {
+                Some(element.name.clone())
+            }
+            _ => None,
+        })
+}
+
+fn infer_primary_output_node(node_names: &[String]) -> Option<String> {
+    node_names
+        .iter()
+        .rev()
+        .find(|name| !is_ground_like(name))
+        .cloned()
+}
+
+fn infer_tf_run_config(
+    netlist: &rspice_core::Netlist,
+    node_names: &[String],
+) -> Result<TfRunConfig, String> {
+    let input_source = infer_primary_source_name(netlist)
+        .ok_or_else(|| "TF requires at least one independent source in the netlist".to_string())?;
+    let output_node = infer_primary_output_node(node_names).ok_or_else(|| {
+        "TF could not infer an output node; ensure at least one non-ground node exists".to_string()
+    })?;
+    Ok(TfRunConfig {
+        input_source,
+        output_node,
+        ..TfRunConfig::default()
+    })
+}
+
+fn source_dc_bias(spec: &SourceSpec) -> Value {
+    match spec {
+        SourceSpec::Dc(v) => *v,
+        SourceSpec::Ac { .. } => 0.0,
+        SourceSpec::DcAc { dc_value, .. } => *dc_value,
+        SourceSpec::Pulse { v1, .. } => *v1,
+        SourceSpec::Sin { offset, .. } => *offset,
+        SourceSpec::Pwl { points } => points.first().map(|(_, value)| *value).unwrap_or(0.0),
+        SourceSpec::PwlFile { .. } => 0.0,
+        SourceSpec::Exp { v1, .. } => *v1,
+    }
+}
+
+fn source_with_ac_excitation(spec: &SourceSpec, magnitude: Value, phase_deg: Value) -> SourceSpec {
+    SourceSpec::DcAc {
+        dc_value: source_dc_bias(spec),
+        ac_magnitude: magnitude,
+        ac_phase: phase_deg,
+    }
+}
+
+fn source_without_ac(spec: &SourceSpec) -> SourceSpec {
+    source_with_ac_excitation(spec, 0.0, 0.0)
+}
+
+fn zero_all_source_ac(netlist: &mut rspice_core::Netlist) {
+    for element in &mut netlist.elements {
+        match &mut element.kind {
+            ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
+                *spec = source_without_ac(spec);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn set_source_ac_excitation(
+    netlist: &mut rspice_core::Netlist,
+    source_name: &str,
+    magnitude: Value,
+    phase_deg: Value,
+) -> Result<(), String> {
+    let source_name = source_name.trim();
+    if source_name.is_empty() {
+        return Err("source name cannot be empty".to_string());
+    }
+
+    let mut matched = false;
+    for element in &mut netlist.elements {
+        if !element.name.eq_ignore_ascii_case(source_name) {
+            continue;
+        }
+        match &mut element.kind {
+            ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
+                *spec = source_with_ac_excitation(spec, magnitude, phase_deg);
+                matched = true;
+            }
+            _ => {
+                return Err(format!(
+                    "Element '{}' exists but is not an independent source",
+                    source_name
+                ));
+            }
+        }
+    }
+
+    if !matched {
+        return Err(format!(
+            "Independent source '{}' was not found in the netlist",
+            source_name
+        ));
+    }
+
+    Ok(())
+}
+
+fn unique_element_name(netlist: &rspice_core::Netlist, prefix: &str) -> String {
+    if netlist
+        .elements
+        .iter()
+        .all(|element| !element.name.eq_ignore_ascii_case(prefix))
+    {
+        return prefix.to_string();
+    }
+
+    for idx in 1.. {
+        let candidate = format!("{}{}", prefix, idx);
+        if netlist
+            .elements
+            .iter()
+            .all(|element| !element.name.eq_ignore_ascii_case(&candidate))
+        {
+            return candidate;
+        }
+    }
+
+    unreachable!("monotonic suffix search should always find a free element name")
+}
+
+fn inject_tf_output_test_source(
+    netlist: &mut rspice_core::Netlist,
+    output_node: &str,
+    output_ref: Option<&str>,
+) -> Result<(), String> {
+    let output_node = output_node.trim();
+    if output_node.is_empty() {
+        return Err("TF output node must be non-empty".to_string());
+    }
+    let output_ref = output_ref
+        .map(str::trim)
+        .filter(|node| !node.is_empty())
+        .unwrap_or("0");
+    let test_name = unique_element_name(netlist, "__TF_ZOUT_TEST");
+    netlist.elements.push(rspice_core::netlist::Element {
+        name: test_name,
+        kind: ElementKind::CurrentSource(SourceSpec::Ac {
+            magnitude: 1.0,
+            phase: 0.0,
+        }),
+        nodes: vec![output_node.to_string(), output_ref.to_string()],
+    });
+    Ok(())
+}
+
+fn normalize_voltage_signal_name(name: &str) -> String {
+    let trimmed = name.trim();
+    if trimmed.len() > 3 && trimmed[..2].eq_ignore_ascii_case("V(") && trimmed.ends_with(')') {
+        return trimmed[2..trimmed.len() - 1].trim().to_ascii_uppercase();
+    }
+    trimmed.to_ascii_uppercase()
+}
+
+fn estimate_carrier_rms_for_node(pss_data: &PssData, output_node: &str) -> Option<Value> {
+    let target = normalize_voltage_signal_name(output_node);
+
+    if let Some((_, harmonics)) = pss_data
+        .harmonics
+        .iter()
+        .find(|(name, _)| normalize_voltage_signal_name(name) == target)
+    {
+        if let Some((_, magnitude, _)) = harmonics
+            .iter()
+            .filter(|(frequency, magnitude, _)| *frequency > 0.0 && *magnitude > 0.0)
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+        {
+            return Some(*magnitude / 2.0_f64.sqrt());
+        }
+    }
+
+    pss_data
+        .waveforms
+        .iter()
+        .find(|(name, _)| normalize_voltage_signal_name(name) == target)
+        .and_then(|(_, values)| {
+            if values.is_empty() {
+                return None;
+            }
+            let mean_sq =
+                values.iter().map(|value| value * value).sum::<Value>() / values.len() as Value;
+            (mean_sq > 0.0).then_some(mean_sq.sqrt())
+        })
+}
+
+fn integrate_noise_rms(frequencies: &[Value], psd: &[Value]) -> Value {
+    if frequencies.len() < 2 || psd.len() < 2 {
+        return 0.0;
+    }
+    let n = frequencies.len().min(psd.len());
+    let mut integrated = 0.0;
+    for idx in 1..n {
+        let df = frequencies[idx] - frequencies[idx - 1];
+        if df <= 0.0 {
+            continue;
+        }
+        let avg = (psd[idx].max(0.0) + psd[idx - 1].max(0.0)) * 0.5;
+        integrated += avg * df;
+    }
+    integrated.max(0.0).sqrt()
 }
 
 fn map_dc_sweep_results(
@@ -3699,5 +4526,148 @@ mod tests {
         let err = run_pac_analysis(netlist, &cfg)
             .expect_err("PAC without any enabled sidebands should be rejected");
         assert!(err.contains("at least one sideband"));
+    }
+
+    #[test]
+    fn test_run_pac_analysis_auto_infers_source_and_output() {
+        let netlist = "* pac auto\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        let result =
+            run_pac_analysis_auto(netlist).expect("PAC auto mode should infer IO for simple RC");
+        assert!(result.converged);
+        assert!(!result.frequencies.is_empty());
+        assert!(!result.spectra.is_empty());
+    }
+
+    #[test]
+    fn test_run_tf_analysis_with_config_executes_for_driven_rc() {
+        let netlist = "* tf\nV1 in 0 DC 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        let cfg = TfRunConfig {
+            start_freq: 10.0,
+            stop_freq: 1e6,
+            points_per_unit: 6,
+            sweep: TfFrequencySweep::Decade,
+            input_source: "V1".to_string(),
+            output_node: "out".to_string(),
+            output_ref: None,
+            group_delay: true,
+            input_impedance: true,
+            output_impedance: true,
+        };
+
+        let result = run_tf_analysis_with_config(netlist, &cfg)
+            .expect("TF analysis should execute for driven RC");
+        assert!(!result.frequencies.is_empty());
+        assert_eq!(result.transfer.len(), result.frequencies.len());
+        assert_eq!(result.magnitude_db.len(), result.frequencies.len());
+        assert_eq!(result.phase_deg.len(), result.frequencies.len());
+        assert!(result
+            .transfer
+            .iter()
+            .all(|value| value.re.is_finite() && value.im.is_finite()));
+        assert!(result
+            .group_delay
+            .as_ref()
+            .is_some_and(|curve| !curve.is_empty()));
+        assert!(result
+            .input_impedance
+            .as_ref()
+            .is_some_and(|curve| curve.iter().all(|value| value.re.is_finite())));
+        assert!(result
+            .output_impedance
+            .as_ref()
+            .is_some_and(|curve| curve.iter().all(|value| value.re.is_finite())));
+    }
+
+    #[test]
+    fn test_run_tf_analysis_with_config_rejects_unknown_input_source() {
+        let netlist = "* tf invalid\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        let cfg = TfRunConfig {
+            input_source: "V_NOT_PRESENT".to_string(),
+            output_node: "out".to_string(),
+            ..TfRunConfig::default()
+        };
+        let err =
+            run_tf_analysis_with_config(netlist, &cfg).expect_err("missing source must fail TF");
+        assert!(err.contains("not found"));
+    }
+
+    #[test]
+    fn test_run_tf_analysis_auto_infers_configuration() {
+        let netlist = "* tf auto\nVDRIVE in 0 1\nR1 in out 2k\nC1 out 0 2n\n.end\n";
+        let result = run_tf_analysis(netlist).expect("TF auto mode should infer source and output");
+        assert!(!result.frequencies.is_empty());
+        assert_eq!(result.transfer.len(), result.frequencies.len());
+        assert_eq!(result.input_source, "VDRIVE");
+        assert!(result.output_label.contains("out") || result.output_label.contains("OUT"));
+    }
+
+    #[test]
+    fn test_run_pnoise_analysis_with_config_executes_output_referred() {
+        let netlist = "* pnoise\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        let cfg = PnoiseRunConfig {
+            pss_fundamental_freq: 1e6,
+            pss_num_harmonics: 8,
+            pss_tolerance: 1e-4,
+            start_freq: 10.0,
+            stop_freq: 1e6,
+            points_per_unit: 6,
+            sweep: PnoiseFrequencySweep::Decade,
+            max_sideband: 3,
+            output_node: "out".to_string(),
+            output_ref: None,
+            noise_ref: PnoiseReference::Output,
+            integrated_noise: true,
+            noise_summary: true,
+            reltol: 1e-3,
+            abstol: 1e-18,
+        };
+
+        let result = run_pnoise_analysis_with_config(netlist, &cfg)
+            .expect("PNOISE output-referred analysis should execute");
+        assert!(!result.frequencies.is_empty());
+        assert_eq!(result.output_noise.len(), result.frequencies.len());
+        assert_eq!(result.reference, PnoiseReference::Output);
+        assert_eq!(result.sideband_factor, 7);
+        assert!(result
+            .total_output_noise
+            .is_some_and(|value| value.is_finite() && value >= 0.0));
+    }
+
+    #[test]
+    fn test_run_pnoise_analysis_with_phase_reference_produces_dbc() {
+        let netlist = "* pnoise phase\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        let cfg = PnoiseRunConfig {
+            output_node: "out".to_string(),
+            noise_ref: PnoiseReference::Phase,
+            max_sideband: 2,
+            ..PnoiseRunConfig::default()
+        };
+        let result = run_pnoise_analysis_with_config(netlist, &cfg)
+            .expect("PNOISE phase-noise mode should execute");
+        assert_eq!(result.reference, PnoiseReference::Phase);
+        assert_eq!(result.output_noise.len(), result.frequencies.len());
+        assert!(result.output_noise.iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn test_run_pnoise_analysis_rejects_non_ground_reference_node() {
+        let netlist = "* pnoise invalid\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        let cfg = PnoiseRunConfig {
+            output_node: "out".to_string(),
+            output_ref: Some("in".to_string()),
+            ..PnoiseRunConfig::default()
+        };
+        let err = run_pnoise_analysis_with_config(netlist, &cfg)
+            .expect_err("differential PNOISE output should be rejected for now");
+        assert!(err.contains("differential"));
+    }
+
+    #[test]
+    fn test_run_pnoise_analysis_auto_infers_output_node() {
+        let netlist = "* pnoise auto\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        let result =
+            run_pnoise_analysis(netlist).expect("PNOISE auto mode should infer output node");
+        assert!(!result.frequencies.is_empty());
+        assert_eq!(result.output_noise.len(), result.frequencies.len());
     }
 }
