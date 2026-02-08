@@ -24,8 +24,9 @@ use super::results::{DcOpResult, SimulationResult, WaveformData};
 use super::runner::SimulationError;
 use crate::output_spec::{
     collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
-    normalized_sensitivity, parse_output_spec, run_ac_output_at_frequency,
-    run_dc_output_sensitivity, OutputSpec,
+    normalized_sensitivity, parse_output_spec, resolve_sensitivity_ac_frequency,
+    run_ac_output_at_frequency, run_dc_output_sensitivity, validate_sensitivity_output_spec,
+    OutputSpec,
 };
 
 //=============================================================================
@@ -664,21 +665,8 @@ impl EngineBridge {
     ) -> Result<SimulationResult, SimulationError> {
         let engine = self.engine_for_netlist(netlist);
 
-        let ac_frequency = if config.ac_mode {
-            let freq = config.frequency.unwrap_or(1.0);
-            if freq <= 0.0 {
-                return Err(SimulationError::InvalidConfig(
-                    "Sensitivity AC frequency must be > 0".to_string(),
-                ));
-            }
-            Some(freq)
-        } else if config.frequency.is_some() {
-            return Err(SimulationError::InvalidConfig(
-                "Sensitivity frequency is only valid when AC mode is enabled".to_string(),
-            ));
-        } else {
-            None
-        };
+        let ac_frequency = resolve_sensitivity_ac_frequency(config.ac_mode, config.frequency)
+            .map_err(SimulationError::InvalidConfig)?;
 
         let dc_result = engine
             .run_dc_op(netlist)
@@ -693,13 +681,7 @@ impl EngineBridge {
                     config.output_var
                 ))
             })?;
-        if let OutputSpec::Voltage(vspec) = &output_spec {
-            if vspec.pos == 0 && vspec.neg.is_none() {
-                return Err(SimulationError::InvalidConfig(
-                    "Sensitivity output node cannot be ground".to_string(),
-                ));
-            }
-        }
+        validate_sensitivity_output_spec(&output_spec).map_err(SimulationError::InvalidConfig)?;
 
         let nominal_value = if let Some(freq) = ac_frequency {
             run_ac_output_at_frequency(&engine, netlist, &output_spec, freq)

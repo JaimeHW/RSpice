@@ -11,7 +11,8 @@ use rspice_core::{resolve_simulation_config, SimulationConfigOverrides, Value};
 use crate::output_spec::{
     collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
     normalized_sensitivity, parse_output_spec, resolve_node_or_ground_index,
-    run_ac_output_at_frequency, run_dc_output_sensitivity, OutputSpec, OutputVoltageSpec,
+    resolve_sensitivity_ac_frequency, run_ac_output_at_frequency, run_dc_output_sensitivity,
+    validate_sensitivity_output_spec, OutputSpec, OutputVoltageSpec,
 };
 
 // =============================================================================
@@ -684,17 +685,7 @@ pub fn run_sensitivity_analysis(
     if output_var.is_empty() {
         return Err("Sensitivity output_var is required".to_string());
     }
-    let ac_frequency = if ac_mode {
-        let freq = frequency.unwrap_or(1.0);
-        if freq <= 0.0 {
-            return Err("Sensitivity AC frequency must be > 0".to_string());
-        }
-        Some(freq)
-    } else if frequency.is_some() {
-        return Err("Sensitivity frequency is only valid when AC mode is enabled".to_string());
-    } else {
-        None
-    };
+    let ac_frequency = resolve_sensitivity_ac_frequency(ac_mode, frequency)?;
 
     let netlist = rspice_core::netlist::parse_netlist(netlist_text)
         .map_err(|e| format!("Parse error: {}", e))?;
@@ -717,11 +708,7 @@ pub fn run_sensitivity_analysis(
                 output_var
             )
         })?;
-    if let OutputSpec::Voltage(vspec) = &output_spec {
-        if vspec.pos == 0 && vspec.neg.is_none() {
-            return Err("Sensitivity output node cannot be ground".to_string());
-        }
-    }
+    validate_sensitivity_output_spec(&output_spec)?;
 
     let nominal_output = if let Some(freq) = ac_frequency {
         run_ac_output_at_frequency(&engine, &netlist, &output_spec, freq)
