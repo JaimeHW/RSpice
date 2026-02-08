@@ -7,7 +7,7 @@
 
 [![License](https://img.shields.io/badge/license-Source%20Available-red.svg?style=flat-square)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg?style=flat-square)](https://www.rust-lang.org)
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg?style=flat-square)](https://github.com/rspice/rspice/actions)
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg?style=flat-square)](https://github.com/JaimeHW/rspice/actions)
 [![Platform](https://img.shields.io/badge/platform-win%20|%20macos%20|%20linux%20|%20web-lightgrey.svg?style=flat-square)](https://rspice.org)
 
 <br/>
@@ -27,9 +27,12 @@
 - [Overview](#overview)
 - [Why RSpice?](#why-rspice)
 - [Capabilities](#capabilities)
+- [Architecture](#architecture)
 - [RSpice Studio](#rspice-studio)
 - [Installation](#installation)
+- [Quick Start](#quick-start)
 - [Usage](#usage)
+- [CLI Features](#cli-features)
 - [Roadmap](#roadmap)
 - [Community](#community)
 - [License](#license)
@@ -48,7 +51,8 @@ Bridging the gap between academic tools and commercial EDA, RSpice features a **
 ### 🚀 **Engineered for Speed**
 *   **Parallel Core**: Built on **`rayon`**, enabling massive parallelism for Monte Carlo analysis and parametric sweeps across all available CPU cores.
 *   **Sparse Solver**: Utilizes **`faer`** for state-of-the-art sparse LU factorization, offering superior scaling on large matrices compared to legacy solvers (KLU/Sparse 1.3).
-*   **JIT Compilation**: Verilog-A models are compiled directly to native machine code (AVX2/AVX-512) via **Cranelift**—zero interpretation overhead.
+*   **JIT Compilation**: Verilog-A models are compiled directly to native machine code via **Cranelift**—zero interpretation overhead.
+*   **SIMD Acceleration**: Optional vectorized math, integration, and reduction kernels for numerically intensive workloads.
 
 ### 🎯 **Precision & Reliability**
 *   **Adaptive Stepping**: Advanced Gear/Trapezoidal integration with dynamic local truncation error (LTE) control.
@@ -57,6 +61,7 @@ Bridging the gap between academic tools and commercial EDA, RSpice features a **
 
 ### 🔌 **Extensible Architecture**
 *   **FFI Plugin System**: Load external device models compiled as dynamic libraries (`.dll`/`.so`) for proprietary or legacy model integration.
+*   **Python Bindings**: Native **PyO3** bindings with **NumPy** zero-copy array access for scripting, post-processing, and automation.
 *   **Open Standard**: Fully compliant with standard SPICE netlist syntax and **Verilog-A LRM 2.4**.
 
 ---
@@ -94,9 +99,24 @@ RSpice includes a comprehensive library of industry-standard device models:
 *   **BJT**: Gummel-Poon (NPN/PNP) with quasi-saturation, substrate effects, and high-injection modeling.
 *   **Diode**: Shockley equation with junction and diffusion capacitance.
 *   **JFET/GaN HEMT**: Curtice/Cubic models with self-heating and trapping effects.
-*   **Passive**: Lossy Transmission Lines (T-element), **Jiles-Atherton** Magnetic Hysteresis, Coupled Inductors.
-*   **Behavioral**: Arbitrary Sources (Equation-based), **Verilog-A** modules.
+*   **Passive**: Lossy Transmission Lines (T-element), **Jiles-Atherton** Magnetic Hysteresis, Coupled Inductors, Saturable Inductors.
+*   **Behavioral**: Arbitrary Sources (Equation-based), **Verilog-A** modules, Op-Amp macro models.
 *   **Mixed-Signal**: Full **XSPICE** event-driven subsystem (ngspice-compatible) with **A/D & D/A bridges** and Digital Primitives.
+
+---
+
+## Architecture
+
+RSpice is organized as a Rust workspace with six crates:
+
+| Crate | Description |
+| :--- | :--- |
+| **`rspice-core`** | Simulation engine — MNA stamping, solvers, device models, analysis suite |
+| **`rspice-cli`** | Command-line interface with subcommand-based automation |
+| **`rspice-ui`** | GPU-accelerated graphical interface (egui + wgpu) |
+| **`rspice-veriloga`** | Verilog-A/AMS compiler — lexer, parser, semantic analysis, Cranelift JIT |
+| **`rspice-python`** | Python bindings via PyO3 with NumPy zero-copy array support |
+| **`rspice-wasm`** | WebAssembly target for browser-based simulation |
 
 ---
 
@@ -104,7 +124,7 @@ RSpice includes a comprehensive library of industry-standard device models:
 
 The visual interface is designed for the modern engineer:
 
-*   **GPU Rendering**: Powered by **WebGPU** and **`wgpu`**, rendering massive waveforms and complex schematics at a fluid 60FPS.
+*   **GPU Rendering**: Powered by **egui** with a native **wgpu** backend, rendering massive waveforms and complex schematics at a fluid 60FPS.
 *   **Cross-Probing**: Interactive linking between schematic nodes and waveform traces.
 *   **Virtuoso-Style Hierarchy**: Full **Library/Cell/View (LCV)** commercial registry for hierarchical design management and PDK integration.
 *   **Format Support**: Import/Export standard formats including Touchstone (`.s2p`), CSV, and **LTspice® RAW**.
@@ -120,10 +140,9 @@ The visual interface is designed for the modern engineer:
 RSpice is optimized for modern instruction sets. For maximum performance:
 
 ```bash
-git clone https://github.com/rspice/rspice.git
+git clone https://github.com/JaimeHW/rspice.git
 cd rspice
 
-```bash
 # Build with native CPU optimizations (AVX/SSE)
 RUSTFLAGS="-C target-cpu=native" cargo build --release
 ```
@@ -160,7 +179,24 @@ cargo run -p rspice-ui --release
 ### Headless Engine
 Execute batch simulations for CI/CD pipelines:
 ```bash
-cargo run -p rspice-cli --release -- design.cir
+cargo run -p rspice-cli --release -- run design.cir
+```
+
+### Python Scripting
+Use the PyO3-based Python bindings for automation and post-processing:
+```bash
+# Build the Python module
+cd crates/rspice-python
+pip install maturin
+maturin develop --release
+```
+
+```python
+import rspice
+
+# Run a simulation
+results = rspice.run("circuit.sp")
+print(results.variables)
 ```
 
 
@@ -174,7 +210,7 @@ The RSpice CLI provides a subcommand-based interface designed for automation:
 | `rspice info` | Display netlist summary |
 | `rspice check` | Validate syntax and connectivity |
 | `rspice compare` | Golden file regression testing |
-| `rspice convert` | Format conversion |
+| `rspice convert` | Format conversion (RAW, CSV, JSON, TSV, ASCII) |
 | `rspice compile-va` | Compile Verilog-A models |
 
 ### CI/CD Integration
@@ -199,15 +235,15 @@ We are consistently pushing the boundaries of open-source EDA:
 
 *   [x] **Advanced RF**: Harmonic Balance, PSS, & PNoise.
 *   [x] **Measurement Engine**: Automated extraction of circuit metrics.
+*   [x] **Python Bindings**: PyO3-based scripting interface with NumPy integration.
 *   [ ] **Heterogeneous Simulation**: Mixed-signal co-simulation with external digital solvers.
-*   [ ] **Python Bindings**: PyO3-based scripting interface for data post-processing.
 
 ## Community
 
 Join the revolution in open analog verification:
 
-*   **Discord**: [Join the RSpice Server](https://discord.gg/rspice) - Chat with the developers.
-*   **Discussion**: [GitHub Discussions](https://github.com/rspice/rspice/discussions) - Q&A and feature requests.
+*   **Discord**: [Join the RSpice Server](https://discord.gg/rspice) — Chat with the developers.
+*   **Discussion**: [GitHub Discussions](https://github.com/JaimeHW/rspice/discussions) — Q&A and feature requests.
 *   **Contribute**: Read our [Contribution Guide](CONTRIBUTING.md) to get started.
 
 
