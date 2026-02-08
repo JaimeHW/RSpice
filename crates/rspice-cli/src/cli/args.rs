@@ -109,6 +109,10 @@ pub struct RunArgs {
     #[arg(long, value_name = "TOL")]
     pub reltol: Option<f64>,
 
+    /// Relative residual tolerance for equation convergence checks
+    #[arg(long, value_name = "TOL")]
+    pub residual_reltol: Option<f64>,
+
     /// Minimum timestep for transient analysis
     #[arg(long, value_name = "TIME")]
     pub min_step: Option<f64>,
@@ -447,6 +451,18 @@ mod tests {
             Commands::Run(args) => {
                 assert_eq!(args.output, Some(PathBuf::from("out.raw")));
                 assert_eq!(args.format, OutputFormat::Csv);
+            }
+            _ => panic!("Expected Run command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_run_with_residual_reltol() {
+        let cli =
+            Cli::try_parse_from(["rspice", "run", "test.sp", "--residual-reltol", "2e-4"]).unwrap();
+        match cli.command {
+            Commands::Run(args) => {
+                assert_eq!(args.residual_reltol, Some(2e-4));
             }
             _ => panic!("Expected Run command"),
         }

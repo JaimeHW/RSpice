@@ -41,6 +41,9 @@ pub struct SimulationConfig {
     /// Relative tolerance
     pub reltol: f64,
 
+    /// Relative residual tolerance for equation convergence checks
+    pub residual_reltol: f64,
+
     /// Minimum timestep for transient
     pub min_timestep: f64,
 
@@ -105,6 +108,7 @@ impl Default for SimulationConfig {
             max_iterations: 50,
             abstol: 1e-12,
             reltol: 1e-3,
+            residual_reltol: 1e-3,
             min_timestep: 1e-15,
             max_timestep: 1e-3,
             compress_waveforms: false,
@@ -226,6 +230,9 @@ impl Config {
         if other.simulation.reltol != SimulationConfig::default().reltol {
             self.simulation.reltol = other.simulation.reltol;
         }
+        if other.simulation.residual_reltol != SimulationConfig::default().residual_reltol {
+            self.simulation.residual_reltol = other.simulation.residual_reltol;
+        }
 
         // Output settings
         if other.output.format != OutputConfig::default().format {
@@ -296,6 +303,7 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.simulation.temperature, 27.0);
         assert_eq!(config.simulation.max_iterations, 50);
+        assert_eq!(config.simulation.residual_reltol, 1e-3);
         assert_eq!(config.output.format, "raw");
     }
 
@@ -304,6 +312,7 @@ mod tests {
         let base = Config::default();
         let mut override_config = Config::default();
         override_config.simulation.temperature = 85.0;
+        override_config.simulation.residual_reltol = 2e-4;
         override_config.output.format = "csv".to_string();
         override_config
             .paths
@@ -312,6 +321,7 @@ mod tests {
 
         let merged = base.merge(override_config);
         assert_eq!(merged.simulation.temperature, 85.0);
+        assert_eq!(merged.simulation.residual_reltol, 2e-4);
         assert_eq!(merged.output.format, "csv");
         assert_eq!(merged.paths.include_paths.len(), 1);
     }

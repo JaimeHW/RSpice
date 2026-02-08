@@ -223,6 +223,9 @@ fn build_sim_config(args: &RunArgs, config: &Config) -> SimulationConfig {
     // Keep legacy `SimulationConfig::tolerance` aligned with RELTOL semantics.
     let reltol = args.reltol.unwrap_or(config.simulation.reltol);
     let abstol = args.abstol.unwrap_or(config.simulation.abstol);
+    let residual_reltol = args
+        .residual_reltol
+        .unwrap_or(config.simulation.residual_reltol);
     sim_config.tolerance = reltol;
 
     // Iterations
@@ -254,6 +257,7 @@ fn build_sim_config(args: &RunArgs, config: &Config) -> SimulationConfig {
     convergence_config.voltage_reltol = reltol;
     convergence_config.voltage_abstol = abstol;
     convergence_config.current_abstol = abstol;
+    convergence_config.residual_reltol = residual_reltol;
     sim_config.convergence_config = convergence_config;
 
     sim_config
@@ -2300,6 +2304,7 @@ mod tests {
             maxiter: None,
             abstol: None,
             reltol: None,
+            residual_reltol: None,
             min_step: None,
             max_step: None,
             includes: vec![],
@@ -2347,6 +2352,10 @@ mod tests {
             sim_config.convergence_config.current_abstol,
             config.simulation.abstol
         );
+        assert_eq!(
+            sim_config.convergence_config.residual_reltol,
+            config.simulation.residual_reltol
+        );
     }
 
     #[test]
@@ -2356,6 +2365,7 @@ mod tests {
         args.maxiter = Some(100);
         args.reltol = Some(5e-4);
         args.abstol = Some(1e-15);
+        args.residual_reltol = Some(2e-4);
         let config = Config::default();
         let sim_config = build_sim_config(&args, &config);
 
@@ -2365,6 +2375,7 @@ mod tests {
         assert_eq!(sim_config.convergence_config.voltage_reltol, 5e-4);
         assert_eq!(sim_config.convergence_config.voltage_abstol, 1e-15);
         assert_eq!(sim_config.convergence_config.current_abstol, 1e-15);
+        assert_eq!(sim_config.convergence_config.residual_reltol, 2e-4);
     }
 
     #[test]
@@ -2381,6 +2392,10 @@ mod tests {
         );
         assert_eq!(sim_config.convergence_config.voltage_abstol, 2e-14);
         assert_eq!(sim_config.convergence_config.current_abstol, 2e-14);
+        assert_eq!(
+            sim_config.convergence_config.residual_reltol,
+            config.simulation.residual_reltol
+        );
     }
 
     #[test]
@@ -2389,6 +2404,7 @@ mod tests {
         args.convergence = Some("fast".to_string());
         args.reltol = Some(8e-4);
         args.abstol = Some(4e-12);
+        args.residual_reltol = Some(3e-4);
         let config = Config::default();
         let sim_config = build_sim_config(&args, &config);
 
@@ -2397,6 +2413,31 @@ mod tests {
         assert_eq!(sim_config.convergence_config.voltage_reltol, 8e-4);
         assert_eq!(sim_config.convergence_config.voltage_abstol, 4e-12);
         assert_eq!(sim_config.convergence_config.current_abstol, 4e-12);
+        assert_eq!(sim_config.convergence_config.residual_reltol, 3e-4);
+    }
+
+    #[test]
+    fn test_build_sim_config_residual_reltol_can_differ_from_voltage_reltol() {
+        let mut args = make_default_run_args();
+        args.reltol = Some(9e-4);
+        args.residual_reltol = Some(5e-5);
+        let config = Config::default();
+        let sim_config = build_sim_config(&args, &config);
+
+        assert_eq!(sim_config.convergence_config.voltage_reltol, 9e-4);
+        assert_eq!(sim_config.convergence_config.residual_reltol, 5e-5);
+    }
+
+    #[test]
+    fn test_build_sim_config_uses_config_residual_reltol_default() {
+        let args = make_default_run_args();
+        let mut config = Config::default();
+        config.simulation.reltol = 1e-3;
+        config.simulation.residual_reltol = 2e-4;
+        let sim_config = build_sim_config(&args, &config);
+
+        assert_eq!(sim_config.convergence_config.voltage_reltol, 1e-3);
+        assert_eq!(sim_config.convergence_config.residual_reltol, 2e-4);
     }
 
     #[test]
