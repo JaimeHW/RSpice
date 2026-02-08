@@ -44,6 +44,8 @@ pub enum AnalysisRunType {
     Pac,
     /// Periodic noise
     Pnoise,
+    /// Periodic transfer function
+    Pxf,
     /// Loop stability
     Stb,
     /// Monte Carlo
@@ -70,6 +72,7 @@ impl AnalysisRunType {
             AnalysisRunType::Pss => "PSS",
             AnalysisRunType::Pac => "PAC",
             AnalysisRunType::Pnoise => "PNoise",
+            AnalysisRunType::Pxf => "PXF",
             AnalysisRunType::Stb => "STB",
             AnalysisRunType::MonteCarlo => "Monte Carlo",
             AnalysisRunType::Parametric => "Parametric",
@@ -92,7 +95,10 @@ impl AnalysisRunType {
 
     /// Whether this analysis requires PSS first
     pub fn requires_pss(&self) -> bool {
-        matches!(self, AnalysisRunType::Pac | AnalysisRunType::Pnoise)
+        matches!(
+            self,
+            AnalysisRunType::Pac | AnalysisRunType::Pnoise | AnalysisRunType::Pxf
+        )
     }
 
     /// Estimated relative complexity (for progress estimation)
@@ -110,6 +116,7 @@ impl AnalysisRunType {
             AnalysisRunType::Pss => 20,
             AnalysisRunType::Pac => 5,
             AnalysisRunType::Pnoise => 10,
+            AnalysisRunType::Pxf => 8,
             AnalysisRunType::Stb => 4,
             AnalysisRunType::MonteCarlo => 50,
             AnalysisRunType::Parametric => 30,
@@ -214,6 +221,8 @@ pub enum AnalysisSpec {
     Pac,
     /// Periodic noise
     Pnoise,
+    /// Periodic transfer function
+    Pxf,
     /// Stability analysis
     Stb {
         probe_node: String,
@@ -245,6 +254,7 @@ impl AnalysisSpec {
             AnalysisSpec::PoleZero { .. } => AnalysisRunType::PoleZero,
             AnalysisSpec::Pac => AnalysisRunType::Pac,
             AnalysisSpec::Pnoise => AnalysisRunType::Pnoise,
+            AnalysisSpec::Pxf => AnalysisRunType::Pxf,
             AnalysisSpec::Stb { .. } => AnalysisRunType::Stb,
             AnalysisSpec::MonteCarlo => AnalysisRunType::MonteCarlo,
             AnalysisSpec::Parametric => AnalysisRunType::Parametric,
@@ -475,6 +485,7 @@ impl AnalysisSpec {
             AnalysisSpec::Tf
             | AnalysisSpec::Pac
             | AnalysisSpec::Pnoise
+            | AnalysisSpec::Pxf
             | AnalysisSpec::MonteCarlo
             | AnalysisSpec::Parametric
             | AnalysisSpec::Corner => Ok(()),
@@ -1066,6 +1077,7 @@ mod tests {
         assert_eq!(AnalysisRunType::DcOp.display_name(), "DC Operating Point");
         assert_eq!(AnalysisRunType::Transient.display_name(), "Transient");
         assert_eq!(AnalysisRunType::Stb.display_name(), "STB");
+        assert_eq!(AnalysisRunType::Pxf.display_name(), "PXF");
     }
 
     #[test]
@@ -1100,6 +1112,7 @@ mod tests {
     fn test_run_type_requires_pss() {
         assert!(AnalysisRunType::Pac.requires_pss());
         assert!(AnalysisRunType::Pnoise.requires_pss());
+        assert!(AnalysisRunType::Pxf.requires_pss());
         assert!(!AnalysisRunType::Ac.requires_pss());
     }
 

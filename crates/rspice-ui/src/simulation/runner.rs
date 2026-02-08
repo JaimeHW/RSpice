@@ -23,6 +23,7 @@ pub struct SpecExecutionOptions {
     pub temp: Option<crate::services::simulation_runner::TempRunConfig>,
     pub corner: Option<crate::services::simulation_runner::CornerRunConfig>,
     pub pac: Option<crate::services::simulation_runner::PacRunConfig>,
+    pub pxf: Option<crate::services::simulation_runner::PxfRunConfig>,
     pub tf: Option<crate::services::simulation_runner::TfRunConfig>,
     pub pnoise: Option<crate::services::simulation_runner::PnoiseRunConfig>,
 }
@@ -327,6 +328,19 @@ fn run_simulation_thread(
                         p.update_status(SimulationStatus::AcAnalysis {
                             freq: pac.start_freq,
                             stop_freq: pac.stop_freq,
+                        });
+                    } else {
+                        p.update_status(SimulationStatus::AcAnalysis {
+                            freq: 1.0,
+                            stop_freq: 1.0,
+                        });
+                    }
+                }
+                AnalysisSpec::Pxf => {
+                    if let Some(pxf) = &options.pxf {
+                        p.update_status(SimulationStatus::AcAnalysis {
+                            freq: pxf.start_freq,
+                            stop_freq: pxf.stop_freq,
                         });
                     } else {
                         p.update_status(SimulationStatus::AcAnalysis {
@@ -662,6 +676,52 @@ fn run_spec_request(
                     )
                 })
                 .collect();
+
+            Ok(SimulationResult::Ac {
+                frequencies: data.frequencies,
+                waveforms,
+            })
+        }
+        AnalysisSpec::Pxf => {
+            let pxf_cfg = options.pxf.ok_or_else(|| {
+                SimulationError::InvalidConfig(
+                    "PXF analysis requires explicit PXF execution options".to_string(),
+                )
+            })?;
+            let data = svc_runner::run_pxf_analysis_with_config(netlist, &pxf_cfg)
+                .map_err(SimulationError::InvalidConfig)?;
+
+            let mut waveforms: std::collections::HashMap<String, WaveformData> =
+                std::collections::HashMap::new();
+            let transfer_name = format!(
+                "H(sb{}->sb{}, {})",
+                data.input_sideband, data.output_sideband, data.output_label
+            );
+            waveforms.insert(
+                transfer_name.clone(),
+                WaveformData::new_complex(
+                    transfer_name,
+                    data.frequencies.clone(),
+                    data.transfer.iter().map(|value| value.re).collect(),
+                    data.transfer.iter().map(|value| value.im).collect(),
+                ),
+            );
+
+            if let Some(gd) = data.group_delay {
+                let (freqs, delays): (Vec<f64>, Vec<f64>) = gd.into_iter().unzip();
+                waveforms.insert(
+                    "group_delay".to_string(),
+                    WaveformData {
+                        name: "group_delay".to_string(),
+                        x_values: freqs,
+                        y_values: delays,
+                        y_unit: "s".to_string(),
+                        x_unit: "Hz".to_string(),
+                        is_complex: false,
+                        y_imag: None,
+                    },
+                );
+            }
 
             Ok(SimulationResult::Ac {
                 frequencies: data.frequencies,
@@ -1052,6 +1112,7 @@ C1 out 0 1n
             }),
             corner: None,
             pac: None,
+            pxf: None,
             tf: None,
             pnoise: None,
         };
@@ -1148,6 +1209,7 @@ R2 out 0 1k
                 base_mode: crate::services::simulation_runner::CornerBaseMode::Op,
             }),
             pac: None,
+            pxf: None,
             tf: None,
             pnoise: None,
         };
@@ -1210,6 +1272,7 @@ C1 out 0 1n
                 },
             }),
             pac: None,
+            pxf: None,
             tf: None,
             pnoise: None,
         };
@@ -1361,6 +1424,7 @@ C1 out 0 1n
                 reltol: 1e-3,
                 abstol: 1e-12,
             }),
+            pxf: None,
             tf: None,
             pnoise: None,
         };
@@ -1398,6 +1462,100 @@ C1 out 0 1n
     }
 
     #[test]
+    fn test_runner_start_spec_pxf_with_options() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* PXF smoke test
+V1 in 0 DC 1
+R1 in out 1k
+C1 out 0 1n
+.end
+"#
+        .to_string();
+
+        let options = SpecExecutionOptions {
+            temp: None,
+            corner: None,
+            pac: None,
+            pxf: Some(crate::services::simulation_runner::PxfRunConfig {
+                pss_fundamental_freq: 1e6,
+                pss_num_harmonics: 8,
+                pss_tolerance: 1e-4,
+                start_freq: 1e3,
+                stop_freq: 1e6,
+                points_per_unit: 8,
+                sweep: crate::services::simulation_runner::PxfFrequencySweep::Decade,
+                input_source: "V1".to_string(),
+                input_sideband: 1,
+                output_node: "out".to_string(),
+                output_ref: None,
+                output_sideband: 1,
+                max_sideband: 3,
+                reltol: 1e-3,
+                abstol: 1e-12,
+            }),
+            tf: None,
+            pnoise: None,
+        };
+
+        runner
+            .start_spec_with_options(AnalysisSpec::Pxf, netlist, options)
+            .expect("PXF spec should start");
+        thread::sleep(std::time::Duration::from_millis(250));
+
+        let result = runner.poll_result();
+        assert!(result.is_some(), "Expected PXF result");
+        let result = result.unwrap().expect("PXF should succeed");
+        match result {
+            SimulationResult::Ac {
+                frequencies,
+                waveforms,
+            } => {
+                assert!(!frequencies.is_empty());
+                assert!(!waveforms.is_empty());
+                assert!(
+                    waveforms.keys().any(|name| name.starts_with("H(sb")),
+                    "expected PXF transfer waveform name, got {:?}",
+                    waveforms.keys().collect::<Vec<_>>()
+                );
+                assert!(waveforms
+                    .values()
+                    .any(|wf| wf.is_complex && wf.y_imag.as_ref().is_some()));
+            }
+            other => panic!("Expected AC result for PXF, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_pxf_requires_options() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* PXF missing options
+V1 in 0 DC 1
+R1 in out 1k
+C1 out 0 1n
+.end
+"#
+        .to_string();
+
+        runner
+            .start_spec(AnalysisSpec::Pxf, netlist)
+            .expect("PXF spec launch without options should still start thread");
+        thread::sleep(std::time::Duration::from_millis(250));
+
+        let result = runner
+            .poll_result()
+            .expect("Expected PXF completion result")
+            .expect_err("PXF without options should fail");
+        assert!(matches!(result, SimulationError::InvalidConfig(_)));
+        assert!(
+            result
+                .to_string()
+                .contains("requires explicit PXF execution options")
+        );
+    }
+
+    #[test]
     fn test_runner_start_spec_tf_with_options() {
         let mut runner = SimulationRunner::new();
         let netlist = r#"
@@ -1413,6 +1571,7 @@ C1 out 0 1n
             temp: None,
             corner: None,
             pac: None,
+            pxf: None,
             tf: Some(crate::services::simulation_runner::TfRunConfig {
                 start_freq: 10.0,
                 stop_freq: 1e6,
@@ -1481,6 +1640,7 @@ C1 out 0 1n
             temp: None,
             corner: None,
             pac: None,
+            pxf: None,
             tf: None,
             pnoise: Some(crate::services::simulation_runner::PnoiseRunConfig {
                 pss_fundamental_freq: 1e6,

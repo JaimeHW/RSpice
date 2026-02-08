@@ -1150,6 +1150,126 @@ impl RunExecutor {
                     Err(e) => Err(e),
                 }
             }
+            AnalysisSpec::Pxf => {
+                let pxf_result = simulation_runner::run_pxf_analysis(netlist);
+                match pxf_result {
+                    Ok(data) => {
+                        let mut waveforms = vec![MappedWaveform::complex_ac(
+                            format!(
+                                "H(sb{}->sb{}, {})",
+                                data.input_sideband, data.output_sideband, data.output_label
+                            ),
+                            data.frequencies.clone(),
+                            data.transfer.iter().map(|value| value.re).collect(),
+                            data.transfer.iter().map(|value| value.im).collect(),
+                        )];
+                        if let Some(group_delay) = data.group_delay {
+                            let (x, y): (Vec<f64>, Vec<f64>) = group_delay.into_iter().unzip();
+                            waveforms.push(MappedWaveform {
+                                name: "group_delay".to_string(),
+                                x,
+                                y,
+                                x_label: "Frequency".to_string(),
+                                y_label: "Group Delay".to_string(),
+                                x_unit: "Hz".to_string(),
+                                y_unit: "s".to_string(),
+                                is_complex: false,
+                                y_imag: None,
+                            });
+                        }
+
+                        let mut measurements = vec![
+                            MappedMeasurement {
+                                name: "input_sideband".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.input_sideband as f64,
+                                unit: "index".to_string(),
+                                signal: "pxf".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                            MappedMeasurement {
+                                name: "output_sideband".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.output_sideband as f64,
+                                unit: "index".to_string(),
+                                signal: "pxf".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                            MappedMeasurement {
+                                name: "fundamental_frequency".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.fundamental_frequency,
+                                unit: "Hz".to_string(),
+                                signal: "pxf".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                        ];
+                        if let Some(dc_gain) = data.dc_gain {
+                            measurements.push(MappedMeasurement {
+                                name: "dc_gain_db".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: 20.0 * dc_gain.norm().max(1e-30).log10(),
+                                unit: "dB".to_string(),
+                                signal: "pxf".to_string(),
+                                status: MeasurementStatus::Success,
+                            });
+                        }
+                        if let Some((peak_freq, peak_gain_db)) = data.peak_gain {
+                            measurements.push(MappedMeasurement {
+                                name: "peak_gain_db".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: peak_gain_db,
+                                unit: "dB".to_string(),
+                                signal: "pxf".to_string(),
+                                status: MeasurementStatus::Success,
+                            });
+                            measurements.push(MappedMeasurement {
+                                name: "peak_gain_frequency".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: peak_freq,
+                                unit: "Hz".to_string(),
+                                signal: "pxf".to_string(),
+                                status: MeasurementStatus::Success,
+                            });
+                        }
+                        if let Some(bw) = data.bandwidth_3db {
+                            measurements.push(MappedMeasurement {
+                                name: "bandwidth_3db".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: bw,
+                                unit: "Hz".to_string(),
+                                signal: "pxf".to_string(),
+                                status: MeasurementStatus::Success,
+                            });
+                        }
+                        if let Some(ugf) = data.unity_gain_freq {
+                            measurements.push(MappedMeasurement {
+                                name: "unity_gain_frequency".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: ugf,
+                                unit: "Hz".to_string(),
+                                signal: "pxf".to_string(),
+                                status: MeasurementStatus::Success,
+                            });
+                        }
+
+                        let status = if data.warnings.is_empty() {
+                            ResultStatus::Success
+                        } else {
+                            ResultStatus::Warning
+                        };
+                        Ok(MappedResult {
+                            analysis_type: MappedAnalysisType::Ac,
+                            status,
+                            waveforms,
+                            measurements,
+                            warnings: data.warnings,
+                            ..Default::default()
+                        })
+                    }
+                    Err(e) => Err(e),
+                }
+            }
             AnalysisSpec::Pnoise => {
                 let pnoise_result = simulation_runner::run_pnoise_analysis(netlist);
                 match pnoise_result {
@@ -1340,6 +1460,7 @@ impl RunExecutor {
             AnalysisRunType::Pss => MappedAnalysisType::Pss,
             AnalysisRunType::Pac => MappedAnalysisType::Pac,
             AnalysisRunType::Pnoise => MappedAnalysisType::Pnoise,
+            AnalysisRunType::Pxf => MappedAnalysisType::Ac,
             AnalysisRunType::Stb => MappedAnalysisType::Ac,
             AnalysisRunType::MonteCarlo => MappedAnalysisType::MonteCarlo,
             AnalysisRunType::Parametric => MappedAnalysisType::Parametric,
@@ -1630,6 +1751,7 @@ mod tests {
             (AnalysisRunType::Transient, MappedAnalysisType::Transient),
             (AnalysisRunType::Noise, MappedAnalysisType::Noise),
             (AnalysisRunType::PoleZero, MappedAnalysisType::PoleZero),
+            (AnalysisRunType::Pxf, MappedAnalysisType::Ac),
             (AnalysisRunType::Stb, MappedAnalysisType::Ac),
         ];
 
@@ -2051,6 +2173,40 @@ mod tests {
             .expect("expected mapped PAC result");
         assert_eq!(mapped.analysis_type, MappedAnalysisType::Pac);
         assert!(!mapped.waveforms.is_empty(), "expected PAC spectra");
+    }
+
+    #[test]
+    fn test_pxf_analysis_with_spec_is_executed() {
+        let executor = RunExecutor::new();
+        let mut queue =
+            RunQueue::new().with_netlist("* pxf\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n");
+        queue.add_analysis(AnalysisSpec::Pxf);
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.total_runs, 1);
+        assert!(
+            result.errors.is_empty(),
+            "expected PXF run to succeed, got errors: {:?}",
+            result.errors
+        );
+
+        let mapped = result
+            .results
+            .values()
+            .next()
+            .expect("expected mapped PXF result");
+        assert_eq!(mapped.analysis_type, MappedAnalysisType::Ac);
+        assert!(
+            mapped.waveforms.iter().any(|wf| wf.name.starts_with("H(sb")),
+            "expected transfer waveform in mapped PXF result"
+        );
+        assert!(
+            mapped
+                .measurements
+                .iter()
+                .any(|m| m.name == "input_sideband"),
+            "expected sideband measurement metadata"
+        );
     }
 
     #[test]

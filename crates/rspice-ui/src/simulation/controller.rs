@@ -469,6 +469,7 @@ impl SimulationController {
             spec,
             AnalysisSpec::Tf
                 | AnalysisSpec::Pnoise
+                | AnalysisSpec::Pxf
                 | AnalysisSpec::Stb { .. }
                 | AnalysisSpec::MonteCarlo
                 | AnalysisSpec::Parametric
@@ -495,6 +496,7 @@ impl SimulationController {
                     temp: Some(Self::temp_run_config_from_dialog(state, &temp_cfg)?),
                     corner: None,
                     pac: None,
+                    pxf: None,
                     tf: None,
                     pnoise: None,
                 })
@@ -509,6 +511,7 @@ impl SimulationController {
                     temp: None,
                     corner: Some(Self::corner_run_config_from_dialog(state, &corner_cfg)?),
                     pac: None,
+                    pxf: None,
                     tf: None,
                     pnoise: None,
                 })
@@ -517,6 +520,15 @@ impl SimulationController {
                 temp: None,
                 corner: None,
                 pac: Some(Self::pac_run_config_from_dialog(state)?),
+                pxf: None,
+                tf: None,
+                pnoise: None,
+            }),
+            AnalysisSpec::Pxf => Ok(SpecExecutionOptions {
+                temp: None,
+                corner: None,
+                pac: None,
+                pxf: Some(Self::pxf_run_config_from_dialog(state)?),
                 tf: None,
                 pnoise: None,
             }),
@@ -524,6 +536,7 @@ impl SimulationController {
                 temp: None,
                 corner: None,
                 pac: None,
+                pxf: None,
                 tf: Some(Self::tf_run_config_from_dialog(state)?),
                 pnoise: None,
             }),
@@ -531,6 +544,7 @@ impl SimulationController {
                 temp: None,
                 corner: None,
                 pac: None,
+                pxf: None,
                 tf: None,
                 pnoise: Some(Self::pnoise_run_config_from_dialog(state)?),
             }),
@@ -538,6 +552,7 @@ impl SimulationController {
                 temp: None,
                 corner: None,
                 pac: None,
+                pxf: None,
                 tf: None,
                 pnoise: None,
             }),
@@ -680,6 +695,50 @@ impl SimulationController {
             noise_summary: pnoise_cfg.noise_summary,
             reltol: 1e-3,
             abstol: 1e-18,
+        })
+    }
+
+    fn pxf_run_config_from_dialog(
+        state: &AppState,
+    ) -> Result<crate::services::simulation_runner::PxfRunConfig, String> {
+        use crate::services::simulation_runner::{PxfFrequencySweep, PxfRunConfig};
+
+        let mut pxf_state = state.dialogs.pxf_state.clone();
+        pxf_state.ensure_initialized();
+        let pxf_cfg = pxf_state
+            .to_config()
+            .map_err(|e| format!("invalid PXF settings: {}", e))?;
+
+        let mut pss_state = state.dialogs.pss_state.clone();
+        pss_state.ensure_initialized();
+        let pss_cfg = pss_state
+            .to_config()
+            .map_err(|e| format!("invalid PSS settings required for PXF: {}", e))?;
+
+        let sweep = match pxf_cfg.sweep_type {
+            crate::simulation::dialog::pxf::PxfSweepType::Decade => PxfFrequencySweep::Decade,
+            crate::simulation::dialog::pxf::PxfSweepType::Octave => PxfFrequencySweep::Octave,
+            crate::simulation::dialog::pxf::PxfSweepType::Linear => PxfFrequencySweep::Linear,
+        };
+
+        let output_ref = (!pxf_cfg.output_ref.trim().is_empty()).then(|| pxf_cfg.output_ref.clone());
+
+        Ok(PxfRunConfig {
+            pss_fundamental_freq: pss_cfg.fund_freq,
+            pss_num_harmonics: pss_cfg.num_harmonics as usize,
+            pss_tolerance: pss_cfg.stab_tol,
+            start_freq: pxf_cfg.start_freq,
+            stop_freq: pxf_cfg.stop_freq,
+            points_per_unit: pxf_cfg.num_points as usize,
+            sweep,
+            input_source: pxf_cfg.input_source,
+            input_sideband: 1,
+            output_node: pxf_cfg.output_node,
+            output_ref,
+            output_sideband: pxf_cfg.output_sideband,
+            max_sideband: pxf_cfg.max_sideband,
+            reltol: 1e-3,
+            abstol: 1e-12,
         })
     }
 
@@ -924,6 +983,7 @@ impl SimulationController {
             11 => self.build_harmonic_balance_spec(state),
             13 => self.build_pac_spec(state),
             14 => self.build_pnoise_spec(state),
+            15 => self.build_pxf_spec(state),
             17 => self.build_tf_spec(state),
             18 => self.build_corner_sweep_spec(state),
             _ => Err(
@@ -1063,6 +1123,7 @@ impl SimulationController {
             AnalysisSpec::HarmonicBalance { .. } => self.build_harmonic_balance_command(state),
             AnalysisSpec::Pac => self.build_pac_command(state),
             AnalysisSpec::Pnoise => self.build_pnoise_command(state),
+            AnalysisSpec::Pxf => self.build_pxf_command(state),
             AnalysisSpec::Tf => self.build_tf_command(state),
             _ => self
                 .analysis_spec_to_config(state, spec)
@@ -1155,6 +1216,15 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid PNOISE settings: {}", e))?;
         Ok(AnalysisSpec::Pnoise)
+    }
+
+    fn build_pxf_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
+        let mut pxf_state = state.dialogs.pxf_state.clone();
+        pxf_state.ensure_initialized();
+        pxf_state
+            .to_config()
+            .map_err(|e| format!("invalid PXF settings: {}", e))?;
+        Ok(AnalysisSpec::Pxf)
     }
 
     fn build_tf_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
@@ -1272,6 +1342,15 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid PNOISE settings: {}", e))?;
         Ok(pnoise_cfg.to_spice())
+    }
+
+    fn build_pxf_command(&self, state: &AppState) -> Result<String, String> {
+        let mut pxf_state = state.dialogs.pxf_state.clone();
+        pxf_state.ensure_initialized();
+        let pxf_cfg = pxf_state
+            .to_config()
+            .map_err(|e| format!("invalid PXF settings: {}", e))?;
+        Ok(pxf_cfg.to_spice())
     }
 
     fn build_tf_command(&self, state: &AppState) -> Result<String, String> {
@@ -1458,6 +1537,7 @@ impl SimulationController {
             AnalysisRunType::Pss => AnalysisType::Pss,
             AnalysisRunType::Pac => AnalysisType::Ac,
             AnalysisRunType::Pnoise => AnalysisType::Noise,
+            AnalysisRunType::Pxf => AnalysisType::Ac,
             AnalysisRunType::Stb => AnalysisType::Ac,
             AnalysisRunType::MonteCarlo => AnalysisType::MonteCarlo,
             AnalysisRunType::Parametric => AnalysisType::Parametric,
@@ -2576,12 +2656,12 @@ mod tests {
     fn test_build_analysis_plan_rejects_unsupported_analysis_tab() {
         let controller = SimulationController::new();
         let mut state = AppState::default();
-        state.dialogs.enabled_analyses.insert(15); // PXF (not yet implemented)
+        state.dialogs.enabled_analyses.insert(16); // PSTB (not yet implemented)
 
         let errors = controller
             .build_analysis_plan(&state)
             .expect_err("unsupported analysis should fail planning");
-        assert!(errors.iter().any(|e| e.contains("PXF")));
+        assert!(errors.iter().any(|e| e.contains("PSTB")));
     }
 
     #[test]
@@ -2945,6 +3025,25 @@ mod tests {
     }
 
     #[test]
+    fn test_build_analysis_spec_for_pxf_accepts_valid_dialog_configuration() {
+        use crate::simulation::dialog::pxf::PxfConfig;
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.pxf_state = crate::simulation::dialog::pxf::PxfDialogState::from_config(
+            &PxfConfig::new(10.0, 10e6, 12)
+                .with_input("V1")
+                .with_output("OUT", 1)
+                .with_sidebands(3),
+        );
+
+        let spec = controller
+            .build_analysis_spec_for_index(&state, 15)
+            .expect("PXF spec should build");
+        assert!(matches!(spec, AnalysisSpec::Pxf));
+    }
+
+    #[test]
     fn test_build_analysis_spec_for_tf_accepts_valid_dialog_configuration() {
         use crate::simulation::dialog::xf::{XfConfig, XfSweepType};
 
@@ -3072,8 +3171,51 @@ mod tests {
         assert!(queue[0].config.is_none());
         assert!(queue[0].analysis_line.starts_with(".stb "));
         assert!(queue[0].spec_options.pac.is_none());
+        assert!(queue[0].spec_options.pxf.is_none());
         assert!(queue[0].spec_options.tf.is_none());
         assert!(queue[0].spec_options.pnoise.is_none());
+    }
+
+    #[test]
+    fn test_build_queue_from_plan_stores_pxf_as_spec_executed_run() {
+        use crate::simulation::dialog::pss::PssConfig;
+        use crate::simulation::dialog::pxf::PxfConfig;
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses = [15usize].into_iter().collect();
+        state.dialogs.pss_state =
+            crate::simulation::dialog::pss::PssDialogState::from_config(&PssConfig::new(5e6));
+        state.dialogs.pxf_state = crate::simulation::dialog::pxf::PxfDialogState::from_config(
+            &PxfConfig::new(1e3, 1e6, 10)
+                .with_input("V1")
+                .with_output("OUT", 1)
+                .with_sidebands(3),
+        );
+
+        let plan = controller
+            .build_analysis_plan(&state)
+            .expect("plan should build");
+        let queue = controller
+            .build_queue_from_plan(&state, &plan)
+            .expect("queue should build");
+
+        assert_eq!(queue.len(), 1);
+        assert!(matches!(queue[0].spec, AnalysisSpec::Pxf));
+        assert!(queue[0].config.is_none());
+        assert!(queue[0].analysis_line.starts_with(".pxf "));
+        let pxf_cfg = queue[0]
+            .spec_options
+            .pxf
+            .as_ref()
+            .expect("PXF options should be present");
+        assert_eq!(pxf_cfg.input_source, "V1");
+        assert_eq!(pxf_cfg.output_sideband, 1);
+        assert_eq!(pxf_cfg.max_sideband, 3);
+        assert!(matches!(
+            pxf_cfg.sweep,
+            crate::services::simulation_runner::PxfFrequencySweep::Decade
+        ));
     }
 
     #[test]
