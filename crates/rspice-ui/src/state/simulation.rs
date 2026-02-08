@@ -366,7 +366,7 @@ impl SimulationRun {
     /// Format timestamp as human-readable time string (e.g., "1:04:01 PM")
     fn format_time(timestamp: f64) -> String {
         use std::time::{Duration, UNIX_EPOCH};
-        let datetime = UNIX_EPOCH + Duration::from_secs_f64(timestamp);
+        let _datetime = UNIX_EPOCH + Duration::from_secs_f64(timestamp);
         // Use chrono-free approach for portability
         let secs = timestamp as u64;
         let hours = (secs / 3600) % 24;
@@ -398,6 +398,10 @@ pub struct SimulationState {
     /// Flag to trigger simulation from menu (toolbar watches this)
     /// When set to true, toolbar will start simulation and reset to false
     pub trigger_simulation: bool,
+
+    /// Flag to trigger simulation abort from stop button
+    /// When set to true, SimulationController will call runner.abort() and reset to false
+    pub trigger_abort: bool,
 
     /// Current simulation progress (0.0 to 1.0)
     pub progress: f64,

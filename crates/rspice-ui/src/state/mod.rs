@@ -19,6 +19,7 @@ pub mod label_cache;
 pub mod leader_line;
 pub mod library_browser;
 pub mod model_library;
+pub mod pdk_config;
 pub mod preferences;
 pub mod property_types;
 pub mod recent_files;
@@ -37,8 +38,11 @@ pub use display_settings::{PinNameVisibility, SchematicDisplaySettings};
 pub use document::{Document, DocumentManager};
 pub use history::SchematicHistory;
 pub use library_browser::{Cell, Library, LibraryManager, View, ViewType};
+pub use model_library::ModelLibraryManager;
+pub use pdk_config::{ConfigError, DiscoveredFile, LibraryPathEntry, PdkConfig};
 pub use property_types::{
-    PropertyDefinition, PropertyRegistry, PropertySheet, PropertyType, PropertyValue,
+    format_engineering, DisplayMode, PropertyDefinition, PropertyRegistry, PropertySheet,
+    PropertyType, PropertyValue, VisibilityCondition,
 };
 pub use schematic::*;
 pub use simulation::{

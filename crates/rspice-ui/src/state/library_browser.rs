@@ -700,6 +700,24 @@ impl LibraryManager {
             "Sources",
             "Sinusoidal voltage source",
         );
+        add_primitive(
+            &mut lib,
+            "VSource PWL",
+            "Sources",
+            "Piecewise linear voltage source",
+        );
+        add_primitive(
+            &mut lib,
+            "VSource Exp",
+            "Sources",
+            "Exponential voltage source",
+        );
+        add_primitive(
+            &mut lib,
+            "VSource SFFM",
+            "Sources",
+            "Single-frequency FM voltage source",
+        );
         add_primitive(&mut lib, "ISource DC", "Sources", "DC current source");
         add_primitive(
             &mut lib,
@@ -707,6 +725,31 @@ impl LibraryManager {
             "Sources",
             "AC small-signal current source",
         );
+        add_primitive(
+            &mut lib,
+            "ISource Pulse",
+            "Sources",
+            "Pulse waveform current source",
+        );
+        add_primitive(
+            &mut lib,
+            "ISource Sin",
+            "Sources",
+            "Sinusoidal current source",
+        );
+        add_primitive(
+            &mut lib,
+            "ISource PWL",
+            "Sources",
+            "Piecewise linear current source",
+        );
+        add_primitive(
+            &mut lib,
+            "ISource Exp",
+            "Sources",
+            "Exponential current source",
+        );
+        add_primitive(&mut lib, "ISource Noise", "Sources", "Noise current source");
 
         // ===== CONTROLLED SOURCES =====
         add_primitive(
@@ -1244,12 +1287,12 @@ mod tests {
     }
 
     #[test]
-    fn test_primitives_library_has_21_components() {
+    fn test_primitives_library_has_expected_component_count() {
         let mgr = LibraryManager::with_primitives();
         let lib = mgr
             .get_library(LibraryManager::PRIMITIVES_LIBRARY)
             .expect("primitives library must exist");
-        assert_eq!(lib.cell_count(), 21);
+        assert_eq!(lib.cell_count(), 29);
     }
 
     #[test]
@@ -1296,7 +1339,7 @@ mod tests {
     fn test_primitives_sources_category() {
         let mgr = LibraryManager::with_primitives();
         let sources = mgr.cells_in_category(LibraryManager::PRIMITIVES_LIBRARY, "Sources");
-        assert_eq!(sources.len(), 6);
+        assert_eq!(sources.len(), 14);
     }
 
     #[test]
