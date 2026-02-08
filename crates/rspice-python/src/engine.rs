@@ -475,7 +475,8 @@ R1 2 0 1k
     fn test_engine_default_creation() {
         let engine = PyEngine::new(None);
         let cfg = engine.config();
-        assert!((cfg.inner.tolerance - 1e-9).abs() < 1e-12);
+        let expected_tolerance = rspice_core::engine::SimulationConfig::default().tolerance;
+        assert!((cfg.inner.tolerance - expected_tolerance).abs() < 1e-18);
         assert_eq!(cfg.inner.max_iterations, 50);
     }
 

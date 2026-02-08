@@ -270,6 +270,17 @@ impl PyConvergenceConfig {
         self.inner.voltage_reltol = value;
     }
 
+    /// Relative equation residual tolerance for Newton convergence checks.
+    #[getter]
+    fn get_residual_reltol(&self) -> f64 {
+        self.inner.residual_reltol
+    }
+
+    #[setter]
+    fn set_residual_reltol(&mut self, value: f64) {
+        self.inner.residual_reltol = value;
+    }
+
     /// Absolute voltage tolerance for Newton convergence checks.
     #[getter]
     fn get_voltage_abstol(&self) -> f64 {
@@ -305,13 +316,14 @@ impl PyConvergenceConfig {
 
     fn __repr__(&self) -> String {
         format!(
-            "ConvergenceConfig(gmin_stepping={}, source_stepping={}, pseudo_transient={}, arc_length={}, damping={:?}, voltage_reltol={:.0e}, voltage_abstol={:.0e}, current_abstol={:.0e})",
+            "ConvergenceConfig(gmin_stepping={}, source_stepping={}, pseudo_transient={}, arc_length={}, damping={:?}, voltage_reltol={:.0e}, residual_reltol={:.0e}, voltage_abstol={:.0e}, current_abstol={:.0e})",
             self.inner.gmin_stepping,
             self.inner.source_stepping,
             self.inner.pseudo_transient,
             self.inner.arc_length,
             self.inner.damping_strategy,
             self.inner.voltage_reltol,
+            self.inner.residual_reltol,
             self.inner.voltage_abstol,
             self.inner.current_abstol
         )
@@ -491,6 +503,7 @@ mod tests {
         assert!(config.inner.voltage_reltol > 0.0);
         assert_eq!(config.inner.voltage_abstol, 0.0);
         assert!(config.inner.current_abstol > 0.0);
+        assert!(config.inner.residual_reltol > 0.0);
     }
 
     #[test]
@@ -524,7 +537,8 @@ mod tests {
     #[test]
     fn test_simulation_config_default() {
         let config = PySimulationConfig::new();
-        assert!((config.inner.tolerance - 1e-9).abs() < 1e-12);
+        let expected_tolerance = SimulationConfig::default().tolerance;
+        assert!((config.inner.tolerance - expected_tolerance).abs() < 1e-18);
         assert_eq!(config.inner.max_iterations, 50);
         assert!((config.inner.temperature - 300.0).abs() < 0.1);
     }
@@ -607,6 +621,7 @@ mod tests {
         let repr = config.__repr__();
         assert!(repr.contains("gmin_stepping=true"));
         assert!(repr.contains("arc_length=true"));
+        assert!(repr.contains("residual_reltol="));
         assert!(repr.contains("current_abstol="));
     }
 
@@ -660,6 +675,9 @@ mod tests {
 
         config.set_voltage_reltol(2e-3);
         assert!((config.get_voltage_reltol() - 2e-3).abs() < 1e-15);
+
+        config.set_residual_reltol(4e-4);
+        assert!((config.get_residual_reltol() - 4e-4).abs() < 1e-15);
 
         config.set_voltage_abstol(5e-7);
         assert!((config.get_voltage_abstol() - 5e-7).abs() < 1e-18);
