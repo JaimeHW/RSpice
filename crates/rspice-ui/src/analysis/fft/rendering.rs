@@ -2,7 +2,7 @@
 //!
 //! Commercial-grade egui rendering for FFT/spectrum visualization.
 
-use egui::{Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, Vec2};
+use egui::{Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2};
 use std::f64::consts::PI;
 
 use super::data::{FftData, FftPoint, SpectrumAnalysis};
@@ -47,7 +47,7 @@ fn text_color() -> Color32 {
 // =============================================================================
 
 /// Render the FFT viewer panel
-pub fn render_fft_viewer(ui: &mut Ui, app_state: &mut AppState) {
+pub fn render_fft_viewer(ui: &mut Ui, _app_state: &mut AppState) {
     let mut state = FftState::new();
     load_demo_data(&mut state);
 
@@ -115,7 +115,7 @@ fn render_header(ui: &mut Ui, layout: &FftLayout, state: &mut FftState) {
         .rect_filled(layout.header, Rounding::ZERO, Color32::from_rgb(30, 33, 40));
 
     let header_rect = layout.header.shrink(4.0);
-    ui.allocate_ui_at_rect(header_rect, |ui| {
+    ui.allocate_new_ui(UiBuilder::new().max_rect(header_rect), |ui| {
         ui.horizontal(|ui| {
             ui.add_space(8.0);
 
@@ -255,7 +255,7 @@ fn render_spectrum_core(ui: &mut Ui, layout: &FftLayout, state: &FftState) {
     );
 }
 
-fn render_grid(painter: &egui::Painter, rect: Rect, state: &FftState) {
+fn render_grid(painter: &egui::Painter, rect: Rect, _state: &FftState) {
     let stroke = Stroke::new(0.5, grid_color());
 
     // Vertical lines (frequency)
@@ -318,7 +318,7 @@ fn render_fundamental_marker(
     painter: &egui::Painter,
     rect: Rect,
     freq: f64,
-    data: &FftData,
+    _data: &FftData,
     state: &FftState,
 ) {
     let x = freq_to_x(freq, rect, state);
@@ -346,7 +346,7 @@ fn render_harmonic_marker(
     painter: &egui::Painter,
     rect: Rect,
     freq: f64,
-    db: f64,
+    _db: f64,
     state: &FftState,
 ) {
     let x = freq_to_x(freq, rect, state);
@@ -430,7 +430,7 @@ fn render_info_panel(ui: &mut Ui, layout: &FftLayout, state: &FftState) {
         .rect_filled(layout.info, Rounding::ZERO, Color32::from_rgb(25, 27, 33));
 
     let panel_rect = layout.info.shrink(8.0);
-    ui.allocate_ui_at_rect(panel_rect, |ui| {
+    ui.allocate_new_ui(UiBuilder::new().max_rect(panel_rect), |ui| {
         ui.vertical(|ui| {
             ui.label(
                 egui::RichText::new("Analysis")

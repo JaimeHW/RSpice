@@ -4,7 +4,9 @@
 //! Renders constant-R circles, constant-X arcs, VSWR circles,
 //! S-parameter traces, and markers.
 
-use egui::{Color32, FontId, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui, Vec2};
+use egui::{
+    Color32, FontId, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2,
+};
 use std::f64::consts::PI;
 
 use super::complex::Complex;
@@ -171,7 +173,7 @@ fn render_header(
 
     // Create UI area for header controls
     let header_rect = layout.header.shrink(4.0);
-    ui.allocate_ui_at_rect(header_rect, |ui| {
+    ui.allocate_new_ui(UiBuilder::new().max_rect(header_rect), |ui| {
         ui.horizontal(|ui| {
             ui.add_space(8.0);
 
@@ -300,11 +302,11 @@ fn render_chart_core(ui: &mut Ui, layout: &SmithChartLayout, state: &SmithChartS
     painter.circle_filled(center, 3.0, Color32::from_rgb(100, 100, 100));
 }
 
-fn render_r_circles(painter: &Painter, center: Pos2, radius: f32, state: &SmithChartState) {
+fn render_r_circles(painter: &Painter, center: Pos2, radius: f32, _state: &SmithChartState) {
     let stroke = Stroke::new(0.5, r_circle_color());
 
     for &r in standard_r_values() {
-        let (cx, cy, cr) = constant_r_circle(r);
+        let (cx, _cy, cr) = constant_r_circle(r);
         let screen_cx = center.x + cx as f32 * radius;
         let screen_cy = center.y; // R circles are centered on real axis
         let screen_cr = cr as f32 * radius;
@@ -328,7 +330,7 @@ fn render_r_circles(painter: &Painter, center: Pos2, radius: f32, state: &SmithC
     }
 }
 
-fn render_x_circles(painter: &Painter, center: Pos2, radius: f32, state: &SmithChartState) {
+fn render_x_circles(painter: &Painter, center: Pos2, radius: f32, _state: &SmithChartState) {
     let stroke = Stroke::new(0.5, x_circle_color());
 
     for &x in standard_x_values() {
@@ -364,8 +366,8 @@ fn render_x_circles(painter: &Painter, center: Pos2, radius: f32, state: &SmithC
 /// Draw a circle clipped to the unit circle
 fn draw_clipped_circle(
     painter: &Painter,
-    unit_center: Pos2,
-    unit_radius: f32,
+    _unit_center: Pos2,
+    _unit_radius: f32,
     cx: f32,
     cy: f32,
     cr: f32,
@@ -473,7 +475,7 @@ fn render_readout_panel(ui: &mut Ui, layout: &SmithChartLayout, state: &SmithCha
 
     // Create UI area
     let readout_rect = layout.readout.shrink(8.0);
-    ui.allocate_ui_at_rect(readout_rect, |ui| {
+    ui.allocate_new_ui(UiBuilder::new().max_rect(readout_rect), |ui| {
         ui.vertical(|ui| {
             ui.label(
                 egui::RichText::new("Marker Readout")

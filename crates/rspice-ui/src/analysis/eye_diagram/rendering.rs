@@ -3,7 +3,9 @@
 //! Commercial-grade egui rendering for eye diagram visualization.
 //! Supports overlay, persistence, and single-trace display modes.
 
-use egui::{Color32, FontId, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui, Vec2};
+use egui::{
+    Color32, FontId, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2,
+};
 use std::f64::consts::PI;
 
 use super::data::{EyeData, EyeDataBuilder, EyeTrace};
@@ -136,7 +138,7 @@ fn render_header(
     painter.rect_filled(layout.header, Rounding::ZERO, Color32::from_rgb(30, 33, 40));
 
     let header_rect = layout.header.shrink(4.0);
-    ui.allocate_ui_at_rect(header_rect, |ui| {
+    ui.allocate_new_ui(UiBuilder::new().max_rect(header_rect), |ui| {
         ui.horizontal(|ui| {
             ui.add_space(8.0);
 
@@ -263,7 +265,7 @@ fn render_grid(painter: &Painter, rect: Rect, state: &EyeDiagramState) {
     }
 }
 
-fn render_center_lines(painter: &Painter, rect: Rect, state: &EyeDiagramState) {
+fn render_center_lines(painter: &Painter, rect: Rect, _state: &EyeDiagramState) {
     let stroke = Stroke::new(1.0, center_line_color());
 
     // Vertical center (mid-UI)
@@ -437,7 +439,7 @@ fn render_measurements_panel(ui: &mut Ui, layout: &EyeLayout, state: &EyeDiagram
     );
 
     let panel_rect = layout.measurements.shrink(8.0);
-    ui.allocate_ui_at_rect(panel_rect, |ui| {
+    ui.allocate_new_ui(UiBuilder::new().max_rect(panel_rect), |ui| {
         ui.vertical(|ui| {
             ui.label(
                 egui::RichText::new("Measurements")

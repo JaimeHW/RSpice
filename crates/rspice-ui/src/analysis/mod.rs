@@ -20,6 +20,7 @@
 //! - `data.rs` - Data structures for analysis results
 
 pub mod bode;
+pub mod calculator;
 pub mod eye_diagram;
 pub mod fft;
 pub mod hb_tones;

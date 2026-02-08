@@ -2,7 +2,9 @@
 //!
 //! Commercial-grade egui rendering for Bode plot visualization.
 
-use egui::{Color32, FontId, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui, Vec2};
+use egui::{
+    Color32, FontId, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2,
+};
 use std::f64::consts::PI;
 
 use super::data::{BodeData, FrequencyPoint, FrequencyResponse};
@@ -91,6 +93,25 @@ const PLOT_GAP: f32 = 4.0;
 fn calculate_layout(available: Rect, state: &BodePlotState) -> BodeLayout {
     let total = available;
 
+    // Ensure minimum dimensions
+    let min_width = CHART_PADDING * 4.0 + INFO_WIDTH;
+    let min_height = HEADER_HEIGHT + CHART_PADDING * 2.0 + 50.0;
+
+    // If too small, return minimal layout with no plots
+    if total.width() < min_width || total.height() < min_height {
+        let header = Rect::from_min_size(
+            total.min,
+            Vec2::new(total.width(), HEADER_HEIGHT.min(total.height())),
+        );
+        return BodeLayout {
+            total,
+            header,
+            magnitude: None,
+            phase: None,
+            info: Rect::NOTHING,
+        };
+    }
+
     let header = Rect::from_min_size(total.min, Vec2::new(total.width(), HEADER_HEIGHT));
 
     let info = Rect::from_min_size(
@@ -98,9 +119,14 @@ fn calculate_layout(available: Rect, state: &BodePlotState) -> BodeLayout {
         Vec2::new(INFO_WIDTH, total.height() - HEADER_HEIGHT),
     );
 
+    let plot_left = total.min.x + CHART_PADDING;
+    let plot_right = (info.min.x - CHART_PADDING).max(plot_left + 50.0);
+    let plot_top = header.max.y + CHART_PADDING;
+    let plot_bottom = (total.max.y - CHART_PADDING).max(plot_top + 50.0);
+
     let plot_area = Rect::from_min_max(
-        Pos2::new(total.min.x + CHART_PADDING, header.max.y + CHART_PADDING),
-        Pos2::new(info.min.x - CHART_PADDING, total.max.y - CHART_PADDING),
+        Pos2::new(plot_left, plot_top),
+        Pos2::new(plot_right, plot_bottom),
     );
 
     let (magnitude, phase) = match state.mode {
@@ -145,7 +171,7 @@ fn render_header(
     painter.rect_filled(layout.header, Rounding::ZERO, Color32::from_rgb(30, 33, 40));
 
     let header_rect = layout.header.shrink(4.0);
-    ui.allocate_ui_at_rect(header_rect, |ui| {
+    ui.allocate_new_ui(UiBuilder::new().max_rect(header_rect), |ui| {
         ui.horizontal(|ui| {
             ui.add_space(8.0);
 
@@ -324,7 +350,7 @@ fn render_phase_plot(painter: &Painter, rect: Rect, state: &BodePlotState) {
     );
 }
 
-fn render_log_grid(painter: &Painter, rect: Rect, y_min: f64, y_max: f64) {
+fn render_log_grid(painter: &Painter, rect: Rect, _y_min: f64, _y_max: f64) {
     let stroke = Stroke::new(0.5, grid_color());
 
     // Vertical lines (log decades)
@@ -431,7 +457,7 @@ fn render_info_panel(ui: &mut Ui, layout: &BodeLayout, state: &BodePlotState) {
         .rect_filled(layout.info, Rounding::ZERO, Color32::from_rgb(25, 27, 33));
 
     let panel_rect = layout.info.shrink(8.0);
-    ui.allocate_ui_at_rect(panel_rect, |ui| {
+    ui.allocate_new_ui(UiBuilder::new().max_rect(panel_rect), |ui| {
         ui.vertical(|ui| {
             ui.label(egui::RichText::new("Info").size(11.0).color(text_color()));
             ui.add_space(8.0);

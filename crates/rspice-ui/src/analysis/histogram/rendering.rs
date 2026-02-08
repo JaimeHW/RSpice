@@ -2,12 +2,14 @@
 //!
 //! Commercial-grade egui rendering for histogram visualization.
 
-use egui::{Color32, FontId, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui, Vec2};
+use egui::{
+    Color32, FontId, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2,
+};
 use std::f64::consts::PI;
 
 use super::data::{Histogram, HistogramBuilder};
 use super::state::{AxisScale, DistributionOverlay, HistogramDisplayMode, HistogramState};
-use super::statistics::{HistogramStats, NormalParams};
+use super::statistics::{HistogramStats, LogNormalParams, NormalParams};
 use crate::common::app::AppState;
 
 // =============================================================================
@@ -129,14 +131,14 @@ fn render_header(
     ui: &mut Ui,
     layout: &HistogramLayout,
     state: &mut HistogramState,
-    app_state: &mut AppState,
+    _app_state: &mut AppState,
 ) {
     let painter = ui.painter();
 
     painter.rect_filled(layout.header, Rounding::ZERO, Color32::from_rgb(30, 33, 40));
 
     let header_rect = layout.header.shrink(4.0);
-    ui.allocate_ui_at_rect(header_rect, |ui| {
+    ui.allocate_new_ui(UiBuilder::new().max_rect(header_rect), |ui| {
         ui.horizontal(|ui| {
             ui.add_space(8.0);
 
@@ -352,7 +354,9 @@ fn render_distribution_overlay(
             render_normal_curve(painter, rect, hist, &params, state);
         }
         DistributionOverlay::LogNormal => {
-            // TODO: Implement log-normal overlay
+            if let Some(params) = LogNormalParams::fit(hist) {
+                render_lognormal_curve(painter, rect, hist, &params, state);
+            }
         }
         DistributionOverlay::None => {}
     }
@@ -363,7 +367,7 @@ fn render_normal_curve(
     rect: Rect,
     hist: &Histogram,
     params: &NormalParams,
-    state: &HistogramState,
+    _state: &HistogramState,
 ) {
     let (range_min, range_max) = hist.range();
     let n_points = 100;
@@ -399,7 +403,56 @@ fn render_normal_curve(
     }
 }
 
-fn render_axes(painter: &Painter, rect: Rect, state: &HistogramState) {
+fn render_lognormal_curve(
+    painter: &Painter,
+    rect: Rect,
+    hist: &Histogram,
+    params: &LogNormalParams,
+    _state: &HistogramState,
+) {
+    let (range_min, range_max) = hist.range();
+    let n_points = 100;
+
+    // Skip if data range includes non-positive values (log-normal undefined)
+    if range_min <= 0.0 {
+        return;
+    }
+
+    let mut points = Vec::with_capacity(n_points);
+
+    // Scale factor to match histogram height
+    // Mode of log-normal is exp(mu - sigma^2)
+    let mode = (params.mu - params.sigma * params.sigma).exp();
+    let max_pdf = params.pdf(mode);
+    let max_count = hist.max_count() as f64;
+    let scale = if max_pdf > 0.0 {
+        max_count / max_pdf
+    } else {
+        1.0
+    };
+
+    for i in 0..n_points {
+        let t = i as f64 / (n_points - 1) as f64;
+        let x = range_min + t * (range_max - range_min);
+        let y = params.pdf(x) * scale;
+
+        let screen_x = rect.min.x + t as f32 * rect.width();
+        let height_ratio = if max_count > 0.0 { y / max_count } else { 0.0 };
+        let screen_y = rect.max.y - 15.0 - height_ratio as f32 * (rect.height() - 20.0);
+
+        if screen_y >= rect.min.y && screen_y <= rect.max.y {
+            points.push(Pos2::new(screen_x, screen_y));
+        }
+    }
+
+    // Draw as connected line segments (using distinct color for log-normal)
+    let lognormal_color = Color32::from_rgb(255, 100, 100); // Red-ish for log-normal
+    for window in points.windows(2) {
+        painter.line_segment([window[0], window[1]], Stroke::new(2.0, lognormal_color));
+    }
+}
+
+fn render_axes(painter: &Painter, rect: Rect, _state: &HistogramState) {
     let stroke = Stroke::new(1.0, axis_color());
 
     // X-axis
@@ -435,7 +488,7 @@ fn render_stats_panel(ui: &mut Ui, layout: &HistogramLayout, state: &HistogramSt
     painter.rect_filled(stats_rect, Rounding::ZERO, Color32::from_rgb(25, 27, 33));
 
     let panel_rect = stats_rect.shrink(8.0);
-    ui.allocate_ui_at_rect(panel_rect, |ui| {
+    ui.allocate_new_ui(UiBuilder::new().max_rect(panel_rect), |ui| {
         ui.vertical(|ui| {
             ui.label(
                 egui::RichText::new("Statistics")

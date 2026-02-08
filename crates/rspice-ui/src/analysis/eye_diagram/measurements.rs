@@ -334,12 +334,12 @@ fn calculate_horizontal_opening(data: &EyeData) -> HorizontalOpening {
     }
 
     // Calculate jitter from crossing distribution
-    let rising_mean = rising_crossings.iter().sum::<f64>() / rising_crossings.len() as f64;
-    let falling_mean = falling_crossings.iter().sum::<f64>() / falling_crossings.len() as f64;
+    let _rising_mean = rising_crossings.iter().sum::<f64>() / rising_crossings.len() as f64;
+    let _falling_mean = falling_crossings.iter().sum::<f64>() / falling_crossings.len() as f64;
 
     let rising_max = rising_crossings.iter().copied().fold(f64::MIN, f64::max);
-    let rising_min = rising_crossings.iter().copied().fold(f64::MAX, f64::min);
-    let falling_max = falling_crossings.iter().copied().fold(f64::MIN, f64::max);
+    let _rising_min = rising_crossings.iter().copied().fold(f64::MAX, f64::min);
+    let _falling_max = falling_crossings.iter().copied().fold(f64::MIN, f64::max);
     let falling_min = falling_crossings.iter().copied().fold(f64::MAX, f64::min);
 
     // Eye opening is space between latest rising edge and earliest falling edge

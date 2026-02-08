@@ -2,7 +2,7 @@
 //!
 //! Commercial-grade egui rendering for Nyquist plot visualization.
 
-use egui::{Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, Vec2};
+use egui::{Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2};
 use std::f64::consts::PI;
 
 use super::data::{NyquistData, NyquistPoint};
@@ -54,7 +54,7 @@ fn axis_color() -> Color32 {
 // =============================================================================
 
 /// Render the Nyquist plot viewer panel
-pub fn render_nyquist_viewer(ui: &mut Ui, app_state: &mut AppState) {
+pub fn render_nyquist_viewer(ui: &mut Ui, _app_state: &mut AppState) {
     let mut state = NyquistState::new();
     load_demo_data(&mut state);
 
@@ -122,7 +122,7 @@ fn render_header(ui: &mut Ui, layout: &NyquistLayout, state: &mut NyquistState) 
         .rect_filled(layout.header, Rounding::ZERO, Color32::from_rgb(30, 33, 40));
 
     let header_rect = layout.header.shrink(4.0);
-    ui.allocate_ui_at_rect(header_rect, |ui| {
+    ui.allocate_new_ui(UiBuilder::new().max_rect(header_rect), |ui| {
         ui.horizontal(|ui| {
             ui.add_space(8.0);
 
@@ -222,7 +222,7 @@ fn render_plot_core(ui: &mut Ui, layout: &NyquistLayout, state: &NyquistState) {
     );
 }
 
-fn render_grid(painter: &egui::Painter, rect: Rect, state: &NyquistState) {
+fn render_grid(painter: &egui::Painter, rect: Rect, _state: &NyquistState) {
     let stroke = Stroke::new(0.5, grid_color());
 
     // Vertical lines (real axis)
@@ -386,7 +386,7 @@ fn render_info_panel(ui: &mut Ui, layout: &NyquistLayout, state: &NyquistState) 
         .rect_filled(layout.info, Rounding::ZERO, Color32::from_rgb(25, 27, 33));
 
     let panel_rect = layout.info.shrink(8.0);
-    ui.allocate_ui_at_rect(panel_rect, |ui| {
+    ui.allocate_new_ui(UiBuilder::new().max_rect(panel_rect), |ui| {
         ui.vertical(|ui| {
             ui.label(
                 egui::RichText::new("Stability")
