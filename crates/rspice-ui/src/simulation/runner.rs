@@ -23,6 +23,8 @@ pub struct SpecExecutionOptions {
     pub temp: Option<crate::services::simulation_runner::TempRunConfig>,
     pub corner: Option<crate::services::simulation_runner::CornerRunConfig>,
     pub pac: Option<crate::services::simulation_runner::PacRunConfig>,
+    pub tf: Option<crate::services::simulation_runner::TfRunConfig>,
+    pub pnoise: Option<crate::services::simulation_runner::PnoiseRunConfig>,
 }
 
 //=============================================================================
@@ -556,6 +558,74 @@ fn run_spec_request(
                 waveforms,
             })
         }
+        AnalysisSpec::Tf => {
+            let data = if let Some(tf_cfg) = options.tf {
+                svc_runner::run_tf_analysis_with_config(netlist, &tf_cfg)
+                    .map_err(SimulationError::InvalidConfig)?
+            } else {
+                svc_runner::run_tf_analysis(netlist).map_err(SimulationError::InvalidConfig)?
+            };
+
+            let mut waveforms: std::collections::HashMap<String, WaveformData> =
+                std::collections::HashMap::new();
+            let transfer_name = format!("H({}/{})", data.output_label, data.input_source);
+            waveforms.insert(
+                transfer_name.clone(),
+                WaveformData::new_complex(
+                    transfer_name,
+                    data.frequencies.clone(),
+                    data.transfer.iter().map(|value| value.re).collect(),
+                    data.transfer.iter().map(|value| value.im).collect(),
+                ),
+            );
+
+            if let Some(gd) = data.group_delay {
+                let (freqs, delays): (Vec<f64>, Vec<f64>) = gd.into_iter().unzip();
+                waveforms.insert(
+                    "group_delay".to_string(),
+                    WaveformData {
+                        name: "group_delay".to_string(),
+                        x_values: freqs,
+                        y_values: delays,
+                        y_unit: "s".to_string(),
+                        x_unit: "Hz".to_string(),
+                        is_complex: false,
+                        y_imag: None,
+                    },
+                );
+            }
+
+            if let Some(zin) = data.input_impedance {
+                let zin_name = format!("Zin({})", data.input_source);
+                waveforms.insert(
+                    zin_name.clone(),
+                    WaveformData::new_complex(
+                        zin_name,
+                        data.frequencies.clone(),
+                        zin.iter().map(|value| value.re).collect(),
+                        zin.iter().map(|value| value.im).collect(),
+                    ),
+                );
+            }
+
+            if let Some(zout) = data.output_impedance {
+                let zout_name = format!("Zout({})", data.output_label);
+                waveforms.insert(
+                    zout_name.clone(),
+                    WaveformData::new_complex(
+                        zout_name,
+                        data.frequencies.clone(),
+                        zout.iter().map(|value| value.re).collect(),
+                        zout.iter().map(|value| value.im).collect(),
+                    ),
+                );
+            }
+
+            Ok(SimulationResult::Ac {
+                frequencies: data.frequencies,
+                waveforms,
+            })
+        }
         AnalysisSpec::Pac => {
             let pac_cfg = options.pac.ok_or_else(|| {
                 SimulationError::InvalidConfig(
@@ -588,6 +658,28 @@ fn run_spec_request(
             Ok(SimulationResult::Ac {
                 frequencies: data.frequencies,
                 waveforms,
+            })
+        }
+        AnalysisSpec::Pnoise => {
+            let data = if let Some(pnoise_cfg) = options.pnoise {
+                svc_runner::run_pnoise_analysis_with_config(netlist, &pnoise_cfg)
+                    .map_err(SimulationError::InvalidConfig)?
+            } else {
+                svc_runner::run_pnoise_analysis(netlist).map_err(SimulationError::InvalidConfig)?
+            };
+
+            let freq_len = data.frequencies.len().max(1);
+            let contributors = data
+                .contributors
+                .into_iter()
+                .map(|(name, percentage)| (name, vec![percentage; freq_len]))
+                .collect();
+
+            Ok(SimulationResult::Noise {
+                frequencies: data.frequencies,
+                output_noise: data.output_noise,
+                input_noise: data.input_noise,
+                contributors,
             })
         }
         unsupported => Err(SimulationError::InvalidConfig(format!(
@@ -906,6 +998,8 @@ C1 out 0 1n
             }),
             corner: None,
             pac: None,
+            tf: None,
+            pnoise: None,
         };
 
         runner
@@ -1000,6 +1094,8 @@ R2 out 0 1k
                 base_mode: crate::services::simulation_runner::CornerBaseMode::Op,
             }),
             pac: None,
+            tf: None,
+            pnoise: None,
         };
 
         runner
@@ -1060,6 +1156,8 @@ C1 out 0 1n
                 },
             }),
             pac: None,
+            tf: None,
+            pnoise: None,
         };
 
         runner
@@ -1209,6 +1307,8 @@ C1 out 0 1n
                 reltol: 1e-3,
                 abstol: 1e-12,
             }),
+            tf: None,
+            pnoise: None,
         };
 
         runner
@@ -1240,6 +1340,132 @@ C1 out 0 1n
                         .is_some_and(|imag| imag.len() == wf.y_values.len())));
             }
             other => panic!("Expected AC result for PAC, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_tf_with_options() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* TF smoke test
+V1 in 0 DC 1
+R1 in out 1k
+C1 out 0 1n
+.end
+"#
+        .to_string();
+
+        let options = SpecExecutionOptions {
+            temp: None,
+            corner: None,
+            pac: None,
+            tf: Some(crate::services::simulation_runner::TfRunConfig {
+                start_freq: 10.0,
+                stop_freq: 1e6,
+                points_per_unit: 6,
+                sweep: crate::services::simulation_runner::TfFrequencySweep::Decade,
+                input_source: "V1".to_string(),
+                output_node: "out".to_string(),
+                output_ref: None,
+                group_delay: true,
+                input_impedance: true,
+                output_impedance: true,
+            }),
+            pnoise: None,
+        };
+
+        runner
+            .start_spec_with_options(AnalysisSpec::Tf, netlist, options)
+            .expect("TF spec should start");
+        thread::sleep(std::time::Duration::from_millis(250));
+
+        let result = runner.poll_result();
+        assert!(result.is_some(), "Expected TF result");
+        let result = result.unwrap().expect("TF should succeed");
+        match result {
+            SimulationResult::Ac {
+                frequencies,
+                waveforms,
+            } => {
+                assert!(!frequencies.is_empty());
+                assert!(
+                    waveforms.keys().any(|name| name.starts_with("H(")),
+                    "expected transfer waveform, got {:?}",
+                    waveforms.keys().collect::<Vec<_>>()
+                );
+                assert!(
+                    waveforms.keys().any(|name| name.starts_with("Zin(")),
+                    "expected Zin waveform, got {:?}",
+                    waveforms.keys().collect::<Vec<_>>()
+                );
+                assert!(
+                    waveforms.keys().any(|name| name.starts_with("Zout(")),
+                    "expected Zout waveform, got {:?}",
+                    waveforms.keys().collect::<Vec<_>>()
+                );
+                assert!(waveforms
+                    .values()
+                    .any(|wf| wf.is_complex && wf.y_imag.as_ref().is_some()));
+            }
+            other => panic!("Expected AC result for TF, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_pnoise_with_options() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* PNOISE smoke test
+V1 in 0 DC 1
+R1 in out 1k
+C1 out 0 1n
+.end
+"#
+        .to_string();
+
+        let options = SpecExecutionOptions {
+            temp: None,
+            corner: None,
+            pac: None,
+            tf: None,
+            pnoise: Some(crate::services::simulation_runner::PnoiseRunConfig {
+                pss_fundamental_freq: 1e6,
+                pss_num_harmonics: 8,
+                pss_tolerance: 1e-4,
+                start_freq: 10.0,
+                stop_freq: 1e6,
+                points_per_unit: 6,
+                sweep: crate::services::simulation_runner::PnoiseFrequencySweep::Decade,
+                max_sideband: 3,
+                output_node: "out".to_string(),
+                output_ref: None,
+                noise_ref: crate::services::simulation_runner::PnoiseReference::Output,
+                integrated_noise: true,
+                noise_summary: true,
+                reltol: 1e-3,
+                abstol: 1e-18,
+            }),
+        };
+
+        runner
+            .start_spec_with_options(AnalysisSpec::Pnoise, netlist, options)
+            .expect("PNOISE spec should start");
+        thread::sleep(std::time::Duration::from_millis(250));
+
+        let result = runner.poll_result();
+        assert!(result.is_some(), "Expected PNOISE result");
+        let result = result.unwrap().expect("PNOISE should succeed");
+        match result {
+            SimulationResult::Noise {
+                frequencies,
+                output_noise,
+                ..
+            } => {
+                assert!(!frequencies.is_empty());
+                assert_eq!(frequencies.len(), output_noise.len());
+                assert!(output_noise.iter().all(|value| value.is_finite()));
+            }
+            other => panic!("Expected Noise result for PNOISE, got {:?}", other),
         }
     }
 }

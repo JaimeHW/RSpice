@@ -467,7 +467,9 @@ impl SimulationController {
     fn executes_via_spec(spec: &AnalysisSpec) -> bool {
         matches!(
             spec,
-            AnalysisSpec::MonteCarlo
+            AnalysisSpec::Tf
+                | AnalysisSpec::Pnoise
+                | AnalysisSpec::MonteCarlo
                 | AnalysisSpec::Parametric
                 | AnalysisSpec::Corner
                 | AnalysisSpec::Pss { .. }
@@ -492,6 +494,8 @@ impl SimulationController {
                     temp: Some(Self::temp_run_config_from_dialog(state, &temp_cfg)?),
                     corner: None,
                     pac: None,
+                    tf: None,
+                    pnoise: None,
                 })
             }
             AnalysisSpec::Corner => {
@@ -504,17 +508,37 @@ impl SimulationController {
                     temp: None,
                     corner: Some(Self::corner_run_config_from_dialog(state, &corner_cfg)?),
                     pac: None,
+                    tf: None,
+                    pnoise: None,
                 })
             }
             AnalysisSpec::Pac => Ok(SpecExecutionOptions {
                 temp: None,
                 corner: None,
                 pac: Some(Self::pac_run_config_from_dialog(state)?),
+                tf: None,
+                pnoise: None,
+            }),
+            AnalysisSpec::Tf => Ok(SpecExecutionOptions {
+                temp: None,
+                corner: None,
+                pac: None,
+                tf: Some(Self::tf_run_config_from_dialog(state)?),
+                pnoise: None,
+            }),
+            AnalysisSpec::Pnoise => Ok(SpecExecutionOptions {
+                temp: None,
+                corner: None,
+                pac: None,
+                tf: None,
+                pnoise: Some(Self::pnoise_run_config_from_dialog(state)?),
             }),
             _ => Ok(SpecExecutionOptions {
                 temp: None,
                 corner: None,
                 pac: None,
+                tf: None,
+                pnoise: None,
             }),
         }
     }
@@ -561,6 +585,100 @@ impl SimulationController {
             include_dc: pac_cfg.include_dc,
             reltol: 1e-3,
             abstol: 1e-12,
+        })
+    }
+
+    fn tf_run_config_from_dialog(
+        state: &AppState,
+    ) -> Result<crate::services::simulation_runner::TfRunConfig, String> {
+        use crate::services::simulation_runner::{TfFrequencySweep, TfRunConfig};
+
+        let mut xf_state = state.dialogs.xf_state.clone();
+        xf_state.ensure_initialized();
+        let xf_cfg = xf_state
+            .to_config()
+            .map_err(|e| format!("invalid transfer-function settings: {}", e))?;
+
+        let sweep = match xf_cfg.sweep_type {
+            crate::simulation::dialog::xf::XfSweepType::Decade => TfFrequencySweep::Decade,
+            crate::simulation::dialog::xf::XfSweepType::Octave => TfFrequencySweep::Octave,
+            crate::simulation::dialog::xf::XfSweepType::Linear => TfFrequencySweep::Linear,
+        };
+
+        let output_ref = (!xf_cfg.output_ref.trim().is_empty()).then(|| xf_cfg.output_ref.clone());
+
+        Ok(TfRunConfig {
+            start_freq: xf_cfg.start_freq,
+            stop_freq: xf_cfg.stop_freq,
+            points_per_unit: xf_cfg.num_points as usize,
+            sweep,
+            input_source: xf_cfg.input_source,
+            output_node: xf_cfg.output_node,
+            output_ref,
+            group_delay: xf_cfg.group_delay,
+            input_impedance: xf_cfg.input_impedance,
+            output_impedance: xf_cfg.output_impedance,
+        })
+    }
+
+    fn pnoise_run_config_from_dialog(
+        state: &AppState,
+    ) -> Result<crate::services::simulation_runner::PnoiseRunConfig, String> {
+        use crate::services::simulation_runner::{
+            PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
+        };
+
+        let mut pnoise_state = state.dialogs.pnoise_state.clone();
+        pnoise_state.ensure_initialized();
+        let pnoise_cfg = pnoise_state
+            .to_config()
+            .map_err(|e| format!("invalid PNOISE settings: {}", e))?;
+
+        let mut pss_state = state.dialogs.pss_state.clone();
+        pss_state.ensure_initialized();
+        let pss_cfg = pss_state
+            .to_config()
+            .map_err(|e| format!("invalid PSS settings required for PNOISE: {}", e))?;
+
+        let sweep = match pnoise_cfg.sweep_type {
+            crate::simulation::dialog::pnoise::PnoiseSweepType::Decade => {
+                PnoiseFrequencySweep::Decade
+            }
+            crate::simulation::dialog::pnoise::PnoiseSweepType::Octave => {
+                PnoiseFrequencySweep::Octave
+            }
+            crate::simulation::dialog::pnoise::PnoiseSweepType::Linear => {
+                PnoiseFrequencySweep::Linear
+            }
+        };
+
+        let noise_ref = match pnoise_cfg.noise_ref {
+            crate::simulation::dialog::pnoise::NoiseReferenceType::Output => {
+                PnoiseReference::Output
+            }
+            crate::simulation::dialog::pnoise::NoiseReferenceType::Input => PnoiseReference::Input,
+            crate::simulation::dialog::pnoise::NoiseReferenceType::Phase => PnoiseReference::Phase,
+        };
+
+        let output_ref =
+            (!pnoise_cfg.output_ref.trim().is_empty()).then(|| pnoise_cfg.output_ref.clone());
+
+        Ok(PnoiseRunConfig {
+            pss_fundamental_freq: pss_cfg.fund_freq,
+            pss_num_harmonics: pss_cfg.num_harmonics as usize,
+            pss_tolerance: pss_cfg.stab_tol,
+            start_freq: pnoise_cfg.start_freq,
+            stop_freq: pnoise_cfg.stop_freq,
+            points_per_unit: pnoise_cfg.num_points as usize,
+            sweep,
+            max_sideband: pnoise_cfg.max_sideband,
+            output_node: pnoise_cfg.output_node,
+            output_ref,
+            noise_ref,
+            integrated_noise: pnoise_cfg.integrated_noise,
+            noise_summary: pnoise_cfg.noise_summary,
+            reltol: 1e-3,
+            abstol: 1e-18,
         })
     }
 
@@ -803,6 +921,8 @@ impl SimulationController {
             10 => self.build_temperature_sweep_spec(state),
             11 => self.build_harmonic_balance_spec(state),
             13 => self.build_pac_spec(state),
+            14 => self.build_pnoise_spec(state),
+            17 => self.build_tf_spec(state),
             18 => self.build_corner_sweep_spec(state),
             _ => Err(
                 "analysis is not implemented in the current UI simulation controller".to_string(),
@@ -939,6 +1059,8 @@ impl SimulationController {
             AnalysisSpec::Pss { .. } => self.build_pss_command(state),
             AnalysisSpec::HarmonicBalance { .. } => self.build_harmonic_balance_command(state),
             AnalysisSpec::Pac => self.build_pac_command(state),
+            AnalysisSpec::Pnoise => self.build_pnoise_command(state),
+            AnalysisSpec::Tf => self.build_tf_command(state),
             _ => self
                 .analysis_spec_to_config(state, spec)
                 .map(|cfg| cfg.to_spice()),
@@ -1007,6 +1129,24 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid PAC settings: {}", e))?;
         Ok(AnalysisSpec::Pac)
+    }
+
+    fn build_pnoise_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
+        let mut pnoise_state = state.dialogs.pnoise_state.clone();
+        pnoise_state.ensure_initialized();
+        pnoise_state
+            .to_config()
+            .map_err(|e| format!("invalid PNOISE settings: {}", e))?;
+        Ok(AnalysisSpec::Pnoise)
+    }
+
+    fn build_tf_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
+        let mut xf_state = state.dialogs.xf_state.clone();
+        xf_state.ensure_initialized();
+        xf_state
+            .to_config()
+            .map_err(|e| format!("invalid transfer-function settings: {}", e))?;
+        Ok(AnalysisSpec::Tf)
     }
 
     fn build_monte_carlo_command(&self, state: &AppState) -> Result<String, String> {
@@ -1097,6 +1237,24 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid PAC settings: {}", e))?;
         Ok(pac_cfg.to_spice())
+    }
+
+    fn build_pnoise_command(&self, state: &AppState) -> Result<String, String> {
+        let mut pnoise_state = state.dialogs.pnoise_state.clone();
+        pnoise_state.ensure_initialized();
+        let pnoise_cfg = pnoise_state
+            .to_config()
+            .map_err(|e| format!("invalid PNOISE settings: {}", e))?;
+        Ok(pnoise_cfg.to_spice())
+    }
+
+    fn build_tf_command(&self, state: &AppState) -> Result<String, String> {
+        let mut xf_state = state.dialogs.xf_state.clone();
+        xf_state.ensure_initialized();
+        let xf_cfg = xf_state
+            .to_config()
+            .map_err(|e| format!("invalid transfer-function settings: {}", e))?;
+        Ok(xf_cfg.to_spice())
     }
 
     fn build_pole_zero_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
@@ -1267,7 +1425,7 @@ impl SimulationController {
             AnalysisRunType::Ac => AnalysisType::Ac,
             AnalysisRunType::Transient => AnalysisType::Transient,
             AnalysisRunType::Noise => AnalysisType::Noise,
-            AnalysisRunType::Tf => AnalysisType::Sensitivity,
+            AnalysisRunType::Tf => AnalysisType::Ac,
             AnalysisRunType::Sensitivity => AnalysisType::Sensitivity,
             AnalysisRunType::PoleZero => AnalysisType::PoleZero,
             AnalysisRunType::HarmonicBalance => AnalysisType::HarmonicBalance,
@@ -2391,12 +2549,12 @@ mod tests {
     fn test_build_analysis_plan_rejects_unsupported_analysis_tab() {
         let controller = SimulationController::new();
         let mut state = AppState::default();
-        state.dialogs.enabled_analyses.insert(14); // PNoise
+        state.dialogs.enabled_analyses.insert(15); // PXF (not yet implemented)
 
         let errors = controller
             .build_analysis_plan(&state)
             .expect_err("unsupported analysis should fail planning");
-        assert!(errors.iter().any(|e| e.contains("PNoise")));
+        assert!(errors.iter().any(|e| e.contains("PXF")));
     }
 
     #[test]
@@ -2709,6 +2867,47 @@ mod tests {
     }
 
     #[test]
+    fn test_build_analysis_spec_for_pnoise_accepts_valid_dialog_configuration() {
+        use crate::simulation::dialog::pnoise::{NoiseReferenceType, PnoiseConfig};
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.pnoise_state =
+            crate::simulation::dialog::pnoise::PnoiseDialogState::from_config(
+                &PnoiseConfig::new(10.0, 10e6, 12)
+                    .with_output("OUT")
+                    .with_sidebands(3)
+                    .with_noise_ref(NoiseReferenceType::Phase),
+            );
+
+        let spec = controller
+            .build_analysis_spec_for_index(&state, 14)
+            .expect("PNOISE spec should build");
+        assert!(matches!(spec, AnalysisSpec::Pnoise));
+    }
+
+    #[test]
+    fn test_build_analysis_spec_for_tf_accepts_valid_dialog_configuration() {
+        use crate::simulation::dialog::xf::{XfConfig, XfSweepType};
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        let mut cfg = XfConfig::new(1e3, 1e9, 20)
+            .with_input("V1")
+            .with_output("OUT")
+            .with_group_delay(true);
+        cfg.sweep_type = XfSweepType::Octave;
+        cfg.input_impedance = true;
+        cfg.output_impedance = true;
+        state.dialogs.xf_state = crate::simulation::dialog::xf::XfDialogState::from_config(&cfg);
+
+        let spec = controller
+            .build_analysis_spec_for_index(&state, 17)
+            .expect("TF spec should build");
+        assert!(matches!(spec, AnalysisSpec::Tf));
+    }
+
+    #[test]
     fn test_build_queue_from_plan_emits_worst_case_monte_carlo_command() {
         use crate::simulation::dialog::mc::{McConfig, McDistribution};
 
@@ -2787,6 +2986,75 @@ mod tests {
                 .expect("PAC options should be present")
                 .sweep,
             crate::services::simulation_runner::PacFrequencySweep::Decade
+        ));
+    }
+
+    #[test]
+    fn test_build_queue_from_plan_stores_tf_and_pnoise_as_spec_executed_runs() {
+        use crate::simulation::dialog::pnoise::{NoiseReferenceType, PnoiseConfig};
+        use crate::simulation::dialog::pss::PssConfig;
+        use crate::simulation::dialog::xf::{XfConfig, XfSweepType};
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses = [14usize, 17usize].into_iter().collect();
+
+        state.dialogs.pss_state =
+            crate::simulation::dialog::pss::PssDialogState::from_config(&PssConfig::new(5e6));
+        state.dialogs.pnoise_state =
+            crate::simulation::dialog::pnoise::PnoiseDialogState::from_config(
+                &PnoiseConfig::new(10.0, 10e6, 10)
+                    .with_output("OUT")
+                    .with_sidebands(2)
+                    .with_noise_ref(NoiseReferenceType::Phase),
+            );
+
+        let mut xf_cfg = XfConfig::new(1e3, 1e8, 8)
+            .with_input("V1")
+            .with_output("OUT")
+            .with_group_delay(true);
+        xf_cfg.sweep_type = XfSweepType::Linear;
+        xf_cfg.input_impedance = true;
+        xf_cfg.output_impedance = true;
+        state.dialogs.xf_state = crate::simulation::dialog::xf::XfDialogState::from_config(&xf_cfg);
+
+        let plan = controller
+            .build_analysis_plan(&state)
+            .expect("plan should build");
+        let queue = controller
+            .build_queue_from_plan(&state, &plan)
+            .expect("queue should build");
+
+        assert_eq!(queue.len(), 2);
+        assert!(matches!(queue[0].spec, AnalysisSpec::Pnoise));
+        assert!(queue[0].config.is_none());
+        assert!(queue[0].analysis_line.starts_with(".pnoise "));
+        assert!(queue[0].spec_options.pnoise.is_some());
+        assert!(matches!(
+            queue[0]
+                .spec_options
+                .pnoise
+                .as_ref()
+                .expect("PNOISE options should be present")
+                .noise_ref,
+            crate::services::simulation_runner::PnoiseReference::Phase
+        ));
+
+        assert!(matches!(queue[1].spec, AnalysisSpec::Tf));
+        assert!(queue[1].config.is_none());
+        assert!(queue[1].analysis_line.starts_with(".xf "));
+        assert!(queue[1].spec_options.tf.is_some());
+        let tf_cfg = queue[1]
+            .spec_options
+            .tf
+            .as_ref()
+            .expect("TF options should be present");
+        assert!(tf_cfg.group_delay);
+        assert!(tf_cfg.input_impedance);
+        assert!(tf_cfg.output_impedance);
+        assert!(matches!(
+            tf_cfg.sweep,
+            crate::services::simulation_runner::TfFrequencySweep::Linear
         ));
     }
 
