@@ -374,6 +374,11 @@ impl PstbAnalyzer {
 
         // Compute eigenvalues using QR iteration or power method
         let eigenvalues = self.compute_eigenvalues(monodromy);
+        let eigenvectors = if self.config.compute_eigenvectors {
+            self.compute_right_eigenvectors(monodromy, &eigenvalues)
+        } else {
+            vec![None; eigenvalues.len()]
+        };
 
         // Create FloquetMultiplier objects
         let mut multipliers: Vec<FloquetMultiplier> = eigenvalues
@@ -382,6 +387,7 @@ impl PstbAnalyzer {
             .map(|(i, &ev)| {
                 let mut fm = FloquetMultiplier::new(ev, period, self.config.stability_threshold);
                 fm.index = i;
+                fm.eigenvector = eigenvectors.get(i).cloned().unwrap_or(None);
                 fm
             })
             .collect();
@@ -527,6 +533,180 @@ impl PstbAnalyzer {
         eigenvalues
     }
 
+    /// Compute right eigenvectors for each eigenvalue using shifted inverse iteration.
+    fn compute_right_eigenvectors(
+        &self,
+        matrix: &[Vec<Value>],
+        eigenvalues: &[Complex64],
+    ) -> Vec<Option<Vec<Complex64>>> {
+        eigenvalues
+            .iter()
+            .map(|&lambda| self.inverse_iteration_right_eigenvector(matrix, lambda))
+            .collect()
+    }
+
+    /// Shifted inverse iteration for right eigenvector associated with `lambda`.
+    fn inverse_iteration_right_eigenvector(
+        &self,
+        matrix: &[Vec<Value>],
+        lambda: Complex64,
+    ) -> Option<Vec<Complex64>> {
+        let n = matrix.len();
+        if n == 0 {
+            return None;
+        }
+        if n == 1 {
+            return Some(vec![Complex64::new(1.0, 0.0)]);
+        }
+
+        let mut v = (0..n)
+            .map(|i| Complex64::new((i + 1) as Value, 0.0))
+            .collect::<Vec<_>>();
+        let mut v_norm = Self::complex_l2_norm(&v);
+        if !v_norm.is_finite() || v_norm <= 1e-20 {
+            return None;
+        }
+        for x in &mut v {
+            *x /= v_norm;
+        }
+
+        // Small complex shift keeps (A - λI) solvable for inverse iteration.
+        let shift = self.config.eigenvalue_tolerance.max(1e-12);
+        let lambda_shifted = lambda + Complex64::new(shift, shift * 0.1);
+
+        const MAX_ITERS: usize = 24;
+        for _ in 0..MAX_ITERS {
+            let mut w = self.solve_shifted_complex_system(matrix, lambda_shifted, &v)?;
+            let w_norm = Self::complex_l2_norm(&w);
+            if !w_norm.is_finite() || w_norm <= 1e-20 {
+                return None;
+            }
+            for x in &mut w {
+                *x /= w_norm;
+            }
+            Self::phase_normalize(&mut w);
+
+            let delta = w
+                .iter()
+                .zip(v.iter())
+                .map(|(a, b)| (*a - *b).norm_sqr())
+                .sum::<Value>()
+                .sqrt();
+            v = w;
+            v_norm = Self::complex_l2_norm(&v);
+            if !v_norm.is_finite() || v_norm <= 1e-20 {
+                return None;
+            }
+            if delta <= 1e-8 {
+                break;
+            }
+        }
+
+        if v.iter().all(|c| c.re.is_finite() && c.im.is_finite()) {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    /// Solve (A - λI)x = rhs for x, where A is real and λ, rhs are complex.
+    fn solve_shifted_complex_system(
+        &self,
+        matrix: &[Vec<Value>],
+        lambda: Complex64,
+        rhs: &[Complex64],
+    ) -> Option<Vec<Complex64>> {
+        let n = matrix.len();
+        if rhs.len() != n {
+            return None;
+        }
+
+        let mut aug = vec![vec![Complex64::new(0.0, 0.0); n + 1]; n];
+        for i in 0..n {
+            for j in 0..n {
+                aug[i][j] = Complex64::new(matrix[i][j], 0.0);
+            }
+            aug[i][i] -= lambda;
+            aug[i][n] = rhs[i];
+        }
+
+        const PIVOT_EPS: Value = 1e-20;
+
+        for col in 0..n {
+            let mut pivot_row = col;
+            let mut pivot_norm = aug[col][col].norm();
+            for (row, row_data) in aug.iter().enumerate().skip(col + 1) {
+                let candidate = row_data[col].norm();
+                if candidate > pivot_norm {
+                    pivot_norm = candidate;
+                    pivot_row = row;
+                }
+            }
+
+            if !pivot_norm.is_finite() || pivot_norm <= PIVOT_EPS {
+                return None;
+            }
+            if pivot_row != col {
+                aug.swap(pivot_row, col);
+            }
+
+            let pivot = aug[col][col];
+            let pivot_entries = aug[col].clone();
+            for row in (col + 1)..n {
+                let factor = aug[row][col] / pivot;
+                if factor.norm() <= PIVOT_EPS {
+                    continue;
+                }
+                for k in col..=n {
+                    aug[row][k] -= factor * pivot_entries[k];
+                }
+            }
+        }
+
+        let mut x = vec![Complex64::new(0.0, 0.0); n];
+        for i_rev in 0..n {
+            let i = n - 1 - i_rev;
+            let mut sum = aug[i][n];
+            for (k, xk) in x.iter().enumerate().skip(i + 1) {
+                sum -= aug[i][k] * *xk;
+            }
+            let diag = aug[i][i];
+            if diag.norm() <= PIVOT_EPS {
+                return None;
+            }
+            x[i] = sum / diag;
+        }
+
+        if x.iter().all(|c| c.re.is_finite() && c.im.is_finite()) {
+            Some(x)
+        } else {
+            None
+        }
+    }
+
+    fn complex_l2_norm(values: &[Complex64]) -> Value {
+        values.iter().map(|c| c.norm_sqr()).sum::<Value>().sqrt()
+    }
+
+    /// Normalize phase so the largest-magnitude component is real-positive.
+    fn phase_normalize(vector: &mut [Complex64]) {
+        let Some((idx, _)) = vector.iter().enumerate().max_by(|(_, a), (_, b)| {
+            a.norm()
+                .partial_cmp(&b.norm())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        }) else {
+            return;
+        };
+        let anchor = vector[idx];
+        if anchor.norm() <= 1e-20 {
+            return;
+        }
+        let rot = Complex64::from_polar(1.0, -anchor.arg());
+        for x in vector {
+            *x *= rot;
+        }
+    }
+
     /// QR decomposition using modified Gram-Schmidt
     fn qr_decompose(&self, a: &[Vec<Value>]) -> (Vec<Vec<Value>>, Vec<Vec<Value>>) {
         let n = a.len();
@@ -534,7 +714,7 @@ impl PstbAnalyzer {
         let mut r: Vec<Vec<Value>> = vec![vec![0.0; n]; n];
 
         // Extract columns
-        let mut cols: Vec<Vec<Value>> = (0..n).map(|j| (0..n).map(|i| a[i][j]).collect()).collect();
+        let cols: Vec<Vec<Value>> = (0..n).map(|j| (0..n).map(|i| a[i][j]).collect()).collect();
 
         for j in 0..n {
             let mut v = cols[j].clone();
@@ -588,7 +768,6 @@ impl PstbAnalyzer {
             // Check for bifurcations at unit circle
             for m in multipliers.iter().filter(|m| !m.is_trivial) {
                 let mag = m.magnitude();
-                let real = m.value.re;
                 let imag = m.value.im.abs();
 
                 // Near λ = -1: period doubling
@@ -633,6 +812,20 @@ impl PstbAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn eigenpair_residual_norm(matrix: &[Vec<Value>], lambda: Complex64, v: &[Complex64]) -> Value {
+        let n = matrix.len();
+        assert_eq!(v.len(), n);
+        let mut accum = 0.0;
+        for i in 0..n {
+            let av_i = (0..n)
+                .map(|j| Complex64::new(matrix[i][j], 0.0) * v[j])
+                .fold(Complex64::new(0.0, 0.0), |acc, term| acc + term);
+            let residual = av_i - lambda * v[i];
+            accum += residual.norm_sqr();
+        }
+        accum.sqrt()
+    }
 
     // =========================================================================
     // Configuration Tests
@@ -895,6 +1088,70 @@ mod tests {
 
         assert!(!result.is_stable());
         assert!(result.num_unstable >= 1);
+    }
+
+    #[test]
+    fn test_analyzer_eigenvectors_disabled_by_default() {
+        let config = PstbConfig::default();
+        let mut analyzer = PstbAnalyzer::new(config);
+        let monodromy = vec![vec![0.9, 0.0], vec![0.0, 0.6]];
+
+        let result = analyzer.analyze_monodromy(&monodromy, 1e-9);
+        assert!(result.multipliers.iter().all(|m| m.eigenvector.is_none()));
+    }
+
+    #[test]
+    fn test_analyzer_populates_eigenvectors_when_enabled() {
+        let config = PstbConfig::new().with_eigenvectors(true);
+        let mut analyzer = PstbAnalyzer::new(config);
+        let monodromy = vec![vec![0.9, 0.0], vec![0.0, 0.6]];
+
+        let result = analyzer.analyze_monodromy(&monodromy, 1e-9);
+        assert_eq!(result.multipliers.len(), 2);
+
+        for multiplier in &result.multipliers {
+            let eigenvector = multiplier
+                .eigenvector
+                .as_ref()
+                .expect("eigenvectors should be present when enabled");
+            assert_eq!(eigenvector.len(), 2);
+            let residual = eigenpair_residual_norm(&monodromy, multiplier.value, eigenvector);
+            assert!(
+                residual <= 1e-5,
+                "eigenpair residual too large: {:.3e}",
+                residual
+            );
+        }
+    }
+
+    #[test]
+    fn test_analyzer_eigenvector_localization_for_diagonal_modes() {
+        let config = PstbConfig::new().with_eigenvectors(true);
+        let mut analyzer = PstbAnalyzer::new(config);
+        let monodromy = vec![vec![0.92, 0.0], vec![0.0, 0.55]];
+
+        let result = analyzer.analyze_monodromy(&monodromy, 1e-9);
+        assert_eq!(result.multipliers.len(), 2);
+
+        let dominant = &result.multipliers[0];
+        let dominant_v = dominant
+            .eigenvector
+            .as_ref()
+            .expect("dominant mode eigenvector should be computed");
+        assert!(
+            dominant_v[0].norm() > dominant_v[1].norm(),
+            "dominant mode should align with state 0 for diagonal monodromy"
+        );
+
+        let second = &result.multipliers[1];
+        let second_v = second
+            .eigenvector
+            .as_ref()
+            .expect("second mode eigenvector should be computed");
+        assert!(
+            second_v[1].norm() > second_v[0].norm(),
+            "second mode should align with state 1 for diagonal monodromy"
+        );
     }
 
     // =========================================================================
