@@ -747,11 +747,7 @@ impl Engine {
                             continue;
                         }
 
-                        let voltage_converged = Self::check_voltage_convergence(
-                            &new_solution,
-                            &sol,
-                            self.config.tolerance,
-                        );
+                        let voltage_converged = self.voltage_convergence_met(&new_solution, &sol);
 
                         // CRITICAL: Update new_solution BEFORE checking device convergence
                         // Otherwise, BJT vbe/vbc are based on old guess, not new solve
@@ -763,7 +759,7 @@ impl Engine {
                         }
 
                         let device_converged = !circuit.has_nonlinear_devices()
-                            || circuit.nonlinear_converged(self.config.tolerance);
+                            || circuit.nonlinear_converged(self.device_convergence_tolerance());
 
                         if voltage_converged && device_converged {
                             converged = true;
@@ -791,13 +787,9 @@ impl Engine {
                 let count = CONV_LOG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if count < 10 {
                     // Check what specifically didn't converge
-                    let v_conv = Self::check_voltage_convergence(
-                        &solution,
-                        &new_solution,
-                        self.config.tolerance,
-                    );
+                    let v_conv = self.voltage_convergence_met(&solution, &new_solution);
                     let d_conv = !circuit.has_nonlinear_devices()
-                        || circuit.nonlinear_converged(self.config.tolerance);
+                        || circuit.nonlinear_converged(self.device_convergence_tolerance());
                     let max_dv = Self::max_abs_delta_prefix(&solution, &new_solution, num_nodes);
                     log::warn!(
                         "Newton non-converge at t={:.6e}, dt={:.3e}: voltage_conv={}, device_conv={}, max_dv={:.3e}, iter={}",

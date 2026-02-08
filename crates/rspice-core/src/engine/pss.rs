@@ -689,13 +689,9 @@ impl Engine {
 
                 match matrix.solve(&rhs) {
                     Ok(sol) => {
-                        let voltage_converged = Self::check_voltage_convergence(
-                            &new_solution,
-                            &sol,
-                            self.config.tolerance,
-                        );
+                        let voltage_converged = self.voltage_convergence_met(&new_solution, &sol);
                         let device_converged = !circuit.has_nonlinear_devices()
-                            || circuit.nonlinear_converged(self.config.tolerance);
+                            || circuit.nonlinear_converged(self.device_convergence_tolerance());
 
                         new_solution = sol;
 

@@ -76,7 +76,7 @@ impl Engine {
     }
 
     #[inline]
-    fn voltage_convergence_met(&self, old: &[Value], new: &[Value]) -> bool {
+    pub(crate) fn voltage_convergence_met(&self, old: &[Value], new: &[Value]) -> bool {
         Self::check_voltage_convergence_with_tolerances(
             old,
             new,
@@ -1025,6 +1025,7 @@ impl Engine {
     ///
     /// Uses `tolerance` as an absolute voltage tolerance with default SPICE-like
     /// relative tolerance of 1e-3.
+    #[allow(dead_code)]
     pub(crate) fn check_voltage_convergence(
         old: &[Value],
         new: &[Value],
