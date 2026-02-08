@@ -1221,6 +1221,38 @@ mod tests {
     }
 
     #[test]
+    fn test_sensitivity_voltage_output_uses_voltage_units() {
+        let executor = RunExecutor::new();
+        let mut queue =
+            RunQueue::new().with_netlist("* sens v\n.param RVAL=1k\nV1 in 0 1\nR1 in out {RVAL}\nR2 out 0 1k\n");
+        queue.add_analysis(AnalysisSpec::Sensitivity {
+            output_var: "V(out)".to_string(),
+            ac_mode: false,
+            frequency: None,
+        });
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.total_runs, 1);
+        assert!(
+            result.errors.is_empty(),
+            "expected successful voltage-output sensitivity run, got errors: {:?}",
+            result.errors
+        );
+
+        let mapped = result
+            .results
+            .values()
+            .next()
+            .expect("expected mapped sensitivity result");
+        let raw_measurement = mapped
+            .measurements
+            .iter()
+            .find(|m| m.name.starts_with("d(V(out))/d("))
+            .expect("expected raw voltage sensitivity measurement");
+        assert_eq!(raw_measurement.unit, "V/unit");
+    }
+
+    #[test]
     fn test_sensitivity_ac_analysis_with_spec_is_executed() {
         let executor = RunExecutor::new();
         let mut queue = RunQueue::new().with_netlist(
