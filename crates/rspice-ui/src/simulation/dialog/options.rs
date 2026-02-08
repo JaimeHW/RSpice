@@ -319,6 +319,9 @@ pub struct SimulationOptions {
     /// Relative tolerance for convergence (default: 1e-3)
     pub reltol: f64,
 
+    /// Relative residual tolerance for equation convergence (default: 1e-3)
+    pub residual_reltol: f64,
+
     /// Absolute voltage tolerance (default: 1e-6 V)
     pub vntol: f64,
 
@@ -421,6 +424,7 @@ impl Default for SimulationOptions {
         Self {
             // Accuracy - SPICE defaults
             reltol: 1e-3,
+            residual_reltol: 1e-3,
             vntol: 1e-6,
             abstol: 1e-12,
             iabstol: 1e-12,
@@ -467,6 +471,7 @@ impl SimulationOptions {
     pub fn fast() -> Self {
         Self {
             reltol: 1e-2,
+            residual_reltol: 1e-2,
             abstol: 1e-9,
             iabstol: 1e-9,
             itl1: 30,
@@ -483,6 +488,7 @@ impl SimulationOptions {
     pub fn accurate() -> Self {
         Self {
             reltol: 1e-4,
+            residual_reltol: 1e-4,
             vntol: 1e-7,
             abstol: 1e-14,
             iabstol: 1e-14,
@@ -499,6 +505,7 @@ impl SimulationOptions {
     pub fn robust() -> Self {
         Self {
             reltol: 1e-3,
+            residual_reltol: 1e-3,
             itl1: 200,
             itl4: 20,
             gmin_stepping: true,
@@ -572,6 +579,7 @@ impl SimulationOptions {
                 voltage_reltol: self.reltol,
                 voltage_abstol: self.vntol,
                 current_abstol: self.iabstol,
+                residual_reltol: self.residual_reltol,
                 verbose: self.verbose,
             },
         }
@@ -584,6 +592,12 @@ impl SimulationOptions {
         // Tolerances must be positive
         if self.reltol <= 0.0 {
             errors.push(ValidationError::InvalidTolerance("reltol", self.reltol));
+        }
+        if self.residual_reltol <= 0.0 {
+            errors.push(ValidationError::InvalidTolerance(
+                "residual_reltol",
+                self.residual_reltol,
+            ));
         }
         if self.vntol <= 0.0 {
             errors.push(ValidationError::InvalidTolerance("vntol", self.vntol));
@@ -651,6 +665,9 @@ impl SimulationOptions {
         if (self.reltol - default.reltol).abs() > 1e-15 {
             lines.push(format!("+ RELTOL={:.2e}", self.reltol));
         }
+        if (self.residual_reltol - default.residual_reltol).abs() > 1e-15 {
+            lines.push(format!("+ RESIDUAL_RELTOL={:.2e}", self.residual_reltol));
+        }
         if (self.abstol - default.abstol).abs() > 1e-20 {
             lines.push(format!("+ ABSTOL={:.2e}", self.abstol));
         }
@@ -701,6 +718,9 @@ impl SimulationOptions {
                 if let Some((key, val)) = part.split_once('=') {
                     match key.to_uppercase().as_str() {
                         "RELTOL" => opts.reltol = parse_si_value(val)?,
+                        "RESIDUAL_RELTOL" | "RESRELTOL" => {
+                            opts.residual_reltol = parse_si_value(val)?
+                        }
                         "ABSTOL" => opts.abstol = parse_si_value(val)?,
                         "VNTOL" => opts.vntol = parse_si_value(val)?,
                         "IABSTOL" => opts.iabstol = parse_si_value(val)?,
@@ -786,6 +806,7 @@ pub struct OptionsDialogState {
 
     /// Accuracy tab fields
     pub reltol: String,
+    pub residual_reltol: String,
     pub abstol: String,
     pub vntol: String,
     pub iabstol: String,
@@ -832,6 +853,7 @@ impl OptionsDialogState {
             active_tab: 0,
 
             reltol: format_si_value(opts.reltol),
+            residual_reltol: format_si_value(opts.residual_reltol),
             abstol: format_si_value(opts.abstol),
             vntol: format_si_value(opts.vntol),
             iabstol: format_si_value(opts.iabstol),
@@ -877,6 +899,10 @@ impl OptionsDialogState {
 
         let reltol = parse_si_value(&self.reltol).unwrap_or_else(|e| {
             errors.push(format!("reltol: {}", e));
+            1e-3
+        });
+        let residual_reltol = parse_si_value(&self.residual_reltol).unwrap_or_else(|e| {
+            errors.push(format!("residual_reltol: {}", e));
             1e-3
         });
         let abstol = parse_si_value(&self.abstol).unwrap_or_else(|e| {
@@ -943,6 +969,7 @@ impl OptionsDialogState {
 
         Ok(SimulationOptions {
             reltol,
+            residual_reltol,
             abstol,
             vntol,
             iabstol,
@@ -1103,6 +1130,7 @@ mod tests {
 
         // SPICE3 default tolerances
         assert!((opts.reltol - 1e-3).abs() < 1e-10);
+        assert!((opts.residual_reltol - 1e-3).abs() < 1e-10);
         assert!((opts.abstol - 1e-12).abs() < 1e-20);
         assert!((opts.vntol - 1e-6).abs() < 1e-12);
 
@@ -1149,6 +1177,7 @@ mod tests {
     fn test_to_simulation_config_maps_voltage_convergence_tolerances() {
         let mut opts = SimulationOptions::default();
         opts.reltol = 2e-3;
+        opts.residual_reltol = 6e-4;
         opts.vntol = 3e-6;
         opts.iabstol = 4e-12;
         opts.gmin = 5e-10;
@@ -1156,6 +1185,7 @@ mod tests {
         let sim = opts.to_simulation_config();
         assert!((sim.tolerance - 2e-3).abs() < 1e-15);
         assert!((sim.convergence_config.voltage_reltol - 2e-3).abs() < 1e-15);
+        assert!((sim.convergence_config.residual_reltol - 6e-4).abs() < 1e-15);
         assert!((sim.convergence_config.voltage_abstol - 3e-6).abs() < 1e-15);
         assert!((sim.convergence_config.current_abstol - 4e-12).abs() < 1e-24);
         assert!((sim.convergence_config.gmin_initial - 5e-10).abs() < 1e-21);
@@ -1191,13 +1221,13 @@ mod tests {
     #[test]
     fn test_validate_negative_tolerance_fails() {
         let mut opts = SimulationOptions::default();
-        opts.reltol = -1e-3;
+        opts.residual_reltol = -1e-3;
         let result = opts.validate();
         assert!(result.is_err());
         let errors = result.unwrap_err();
         assert!(errors
             .iter()
-            .any(|e| matches!(e, ValidationError::InvalidTolerance("reltol", _))));
+            .any(|e| matches!(e, ValidationError::InvalidTolerance("residual_reltol", _))));
     }
 
     #[test]
@@ -1271,21 +1301,24 @@ mod tests {
     fn test_spice_export_non_default() {
         let mut opts = SimulationOptions::default();
         opts.reltol = 1e-4;
+        opts.residual_reltol = 2e-4;
         opts.temp = 85.0;
         opts.itl1 = 100;
         let spice = opts.to_spice_options();
 
         assert!(spice.contains("RELTOL="));
+        assert!(spice.contains("RESIDUAL_RELTOL="));
         assert!(spice.contains("TEMP=85"));
         assert!(spice.contains("ITL1=100"));
     }
 
     #[test]
     fn test_spice_import_basic() {
-        let text = ".OPTIONS RELTOL=1e-4 ABSTOL=1e-14 ITL1=100 TEMP=85";
+        let text = ".OPTIONS RELTOL=1e-4 RESIDUAL_RELTOL=2e-4 ABSTOL=1e-14 ITL1=100 TEMP=85";
         let opts = SimulationOptions::from_spice_options(text).unwrap();
 
         assert!((opts.reltol - 1e-4).abs() < 1e-10);
+        assert!((opts.residual_reltol - 2e-4).abs() < 1e-10);
         assert!((opts.abstol - 1e-14).abs() < 1e-20);
         assert_eq!(opts.itl1, 100);
         assert!((opts.temp - 85.0).abs() < 0.1);
@@ -1318,6 +1351,7 @@ mod tests {
     fn test_spice_roundtrip() {
         let mut original = SimulationOptions::default();
         original.reltol = 1e-4;
+        original.residual_reltol = 3e-4;
         original.abstol = 1e-14;
         original.itl1 = 100;
         original.temp = 85.0;
@@ -1327,6 +1361,7 @@ mod tests {
         let parsed = SimulationOptions::from_spice_options(&spice).unwrap();
 
         assert!((parsed.reltol - original.reltol).abs() < 1e-10);
+        assert!((parsed.residual_reltol - original.residual_reltol).abs() < 1e-10);
         assert!(parsed.itl1 == original.itl1);
         assert!((parsed.temp - original.temp).abs() < 0.01);
         assert_eq!(parsed.method, original.method);
@@ -1343,6 +1378,7 @@ mod tests {
 
         // Check that strings are non-empty
         assert!(!state.reltol.is_empty());
+        assert!(!state.residual_reltol.is_empty());
         assert!(!state.abstol.is_empty());
         assert!(!state.itl1.is_empty());
     }
@@ -1365,6 +1401,10 @@ mod tests {
 
         // Key values should roundtrip
         assert!((result.reltol - original.reltol).abs() / original.reltol < 0.01);
+        assert!(
+            (result.residual_reltol - original.residual_reltol).abs() / original.residual_reltol
+                < 0.01
+        );
         assert_eq!(result.itl1, original.itl1);
     }
 
