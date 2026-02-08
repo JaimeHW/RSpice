@@ -5,7 +5,7 @@
 //! evaluation in the Newton-Raphson loop.
 
 use crate::Value;
-use crate::expr::{parse_expression, compile, CompiledExpr, Vm, Context};
+use crate::expr::{CompiledExpr, Context, Vm, compile, parse_expression};
 use crate::solver::StaticMatrix;
 
 /// Compiled behavioral voltage source
@@ -27,10 +27,16 @@ pub struct BehavioralVoltageSource {
 
 impl BehavioralVoltageSource {
     /// Create a new behavioral voltage source
-    pub fn new(name: String, node_pos: usize, node_neg: usize, branch_index: usize, expression: &str) -> Self {
+    pub fn new(
+        name: String,
+        node_pos: usize,
+        node_neg: usize,
+        branch_index: usize,
+        expression: &str,
+    ) -> Self {
         let ast = parse_expression(expression);
         let program = compile(&ast);
-        
+
         Self {
             name,
             node_pos,
@@ -48,7 +54,14 @@ impl BehavioralVoltageSource {
     }
 
     /// Stamp into the matrix (MNA voltage source with computed value)
-    pub fn stamp(&mut self, matrix: &mut StaticMatrix, rhs: &mut [Value], voltages: &[Value], currents: &[Value], time: Value) {
+    pub fn stamp(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+        currents: &[Value],
+        time: Value,
+    ) {
         let v_value = self.evaluate(voltages, currents, time);
         let br = self.branch_index;
         let np = self.node_pos;
@@ -64,7 +77,7 @@ impl BehavioralVoltageSource {
             matrix.add(br - 1, nn - 1, -1.0);
             matrix.add(nn - 1, br - 1, -1.0);
         }
-        
+
         // RHS: branch equation
         rhs[br - 1] = v_value;
     }
@@ -90,7 +103,7 @@ impl BehavioralCurrentSource {
     pub fn new(name: String, node_pos: usize, node_neg: usize, expression: &str) -> Self {
         let ast = parse_expression(expression);
         let program = compile(&ast);
-        
+
         Self {
             name,
             node_pos,
@@ -107,7 +120,13 @@ impl BehavioralCurrentSource {
     }
 
     /// Stamp into the RHS (current source stamps directly)
-    pub fn stamp(&mut self, rhs: &mut [Value], voltages: &[Value], currents: &[Value], time: Value) {
+    pub fn stamp(
+        &mut self,
+        rhs: &mut [Value],
+        voltages: &[Value],
+        currents: &[Value],
+        time: Value,
+    ) {
         let i_value = self.evaluate(voltages, currents, time);
         let np = self.node_pos;
         let nn = self.node_neg;
@@ -170,12 +189,8 @@ mod tests {
 
     #[test]
     fn test_behavioral_voltage_simple() {
-        let mut bvs = BehavioralVoltageSource::new(
-            "B1".to_string(),
-            1, 0, 1,
-            "5.0"
-        );
-        
+        let mut bvs = BehavioralVoltageSource::new("B1".to_string(), 1, 0, 1, "5.0");
+
         let voltages = [0.0];
         let currents = [];
         let v = bvs.evaluate(&voltages, &currents, 0.0);
@@ -184,24 +199,16 @@ mod tests {
 
     #[test]
     fn test_behavioral_voltage_expression() {
-        let mut bvs = BehavioralVoltageSource::new(
-            "B1".to_string(),
-            1, 0, 1,
-            "2 * 3 + 1"
-        );
-        
+        let mut bvs = BehavioralVoltageSource::new("B1".to_string(), 1, 0, 1, "2 * 3 + 1");
+
         let v = bvs.evaluate(&[], &[], 0.0);
         assert!((v - 7.0).abs() < 1e-10);
     }
 
     #[test]
     fn test_behavioral_current_simple() {
-        let mut bcs = BehavioralCurrentSource::new(
-            "B1".to_string(),
-            1, 0,
-            "0.001"
-        );
-        
+        let mut bcs = BehavioralCurrentSource::new("B1".to_string(), 1, 0, "0.001");
+
         let i = bcs.evaluate(&[], &[], 0.0);
         assert!((i - 0.001).abs() < 1e-12);
     }

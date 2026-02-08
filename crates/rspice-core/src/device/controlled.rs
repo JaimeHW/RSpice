@@ -6,8 +6,8 @@
 //! - G: Voltage-Controlled Current Source (VCCS)
 //! - H: Current-Controlled Voltage Source (CCVS)
 
+use crate::solver::{StaticMatrix, TripletMatrix};
 use crate::{Value, circuit::NodeId};
-use crate::solver::{TripletMatrix, StaticMatrix};
 
 //=============================================================================
 // VCVS (E-element): V_out = gain * V(nc+, nc-)
@@ -80,7 +80,7 @@ impl Vcvs {
                 matrix.push(nn - 1, br_idx, -1.0);
                 matrix.push(br_idx, nn - 1, -1.0);
             }
-            
+
             // Control voltage coefficient: -gain * V(nc+) + gain * V(nc-)
             if cp > 0 {
                 matrix.push(br_idx, cp - 1, -gain);
@@ -115,7 +115,7 @@ impl Vcvs {
                 matrix.add(nn - 1, br_idx - 1, -1.0);
                 matrix.add(br_idx - 1, nn - 1, -1.0);
             }
-            
+
             // Control voltage coefficient: -gain * V(nc+) + gain * V(nc-)
             if cp > 0 {
                 matrix.add(br_idx - 1, cp - 1, -gain);
@@ -185,10 +185,18 @@ impl Vccs {
             let gm = self.transconductances[i];
 
             // Stamp gm into the matrix
-            if np > 0 && cp > 0 { matrix.push(np - 1, cp - 1, gm); }
-            if np > 0 && cn > 0 { matrix.push(np - 1, cn - 1, -gm); }
-            if nn > 0 && cp > 0 { matrix.push(nn - 1, cp - 1, -gm); }
-            if nn > 0 && cn > 0 { matrix.push(nn - 1, cn - 1, gm); }
+            if np > 0 && cp > 0 {
+                matrix.push(np - 1, cp - 1, gm);
+            }
+            if np > 0 && cn > 0 {
+                matrix.push(np - 1, cn - 1, -gm);
+            }
+            if nn > 0 && cp > 0 {
+                matrix.push(nn - 1, cp - 1, -gm);
+            }
+            if nn > 0 && cn > 0 {
+                matrix.push(nn - 1, cn - 1, gm);
+            }
         }
     }
 
@@ -203,10 +211,18 @@ impl Vccs {
             let gm = self.transconductances[i];
 
             // Stamp gm into the matrix
-            if np > 0 && cp > 0 { matrix.add(np - 1, cp - 1, gm); }
-            if np > 0 && cn > 0 { matrix.add(np - 1, cn - 1, -gm); }
-            if nn > 0 && cp > 0 { matrix.add(nn - 1, cp - 1, -gm); }
-            if nn > 0 && cn > 0 { matrix.add(nn - 1, cn - 1, gm); }
+            if np > 0 && cp > 0 {
+                matrix.add(np - 1, cp - 1, gm);
+            }
+            if np > 0 && cn > 0 {
+                matrix.add(np - 1, cn - 1, -gm);
+            }
+            if nn > 0 && cp > 0 {
+                matrix.add(nn - 1, cp - 1, -gm);
+            }
+            if nn > 0 && cn > 0 {
+                matrix.add(nn - 1, cn - 1, gm);
+            }
         }
     }
 }
@@ -266,8 +282,38 @@ impl Cccs {
             let cb_idx = num_nodes + cb - 1;
 
             // Output current contribution to node equations
-            if np > 0 { matrix.push(np - 1, cb_idx, gain); }
-            if nn > 0 { matrix.push(nn - 1, cb_idx, -gain); }
+            if np > 0 {
+                matrix.push(np - 1, cb_idx, gain);
+            }
+            if nn > 0 {
+                matrix.push(nn - 1, cb_idx, -gain);
+            }
+        }
+    }
+
+    /// Stamp all CCCS elements using direct StaticMatrix access.
+    #[inline]
+    pub fn stamp_all_direct<F>(&self, matrix: &mut StaticMatrix, branch_idx_fn: F)
+    where
+        F: Fn(usize) -> usize,
+    {
+        for i in 0..self.names.len() {
+            let np = self.node_pos[i];
+            let nn = self.node_neg[i];
+            let cb_ordinal = self.ctrl_branch[i];
+            let gain = self.gains[i];
+
+            if cb_ordinal == 0 {
+                continue;
+            }
+            let cb_idx = branch_idx_fn(cb_ordinal);
+
+            if np > 0 {
+                matrix.add(np - 1, cb_idx - 1, gain);
+            }
+            if nn > 0 {
+                matrix.add(nn - 1, cb_idx - 1, -gain);
+            }
         }
     }
 }
@@ -340,9 +386,42 @@ impl Ccvs {
                 matrix.push(nn - 1, br_idx, -1.0);
                 matrix.push(br_idx, nn - 1, -1.0);
             }
-            
+
             // Control current coefficient: -rm * I_ctrl
             matrix.push(br_idx, cb_idx, -rm);
+        }
+    }
+
+    /// Stamp all CCVS elements using direct StaticMatrix access.
+    #[inline]
+    pub fn stamp_all_direct<F>(&self, matrix: &mut StaticMatrix, branch_idx_fn: F)
+    where
+        F: Fn(usize) -> usize,
+    {
+        for i in 0..self.names.len() {
+            let np = self.node_pos[i];
+            let nn = self.node_neg[i];
+            let br_ordinal = self.branch_indices[i];
+            let cb_ordinal = self.ctrl_branch[i];
+            let rm = self.transresistances[i];
+
+            if br_ordinal == 0 || cb_ordinal == 0 {
+                continue;
+            }
+
+            let br_idx = branch_idx_fn(br_ordinal);
+            let cb_idx = branch_idx_fn(cb_ordinal);
+
+            if np > 0 {
+                matrix.add(np - 1, br_idx - 1, 1.0);
+                matrix.add(br_idx - 1, np - 1, 1.0);
+            }
+            if nn > 0 {
+                matrix.add(nn - 1, br_idx - 1, -1.0);
+                matrix.add(br_idx - 1, nn - 1, -1.0);
+            }
+
+            matrix.add(br_idx - 1, cb_idx - 1, -rm);
         }
     }
 }
