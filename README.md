@@ -100,7 +100,7 @@ RSpice includes a comprehensive library of industry-standard device models:
 
 ## Architecture
 
-RSpice is organized as a Rust workspace with six crates:
+RSpice is organized as a Rust workspace with five active crates:
 
 | Crate | Description |
 | :--- | :--- |
@@ -109,7 +109,6 @@ RSpice is organized as a Rust workspace with six crates:
 | **`rspice-ui`** | GPU-accelerated graphical interface (egui + wgpu) |
 | **`rspice-veriloga`** | Verilog-A/AMS compiler — lexer, parser, semantic analysis, Cranelift JIT |
 | **`rspice-python`** | Python bindings via PyO3 with NumPy zero-copy array support |
-| **`rspice-wasm`** | WebAssembly target for browser-based simulation |
 
 ---
 

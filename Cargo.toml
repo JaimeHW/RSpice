@@ -4,7 +4,6 @@ members = [
     "crates/rspice-core",
     "crates/rspice-cli",
     "crates/rspice-ui",
-    "crates/rspice-wasm",
     "crates/rspice-veriloga",
     "crates/rspice-python",
 ]
