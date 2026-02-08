@@ -804,10 +804,12 @@ impl EngineBridge {
             sensitivities.insert(param_name.clone(), sensitivity);
 
             // Compute normalized sensitivity: (dV/V) / (dP/P) = (P/V) * dV/dP
-            if nominal_value.abs() > 1e-15 {
-                let norm_sens = (param_value / nominal_value) * sensitivity;
-                normalized.insert(param_name.clone(), norm_sens);
-            }
+            let norm_sens = if nominal_value.abs() > 1e-15 {
+                (param_value / nominal_value) * sensitivity
+            } else {
+                0.0
+            };
+            normalized.insert(param_name.clone(), norm_sens);
         }
 
         Ok(SimulationResult::Sensitivity {
@@ -1544,6 +1546,46 @@ R2 out 0 1k
                 assert!(normalized
                     .iter()
                     .all(|(_, norm)| norm.is_finite()));
+            }
+            _ => panic!("Expected Sensitivity result"),
+        }
+    }
+
+    #[test]
+    fn test_run_sensitivity_normalized_reports_zero_when_nominal_is_zero() {
+        let bridge = EngineBridge::new();
+        let netlist = r#"
+* Sensitivity zero nominal output
+.param RVAL=1k
+V1 in 0 DC 0
+R1 in out {RVAL}
+R2 out 0 1k
+.end
+"#;
+
+        let cfg = AnalysisConfig::Sensitivity(super::super::config::SensitivityConfig {
+            output_var: "V(out)".to_string(),
+            ac_mode: false,
+            frequency: None,
+        });
+
+        let result = bridge
+            .run(&cfg, netlist)
+            .expect("sensitivity run should succeed");
+        match result {
+            SimulationResult::Sensitivity {
+                sensitivities,
+                normalized,
+            } => {
+                let key = sensitivities
+                    .keys()
+                    .find(|k| k.eq_ignore_ascii_case("RVAL"))
+                    .expect("expected RVAL sensitivity key");
+                let norm = normalized
+                    .get(key)
+                    .copied()
+                    .expect("expected normalized sensitivity entry");
+                assert!(norm.abs() <= 1e-18);
             }
             _ => panic!("Expected Sensitivity result"),
         }
