@@ -71,6 +71,11 @@ impl Engine {
     }
 
     #[inline]
+    pub(crate) fn current_abstol(&self) -> Value {
+        Self::sanitize_positive_tolerance(self.config.convergence_config.current_abstol, 1e-12)
+    }
+
+    #[inline]
     pub(crate) fn device_convergence_tolerance(&self) -> Value {
         self.voltage_abstol()
     }
@@ -95,7 +100,7 @@ impl Engine {
         match matrix.scaled_residual_inf_norm(
             solution,
             rhs,
-            self.device_convergence_tolerance(),
+            self.current_abstol(),
             self.voltage_reltol(),
         ) {
             Ok(norm) => norm.is_finite() && norm <= 1.0,
@@ -1763,6 +1768,14 @@ mod tests {
         config.convergence_config.voltage_abstol = 7e-7;
         let engine = Engine::new(config);
         assert!((engine.device_convergence_tolerance() - 7e-7).abs() < 1e-18);
+    }
+
+    #[test]
+    fn test_current_abstol_uses_configured_current_tolerance() {
+        let mut config = crate::engine::SimulationConfig::default();
+        config.convergence_config.current_abstol = 4e-13;
+        let engine = Engine::new(config);
+        assert!((engine.current_abstol() - 4e-13).abs() < 1e-24);
     }
 
     #[test]

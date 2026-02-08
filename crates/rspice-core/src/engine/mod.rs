@@ -105,6 +105,11 @@ pub struct ConvergenceConfig {
     /// A non-positive value keeps legacy behavior and falls back to
     /// `SimulationConfig::tolerance`.
     pub voltage_abstol: Value,
+    /// Absolute current tolerance for equation residual convergence checks.
+    ///
+    /// This is used when normalizing `A*x-b` residuals in Newton acceptance.
+    /// A non-positive value falls back to a conservative 1e-12 default.
+    pub current_abstol: Value,
     /// Verbose convergence logging
     pub verbose: bool,
 }
@@ -137,6 +142,7 @@ impl Default for ConvergenceConfig {
             gmin_target: 1e-15,
             voltage_reltol: 1e-3,
             voltage_abstol: 0.0,
+            current_abstol: 1e-12,
             verbose: false,
         }
     }
@@ -184,6 +190,12 @@ impl ConvergenceConfig {
     pub fn with_voltage_tolerances(mut self, reltol: Value, abstol: Value) -> Self {
         self.voltage_reltol = reltol;
         self.voltage_abstol = abstol;
+        self
+    }
+
+    /// Set absolute current tolerance used for residual convergence checks.
+    pub fn with_current_tolerance(mut self, abstol: Value) -> Self {
+        self.current_abstol = abstol;
         self
     }
 }
