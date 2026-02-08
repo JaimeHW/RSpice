@@ -749,6 +749,8 @@ impl Engine {
                         }
 
                         let voltage_converged = self.voltage_convergence_met(&new_solution, &sol);
+                        let linearized_residual_converged =
+                            self.residual_convergence_met(&matrix, &sol, &rhs);
 
                         // CRITICAL: Update new_solution BEFORE checking device convergence
                         // Otherwise, BJT vbe/vbc are based on old guess, not new solve
@@ -762,7 +764,7 @@ impl Engine {
                         let device_converged = !circuit.has_nonlinear_devices()
                             || circuit.nonlinear_converged(self.device_convergence_tolerance());
 
-                        if voltage_converged && device_converged {
+                        if voltage_converged && device_converged && linearized_residual_converged {
                             converged = true;
                             break;
                         }
@@ -791,13 +793,15 @@ impl Engine {
                     let v_conv = self.voltage_convergence_met(&solution, &new_solution);
                     let d_conv = !circuit.has_nonlinear_devices()
                         || circuit.nonlinear_converged(self.device_convergence_tolerance());
+                    let r_conv = self.residual_convergence_met(&matrix, &new_solution, &rhs);
                     let max_dv = Self::max_abs_delta_prefix(&solution, &new_solution, num_nodes);
                     log::warn!(
-                        "Newton non-converge at t={:.6e}, dt={:.3e}: voltage_conv={}, device_conv={}, max_dv={:.3e}, iter={}",
+                        "Newton non-converge at t={:.6e}, dt={:.3e}: voltage_conv={}, device_conv={}, residual_conv={}, max_dv={:.3e}, iter={}",
                         t,
                         dt,
                         v_conv,
                         d_conv,
+                        r_conv,
                         max_dv,
                         total_iterations
                     );

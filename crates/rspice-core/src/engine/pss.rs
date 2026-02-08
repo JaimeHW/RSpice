@@ -691,12 +691,19 @@ impl Engine {
                 match matrix.solve(&rhs) {
                     Ok(sol) => {
                         let voltage_converged = self.voltage_convergence_met(&new_solution, &sol);
-                        let device_converged = !circuit.has_nonlinear_devices()
-                            || circuit.nonlinear_converged(self.device_convergence_tolerance());
+                        let linearized_residual_converged =
+                            self.residual_convergence_met(matrix, &sol, &rhs);
 
                         new_solution = sol;
 
-                        if voltage_converged && device_converged {
+                        if circuit.has_nonlinear_devices() {
+                            circuit.update_nonlinear(&new_solution);
+                        }
+
+                        let device_converged = !circuit.has_nonlinear_devices()
+                            || circuit.nonlinear_converged(self.device_convergence_tolerance());
+
+                        if voltage_converged && device_converged && linearized_residual_converged {
                             converged = true;
                             break;
                         }
