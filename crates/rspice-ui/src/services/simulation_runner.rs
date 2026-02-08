@@ -729,8 +729,7 @@ pub fn run_sensitivity_analysis(
         dc_output_value(&dc_result, &output_spec)?
     };
 
-    let mut params = netlist.params.all_params();
-    params.sort_by(|a, b| a.0.cmp(&b.0));
+    let params = collect_sensitivity_parameters(&netlist);
 
     if params.is_empty() {
         return Ok(SensitivityData {
@@ -1220,6 +1219,19 @@ fn canonicalize_pz_port(pos: usize, neg: usize) -> Result<(usize, Option<usize>,
     Ok((neg, None, -1.0))
 }
 
+fn collect_sensitivity_parameters(netlist: &rspice_core::Netlist) -> Vec<(String, Value)> {
+    let mut params: Vec<(String, Value)> = netlist
+        .params
+        .all_params()
+        .into_iter()
+        .filter(|(name, value)| {
+            value.is_finite() && !name.starts_with("IC_") && !name.starts_with("NODESET_")
+        })
+        .collect();
+    params.sort_by(|a, b| a.0.cmp(&b.0));
+    params
+}
+
 fn run_ac_output_sensitivity_finite_difference(
     engine: &Engine,
     netlist: &rspice_core::Netlist,
@@ -1640,6 +1652,23 @@ mod tests {
             .sensitivities
             .iter()
             .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL")));
+    }
+
+    #[test]
+    fn test_run_sensitivity_analysis_filters_internal_side_channel_parameters() {
+        let netlist = "* sens params\n.param RVAL=1k\n.param IC_START=0.1\n.param NODESET_OUT=0.2\nV1 in 0 1\nR1 in out {RVAL}\nR2 out 0 1k\n";
+
+        let result = run_sensitivity_analysis(netlist, "V(out)", false, None)
+            .expect("sensitivity run should succeed");
+
+        assert!(result
+            .sensitivities
+            .iter()
+            .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL")));
+        assert!(result
+            .sensitivities
+            .iter()
+            .all(|(name, _, _)| !name.starts_with("IC_") && !name.starts_with("NODESET_")));
     }
 
     #[test]
