@@ -3,10 +3,10 @@
 //! Async wrapper around rspice-core for running simulations from the GUI.
 
 use crate::output_spec::{
-    OutputSpec, OutputVoltageSpec, collect_sensitivity_parameters, dc_output_value,
-    finite_difference_derivative, normalized_sensitivity, parse_output_spec,
-    resolve_node_or_ground_index, resolve_sensitivity_ac_frequency, run_ac_output_at_frequency,
-    run_dc_output_sensitivity, validate_sensitivity_output_spec,
+    collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
+    normalized_sensitivity, parse_output_spec, resolve_node_or_ground_index,
+    resolve_sensitivity_ac_frequency, run_ac_output_at_frequency, run_dc_output_sensitivity,
+    validate_sensitivity_output_spec, OutputSpec, OutputVoltageSpec,
 };
 use num_complex::Complex64;
 use rspice_core::analysis::ac::AcResult;
@@ -18,7 +18,7 @@ use rspice_core::netlist::{
     StepTarget,
 };
 use rspice_core::solver::SimulationResult as CoreSimulationResult;
-use rspice_core::{SimulationConfigOverrides, Value, resolve_simulation_config};
+use rspice_core::{resolve_simulation_config, SimulationConfigOverrides, Value};
 
 // =============================================================================
 // Platform-agnostic timing utilities
@@ -1378,6 +1378,72 @@ pub struct CornerRunConfig {
     pub temperatures_c: Vec<Value>,
     pub full_matrix: bool,
     pub nominal_voltage: Option<Value>,
+    pub base_mode: CornerBaseMode,
+}
+
+/// Frequency sweep type used by corner AC base analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CornerFrequencySweep {
+    Decade,
+    Octave,
+    Linear,
+}
+
+impl CornerFrequencySweep {
+    fn as_keyword(self) -> &'static str {
+        match self {
+            Self::Decade => "dec",
+            Self::Octave => "oct",
+            Self::Linear => "lin",
+        }
+    }
+}
+
+/// Base analysis executed at each corner point.
+#[derive(Debug, Clone)]
+pub enum CornerBaseMode {
+    /// Run DC operating point directly at each corner.
+    Op,
+    /// Run DC sweep and record the final converged point at each corner.
+    DcSweep {
+        source_name: String,
+        start: Value,
+        stop: Value,
+        step: Value,
+    },
+    /// Run transient analysis and record the terminal sample at each corner.
+    Transient { stop_time: Value, step_time: Value },
+    /// Run AC analysis and record terminal-frequency magnitude at each corner.
+    Ac {
+        start_freq: Value,
+        stop_freq: Value,
+        points_per_unit: usize,
+        sweep: CornerFrequencySweep,
+    },
+}
+
+impl CornerBaseMode {
+    fn metric_label(&self) -> CornerMetricLabel {
+        match self {
+            Self::Ac { .. } => CornerMetricLabel::AcMagnitude,
+            _ => CornerMetricLabel::Voltage,
+        }
+    }
+
+    fn display_name(&self) -> &'static str {
+        match self {
+            Self::Op => "OP",
+            Self::DcSweep { .. } => "DC",
+            Self::Transient { .. } => "TRAN",
+            Self::Ac { .. } => "AC",
+        }
+    }
+}
+
+impl Default for CornerBaseMode {
+    fn default() -> Self {
+        Self::Op
+    }
 }
 
 impl Default for CornerRunConfig {
@@ -1388,6 +1454,7 @@ impl Default for CornerRunConfig {
             temperatures_c: vec![25.0],
             full_matrix: true,
             nominal_voltage: Some(1.0),
+            base_mode: CornerBaseMode::default(),
         }
     }
 }
@@ -1418,6 +1485,85 @@ impl CornerRunConfig {
                 );
             }
         }
+        match &self.base_mode {
+            CornerBaseMode::Op => {}
+            CornerBaseMode::DcSweep {
+                source_name,
+                start,
+                stop,
+                step,
+            } => {
+                if source_name.trim().is_empty() {
+                    return Err(
+                        "Corner DC sweep base mode requires a non-empty source name".to_string()
+                    );
+                }
+                if !start.is_finite() || !stop.is_finite() || !step.is_finite() {
+                    return Err(
+                        "Corner DC sweep base mode requires finite start/stop/step values"
+                            .to_string(),
+                    );
+                }
+                if *step == 0.0 {
+                    return Err("Corner DC sweep base mode step cannot be zero".to_string());
+                }
+                if (stop - start).abs() > 0.0 && (stop - start).signum() != step.signum() {
+                    return Err(
+                        "Corner DC sweep base mode step direction must match start/stop range"
+                            .to_string(),
+                    );
+                }
+            }
+            CornerBaseMode::Transient {
+                stop_time,
+                step_time,
+            } => {
+                if !stop_time.is_finite() || *stop_time <= 0.0 {
+                    return Err(
+                        "Corner transient base mode stop_time must be a positive finite value"
+                            .to_string(),
+                    );
+                }
+                if !step_time.is_finite() || *step_time <= 0.0 {
+                    return Err(
+                        "Corner transient base mode step_time must be a positive finite value"
+                            .to_string(),
+                    );
+                }
+                if step_time > stop_time {
+                    return Err(
+                        "Corner transient base mode step_time must be <= stop_time".to_string()
+                    );
+                }
+            }
+            CornerBaseMode::Ac {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                ..
+            } => {
+                if !start_freq.is_finite() || !stop_freq.is_finite() {
+                    return Err(
+                        "Corner AC base mode requires finite start/stop frequencies".to_string()
+                    );
+                }
+                if *start_freq <= 0.0 || *stop_freq <= 0.0 {
+                    return Err(
+                        "Corner AC base mode frequencies must be positive values".to_string()
+                    );
+                }
+                if stop_freq < start_freq {
+                    return Err(
+                        "Corner AC base mode stop frequency must be >= start frequency".to_string(),
+                    );
+                }
+                if *points_per_unit == 0 {
+                    return Err(
+                        "Corner AC base mode points_per_unit must be greater than zero".to_string(),
+                    );
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -1437,6 +1583,27 @@ impl CornerPoint {
             self.voltage,
             self.temperature_c
         )
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CornerPointResult {
+    node_names: Vec<String>,
+    node_values: Vec<Value>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CornerMetricLabel {
+    Voltage,
+    AcMagnitude,
+}
+
+impl CornerMetricLabel {
+    fn format_trace_name(self, node_name: &str) -> String {
+        match self {
+            Self::Voltage => format!("V({})", node_name),
+            Self::AcMagnitude => format!("|V({})|", node_name),
+        }
     }
 }
 
@@ -1496,13 +1663,14 @@ fn run_corner_analysis_with_netlist(
         .nominal_voltage
         .or_else(|| infer_nominal_supply_voltage(netlist))
         .unwrap_or(1.0);
-    let results = run_corner_sweep_dc(netlist, &points, nominal_voltage)?;
+    let results = run_corner_sweep(netlist, &points, config, nominal_voltage)?;
     if results.is_empty() {
         return Err("Corner analysis produced no converged corner points".to_string());
     }
 
     let num_failures = points.len().saturating_sub(results.len());
-    let (temperatures_c, corner_labels, voltages) = map_corner_results(&results);
+    let metric = config.base_mode.metric_label();
+    let (temperatures_c, corner_labels, voltages) = map_corner_results(&results, metric);
 
     Ok(CornerData {
         num_points: temperatures_c.len(),
@@ -1557,7 +1725,8 @@ fn map_dc_sweep_results(
 }
 
 fn map_corner_results(
-    results: &[(CornerPoint, CoreSimulationResult)],
+    results: &[(CornerPoint, CornerPointResult)],
+    metric_label: CornerMetricLabel,
 ) -> (Vec<Value>, Vec<String>, Vec<(String, Vec<Value>)>) {
     let temperatures_c: Vec<Value> = results
         .iter()
@@ -1567,7 +1736,7 @@ fn map_corner_results(
     let mut voltages = Vec::new();
 
     if let Some((_, first)) = results.first() {
-        for node_idx in 1..first.node_voltages.len() {
+        for node_idx in 1..first.node_values.len() {
             let node_name = first
                 .node_names
                 .get(node_idx)
@@ -1575,9 +1744,9 @@ fn map_corner_results(
                 .unwrap_or_else(|| node_idx.to_string());
             let values: Vec<Value> = results
                 .iter()
-                .map(|(_, result)| result.node_voltages.get(node_idx).copied().unwrap_or(0.0))
+                .map(|(_, result)| result.node_values.get(node_idx).copied().unwrap_or(0.0))
                 .collect();
-            voltages.push((format!("V({})", node_name), values));
+            voltages.push((metric_label.format_trace_name(&node_name), values));
         }
     }
 
@@ -1619,11 +1788,12 @@ fn expand_corner_points(config: &CornerRunConfig) -> Vec<CornerPoint> {
     points
 }
 
-fn run_corner_sweep_dc(
+fn run_corner_sweep(
     netlist: &rspice_core::Netlist,
     points: &[CornerPoint],
+    config: &CornerRunConfig,
     nominal_voltage: Value,
-) -> Result<Vec<(CornerPoint, CoreSimulationResult)>, String> {
+) -> Result<Vec<(CornerPoint, CornerPointResult)>, String> {
     if !nominal_voltage.is_finite() || nominal_voltage <= 0.0 {
         return Err("Corner analysis nominal voltage must be a positive finite value".to_string());
     }
@@ -1648,19 +1818,155 @@ fn run_corner_sweep_dc(
         apply_process_corner(&mut corner_netlist, point.process);
         apply_voltage_corner(&mut corner_netlist, point.voltage, nominal_voltage)?;
 
-        let mut config = build_engine_config(&corner_netlist, None);
-        config.temperature = point.temperature_c + 273.15;
-        let engine = Engine::new(config);
+        let mut sim_config = build_engine_config(&corner_netlist, None);
+        sim_config.temperature = point.temperature_c + 273.15;
+        let engine = Engine::new(sim_config);
 
-        match engine.run_dc_op(&corner_netlist) {
-            Ok(dc) => results.push((point.clone(), dc)),
+        match run_corner_point(&engine, &corner_netlist, &config.base_mode) {
+            Ok(result) => results.push((point.clone(), result)),
             Err(e) => {
-                log::warn!("Corner {} failed: {}", point.label(), e);
+                log::warn!(
+                    "Corner {} ({}) failed: {}",
+                    point.label(),
+                    config.base_mode.display_name(),
+                    e
+                );
             }
         }
     }
 
     Ok(results)
+}
+
+fn run_corner_point(
+    engine: &Engine,
+    netlist: &rspice_core::Netlist,
+    base_mode: &CornerBaseMode,
+) -> Result<CornerPointResult, String> {
+    match base_mode {
+        CornerBaseMode::Op => engine
+            .run_dc_op(netlist)
+            .map(|dc| corner_point_result_from_dc(&dc))
+            .map_err(|e| format!("DC operating point error: {}", e)),
+        CornerBaseMode::DcSweep {
+            source_name,
+            start,
+            stop,
+            step,
+        } => {
+            let results = engine
+                .run_dc_sweep(netlist, source_name, *start, *stop, *step)
+                .map_err(|e| format!("DC sweep error: {}", e))?;
+            let (_, terminal) = results
+                .last()
+                .ok_or_else(|| "DC sweep produced no points".to_string())?;
+            Ok(corner_point_result_from_dc(terminal))
+        }
+        CornerBaseMode::Transient {
+            stop_time,
+            step_time,
+        } => {
+            let result = engine
+                .run_tran(netlist, *stop_time, *step_time)
+                .map_err(|e| format!("Transient analysis error: {}", e))?;
+            corner_point_result_from_transient(result)
+        }
+        CornerBaseMode::Ac {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+        } => run_corner_ac_point(
+            engine,
+            netlist,
+            *start_freq,
+            *stop_freq,
+            *points_per_unit,
+            *sweep,
+        ),
+    }
+}
+
+fn corner_point_result_from_dc(result: &CoreSimulationResult) -> CornerPointResult {
+    CornerPointResult {
+        node_names: result.node_names.clone(),
+        node_values: result.node_voltages.clone(),
+    }
+}
+
+fn corner_point_result_from_transient(
+    result: TransientResult,
+) -> Result<CornerPointResult, String> {
+    if result.time.is_empty() {
+        return Err("Transient analysis produced no time points".to_string());
+    }
+    if result.node_names.is_empty() {
+        return Err("Transient analysis returned no node names".to_string());
+    }
+
+    let mut node_values = Vec::with_capacity(result.node_names.len());
+    for (idx, node_name) in result.node_names.iter().enumerate() {
+        let Some(waveform) = result.voltages.get(idx) else {
+            return Err(format!(
+                "Transient result missing waveform for node '{}'",
+                node_name
+            ));
+        };
+        let Some(value) = waveform.last().copied() else {
+            return Err(format!(
+                "Transient waveform for node '{}' contains no samples",
+                node_name
+            ));
+        };
+        node_values.push(value);
+    }
+
+    Ok(CornerPointResult {
+        node_names: result.node_names,
+        node_values,
+    })
+}
+
+fn run_corner_ac_point(
+    engine: &Engine,
+    netlist: &rspice_core::Netlist,
+    start_freq: Value,
+    stop_freq: Value,
+    points_per_unit: usize,
+    sweep: CornerFrequencySweep,
+) -> Result<CornerPointResult, String> {
+    let frequencies =
+        generate_freq_points(start_freq, stop_freq, points_per_unit, sweep.as_keyword());
+    if frequencies.is_empty() {
+        return Err("Corner AC base mode generated no frequency points".to_string());
+    }
+
+    let dc_result = engine
+        .run_dc_op(netlist)
+        .map_err(|e| format!("DC OP error (required for AC): {}", e))?;
+    let node_names = dc_result.node_names;
+
+    let ac_results = engine
+        .run_ac(netlist, &frequencies)
+        .map_err(|e| format!("AC analysis error: {}", e))?;
+    let terminal = ac_results
+        .last()
+        .ok_or_else(|| "AC analysis produced no points".to_string())?;
+
+    let mut node_values = vec![0.0; node_names.len()];
+    for node_idx in 1..node_names.len() {
+        let ac_idx = node_idx.saturating_sub(1);
+        node_values[node_idx] = terminal
+            .voltages
+            .get(ac_idx)
+            .map(|value| value.norm())
+            .unwrap_or(0.0);
+    }
+
+    Ok(CornerPointResult {
+        node_names,
+        node_values,
+    })
 }
 
 fn apply_process_corner(netlist: &mut rspice_core::Netlist, process: CornerProcess) {
@@ -2384,12 +2690,10 @@ mod tests {
             .expect("sensitivity run should succeed");
         assert_eq!(result.output_var, "V(out)");
         assert!(!result.sensitivities.is_empty());
-        assert!(
-            result
-                .sensitivities
-                .iter()
-                .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL"))
-        );
+        assert!(result
+            .sensitivities
+            .iter()
+            .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL")));
     }
 
     #[test]
@@ -2399,18 +2703,14 @@ mod tests {
         let result = run_sensitivity_analysis(netlist, "V(out)", false, None)
             .expect("sensitivity run should succeed");
 
-        assert!(
-            result
-                .sensitivities
-                .iter()
-                .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL"))
-        );
-        assert!(
-            result
-                .sensitivities
-                .iter()
-                .all(|(name, _, _)| !name.starts_with("IC_") && !name.starts_with("NODESET_"))
-        );
+        assert!(result
+            .sensitivities
+            .iter()
+            .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL")));
+        assert!(result
+            .sensitivities
+            .iter()
+            .all(|(name, _, _)| !name.starts_with("IC_") && !name.starts_with("NODESET_")));
     }
 
     #[test]
@@ -2436,12 +2736,10 @@ mod tests {
         let result = run_sensitivity_analysis(netlist, "V(out,in)", false, None)
             .expect("differential sensitivity run should succeed");
         assert!(!result.sensitivities.is_empty());
-        assert!(
-            result
-                .sensitivities
-                .iter()
-                .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite())
-        );
+        assert!(result
+            .sensitivities
+            .iter()
+            .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite()));
     }
 
     #[test]
@@ -2469,12 +2767,10 @@ mod tests {
             .expect("current-output ac sensitivity should succeed");
         assert_eq!(result.output_var, "I(V1)");
         assert!(!result.sensitivities.is_empty());
-        assert!(
-            result
-                .sensitivities
-                .iter()
-                .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite())
-        );
+        assert!(result
+            .sensitivities
+            .iter()
+            .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite()));
     }
 
     #[test]
@@ -2563,12 +2859,10 @@ mod tests {
         assert_eq!(result.target, "PARAM RVAL");
         assert_eq!(result.sweep_values.len(), 4);
         assert_eq!(result.num_points, 4);
-        assert!(
-            result
-                .voltages
-                .iter()
-                .any(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
-        );
+        assert!(result
+            .voltages
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("V(out)")));
     }
 
     #[test]
@@ -2597,12 +2891,10 @@ mod tests {
         assert_eq!(result.corner_labels.len(), 3);
         assert!(result.corner_labels[0].starts_with("TT_1.000000V_"));
         assert_eq!(result.num_points, 3);
-        assert!(
-            result
-                .voltages
-                .iter()
-                .any(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
-        );
+        assert!(result
+            .voltages
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("V(out)")));
     }
 
     #[test]
@@ -2621,6 +2913,7 @@ mod tests {
             temperatures_c: vec![-40.0, 125.0],
             full_matrix: true,
             nominal_voltage: Some(1.0),
+            base_mode: CornerBaseMode::Op,
         };
 
         let result = run_corner_analysis_with_config(netlist, &cfg)
@@ -2629,12 +2922,10 @@ mod tests {
         assert_eq!(result.temperatures_c.len(), 8);
         assert_eq!(result.corner_labels.len(), 8);
         assert_eq!(result.num_failures, 0);
-        assert!(
-            result
-                .corner_labels
-                .iter()
-                .any(|label| label.contains("FF_1.100000V_125.000000C"))
-        );
+        assert!(result
+            .corner_labels
+            .iter()
+            .any(|label| label.contains("FF_1.100000V_125.000000C")));
     }
 
     #[test]
@@ -2646,6 +2937,7 @@ mod tests {
             temperatures_c: vec![25.0],
             full_matrix: false,
             nominal_voltage: Some(1.0),
+            base_mode: CornerBaseMode::Op,
         };
 
         let result = run_corner_analysis_with_config(netlist, &cfg)
@@ -2666,10 +2958,115 @@ mod tests {
             temperatures_c: vec![25.0],
             full_matrix: true,
             nominal_voltage: Some(1.0),
+            base_mode: CornerBaseMode::Op,
         };
         let err = run_corner_analysis_with_config(netlist, &cfg)
             .expect_err("invalid voltage corner must be rejected");
         assert!(err.contains("voltage corners"));
+    }
+
+    #[test]
+    fn test_run_corner_analysis_with_config_transient_base_mode() {
+        let netlist = "* corners tran\nVDD vdd 0 1.0\nR1 vdd out 1k\nC1 out 0 1n\n.end\n";
+        let cfg = CornerRunConfig {
+            process_corners: vec![CornerProcess::TT],
+            voltages: vec![0.9, 1.1],
+            temperatures_c: vec![25.0],
+            full_matrix: true,
+            nominal_voltage: Some(1.0),
+            base_mode: CornerBaseMode::Transient {
+                stop_time: 2e-6,
+                step_time: 2e-8,
+            },
+        };
+
+        let result = run_corner_analysis_with_config(netlist, &cfg)
+            .expect("corner transient base mode should execute");
+        assert_eq!(result.num_points, 2);
+        let out = result
+            .voltages
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
+            .expect("expected V(out) waveform");
+        assert_eq!(out.1.len(), 2);
+        assert!(out.1.iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn test_run_corner_analysis_with_config_ac_base_mode() {
+        let netlist = "* corners ac\nV1 in 0 DC 1 AC 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        let cfg = CornerRunConfig {
+            process_corners: vec![CornerProcess::TT],
+            voltages: vec![1.0],
+            temperatures_c: vec![-40.0, 25.0, 125.0],
+            full_matrix: true,
+            nominal_voltage: Some(1.0),
+            base_mode: CornerBaseMode::Ac {
+                start_freq: 1e3,
+                stop_freq: 1e6,
+                points_per_unit: 10,
+                sweep: CornerFrequencySweep::Decade,
+            },
+        };
+
+        let result =
+            run_corner_analysis_with_config(netlist, &cfg).expect("corner AC base mode should run");
+        assert_eq!(result.num_points, 3);
+        assert!(result
+            .voltages
+            .iter()
+            .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
+                && values.len() == 3
+                && values.iter().all(|v| v.is_finite() && *v >= 0.0)));
+    }
+
+    #[test]
+    fn test_run_corner_analysis_with_config_dc_sweep_base_mode() {
+        let netlist = "* corners dc\nVDD in 0 1\nR1 in out 1k\nR2 out 0 1k\n.end\n";
+        let cfg = CornerRunConfig {
+            process_corners: vec![CornerProcess::TT, CornerProcess::FF],
+            voltages: vec![1.0],
+            temperatures_c: vec![25.0],
+            full_matrix: true,
+            nominal_voltage: Some(1.0),
+            base_mode: CornerBaseMode::DcSweep {
+                source_name: "VDD".to_string(),
+                start: 0.0,
+                stop: 1.0,
+                step: 0.2,
+            },
+        };
+
+        let result = run_corner_analysis_with_config(netlist, &cfg)
+            .expect("corner DC sweep base mode should execute");
+        assert_eq!(result.num_points, 2);
+        let trace = result
+            .voltages
+            .iter()
+            .find(|(_, values)| values.len() == 2 && values.iter().all(|value| value.is_finite()))
+            .expect("expected at least one finite corner trace");
+        assert!(trace.0.starts_with("V("));
+    }
+
+    #[test]
+    fn test_run_corner_analysis_with_config_rejects_invalid_dc_base_mode_step() {
+        let netlist = "* corners invalid dc\nV1 in 0 1\nR1 in 0 1k\n.end\n";
+        let cfg = CornerRunConfig {
+            process_corners: vec![CornerProcess::TT],
+            voltages: vec![1.0],
+            temperatures_c: vec![25.0],
+            full_matrix: true,
+            nominal_voltage: Some(1.0),
+            base_mode: CornerBaseMode::DcSweep {
+                source_name: "V1".to_string(),
+                start: 0.0,
+                stop: 1.0,
+                step: 0.0,
+            },
+        };
+        let err = run_corner_analysis_with_config(netlist, &cfg)
+            .expect_err("invalid corner DC step must be rejected");
+        assert!(err.contains("step cannot be zero"));
     }
 
     #[test]
