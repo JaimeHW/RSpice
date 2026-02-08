@@ -1705,8 +1705,16 @@ pub fn run_pxf_analysis_with_config(
         return Err("PXF produced no transfer points".to_string());
     }
 
-    let sweep_freqs: Vec<Value> = pxf_result.points.iter().map(|point| point.freq_in).collect();
-    let output_freqs: Vec<Value> = pxf_result.points.iter().map(|point| point.freq_out).collect();
+    let sweep_freqs: Vec<Value> = pxf_result
+        .points
+        .iter()
+        .map(|point| point.freq_in)
+        .collect();
+    let output_freqs: Vec<Value> = pxf_result
+        .points
+        .iter()
+        .map(|point| point.freq_out)
+        .collect();
     let transfer: Vec<Complex64> = pxf_result
         .points
         .iter()
@@ -2385,6 +2393,216 @@ pub fn run_stb_analysis(
         phase_crossover_freq: stb_result.margins.gain_margin_freq,
         is_stable: stb_result.margins.is_stable(),
     })
+}
+
+// =============================================================================
+// PSTB (Periodic Stability) Analysis
+// =============================================================================
+
+/// Explicit configuration for PSTB execution.
+#[derive(Debug, Clone)]
+pub struct PstbRunConfig {
+    pub pss_fundamental_freq: Value,
+    pub pss_num_harmonics: usize,
+    pub pss_tolerance: Value,
+    pub probe_instance: String,
+    pub max_harmonics: usize,
+    pub num_multipliers: usize,
+    pub stability_threshold: Value,
+    pub detect_subharmonics: bool,
+    pub eigenvalue_tolerance: Value,
+}
+
+impl Default for PstbRunConfig {
+    fn default() -> Self {
+        Self {
+            pss_fundamental_freq: 1e6,
+            pss_num_harmonics: 10,
+            pss_tolerance: 1e-3,
+            probe_instance: "LPROBE".to_string(),
+            max_harmonics: 10,
+            num_multipliers: 10,
+            stability_threshold: 1.0 + 1e-6,
+            detect_subharmonics: true,
+            eigenvalue_tolerance: 1e-10,
+        }
+    }
+}
+
+impl PstbRunConfig {
+    fn validate(&self) -> Result<(), String> {
+        if !self.pss_fundamental_freq.is_finite() || self.pss_fundamental_freq <= 0.0 {
+            return Err("PSTB requires a positive PSS fundamental frequency".to_string());
+        }
+        if self.pss_num_harmonics == 0 {
+            return Err("PSTB requires at least one PSS harmonic".to_string());
+        }
+        if !self.pss_tolerance.is_finite() || self.pss_tolerance <= 0.0 {
+            return Err("PSTB requires a positive PSS tolerance".to_string());
+        }
+        if self.probe_instance.trim().is_empty() {
+            return Err("PSTB probe instance must be specified".to_string());
+        }
+        if self.max_harmonics == 0 {
+            return Err("PSTB max harmonics must be greater than zero".to_string());
+        }
+        if self.num_multipliers == 0 {
+            return Err("PSTB number of multipliers must be greater than zero".to_string());
+        }
+        if !self.stability_threshold.is_finite() || self.stability_threshold <= 0.0 {
+            return Err("PSTB stability threshold must be positive".to_string());
+        }
+        if !self.eigenvalue_tolerance.is_finite() || self.eigenvalue_tolerance <= 0.0 {
+            return Err("PSTB eigenvalue tolerance must be positive".to_string());
+        }
+        Ok(())
+    }
+}
+
+/// PSTB analysis data.
+#[derive(Debug, Clone)]
+pub struct PstbData {
+    /// Fundamental period in seconds.
+    pub period: Value,
+    /// Fundamental frequency in Hz.
+    pub fundamental_frequency: Value,
+    /// Probe instance used for metadata correlation.
+    pub probe_instance: String,
+    /// Mode indices (1-based) for plotting.
+    pub mode_indices: Vec<Value>,
+    /// Floquet multiplier magnitudes.
+    pub multiplier_magnitude: Vec<Value>,
+    /// Floquet multiplier phases in degrees.
+    pub multiplier_phase_deg: Vec<Value>,
+    /// Mode damping factors in 1/s.
+    pub mode_damping: Vec<Value>,
+    /// Mode natural frequencies in Hz.
+    pub mode_frequency_hz: Vec<Value>,
+    /// Per-mode stability margin in dB.
+    pub stability_margin_db: Vec<Value>,
+    /// Dominant multiplier magnitude.
+    pub dominant_multiplier_magnitude: Value,
+    /// Global minimum stability margin in dB.
+    pub min_stability_margin_db: Value,
+    /// Number of unstable modes.
+    pub num_unstable: usize,
+    /// Stability classification string.
+    pub stability_classification: String,
+    /// Whether the periodic orbit is stable.
+    pub is_stable: bool,
+}
+
+fn stability_type_label(
+    stability: rspice_core::analysis::advanced::pstb::StabilityType,
+) -> &'static str {
+    use rspice_core::analysis::advanced::pstb::StabilityType;
+    match stability {
+        StabilityType::Stable => "Stable",
+        StabilityType::UnstableReal => "UnstableReal",
+        StabilityType::UnstableComplex => "UnstableComplex",
+        StabilityType::PeriodDoubling => "PeriodDoubling",
+        StabilityType::NeimarkSacker => "NeimarkSacker",
+        StabilityType::SaddleNode => "SaddleNode",
+        StabilityType::Marginal => "Marginal",
+    }
+}
+
+fn sanitize_db(value: Value) -> Value {
+    if value.is_finite() {
+        value
+    } else if value.is_sign_positive() {
+        300.0
+    } else {
+        -300.0
+    }
+}
+
+/// Run PSTB analysis using a PSS operating point and monodromy-based Floquet analysis.
+pub fn run_pstb_analysis_with_config(
+    netlist_text: &str,
+    config: &PstbRunConfig,
+) -> Result<PstbData, String> {
+    use rspice_core::analysis::advanced::pstb::{PstbAnalyzer, PstbConfig};
+    use rspice_core::analysis::PssConfig;
+
+    config.validate()?;
+
+    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
+        .map_err(|e| format!("Parse error: {}", e))?;
+
+    let mut sim_config = build_engine_config(&netlist, None);
+    sim_config.tolerance = config.pss_tolerance;
+    let engine = Engine::new(sim_config);
+
+    let pss_harmonics = config.pss_num_harmonics.max(config.max_harmonics);
+    let pss_config = PssConfig::new(config.pss_fundamental_freq)
+        .with_harmonics(pss_harmonics)
+        .with_tolerance(config.pss_tolerance)
+        .with_max_iterations(50)
+        .with_tstab_periods(10);
+    let pss_result = engine
+        .run_pss(&netlist, pss_config)
+        .map_err(|e| format!("PSTB prerequisite PSS error: {}", e))?;
+
+    if pss_result.monodromy.is_empty() {
+        return Err("PSTB prerequisite PSS returned an empty monodromy matrix".to_string());
+    }
+
+    let pstb_config = PstbConfig::new()
+        .with_num_eigenvalues(config.num_multipliers)
+        .with_tolerance(config.eigenvalue_tolerance)
+        .with_stability_threshold(config.stability_threshold)
+        .with_subharmonic_detection(config.detect_subharmonics);
+    let mut analyzer = PstbAnalyzer::new(pstb_config);
+    let pstb_result = analyzer.analyze_monodromy(&pss_result.monodromy, pss_result.period);
+
+    let mut mode_indices = Vec::new();
+    let mut multiplier_magnitude = Vec::new();
+    let mut multiplier_phase_deg = Vec::new();
+    let mut mode_damping = Vec::new();
+    let mut mode_frequency_hz = Vec::new();
+    let mut stability_margin_db = Vec::new();
+
+    for (idx, multiplier) in pstb_result
+        .multipliers
+        .iter()
+        .take(config.num_multipliers)
+        .enumerate()
+    {
+        mode_indices.push((idx + 1) as Value);
+        multiplier_magnitude.push(multiplier.magnitude());
+        multiplier_phase_deg.push(multiplier.phase_degrees());
+        mode_damping.push(multiplier.damping());
+        mode_frequency_hz.push(multiplier.natural_frequency());
+        stability_margin_db.push(sanitize_db(multiplier.stability_margin_db()));
+    }
+
+    if mode_indices.is_empty() {
+        return Err("PSTB produced no Floquet multipliers".to_string());
+    }
+
+    Ok(PstbData {
+        period: pstb_result.period,
+        fundamental_frequency: pstb_result.fundamental_frequency,
+        probe_instance: config.probe_instance.trim().to_string(),
+        mode_indices,
+        multiplier_magnitude,
+        multiplier_phase_deg,
+        mode_damping,
+        mode_frequency_hz,
+        stability_margin_db,
+        dominant_multiplier_magnitude: pstb_result.max_multiplier_magnitude,
+        min_stability_margin_db: sanitize_db(pstb_result.min_stability_margin_db),
+        num_unstable: pstb_result.num_unstable,
+        stability_classification: stability_type_label(pstb_result.stability).to_string(),
+        is_stable: pstb_result.is_stable(),
+    })
+}
+
+/// Run PSTB analysis with default configuration.
+pub fn run_pstb_analysis(netlist_text: &str) -> Result<PstbData, String> {
+    let cfg = PstbRunConfig::default();
+    run_pstb_analysis_with_config(netlist_text, &cfg)
 }
 
 // =============================================================================
@@ -4918,12 +5136,10 @@ mod tests {
         assert_eq!(result.input_sideband, 1);
         assert_eq!(result.output_sideband, 1);
         assert!(result.output_label.starts_with("V("));
-        assert!(
-            result
-                .transfer
-                .iter()
-                .all(|value| value.re.is_finite() && value.im.is_finite())
-        );
+        assert!(result
+            .transfer
+            .iter()
+            .all(|value| value.re.is_finite() && value.im.is_finite()));
         assert!(result.magnitude_db.iter().all(|value| value.is_finite()));
         assert!(result.phase_deg.iter().all(|value| value.is_finite()));
     }
@@ -5100,5 +5316,83 @@ mod tests {
             run_pnoise_analysis(netlist).expect("PNOISE auto mode should infer output node");
         assert!(!result.frequencies.is_empty());
         assert_eq!(result.output_noise.len(), result.frequencies.len());
+    }
+
+    #[test]
+    fn test_run_pstb_analysis_with_config_executes_for_driven_rc() {
+        let netlist = "* pstb\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        let cfg = PstbRunConfig {
+            pss_fundamental_freq: 1e6,
+            pss_num_harmonics: 8,
+            pss_tolerance: 1e-4,
+            probe_instance: "LPROBE".to_string(),
+            max_harmonics: 8,
+            num_multipliers: 4,
+            stability_threshold: 1.0 + 1e-6,
+            detect_subharmonics: true,
+            eigenvalue_tolerance: 1e-10,
+        };
+
+        let result = run_pstb_analysis_with_config(netlist, &cfg)
+            .expect("PSTB analysis should execute with explicit config");
+        assert!(result.period.is_finite() && result.period > 0.0);
+        assert!(result.fundamental_frequency.is_finite() && result.fundamental_frequency > 0.0);
+        assert_eq!(result.probe_instance, "LPROBE");
+        assert!(!result.mode_indices.is_empty());
+        assert_eq!(result.mode_indices.len(), result.multiplier_magnitude.len());
+        assert_eq!(result.mode_indices.len(), result.multiplier_phase_deg.len());
+        assert_eq!(result.mode_indices.len(), result.mode_damping.len());
+        assert_eq!(result.mode_indices.len(), result.mode_frequency_hz.len());
+        assert_eq!(result.mode_indices.len(), result.stability_margin_db.len());
+        assert!(result
+            .multiplier_magnitude
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0));
+        assert!(result
+            .multiplier_phase_deg
+            .iter()
+            .all(|value| value.is_finite()));
+        assert!(result.mode_damping.iter().all(|value| value.is_finite()));
+        assert!(result
+            .mode_frequency_hz
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0));
+        assert!(result
+            .stability_margin_db
+            .iter()
+            .all(|value| value.is_finite()));
+        assert!(result.dominant_multiplier_magnitude.is_finite());
+        assert!(result.min_stability_margin_db.is_finite());
+        assert!(result.stability_classification.len() >= 4);
+        assert_eq!(
+            result.num_unstable,
+            result
+                .multiplier_magnitude
+                .iter()
+                .filter(|value| **value > cfg.stability_threshold)
+                .count()
+        );
+    }
+
+    #[test]
+    fn test_run_pstb_analysis_with_config_rejects_invalid_multiplier_count() {
+        let netlist = "* pstb invalid\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        let cfg = PstbRunConfig {
+            num_multipliers: 0,
+            ..PstbRunConfig::default()
+        };
+
+        let err = run_pstb_analysis_with_config(netlist, &cfg)
+            .expect_err("PSTB should reject zero requested multipliers");
+        assert!(err.contains("multipliers"));
+    }
+
+    #[test]
+    fn test_run_pstb_analysis_default_executes() {
+        let netlist = "* pstb auto\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        let result = run_pstb_analysis(netlist).expect("PSTB default mode should execute");
+        assert!(!result.mode_indices.is_empty());
+        assert_eq!(result.mode_indices.len(), result.multiplier_magnitude.len());
+        assert!(result.stability_classification.len() >= 4);
     }
 }
