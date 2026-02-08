@@ -6,6 +6,238 @@
 use super::{Engine, SimulationError, extract_dc_value};
 use crate::netlist::{ElementKind, flatten_netlist};
 use crate::{CircuitData, Netlist};
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
+/// Embedded transistor model library used for fallback model resolution.
+const BUILTIN_TRANSISTOR_LIB: &str = include_str!("../../../../models/spice/transistor.lib");
+
+/// Lazily parsed builtin BJT model parameter map (MODEL_NAME -> params).
+fn builtin_bjt_model_map() -> &'static HashMap<String, HashMap<String, f64>> {
+    static BJT_MODELS: OnceLock<HashMap<String, HashMap<String, f64>>> = OnceLock::new();
+    BJT_MODELS.get_or_init(|| {
+        let mut map = HashMap::new();
+        let Ok(netlist) = crate::netlist::parse_netlist(BUILTIN_TRANSISTOR_LIB) else {
+            log::warn!("Failed to parse embedded transistor library for BJT fallback models");
+            return map;
+        };
+
+        for model in netlist.models {
+            if model.model_type.eq_ignore_ascii_case("NPN")
+                || model.model_type.eq_ignore_ascii_case("PNP")
+            {
+                map.insert(
+                    model.name.to_uppercase(),
+                    model.params.into_iter().collect(),
+                );
+            }
+        }
+        map
+    })
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct TransmissionLineModelParams {
+    z0: Option<f64>,
+    td: Option<f64>,
+    freq: Option<f64>,
+    nl: Option<f64>,
+    r: Option<f64>,
+    g: Option<f64>,
+    len: Option<f64>,
+    alpha: Option<f64>,
+    atten: Option<f64>,
+}
+
+fn model_param(params: &[(String, f64)], names: &[&str]) -> Option<f64> {
+    params.iter().find_map(|(name, value)| {
+        if names
+            .iter()
+            .any(|candidate| name.eq_ignore_ascii_case(candidate))
+        {
+            Some(*value)
+        } else {
+            None
+        }
+    })
+}
+
+fn resolve_tline_model_params(
+    netlist: &Netlist,
+    model_name: &str,
+) -> Option<TransmissionLineModelParams> {
+    let model = netlist
+        .models
+        .iter()
+        .find(|m| m.name.eq_ignore_ascii_case(model_name))?;
+
+    let mut params = TransmissionLineModelParams {
+        z0: model_param(&model.params, &["Z0", "ZO"]),
+        td: model_param(&model.params, &["TD", "TDELAY"]),
+        freq: model_param(&model.params, &["F", "FREQ"]),
+        nl: model_param(&model.params, &["NL"]),
+        r: model_param(&model.params, &["R", "R0"]),
+        g: model_param(&model.params, &["G", "G0"]),
+        len: model_param(&model.params, &["LEN", "LENGTH"]),
+        alpha: model_param(&model.params, &["ALPHA"]),
+        atten: model_param(&model.params, &["ATTEN", "ATTENDB", "LOSSDB"]),
+    };
+
+    let l = model_param(&model.params, &["L", "L0"]);
+    let c = model_param(&model.params, &["C", "C0"]);
+    let len = params.len;
+
+    if params.z0.is_none() {
+        if let (Some(l), Some(c)) = (l, c) {
+            if l > 0.0 && c > 0.0 {
+                params.z0 = Some((l / c).sqrt());
+            }
+        }
+    }
+
+    if params.td.is_none() {
+        if let (Some(f), Some(nl)) = (params.freq, params.nl) {
+            if f > 0.0 {
+                params.td = Some(nl / f);
+            }
+        }
+    }
+
+    if params.td.is_none() {
+        if let (Some(l), Some(c), Some(len)) = (l, c, len) {
+            if l > 0.0 && c > 0.0 && len > 0.0 {
+                params.td = Some(len * (l * c).sqrt());
+            }
+        }
+    }
+
+    Some(params)
+}
+
+fn tline_model_attenuation(params: TransmissionLineModelParams, z0: f64) -> Option<f64> {
+    let len = params.len.unwrap_or(1.0).max(0.0);
+
+    // Explicit alpha (Np/unit length) takes precedence.
+    if let Some(alpha) = params.alpha {
+        if alpha.is_finite() && alpha >= 0.0 {
+            return Some((-alpha * len).exp());
+        }
+    }
+
+    // ATTEN/ATTENDB: interpret <=1 as linear ratio, otherwise as dB.
+    if let Some(atten) = params.atten {
+        if atten.is_finite() && atten >= 0.0 {
+            if atten <= 1.0 {
+                return Some(atten);
+            }
+            let db_total = if params.len.is_some() {
+                atten * len
+            } else {
+                atten
+            };
+            return Some(10_f64.powf(-db_total / 20.0));
+        }
+    }
+
+    // Derive from primary RLGC line loss when available.
+    let r = params.r.unwrap_or(0.0).max(0.0);
+    let g = params.g.unwrap_or(0.0).max(0.0);
+    if (r > 0.0 || g > 0.0) && z0.is_finite() && z0 > 0.0 {
+        let alpha = r / (2.0 * z0) + g * z0 / 2.0;
+        if alpha.is_finite() && alpha >= 0.0 {
+            return Some((-alpha * len).exp());
+        }
+    }
+
+    None
+}
+
+fn resolve_bjt_type_from_model(model_type: &str) -> Option<crate::netlist::BjtType> {
+    if model_type.eq_ignore_ascii_case("NPN") {
+        Some(crate::netlist::BjtType::Npn)
+    } else if model_type.eq_ignore_ascii_case("PNP") {
+        Some(crate::netlist::BjtType::Pnp)
+    } else {
+        None
+    }
+}
+
+fn resolve_mos_type_from_model(model_type: &str) -> Option<crate::netlist::MosType> {
+    if model_type.eq_ignore_ascii_case("NMOS") {
+        Some(crate::netlist::MosType::Nmos)
+    } else if model_type.eq_ignore_ascii_case("PMOS") {
+        Some(crate::netlist::MosType::Pmos)
+    } else {
+        None
+    }
+}
+
+fn resolve_jfet_type_from_model(model_type: &str) -> Option<crate::netlist::JfetType> {
+    if model_type.eq_ignore_ascii_case("NJF") {
+        Some(crate::netlist::JfetType::Njf)
+    } else if model_type.eq_ignore_ascii_case("PJF") {
+        Some(crate::netlist::JfetType::Pjf)
+    } else {
+        None
+    }
+}
+
+fn resolve_mesfet_type_from_model(model_type: &str) -> Option<crate::netlist::MesfetType> {
+    if model_type.eq_ignore_ascii_case("NMF") {
+        Some(crate::netlist::MesfetType::Nmf)
+    } else if model_type.eq_ignore_ascii_case("PMF") {
+        Some(crate::netlist::MesfetType::Pmf)
+    } else {
+        None
+    }
+}
+
+fn find_model_def<'a>(
+    netlist: &'a Netlist,
+    model_name: &str,
+) -> Option<&'a crate::netlist::ModelDef> {
+    netlist
+        .models
+        .iter()
+        .find(|m| m.name.eq_ignore_ascii_case(model_name))
+}
+
+fn expected_model_type_text(expected_types: &[&str]) -> String {
+    match expected_types {
+        [] => String::new(),
+        [single] => (*single).to_string(),
+        [left, right] => format!("{left} or {right}"),
+        _ => expected_types.join(", "),
+    }
+}
+
+fn ensure_model_type(
+    element_kind: &str,
+    element_name: &str,
+    model_name: &str,
+    model_def: &crate::netlist::ModelDef,
+    expected_types: &[&str],
+) -> Result<(), SimulationError> {
+    if expected_types
+        .iter()
+        .any(|kind| model_def.model_type.eq_ignore_ascii_case(kind))
+    {
+        return Ok(());
+    }
+
+    let expected = expected_model_type_text(expected_types);
+    Err(SimulationError::Circuit(format!(
+        "{} '{}' references model '{}' with incompatible type '{}'; expected {}",
+        element_kind, element_name, model_name, model_def.model_type, expected
+    )))
+}
+
+fn map_switch_state(state: crate::netlist::SwitchState) -> crate::device::SwitchState {
+    match state {
+        crate::netlist::SwitchState::On => crate::device::SwitchState::On,
+        crate::netlist::SwitchState::Off => crate::device::SwitchState::Off,
+    }
+}
 
 impl Engine {
     /// Build circuit from netlist (flattens subcircuits first)
@@ -15,6 +247,17 @@ impl Engine {
         // Flatten subcircuit instances into top-level elements
         let flat_elements = flatten_netlist(netlist)
             .map_err(|e| SimulationError::Netlist(format!("Flattening error: {}", e)))?;
+
+        // Debug: log all elements
+        log::info!("Building circuit with {} elements:", flat_elements.len());
+        for element in &flat_elements {
+            log::info!(
+                "  Element: {} nodes={:?} kind={:?}",
+                element.name,
+                element.nodes,
+                element.kind
+            );
+        }
 
         for element in &flat_elements {
             match &element.kind {
@@ -105,17 +348,47 @@ impl Engine {
                         ac_phase,
                     );
                 }
-                ElementKind::Diode { model: _ } => {
+                ElementKind::Diode { model } => {
                     let anode = circuit.get_or_create_node(&element.nodes[0]);
                     let cathode = circuit.get_or_create_node(&element.nodes[1]);
-                    let diode = crate::device::Diode::new(element.name.clone(), anode, cathode);
+                    let mut diode = crate::device::Diode::new(element.name.clone(), anode, cathode);
+
+                    // Look up model and apply parameters
+                    let model_def = find_model_def(netlist, model);
+                    if let Some(device_model) = model_def {
+                        ensure_model_type(
+                            "Diode",
+                            &element.name,
+                            model,
+                            device_model,
+                            &["D", "DIODE"],
+                        )?;
+                        let params_map: std::collections::HashMap<String, f64> =
+                            device_model.params.iter().cloned().collect();
+                        diode = diode.with_model_params(&params_map);
+                    }
+
                     circuit.diodes.add(diode);
                 }
-                ElementKind::Bjt { model: _, bjt_type } => {
+                ElementKind::Bjt { model, bjt_type } => {
                     let collector = circuit.get_or_create_node(&element.nodes[0]);
                     let base = circuit.get_or_create_node(&element.nodes[1]);
                     let emitter = circuit.get_or_create_node(&element.nodes[2]);
-                    let bjt = match bjt_type {
+
+                    // Resolve polarity from model card when available.
+                    let model_def = find_model_def(netlist, model);
+                    let resolved_bjt_type = if let Some(device_model) = model_def {
+                        resolve_bjt_type_from_model(&device_model.model_type).ok_or_else(|| {
+                            SimulationError::Circuit(format!(
+                                "BJT '{}' references model '{}' with incompatible type '{}'; expected NPN or PNP",
+                                element.name, model, device_model.model_type
+                            ))
+                        })?
+                    } else {
+                        *bjt_type
+                    };
+
+                    let mut bjt = match resolved_bjt_type {
                         crate::netlist::BjtType::Npn => crate::device::Bjt::new_npn(
                             element.name.clone(),
                             collector,
@@ -129,6 +402,26 @@ impl Engine {
                             emitter,
                         ),
                     };
+
+                    // Look up model and apply parameters
+                    if let Some(device_model) = model_def {
+                        // Convert Vec<(String, f64)> to HashMap for with_params
+                        let params_map: std::collections::HashMap<String, f64> =
+                            device_model.params.iter().cloned().collect();
+                        bjt = bjt.with_params(&params_map);
+                    } else if let Some(params_map) =
+                        builtin_bjt_model_map().get(&model.to_uppercase())
+                    {
+                        // Fallback to embedded transistor library models when no
+                        // explicit .MODEL card is present in the parsed netlist.
+                        bjt = bjt.with_params(params_map);
+                        log::debug!(
+                            "Applied embedded BJT fallback model '{}' to {}",
+                            model,
+                            element.name
+                        );
+                    }
+
                     circuit.bjts.add(bjt);
                 }
                 ElementKind::Mosfet { model, mos_type } => {
@@ -136,7 +429,21 @@ impl Engine {
                     let gate = circuit.get_or_create_node(&element.nodes[1]);
                     let source = circuit.get_or_create_node(&element.nodes[2]);
                     let bulk = circuit.get_or_create_node(&element.nodes[3]);
-                    let mut mosfet = match mos_type {
+
+                    // Resolve NMOS/PMOS from model card when available.
+                    let model_def = find_model_def(netlist, model);
+                    let resolved_mos_type = if let Some(device_model) = model_def {
+                        resolve_mos_type_from_model(&device_model.model_type).ok_or_else(|| {
+                            SimulationError::Circuit(format!(
+                                "MOSFET '{}' references model '{}' with incompatible type '{}'; expected NMOS or PMOS",
+                                element.name, model, device_model.model_type
+                            ))
+                        })?
+                    } else {
+                        *mos_type
+                    };
+
+                    let mut mosfet = match resolved_mos_type {
                         crate::netlist::MosType::Nmos => crate::device::Mosfet::new_nmos(
                             element.name.clone(),
                             drain,
@@ -154,12 +461,7 @@ impl Engine {
                     };
 
                     // Look up model and apply parameters including LEVEL
-                    let model_upper = model.to_uppercase();
-                    if let Some(device_model) = netlist
-                        .models
-                        .iter()
-                        .find(|m| m.name.to_uppercase() == model_upper)
-                    {
+                    if let Some(device_model) = model_def {
                         // Convert Vec<(String, f64)> to HashMap for with_params
                         let params_map: std::collections::HashMap<String, f64> =
                             device_model.params.iter().cloned().collect();
@@ -174,14 +476,25 @@ impl Engine {
 
                     circuit.mosfets.add(mosfet);
                 }
-                ElementKind::Jfet {
-                    model: _,
-                    jfet_type,
-                } => {
+                ElementKind::Jfet { model, jfet_type } => {
                     let drain = circuit.get_or_create_node(&element.nodes[0]);
                     let gate = circuit.get_or_create_node(&element.nodes[1]);
                     let source = circuit.get_or_create_node(&element.nodes[2]);
-                    let jfet = match jfet_type {
+
+                    // Resolve NJF/PJF from model card when available.
+                    let model_def = find_model_def(netlist, model);
+                    let resolved_jfet_type = if let Some(device_model) = model_def {
+                        resolve_jfet_type_from_model(&device_model.model_type).ok_or_else(|| {
+                            SimulationError::Circuit(format!(
+                                "JFET '{}' references model '{}' with incompatible type '{}'; expected NJF or PJF",
+                                element.name, model, device_model.model_type
+                            ))
+                        })?
+                    } else {
+                        *jfet_type
+                    };
+
+                    let mut jfet = match resolved_jfet_type {
                         crate::netlist::JfetType::Njf => {
                             crate::device::Jfet::njf(&element.name, drain, gate, source)
                         }
@@ -189,18 +502,68 @@ impl Engine {
                             crate::device::Jfet::pjf(&element.name, drain, gate, source)
                         }
                     };
+
+                    // Look up model and apply parameters
+                    if let Some(device_model) = model_def {
+                        let params_map: std::collections::HashMap<String, f64> =
+                            device_model.params.iter().cloned().collect();
+                        jfet = jfet.with_model_params(&params_map);
+                    }
+
+                    // Realistic extrinsic JFET series resistances (RD/RS) are modeled by
+                    // inserting explicit linear resistors and connecting the intrinsic JFET
+                    // to generated internal drain/source nodes.
+                    let rd = if jfet.params.rd.is_finite() && jfet.params.rd > 0.0 {
+                        jfet.params.rd
+                    } else {
+                        0.0
+                    };
+                    let rs = if jfet.params.rs.is_finite() && jfet.params.rs > 0.0 {
+                        jfet.params.rs
+                    } else {
+                        0.0
+                    };
+
+                    if rd > 0.0 {
+                        let dint_name = format!("{}.__dint", element.name);
+                        let dint = circuit.get_or_create_node(&dint_name);
+                        let rd_name = format!("{}.__rd", element.name);
+                        circuit.resistors.add(rd_name, drain, dint, rd);
+                        jfet.drain = dint;
+                        jfet.params.rd = 0.0;
+                    }
+                    if rs > 0.0 {
+                        let sint_name = format!("{}.__sint", element.name);
+                        let sint = circuit.get_or_create_node(&sint_name);
+                        let rs_name = format!("{}.__rs", element.name);
+                        circuit.resistors.add(rs_name, source, sint, rs);
+                        jfet.source = sint;
+                        jfet.params.rs = 0.0;
+                    }
+
                     circuit.jfets.push(jfet);
                 }
                 // MESFET (GaAs FET) - treat as JFET for now since physics are similar
-                ElementKind::Mesfet {
-                    model: _,
-                    mesfet_type,
-                } => {
+                ElementKind::Mesfet { model, mesfet_type } => {
                     let drain = circuit.get_or_create_node(&element.nodes[0]);
                     let gate = circuit.get_or_create_node(&element.nodes[1]);
                     let source = circuit.get_or_create_node(&element.nodes[2]);
                     // MESFET uses similar equations to JFET - treat as N-channel JFET
-                    let jfet = match mesfet_type {
+
+                    // Resolve NMF/PMF from model card when available.
+                    let model_def = find_model_def(netlist, model);
+                    let resolved_mesfet_type = if let Some(device_model) = model_def {
+                        resolve_mesfet_type_from_model(&device_model.model_type).ok_or_else(|| {
+                            SimulationError::Circuit(format!(
+                                "MESFET '{}' references model '{}' with incompatible type '{}'; expected NMF or PMF",
+                                element.name, model, device_model.model_type
+                            ))
+                        })?
+                    } else {
+                        *mesfet_type
+                    };
+
+                    let mut jfet = match resolved_mesfet_type {
                         crate::netlist::MesfetType::Nmf => {
                             crate::device::Jfet::njf(&element.name, drain, gate, source)
                         }
@@ -208,6 +571,43 @@ impl Engine {
                             crate::device::Jfet::pjf(&element.name, drain, gate, source)
                         }
                     };
+
+                    // Look up model and apply parameters
+                    if let Some(device_model) = model_def {
+                        let params_map: std::collections::HashMap<String, f64> =
+                            device_model.params.iter().cloned().collect();
+                        jfet = jfet.with_model_params(&params_map);
+                    }
+
+                    // Apply the same RD/RS extrinsic-node expansion for MESFET aliases.
+                    let rd = if jfet.params.rd.is_finite() && jfet.params.rd > 0.0 {
+                        jfet.params.rd
+                    } else {
+                        0.0
+                    };
+                    let rs = if jfet.params.rs.is_finite() && jfet.params.rs > 0.0 {
+                        jfet.params.rs
+                    } else {
+                        0.0
+                    };
+
+                    if rd > 0.0 {
+                        let dint_name = format!("{}.__dint", element.name);
+                        let dint = circuit.get_or_create_node(&dint_name);
+                        let rd_name = format!("{}.__rd", element.name);
+                        circuit.resistors.add(rd_name, drain, dint, rd);
+                        jfet.drain = dint;
+                        jfet.params.rd = 0.0;
+                    }
+                    if rs > 0.0 {
+                        let sint_name = format!("{}.__sint", element.name);
+                        let sint = circuit.get_or_create_node(&sint_name);
+                        let rs_name = format!("{}.__rs", element.name);
+                        circuit.resistors.add(rs_name, source, sint, rs);
+                        jfet.source = sint;
+                        jfet.params.rs = 0.0;
+                    }
+
                     circuit.jfets.push(jfet);
                 }
                 // Controlled sources
@@ -297,64 +697,177 @@ impl Engine {
                 ElementKind::VSwitch {
                     control_pos,
                     control_neg,
-                    model: _,
-                    initial_state: _,
+                    model,
+                    initial_state,
                 } => {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
                     let cp = circuit.get_or_create_node(control_pos);
                     let cn = circuit.get_or_create_node(control_neg);
-                    // Create voltage-controlled switch
-                    let sw = crate::device::VoltageSwitch::new(
+
+                    let model_def = find_model_def(netlist, model).ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "Voltage-controlled switch '{}' references unknown model '{}'",
+                            element.name, model
+                        ))
+                    })?;
+                    ensure_model_type(
+                        "Voltage-controlled switch",
+                        &element.name,
+                        model,
+                        model_def,
+                        &["SW", "VSWITCH", "VSW"],
+                    )?;
+                    let params_map: std::collections::HashMap<String, f64> =
+                        model_def.params.iter().cloned().collect();
+
+                    let mut sw = crate::device::VoltageSwitch::new(
                         element.name.clone(),
                         np,
                         nn, // Switch terminals
                         cp,
                         cn, // Control terminals
-                    );
+                    )
+                    .with_params(&params_map);
+                    if let Some(state) = initial_state {
+                        sw = sw.with_initial_state(map_switch_state(*state));
+                    }
                     circuit.vswitches.push(sw);
                 }
                 ElementKind::ISwitch {
                     control_element,
-                    model: _,
-                    initial_state: _,
+                    model,
+                    initial_state,
                 } => {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
-                    // Create current-controlled switch
-                    let sw = crate::device::CurrentSwitch::new(
+
+                    let model_def = find_model_def(netlist, model).ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "Current-controlled switch '{}' references unknown model '{}'",
+                            element.name, model
+                        ))
+                    })?;
+                    ensure_model_type(
+                        "Current-controlled switch",
+                        &element.name,
+                        model,
+                        model_def,
+                        &["CSW", "ISWITCH", "ISW"],
+                    )?;
+                    let params_map: std::collections::HashMap<String, f64> =
+                        model_def.params.iter().cloned().collect();
+
+                    let mut sw = crate::device::CurrentSwitch::new(
                         element.name.clone(),
                         np,
                         nn,
                         control_element.clone(), // Control source name
-                    );
+                    )
+                    .with_params(&params_map);
+                    if let Some(state) = initial_state {
+                        sw = sw.with_initial_state(map_switch_state(*state));
+                    }
+                    let iswitch_idx = circuit.iswitches.len();
                     circuit.iswitches.push(sw);
+                    circuit.add_iswitch_pending(iswitch_idx, control_element.clone());
                 }
-                ElementKind::TransmissionLine { z0, td, freq, nl } => {
+                ElementKind::TransmissionLine {
+                    z0,
+                    td,
+                    freq,
+                    nl,
+                    model,
+                } => {
+                    if element.nodes.len() > 4 {
+                        return Err(SimulationError::Circuit(format!(
+                            "Transmission line '{}' has {} nodes; coupled/multiconductor P-lines are not yet supported",
+                            element.name,
+                            element.nodes.len()
+                        )));
+                    }
+                    if element.nodes.len() < 4 {
+                        return Err(SimulationError::Circuit(format!(
+                            "Transmission line '{}' requires 4 nodes",
+                            element.name
+                        )));
+                    }
+
                     let p1p = circuit.get_or_create_node(&element.nodes[0]);
                     let p1n = circuit.get_or_create_node(&element.nodes[1]);
                     let p2p = circuit.get_or_create_node(&element.nodes[2]);
                     let p2n = circuit.get_or_create_node(&element.nodes[3]);
 
-                    // Calculate delay from TD or F/NL
-                    let delay = if let Some(t) = td {
-                        *t
-                    } else if let (Some(f), Some(n)) = (freq, nl) {
-                        // TD = NL / F
-                        n / f
-                    } else {
-                        1e-9 // Default 1ns
-                    };
+                    if let (Some(model_name), Some(model_def)) = (
+                        model.as_deref(),
+                        model
+                            .as_deref()
+                            .and_then(|name| find_model_def(netlist, name)),
+                    ) {
+                        ensure_model_type(
+                            "Transmission line",
+                            &element.name,
+                            model_name,
+                            model_def,
+                            &["LTRA", "TXL"],
+                        )?;
+                    }
 
-                    let tline = crate::device::TransmissionLine::new(
+                    let model_params = model
+                        .as_deref()
+                        .and_then(|name| resolve_tline_model_params(netlist, name));
+
+                    if model.is_some() && model_params.is_none() && z0.is_none() {
+                        return Err(SimulationError::Circuit(format!(
+                            "Transmission line '{}' references unknown model '{}'",
+                            element.name,
+                            model.as_deref().unwrap_or_default()
+                        )));
+                    }
+
+                    let freq_eff = (*freq).or(model_params.and_then(|m| m.freq));
+                    let nl_eff = (*nl).or(model_params.and_then(|m| m.nl));
+
+                    let delay = (*td)
+                        .or_else(|| {
+                            if let (Some(f), Some(n)) = (freq_eff, nl_eff) {
+                                if f > 0.0 { Some(n / f) } else { None }
+                            } else {
+                                None
+                            }
+                        })
+                        .or(model_params.and_then(|m| m.td))
+                        .unwrap_or(1e-9);
+
+                    let z0_eff = (*z0).or(model_params.and_then(|m| m.z0)).unwrap_or(50.0);
+                    if z0_eff <= 0.0 || !z0_eff.is_finite() {
+                        return Err(SimulationError::Circuit(format!(
+                            "Transmission line '{}' has invalid Z0={}",
+                            element.name, z0_eff
+                        )));
+                    }
+                    if delay <= 0.0 || !delay.is_finite() {
+                        return Err(SimulationError::Circuit(format!(
+                            "Transmission line '{}' has invalid TD={}",
+                            element.name, delay
+                        )));
+                    }
+
+                    let mut tline = crate::device::TransmissionLine::new(
                         element.name.clone(),
                         p1p,
                         p1n,
                         p2p,
                         p2n,
-                        *z0,
+                        z0_eff,
                         delay,
                     );
+                    tline.freq = freq_eff;
+                    tline.nl = nl_eff;
+                    if let Some(att) = model_params.and_then(|p| tline_model_attenuation(p, z0_eff))
+                    {
+                        tline.set_attenuation(att);
+                    }
                     circuit.tlines.push(tline);
                 }
                 ElementKind::Coupling {
@@ -476,11 +989,6 @@ impl Engine {
             }
         }
 
-        // Resolve all pending CCCS/CCVS control element references
-        circuit
-            .resolve_control_elements()
-            .map_err(|e| SimulationError::Circuit(e.to_string()))?;
-
         // Load Verilog-A models from .VERILOGA includes
         #[cfg(feature = "veriloga")]
         {
@@ -511,6 +1019,12 @@ impl Engine {
         // Ensure ground reference exists
         // If no node "0" was specified, auto-select a reference node
         circuit.ensure_ground_reference();
+
+        // Resolve all pending control element references after final node count
+        // is established (required for current-controlled switch branch indexing).
+        circuit
+            .resolve_control_elements()
+            .map_err(|e| SimulationError::Circuit(e.to_string()))?;
 
         Ok(circuit)
     }

@@ -51,6 +51,9 @@ pub enum SimulationError {
 
     #[error("Convergence failed after {0} iterations")]
     ConvergenceFailed(usize),
+
+    #[error("Simulation aborted by user")]
+    Aborted,
 }
 
 /// Simulation configuration
@@ -212,9 +215,9 @@ impl BypassConfig {
 impl Default for SimulationConfig {
     fn default() -> Self {
         Self {
-            tolerance: 1e-9,
+            tolerance: 1e-6, // 1μV tolerance (was 1e-9, too tight)
             max_iterations: 50,
-            min_timestep: 1e-15,
+            min_timestep: 1e-12, // 1ps min timestep (was 1e-15, impractical)
             max_timestep: 1e-3,
             temperature: 300.0, // Room temperature
             integration_method: crate::analysis::IntegrationMethod::TrapGear,
