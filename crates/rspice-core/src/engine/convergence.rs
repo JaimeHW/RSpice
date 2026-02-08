@@ -85,6 +85,128 @@ impl Engine {
         )
     }
 
+    #[inline]
+    pub(crate) fn residual_convergence_met(
+        &self,
+        matrix: &StaticMatrix,
+        solution: &[Value],
+        rhs: &[Value],
+    ) -> bool {
+        match matrix.scaled_residual_inf_norm(
+            solution,
+            rhs,
+            self.device_convergence_tolerance(),
+            self.voltage_reltol(),
+        ) {
+            Ok(norm) => norm.is_finite() && norm <= 1.0,
+            Err(_) => false,
+        }
+    }
+
+    fn nonlinear_residual_converged_with_linear_stamp<F>(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+        mut linear_stamp: F,
+    ) -> bool
+    where
+        F: FnMut(&mut CircuitData, &mut StaticMatrix, &mut [Value]),
+    {
+        let size = circuit.matrix_size();
+        if solution.len() != size || solution.iter().any(|v| !v.is_finite()) {
+            return false;
+        }
+
+        let mut rhs = vec![0.0; size];
+        matrix.clear_values();
+        linear_stamp(circuit, matrix, &mut rhs);
+        circuit.update_nonlinear(solution);
+        circuit.stamp_nonlinear(matrix, &mut rhs, solution);
+        self.residual_convergence_met(matrix, solution, &rhs)
+    }
+
+    fn nonlinear_residual_converged(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+    ) -> bool {
+        self.nonlinear_residual_converged_with_linear_stamp(
+            circuit,
+            matrix,
+            solution,
+            |circuit, matrix, rhs| {
+                for i in 0..rhs.len() {
+                    matrix.add(i, i, 1e-12);
+                }
+                circuit.stamp_dc_direct(matrix, rhs);
+            },
+        )
+    }
+
+    fn nonlinear_residual_converged_scaled(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+        source_scale: Value,
+    ) -> bool {
+        self.nonlinear_residual_converged_with_linear_stamp(
+            circuit,
+            matrix,
+            solution,
+            |circuit, matrix, rhs| {
+                for i in 0..rhs.len() {
+                    matrix.add(i, i, 1e-12);
+                }
+                circuit.stamp_dc_direct_scaled(matrix, rhs, source_scale);
+            },
+        )
+    }
+
+    fn nonlinear_residual_converged_with_gmin(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+        gmin: Value,
+    ) -> bool {
+        self.nonlinear_residual_converged_with_linear_stamp(
+            circuit,
+            matrix,
+            solution,
+            |circuit, matrix, rhs| {
+                for i in 0..rhs.len() {
+                    matrix.add(i, i, gmin);
+                }
+                circuit.stamp_dc_direct(matrix, rhs);
+            },
+        )
+    }
+
+    fn nonlinear_residual_converged_with_pseudo_transient(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+        anchor_solution: &[Value],
+        pseudo_conductance: Value,
+    ) -> bool {
+        self.nonlinear_residual_converged_with_linear_stamp(
+            circuit,
+            matrix,
+            solution,
+            |circuit, matrix, rhs| {
+                for i in 0..rhs.len() {
+                    matrix.add(i, i, 1e-12 + pseudo_conductance);
+                    rhs[i] += pseudo_conductance * anchor_solution[i];
+                }
+                circuit.stamp_dc_direct(matrix, rhs);
+            },
+        )
+    }
+
     fn build_descending_schedule(mut start: Value, mut end: Value) -> Vec<Value> {
         if !start.is_finite() || start <= 0.0 {
             start = 1e-3;
@@ -418,10 +540,20 @@ impl Engine {
             Self::clamp_solution_to_physical_bounds(&mut new_solution);
 
             let voltage_converged = self.voltage_convergence_met(&solution, &new_solution);
+            let linearized_residual_converged =
+                self.residual_convergence_met(matrix, &new_solution, &rhs);
             circuit.update_nonlinear(&new_solution);
             solution = new_solution;
 
-            if voltage_converged && circuit.nonlinear_converged(self.device_convergence_tolerance())
+            if voltage_converged
+                && linearized_residual_converged
+                && circuit.nonlinear_converged(self.device_convergence_tolerance())
+                && self.nonlinear_residual_converged_scaled(
+                    circuit,
+                    matrix,
+                    &solution,
+                    source_scale,
+                )
             {
                 return (solution, true, used_iterations);
             }
@@ -487,12 +619,14 @@ impl Engine {
         circuit.stamp_dc_direct(matrix, &mut rhs);
         circuit.update_nonlinear(solution);
         circuit.stamp_nonlinear(matrix, &mut rhs, solution);
+        let residual_converged = self.residual_convergence_met(matrix, solution, &rhs);
 
         let Ok(next_solution) = matrix.solve(&rhs) else {
             return false;
         };
 
-        self.voltage_convergence_met(solution, &next_solution)
+        residual_converged
+            && self.voltage_convergence_met(solution, &next_solution)
             && circuit.nonlinear_converged(self.device_convergence_tolerance())
     }
 
@@ -883,11 +1017,17 @@ impl Engine {
             }
             // Check convergence (both voltage change and device convergence)
             let voltage_converged = self.voltage_convergence_met(&solution, &new_solution);
+            let linearized_residual_converged =
+                self.residual_convergence_met(matrix, &new_solution, &rhs);
             // Device convergence must be checked at the candidate iterate, not the prior iterate.
             circuit.update_nonlinear(&new_solution);
             let device_converged = circuit.nonlinear_converged(self.device_convergence_tolerance());
             solution = new_solution;
-            if voltage_converged && device_converged {
+            if voltage_converged
+                && linearized_residual_converged
+                && device_converged
+                && self.nonlinear_residual_converged(circuit, matrix, &solution)
+            {
                 if hit_voltage_limit {
                     log::info!(
                         "DC operating point converged after {} iterations (voltage limiting was triggered)",
@@ -1139,10 +1279,16 @@ impl Engine {
                         Self::clamp_solution_to_physical_bounds(&mut new_solution);
 
                         let converged = self.voltage_convergence_met(&solution, &new_solution);
+                        let linearized_residual_converged =
+                            self.residual_convergence_met(matrix, &new_solution, &rhs);
                         circuit.update_nonlinear(&new_solution);
                         solution = new_solution;
                         if converged
+                            && linearized_residual_converged
                             && circuit.nonlinear_converged(self.device_convergence_tolerance())
+                            && self.nonlinear_residual_converged_scaled(
+                                circuit, matrix, &solution, scale,
+                            )
                         {
                             break;
                         }
@@ -1223,10 +1369,22 @@ impl Engine {
                 Self::clamp_solution_to_physical_bounds(&mut new_solution);
 
                 let converged = self.voltage_convergence_met(&solution, &new_solution);
+                let linearized_residual_converged =
+                    self.residual_convergence_met(matrix, &new_solution, &rhs);
                 circuit.update_nonlinear(&new_solution);
                 solution = new_solution;
 
-                if converged && circuit.nonlinear_converged(self.device_convergence_tolerance()) {
+                if converged
+                    && linearized_residual_converged
+                    && circuit.nonlinear_converged(self.device_convergence_tolerance())
+                    && self.nonlinear_residual_converged_with_pseudo_transient(
+                        circuit,
+                        matrix,
+                        &solution,
+                        &anchor_solution,
+                        pseudo_conductance,
+                    )
+                {
                     stage_converged = true;
                     break;
                 }
@@ -1389,10 +1547,16 @@ impl Engine {
                         Self::clamp_solution_to_physical_bounds(&mut new_solution);
 
                         let converged = self.voltage_convergence_met(&solution, &new_solution);
+                        let linearized_residual_converged =
+                            self.residual_convergence_met(matrix, &new_solution, &rhs);
                         circuit.update_nonlinear(&new_solution);
                         solution = new_solution;
                         if converged
+                            && linearized_residual_converged
                             && circuit.nonlinear_converged(self.device_convergence_tolerance())
+                            && self.nonlinear_residual_converged_with_gmin(
+                                circuit, matrix, &solution, gmin,
+                            )
                         {
                             break;
                         }
@@ -1599,6 +1763,36 @@ mod tests {
         config.convergence_config.voltage_abstol = 7e-7;
         let engine = Engine::new(config);
         assert!((engine.device_convergence_tolerance() - 7e-7).abs() < 1e-18);
+    }
+
+    #[test]
+    fn test_residual_convergence_met_accepts_exact_solution() {
+        let engine = Engine::new(crate::engine::SimulationConfig::default());
+        let triplets = vec![(0, 0, 2.0), (0, 1, 1.0), (1, 0, 1.0), (1, 1, 3.0)];
+        let matrix = StaticMatrix::from_triplets(2, 2, &triplets).unwrap();
+        let rhs = vec![5.0, 7.0];
+        let solution = vec![1.6, 1.8];
+        assert!(engine.residual_convergence_met(&matrix, &solution, &rhs));
+    }
+
+    #[test]
+    fn test_residual_convergence_met_rejects_large_equation_residual() {
+        let engine = Engine::new(crate::engine::SimulationConfig::default());
+        let triplets = vec![(0, 0, 2.0), (0, 1, 1.0), (1, 0, 1.0), (1, 1, 3.0)];
+        let matrix = StaticMatrix::from_triplets(2, 2, &triplets).unwrap();
+        let rhs = vec![5.0, 7.0];
+        let solution = vec![1.2, 2.4];
+        assert!(!engine.residual_convergence_met(&matrix, &solution, &rhs));
+    }
+
+    #[test]
+    fn test_residual_convergence_met_rejects_non_finite_solution() {
+        let engine = Engine::new(crate::engine::SimulationConfig::default());
+        let triplets = vec![(0, 0, 1.0)];
+        let matrix = StaticMatrix::from_triplets(1, 1, &triplets).unwrap();
+        let rhs = vec![0.0];
+        let solution = vec![f64::NAN];
+        assert!(!engine.residual_convergence_met(&matrix, &solution, &rhs));
     }
 
     /// Test that configured GMIN schedule is in decreasing order.
