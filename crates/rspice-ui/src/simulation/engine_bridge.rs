@@ -23,8 +23,9 @@ use super::config::AnalysisConfig;
 use super::results::{DcOpResult, SimulationResult, WaveformData};
 use super::runner::SimulationError;
 use crate::output_spec::{
-    dc_output_value, parse_output_spec, run_ac_output_at_frequency, run_dc_output_sensitivity,
-    OutputSpec,
+    collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
+    normalized_sensitivity, parse_output_spec, run_ac_output_at_frequency,
+    run_dc_output_sensitivity, OutputSpec,
 };
 
 //=============================================================================
@@ -708,8 +709,7 @@ impl EngineBridge {
             dc_output_value(&dc_result, &output_spec).map_err(SimulationError::InvalidConfig)?
         };
 
-        let mut parameters: Vec<(String, f64)> = self.extract_parameters(netlist).into_iter().collect();
-        parameters.sort_by(|a, b| a.0.cmp(&b.0));
+        let parameters = collect_sensitivity_parameters(netlist);
 
         if parameters.is_empty() {
             // No parameters found - return empty result
@@ -719,8 +719,6 @@ impl EngineBridge {
             });
         }
 
-        // Perturbation factor for finite differences (1% relative change)
-        let perturbation = 0.01;
         let mut sensitivities: HashMap<String, f64> = HashMap::new();
         let mut normalized: HashMap<String, f64> = HashMap::new();
 
@@ -730,26 +728,15 @@ impl EngineBridge {
                 continue; // Skip zero-valued parameters
             }
 
-            let delta = (param_value.abs() * perturbation).max(1e-12);
             let sensitivity = if let Some(freq) = ac_frequency {
-                let up = self.run_perturbed_ac_output(
-                    netlist,
-                    &output_spec,
-                    &param_name,
-                    param_value + delta,
-                    freq,
-                );
-                let down = self.run_perturbed_ac_output(
-                    netlist,
-                    &output_spec,
-                    &param_name,
-                    param_value - delta,
-                    freq,
-                );
-                if let (Some(v_up), Some(v_down)) = (up, down) {
-                    (v_up - v_down) / (2.0 * delta)
-                } else {
-                    continue;
+                let mut perturbed = netlist.clone();
+                match finite_difference_derivative(param_value, |candidate| {
+                    perturbed.params.set(&param_name, candidate);
+                    run_ac_output_at_frequency(&engine, &perturbed, &output_spec, freq)
+                        .map(|value| value.norm())
+                }) {
+                    Ok(raw) => raw,
+                    Err(_) => continue,
                 }
             } else {
                 match &output_spec {
@@ -761,22 +748,14 @@ impl EngineBridge {
                         }
                     }
                     OutputSpec::BranchCurrent { .. } => {
-                        let up = self.run_perturbed_dc_output(
-                            netlist,
-                            &output_spec,
-                            &param_name,
-                            param_value + delta,
-                        );
-                        let down = self.run_perturbed_dc_output(
-                            netlist,
-                            &output_spec,
-                            &param_name,
-                            param_value - delta,
-                        );
-                        if let (Some(v_up), Some(v_down)) = (up, down) {
-                            (v_up - v_down) / (2.0 * delta)
-                        } else {
-                            continue;
+                        let mut perturbed = netlist.clone();
+                        match finite_difference_derivative(param_value, |candidate| {
+                            perturbed.params.set(&param_name, candidate);
+                            let dc_result = engine.run_dc_op(&perturbed).map_err(|e| e.to_string())?;
+                            dc_output_value(&dc_result, &output_spec)
+                        }) {
+                            Ok(raw) => raw,
+                            Err(_) => continue,
                         }
                     }
                 }
@@ -784,12 +763,7 @@ impl EngineBridge {
 
             sensitivities.insert(param_name.clone(), sensitivity);
 
-            // Compute normalized sensitivity: (dV/V) / (dP/P) = (P/V) * dV/dP
-            let norm_sens = if nominal_value.abs() > 1e-15 {
-                (param_value / nominal_value) * sensitivity
-            } else {
-                0.0
-            };
+            let norm_sens = normalized_sensitivity(sensitivity, param_value, nominal_value);
             normalized.insert(param_name.clone(), norm_sens);
         }
 
@@ -797,57 +771,6 @@ impl EngineBridge {
             sensitivities,
             normalized,
         })
-    }
-
-    /// Extract global `.param` values for sensitivity analysis.
-    fn extract_parameters(&self, netlist: &rspice_core::Netlist) -> HashMap<String, f64> {
-        let mut params = HashMap::new();
-        for (name, value) in netlist.params.all_params() {
-            if !value.is_finite() {
-                continue;
-            }
-            // Internal parser side-channel values are not design parameters.
-            if name.starts_with("IC_") || name.starts_with("NODESET_") {
-                continue;
-            }
-            params.insert(name, value);
-        }
-        params
-    }
-
-    fn run_perturbed_dc_output(
-        &self,
-        netlist: &rspice_core::Netlist,
-        output_spec: &OutputSpec,
-        param_name: &str,
-        new_value: f64,
-    ) -> Option<f64> {
-        if !new_value.is_finite() {
-            return None;
-        }
-        let mut perturbed = netlist.clone();
-        perturbed.params.set(param_name, new_value);
-        let engine = self.engine_for_netlist(&perturbed);
-        let dc_result = engine.run_dc_op(&perturbed).ok()?;
-        dc_output_value(&dc_result, output_spec).ok()
-    }
-
-    fn run_perturbed_ac_output(
-        &self,
-        netlist: &rspice_core::Netlist,
-        output_spec: &OutputSpec,
-        param_name: &str,
-        new_value: f64,
-        frequency: f64,
-    ) -> Option<f64> {
-        if !new_value.is_finite() || frequency <= 0.0 {
-            return None;
-        }
-        let mut perturbed = netlist.clone();
-        perturbed.params.set(param_name, new_value);
-        let engine = self.engine_for_netlist(&perturbed);
-        let value = run_ac_output_at_frequency(&engine, &perturbed, output_spec, frequency).ok()?;
-        Some(value.norm())
     }
 
     //-------------------------------------------------------------------------
