@@ -259,6 +259,28 @@ impl PyConvergenceConfig {
         self.inner.gmin_target = value;
     }
 
+    /// Relative voltage tolerance for Newton convergence checks.
+    #[getter]
+    fn get_voltage_reltol(&self) -> f64 {
+        self.inner.voltage_reltol
+    }
+
+    #[setter]
+    fn set_voltage_reltol(&mut self, value: f64) {
+        self.inner.voltage_reltol = value;
+    }
+
+    /// Absolute voltage tolerance for Newton convergence checks.
+    #[getter]
+    fn get_voltage_abstol(&self) -> f64 {
+        self.inner.voltage_abstol
+    }
+
+    #[setter]
+    fn set_voltage_abstol(&mut self, value: f64) {
+        self.inner.voltage_abstol = value;
+    }
+
     /// Enable verbose convergence logging
     #[getter]
     fn get_verbose(&self) -> bool {
@@ -272,12 +294,14 @@ impl PyConvergenceConfig {
 
     fn __repr__(&self) -> String {
         format!(
-            "ConvergenceConfig(gmin_stepping={}, source_stepping={}, pseudo_transient={}, arc_length={}, damping={:?})",
+            "ConvergenceConfig(gmin_stepping={}, source_stepping={}, pseudo_transient={}, arc_length={}, damping={:?}, voltage_reltol={:.0e}, voltage_abstol={:.0e})",
             self.inner.gmin_stepping,
             self.inner.source_stepping,
             self.inner.pseudo_transient,
             self.inner.arc_length,
-            self.inner.damping_strategy
+            self.inner.damping_strategy,
+            self.inner.voltage_reltol,
+            self.inner.voltage_abstol
         )
     }
 }
@@ -452,6 +476,8 @@ mod tests {
             config.inner.damping_strategy,
             DampingStrategy::VoltageLimiting
         );
+        assert!(config.inner.voltage_reltol > 0.0);
+        assert_eq!(config.inner.voltage_abstol, 0.0);
     }
 
     #[test]
@@ -617,6 +643,12 @@ mod tests {
 
         config.set_gmin_target(1e-16);
         assert!((config.get_gmin_target() - 1e-16).abs() < 1e-19);
+
+        config.set_voltage_reltol(2e-3);
+        assert!((config.get_voltage_reltol() - 2e-3).abs() < 1e-15);
+
+        config.set_voltage_abstol(5e-7);
+        assert!((config.get_voltage_abstol() - 5e-7).abs() < 1e-18);
 
         config.set_verbose(true);
         assert!(config.get_verbose());
