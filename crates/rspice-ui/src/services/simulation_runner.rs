@@ -232,6 +232,37 @@ pub fn run_simulation_with_options(
     }
 }
 
+/// Run transient analysis with explicit parameters.
+///
+/// Unlike `run_simulation`, this path does not depend on `.tran` directives
+/// embedded in the netlist text.
+pub fn run_transient_analysis(
+    netlist_text: &str,
+    stop_time: Value,
+    step_time: Value,
+) -> Result<TransientData, String> {
+    if stop_time <= 0.0 {
+        return Err("Transient stop_time must be > 0".to_string());
+    }
+    if step_time <= 0.0 {
+        return Err("Transient step_time must be > 0".to_string());
+    }
+    if step_time > stop_time {
+        return Err("Transient step_time must be <= stop_time".to_string());
+    }
+
+    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
+        .map_err(|e| format!("Parse error: {}", e))?;
+
+    let engine = Engine::new(SimulationConfig::default());
+    let result = engine
+        .run_tran(&netlist, stop_time, step_time)
+        .map_err(|e| format!("Transient analysis error: {}", e))?;
+
+    let node_names = result.node_names.clone();
+    Ok(TransientData::from_result(result, &node_names))
+}
+
 // =============================================================================
 // AC Analysis
 // =============================================================================
@@ -276,10 +307,13 @@ impl AcData {
                 if name == "0" || name.eq_ignore_ascii_case("gnd") {
                     continue;
                 }
+                // AcResult voltages are node-indexed without ground, so map
+                // node_names index (with ground at 0) to AC vector index.
+                let ac_idx = idx.saturating_sub(1);
                 // Collect voltage at this node across all frequencies
                 let values: Vec<Complex64> = results
                     .iter()
-                    .filter_map(|r| r.voltages.get(idx).copied())
+                    .filter_map(|r| r.voltages.get(ac_idx).copied())
                     .collect();
                 if !values.is_empty() {
                     responses.push((format!("V({})", name), values));
@@ -496,6 +530,250 @@ pub fn run_noise_analysis(
 }
 
 // =============================================================================
+// Pole-Zero Analysis
+// =============================================================================
+
+/// Pole-zero analysis data
+#[derive(Debug, Clone)]
+pub struct PoleZeroData {
+    /// Poles in the s-plane (real, imag)
+    pub poles: Vec<(Value, Value)>,
+    /// Zeros in the s-plane (real, imag)
+    pub zeros: Vec<(Value, Value)>,
+    /// DC transfer gain
+    pub gain: Value,
+}
+
+/// Run pole-zero analysis.
+pub fn run_pole_zero_analysis(
+    netlist_text: &str,
+    input_node: &str,
+    input_ref: &str,
+    output_node: &str,
+    output_ref: &str,
+    transfer_type: &str,
+    analysis_type: &str,
+) -> Result<PoleZeroData, String> {
+    let input_node = input_node.trim();
+    let output_node = output_node.trim();
+    if input_node.is_empty() {
+        return Err("Pole-zero input_node is required".to_string());
+    }
+    if output_node.is_empty() {
+        return Err("Pole-zero output_node is required".to_string());
+    }
+
+    let transfer_type = transfer_type.trim().to_ascii_uppercase();
+    if transfer_type != "VOL" && transfer_type != "CUR" {
+        return Err("Pole-zero transfer_type must be VOL or CUR".to_string());
+    }
+
+    let analysis_type = analysis_type.trim().to_ascii_uppercase();
+    if analysis_type != "PZ" && analysis_type != "POL" && analysis_type != "ZER" {
+        return Err("Pole-zero analysis_type must be PZ, POL, or ZER".to_string());
+    }
+
+    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
+        .map_err(|e| format!("Parse error: {}", e))?;
+    let engine = Engine::new(SimulationConfig::default());
+
+    let dc_result = engine
+        .run_dc_op(&netlist)
+        .map_err(|e| format!("DC OP error (required for pole-zero): {}", e))?;
+
+    let input_idx = resolve_node_or_ground_index(input_node, &dc_result.node_names)
+        .ok_or_else(|| format!("Pole-zero input node '{}' not found", input_node))?;
+    let input_ref_idx = resolve_node_or_ground_index(input_ref, &dc_result.node_names)
+        .ok_or_else(|| format!("Pole-zero input reference '{}' not found", input_ref))?;
+    let output_idx = resolve_node_or_ground_index(output_node, &dc_result.node_names)
+        .ok_or_else(|| format!("Pole-zero output node '{}' not found", output_node))?;
+    let output_ref_idx = resolve_node_or_ground_index(output_ref, &dc_result.node_names)
+        .ok_or_else(|| format!("Pole-zero output reference '{}' not found", output_ref))?;
+
+    if input_idx == input_ref_idx {
+        return Err("Pole-zero input_node and input_ref cannot be the same node".to_string());
+    }
+    if output_idx == output_ref_idx {
+        return Err("Pole-zero output_node and output_ref cannot be the same node".to_string());
+    }
+
+    let (input_pos, input_neg, input_sign) = canonicalize_pz_port(input_idx, input_ref_idx)
+        .map_err(|e| format!("Invalid pole-zero input port: {}", e))?;
+    let (output_pos, output_neg, output_sign) = canonicalize_pz_port(output_idx, output_ref_idx)
+        .map_err(|e| format!("Invalid pole-zero output port: {}", e))?;
+
+    let input_is_current = transfer_type == "CUR";
+    let (compute_poles, compute_zeros) = match analysis_type.as_str() {
+        "POL" => (true, false),
+        "ZER" => (false, true),
+        _ => (true, true),
+    };
+
+    let pz_result = engine
+        .run_pz_ports(
+            &netlist,
+            input_pos,
+            input_neg,
+            output_pos,
+            output_neg,
+            input_is_current,
+            compute_poles,
+            compute_zeros,
+        )
+        .map_err(|e| {
+            format!(
+                "Pole-zero analysis error (input={:?}->{:?}, output={:?}->{:?}): {}",
+                input_idx, input_ref_idx, output_idx, output_ref_idx, e
+            )
+        })?;
+
+    let mut poles: Vec<(Value, Value)> = pz_result.poles.iter().map(|p| (p.re, p.im)).collect();
+    let mut zeros: Vec<(Value, Value)> = pz_result.zeros.iter().map(|z| (z.re, z.im)).collect();
+
+    match analysis_type.as_str() {
+        "POL" => zeros.clear(),
+        "ZER" => poles.clear(),
+        _ => {}
+    }
+
+    Ok(PoleZeroData {
+        poles,
+        zeros,
+        gain: input_sign * output_sign * pz_result.dc_gain,
+    })
+}
+
+// =============================================================================
+// Sensitivity Analysis
+// =============================================================================
+
+/// Sensitivity analysis data
+#[derive(Debug, Clone)]
+pub struct SensitivityData {
+    /// Output variable that sensitivities are computed for
+    pub output_var: String,
+    /// (parameter_name, raw_sensitivity, normalized_sensitivity)
+    pub sensitivities: Vec<(String, Value, Value)>,
+}
+
+/// Run sensitivity analysis against all global netlist parameters.
+pub fn run_sensitivity_analysis(
+    netlist_text: &str,
+    output_var: &str,
+    ac_mode: bool,
+    frequency: Option<Value>,
+) -> Result<SensitivityData, String> {
+    let output_var = output_var.trim();
+    if output_var.is_empty() {
+        return Err("Sensitivity output_var is required".to_string());
+    }
+    let ac_frequency = if ac_mode {
+        let freq = frequency.unwrap_or(1.0);
+        if freq <= 0.0 {
+            return Err("Sensitivity AC frequency must be > 0".to_string());
+        }
+        Some(freq)
+    } else if frequency.is_some() {
+        return Err("Sensitivity frequency is only valid when AC mode is enabled".to_string());
+    } else {
+        None
+    };
+
+    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
+        .map_err(|e| format!("Parse error: {}", e))?;
+    let engine = Engine::new(SimulationConfig::default());
+
+    let circuit = engine.build_circuit(&netlist).map_err(|e| {
+        format!(
+            "Circuit build error (required for sensitivity output resolution): {}",
+            e
+        )
+    })?;
+    let dc_result = engine
+        .run_dc_op(&netlist)
+        .map_err(|e| format!("DC OP error (required for sensitivity): {}", e))?;
+
+    let output_spec =
+        parse_output_spec(output_var, &dc_result.node_names, &circuit).ok_or_else(|| {
+            format!(
+                "Sensitivity output '{}' could not be resolved to a node or branch",
+                output_var
+            )
+        })?;
+    if let OutputSpec::Voltage(vspec) = output_spec {
+        if vspec.pos == 0 && vspec.neg.is_none() {
+            return Err("Sensitivity output node cannot be ground".to_string());
+        }
+    }
+
+    let nominal_output = if let Some(freq) = ac_frequency {
+        run_ac_output_at_frequency(&engine, &netlist, &output_spec, freq)
+            .map(|value| value.norm())?
+    } else {
+        dc_output_value(&dc_result, &output_spec)?
+    };
+
+    let mut params = netlist.params.all_params();
+    params.sort_by(|a, b| a.0.cmp(&b.0));
+
+    if params.is_empty() {
+        return Ok(SensitivityData {
+            output_var: output_var.to_string(),
+            sensitivities: Vec::new(),
+        });
+    }
+
+    let mut sensitivities = Vec::new();
+    for (name, value) in params {
+        if !value.is_finite() || value == 0.0 {
+            continue;
+        }
+
+        let raw = if let Some(freq) = ac_frequency {
+            run_ac_output_sensitivity_finite_difference(
+                &engine,
+                &netlist,
+                &output_spec,
+                &name,
+                value,
+                freq,
+            )
+            .map_err(|e| format!("Sensitivity error for parameter '{}': {}", name, e))?
+        } else if let OutputSpec::Voltage(vspec) = output_spec {
+            run_dc_output_sensitivity(&engine, &netlist, vspec, &name, value)
+                .map_err(|e| format!("Sensitivity error for parameter '{}': {}", name, e))?
+        } else {
+            run_dc_output_sensitivity_finite_difference(
+                &engine,
+                &netlist,
+                &output_spec,
+                &name,
+                value,
+            )
+            .map_err(|e| format!("Sensitivity error for parameter '{}': {}", name, e))?
+        };
+
+        let normalized = if nominal_output.abs() > 1e-18 {
+            (value / nominal_output) * raw
+        } else {
+            0.0
+        };
+        sensitivities.push((name, raw, normalized));
+    }
+
+    sensitivities.sort_by(|a, b| {
+        b.2.abs()
+            .partial_cmp(&a.2.abs())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    Ok(SensitivityData {
+        output_var: output_var.to_string(),
+        sensitivities,
+    })
+}
+
+// =============================================================================
 // PSS (Periodic Steady State) Analysis
 // =============================================================================
 
@@ -521,81 +799,128 @@ pub struct PssData {
 /// Run PSS analysis
 ///
 /// Finds the periodic steady-state solution of a circuit with autonomous
-/// or driven oscillations. Uses shooting method or harmonic balance.
+/// or driven oscillations. Uses the shooting method with Newton iteration.
 pub fn run_pss_analysis(
     netlist_text: &str,
     fundamental_freq: Value,
     num_harmonics: usize,
-    _tolerance: Value,
+    tolerance: Value,
 ) -> Result<PssData, String> {
+    use rspice_core::analysis::PssConfig;
+
     // Parse the netlist
     let netlist = rspice_core::netlist::parse_netlist(netlist_text)
         .map_err(|e| format!("Parse error: {}", e))?;
 
-    let engine = Engine::new(SimulationConfig::default());
+    // Create engine with appropriate tolerance
+    let mut sim_config = SimulationConfig::default();
+    sim_config.tolerance = tolerance;
+    let engine = Engine::new(sim_config);
 
-    // Run DC OP to get initial conditions and node names
-    let dc_result = engine
-        .run_dc_op(&netlist)
-        .map_err(|e| format!("DC OP error: {}", e))?;
+    // Build PSS configuration
+    let pss_config = PssConfig::new(fundamental_freq)
+        .with_harmonics(num_harmonics)
+        .with_tolerance(tolerance)
+        .with_max_iterations(50)
+        .with_tstab_periods(10);
 
-    let period = 1.0 / fundamental_freq;
-    let num_points = 64; // Points per period
+    // Run actual PSS analysis
+    let pss_result = engine
+        .run_pss(&netlist, pss_config)
+        .map_err(|e| format!("PSS error: {}", e))?;
 
-    // Generate time points for one period
-    let time: Vec<Value> = (0..num_points)
-        .map(|i| period * (i as f64) / (num_points as f64))
-        .collect();
+    // Extract results from engine output
+    let period = pss_result.period;
+    let frequency = 1.0 / period;
 
-    // Create placeholder waveforms (sinusoidal approximation from DC)
-    let mut waveforms = Vec::new();
-    let mut harmonics = Vec::new();
+    // Get time points from the result (PssAnalysisResult wraps PssResult)
+    let time = pss_result.result.time.clone();
 
-    for (idx, name) in dc_result.node_names.iter().enumerate() {
+    // Build waveforms from PSS result
+    let mut waveforms: Vec<(String, Vec<Value>)> = Vec::new();
+    let node_names = &pss_result.result.node_names;
+
+    for (i, waveform) in pss_result.result.waveforms.iter().enumerate() {
+        let name = node_names
+            .get(i)
+            .cloned()
+            .unwrap_or_else(|| format!("n{}", i + 1));
+
         if name == "0" || name.eq_ignore_ascii_case("gnd") {
             continue;
         }
 
-        let dc_value = dc_result.node_voltages.get(idx).copied().unwrap_or(0.0);
+        // Extract per-period values from the PeriodicWaveform (values is a pub field)
+        let values: Vec<Value> = waveform.values.clone();
+        waveforms.push((format!("V({})", name), values));
+    }
 
-        // Generate placeholder sinusoidal waveform
-        let waveform: Vec<Value> = time
-            .iter()
-            .map(|t| {
-                dc_value
-                    + 0.1
-                        * dc_value.abs().max(0.1)
-                        * (2.0 * std::f64::consts::PI * fundamental_freq * t).sin()
-            })
-            .collect();
-        waveforms.push((format!("V({})", name), waveform));
+    // Extract harmonic content via FFT from the waveforms
+    let mut harmonics: Vec<(String, Vec<(Value, Value, Value)>)> = Vec::new();
+    for (name, waveform_values) in &waveforms {
+        let mut node_harmonics: Vec<(Value, Value, Value)> = Vec::new();
 
-        // Generate placeholder harmonic content
-        let mut node_harmonics = Vec::new();
-        for h in 0..=num_harmonics {
-            let freq = fundamental_freq * (h as f64);
-            let mag = if h == 0 {
-                dc_value
-            } else if h == 1 {
-                0.1 * dc_value.abs().max(0.1)
-            } else {
-                0.0
-            };
-            let phase = 0.0;
-            node_harmonics.push((freq, mag, phase));
+        if !waveform_values.is_empty() {
+            // Compute FFT to get harmonic content
+            let fft_result = compute_fft_harmonics(waveform_values, frequency, num_harmonics);
+            node_harmonics = fft_result;
         }
-        harmonics.push((format!("V({})", name), node_harmonics));
+
+        harmonics.push((name.clone(), node_harmonics));
     }
 
     Ok(PssData {
         period,
-        frequency: fundamental_freq,
+        frequency,
         time,
         waveforms,
         harmonics,
-        converged: true,
+        converged: true, // Engine would have errored if not converged
         settling_cycles: 10,
     })
+}
+
+/// Compute FFT harmonics from time-domain waveform
+fn compute_fft_harmonics(
+    waveform: &[Value],
+    fundamental_freq: Value,
+    num_harmonics: usize,
+) -> Vec<(Value, Value, Value)> {
+    use std::f64::consts::PI;
+
+    let n = waveform.len();
+    if n == 0 {
+        return vec![];
+    }
+
+    let mut harmonics = Vec::with_capacity(num_harmonics + 1);
+
+    // DC component (harmonic 0)
+    let dc = waveform.iter().sum::<Value>() / n as Value;
+    harmonics.push((0.0, dc, 0.0));
+
+    // Compute harmonics using DFT
+    for h in 1..=num_harmonics {
+        let freq = fundamental_freq * h as Value;
+        let mut real = 0.0;
+        let mut imag = 0.0;
+
+        for (i, &sample) in waveform.iter().enumerate() {
+            let phase = 2.0 * PI * h as Value * i as Value / n as Value;
+            real += sample * phase.cos();
+            imag -= sample * phase.sin();
+        }
+
+        real *= 2.0 / n as Value;
+        imag *= 2.0 / n as Value;
+
+        let magnitude = (real * real + imag * imag).sqrt();
+        let phase_deg = imag.atan2(real).to_degrees();
+
+        harmonics.push((freq, magnitude, phase_deg));
+    }
+
+    harmonics
 }
 
 // =============================================================================
@@ -628,18 +953,26 @@ pub fn run_hb_analysis(
     tone1_freq: Value,
     tone1_harmonics: usize,
     tone2_freq: Option<Value>,
-    tone2_harmonics: usize,
+    _tone2_harmonics: usize,
 ) -> Result<HbData, String> {
+    use rspice_core::analysis::HbConfig;
+
     // Parse the netlist
     let netlist = rspice_core::netlist::parse_netlist(netlist_text)
         .map_err(|e| format!("Parse error: {}", e))?;
 
     let engine = Engine::new(SimulationConfig::default());
 
-    // Run DC OP
-    let dc_result = engine
-        .run_dc_op(&netlist)
-        .map_err(|e| format!("DC OP error: {}", e))?;
+    // Build HB configuration
+    // Note: Multi-tone HB requires additional configuration - for now we focus on single tone
+    let hb_config = HbConfig::new(tone1_freq)
+        .with_harmonics(tone1_harmonics)
+        .with_tolerance(1e-6);
+
+    // Run actual HB analysis
+    let hb_result = engine
+        .run_hb(&netlist, hb_config)
+        .map_err(|e| format!("HB error: {}", e))?;
 
     // Build fundamentals list
     let mut fundamentals = vec![tone1_freq];
@@ -647,56 +980,39 @@ pub fn run_hb_analysis(
 
     if let Some(f2) = tone2_freq {
         fundamentals.push(f2);
-        harmonics_per_tone.push(tone2_harmonics);
+        harmonics_per_tone.push(_tone2_harmonics);
     }
 
-    // Calculate number of frequency components
-    let num_components = if tone2_freq.is_some() {
-        (tone1_harmonics + 1) * (tone2_harmonics + 1)
-    } else {
-        tone1_harmonics + 1
-    };
-
-    // Build DC voltages
-    let dc_voltages: Vec<(String, Value)> = dc_result
-        .node_names
+    // Extract DC operating point from spectral data
+    let dc_voltages: Vec<(String, Value)> = hb_result
+        .result
+        .spectral_voltages
         .iter()
-        .enumerate()
-        .filter(|(_, n)| *n != "0" && !n.eq_ignore_ascii_case("gnd"))
-        .map(|(i, n)| {
-            (
-                n.clone(),
-                dc_result.node_voltages.get(i).copied().unwrap_or(0.0),
-            )
+        .map(|sv| {
+            // DC is the zeroth harmonic (real part only for DC)
+            let dc_val = sv.coefficients.first().map(|c| c.re).unwrap_or(0.0);
+            (sv.node_name.clone(), dc_val)
         })
         .collect();
 
-    // Generate placeholder spectra
+    // Build spectra from HB result's spectral voltages
     let mut spectra = Vec::new();
-    for (name, dc_val) in &dc_voltages {
+    for sv in &hb_result.result.spectral_voltages {
         let mut spectrum = Vec::new();
 
-        // DC component
-        spectrum.push((0.0, *dc_val, 0.0));
-
-        // Add tone1 harmonics
-        for h in 1..=tone1_harmonics {
-            let freq = tone1_freq * (h as f64);
-            let mag = 0.1 * dc_val.abs().max(0.1) / (h as f64);
-            spectrum.push((freq, mag, 0.0));
+        // For each harmonic coefficient
+        for (h, coeff) in sv.coefficients.iter().enumerate() {
+            let freq = tone1_freq * h as Value;
+            let magnitude = coeff.norm();
+            let phase_deg = coeff.arg().to_degrees();
+            spectrum.push((freq, magnitude, phase_deg));
         }
 
-        // Add tone2 harmonics if present
-        if let Some(f2) = tone2_freq {
-            for h in 1..=tone2_harmonics {
-                let freq = f2 * (h as f64);
-                let mag = 0.05 * dc_val.abs().max(0.1) / (h as f64);
-                spectrum.push((freq, mag, 0.0));
-            }
-        }
-
-        spectra.push((format!("V({})", name), spectrum));
+        spectra.push((format!("V({})", sv.node_name), spectrum));
     }
+
+    // Number of frequency components
+    let num_components = hb_result.num_harmonics + 1;
 
     Ok(HbData {
         fundamentals,
@@ -704,7 +1020,7 @@ pub fn run_hb_analysis(
         dc_voltages,
         spectra,
         num_components,
-        converged: true,
+        converged: hb_result.converged,
     })
 }
 
@@ -789,54 +1105,388 @@ impl StbData {
 /// Run STB (loop stability) analysis
 ///
 /// Measures the loop gain and phase of a feedback system to determine
-/// phase margin and gain margin.
+/// phase margin and gain margin using AC analysis data.
 pub fn run_stb_analysis(
     netlist_text: &str,
-    _probe_node: &str,
+    probe_node: &str,
     start_freq: Value,
     stop_freq: Value,
     points_per_decade: usize,
 ) -> Result<StbData, String> {
+    use rspice_core::analysis::advanced::stb::{StbAnalyzer, StbConfig};
+
     // Parse the netlist
-    let _netlist = rspice_core::netlist::parse_netlist(netlist_text)
+    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
         .map_err(|e| format!("Parse error: {}", e))?;
 
-    // Generate frequency points
-    let frequencies = generate_freq_points(start_freq, stop_freq, points_per_decade, "dec");
+    let engine = Engine::new(SimulationConfig::default());
 
-    // Generate placeholder loop gain (typical op-amp open loop response)
-    let dc_gain_db = 100.0; // 100 dB DC gain
-    let pole1 = 10.0; // First pole at 10 Hz
-    let pole2 = 1e6; // Second pole at 1 MHz
+    // Create STB configuration
+    let stb_config = StbConfig::new()
+        .with_sweep(start_freq, stop_freq, points_per_decade)
+        .with_probe(probe_node)
+        .with_nyquist(true);
 
-    let mut loop_gain_db = Vec::with_capacity(frequencies.len());
-    let mut loop_phase_deg = Vec::with_capacity(frequencies.len());
+    // Get frequency points from config
+    let frequencies = stb_config.frequency_points();
 
-    for &f in &frequencies {
-        // Two-pole transfer function magnitude
-        let mag1 = 1.0 / (1.0 + (f / pole1).powi(2)).sqrt();
-        let mag2 = 1.0 / (1.0 + (f / pole2).powi(2)).sqrt();
-        let gain_db = dc_gain_db + 20.0 * (mag1 * mag2).log10();
+    // Run AC analysis at all frequency points
+    // run_ac takes netlist and &[Value] frequencies, returns Vec<AcResult>
+    let ac_results = engine
+        .run_ac(&netlist, &frequencies)
+        .map_err(|e| format!("AC analysis error: {}", e))?;
 
-        // Phase
-        let phase1 = -(f / pole1).atan().to_degrees();
-        let phase2 = -(f / pole2).atan().to_degrees();
-        let phase = phase1 + phase2;
+    // Find the probe node index from the first result
+    // Node names are derived from the circuit, probe_node is 1-indexed
+    let probe_idx = probe_node.parse::<usize>().unwrap_or(1).saturating_sub(1);
 
-        loop_gain_db.push(gain_db);
-        loop_phase_deg.push(phase);
-    }
+    // Extract loop gain at each frequency from AC results
+    // AcResult contains: frequency, voltages (Vec<Complex64>), currents
+    let loop_gains: Vec<Complex64> = ac_results
+        .iter()
+        .map(|result| {
+            // Get complex voltage at probe node
+            result
+                .voltages
+                .get(probe_idx)
+                .copied()
+                .unwrap_or(Complex64::new(1.0, 0.0))
+        })
+        .collect();
 
-    Ok(StbData::calculate_stability(
-        &frequencies,
-        &loop_gain_db,
-        &loop_phase_deg,
-    ))
+    // Extract frequency points from results
+    let result_frequencies: Vec<Value> = ac_results.iter().map(|r| r.frequency).collect();
+
+    // Use StbAnalyzer to extract stability margins
+    let analyzer = StbAnalyzer::new(stb_config);
+    let stb_result = analyzer.analyze(&result_frequencies, &loop_gains);
+
+    // Convert Bode data to our format
+    let loop_gain_db: Vec<Value> = stb_result
+        .bode_points
+        .iter()
+        .map(|p| p.magnitude_db)
+        .collect();
+
+    let loop_phase_deg: Vec<Value> = stb_result.bode_points.iter().map(|p| p.phase_deg).collect();
+
+    // Build StbData from the analysis result
+    Ok(StbData {
+        frequencies: result_frequencies,
+        loop_gain_db,
+        loop_phase_deg,
+        phase_margin: stb_result.margins.phase_margin_deg,
+        gain_margin: stb_result.margins.gain_margin_db,
+        unity_gain_freq: stb_result.margins.unity_gain_bandwidth,
+        phase_crossover_freq: stb_result.margins.gain_margin_freq,
+        is_stable: stb_result.margins.is_stable(),
+    })
 }
 
 // =============================================================================
 // Helper functions
 // =============================================================================
+
+fn is_ground_node(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "0" | "gnd" | "ground"
+    )
+}
+
+fn resolve_node_index(node_name: &str, node_names: &[String]) -> Option<usize> {
+    let trimmed = node_name.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Ok(idx) = trimmed.parse::<usize>() {
+        if idx < node_names.len() {
+            return Some(idx);
+        }
+    }
+
+    let upper = trimmed.to_ascii_uppercase();
+    node_names
+        .iter()
+        .position(|name| name.to_ascii_uppercase() == upper)
+}
+
+fn resolve_node_or_ground_index(node_name: &str, node_names: &[String]) -> Option<usize> {
+    let trimmed = node_name.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if is_ground_node(trimmed) {
+        return Some(0);
+    }
+    resolve_node_index(trimmed, node_names)
+}
+
+fn canonicalize_pz_port(pos: usize, neg: usize) -> Result<(usize, Option<usize>, Value), String> {
+    if pos == neg {
+        return Err("positive and reference nodes cannot be the same".to_string());
+    }
+
+    if pos != 0 {
+        return Ok((pos, if neg == 0 { None } else { Some(neg) }, 1.0));
+    }
+
+    if neg == 0 {
+        return Err("port cannot be ground-ground".to_string());
+    }
+
+    // Canonicalize V(0, n) or I(0, n) to -(V(n,0) / I(n,0)).
+    Ok((neg, None, -1.0))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OutputVoltageSpec {
+    pos: usize,
+    neg: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum OutputSpec {
+    Voltage(OutputVoltageSpec),
+    BranchCurrent {
+        branch_ordinal: usize, // 1-based branch ordinal from CircuitData
+        branch_name: String,
+    },
+}
+
+fn parse_output_spec(
+    output_var: &str,
+    node_names: &[String],
+    circuit: &rspice_core::CircuitData,
+) -> Option<OutputSpec> {
+    let trimmed = output_var.trim();
+    if trimmed.len() > 3 && trimmed[..2].eq_ignore_ascii_case("I(") && trimmed.ends_with(')') {
+        let branch_name = trimmed[2..trimmed.len() - 1].trim();
+        if branch_name.is_empty() {
+            return None;
+        }
+        let branch_ordinal = circuit.get_branch_by_name(branch_name)? as usize;
+        return Some(OutputSpec::BranchCurrent {
+            branch_ordinal,
+            branch_name: branch_name.to_string(),
+        });
+    }
+
+    parse_output_voltage_spec(trimmed, node_names).map(OutputSpec::Voltage)
+}
+
+fn parse_output_voltage_spec(output_var: &str, node_names: &[String]) -> Option<OutputVoltageSpec> {
+    let trimmed = output_var.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if trimmed.len() > 3 && trimmed[..2].eq_ignore_ascii_case("V(") && trimmed.ends_with(')') {
+        let inner = trimmed[2..trimmed.len() - 1].trim();
+        if inner.is_empty() {
+            return None;
+        }
+
+        if let Some((pos, neg)) = inner.split_once(',') {
+            let pos_idx = resolve_node_or_ground_index(pos.trim(), node_names)?;
+            let neg_idx = resolve_node_or_ground_index(neg.trim(), node_names)?;
+            return Some(OutputVoltageSpec {
+                pos: pos_idx,
+                neg: Some(neg_idx),
+            });
+        }
+
+        let pos_idx = resolve_node_or_ground_index(inner, node_names)?;
+        return Some(OutputVoltageSpec {
+            pos: pos_idx,
+            neg: None,
+        });
+    }
+
+    // I(...) output handling is owned by parse_output_spec().
+    if trimmed.len() > 3 && trimmed[..2].eq_ignore_ascii_case("I(") && trimmed.ends_with(')') {
+        return None;
+    }
+
+    let pos_idx = resolve_node_or_ground_index(trimmed, node_names)?;
+    Some(OutputVoltageSpec {
+        pos: pos_idx,
+        neg: None,
+    })
+}
+
+fn dc_output_value(
+    dc_result: &rspice_core::SimulationResult,
+    output_spec: &OutputSpec,
+) -> Result<Value, String> {
+    match output_spec {
+        OutputSpec::Voltage(vspec) => {
+            let v_pos = if vspec.pos == 0 {
+                0.0
+            } else {
+                dc_result
+                    .node_voltages
+                    .get(vspec.pos)
+                    .copied()
+                    .unwrap_or(0.0)
+            };
+            let v_neg = match vspec.neg {
+                Some(0) => 0.0,
+                Some(idx) => dc_result.node_voltages.get(idx).copied().unwrap_or(0.0),
+                None => 0.0,
+            };
+            Ok(v_pos - v_neg)
+        }
+        OutputSpec::BranchCurrent {
+            branch_ordinal,
+            branch_name,
+        } => {
+            let idx = branch_ordinal.saturating_sub(1);
+            dc_result.branch_currents.get(idx).copied().ok_or_else(|| {
+                format!(
+                    "Branch current for '{}' is unavailable (index {})",
+                    branch_name, idx
+                )
+            })
+        }
+    }
+}
+
+fn ac_output_value(ac_result: &AcResult, output_spec: &OutputSpec) -> Result<Complex64, String> {
+    match output_spec {
+        OutputSpec::Voltage(vspec) => {
+            let v_pos = if vspec.pos == 0 {
+                Complex64::new(0.0, 0.0)
+            } else {
+                ac_result
+                    .voltages
+                    .get(vspec.pos.saturating_sub(1))
+                    .copied()
+                    .unwrap_or_else(|| Complex64::new(0.0, 0.0))
+            };
+            let v_neg = match vspec.neg {
+                Some(0) => Complex64::new(0.0, 0.0),
+                Some(idx) => ac_result
+                    .voltages
+                    .get(idx.saturating_sub(1))
+                    .copied()
+                    .unwrap_or_else(|| Complex64::new(0.0, 0.0)),
+                None => Complex64::new(0.0, 0.0),
+            };
+            Ok(v_pos - v_neg)
+        }
+        OutputSpec::BranchCurrent {
+            branch_ordinal,
+            branch_name,
+        } => {
+            let idx = branch_ordinal.saturating_sub(1);
+            ac_result.currents.get(idx).copied().ok_or_else(|| {
+                format!(
+                    "AC branch current for '{}' is unavailable (index {})",
+                    branch_name, idx
+                )
+            })
+        }
+    }
+}
+
+fn run_ac_output_at_frequency(
+    engine: &Engine,
+    netlist: &rspice_core::Netlist,
+    output_spec: &OutputSpec,
+    frequency: Value,
+) -> Result<Complex64, String> {
+    let ac_results = engine
+        .run_ac(netlist, &[frequency])
+        .map_err(|e| format!("AC analysis error at {} Hz: {}", frequency, e))?;
+    let point = ac_results
+        .first()
+        .ok_or_else(|| format!("AC analysis produced no data at {} Hz", frequency))?;
+    ac_output_value(point, output_spec)
+}
+
+fn run_dc_output_sensitivity(
+    engine: &Engine,
+    netlist: &rspice_core::Netlist,
+    output_spec: OutputVoltageSpec,
+    param_name: &str,
+    param_value: Value,
+) -> Result<Value, String> {
+    let pos_sensitivity = if output_spec.pos == 0 {
+        0.0
+    } else {
+        engine
+            .run_sensitivity(netlist, output_spec.pos, param_name, param_value, None)
+            .map_err(|e| e.to_string())?
+    };
+
+    let neg_sensitivity = match output_spec.neg {
+        Some(0) | None => 0.0,
+        Some(idx) => engine
+            .run_sensitivity(netlist, idx, param_name, param_value, None)
+            .map_err(|e| e.to_string())?,
+    };
+
+    Ok(pos_sensitivity - neg_sensitivity)
+}
+
+fn run_ac_output_sensitivity_finite_difference(
+    engine: &Engine,
+    netlist: &rspice_core::Netlist,
+    output_spec: &OutputSpec,
+    param_name: &str,
+    param_value: Value,
+    frequency: Value,
+) -> Result<Value, String> {
+    let delta = (param_value.abs() * 0.01).max(1e-12);
+
+    let mut netlist_plus = netlist.clone();
+    netlist_plus.params.set(param_name, param_value + delta);
+    let plus = run_ac_output_at_frequency(engine, &netlist_plus, output_spec, frequency)?;
+
+    let mut netlist_minus = netlist.clone();
+    netlist_minus.params.set(param_name, param_value - delta);
+    let minus = run_ac_output_at_frequency(engine, &netlist_minus, output_spec, frequency)?;
+
+    Ok((plus.norm() - minus.norm()) / (2.0 * delta))
+}
+
+fn run_dc_output_sensitivity_finite_difference(
+    engine: &Engine,
+    netlist: &rspice_core::Netlist,
+    output_spec: &OutputSpec,
+    param_name: &str,
+    param_value: Value,
+) -> Result<Value, String> {
+    let delta = (param_value.abs() * 0.01).max(1e-12);
+
+    let mut netlist_plus = netlist.clone();
+    netlist_plus.params.set(param_name, param_value + delta);
+    let plus_result = engine
+        .run_dc_op(&netlist_plus)
+        .map_err(|e| format!("DC OP error (plus perturbation): {}", e))?;
+    let plus = dc_output_value(&plus_result, output_spec)?;
+
+    let mut netlist_minus = netlist.clone();
+    netlist_minus.params.set(param_name, param_value - delta);
+    let minus_result = engine
+        .run_dc_op(&netlist_minus)
+        .map_err(|e| format!("DC OP error (minus perturbation): {}", e))?;
+    let minus = dc_output_value(&minus_result, output_spec)?;
+
+    Ok((plus - minus) / (2.0 * delta))
+}
+
+fn parse_output_node(output_var: &str, node_names: &[String]) -> Option<usize> {
+    parse_output_voltage_spec(output_var, node_names).and_then(|spec| {
+        if spec.neg.is_none() {
+            Some(spec.pos)
+        } else {
+            None
+        }
+    })
+}
 
 /// Generate frequency sweep points
 fn generate_freq_points(start: Value, stop: Value, points: usize, sweep_type: &str) -> Vec<Value> {
@@ -938,5 +1588,298 @@ mod tests {
         let phase = data.phase_deg(0);
         assert_eq!(phase.len(), 1);
         assert!((phase[0] - 90.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_ac_data_from_results_node_mapping() {
+        let results = vec![
+            AcResult {
+                frequency: 1e3,
+                voltages: vec![Complex64::new(1.0, 0.0), Complex64::new(0.5, 0.0)],
+                currents: vec![],
+            },
+            AcResult {
+                frequency: 1e6,
+                voltages: vec![Complex64::new(2.0, 0.0), Complex64::new(1.0, 0.0)],
+                currents: vec![],
+            },
+        ];
+        let node_names = vec!["0".to_string(), "IN".to_string(), "OUT".to_string()];
+
+        let data = AcData::from_results(results, &node_names);
+        assert_eq!(data.responses.len(), 2);
+        assert_eq!(data.responses[0].0, "V(IN)");
+        assert_eq!(data.responses[0].1[0], Complex64::new(1.0, 0.0));
+        assert_eq!(data.responses[1].0, "V(OUT)");
+        assert_eq!(data.responses[1].1[0], Complex64::new(0.5, 0.0));
+    }
+
+    #[test]
+    fn test_transient_analysis_validation() {
+        let netlist = "* test\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1p\n.end\n";
+
+        let err =
+            run_transient_analysis(netlist, 0.0, 1e-9).expect_err("expected validation error");
+        assert!(err.contains("stop_time"));
+
+        let err =
+            run_transient_analysis(netlist, 1e-6, 0.0).expect_err("expected validation error");
+        assert!(err.contains("step_time"));
+    }
+
+    #[test]
+    fn test_ground_node_helper() {
+        assert!(is_ground_node("0"));
+        assert!(is_ground_node("gnd"));
+        assert!(is_ground_node("GROUND"));
+        assert!(!is_ground_node("out"));
+    }
+
+    #[test]
+    fn test_resolve_node_index_helper() {
+        let names = vec![
+            "0".to_string(),
+            "IN".to_string(),
+            "OUT".to_string(),
+            "VDD".to_string(),
+        ];
+        assert_eq!(resolve_node_index("IN", &names), Some(1));
+        assert_eq!(resolve_node_index("out", &names), Some(2));
+        assert_eq!(resolve_node_index("3", &names), Some(3));
+        assert_eq!(resolve_node_index("missing", &names), None);
+    }
+
+    #[test]
+    fn test_parse_output_node_helper() {
+        let names = vec!["0".to_string(), "IN".to_string(), "OUT".to_string()];
+        assert_eq!(parse_output_node("V(OUT)", &names), Some(2));
+        assert_eq!(parse_output_node("out", &names), Some(2));
+        assert_eq!(parse_output_node("2", &names), Some(2));
+        assert_eq!(parse_output_node("V(OUT,IN)", &names), None);
+        assert_eq!(parse_output_node("I(R1)", &names), None);
+    }
+
+    #[test]
+    fn test_parse_output_voltage_spec_helper() {
+        let names = vec!["0".to_string(), "IN".to_string(), "OUT".to_string()];
+        assert_eq!(
+            parse_output_voltage_spec("V(OUT)", &names),
+            Some(OutputVoltageSpec { pos: 2, neg: None })
+        );
+        assert_eq!(
+            parse_output_voltage_spec("V(OUT,IN)", &names),
+            Some(OutputVoltageSpec {
+                pos: 2,
+                neg: Some(1)
+            })
+        );
+        assert_eq!(
+            parse_output_voltage_spec("V(OUT,GND)", &names),
+            Some(OutputVoltageSpec {
+                pos: 2,
+                neg: Some(0)
+            })
+        );
+        assert_eq!(parse_output_voltage_spec("I(R1)", &names), None);
+    }
+
+    #[test]
+    fn test_parse_output_spec_current_helper() {
+        let netlist = rspice_core::netlist::parse_netlist("* t\nV1 in 0 1\nR1 in 0 1k\n")
+            .expect("netlist should parse");
+        let engine = Engine::new(SimulationConfig::default());
+        let circuit = engine
+            .build_circuit(&netlist)
+            .expect("circuit build should succeed");
+        let node_names = vec!["0".to_string(), "IN".to_string()];
+
+        let spec = parse_output_spec("I(V1)", &node_names, &circuit);
+        assert!(matches!(
+            spec,
+            Some(OutputSpec::BranchCurrent {
+                branch_ordinal: 1,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn test_run_pole_zero_analysis_validation() {
+        let netlist = "* pz\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n";
+
+        let err = run_pole_zero_analysis(netlist, "in", "0", "out", "0", "BAD", "PZ")
+            .expect_err("expected transfer_type validation");
+        assert!(err.contains("transfer_type"));
+
+        let err = run_pole_zero_analysis(netlist, "in", "nref", "out", "0", "VOL", "PZ")
+            .expect_err("expected reference validation");
+        assert!(err.contains("not found"));
+
+        let err = run_pole_zero_analysis(netlist, "in", "0", "out", "0", "VOL", "BAD")
+            .expect_err("expected analysis_type validation");
+        assert!(err.contains("analysis_type"));
+
+        run_pole_zero_analysis(netlist, "in", "0", "out", "0", "CUR", "PZ")
+            .expect("CUR transfer_type should be accepted");
+    }
+
+    #[test]
+    fn test_run_pole_zero_analysis_filters_analysis_type() {
+        let netlist = "* pz\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n";
+
+        let pol = run_pole_zero_analysis(netlist, "in", "0", "out", "0", "VOL", "POL")
+            .expect("POL run should succeed");
+        assert!(pol.zeros.is_empty());
+
+        let zer = run_pole_zero_analysis(netlist, "in", "0", "out", "0", "VOL", "ZER")
+            .expect("ZER run should succeed");
+        assert!(zer.poles.is_empty());
+    }
+
+    #[test]
+    fn test_run_pole_zero_analysis_supports_non_ground_references() {
+        let netlist =
+            "* pz diff\nV1 in 0 1\nR1 in out 1k\nR2 out ref 500\nC1 out ref 1n\nR3 ref 0 1k\n";
+
+        let diff = run_pole_zero_analysis(netlist, "in", "ref", "out", "ref", "VOL", "PZ")
+            .expect("differential pole-zero should succeed");
+
+        let h11 = run_pole_zero_analysis(netlist, "in", "0", "out", "0", "VOL", "PZ")
+            .expect("h11 should succeed")
+            .gain;
+        let h12 = run_pole_zero_analysis(netlist, "ref", "0", "out", "0", "VOL", "PZ")
+            .expect("h12 should succeed")
+            .gain;
+        let h21 = run_pole_zero_analysis(netlist, "in", "0", "ref", "0", "VOL", "PZ")
+            .expect("h21 should succeed")
+            .gain;
+        let h22 = run_pole_zero_analysis(netlist, "ref", "0", "ref", "0", "VOL", "PZ")
+            .expect("h22 should succeed")
+            .gain;
+        let expected = h11 - h12 - h21 + h22;
+
+        assert!((diff.gain - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_run_pole_zero_analysis_voltage_mode_reports_highpass_zero() {
+        let netlist = "* hp\nC1 in out 1n\nR1 out 0 1k\n";
+
+        let result = run_pole_zero_analysis(netlist, "in", "0", "out", "0", "VOL", "ZER")
+            .expect("voltage-mode zero analysis should succeed");
+
+        assert!(
+            result
+                .zeros
+                .iter()
+                .any(|(re, im)| (re * re + im * im).sqrt() < 1e-2),
+            "expected zero near origin, got {:?}",
+            result.zeros
+        );
+    }
+
+    #[test]
+    fn test_run_sensitivity_analysis_validation() {
+        let netlist = "* sens\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n";
+
+        let err = run_sensitivity_analysis(netlist, "", false, None)
+            .expect_err("expected output variable validation");
+        assert!(err.contains("output_var"));
+
+        let err = run_sensitivity_analysis(netlist, "V(out)", true, Some(0.0))
+            .expect_err("expected AC frequency validation");
+        assert!(err.contains("frequency"));
+
+        let err = run_sensitivity_analysis(netlist, "V(out)", false, Some(1e6))
+            .expect_err("expected mode/frequency validation");
+        assert!(err.contains("only valid"));
+
+        let err = run_sensitivity_analysis(netlist, "I(NO_SUCH_BRANCH)", false, None)
+            .expect_err("expected branch output resolution failure");
+        assert!(err.contains("resolved"));
+    }
+
+    #[test]
+    fn test_run_sensitivity_analysis_no_parameters_returns_empty() {
+        let netlist = "* sens\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n";
+
+        let result = run_sensitivity_analysis(netlist, "V(out)", false, None)
+            .expect("sensitivity run should succeed");
+        assert_eq!(result.output_var, "V(out)");
+        assert!(result.sensitivities.is_empty());
+    }
+
+    #[test]
+    fn test_run_sensitivity_analysis_with_parameter() {
+        let netlist = "* sens\n.param RVAL=1k\nV1 in 0 1\nR1 in out {RVAL}\nR2 out 0 1k\n";
+
+        let result = run_sensitivity_analysis(netlist, "V(out)", false, None)
+            .expect("sensitivity run should succeed");
+        assert_eq!(result.output_var, "V(out)");
+        assert!(!result.sensitivities.is_empty());
+        assert!(result
+            .sensitivities
+            .iter()
+            .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL")));
+    }
+
+    #[test]
+    fn test_run_sensitivity_analysis_ac_mode_with_parameter() {
+        let netlist = "* sens ac\n.param RVAL=1k\nV1 in 0 AC 1\nR1 in out RVAL\nC1 out 0 1n\n";
+
+        let result = run_sensitivity_analysis(netlist, "V(out)", true, Some(1e6))
+            .expect("ac sensitivity run should succeed");
+        assert_eq!(result.output_var, "V(out)");
+        let (_name, raw, normalized) = result
+            .sensitivities
+            .iter()
+            .find(|(name, _, _)| name.eq_ignore_ascii_case("RVAL"))
+            .expect("expected RVAL sensitivity");
+        assert!(raw.is_finite());
+        assert!(normalized.is_finite());
+    }
+
+    #[test]
+    fn test_run_sensitivity_analysis_supports_differential_output() {
+        let netlist = "* sens diff\n.param RVAL=1k\nV1 in 0 1\nR1 in out {RVAL}\nR2 out 0 1k\n";
+
+        let result = run_sensitivity_analysis(netlist, "V(out,in)", false, None)
+            .expect("differential sensitivity run should succeed");
+        assert!(!result.sensitivities.is_empty());
+        assert!(result
+            .sensitivities
+            .iter()
+            .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite()));
+    }
+
+    #[test]
+    fn test_run_sensitivity_analysis_supports_current_output_dc() {
+        let netlist = "* sens i\n.param RVAL=1k\nV1 in 0 1\nR1 in 0 {RVAL}\n";
+
+        let result = run_sensitivity_analysis(netlist, "I(V1)", false, None)
+            .expect("current-output dc sensitivity should succeed");
+        assert_eq!(result.output_var, "I(V1)");
+        assert!(!result.sensitivities.is_empty());
+        let (_name, raw, normalized) = result
+            .sensitivities
+            .iter()
+            .find(|(name, _, _)| name.eq_ignore_ascii_case("RVAL"))
+            .expect("expected RVAL sensitivity");
+        assert!(raw.is_finite());
+        assert!(normalized.is_finite());
+    }
+
+    #[test]
+    fn test_run_sensitivity_analysis_supports_current_output_ac() {
+        let netlist = "* sens iac\n.param RVAL=1k\nV1 in 0 AC 1\nR1 in 0 {RVAL}\n";
+
+        let result = run_sensitivity_analysis(netlist, "I(V1)", true, Some(1e3))
+            .expect("current-output ac sensitivity should succeed");
+        assert_eq!(result.output_var, "I(V1)");
+        assert!(!result.sensitivities.is_empty());
+        assert!(result
+            .sensitivities
+            .iter()
+            .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite()));
     }
 }

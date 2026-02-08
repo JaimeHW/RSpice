@@ -548,12 +548,17 @@ impl DrcChecker {
             }
         }
 
-        // Mark ground nets
+        // Add/mark nets from labels (including standalone ground symbols).
         for label in net_labels {
-            if label.name == "0" || label.name.to_lowercase() == "gnd" {
-                if let Some(net) = net_map.get_mut(&label.name) {
-                    net.is_ground = true;
-                }
+            let net = net_map
+                .entry(label.name.clone())
+                .or_insert_with(|| NetInfo {
+                    name: label.name.clone(),
+                    ..NetInfo::default()
+                });
+
+            if label.name == "0" || label.name.eq_ignore_ascii_case("gnd") {
+                net.is_ground = true;
             }
         }
 
@@ -757,6 +762,172 @@ struct NetInfo {
     has_current_source: bool,
     is_ground: bool,
     connected_components: Vec<String>,
+}
+
+//=============================================================================
+// Schematic Data Extraction
+//=============================================================================
+
+/// Extract DRC-compatible data from a SchematicState.
+///
+/// This is the bridge between the schematic representation and the DRC checker.
+/// It extracts components, wires, and net labels in the format required by
+/// DrcChecker::check_connectivity().
+///
+/// # Performance
+/// - O(n) iteration over components
+/// - O(n) iteration over wires  
+/// - O(n) iteration over net labels
+///
+/// # Example
+/// ```ignore
+/// use rspice_ui::services::drc::{DrcChecker, extract_drc_data};
+///
+/// let (components, wires, net_labels) = extract_drc_data(&schematic);
+/// let result = DrcChecker::new().check_connectivity(&components, &wires, &net_labels);
+/// ```
+pub fn extract_drc_data(
+    schematic: &crate::state::SchematicState,
+) -> (Vec<ComponentInfo>, Vec<WireInfo>, Vec<NetLabelInfo>) {
+    use crate::state::ComponentType;
+
+    let mut components = Vec::with_capacity(schematic.components.len());
+    let mut wires = Vec::with_capacity(schematic.wires.len());
+    let mut net_labels = Vec::with_capacity(schematic.net_labels.len());
+
+    // Build point-to-net mapping from existing net_mapping or create from connectivity
+    let net_mapping = &schematic.net_mapping;
+
+    // Extract components
+    for comp in &schematic.components {
+        let terminal_positions = comp.terminal_positions();
+        let mut pins = Vec::with_capacity(terminal_positions.len());
+
+        for (pin_name, pin_pos) in terminal_positions {
+            // Look up net name from the cached mapping, or create a positional name
+            let net_name = net_mapping
+                .get(&pin_pos)
+                .cloned()
+                .unwrap_or_else(|| format!("net_{}_{}", pin_pos.x, pin_pos.y));
+
+            let is_output = matches!(
+                comp.kind,
+                ComponentType::VoltageSource
+                    | ComponentType::VoltageSourceAc
+                    | ComponentType::VoltageSourcePulse
+                    | ComponentType::VoltageSourceSin
+                    | ComponentType::VoltageSourcePwl
+            ) && pin_name == "+";
+
+            pins.push(PinInfo {
+                name: pin_name.to_string(),
+                net_name,
+                is_output,
+            });
+        }
+
+        let is_voltage_source = matches!(
+            comp.kind,
+            ComponentType::VoltageSource
+                | ComponentType::VoltageSourceAc
+                | ComponentType::VoltageSourcePulse
+                | ComponentType::VoltageSourceSin
+                | ComponentType::VoltageSourcePwl
+        );
+
+        let is_current_source = matches!(
+            comp.kind,
+            ComponentType::CurrentSource
+                | ComponentType::CurrentSourceAc
+                | ComponentType::CurrentSourcePulse
+                | ComponentType::CurrentSourceSin
+                | ComponentType::CurrentSourcePwl
+        );
+
+        components.push(ComponentInfo {
+            id: comp.id as usize,
+            name: if comp.name.is_empty() {
+                comp.spice_instance_name()
+            } else {
+                comp.name.clone()
+            },
+            component_type: comp.kind.spice_prefix().to_string(),
+            pins,
+            is_voltage_source,
+            is_current_source,
+        });
+    }
+
+    // Extract wires
+    for wire in &schematic.wires {
+        if wire.points.len() >= 2 {
+            // Create WireInfo for each segment
+            for i in 0..wire.points.len() - 1 {
+                let start = &wire.points[i];
+                let end = &wire.points[i + 1];
+                wires.push(WireInfo {
+                    id: wire.id as usize,
+                    start_x: start.x as f64,
+                    start_y: start.y as f64,
+                    end_x: end.x as f64,
+                    end_y: end.y as f64,
+                });
+            }
+        }
+    }
+
+    // Extract net labels (including ground symbols)
+    for label in &schematic.net_labels {
+        net_labels.push(NetLabelInfo {
+            name: label.name.clone(),
+            x: label.pos.x as f64,
+            y: label.pos.y as f64,
+        });
+    }
+
+    // Check for ground components (GND symbol)
+    for comp in &schematic.components {
+        if matches!(comp.kind, ComponentType::Ground) {
+            // Ground component acts as a net label for "0"
+            net_labels.push(NetLabelInfo {
+                name: "0".to_string(),
+                x: comp.pos.x as f64,
+                y: comp.pos.y as f64,
+            });
+        }
+    }
+
+    (components, wires, net_labels)
+}
+
+/// Run a complete DRC check on a schematic.
+///
+/// This is a convenience function that extracts data and runs the check
+/// in a single call.
+///
+/// # Example
+/// ```ignore
+/// use rspice_ui::services::drc::run_drc_check;
+///
+/// let result = run_drc_check(&schematic);
+/// if result.passed() {
+///     println!("DRC passed!");
+/// }
+/// ```
+pub fn run_drc_check(schematic: &crate::state::SchematicState) -> DrcResult {
+    let (components, wires, net_labels) = extract_drc_data(schematic);
+    let mut checker = DrcChecker::new();
+    checker.check_connectivity(&components, &wires, &net_labels)
+}
+
+/// Run a complete DRC check with custom configuration.
+pub fn run_drc_check_with_config(
+    schematic: &crate::state::SchematicState,
+    config: DrcConfig,
+) -> DrcResult {
+    let (components, wires, net_labels) = extract_drc_data(schematic);
+    let mut checker = DrcChecker::with_config(config);
+    checker.check_connectivity(&components, &wires, &net_labels)
 }
 
 //=============================================================================
@@ -1020,5 +1191,235 @@ mod tests {
         let result = DrcResult::new();
         let json = serde_json::to_string(&result);
         assert!(json.is_ok());
+    }
+
+    // =========================================================================
+    // Schematic Extraction Tests
+    // =========================================================================
+
+    #[test]
+    fn test_extract_drc_data_empty_schematic() {
+        let schematic = crate::state::SchematicState::default();
+        let (components, wires, net_labels) = extract_drc_data(&schematic);
+
+        assert!(components.is_empty());
+        assert!(wires.is_empty());
+        assert!(net_labels.is_empty());
+    }
+
+    #[test]
+    fn test_extract_drc_data_with_ground_component() {
+        use crate::state::{Component, ComponentType, Point, SchematicState};
+
+        let mut schematic = SchematicState::default();
+
+        // Add a ground symbol
+        let ground = Component::new(1, ComponentType::Ground, Point::new(10, 20));
+        schematic.components.push(ground);
+
+        let (components, _wires, net_labels) = extract_drc_data(&schematic);
+
+        // Ground component should generate both a component AND a net label
+        assert_eq!(components.len(), 1);
+        assert!(net_labels.iter().any(|n| n.name == "0"));
+    }
+
+    #[test]
+    fn test_extract_drc_data_with_voltage_source() {
+        use crate::state::{Component, ComponentType, Point, SchematicState};
+
+        let mut schematic = SchematicState::default();
+
+        // Add a voltage source
+        let vsrc = Component::new(1, ComponentType::VoltageSource, Point::new(10, 20))
+            .with_name_value("V1", "5");
+        schematic.components.push(vsrc);
+
+        let (components, _wires, _net_labels) = extract_drc_data(&schematic);
+
+        assert_eq!(components.len(), 1);
+        assert!(components[0].is_voltage_source);
+        assert!(!components[0].is_current_source);
+        assert_eq!(components[0].name, "V1");
+    }
+
+    #[test]
+    fn test_extract_drc_data_with_current_source() {
+        use crate::state::{Component, ComponentType, Point, SchematicState};
+
+        let mut schematic = SchematicState::default();
+
+        // Add a current source
+        let isrc = Component::new(1, ComponentType::CurrentSource, Point::new(10, 20))
+            .with_name_value("I1", "1m");
+        schematic.components.push(isrc);
+
+        let (components, _wires, _net_labels) = extract_drc_data(&schematic);
+
+        assert_eq!(components.len(), 1);
+        assert!(!components[0].is_voltage_source);
+        assert!(components[0].is_current_source);
+        assert_eq!(components[0].name, "I1");
+    }
+
+    #[test]
+    fn test_extract_drc_data_with_resistor() {
+        use crate::state::{Component, ComponentType, Point, SchematicState};
+
+        let mut schematic = SchematicState::default();
+
+        // Add a resistor
+        let res = Component::new(1, ComponentType::Resistor, Point::new(10, 20))
+            .with_name_value("R1", "1k");
+        schematic.components.push(res);
+
+        let (components, _wires, _net_labels) = extract_drc_data(&schematic);
+
+        assert_eq!(components.len(), 1);
+        assert!(!components[0].is_voltage_source);
+        assert!(!components[0].is_current_source);
+        assert_eq!(components[0].name, "R1");
+        assert_eq!(components[0].component_type, "R");
+        assert_eq!(components[0].pins.len(), 2); // Resistors have 2 pins
+    }
+
+    #[test]
+    fn test_extract_drc_data_with_wires() {
+        use crate::state::{Point, SchematicState, Wire};
+
+        let mut schematic = SchematicState::default();
+
+        // Add a wire with multiple segments
+        let wire = Wire::new(
+            1,
+            vec![Point::new(0, 0), Point::new(10, 0), Point::new(10, 10)],
+        );
+        schematic.wires.push(wire);
+
+        let (_components, wires, _net_labels) = extract_drc_data(&schematic);
+
+        // Wire with 3 points = 2 segments
+        assert_eq!(wires.len(), 2);
+
+        // First segment
+        assert_eq!(wires[0].start_x, 0.0);
+        assert_eq!(wires[0].start_y, 0.0);
+        assert_eq!(wires[0].end_x, 10.0);
+        assert_eq!(wires[0].end_y, 0.0);
+
+        // Second segment
+        assert_eq!(wires[1].start_x, 10.0);
+        assert_eq!(wires[1].start_y, 0.0);
+        assert_eq!(wires[1].end_x, 10.0);
+        assert_eq!(wires[1].end_y, 10.0);
+    }
+
+    #[test]
+    fn test_extract_drc_data_with_net_labels() {
+        use crate::state::{NetLabel, Point, SchematicState};
+
+        let mut schematic = SchematicState::default();
+
+        // Add net labels
+        schematic.net_labels.push(NetLabel {
+            id: 1,
+            name: "VDD".to_string(),
+            pos: Point::new(0, 0),
+        });
+        schematic.net_labels.push(NetLabel {
+            id: 2,
+            name: "VSS".to_string(),
+            pos: Point::new(0, 10),
+        });
+
+        let (_components, _wires, net_labels) = extract_drc_data(&schematic);
+
+        assert_eq!(net_labels.len(), 2);
+        assert!(net_labels.iter().any(|n| n.name == "VDD"));
+        assert!(net_labels.iter().any(|n| n.name == "VSS"));
+    }
+
+    #[test]
+    fn test_run_drc_check_empty_schematic() {
+        let schematic = crate::state::SchematicState::default();
+        let result = run_drc_check(&schematic);
+
+        // Empty schematic should pass (no components = no violations)
+        assert!(result.completed);
+        // May have missing ground warning since there's no GND
+        // but that's OK for an empty schematic
+    }
+
+    #[test]
+    fn test_run_drc_check_with_ground() {
+        use crate::state::{Component, ComponentType, Point, SchematicState};
+
+        let mut schematic = SchematicState::default();
+
+        // Add just a ground symbol
+        let ground = Component::new(1, ComponentType::Ground, Point::new(10, 20));
+        schematic.components.push(ground);
+
+        let result = run_drc_check(&schematic);
+
+        assert!(result.completed);
+        // With ground present, should not have missing ground error
+        let has_missing_ground = result
+            .violations()
+            .iter()
+            .any(|v| v.violation_type == DrcViolationType::MissingGround);
+        assert!(!has_missing_ground);
+    }
+
+    #[test]
+    fn test_run_drc_check_duplicate_names() {
+        use crate::state::{Component, ComponentType, Point, SchematicState};
+
+        let mut schematic = SchematicState::default();
+
+        // Add two resistors with the same name
+        let r1 = Component::new(1, ComponentType::Resistor, Point::new(0, 0))
+            .with_name_value("R1", "1k");
+        let r1_dupe = Component::new(2, ComponentType::Resistor, Point::new(10, 10))
+            .with_name_value("R1", "2k"); // Duplicate name!
+        let gnd = Component::new(3, ComponentType::Ground, Point::new(0, 10));
+
+        schematic.components.push(r1);
+        schematic.components.push(r1_dupe);
+        schematic.components.push(gnd);
+
+        let result = run_drc_check(&schematic);
+
+        assert!(result.completed);
+        assert!(!result.passed()); // Should fail due to duplicate name
+
+        let has_duplicate = result
+            .violations()
+            .iter()
+            .any(|v| v.violation_type == DrcViolationType::DuplicateName);
+        assert!(has_duplicate);
+    }
+
+    #[test]
+    fn test_run_drc_check_with_config() {
+        use crate::state::SchematicState;
+
+        let schematic = SchematicState::default();
+
+        // Disable all checks
+        let config = DrcConfig {
+            check_floating_nodes: false,
+            check_unconnected_pins: false,
+            check_missing_ground: false,
+            check_duplicate_names: false,
+            check_shorted_outputs: false,
+            ..Default::default()
+        };
+
+        let result = run_drc_check_with_config(&schematic, config);
+
+        assert!(result.completed);
+        assert!(result.passed()); // Should pass with all checks disabled
+        assert_eq!(result.total_count(), 0);
     }
 }
