@@ -298,6 +298,27 @@ fn run_simulation_thread(
                     freq: *start_freq,
                     stop_freq: *stop_freq,
                 }),
+                AnalysisSpec::Pss {
+                    fundamental_freq, ..
+                } => {
+                    let period = if *fundamental_freq > 0.0 {
+                        1.0 / *fundamental_freq
+                    } else {
+                        0.0
+                    };
+                    p.update_status(SimulationStatus::Transient {
+                        time: 0.0,
+                        stop_time: period,
+                    })
+                }
+                AnalysisSpec::HarmonicBalance {
+                    tone1_freq,
+                    tone1_harmonics,
+                    ..
+                } => p.update_status(SimulationStatus::AcAnalysis {
+                    freq: *tone1_freq,
+                    stop_freq: *tone1_freq * (*tone1_harmonics).max(1) as f64,
+                }),
                 AnalysisSpec::MonteCarlo => p.update_status(SimulationStatus::PostProcessing),
                 AnalysisSpec::Parametric => p.update_status(SimulationStatus::DcSweep {
                     source: "STEP".to_string(),
@@ -451,6 +472,75 @@ fn run_spec_request(
                 corner_labels,
                 waveforms,
                 num_failures: data.num_failures,
+            })
+        }
+        AnalysisSpec::Pss {
+            fundamental_freq,
+            num_harmonics,
+            tolerance,
+        } => {
+            let data =
+                svc_runner::run_pss_analysis(netlist, fundamental_freq, num_harmonics, tolerance)
+                    .map_err(SimulationError::InvalidConfig)?;
+
+            let time = data.time;
+            let waveforms: std::collections::HashMap<String, WaveformData> = data
+                .waveforms
+                .into_iter()
+                .map(|(name, values)| {
+                    (
+                        name.clone(),
+                        WaveformData::new_time_domain(name, time.clone(), values),
+                    )
+                })
+                .collect();
+
+            Ok(SimulationResult::Transient { time, waveforms })
+        }
+        AnalysisSpec::HarmonicBalance {
+            tone1_freq,
+            tone1_harmonics,
+            tone2_freq,
+            tone2_harmonics,
+        } => {
+            let data = svc_runner::run_hb_analysis(
+                netlist,
+                tone1_freq,
+                tone1_harmonics,
+                tone2_freq,
+                tone2_harmonics,
+            )
+            .map_err(SimulationError::InvalidConfig)?;
+
+            let waveforms: std::collections::HashMap<String, WaveformData> = data
+                .spectra
+                .into_iter()
+                .map(|(name, spectrum)| {
+                    let freqs: Vec<f64> = spectrum.iter().map(|(freq, _, _)| *freq).collect();
+                    let mags: Vec<f64> = spectrum.iter().map(|(_, mag, _)| *mag).collect();
+                    (
+                        name.clone(),
+                        WaveformData {
+                            name,
+                            x_values: freqs,
+                            y_values: mags,
+                            y_unit: "V".to_string(),
+                            x_unit: "Hz".to_string(),
+                            is_complex: false,
+                            y_imag: None,
+                        },
+                    )
+                })
+                .collect();
+            let frequencies = waveforms
+                .values()
+                .next()
+                .map(|wf| wf.x_values.clone())
+                .unwrap_or_default();
+
+            Ok(SimulationResult::Ac {
+                frequencies,
+                waveforms,
             })
         }
         unsupported => Err(SimulationError::InvalidConfig(format!(
@@ -952,6 +1042,82 @@ C1 out 0 1n
                 );
             }
             other => panic!("Expected Corner result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_pss() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* PSS smoke test
+V1 in 0 DC 1
+R1 in out 1k
+C1 out 0 1n
+.end
+"#
+        .to_string();
+
+        runner
+            .start_spec(
+                AnalysisSpec::Pss {
+                    fundamental_freq: 1e6,
+                    num_harmonics: 8,
+                    tolerance: 1e-4,
+                },
+                netlist,
+            )
+            .expect("PSS spec should start");
+        thread::sleep(std::time::Duration::from_millis(250));
+
+        let result = runner.poll_result();
+        assert!(result.is_some(), "Expected PSS result");
+        let result = result.unwrap().expect("PSS should succeed");
+        match result {
+            SimulationResult::Transient { time, waveforms } => {
+                assert!(!time.is_empty());
+                assert!(!waveforms.is_empty());
+            }
+            other => panic!("Expected Transient result for PSS, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_harmonic_balance() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* HB smoke test
+V1 in 0 DC 1
+R1 in out 1k
+C1 out 0 1n
+.end
+"#
+        .to_string();
+
+        runner
+            .start_spec(
+                AnalysisSpec::HarmonicBalance {
+                    tone1_freq: 1e6,
+                    tone1_harmonics: 5,
+                    tone2_freq: None,
+                    tone2_harmonics: 0,
+                },
+                netlist,
+            )
+            .expect("HB spec should start");
+        thread::sleep(std::time::Duration::from_millis(250));
+
+        let result = runner.poll_result();
+        assert!(result.is_some(), "Expected HB result");
+        let result = result.unwrap().expect("HB should succeed");
+        match result {
+            SimulationResult::Ac {
+                frequencies,
+                waveforms,
+            } => {
+                assert!(!frequencies.is_empty());
+                assert!(!waveforms.is_empty());
+            }
+            other => panic!("Expected AC result for HB, got {:?}", other),
         }
     }
 }
