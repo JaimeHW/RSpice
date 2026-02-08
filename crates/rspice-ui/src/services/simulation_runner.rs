@@ -1797,6 +1797,14 @@ impl PnoiseFrequencySweep {
             Self::Linear => "lin",
         }
     }
+
+    fn as_tf_sweep(self) -> TfFrequencySweep {
+        match self {
+            Self::Decade => TfFrequencySweep::Decade,
+            Self::Octave => TfFrequencySweep::Octave,
+            Self::Linear => TfFrequencySweep::Linear,
+        }
+    }
 }
 
 /// PNoise noise-reference mode.
@@ -2039,13 +2047,23 @@ pub fn run_pnoise_analysis_with_config(
     match config.noise_ref {
         PnoiseReference::Output => {}
         PnoiseReference::Input => {
-            // True input-referred PNOISE requires large-signal periodic conversion gain.
-            // Until that path is available in rspice-core, preserve the output vector and
-            // expose it as a fallback input-referred estimate.
-            input_noise = Some(output_noise.clone());
-            warnings.push(
-                "PNOISE input-referred conversion currently uses unity-gain fallback".to_string(),
-            );
+            match compute_input_referred_pnoise(
+                netlist_text,
+                &netlist,
+                &dc_result.node_names,
+                config,
+                &folded_output_noise,
+                &noise_data.frequencies,
+            ) {
+                Ok(estimate) => input_noise = Some(estimate),
+                Err(error) => {
+                    input_noise = Some(output_noise.clone());
+                    warnings.push(format!(
+                        "PNOISE input-referred conversion fell back to unity gain: {}",
+                        error
+                    ));
+                }
+            }
         }
         PnoiseReference::Phase => {
             let carrier_rms = estimate_carrier_rms_for_output(
@@ -2095,6 +2113,102 @@ pub fn run_pnoise_analysis_with_config(
         reference: config.noise_ref,
         warnings,
     })
+}
+
+fn compute_input_referred_pnoise(
+    netlist_text: &str,
+    netlist: &rspice_core::Netlist,
+    node_names: &[String],
+    config: &PnoiseRunConfig,
+    output_noise: &[Value],
+    frequencies: &[Value],
+) -> Result<Vec<Value>, String> {
+    let inferred_tf = infer_tf_run_config(netlist, node_names)?;
+    let tf_config = TfRunConfig {
+        start_freq: config.start_freq,
+        stop_freq: config.stop_freq,
+        points_per_unit: config.points_per_unit,
+        sweep: config.sweep.as_tf_sweep(),
+        input_source: inferred_tf.input_source,
+        output_node: config.output_node.trim().to_string(),
+        output_ref: config
+            .output_ref
+            .as_deref()
+            .map(str::trim)
+            .filter(|node| !node.is_empty() && !is_ground_like(node))
+            .map(ToString::to_string),
+        group_delay: false,
+        input_impedance: false,
+        output_impedance: false,
+    };
+    let tf_data = run_tf_analysis_with_config(netlist_text, &tf_config)?;
+    let gain_squared = transfer_gain_squared_at_frequencies(&tf_data, frequencies)?;
+    if gain_squared.len() != output_noise.len() {
+        return Err(format!(
+            "TF gain vector length {} does not match PNOISE vector length {}",
+            gain_squared.len(),
+            output_noise.len()
+        ));
+    }
+    Ok(output_noise
+        .iter()
+        .zip(gain_squared.iter())
+        .map(|(psd, gain_sq)| psd.max(0.0) / gain_sq.max(1e-30))
+        .collect())
+}
+
+fn transfer_gain_squared_at_frequencies(
+    tf_data: &TfData,
+    target_frequencies: &[Value],
+) -> Result<Vec<Value>, String> {
+    if tf_data.transfer.is_empty() || tf_data.frequencies.len() != tf_data.transfer.len() {
+        return Err("TF analysis returned an invalid transfer vector".to_string());
+    }
+    if target_frequencies.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    if tf_data.frequencies.len() == target_frequencies.len()
+        && tf_data
+            .frequencies
+            .iter()
+            .zip(target_frequencies.iter())
+            .all(|(lhs, rhs)| {
+                let scale = lhs.abs().max(rhs.abs()).max(1.0);
+                (lhs - rhs).abs() <= scale * 1e-9
+            })
+    {
+        return Ok(tf_data
+            .transfer
+            .iter()
+            .map(|gain| gain.norm_sqr().max(1e-30))
+            .collect());
+    }
+
+    Ok(target_frequencies
+        .iter()
+        .map(|target| {
+            let idx = nearest_frequency_index(&tf_data.frequencies, *target);
+            tf_data.transfer[idx].norm_sqr().max(1e-30)
+        })
+        .collect())
+}
+
+fn nearest_frequency_index(frequencies: &[Value], target: Value) -> usize {
+    let mut best_idx = 0;
+    let mut best_delta = frequencies
+        .first()
+        .map(|freq| (*freq - target).abs())
+        .unwrap_or(f64::INFINITY);
+
+    for (idx, freq) in frequencies.iter().enumerate().skip(1) {
+        let delta = (*freq - target).abs();
+        if delta < best_delta {
+            best_delta = delta;
+            best_idx = idx;
+        }
+    }
+    best_idx
 }
 
 /// Run PNoise analysis using inferred/default settings.
@@ -5662,6 +5776,54 @@ mod tests {
         assert_eq!(result.reference, PnoiseReference::Phase);
         assert_eq!(result.output_noise.len(), result.frequencies.len());
         assert!(result.output_noise.iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn test_run_pnoise_analysis_input_reference_uses_transfer_gain_conversion() {
+        let netlist = "* pnoise input\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        let output_cfg = PnoiseRunConfig {
+            output_node: "out".to_string(),
+            noise_ref: PnoiseReference::Output,
+            start_freq: 10.0,
+            stop_freq: 1e7,
+            points_per_unit: 8,
+            sweep: PnoiseFrequencySweep::Decade,
+            max_sideband: 0,
+            ..PnoiseRunConfig::default()
+        };
+        let input_cfg = PnoiseRunConfig {
+            noise_ref: PnoiseReference::Input,
+            ..output_cfg.clone()
+        };
+
+        let output_result = run_pnoise_analysis_with_config(netlist, &output_cfg)
+            .expect("output-referred PNOISE should execute");
+        let input_result = run_pnoise_analysis_with_config(netlist, &input_cfg)
+            .expect("input-referred PNOISE should execute");
+
+        let input_curve = input_result
+            .input_noise
+            .as_ref()
+            .expect("input-referred mode should return an input-noise vector");
+        assert_eq!(input_curve.len(), output_result.output_noise.len());
+        assert!(!input_result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("unity gain")));
+
+        let input_last = *input_curve
+            .last()
+            .expect("input-referred curve should contain at least one point");
+        let output_last = *output_result
+            .output_noise
+            .last()
+            .expect("output-referred curve should contain at least one point");
+        assert!(
+            input_last > output_last * 1.05,
+            "input-referred PSD {} should exceed output PSD {} at high frequency for RC low-pass gain",
+            input_last,
+            output_last
+        );
     }
 
     #[test]
