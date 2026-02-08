@@ -268,6 +268,10 @@ impl PnoiseConfig {
             }
         }
 
+        if self.noise_ref == NoiseReferenceType::Input && !self.input_source.trim().is_empty() {
+            cmd.push_str(&format!(" input={}", self.input_source.trim()));
+        }
+
         cmd.push_str(&format!(" maxsideband={}", self.max_sideband));
 
         if self.noise_ref != NoiseReferenceType::Output {
@@ -934,11 +938,13 @@ mod tests {
         // LNA noise figure: 10 Hz to 10 GHz
         let cfg = PnoiseConfig::new(10.0, 10e9, 20)
             .with_output("VOUT")
+            .with_input("VIN")
             .with_noise_ref(NoiseReferenceType::Input);
 
         assert!(cfg.validate().is_ok());
         let spice = cfg.to_spice();
         assert!(spice.contains("noiseref=input"));
+        assert!(spice.contains("input=VIN"));
     }
 
     #[test]
