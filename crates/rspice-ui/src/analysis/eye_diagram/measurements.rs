@@ -762,7 +762,7 @@ mod tests {
 
         // Add some traces
         for i in 0..5 {
-            let offset = i as f64 * 0.01;
+            let _offset = i as f64 * 0.01;
             let trace = EyeTrace::new(
                 vec![0.0, 0.5, 1.0, 1.5, 2.0],
                 vec![-0.4, 0.0, 0.4, 0.0, -0.4],
@@ -791,7 +791,7 @@ mod tests {
             for s in 0..samples_per_bit {
                 let t =
                     (bit_idx * samples_per_bit + s) as f64 * bit_period / samples_per_bit as f64;
-                let phase = s as f64 / samples_per_bit as f64;
+                let _phase = s as f64 / samples_per_bit as f64;
 
                 // Add simple transition shape
                 let v = if bit == 1 { 0.35 } else { -0.35 };

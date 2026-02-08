@@ -120,7 +120,7 @@ fn avg(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     check_arg_count("avg", &args, 1)?;
     match &args[0] {
         CalcValue::Scalar(s) => Ok(CalcValue::Scalar(*s)),
-        CalcValue::Waveform(x, y) => {
+        CalcValue::Waveform(_x, y) => {
             if y.is_empty() {
                 return Ok(CalcValue::Scalar(0.0));
             }
@@ -135,7 +135,7 @@ fn rms(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     check_arg_count("rms", &args, 1)?;
     match &args[0] {
         CalcValue::Scalar(s) => Ok(CalcValue::Scalar(*s)), // RMS of DC is DC
-        CalcValue::Waveform(x, y) => {
+        CalcValue::Waveform(_x, y) => {
             if y.is_empty() {
                 return Ok(CalcValue::Scalar(0.0));
             }
@@ -182,7 +182,7 @@ fn deriv(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
 fn integ(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     check_arg_count("integ", &args, 1)?;
     match &args[0] {
-        CalcValue::Scalar(s) => Err(EvaluationError::MathError(
+        CalcValue::Scalar(_s) => Err(EvaluationError::MathError(
             "Cannot integrate scalar without domain".into(),
         )),
         CalcValue::Waveform(x, y) => {

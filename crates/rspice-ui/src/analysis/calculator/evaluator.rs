@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn test_eval_vector_math() {
-        let ctx = MockContext::new();
+        let _ctx = MockContext::new();
         // [1,2] + [3,4] = [4,6]
         let v1 = CalcValue::create_waveform(vec![0.0, 1.0], vec![1.0, 2.0]);
         let v2 = CalcValue::create_waveform(vec![0.0, 1.0], vec![3.0, 4.0]);
@@ -245,7 +245,7 @@ mod tests {
         // Manual binary op call to test logic
         let res = apply_binary_op(BinaryOp::Add, v1, v2).unwrap();
         match res {
-            CalcValue::Waveform(x, y) => {
+            CalcValue::Waveform(_x, y) => {
                 assert_eq!(y, vec![4.0, 6.0]);
             }
             _ => panic!("Expected waveform"),
@@ -260,7 +260,7 @@ mod tests {
 
         let res = apply_binary_op(BinaryOp::Mul, v1, s).unwrap();
         match res {
-            CalcValue::Waveform(x, y) => {
+            CalcValue::Waveform(_x, y) => {
                 assert_eq!(y, vec![2.0, 4.0]);
             }
             _ => panic!("Expected waveform"),

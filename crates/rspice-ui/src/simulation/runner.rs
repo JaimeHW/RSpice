@@ -446,7 +446,7 @@ mod tests {
         thread::sleep(std::time::Duration::from_millis(10));
 
         // Check status is not idle (or completed if very fast)
-        let status = runner.status();
+        let _status = runner.status();
         // Progress status might be Idle if completed very quickly, so just check it ran
 
         // Cleanup
