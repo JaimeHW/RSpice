@@ -118,6 +118,84 @@ impl Engine {
             }
         }
 
+        // JFET stamps (3-terminal: include full 3x3 topology to support AC capacitances).
+        for jfet in &circuit.jfets {
+            let d = jfet.drain;
+            let g = jfet.gate;
+            let s = jfet.source;
+            for &row in &[d, g, s] {
+                for &col in &[d, g, s] {
+                    if row > 0 && col > 0 {
+                        triplets.push((row - 1, col - 1, 0.0));
+                    }
+                }
+            }
+        }
+
+        // Switch stamps.
+        // Voltage-controlled and current-controlled switches are linearized as:
+        //   I = g(control) * V(p,n)
+        // so topology must include not only the 2x2 main branch stamp but also
+        // control-variable coupling Jacobian columns.
+        for sw in &circuit.vswitches {
+            let p = sw.node_pos;
+            let n = sw.node_neg;
+            let cp = sw.ctrl_pos;
+            let cn = sw.ctrl_neg;
+            if p > 0 {
+                triplets.push((p - 1, p - 1, 0.0));
+            }
+            if p > 0 && n > 0 {
+                triplets.push((p - 1, n - 1, 0.0));
+            }
+            if n > 0 && p > 0 {
+                triplets.push((n - 1, p - 1, 0.0));
+            }
+            if n > 0 {
+                triplets.push((n - 1, n - 1, 0.0));
+            }
+
+            // Control coupling (rows p/n, columns cp/cn).
+            if p > 0 && cp > 0 {
+                triplets.push((p - 1, cp - 1, 0.0));
+            }
+            if p > 0 && cn > 0 {
+                triplets.push((p - 1, cn - 1, 0.0));
+            }
+            if n > 0 && cp > 0 {
+                triplets.push((n - 1, cp - 1, 0.0));
+            }
+            if n > 0 && cn > 0 {
+                triplets.push((n - 1, cn - 1, 0.0));
+            }
+        }
+        for sw in &circuit.iswitches {
+            let p = sw.node_pos;
+            let n = sw.node_neg;
+            if p > 0 {
+                triplets.push((p - 1, p - 1, 0.0));
+            }
+            if p > 0 && n > 0 {
+                triplets.push((p - 1, n - 1, 0.0));
+            }
+            if n > 0 && p > 0 {
+                triplets.push((n - 1, p - 1, 0.0));
+            }
+            if n > 0 {
+                triplets.push((n - 1, n - 1, 0.0));
+            }
+
+            // Control-branch coupling (rows p/n, column I(control_source)).
+            if let Some(cb) = sw.ctrl_branch {
+                if p > 0 && cb > 0 {
+                    triplets.push((p - 1, cb - 1, 0.0));
+                }
+                if n > 0 && cb > 0 {
+                    triplets.push((n - 1, cb - 1, 0.0));
+                }
+            }
+        }
+
         // Inductor stamps (branch variable like voltage source)
         for i in 0..circuit.inductors.len() {
             let np = circuit.inductors.node_pos[i];
@@ -183,6 +261,87 @@ impl Engine {
             }
             if nn > 0 && cn > 0 {
                 triplets.push((nn - 1, cn - 1, 0.0));
+            }
+        }
+
+        // CCCS stamps (output node equations depend on controlling branch current)
+        for i in 0..circuit.cccs.len() {
+            let np = circuit.cccs.node_pos[i];
+            let nn = circuit.cccs.node_neg[i];
+            let cb_ordinal = circuit.cccs.ctrl_branch[i];
+            if cb_ordinal == 0 {
+                continue;
+            }
+            let cb = circuit.get_branch_matrix_index(cb_ordinal);
+
+            if np > 0 {
+                triplets.push((np - 1, cb - 1, 0.0));
+            }
+            if nn > 0 {
+                triplets.push((nn - 1, cb - 1, 0.0));
+            }
+        }
+
+        // CCVS stamps (voltage-source branch equation plus controlling branch coupling)
+        for i in 0..circuit.ccvs.len() {
+            let np = circuit.ccvs.node_pos[i];
+            let nn = circuit.ccvs.node_neg[i];
+            let br_ordinal = circuit.ccvs.branch_indices[i];
+            let cb_ordinal = circuit.ccvs.ctrl_branch[i];
+            if br_ordinal == 0 || cb_ordinal == 0 {
+                continue;
+            }
+            let br = circuit.get_branch_matrix_index(br_ordinal);
+            let cb = circuit.get_branch_matrix_index(cb_ordinal);
+
+            if np > 0 {
+                triplets.push((br - 1, np - 1, 0.0));
+                triplets.push((np - 1, br - 1, 0.0));
+            }
+            if nn > 0 {
+                triplets.push((br - 1, nn - 1, 0.0));
+                triplets.push((nn - 1, br - 1, 0.0));
+            }
+            triplets.push((br - 1, cb - 1, 0.0));
+        }
+
+        // Transmission line ports (companion model uses two shunt conductances per line).
+        // Dynamic delayed-wave terms are injected on RHS during transient stamping.
+        for tl in &circuit.tlines {
+            for &(np, nn) in &[(tl.node1_pos, tl.node1_neg), (tl.node2_pos, tl.node2_neg)] {
+                if np > 0 {
+                    triplets.push((np - 1, np - 1, 0.0));
+                }
+                if np > 0 && nn > 0 {
+                    triplets.push((np - 1, nn - 1, 0.0));
+                }
+                if nn > 0 && np > 0 {
+                    triplets.push((nn - 1, np - 1, 0.0));
+                }
+                if nn > 0 {
+                    triplets.push((nn - 1, nn - 1, 0.0));
+                }
+            }
+
+            // Cross-port terms required by AC distributed-line Y-parameters.
+            let p1 = tl.node1_pos;
+            let n1 = tl.node1_neg;
+            let p2 = tl.node2_pos;
+            let n2 = tl.node2_neg;
+
+            for &(r, c) in &[
+                (p1, p2),
+                (p1, n2),
+                (n1, p2),
+                (n1, n2),
+                (p2, p1),
+                (p2, n1),
+                (n2, p1),
+                (n2, n1),
+            ] {
+                if r > 0 && c > 0 {
+                    triplets.push((r - 1, c - 1, 0.0));
+                }
             }
         }
 
