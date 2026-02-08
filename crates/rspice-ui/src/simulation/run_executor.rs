@@ -1009,18 +1009,224 @@ impl RunExecutor {
                     Err(e) => Err(e),
                 }
             }
-            AnalysisSpec::Tf => Err(
-                "TF analysis is not yet available: rspice-core does not expose a run_tf engine API"
-                    .to_string(),
-            ),
-            AnalysisSpec::Pac => Err(
-                "PAC analysis is not yet available: rspice-core does not expose a run_pac engine API"
-                    .to_string(),
-            ),
-            AnalysisSpec::Pnoise => Err(
-                "PNOISE analysis is not yet available: rspice-core does not expose a run_pnoise engine API"
-                    .to_string(),
-            ),
+            AnalysisSpec::Tf => {
+                let tf_result = simulation_runner::run_tf_analysis(netlist);
+                match tf_result {
+                    Ok(data) => {
+                        let mut waveforms = vec![MappedWaveform::complex_ac(
+                            format!("H({}/{})", data.output_label, data.input_source),
+                            data.frequencies.clone(),
+                            data.transfer.iter().map(|value| value.re).collect(),
+                            data.transfer.iter().map(|value| value.im).collect(),
+                        )];
+
+                        waveforms.push(MappedWaveform {
+                            name: format!("|H({}/{})| dB", data.output_label, data.input_source),
+                            x: data.frequencies.clone(),
+                            y: data.magnitude_db.clone(),
+                            x_label: "Frequency".to_string(),
+                            y_label: "Magnitude".to_string(),
+                            x_unit: "Hz".to_string(),
+                            y_unit: "dB".to_string(),
+                            is_complex: false,
+                            y_imag: None,
+                        });
+
+                        waveforms.push(MappedWaveform {
+                            name: format!("Phase(H({}/{}))", data.output_label, data.input_source),
+                            x: data.frequencies.clone(),
+                            y: data.phase_deg.clone(),
+                            x_label: "Frequency".to_string(),
+                            y_label: "Phase".to_string(),
+                            x_unit: "Hz".to_string(),
+                            y_unit: "deg".to_string(),
+                            is_complex: false,
+                            y_imag: None,
+                        });
+
+                        if let Some(group_delay) = data.group_delay {
+                            let (x, y): (Vec<f64>, Vec<f64>) = group_delay.into_iter().unzip();
+                            waveforms.push(MappedWaveform {
+                                name: format!("GroupDelay({})", data.output_label),
+                                x,
+                                y,
+                                x_label: "Frequency".to_string(),
+                                y_label: "Group Delay".to_string(),
+                                x_unit: "Hz".to_string(),
+                                y_unit: "s".to_string(),
+                                is_complex: false,
+                                y_imag: None,
+                            });
+                        }
+
+                        if let Some(zin) = data.input_impedance {
+                            waveforms.push(MappedWaveform::complex_ac(
+                                format!("Zin({})", data.input_source),
+                                data.frequencies.clone(),
+                                zin.iter().map(|value| value.re).collect(),
+                                zin.iter().map(|value| value.im).collect(),
+                            ));
+                        }
+
+                        if let Some(zout) = data.output_impedance {
+                            waveforms.push(MappedWaveform::complex_ac(
+                                format!("Zout({})", data.output_label),
+                                data.frequencies.clone(),
+                                zout.iter().map(|value| value.re).collect(),
+                                zout.iter().map(|value| value.im).collect(),
+                            ));
+                        }
+
+                        let mut measurements = Vec::new();
+                        if let Some(dc_gain) = data.dc_gain {
+                            measurements.push(MappedMeasurement {
+                                name: "dc_gain".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: dc_gain,
+                                unit: "V/V".to_string(),
+                                signal: data.output_label.clone(),
+                                status: MeasurementStatus::Success,
+                            });
+                            measurements.push(MappedMeasurement {
+                                name: "dc_gain_db".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: 20.0 * dc_gain.max(1e-30).log10(),
+                                unit: "dB".to_string(),
+                                signal: data.output_label.clone(),
+                                status: MeasurementStatus::Success,
+                            });
+                        }
+
+                        Ok(MappedResult {
+                            analysis_type: MappedAnalysisType::Tf,
+                            status: ResultStatus::Success,
+                            waveforms,
+                            measurements,
+                            ..Default::default()
+                        })
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            AnalysisSpec::Pac => {
+                let pac_result = simulation_runner::run_pac_analysis_auto(netlist);
+                match pac_result {
+                    Ok(data) => {
+                        let waveforms = data
+                            .spectra
+                            .into_iter()
+                            .map(|(name, spectrum)| {
+                                let x: Vec<f64> = spectrum.iter().map(|(f, _, _)| *f).collect();
+                                let y: Vec<f64> = spectrum.iter().map(|(_, m, _)| *m).collect();
+                                MappedWaveform {
+                                    name,
+                                    x,
+                                    y,
+                                    x_label: "Frequency Offset".to_string(),
+                                    y_label: "Magnitude".to_string(),
+                                    x_unit: "Hz".to_string(),
+                                    y_unit: "V".to_string(),
+                                    is_complex: false,
+                                    y_imag: None,
+                                }
+                            })
+                            .collect();
+
+                        Ok(MappedResult {
+                            analysis_type: MappedAnalysisType::Pac,
+                            status: ResultStatus::Success,
+                            waveforms,
+                            measurements: vec![MappedMeasurement {
+                                name: "num_sidebands".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.sidebands.len() as f64,
+                                unit: "count".to_string(),
+                                signal: "pac".to_string(),
+                                status: MeasurementStatus::Success,
+                            }],
+                            ..Default::default()
+                        })
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            AnalysisSpec::Pnoise => {
+                let pnoise_result = simulation_runner::run_pnoise_analysis(netlist);
+                match pnoise_result {
+                    Ok(data) => {
+                        let y_label = match data.reference {
+                            crate::services::simulation_runner::PnoiseReference::Phase => {
+                                "Phase Noise"
+                            }
+                            crate::services::simulation_runner::PnoiseReference::Input => {
+                                "Input-Referred Noise"
+                            }
+                            crate::services::simulation_runner::PnoiseReference::Output => {
+                                "Output-Referred Noise"
+                            }
+                        };
+                        let y_unit = match data.reference {
+                            crate::services::simulation_runner::PnoiseReference::Phase => "dBc/Hz",
+                            _ => "V^2/Hz",
+                        };
+
+                        let mut measurements = vec![
+                            MappedMeasurement {
+                                name: "carrier_frequency".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.carrier_frequency,
+                                unit: "Hz".to_string(),
+                                signal: "pnoise".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                            MappedMeasurement {
+                                name: "sideband_factor".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.sideband_factor as f64,
+                                unit: "x".to_string(),
+                                signal: "pnoise".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                        ];
+                        if let Some(total) = data.total_output_noise {
+                            measurements.push(MappedMeasurement {
+                                name: "integrated_noise".to_string(),
+                                meas_type: MeasurementType::Rms,
+                                value: total,
+                                unit: "Vrms".to_string(),
+                                signal: "pnoise".to_string(),
+                                status: MeasurementStatus::Success,
+                            });
+                        }
+
+                        let status = if data.warnings.is_empty() {
+                            ResultStatus::Success
+                        } else {
+                            ResultStatus::Warning
+                        };
+
+                        Ok(MappedResult {
+                            analysis_type: MappedAnalysisType::Pnoise,
+                            status,
+                            waveforms: vec![MappedWaveform {
+                                name: "pnoise".to_string(),
+                                x: data.frequencies,
+                                y: data.output_noise,
+                                x_label: "Frequency Offset".to_string(),
+                                y_label: y_label.to_string(),
+                                x_unit: "Hz".to_string(),
+                                y_unit: y_unit.to_string(),
+                                is_complex: false,
+                                y_imag: None,
+                            }],
+                            measurements,
+                            warnings: data.warnings,
+                            ..Default::default()
+                        })
+                    }
+                    Err(e) => Err(e),
+                }
+            }
         }
     }
 
@@ -1703,5 +1909,81 @@ mod tests {
         let results = executor.execute_corners(&base_queue, &corners);
         assert_eq!(results.len(), 1);
         assert!(results.contains_key("tt"));
+    }
+
+    #[test]
+    fn test_tf_analysis_with_spec_is_executed() {
+        let executor = RunExecutor::new();
+        let mut queue =
+            RunQueue::new().with_netlist("* tf\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n");
+        queue.add_analysis(AnalysisSpec::Tf);
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.total_runs, 1);
+        assert!(
+            result.errors.is_empty(),
+            "expected TF run to succeed, got errors: {:?}",
+            result.errors
+        );
+
+        let mapped = result
+            .results
+            .values()
+            .next()
+            .expect("expected mapped TF result");
+        assert_eq!(mapped.analysis_type, MappedAnalysisType::Tf);
+        assert!(
+            mapped.waveforms.iter().any(|wf| wf.name.starts_with("H(")),
+            "expected transfer-function waveform"
+        );
+    }
+
+    #[test]
+    fn test_pac_analysis_with_spec_is_executed() {
+        let executor = RunExecutor::new();
+        let mut queue =
+            RunQueue::new().with_netlist("* pac\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n");
+        queue.add_analysis(AnalysisSpec::Pac);
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.total_runs, 1);
+        assert!(
+            result.errors.is_empty(),
+            "expected PAC run to succeed, got errors: {:?}",
+            result.errors
+        );
+
+        let mapped = result
+            .results
+            .values()
+            .next()
+            .expect("expected mapped PAC result");
+        assert_eq!(mapped.analysis_type, MappedAnalysisType::Pac);
+        assert!(!mapped.waveforms.is_empty(), "expected PAC spectra");
+    }
+
+    #[test]
+    fn test_pnoise_analysis_with_spec_is_executed() {
+        let executor = RunExecutor::new();
+        let mut queue =
+            RunQueue::new().with_netlist("* pnoise\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n");
+        queue.add_analysis(AnalysisSpec::Pnoise);
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.total_runs, 1);
+        assert!(
+            result.errors.is_empty(),
+            "expected PNOISE run to succeed, got errors: {:?}",
+            result.errors
+        );
+
+        let mapped = result
+            .results
+            .values()
+            .next()
+            .expect("expected mapped PNOISE result");
+        assert_eq!(mapped.analysis_type, MappedAnalysisType::Pnoise);
+        assert_eq!(mapped.waveforms.len(), 1);
+        assert_eq!(mapped.waveforms[0].x.len(), mapped.waveforms[0].y.len());
     }
 }
