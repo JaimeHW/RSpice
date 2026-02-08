@@ -726,16 +726,281 @@ impl RunExecutor {
                     Err(e) => Err(e),
                 }
             }
-            // Remaining analyses are intentionally explicit until implementation exists.
-            AnalysisSpec::Tf
-            | AnalysisSpec::Pac
-            | AnalysisSpec::Pnoise
-            | AnalysisSpec::MonteCarlo
-            | AnalysisSpec::Parametric
-            | AnalysisSpec::Corner => Err(format!(
-                "{:?} execution is not implemented in RunExecutor yet",
-                spec.run_type()
-            )),
+            AnalysisSpec::MonteCarlo => {
+                let mc_result = simulation_runner::run_monte_carlo_analysis(netlist);
+                match mc_result {
+                    Ok(data) => {
+                        let mut measurements = vec![
+                            MappedMeasurement {
+                                name: "runs_requested".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.runs_requested as f64,
+                                unit: "count".to_string(),
+                                signal: "monte_carlo".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                            MappedMeasurement {
+                                name: "runs_completed".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.runs_completed as f64,
+                                unit: "count".to_string(),
+                                signal: "monte_carlo".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                            MappedMeasurement {
+                                name: "runs_failed".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.num_failures as f64,
+                                unit: "count".to_string(),
+                                signal: "monte_carlo".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                        ];
+
+                        let variable_unit = |name: &str| {
+                            if name.starts_with("V(") {
+                                "V"
+                            } else if name.starts_with("I(") {
+                                "A"
+                            } else {
+                                "unit"
+                            }
+                        };
+
+                        measurements.extend(data.variables.iter().flat_map(|var| {
+                            let unit = variable_unit(&var.name).to_string();
+                            [
+                                MappedMeasurement {
+                                    name: format!("mean({})", var.name),
+                                    meas_type: MeasurementType::Custom,
+                                    value: var.mean,
+                                    unit: unit.clone(),
+                                    signal: var.name.clone(),
+                                    status: MeasurementStatus::Success,
+                                },
+                                MappedMeasurement {
+                                    name: format!("stddev({})", var.name),
+                                    meas_type: MeasurementType::Custom,
+                                    value: var.std_dev,
+                                    unit: unit.clone(),
+                                    signal: var.name.clone(),
+                                    status: MeasurementStatus::Success,
+                                },
+                                MappedMeasurement {
+                                    name: format!("min({})", var.name),
+                                    meas_type: MeasurementType::Custom,
+                                    value: var.min,
+                                    unit: unit.clone(),
+                                    signal: var.name.clone(),
+                                    status: MeasurementStatus::Success,
+                                },
+                                MappedMeasurement {
+                                    name: format!("max({})", var.name),
+                                    meas_type: MeasurementType::Custom,
+                                    value: var.max,
+                                    unit,
+                                    signal: var.name.clone(),
+                                    status: MeasurementStatus::Success,
+                                },
+                            ]
+                        }));
+
+                        let waveforms = data
+                            .variables
+                            .iter()
+                            .filter_map(|var| {
+                                if var.histogram.is_empty() || var.bin_edges.len() < 2 {
+                                    return None;
+                                }
+                                let x: Vec<f64> = var
+                                    .bin_edges
+                                    .windows(2)
+                                    .map(|window| (window[0] + window[1]) * 0.5)
+                                    .collect();
+                                let y: Vec<f64> =
+                                    var.histogram.iter().map(|count| *count as f64).collect();
+                                Some(MappedWaveform {
+                                    name: format!("hist({})", var.name),
+                                    x,
+                                    y,
+                                    x_label: "Value".to_string(),
+                                    y_label: "Count".to_string(),
+                                    y_unit: "count".to_string(),
+                                    ..Default::default()
+                                })
+                            })
+                            .collect();
+
+                        let mut warnings = Vec::new();
+                        if data.num_failures > 0 {
+                            warnings.push(format!(
+                                "Monte Carlo converged on {}/{} runs ({} failed)",
+                                data.runs_completed, data.runs_requested, data.num_failures
+                            ));
+                        }
+                        if !data.all_converged && data.num_failures == 0 {
+                            warnings.push(
+                                "Monte Carlo reported non-convergence despite zero explicit failures"
+                                    .to_string(),
+                            );
+                        }
+
+                        let status = if warnings.is_empty() {
+                            ResultStatus::Success
+                        } else {
+                            ResultStatus::Warning
+                        };
+
+                        Ok(MappedResult {
+                            analysis_type: MappedAnalysisType::MonteCarlo,
+                            status,
+                            waveforms,
+                            measurements,
+                            warnings,
+                            ..Default::default()
+                        })
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            AnalysisSpec::Parametric => {
+                let param_result = simulation_runner::run_parametric_analysis(netlist);
+                match param_result {
+                    Ok(data) => {
+                        let sweep_values = data.sweep_values;
+                        let waveforms = data
+                            .voltages
+                            .into_iter()
+                            .map(|(name, values)| MappedWaveform {
+                                name,
+                                x: sweep_values.clone(),
+                                y: values.into_iter().collect(),
+                                x_label: data.target.clone(),
+                                y_label: "Voltage".to_string(),
+                                y_unit: "V".to_string(),
+                                ..Default::default()
+                            })
+                            .collect();
+
+                        let warnings = if data.num_failures > 0 {
+                            vec![format!(
+                                "Parametric sweep completed with {} failed points",
+                                data.num_failures
+                            )]
+                        } else {
+                            Vec::new()
+                        };
+
+                        let status = if warnings.is_empty() {
+                            ResultStatus::Success
+                        } else {
+                            ResultStatus::Warning
+                        };
+
+                        Ok(MappedResult {
+                            analysis_type: MappedAnalysisType::Parametric,
+                            status,
+                            waveforms,
+                            measurements: vec![
+                                MappedMeasurement {
+                                    name: "sweep_points".to_string(),
+                                    meas_type: MeasurementType::Custom,
+                                    value: data.num_points as f64,
+                                    unit: "count".to_string(),
+                                    signal: "parametric".to_string(),
+                                    status: MeasurementStatus::Success,
+                                },
+                                MappedMeasurement {
+                                    name: "failed_points".to_string(),
+                                    meas_type: MeasurementType::Custom,
+                                    value: data.num_failures as f64,
+                                    unit: "count".to_string(),
+                                    signal: "parametric".to_string(),
+                                    status: MeasurementStatus::Success,
+                                },
+                            ],
+                            warnings,
+                            ..Default::default()
+                        })
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            AnalysisSpec::Corner => {
+                let corner_result = simulation_runner::run_corner_analysis(netlist);
+                match corner_result {
+                    Ok(data) => {
+                        let temperatures = data.temperatures_c;
+                        let waveforms = data
+                            .voltages
+                            .into_iter()
+                            .map(|(name, values)| MappedWaveform {
+                                name,
+                                x: temperatures.clone(),
+                                y: values.into_iter().collect(),
+                                x_label: "Temperature".to_string(),
+                                x_unit: "C".to_string(),
+                                y_label: "Voltage".to_string(),
+                                y_unit: "V".to_string(),
+                                ..Default::default()
+                            })
+                            .collect();
+
+                        let warnings = if data.num_failures > 0 {
+                            vec![format!(
+                                "Corner sweep completed with {} failed corners",
+                                data.num_failures
+                            )]
+                        } else {
+                            Vec::new()
+                        };
+                        let status = if warnings.is_empty() {
+                            ResultStatus::Success
+                        } else {
+                            ResultStatus::Warning
+                        };
+
+                        Ok(MappedResult {
+                            analysis_type: MappedAnalysisType::Corner,
+                            status,
+                            waveforms,
+                            measurements: vec![
+                                MappedMeasurement {
+                                    name: "corner_points".to_string(),
+                                    meas_type: MeasurementType::Custom,
+                                    value: data.num_points as f64,
+                                    unit: "count".to_string(),
+                                    signal: "corner".to_string(),
+                                    status: MeasurementStatus::Success,
+                                },
+                                MappedMeasurement {
+                                    name: "failed_corners".to_string(),
+                                    meas_type: MeasurementType::Custom,
+                                    value: data.num_failures as f64,
+                                    unit: "count".to_string(),
+                                    signal: "corner".to_string(),
+                                    status: MeasurementStatus::Success,
+                                },
+                            ],
+                            warnings,
+                            ..Default::default()
+                        })
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            AnalysisSpec::Tf => Err(
+                "TF analysis is not yet available: rspice-core does not expose a run_tf engine API"
+                    .to_string(),
+            ),
+            AnalysisSpec::Pac => Err(
+                "PAC analysis is not yet available: rspice-core does not expose a run_pac engine API"
+                    .to_string(),
+            ),
+            AnalysisSpec::Pnoise => Err(
+                "PNOISE analysis is not yet available: rspice-core does not expose a run_pnoise engine API"
+                    .to_string(),
+            ),
         }
     }
 
@@ -1272,6 +1537,137 @@ mod tests {
                 "ac sensitivity should execute via service runner"
             );
         }
+    }
+
+    #[test]
+    fn test_monte_carlo_analysis_with_spec_is_executed() {
+        let executor = RunExecutor::new();
+        let mut queue = RunQueue::new().with_netlist(
+            "* mc\n.param RVAL=1k\nV1 in 0 1\nR1 in out {RVAL}\nR2 out 0 1k\n.MC 8 SEED 7 DIST GAUSS SPREAD 0.02 PARAMS RVAL\n.end\n",
+        );
+        queue.add_analysis(AnalysisSpec::MonteCarlo);
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.total_runs, 1);
+        assert!(
+            result.errors.is_empty(),
+            "expected Monte Carlo run to succeed, got errors: {:?}",
+            result.errors
+        );
+
+        let mapped = result
+            .results
+            .values()
+            .next()
+            .expect("expected mapped Monte Carlo result");
+        assert_eq!(mapped.analysis_type, MappedAnalysisType::MonteCarlo);
+        assert!(
+            mapped
+                .measurements
+                .iter()
+                .any(|m| m.name == "runs_requested" && (m.value - 8.0).abs() < 1e-12),
+            "expected runs_requested measurement"
+        );
+    }
+
+    #[test]
+    fn test_monte_carlo_analysis_requires_mc_command() {
+        let executor = RunExecutor::new();
+        let mut queue = RunQueue::new().with_netlist("* no mc\nV1 in 0 1\nR1 in 0 1k\n");
+        queue.add_analysis(AnalysisSpec::MonteCarlo);
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.failed_runs, 1);
+        let err = result
+            .errors
+            .values()
+            .next()
+            .expect("expected Monte Carlo configuration error");
+        assert!(err.contains(".MC command"));
+    }
+
+    #[test]
+    fn test_parametric_analysis_with_spec_is_executed() {
+        let executor = RunExecutor::new();
+        let mut queue = RunQueue::new().with_netlist(
+            "* step\n.param RVAL=1k\nV1 in 0 1\nR1 in out {RVAL}\nR2 out 0 1k\n.STEP PARAM RVAL 1k 4k 1k\n.end\n",
+        );
+        queue.add_analysis(AnalysisSpec::Parametric);
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.total_runs, 1);
+        assert!(
+            result.errors.is_empty(),
+            "expected parametric run to succeed, got errors: {:?}",
+            result.errors
+        );
+
+        let mapped = result
+            .results
+            .values()
+            .next()
+            .expect("expected mapped parametric result");
+        assert_eq!(mapped.analysis_type, MappedAnalysisType::Parametric);
+        assert!(!mapped.waveforms.is_empty(), "expected stepped waveforms");
+        assert_eq!(mapped.waveforms[0].x.len(), 4);
+    }
+
+    #[test]
+    fn test_parametric_analysis_requires_step_command() {
+        let executor = RunExecutor::new();
+        let mut queue = RunQueue::new().with_netlist("* no step\nV1 in 0 1\nR1 in 0 1k\n");
+        queue.add_analysis(AnalysisSpec::Parametric);
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.failed_runs, 1);
+        let err = result
+            .errors
+            .values()
+            .next()
+            .expect("expected parametric configuration error");
+        assert!(err.contains(".STEP command"));
+    }
+
+    #[test]
+    fn test_corner_analysis_with_temp_command_is_executed() {
+        let executor = RunExecutor::new();
+        let mut queue = RunQueue::new().with_netlist(
+            "* corner\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.TEMP -40 27 125\n.end\n",
+        );
+        queue.add_analysis(AnalysisSpec::Corner);
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.total_runs, 1);
+        assert!(
+            result.errors.is_empty(),
+            "expected corner run to succeed, got errors: {:?}",
+            result.errors
+        );
+
+        let mapped = result
+            .results
+            .values()
+            .next()
+            .expect("expected mapped corner result");
+        assert_eq!(mapped.analysis_type, MappedAnalysisType::Corner);
+        assert!(!mapped.waveforms.is_empty(), "expected corner waveforms");
+        assert_eq!(mapped.waveforms[0].x.len(), 3);
+    }
+
+    #[test]
+    fn test_corner_analysis_requires_temp_command() {
+        let executor = RunExecutor::new();
+        let mut queue = RunQueue::new().with_netlist("* no temp\nV1 in 0 1\nR1 in 0 1k\n");
+        queue.add_analysis(AnalysisSpec::Corner);
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.failed_runs, 1);
+        let err = result
+            .errors
+            .values()
+            .next()
+            .expect("expected corner configuration error");
+        assert!(err.contains(".TEMP"));
     }
 
     #[test]
