@@ -910,7 +910,7 @@ impl EngineBridge {
         }
 
         if let Ok(idx) = trimmed.parse::<usize>() {
-            return Some(idx);
+            return (idx < node_names.len()).then_some(idx);
         }
 
         let upper = trimmed.to_ascii_uppercase();
@@ -929,11 +929,23 @@ impl EngineBridge {
                 let v_pos = if vspec.pos == 0 {
                     0.0
                 } else {
-                    dc_result.node_voltages.get(vspec.pos).copied().unwrap_or(0.0)
+                    dc_result.node_voltages.get(vspec.pos).copied().ok_or_else(|| {
+                        SimulationError::InvalidConfig(format!(
+                            "Voltage output node index {} is out of range ({} available)",
+                            vspec.pos,
+                            dc_result.node_voltages.len()
+                        ))
+                    })?
                 };
                 let v_neg = match vspec.neg {
                     Some(0) => 0.0,
-                    Some(idx) => dc_result.node_voltages.get(idx).copied().unwrap_or(0.0),
+                    Some(idx) => dc_result.node_voltages.get(idx).copied().ok_or_else(|| {
+                        SimulationError::InvalidConfig(format!(
+                            "Voltage reference node index {} is out of range ({} available)",
+                            idx,
+                            dc_result.node_voltages.len()
+                        ))
+                    })?,
                     None => 0.0,
                 };
                 Ok(v_pos - v_neg)
@@ -971,7 +983,13 @@ impl EngineBridge {
                         .voltages
                         .get(vspec.pos.saturating_sub(1))
                         .copied()
-                        .unwrap_or_else(|| Complex64::new(0.0, 0.0))
+                        .ok_or_else(|| {
+                            SimulationError::InvalidConfig(format!(
+                                "AC voltage output node index {} is out of range ({} available)",
+                                vspec.pos,
+                                ac_result.voltages.len()
+                            ))
+                        })?
                 };
                 let v_neg = match vspec.neg {
                     Some(0) => Complex64::new(0.0, 0.0),
@@ -979,7 +997,13 @@ impl EngineBridge {
                         .voltages
                         .get(idx.saturating_sub(1))
                         .copied()
-                        .unwrap_or_else(|| Complex64::new(0.0, 0.0)),
+                        .ok_or_else(|| {
+                            SimulationError::InvalidConfig(format!(
+                                "AC voltage reference node index {} is out of range ({} available)",
+                                idx,
+                                ac_result.voltages.len()
+                            ))
+                        })?,
                     None => Complex64::new(0.0, 0.0),
                 };
                 Ok(v_pos - v_neg)
@@ -1663,6 +1687,32 @@ R2 out 0 1k
 
         let cfg = AnalysisConfig::Sensitivity(super::super::config::SensitivityConfig {
             output_var: "I(NO_SUCH_BRANCH)".to_string(),
+            ac_mode: false,
+            frequency: None,
+        });
+
+        let err = bridge
+            .run(&cfg, netlist)
+            .expect_err("expected unresolved output error");
+        assert!(err
+            .to_string()
+            .contains("could not be resolved to a node or branch"));
+    }
+
+    #[test]
+    fn test_run_sensitivity_rejects_out_of_range_numeric_output_index() {
+        let bridge = EngineBridge::new();
+        let netlist = r#"
+* Sensitivity parameterized divider
+.param RVAL=1k
+V1 in 0 DC 10
+R1 in out {RVAL}
+R2 out 0 1k
+.end
+"#;
+
+        let cfg = AnalysisConfig::Sensitivity(super::super::config::SensitivityConfig {
+            output_var: "99".to_string(),
             ac_mode: false,
             frequency: None,
         });
