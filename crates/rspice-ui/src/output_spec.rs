@@ -50,6 +50,66 @@ pub(crate) fn sensitivity_raw_unit(output_var: &str) -> &'static str {
     }
 }
 
+pub(crate) const SENSITIVITY_RELATIVE_PERTURBATION: Value = 0.01;
+pub(crate) const SENSITIVITY_MIN_DELTA: Value = 1e-12;
+pub(crate) const SENSITIVITY_NORMALIZATION_EPSILON: Value = 1e-15;
+
+#[inline]
+pub(crate) fn sensitivity_delta(param_value: Value) -> Value {
+    (param_value.abs() * SENSITIVITY_RELATIVE_PERTURBATION).max(SENSITIVITY_MIN_DELTA)
+}
+
+pub(crate) fn finite_difference_derivative<F>(
+    param_value: Value,
+    mut evaluate_output: F,
+) -> Result<Value, String>
+where
+    F: FnMut(Value) -> Result<Value, String>,
+{
+    if !param_value.is_finite() {
+        return Err("Sensitivity parameter value must be finite".to_string());
+    }
+
+    let delta = sensitivity_delta(param_value);
+    let plus = evaluate_output(param_value + delta)?;
+    let minus = evaluate_output(param_value - delta)?;
+    if !plus.is_finite() || !minus.is_finite() {
+        return Err("Sensitivity perturbation produced non-finite outputs".to_string());
+    }
+
+    let derivative = (plus - minus) / (2.0 * delta);
+    if !derivative.is_finite() {
+        return Err("Sensitivity finite-difference derivative is non-finite".to_string());
+    }
+    Ok(derivative)
+}
+
+#[inline]
+pub(crate) fn normalized_sensitivity(
+    raw_sensitivity: Value,
+    param_value: Value,
+    nominal_output: Value,
+) -> Value {
+    if nominal_output.abs() > SENSITIVITY_NORMALIZATION_EPSILON {
+        (param_value / nominal_output) * raw_sensitivity
+    } else {
+        0.0
+    }
+}
+
+pub(crate) fn collect_sensitivity_parameters(netlist: &rspice_core::Netlist) -> Vec<(String, Value)> {
+    let mut params: Vec<(String, Value)> = netlist
+        .params
+        .all_params()
+        .into_iter()
+        .filter(|(name, value)| {
+            value.is_finite() && !name.starts_with("IC_") && !name.starts_with("NODESET_")
+        })
+        .collect();
+    params.sort_by(|a, b| a.0.cmp(&b.0));
+    params
+}
+
 #[inline]
 fn is_ground_node(name: &str) -> bool {
     matches!(
@@ -386,6 +446,49 @@ mod tests {
         assert_eq!(sensitivity_raw_unit(" i(v1) "), "A/unit");
         assert_eq!(sensitivity_raw_unit("V(out)"), "V/unit");
         assert_eq!(sensitivity_raw_unit("out"), "V/unit");
+    }
+
+    #[test]
+    fn test_sensitivity_delta_helper() {
+        assert!((sensitivity_delta(100.0) - 1.0).abs() < 1e-15);
+        assert!((sensitivity_delta(-50.0) - 0.5).abs() < 1e-15);
+        assert!((sensitivity_delta(1e-30) - SENSITIVITY_MIN_DELTA).abs() < 1e-30);
+    }
+
+    #[test]
+    fn test_finite_difference_derivative_helper() {
+        let derivative = finite_difference_derivative(2.0, |x| Ok(x * x))
+            .expect("finite difference derivative should succeed");
+        assert!((derivative - 4.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_finite_difference_derivative_reports_callback_error() {
+        let err = finite_difference_derivative(2.0, |_x| Err("callback failed".to_string()))
+            .expect_err("callback errors should propagate");
+        assert!(err.contains("callback failed"));
+    }
+
+    #[test]
+    fn test_normalized_sensitivity_helper() {
+        let normalized = normalized_sensitivity(2.0, 4.0, 8.0);
+        assert!((normalized - 1.0).abs() < 1e-15);
+
+        let suppressed = normalized_sensitivity(2.0, 4.0, 1e-18);
+        assert_eq!(suppressed, 0.0);
+    }
+
+    #[test]
+    fn test_collect_sensitivity_parameters_filters_and_sorts() {
+        let netlist = rspice_core::netlist::parse_netlist(
+            "* sens params\n.param Z=3\n.param A=1\n.param M=2\nV1 in 0 1\nR1 in out {A}\nR2 out 0 {Z}\n.IC V(out)=0.1\n.NODESET V(in)=0.2\n",
+        )
+        .expect("netlist should parse");
+
+        let params = collect_sensitivity_parameters(&netlist);
+        let names: Vec<String> = params.into_iter().map(|(name, _)| name).collect();
+
+        assert_eq!(names, vec!["A".to_string(), "M".to_string(), "Z".to_string()]);
     }
 
     #[test]
