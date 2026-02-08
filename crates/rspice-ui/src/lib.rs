@@ -79,6 +79,9 @@ pub mod ui;
 /// Utility functions and helpers
 pub mod utils;
 
+/// Shared output specification helpers for analysis/sensitivity paths
+pub(crate) mod output_spec;
+
 // =============================================================================
 // Re-exports
 // =============================================================================
