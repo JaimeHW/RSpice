@@ -761,6 +761,10 @@ pub struct SimulationOptions {
     pub abstol: Option<Value>,
     /// Absolute voltage tolerance (default: 1e-6 V)
     pub vntol: Option<Value>,
+    /// Absolute current tolerance for residual checks (default: 1e-12 A)
+    pub iabstol: Option<Value>,
+    /// Relative residual tolerance for equation convergence checks (default: RELTOL)
+    pub residual_reltol: Option<Value>,
     /// Minimum conductance (default: 1e-12 S)
     pub gmin: Option<Value>,
     /// Integration method: "TRAP", "GEAR", "TRAPGEAR"
@@ -801,6 +805,12 @@ impl SimulationOptions {
         }
         if other.vntol.is_some() {
             self.vntol = other.vntol;
+        }
+        if other.iabstol.is_some() {
+            self.iabstol = other.iabstol;
+        }
+        if other.residual_reltol.is_some() {
+            self.residual_reltol = other.residual_reltol;
         }
         if other.gmin.is_some() {
             self.gmin = other.gmin;

@@ -39,6 +39,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
     let mut params = ParamContext::new();
     let mut veriloga_includes = Vec::new();
     let mut measurements = Vec::new();
+    let mut options = super::SimulationOptions::default();
 
     // State for tracking subcircuit blocks
     let mut in_subcircuit = false;
@@ -79,6 +80,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
                 &mut current_subckt,
                 &mut params,
                 &mut measurements,
+                &mut options,
             )?;
             continuation.clear();
         }
@@ -122,6 +124,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
             &mut current_subckt,
             &mut params,
             &mut measurements,
+            &mut options,
         )?;
     }
 
@@ -146,7 +149,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
         initial_conditions,
         global_nodes: std::collections::HashSet::new(),
         measurements,
-        options: super::SimulationOptions::default(),
+        options,
         veriloga_includes,
         source_text: Some(input.to_string()),
     })
@@ -170,6 +173,7 @@ fn process_line(
     current_subckt: &mut Option<SubcircuitDef>,
     params: &mut ParamContext,
     measurements: &mut Vec<crate::analysis::MeasureStatement>,
+    options: &mut super::SimulationOptions,
 ) -> Result<(), ParseError> {
     let upper = line.to_uppercase();
 
@@ -212,6 +216,7 @@ fn process_line(
                 models,
                 &mut subckt_params,
                 &mut dummy_measurements,
+                options,
             )?;
             subckt.elements.extend(subckt_elements);
         }
@@ -227,6 +232,7 @@ fn process_line(
         models,
         params,
         measurements,
+        options,
     )
 }
 
@@ -238,6 +244,7 @@ fn parse_line(
     models: &mut Vec<ModelDef>,
     params: &mut ParamContext,
     measurements: &mut Vec<crate::analysis::MeasureStatement>,
+    options: &mut super::SimulationOptions,
 ) -> Result<(), ParseError> {
     // Tokenize the line
     let tokens = tokenize(line).map_err(|e| lex_to_parse_error(e, line_num))?;
@@ -270,6 +277,7 @@ fn parse_line(
             models,
             params,
             measurements,
+            options,
         ),
         'R' => parse_resistor(&mut stream, line_num, elements, params),
         'C' => parse_capacitor(&mut stream, line_num, elements, params),
@@ -320,6 +328,7 @@ fn parse_command(
     models: &mut Vec<ModelDef>,
     params: &mut ParamContext,
     measurements: &mut Vec<crate::analysis::MeasureStatement>,
+    options: &mut super::SimulationOptions,
 ) -> Result<(), ParseError> {
     let cmd = expect_ident(stream, line_num)?;
 
@@ -444,9 +453,7 @@ fn parse_command(
             parse_func_statement(stream, line_num, params)?;
         }
         ".OPTIONS" | ".OPTION" | ".OPT" => {
-            // .OPTIONS are parsed but stored in Netlist, not here
-            // Just consume the line - parsing happens at higher level
-            log::debug!(".OPTIONS found at line {}", line_num);
+            parse_options_command(stream, line_num, params, options)?;
         }
         ".MEAS" | ".MEASURE" => {
             // Parse measurement statement: .MEAS TRAN name TYPE signal [options]
@@ -461,6 +468,90 @@ fn parse_command(
     }
 
     Ok(())
+}
+
+fn parse_options_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    options: &mut super::SimulationOptions,
+) -> Result<(), ParseError> {
+    while !stream.is_eof() {
+        skip_commas(stream);
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
+        }
+
+        let key = expect_ident(stream, line_num)?;
+        let key_upper = key.to_uppercase();
+        let has_equals = stream.consume(&TokenKind::Equals);
+
+        match key_upper.as_str() {
+            "RELTOL" => options.reltol = Some(expect_value(stream, line_num, params)?),
+            "ABSTOL" => options.abstol = Some(expect_value(stream, line_num, params)?),
+            "VNTOL" => options.vntol = Some(expect_value(stream, line_num, params)?),
+            "IABSTOL" => options.iabstol = Some(expect_value(stream, line_num, params)?),
+            "RESIDUAL_RELTOL" | "RESRELTOL" => {
+                options.residual_reltol = Some(expect_value(stream, line_num, params)?)
+            }
+            "GMIN" => options.gmin = Some(expect_value(stream, line_num, params)?),
+            "TRTOL" => options.trtol = Some(expect_value(stream, line_num, params)?),
+            "CHGTOL" => options.chgtol = Some(expect_value(stream, line_num, params)?),
+            "PIVTOL" => options.pivtol = Some(expect_value(stream, line_num, params)?),
+            "TEMP" => options.temp = Some(expect_value(stream, line_num, params)?),
+            "TNOM" => options.tnom = Some(expect_value(stream, line_num, params)?),
+            "ITL1" => {
+                let value = expect_value(stream, line_num, params)?;
+                options.itl1 = Some(parse_usize_option("ITL1", value, line_num)?);
+            }
+            "ITL2" => {
+                let value = expect_value(stream, line_num, params)?;
+                options.itl2 = Some(parse_usize_option("ITL2", value, line_num)?);
+            }
+            "ITL4" => {
+                let value = expect_value(stream, line_num, params)?;
+                options.itl4 = Some(parse_usize_option("ITL4", value, line_num)?);
+            }
+            "ITL6" => {
+                let value = expect_value(stream, line_num, params)?;
+                options.itl6 = Some(parse_usize_option("ITL6", value, line_num)?);
+            }
+            "METHOD" => {
+                let method = expect_ident(stream, line_num)?;
+                options.method = Some(method.to_uppercase());
+            }
+            _ => {
+                // Unknown option: allow bare flags; consume value only when explicitly assigned.
+                if has_equals
+                    && try_value(stream, params).is_none()
+                    && matches!(stream.peek().kind, TokenKind::Ident(_))
+                {
+                    stream.advance();
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_usize_option(name: &str, value: Value, line_num: usize) -> Result<usize, ParseError> {
+    if !value.is_finite() || value < 0.0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("{} must be a non-negative integer, found {}", name, value),
+        });
+    }
+
+    let rounded = value.round();
+    if (value - rounded).abs() > 1e-9 || rounded > usize::MAX as Value {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("{} must be a non-negative integer, found {}", name, value),
+        });
+    }
+
+    Ok(rounded as usize)
 }
 
 /// Parse .MEAS/.MEASURE statement
@@ -2876,6 +2967,49 @@ V1 1 0 DC 5
         assert_eq!(result.title, "Simple RC Circuit");
         assert_eq!(result.elements.len(), 3);
         assert_eq!(result.analyses.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_options_tolerances_and_method() {
+        let netlist = r#"Options Test
+.OPTIONS RELTOL=2e-4 VNTOL=3e-6 ABSTOL=8e-13 IABSTOL=4e-12 RESIDUAL_RELTOL=5e-4 METHOD=GEAR ITL1=120 ITL4=9
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+
+        assert_eq!(result.options.reltol, Some(2e-4));
+        assert_eq!(result.options.vntol, Some(3e-6));
+        assert_eq!(result.options.abstol, Some(8e-13));
+        assert_eq!(result.options.iabstol, Some(4e-12));
+        assert_eq!(result.options.residual_reltol, Some(5e-4));
+        assert_eq!(result.options.method.as_deref(), Some("GEAR"));
+        assert_eq!(result.options.itl1, Some(120));
+        assert_eq!(result.options.itl4, Some(9));
+    }
+
+    #[test]
+    fn test_parse_options_continuation_and_merge() {
+        let netlist = r#"Options Merge Test
+.OPTIONS RELTOL=1e-3
++ IABSTOL=2e-12 RESRELTOL=7e-4
+.OPTIONS RELTOL=5e-4
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+
+        assert_eq!(result.options.reltol, Some(5e-4));
+        assert_eq!(result.options.iabstol, Some(2e-12));
+        assert_eq!(result.options.residual_reltol, Some(7e-4));
+    }
+
+    #[test]
+    fn test_parse_options_unknown_flag_does_not_consume_next_option() {
+        let netlist = r#"Options Unknown Flag Test
+.OPTIONS NOPAGE RELTOL=4e-4
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+        assert_eq!(result.options.reltol, Some(4e-4));
     }
 
     #[test]
