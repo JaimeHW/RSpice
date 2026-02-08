@@ -34,7 +34,7 @@
 
 ## Overview
 
-**RSpice** is a high-performance, general-purpose analog circuit simulator engineered for modern hardware. Built entirely in **Rust**, it replaces legacy SPICE limitations with a modern, parallelized architecture designed for massive multi-core scalability and cloud-native verification.
+**RSpice** is a high-performance, general-purpose analog and mixed-signal electronic circuit simulator engineered for modern hardware. Built entirely in **Rust**, it replaces legacy SPICE limitations with a modern, parallelized architecture designed for massive multi-core scalability and cloud-native verification.
 
 Bridging the gap between academic tools and commercial EDA, RSpice features a **JIT-compiled Verilog-A engine**, **RF-grade analysis**, and a **GPU-accelerated interface**, delivering the speed and accuracy required for complex mixed-signal, power, and RF design.
 
