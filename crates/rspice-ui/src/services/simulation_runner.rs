@@ -2482,6 +2482,8 @@ pub struct PstbData {
     pub probe_state_persistence_db: Value,
     /// Mode indices (1-based) for plotting.
     pub mode_indices: Vec<Value>,
+    /// Probe-local mode participation (normalized |v_i| contribution per mode).
+    pub probe_mode_participation: Vec<Value>,
     /// Floquet multiplier magnitudes.
     pub multiplier_magnitude: Vec<Value>,
     /// Floquet multiplier phases in degrees.
@@ -2496,6 +2498,10 @@ pub struct PstbData {
     pub dominant_multiplier_magnitude: Value,
     /// Global minimum stability margin in dB.
     pub min_stability_margin_db: Value,
+    /// Mode index (1-based) with largest probe participation.
+    pub dominant_probe_mode: usize,
+    /// Largest probe participation value across retained modes.
+    pub dominant_probe_mode_participation: Value,
     /// Number of unstable modes.
     pub num_unstable: usize,
     /// Stability classification string.
@@ -2637,6 +2643,28 @@ fn sanitize_finite(value: Value) -> Value {
     }
 }
 
+fn normalized_probe_participation(
+    eigenvector: Option<&Vec<num_complex::Complex64>>,
+    state_index: usize,
+) -> Value {
+    let Some(vector) = eigenvector else {
+        return 0.0;
+    };
+    let Some(component) = vector.get(state_index) else {
+        return 0.0;
+    };
+    let denom = vector.iter().map(|v| v.norm_sqr()).sum::<Value>().sqrt();
+    if !denom.is_finite() || denom <= 1e-30 {
+        return 0.0;
+    }
+    let ratio = component.norm() / denom;
+    if ratio.is_finite() {
+        ratio.clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
 /// Run PSTB analysis using a PSS operating point and monodromy-based Floquet analysis.
 pub fn run_pstb_analysis_with_config(
     netlist_text: &str,
@@ -2699,6 +2727,7 @@ pub fn run_pstb_analysis_with_config(
 
     let pstb_config = PstbConfig::new()
         .with_num_eigenvalues(config.num_multipliers)
+        .with_eigenvectors(true)
         .with_tolerance(config.eigenvalue_tolerance)
         .with_stability_threshold(config.stability_threshold)
         .with_subharmonic_detection(config.detect_subharmonics);
@@ -2706,6 +2735,7 @@ pub fn run_pstb_analysis_with_config(
     let pstb_result = analyzer.analyze_monodromy(&pss_result.monodromy, pss_result.period);
 
     let mut mode_indices = Vec::new();
+    let mut probe_mode_participation = Vec::new();
     let mut multiplier_magnitude = Vec::new();
     let mut multiplier_phase_deg = Vec::new();
     let mut mode_damping = Vec::new();
@@ -2719,6 +2749,10 @@ pub fn run_pstb_analysis_with_config(
         .enumerate()
     {
         mode_indices.push((idx + 1) as Value);
+        probe_mode_participation.push(sanitize_nonnegative(normalized_probe_participation(
+            multiplier.eigenvector.as_ref(),
+            probe.state_index,
+        )));
         multiplier_magnitude.push(multiplier.magnitude());
         multiplier_phase_deg.push(multiplier.phase_degrees());
         mode_damping.push(multiplier.damping());
@@ -2729,6 +2763,13 @@ pub fn run_pstb_analysis_with_config(
     if mode_indices.is_empty() {
         return Err("PSTB produced no Floquet multipliers".to_string());
     }
+    let (dominant_probe_mode, dominant_probe_mode_participation) = probe_mode_participation
+        .iter()
+        .copied()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(idx, value)| (idx + 1, value))
+        .unwrap_or((0, 0.0));
 
     Ok(PstbData {
         period: pstb_result.period,
@@ -2741,6 +2782,7 @@ pub fn run_pstb_analysis_with_config(
         probe_state_row_norm: probe_row_norm,
         probe_state_persistence_db: probe_persistence_db,
         mode_indices,
+        probe_mode_participation,
         multiplier_magnitude,
         multiplier_phase_deg,
         mode_damping,
@@ -2748,6 +2790,8 @@ pub fn run_pstb_analysis_with_config(
         stability_margin_db,
         dominant_multiplier_magnitude: pstb_result.max_multiplier_magnitude,
         min_stability_margin_db: sanitize_db(pstb_result.min_stability_margin_db),
+        dominant_probe_mode,
+        dominant_probe_mode_participation,
         num_unstable: pstb_result.num_unstable,
         stability_classification: stability_type_label(pstb_result.stability).to_string(),
         is_stable: pstb_result.is_stable(),
@@ -5501,11 +5545,19 @@ mod tests {
         assert!(result.probe_state_row_norm.is_finite() && result.probe_state_row_norm >= 0.0);
         assert!(result.probe_state_persistence_db.is_finite());
         assert!(!result.mode_indices.is_empty());
+        assert_eq!(
+            result.mode_indices.len(),
+            result.probe_mode_participation.len()
+        );
         assert_eq!(result.mode_indices.len(), result.multiplier_magnitude.len());
         assert_eq!(result.mode_indices.len(), result.multiplier_phase_deg.len());
         assert_eq!(result.mode_indices.len(), result.mode_damping.len());
         assert_eq!(result.mode_indices.len(), result.mode_frequency_hz.len());
         assert_eq!(result.mode_indices.len(), result.stability_margin_db.len());
+        assert!(result
+            .probe_mode_participation
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0 && *value <= 1.0));
         assert!(result
             .multiplier_magnitude
             .iter()
@@ -5525,6 +5577,17 @@ mod tests {
             .all(|value| value.is_finite()));
         assert!(result.dominant_multiplier_magnitude.is_finite());
         assert!(result.min_stability_margin_db.is_finite());
+        assert!(
+            result.dominant_probe_mode >= 1
+                && result.dominant_probe_mode <= result.mode_indices.len()
+        );
+        assert!(result.dominant_probe_mode_participation.is_finite());
+        let max_probe_participation = result
+            .probe_mode_participation
+            .iter()
+            .copied()
+            .fold(0.0, Value::max);
+        assert!((result.dominant_probe_mode_participation - max_probe_participation).abs() < 1e-12);
         assert!(result.stability_classification.len() >= 4);
         assert_eq!(
             result.num_unstable,
@@ -5619,6 +5682,10 @@ mod tests {
             "* pstb auto\nV1 in 0 1\nR1 in mid 1k\nLPROBE mid out 1u\nC1 out 0 1n\n.end\n";
         let result = run_pstb_analysis(netlist).expect("PSTB default mode should execute");
         assert!(!result.mode_indices.is_empty());
+        assert_eq!(
+            result.mode_indices.len(),
+            result.probe_mode_participation.len()
+        );
         assert_eq!(result.mode_indices.len(), result.multiplier_magnitude.len());
         assert!(result.stability_classification.len() >= 4);
         assert_eq!(result.probe_instance, "LPROBE");

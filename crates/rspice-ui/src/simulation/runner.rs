@@ -856,6 +856,18 @@ fn run_spec_request(
                     y_imag: None,
                 },
             );
+            waveforms.insert(
+                "Probe Mode Participation".to_string(),
+                WaveformData {
+                    name: "Probe Mode Participation".to_string(),
+                    x_values: data.mode_indices.clone(),
+                    y_values: data.probe_mode_participation,
+                    y_unit: "".to_string(),
+                    x_unit: "mode".to_string(),
+                    is_complex: false,
+                    y_imag: None,
+                },
+            );
 
             Ok(SimulationResult::Ac {
                 frequencies: data.mode_indices,
@@ -1861,6 +1873,7 @@ C1 out 0 1n
                 assert!(waveforms.contains_key("Floquet |lambda|"));
                 assert!(waveforms.contains_key("Stability Margin (dB)"));
                 assert!(waveforms.contains_key("Mode Damping (1/s)"));
+                assert!(waveforms.contains_key("Probe Mode Participation"));
                 assert_eq!(
                     waveforms
                         .get("Floquet |lambda|")

@@ -1467,12 +1467,23 @@ impl RunExecutor {
                             },
                             MappedWaveform {
                                 name: "Mode Damping (1/s)".to_string(),
-                                x: data.mode_indices,
+                                x: data.mode_indices.clone(),
                                 y: data.mode_damping,
                                 x_label: "Mode Index".to_string(),
                                 y_label: "Damping".to_string(),
                                 x_unit: "".to_string(),
                                 y_unit: "1/s".to_string(),
+                                is_complex: false,
+                                y_imag: None,
+                            },
+                            MappedWaveform {
+                                name: "Probe Mode Participation".to_string(),
+                                x: data.mode_indices.clone(),
+                                y: data.probe_mode_participation,
+                                x_label: "Mode Index".to_string(),
+                                y_label: "Participation".to_string(),
+                                x_unit: "".to_string(),
+                                y_unit: "".to_string(),
                                 is_complex: false,
                                 y_imag: None,
                             },
@@ -1555,6 +1566,22 @@ impl RunExecutor {
                                 meas_type: MeasurementType::Custom,
                                 value: data.probe_state_persistence_db,
                                 unit: "dB".to_string(),
+                                signal: "pstb".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                            MappedMeasurement {
+                                name: "dominant_probe_mode".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.dominant_probe_mode as f64,
+                                unit: "index".to_string(),
+                                signal: "pstb".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                            MappedMeasurement {
+                                name: "dominant_probe_mode_participation".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.dominant_probe_mode_participation,
+                                unit: "".to_string(),
                                 signal: "pstb".to_string(),
                                 status: MeasurementStatus::Success,
                             },
@@ -2426,7 +2453,7 @@ mod tests {
             .next()
             .expect("expected mapped PSTB result");
         assert_eq!(mapped.analysis_type, MappedAnalysisType::Ac);
-        assert_eq!(mapped.waveforms.len(), 3);
+        assert_eq!(mapped.waveforms.len(), 4);
         assert!(mapped
             .waveforms
             .iter()
@@ -2435,6 +2462,10 @@ mod tests {
             .waveforms
             .iter()
             .any(|wf| wf.name == "Stability Margin (dB)"));
+        assert!(mapped
+            .waveforms
+            .iter()
+            .any(|wf| wf.name == "Probe Mode Participation"));
         assert!(mapped
             .measurements
             .iter()
@@ -2447,5 +2478,9 @@ mod tests {
             .measurements
             .iter()
             .any(|m| m.name == "probe_state_persistence_db"));
+        assert!(mapped
+            .measurements
+            .iter()
+            .any(|m| m.name == "dominant_probe_mode_participation"));
     }
 }
