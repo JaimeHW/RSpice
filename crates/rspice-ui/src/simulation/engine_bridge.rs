@@ -234,6 +234,15 @@ impl EngineBridge {
             .max(1e-18)
     }
 
+    #[inline]
+    fn ac_voltage_index(node_index: usize) -> Option<usize> {
+        if node_index == 0 {
+            None
+        } else {
+            Some(node_index - 1)
+        }
+    }
+
     /// Run transient analysis
     fn run_transient(
         &self,
@@ -660,6 +669,22 @@ impl EngineBridge {
         let engine = self.engine_for_netlist(netlist);
         use std::collections::HashMap;
 
+        let ac_frequency = if config.ac_mode {
+            let freq = config.frequency.unwrap_or(1.0);
+            if freq <= 0.0 {
+                return Err(SimulationError::InvalidConfig(
+                    "Sensitivity AC frequency must be > 0".to_string(),
+                ));
+            }
+            Some(freq)
+        } else if config.frequency.is_some() {
+            return Err(SimulationError::InvalidConfig(
+                "Sensitivity frequency is only valid when AC mode is enabled".to_string(),
+            ));
+        } else {
+            None
+        };
+
         // Parse output variable to get node index
         let output_node = self.parse_output_variable(&config.output_var, netlist);
 
@@ -670,16 +695,39 @@ impl EngineBridge {
             )));
         }
 
-        // Get nominal DC operating point
-        let nominal_result = engine
-            .run_dc_op(netlist)
-            .map_err(|e| self.translate_error(e))?;
-
-        let nominal_voltage = nominal_result
-            .node_voltages
-            .get(output_node)
-            .copied()
-            .unwrap_or(0.0);
+        let nominal_value = if let Some(freq) = ac_frequency {
+            let ac_results = engine
+                .run_ac(netlist, &[freq])
+                .map_err(|e| self.translate_error(e))?;
+            let point = ac_results.first().ok_or_else(|| {
+                SimulationError::InvalidConfig("AC analysis produced no data".to_string())
+            })?;
+            let ac_output_idx = Self::ac_voltage_index(output_node).ok_or_else(|| {
+                SimulationError::InvalidConfig(format!(
+                    "Invalid output node '{}' for AC sensitivity analysis",
+                    config.output_var
+                ))
+            })?;
+            let output = point.voltages.get(ac_output_idx).ok_or_else(|| {
+                SimulationError::InvalidConfig(format!(
+                    "Output node '{}' not found in AC result (dc index {}, ac index {}, available {})",
+                    config.output_var,
+                    output_node,
+                    ac_output_idx,
+                    point.voltages.len()
+                ))
+            })?;
+            output.norm()
+        } else {
+            let nominal_result = engine
+                .run_dc_op(netlist)
+                .map_err(|e| self.translate_error(e))?;
+            nominal_result
+                .node_voltages
+                .get(output_node)
+                .copied()
+                .unwrap_or(0.0)
+        };
 
         // Extract parameters from netlist elements for sensitivity
         let parameters = self.extract_parameters(netlist);
@@ -703,33 +751,52 @@ impl EngineBridge {
                 continue; // Skip zero-valued parameters
             }
 
-            let delta = param_value * perturbation;
-
-            // Perturb up
-            let perturbed_up_result =
-                self.run_perturbed_dc_op(netlist, param_name, *param_value + delta);
-
-            // Perturb down
-            let perturbed_down_result =
-                self.run_perturbed_dc_op(netlist, param_name, *param_value - delta);
-
-            // Compute sensitivity: dV/dP = (V_up - V_down) / (2*delta)
-            if let (Some(v_up), Some(v_down)) = (perturbed_up_result, perturbed_down_result) {
-                let v_up_val = v_up.node_voltages.get(output_node).copied().unwrap_or(0.0);
-                let v_down_val = v_down
-                    .node_voltages
-                    .get(output_node)
-                    .copied()
-                    .unwrap_or(0.0);
-
-                let sensitivity = (v_up_val - v_down_val) / (2.0 * delta);
-                sensitivities.insert(param_name.clone(), sensitivity);
-
-                // Compute normalized sensitivity: (dV/V) / (dP/P) = (P/V) * dV/dP
-                if nominal_voltage.abs() > 1e-15 {
-                    let norm_sens = (param_value / nominal_voltage) * sensitivity;
-                    normalized.insert(param_name.clone(), norm_sens);
+            let delta = (param_value.abs() * perturbation).max(1e-12);
+            let sensitivity = if let Some(freq) = ac_frequency {
+                let up = self.run_perturbed_ac_output(
+                    netlist,
+                    output_node,
+                    param_name,
+                    *param_value + delta,
+                    freq,
+                );
+                let down = self.run_perturbed_ac_output(
+                    netlist,
+                    output_node,
+                    param_name,
+                    *param_value - delta,
+                    freq,
+                );
+                if let (Some(v_up), Some(v_down)) = (up, down) {
+                    (v_up - v_down) / (2.0 * delta)
+                } else {
+                    continue;
                 }
+            } else {
+                let perturbed_up_result =
+                    self.run_perturbed_dc_op(netlist, param_name, *param_value + delta);
+                let perturbed_down_result =
+                    self.run_perturbed_dc_op(netlist, param_name, *param_value - delta);
+
+                if let (Some(v_up), Some(v_down)) = (perturbed_up_result, perturbed_down_result) {
+                    let v_up_val = v_up.node_voltages.get(output_node).copied().unwrap_or(0.0);
+                    let v_down_val = v_down
+                        .node_voltages
+                        .get(output_node)
+                        .copied()
+                        .unwrap_or(0.0);
+                    (v_up_val - v_down_val) / (2.0 * delta)
+                } else {
+                    continue;
+                }
+            };
+
+            sensitivities.insert(param_name.clone(), sensitivity);
+
+            // Compute normalized sensitivity: (dV/V) / (dP/P) = (P/V) * dV/dP
+            if nominal_value.abs() > 1e-15 {
+                let norm_sens = (param_value / nominal_value) * sensitivity;
+                normalized.insert(param_name.clone(), norm_sens);
             }
         }
 
@@ -739,14 +806,20 @@ impl EngineBridge {
         })
     }
 
-    /// Extract parameters from netlist elements for sensitivity analysis
-    ///
-    /// Note: Full implementation requires netlist element enumeration.
-    /// Currently returns empty as rspice_core::Netlist doesn't expose elements() yet.
-    fn extract_parameters(&self, _netlist: &rspice_core::Netlist) -> HashMap<String, f64> {
-        // Full implementation would iterate netlist.elements() to extract R/C/L values
-        // For now, return empty - framework is in place for when core adds this capability
-        HashMap::new()
+    /// Extract global `.param` values for sensitivity analysis.
+    fn extract_parameters(&self, netlist: &rspice_core::Netlist) -> HashMap<String, f64> {
+        let mut params = HashMap::new();
+        for (name, value) in netlist.params.all_params() {
+            if !value.is_finite() {
+                continue;
+            }
+            // Internal parser side-channel values are not design parameters.
+            if name.starts_with("IC_") || name.starts_with("NODESET_") {
+                continue;
+            }
+            params.insert(name, value);
+        }
+        params
     }
 
     /// Run DC op with a perturbed parameter value
@@ -754,20 +827,38 @@ impl EngineBridge {
     /// Returns None if the simulation fails (e.g., convergence issues)
     fn run_perturbed_dc_op(
         &self,
-        _netlist: &rspice_core::Netlist,
-        _param_name: &str,
-        _new_value: f64,
+        netlist: &rspice_core::Netlist,
+        param_name: &str,
+        new_value: f64,
     ) -> Option<rspice_core::SimulationResult> {
-        // In a full implementation, we would:
-        // 1. Clone the netlist
-        // 2. Modify the element with param_name to use new_value
-        // 3. Run DC op on modified netlist
-        //
-        // For now, return nominal result as placeholder
-        // (Full implementation requires netlist mutation support in rspice-core)
-        //
-        // TODO: Implement netlist element value modification
-        None
+        if !new_value.is_finite() {
+            return None;
+        }
+        let mut perturbed = netlist.clone();
+        perturbed.params.set(param_name, new_value);
+        let engine = self.engine_for_netlist(&perturbed);
+        engine.run_dc_op(&perturbed).ok()
+    }
+
+    fn run_perturbed_ac_output(
+        &self,
+        netlist: &rspice_core::Netlist,
+        output_node: usize,
+        param_name: &str,
+        new_value: f64,
+        frequency: f64,
+    ) -> Option<f64> {
+        if !new_value.is_finite() || frequency <= 0.0 {
+            return None;
+        }
+        let mut perturbed = netlist.clone();
+        perturbed.params.set(param_name, new_value);
+        let engine = self.engine_for_netlist(&perturbed);
+        let ac = engine.run_ac(&perturbed, &[frequency]).ok()?;
+        let point = ac.first()?;
+        let ac_output_idx = Self::ac_voltage_index(output_node)?;
+        let output = point.voltages.get(ac_output_idx)?;
+        Some(output.norm())
     }
 
     /// Parse output variable string (e.g., "V(out)" or "I(R1)") to node index
@@ -1081,6 +1172,170 @@ R1 1 0 1k
         if result.is_ok() {
             assert!(matches!(result.unwrap(), SimulationResult::DcOp(_)));
         }
+    }
+
+    #[test]
+    fn test_run_sensitivity_dc_reports_param_derivatives() {
+        let bridge = EngineBridge::new();
+        let netlist = r#"
+* Sensitivity parameterized divider
+.param RVAL=1k
+V1 in 0 DC 10
+R1 in out {RVAL}
+R2 out 0 1k
+.end
+"#;
+
+        let cfg = AnalysisConfig::Sensitivity(super::super::config::SensitivityConfig {
+            output_var: "V(out)".to_string(),
+            ac_mode: false,
+            frequency: None,
+        });
+
+        let result = bridge
+            .run(&cfg, netlist)
+            .expect("sensitivity run should succeed");
+        match result {
+            SimulationResult::Sensitivity {
+                sensitivities,
+                normalized,
+            } => {
+                assert!(!sensitivities.is_empty());
+                let key = sensitivities
+                    .keys()
+                    .find(|k| k.eq_ignore_ascii_case("RVAL"))
+                    .expect("expected RVAL sensitivity key");
+                assert!(sensitivities[key].is_finite());
+                assert!(normalized[key].is_finite());
+            }
+            _ => panic!("Expected Sensitivity result"),
+        }
+    }
+
+    #[test]
+    fn test_run_sensitivity_ac_reports_param_derivatives() {
+        let bridge = EngineBridge::new();
+        let netlist = r#"
+* Sensitivity parameterized AC low-pass
+.param RVAL=1k
+V1 in 0 DC 0 AC 1
+R1 in out {RVAL}
+C1 out 0 1n
+.end
+"#;
+
+        let cfg = AnalysisConfig::Sensitivity(super::super::config::SensitivityConfig {
+            output_var: "V(out)".to_string(),
+            ac_mode: true,
+            frequency: Some(1e3),
+        });
+
+        let result = bridge
+            .run(&cfg, netlist)
+            .expect("ac sensitivity run should succeed");
+        match result {
+            SimulationResult::Sensitivity {
+                sensitivities,
+                normalized,
+            } => {
+                assert!(!sensitivities.is_empty());
+                let key = sensitivities
+                    .keys()
+                    .find(|k| k.eq_ignore_ascii_case("RVAL"))
+                    .expect("expected RVAL sensitivity key");
+                assert!(sensitivities[key].is_finite());
+                assert!(normalized[key].is_finite());
+            }
+            _ => panic!("Expected Sensitivity result"),
+        }
+    }
+
+    #[test]
+    fn test_run_sensitivity_ac_supports_numeric_output_node_index() {
+        let bridge = EngineBridge::new();
+        let netlist = r#"
+* Sensitivity parameterized AC low-pass
+.param RVAL=1k
+V1 in 0 DC 0 AC 1
+R1 in out {RVAL}
+C1 out 0 1n
+.end
+"#;
+
+        let cfg = AnalysisConfig::Sensitivity(super::super::config::SensitivityConfig {
+            output_var: "2".to_string(),
+            ac_mode: true,
+            frequency: Some(1e3),
+        });
+
+        let result = bridge
+            .run(&cfg, netlist)
+            .expect("ac sensitivity run should succeed");
+        match result {
+            SimulationResult::Sensitivity {
+                sensitivities,
+                normalized,
+            } => {
+                assert!(!sensitivities.is_empty());
+                let key = sensitivities
+                    .keys()
+                    .find(|k| k.eq_ignore_ascii_case("RVAL"))
+                    .expect("expected RVAL sensitivity key");
+                assert!(sensitivities[key].is_finite());
+                assert!(normalized[key].is_finite());
+            }
+            _ => panic!("Expected Sensitivity result"),
+        }
+    }
+
+    #[test]
+    fn test_run_sensitivity_rejects_frequency_without_ac_mode() {
+        let bridge = EngineBridge::new();
+        let netlist = r#"
+* Sensitivity parameterized divider
+.param RVAL=1k
+V1 in 0 DC 10
+R1 in out {RVAL}
+R2 out 0 1k
+.end
+"#;
+
+        let cfg = AnalysisConfig::Sensitivity(super::super::config::SensitivityConfig {
+            output_var: "V(out)".to_string(),
+            ac_mode: false,
+            frequency: Some(1e3),
+        });
+
+        let err = bridge
+            .run(&cfg, netlist)
+            .expect_err("expected validation error");
+        assert!(err
+            .to_string()
+            .contains("only valid when AC mode is enabled"));
+    }
+
+    #[test]
+    fn test_run_sensitivity_rejects_non_positive_ac_frequency() {
+        let bridge = EngineBridge::new();
+        let netlist = r#"
+* Sensitivity parameterized AC low-pass
+.param RVAL=1k
+V1 in 0 DC 0 AC 1
+R1 in out {RVAL}
+C1 out 0 1n
+.end
+"#;
+
+        let cfg = AnalysisConfig::Sensitivity(super::super::config::SensitivityConfig {
+            output_var: "V(out)".to_string(),
+            ac_mode: true,
+            frequency: Some(0.0),
+        });
+
+        let err = bridge
+            .run(&cfg, netlist)
+            .expect_err("expected validation error");
+        assert!(err.to_string().contains("must be > 0"));
     }
 
     #[test]
