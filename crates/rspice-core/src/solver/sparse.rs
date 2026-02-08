@@ -161,6 +161,72 @@ impl StaticMatrix {
         &mut self.values
     }
 
+    /// Compute infinity norm of the scaled residual `A*x-b`.
+    ///
+    /// Each row is normalized with a SPICE-like tolerance scale:
+    /// `abstol + reltol * max(|A*x|, |b|)`.
+    /// Returns `inf` when input vectors contain non-finite values.
+    pub fn scaled_residual_inf_norm(
+        &self,
+        solution: &[Value],
+        rhs: &[Value],
+        abstol: Value,
+        reltol: Value,
+    ) -> Result<Value, SolverError> {
+        if self.nrows != rhs.len() {
+            return Err(SolverError::InvalidCircuit(format!(
+                "Matrix rows {} don't match RHS size {}",
+                self.nrows,
+                rhs.len()
+            )));
+        }
+        if self.ncols != solution.len() {
+            return Err(SolverError::InvalidCircuit(format!(
+                "Matrix cols {} don't match solution size {}",
+                self.ncols,
+                solution.len()
+            )));
+        }
+
+        let safe_abstol = if abstol.is_finite() && abstol > 0.0 {
+            abstol
+        } else {
+            1e-12
+        };
+        let safe_reltol = if reltol.is_finite() && reltol > 0.0 {
+            reltol
+        } else {
+            1e-3
+        };
+
+        let mut ax = vec![0.0; self.nrows];
+        for col in 0..self.ncols {
+            let x = solution[col];
+            if !x.is_finite() {
+                return Ok(Value::INFINITY);
+            }
+            for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
+                let row = self.row_indices[idx];
+                ax[row] += self.values[idx] * x;
+            }
+        }
+
+        let mut residual_inf: Value = 0.0;
+        for row in 0..self.nrows {
+            let row_rhs = rhs[row];
+            let row_ax = ax[row];
+            if !row_rhs.is_finite() || !row_ax.is_finite() {
+                return Ok(Value::INFINITY);
+            }
+            let residual = (row_ax - row_rhs).abs();
+            let scale = safe_abstol + safe_reltol * row_ax.abs().max(row_rhs.abs());
+            let normalized = residual / scale.max(safe_abstol);
+            residual_inf = residual_inf.max(normalized);
+        }
+
+        Ok(residual_inf)
+    }
+
     /// Convert to faer SparseColMat (borrows values, no allocation)
     fn to_sparse_col_mat(&self) -> SparseColMat<usize, Value> {
         let symbolic = SymbolicSparseColMat::new_checked(
@@ -603,6 +669,45 @@ mod tests {
         // Solve again - should use cached structure
         let x2 = matrix.solve(&[5.0, 7.0]).unwrap();
         assert!((x2[0] - 1.6).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_scaled_residual_inf_norm_exact_solution_is_small() {
+        let triplets = vec![(0, 0, 2.0), (0, 1, 1.0), (1, 0, 1.0), (1, 1, 3.0)];
+        let matrix = StaticMatrix::from_triplets(2, 2, &triplets).unwrap();
+        let rhs = vec![5.0, 7.0];
+        let x = vec![1.6, 1.8];
+        let norm = matrix
+            .scaled_residual_inf_norm(&x, &rhs, 1e-9, 1e-3)
+            .unwrap();
+        assert!(norm < 1e-10);
+    }
+
+    #[test]
+    fn test_scaled_residual_inf_norm_detects_off_solution() {
+        let triplets = vec![(0, 0, 2.0), (0, 1, 1.0), (1, 0, 1.0), (1, 1, 3.0)];
+        let matrix = StaticMatrix::from_triplets(2, 2, &triplets).unwrap();
+        let rhs = vec![5.0, 7.0];
+        let x = vec![1.2, 2.4];
+        let norm = matrix
+            .scaled_residual_inf_norm(&x, &rhs, 1e-9, 1e-3)
+            .unwrap();
+        assert!(norm > 1.0);
+    }
+
+    #[test]
+    fn test_scaled_residual_inf_norm_rejects_size_mismatch() {
+        let triplets = vec![(0, 0, 1.0)];
+        let matrix = StaticMatrix::from_triplets(1, 1, &triplets).unwrap();
+        let err = matrix
+            .scaled_residual_inf_norm(&[1.0, 2.0], &[1.0], 1e-9, 1e-3)
+            .unwrap_err();
+        match err {
+            SolverError::InvalidCircuit(msg) => {
+                assert!(msg.contains("solution"));
+            }
+            other => panic!("unexpected error variant: {:?}", other),
+        }
     }
 
     #[test]
