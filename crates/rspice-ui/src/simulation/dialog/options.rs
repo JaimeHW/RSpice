@@ -569,6 +569,8 @@ impl SimulationOptions {
                 damping_strategy: core_damping,
                 gmin_initial: self.gmin,
                 gmin_target: 1e-15,
+                voltage_reltol: self.reltol,
+                voltage_abstol: self.vntol,
                 verbose: self.verbose,
             },
         }
@@ -1140,6 +1142,20 @@ mod tests {
         assert!(opts.pseudo_transient);
         assert!(opts.arc_length);
         assert_eq!(opts.damping, DampingStrategy::Combined);
+    }
+
+    #[test]
+    fn test_to_simulation_config_maps_voltage_convergence_tolerances() {
+        let mut opts = SimulationOptions::default();
+        opts.reltol = 2e-3;
+        opts.vntol = 3e-6;
+        opts.gmin = 5e-10;
+
+        let sim = opts.to_simulation_config();
+        assert!((sim.tolerance - 2e-3).abs() < 1e-15);
+        assert!((sim.convergence_config.voltage_reltol - 2e-3).abs() < 1e-15);
+        assert!((sim.convergence_config.voltage_abstol - 3e-6).abs() < 1e-15);
+        assert!((sim.convergence_config.gmin_initial - 5e-10).abs() < 1e-21);
     }
 
     //=========================================================================
