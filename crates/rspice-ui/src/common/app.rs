@@ -143,7 +143,87 @@ impl Default for PanelSizes {
     }
 }
 
+// =============================================================================
+// Save Confirmation Dialog State
+// =============================================================================
+
+/// Actions that can trigger a save confirmation dialog
+///
+/// Commercial EDA tools like Cadence Virtuoso always prompt the user before
+/// discarding unsaved work. This enum captures the pending action so it can
+/// be executed after the user responds to the confirmation dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmationAction {
+    /// Create new schematic (discard current)
+    FileNew,
+    /// Open another schematic (discard current)
+    FileOpen,
+    /// Close the application
+    Exit,
+}
+
+impl ConfirmationAction {
+    /// Get the dialog title for this action
+    pub fn dialog_title(&self) -> &'static str {
+        match self {
+            ConfirmationAction::FileNew => "Create New Schematic",
+            ConfirmationAction::FileOpen => "Open Schematic",
+            ConfirmationAction::Exit => "Exit RSpice",
+        }
+    }
+
+    /// Get the prompt message for this action
+    pub fn prompt_message(&self) -> &'static str {
+        "The current schematic has unsaved changes.\nDo you want to save before continuing?"
+    }
+}
+
+/// State for the save confirmation dialog
+///
+/// When visible is true, the confirmation dialog is shown. The pending_action
+/// field stores what should happen after the user responds.
+#[derive(Debug, Clone, Default)]
+pub struct ConfirmationDialogState {
+    /// Whether the dialog is currently visible
+    pub visible: bool,
+    /// The action pending user confirmation
+    pub pending_action: Option<ConfirmationAction>,
+}
+
+impl ConfirmationDialogState {
+    /// Open the confirmation dialog for a specific action
+    pub fn show(&mut self, action: ConfirmationAction) {
+        self.visible = true;
+        self.pending_action = Some(action);
+    }
+
+    /// Close the dialog and clear pending action
+    pub fn close(&mut self) {
+        self.visible = false;
+        self.pending_action = None;
+    }
+
+    /// Check if dialog is open for a specific action
+    pub fn is_showing(&self, action: ConfirmationAction) -> bool {
+        self.visible && self.pending_action == Some(action)
+    }
+}
+
+/// User response to a save confirmation dialog
+///
+/// Standard Yes/No/Cancel pattern matching commercial EDA tools.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmationResponse {
+    /// Save changes and proceed with action
+    Yes,
+    /// Discard changes and proceed with action
+    No,
+    /// Cancel the action, keep changes
+    Cancel,
+}
+
 /// Dialog visibility state
+
 #[derive(Debug, Clone, Default)]
 pub struct DialogState {
     /// Simulation setup dialog
@@ -377,6 +457,10 @@ pub struct DialogState {
     // --- Runtime Interaction State ---
     /// Runtime interaction state for drag, hover, etc.
     pub interaction: crate::ui::dialog_state::InteractionState,
+
+    // --- Save Confirmation Dialog ---
+    /// State for save confirmation modal (unsaved changes warning)
+    pub confirmation_dialog: ConfirmationDialogState,
 }
 
 /// Main application state container
@@ -410,6 +494,32 @@ pub struct AppState {
     pub pending_delete_cell: Option<(String, String)>,
     /// Pending view deletion (library, cell, view_name)
     pub pending_delete_view: Option<(String, String, String)>,
+    /// Tabbed property dialog state (commercial-grade property editing)
+    pub tabbed_property_dialog: crate::properties::TabbedPropertyDialogState,
+    /// Property registry (component property schemas)
+    pub property_registry: crate::state::PropertyRegistry,
+    /// Calculator panel state
+    pub calculator_panel: crate::panels::calculator::CalculatorPanel,
+    /// Operating point annotation renderer for schematic overlay
+    pub op_annotation_renderer: crate::schematic::op_annotation::OpAnnotationRenderer,
+    /// PDK Settings dialog state
+    pub pdk_settings_dialog: crate::panels::PdkSettingsDialogState,
+    /// PDK configuration (library paths, environment variables)
+    pub pdk_config: crate::state::pdk_config::PdkConfig,
+    /// Model library manager (PDK models, device libraries)
+    pub model_library_manager: crate::state::model_library::ModelLibraryManager,
+    /// Standalone model browser state (for Tools menu access)
+    pub model_browser_state: crate::properties::model_browser::ModelBrowserState,
+    /// Flag to signal that application exit has been requested (after confirmation)
+    pub exit_requested: bool,
+    /// Pole-Zero viewer state
+    pub pole_zero_state: crate::analysis::pole_zero::PoleZeroState,
+    /// Eye diagram viewer state
+    pub eye_diagram_state: crate::analysis::eye_diagram::EyeDiagramState,
+    /// Smith chart viewer state
+    pub smith_chart_state: crate::analysis::smith_chart::SmithChartState,
+    /// Histogram viewer state
+    pub histogram_state: crate::analysis::histogram::HistogramState,
 }
 
 impl Default for AppState {
@@ -429,6 +539,23 @@ impl Default for AppState {
             library_manager: crate::state::LibraryManager::with_primitives(),
             pending_delete_cell: None,
             pending_delete_view: None,
+            tabbed_property_dialog: crate::properties::TabbedPropertyDialogState::default(),
+            property_registry: crate::state::PropertyRegistry::new(),
+            calculator_panel: crate::panels::calculator::CalculatorPanel::new(),
+            op_annotation_renderer: crate::schematic::op_annotation::OpAnnotationRenderer::new(),
+            pdk_settings_dialog: crate::panels::PdkSettingsDialogState::new(),
+            pdk_config: crate::state::pdk_config::PdkConfig::load_or_default(),
+            model_library_manager: {
+                let mut mgr = crate::state::model_library::ModelLibraryManager::new();
+                mgr.load_builtin_models();
+                mgr
+            },
+            model_browser_state: crate::properties::model_browser::ModelBrowserState::default(),
+            exit_requested: false,
+            pole_zero_state: crate::analysis::pole_zero::PoleZeroState::default(),
+            eye_diagram_state: crate::analysis::eye_diagram::EyeDiagramState::default(),
+            smith_chart_state: crate::analysis::smith_chart::SmithChartState::default(),
+            histogram_state: crate::analysis::histogram::HistogramState::default(),
         }
     }
 }
@@ -587,7 +714,7 @@ impl RSpiceApp {
             self.toggle_panel_browser();
         }
         if ctx.input(|i| i.key_pressed(Key::Backtick) && i.modifiers.ctrl) {
-            self.toggle_panel_console();
+            self.toggle_panel_console_new();
         }
 
         // Help shortcuts
@@ -645,8 +772,12 @@ impl RSpiceApp {
             if ctx.input(|i| i.key_pressed(Key::P) && !i.modifiers.ctrl) {
                 self.state.schematic.tool = Tool::Probe;
             }
-            // Rotate preview/selection (R key)
-            if ctx.input(|i| i.key_pressed(Key::R) && !i.modifiers.ctrl) {
+            // Resistor (Shift+R)
+            if ctx.input(|i| i.key_pressed(Key::R) && i.modifiers.shift && !i.modifiers.ctrl) {
+                self.state.schematic.tool = Tool::Place(ComponentType::Resistor);
+            }
+            // Rotate preview/selection (R key without shift)
+            if ctx.input(|i| i.key_pressed(Key::R) && !i.modifiers.ctrl && !i.modifiers.shift) {
                 // Rotate preview rotation for component placement
                 self.state.schematic.preview_rotation =
                     self.state.schematic.preview_rotation.rotate_cw();
@@ -707,18 +838,42 @@ impl RSpiceApp {
     // Action Handlers
     // =========================================================================
 
+    /// Request a new schematic (prompts to save if dirty)
     fn action_file_new(&mut self) {
         if self.state.schematic.is_dirty {
-            // TODO: Show save confirmation dialog
-            log::warn!("New schematic requested but current has unsaved changes");
+            // Show save confirmation dialog - don't discard unsaved changes
+            self.state
+                .dialogs
+                .confirmation_dialog
+                .show(ConfirmationAction::FileNew);
+        } else {
+            self.do_file_new();
         }
+    }
+
+    /// Internal: Actually create a new schematic (after confirmation)
+    fn do_file_new(&mut self) {
         self.state.schematic = SchematicState::default();
         self.state
             .console_messages
             .push(ConsoleMessage::info("Created new schematic"));
     }
 
+    /// Request to open a schematic (prompts to save if dirty)
     fn action_file_open(&mut self) {
+        if self.state.schematic.is_dirty {
+            // Show save confirmation dialog before opening
+            self.state
+                .dialogs
+                .confirmation_dialog
+                .show(ConfirmationAction::FileOpen);
+        } else {
+            self.do_file_open();
+        }
+    }
+
+    /// Internal: Actually open a schematic (after confirmation)
+    fn do_file_open(&mut self) {
         use crate::io::{load_schematic, show_open_dialog, SchematicIoError};
 
         match show_open_dialog() {
@@ -742,6 +897,49 @@ impl RSpiceApp {
                 self.state
                     .console_messages
                     .push(ConsoleMessage::error(format!("Open failed: {}", e)));
+            }
+        }
+    }
+
+    /// Handle user response to save confirmation dialog
+    ///
+    /// This is called when the user clicks Yes, No, or Cancel in the
+    /// save confirmation dialog. Commercial EDA pattern:
+    /// - Yes: Save first, then execute pending action
+    /// - No: Discard changes and execute pending action
+    /// - Cancel: Close dialog, do nothing
+    fn handle_confirmation_response(&mut self, response: ConfirmationResponse) {
+        let pending = self.state.dialogs.confirmation_dialog.pending_action;
+        self.state.dialogs.confirmation_dialog.close();
+
+        match response {
+            ConfirmationResponse::Cancel => {
+                // User cancelled - do nothing
+            }
+            ConfirmationResponse::No => {
+                // Discard changes and proceed
+                if let Some(action) = pending {
+                    self.execute_pending_action(action);
+                }
+            }
+            ConfirmationResponse::Yes => {
+                // Save first, then proceed
+                self.action_file_save();
+                if let Some(action) = pending {
+                    self.execute_pending_action(action);
+                }
+            }
+        }
+    }
+
+    /// Execute a pending action after confirmation dialog
+    fn execute_pending_action(&mut self, action: ConfirmationAction) {
+        match action {
+            ConfirmationAction::FileNew => self.do_file_new(),
+            ConfirmationAction::FileOpen => self.do_file_open(),
+            ConfirmationAction::Exit => {
+                // Signal exit request - this will be handled by the frame update
+                self.state.exit_requested = true;
             }
         }
     }
@@ -1685,7 +1883,96 @@ impl eframe::App for RSpiceApp {
         // Modal Dialogs
         // =====================================================================
 
+        // Save Confirmation Dialog (unsaved changes warning)
+        // Matches commercial EDA pattern: Yes = Save and proceed, No = Discard, Cancel = Abort
+        if self.state.dialogs.confirmation_dialog.visible {
+            let mut response: Option<ConfirmationResponse> = None;
+
+            egui::Area::new(egui::Id::new("save_confirmation_backdrop"))
+                .order(egui::Order::Foreground)
+                .anchor(egui::Align2::LEFT_TOP, egui::Vec2::ZERO)
+                .show(ctx, |ui| {
+                    // Semi-transparent backdrop to prevent interaction with main UI
+                    let screen = ui.ctx().screen_rect();
+                    ui.painter().rect_filled(
+                        screen,
+                        egui::Rounding::ZERO,
+                        egui::Color32::from_rgba_unmultiplied(0, 0, 0, 180),
+                    );
+                });
+
+            egui::Window::new("Save Changes?")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .order(egui::Order::Foreground)
+                .show(ctx, |ui| {
+                    ui.set_min_width(350.0);
+
+                    // Icon and message
+                    ui.horizontal(|ui| {
+                        ui.add_space(10.0);
+                        ui.label(
+                            RichText::new("⚠")
+                                .size(28.0)
+                                .color(egui::Color32::from_rgb(255, 191, 0)),
+                        );
+                        ui.add_space(10.0);
+                        ui.vertical(|ui| {
+                            if let Some(action) =
+                                &self.state.dialogs.confirmation_dialog.pending_action
+                            {
+                                ui.label(RichText::new(action.dialog_title()).size(14.0).strong());
+                            }
+                            ui.add_space(4.0);
+                            ui.label("The current schematic has unsaved changes.");
+                            ui.label("Do you want to save before continuing?");
+                        });
+                    });
+
+                    ui.add_space(16.0);
+                    ui.separator();
+                    ui.add_space(8.0);
+
+                    // Button row: Yes | No | Cancel (commercial pattern)
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            // Cancel button (rightmost)
+                            if ui.button("Cancel").clicked() {
+                                response = Some(ConfirmationResponse::Cancel);
+                            }
+
+                            ui.add_space(8.0);
+
+                            // No button
+                            if ui.button("Don't Save").clicked() {
+                                response = Some(ConfirmationResponse::No);
+                            }
+
+                            ui.add_space(8.0);
+
+                            // Yes button (primary action)
+                            if ui
+                                .add(
+                                    egui::Button::new(RichText::new("Save").strong())
+                                        .fill(egui::Color32::from_rgb(59, 130, 246)),
+                                )
+                                .clicked()
+                            {
+                                response = Some(ConfirmationResponse::Yes);
+                            }
+                        });
+                    });
+                });
+
+            // Handle the response after dialog rendering
+            if let Some(r) = response {
+                self.handle_confirmation_response(r);
+            }
+        }
+
         // Component Properties Dialog
+
         {
             use crate::properties::dialog::{render_properties_dialog, PropertiesDialogResult};
             let result = render_properties_dialog(ctx, &mut self.state.property_editor);
@@ -1780,6 +2067,99 @@ impl eframe::App for RSpiceApp {
                         module.name,
                         module.ports.join(", ")
                     )));
+            }
+        }
+
+        // Property Dialog (commercial-grade tabbed property editor)
+        crate::panels::render_property_dialog(ctx, &mut self.state);
+
+        // PDK Settings Dialog
+        {
+            let result =
+                crate::panels::render_pdk_settings_dialog(ctx, &mut self.state.pdk_settings_dialog);
+            match result {
+                crate::panels::PdkSettingsDialogResult::Applied(config) => {
+                    // Load models from the updated PDK configuration
+                    match self
+                        .state
+                        .model_library_manager
+                        .load_from_pdk_config(&config)
+                    {
+                        Ok(count) => {
+                            self.state.pdk_config = config;
+                            let _ = self.state.pdk_config.save();
+                            self.state
+                                .console_messages
+                                .push(ConsoleMessage::info(format!(
+                                    "PDK settings applied: {} libraries loaded",
+                                    count
+                                )));
+                        }
+                        Err(errors) => {
+                            self.state.pdk_config = config;
+                            let _ = self.state.pdk_config.save();
+                            self.state
+                                .console_messages
+                                .push(ConsoleMessage::warning(format!(
+                                    "PDK settings applied with {} errors",
+                                    errors.len()
+                                )));
+                            for err in errors {
+                                self.state.console_messages.push(ConsoleMessage::error(err));
+                            }
+                        }
+                    }
+                }
+                crate::panels::PdkSettingsDialogResult::LoadFile(path) => {
+                    // Load a single model file
+                    match self
+                        .state
+                        .model_library_manager
+                        .load_library_file(&path, None)
+                    {
+                        Ok(lib_name) => {
+                            // Track in recent files
+                            self.state.pdk_config.add_recent_file(&path);
+                            let _ = self.state.pdk_config.save();
+
+                            self.state
+                                .console_messages
+                                .push(ConsoleMessage::info(format!(
+                                    "Loaded library '{}' from {}",
+                                    lib_name,
+                                    path.display()
+                                )));
+
+                            // Log model count
+                            if let Some(lib) =
+                                self.state.model_library_manager.get_library(&lib_name)
+                            {
+                                self.state
+                                    .console_messages
+                                    .push(ConsoleMessage::info(format!(
+                                        "  {} models, {} corners available",
+                                        lib.model_count(),
+                                        lib.corner_count()
+                                    )));
+                            }
+                        }
+                        Err(err) => {
+                            self.state
+                                .console_messages
+                                .push(ConsoleMessage::error(format!(
+                                    "Failed to load {}: {}",
+                                    path.display(),
+                                    err
+                                )));
+                        }
+                    }
+                }
+                crate::panels::PdkSettingsDialogResult::Cancelled => {
+                    // User cancelled - no action needed
+                }
+                crate::panels::PdkSettingsDialogResult::None => {
+                    // Dialog still open, no action
+                }
             }
         }
 
@@ -2154,6 +2534,16 @@ impl eframe::App for RSpiceApp {
                 });
         }
 
+        // Waveform Calculator Dialog
+        if self.state.dialogs.waveform_calculator_dialog {
+            egui::Window::new("🧮 Calculator")
+                .open(&mut self.state.dialogs.waveform_calculator_dialog)
+                .default_width(400.0)
+                .show(ctx, |ui| {
+                    self.state.calculator_panel.show(ui, &self.state.simulation);
+                });
+        }
+
         // Keyboard Shortcuts Help
         if self.state.dialogs.shortcuts_help {
             egui::Window::new("Keyboard Shortcuts")
@@ -2205,7 +2595,17 @@ impl eframe::App for RSpiceApp {
                 });
         }
 
-        // New Cell Creation Dialog
+        // Model Browser Dialog (standalone access from menu)
+        // Reuses the existing model browser from the property editor
+        {
+            use crate::properties::model_browser::render_model_browser;
+            let _ = render_model_browser(
+                ctx,
+                &mut self.state.model_browser_state,
+                &self.state.model_library_manager,
+            );
+        }
+
         if self.state.dialogs.new_cell_dialog {
             let mut should_close = false;
             let mut should_create = false;
@@ -2557,6 +2957,37 @@ impl eframe::App for RSpiceApp {
     }
 }
 
+impl RSpiceApp {
+    /// Toggle the bottom panel visibility
+    pub fn toggle_bottom_panel(&mut self) {
+        self.state.panels.bottom_panel = !self.state.panels.bottom_panel;
+    }
+
+    /// Toggle the console panel visibility
+    pub fn toggle_panel_console_new(&mut self) {
+        // Switch to console tab if not active
+        if self.state.panels.active_bottom_tab != BottomPanelTab::Console {
+            self.state.panels.active_bottom_tab = BottomPanelTab::Console;
+            self.state.panels.bottom_panel = true;
+        } else {
+            // Toggle visibility if already active
+            self.state.panels.bottom_panel = !self.state.panels.bottom_panel;
+        }
+    }
+
+    /// Toggle the waveform panel visibility
+    pub fn toggle_panel_waveform_new(&mut self) {
+        // Switch to waveform tab if not active
+        if self.state.panels.active_bottom_tab != BottomPanelTab::Waveform {
+            self.state.panels.active_bottom_tab = BottomPanelTab::Waveform;
+            self.state.panels.bottom_panel = true;
+        } else {
+            // Toggle visibility if already active
+            self.state.panels.bottom_panel = !self.state.panels.bottom_panel;
+        }
+    }
+}
+
 // =============================================================================
 // Icon Rail Helper Functions
 // =============================================================================
@@ -2708,48 +3139,22 @@ impl RSpiceApp {
             ui.add_space(4.0);
 
             // Spacer to push bottom items down
-            ui.add_space(ui.available_height() - 80.0);
+            ui.add_space(ui.available_height() - 40.0);
 
-            // Console toggle
-            let console_active = self.state.panels.bottom_panel
-                && self.state.panels.active_bottom_tab == BottomPanelTab::Console;
+            // Unified Bottom Panel Toggle
+            // Replaces separate Console and Waveform buttons for a cleaner UI
+            // The active tab is managed within the panel itself
+            let panel_active = self.state.panels.bottom_panel;
             if rail_icon_button(
                 ui,
-                IconType::Keyboard,
-                console_active,
+                IconType::PanelBottom,
+                panel_active,
                 self.state.theme.accent,
             )
-            .on_hover_text("Toggle Console")
+            .on_hover_text("Toggle Bottom Panel (Ctrl+`)")
             .clicked()
             {
-                self.toggle_panel_console();
-            }
-
-            ui.add_space(4.0);
-
-            // Waveform toggle
-            let has_waveforms = !self.state.simulation.waveforms.is_empty();
-            let waveform_active = self.state.panels.bottom_panel
-                && self.state.panels.active_bottom_tab == BottomPanelTab::Waveform
-                && has_waveforms;
-
-            let response = if has_waveforms {
-                rail_icon_button(
-                    ui,
-                    IconType::Waveform,
-                    waveform_active,
-                    self.state.theme.accent,
-                )
-            } else {
-                rail_icon_button_disabled(ui, IconType::Waveform)
-            };
-
-            if has_waveforms {
-                if response.on_hover_text("Toggle Waveform Viewer").clicked() {
-                    self.toggle_panel_waveform();
-                }
-            } else {
-                response.on_disabled_hover_text("No waveforms available");
+                self.toggle_bottom_panel();
             }
         });
     }
@@ -2856,6 +3261,31 @@ impl RSpiceApp {
             &mut self.state.script_console,
             &mut self.state.simulation,
         );
+    }
+
+    /// Render the Bode plot panel (AC analysis magnitude/phase)
+    fn render_bode_panel(&mut self, ui: &mut Ui) {
+        crate::analysis::bode::render_bode_panel(ui, &mut self.state);
+    }
+
+    /// Render the Pole-Zero map panel
+    fn render_polezero_panel(&mut self, ui: &mut Ui) {
+        crate::analysis::pole_zero::render_pz_plot(ui, &mut self.state.pole_zero_state);
+    }
+
+    /// Render the Eye diagram panel
+    fn render_eye_panel(&mut self, ui: &mut Ui) {
+        crate::analysis::eye_diagram::render_eye_diagram(ui, &mut self.state.eye_diagram_state);
+    }
+
+    /// Render the Smith chart panel
+    fn render_smith_panel(&mut self, ui: &mut Ui) {
+        crate::analysis::smith_chart::render_smith_chart(ui, &mut self.state.smith_chart_state);
+    }
+
+    /// Render the Histogram panel (Monte Carlo/corners)
+    fn render_histogram_panel(&mut self, ui: &mut Ui) {
+        crate::analysis::histogram::render_histogram(ui, &self.state.histogram_state);
     }
 }
 
@@ -3108,5 +3538,214 @@ mod tests {
             state.theme.is_dark,
             "Theme should be dark by default for EDA"
         );
+    }
+
+    // =========================================================================
+    // Save Confirmation Dialog Tests
+    // Commercial-grade testing for unsaved changes workflow
+    // =========================================================================
+
+    #[test]
+    fn test_confirmation_action_dialog_titles() {
+        // Verify all actions have appropriate dialog titles
+        assert_eq!(
+            ConfirmationAction::FileNew.dialog_title(),
+            "Create New Schematic",
+            "FileNew should have descriptive title"
+        );
+        assert_eq!(
+            ConfirmationAction::FileOpen.dialog_title(),
+            "Open Schematic",
+            "FileOpen should have descriptive title"
+        );
+        assert_eq!(
+            ConfirmationAction::Exit.dialog_title(),
+            "Exit RSpice",
+            "Exit should have descriptive title"
+        );
+    }
+
+    #[test]
+    fn test_confirmation_action_prompt_messages() {
+        // All actions should have clear, user-friendly prompts
+        let message = ConfirmationAction::FileNew.prompt_message();
+        assert!(
+            message.contains("unsaved"),
+            "Prompt should mention unsaved changes"
+        );
+        assert!(message.contains("save"), "Prompt should mention saving");
+    }
+
+    #[test]
+    fn test_confirmation_dialog_state_default() {
+        let state = ConfirmationDialogState::default();
+        assert!(!state.visible, "Dialog should be hidden by default");
+        assert!(
+            state.pending_action.is_none(),
+            "No pending action by default"
+        );
+    }
+
+    #[test]
+    fn test_confirmation_dialog_state_show() {
+        let mut state = ConfirmationDialogState::default();
+
+        // Test showing dialog for FileNew
+        state.show(ConfirmationAction::FileNew);
+        assert!(state.visible, "Dialog should be visible after show()");
+        assert_eq!(
+            state.pending_action,
+            Some(ConfirmationAction::FileNew),
+            "Pending action should be set"
+        );
+
+        // Test showing dialog for different action
+        state.show(ConfirmationAction::FileOpen);
+        assert!(state.visible, "Dialog should remain visible");
+        assert_eq!(
+            state.pending_action,
+            Some(ConfirmationAction::FileOpen),
+            "Pending action should be updated"
+        );
+    }
+
+    #[test]
+    fn test_confirmation_dialog_state_close() {
+        let mut state = ConfirmationDialogState::default();
+
+        // Show then close
+        state.show(ConfirmationAction::FileNew);
+        state.close();
+
+        assert!(!state.visible, "Dialog should be hidden after close()");
+        assert!(
+            state.pending_action.is_none(),
+            "Pending action should be cleared after close()"
+        );
+    }
+
+    #[test]
+    fn test_confirmation_dialog_state_is_showing() {
+        let mut state = ConfirmationDialogState::default();
+
+        // Not showing anything initially
+        assert!(
+            !state.is_showing(ConfirmationAction::FileNew),
+            "Should not be showing FileNew initially"
+        );
+
+        // Show FileNew
+        state.show(ConfirmationAction::FileNew);
+        assert!(
+            state.is_showing(ConfirmationAction::FileNew),
+            "Should be showing FileNew after show()"
+        );
+        assert!(
+            !state.is_showing(ConfirmationAction::FileOpen),
+            "Should not be showing FileOpen"
+        );
+        assert!(
+            !state.is_showing(ConfirmationAction::Exit),
+            "Should not be showing Exit"
+        );
+    }
+
+    #[test]
+    fn test_confirmation_response_enum_completeness() {
+        // Verify all three commercial-standard responses exist
+        let responses = [
+            ConfirmationResponse::Yes,
+            ConfirmationResponse::No,
+            ConfirmationResponse::Cancel,
+        ];
+        assert_eq!(
+            responses.len(),
+            3,
+            "Should have exactly 3 response options (Yes/No/Cancel)"
+        );
+
+        // Verify they are all distinct
+        assert_ne!(ConfirmationResponse::Yes, ConfirmationResponse::No);
+        assert_ne!(ConfirmationResponse::Yes, ConfirmationResponse::Cancel);
+        assert_ne!(ConfirmationResponse::No, ConfirmationResponse::Cancel);
+    }
+
+    #[test]
+    fn test_app_state_has_confirmation_dialog() {
+        let state = AppState::default();
+
+        // Verify confirmation dialog is accessible and properly initialized
+        assert!(
+            !state.dialogs.confirmation_dialog.visible,
+            "Confirmation dialog should be hidden by default"
+        );
+        assert!(
+            state.dialogs.confirmation_dialog.pending_action.is_none(),
+            "No pending action on fresh AppState"
+        );
+    }
+
+    #[test]
+    fn test_app_state_exit_requested_default() {
+        let state = AppState::default();
+        assert!(
+            !state.exit_requested,
+            "Exit should not be requested by default"
+        );
+    }
+
+    #[test]
+    fn test_confirmation_action_is_copy_and_eq() {
+        // Verify ConfirmationAction implements Copy and Eq for efficiency
+        let action = ConfirmationAction::FileNew;
+        let action_copy = action; // Copy
+        assert_eq!(
+            action, action_copy,
+            "ConfirmationAction should implement Eq"
+        );
+
+        // Verify all variants can be compared
+        let actions = [
+            ConfirmationAction::FileNew,
+            ConfirmationAction::FileOpen,
+            ConfirmationAction::Exit,
+        ];
+        for (i, a) in actions.iter().enumerate() {
+            for (j, b) in actions.iter().enumerate() {
+                if i == j {
+                    assert_eq!(a, b, "Same action should be equal");
+                } else {
+                    assert_ne!(a, b, "Different actions should not be equal");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_confirmation_dialog_workflow_complete_cycle() {
+        // Simulate a complete workflow: dirty state -> show dialog -> close
+        let mut state = ConfirmationDialogState::default();
+
+        // Initial state
+        assert!(!state.visible);
+
+        // User triggers action that requires confirmation
+        state.show(ConfirmationAction::Exit);
+        assert!(state.visible);
+        assert_eq!(state.pending_action, Some(ConfirmationAction::Exit));
+
+        // User cancels
+        state.close();
+        assert!(!state.visible);
+        assert!(state.pending_action.is_none());
+
+        // Trigger another action
+        state.show(ConfirmationAction::FileNew);
+        assert!(state.is_showing(ConfirmationAction::FileNew));
+
+        // Complete the action
+        let action = state.pending_action;
+        state.close();
+        assert_eq!(action, Some(ConfirmationAction::FileNew));
     }
 }

@@ -427,7 +427,13 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
             });
 
             if ui.button("Model Browser...").clicked() {
-                state.dialogs.model_browser_dialog = true;
+                state.model_browser_state.open = true;
+                state.model_browser_state.browse_only = true;
+                ui.close_menu();
+            }
+
+            if ui.button("PDK Settings...").clicked() {
+                state.pdk_settings_dialog.open(state.pdk_config.clone());
                 ui.close_menu();
             }
 
@@ -468,11 +474,8 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
 
             // Verification tools
             if ui.button("Design Rule Check").clicked() {
-                // Run DRC on current schematic using DrcChecker
-                let mut checker = crate::services::drc::DrcChecker::new();
-                // TODO: Convert schematic state to DRC input types
-                // For now, run with empty data to show the dialog
-                let result = checker.check_connectivity(&[], &[], &[]);
+                // Run DRC on current schematic using the extraction bridge
+                let result = crate::services::drc::run_drc_check(&state.schematic);
                 let summary = result.summary();
                 let msg = if result.passed() {
                     format!(
@@ -495,9 +498,7 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
 
             if ui.button("Electrical Rule Check").clicked() {
                 // ERC is part of DRC - runs connectivity checks
-                let mut checker = crate::services::drc::DrcChecker::new();
-                // TODO: Convert schematic to DRC input types for full ERC
-                let result = checker.check_connectivity(&[], &[], &[]);
+                let result = crate::services::drc::run_drc_check(&state.schematic);
                 let msg = if result.passed() {
                     "ERC passed: No electrical rule violations".to_string()
                 } else {
