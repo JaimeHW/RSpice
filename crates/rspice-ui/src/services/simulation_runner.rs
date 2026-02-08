@@ -1909,8 +1909,7 @@ pub struct PnoiseData {
     pub input_noise: Option<Vec<Value>>,
     /// Optional total integrated output noise (RMS).
     pub total_output_noise: Option<Value>,
-    /// Device contributors (name, percentage). Differential mode merges output and
-    /// reference-node contributors using uncorrelated PSD weighting.
+    /// Device contributors (name, percentage) at the measured output port.
     pub contributors: Vec<(String, Value)>,
     /// Carrier frequency used for the analysis (Hz).
     pub carrier_frequency: Value,
@@ -1986,41 +1985,18 @@ pub fn run_pnoise_analysis_with_config(
     }
 
     let noise_results = engine
-        .run_noise(&netlist, output_idx, &frequencies, 300.0)
-        .map_err(|e| format!("PNOISE base noise analysis error: {}", e))?;
+        .run_noise_ports(&netlist, output_idx, output_ref_idx, &frequencies, 300.0)
+        .map_err(|e| format!("PNOISE noise analysis error: {}", e))?;
     let noise_data = NoiseData::from_results(noise_results);
-    let reference_noise_data = if let Some(ref_idx) = output_ref_idx {
-        let ref_results = engine
-            .run_noise(&netlist, ref_idx, &frequencies, 300.0)
-            .map_err(|e| format!("PNOISE reference noise analysis error: {}", e))?;
-        Some(NoiseData::from_results(ref_results))
-    } else {
-        None
-    };
 
     let sideband_factor = (2_i64
         .saturating_mul(config.max_sideband.max(0) as i64)
         .saturating_add(1)) as usize;
-    let mut folded_output_noise: Vec<Value> = noise_data
+    let folded_output_noise: Vec<Value> = noise_data
         .output_noise
         .iter()
         .map(|value| *value * sideband_factor as Value)
         .collect();
-    if let Some(reference) = &reference_noise_data {
-        if reference.output_noise.len() != folded_output_noise.len() {
-            return Err(format!(
-                "PNOISE reference noise vector length {} does not match output length {}",
-                reference.output_noise.len(),
-                folded_output_noise.len()
-            ));
-        }
-        for (dst, ref_psd) in folded_output_noise
-            .iter_mut()
-            .zip(reference.output_noise.iter())
-        {
-            *dst += ref_psd.max(0.0) * sideband_factor as Value;
-        }
-    }
 
     let mut warnings = Vec::new();
     if sideband_factor > 1 {
@@ -2028,12 +2004,6 @@ pub fn run_pnoise_analysis_with_config(
             "PNOISE sideband folding approximated with scalar factor {}",
             sideband_factor
         ));
-    }
-    if reference_noise_data.is_some() {
-        warnings.push(
-            "PNOISE differential output uses uncorrelated PSD summation between output and reference nodes"
-                .to_string(),
-        );
     }
 
     let mut output_noise = folded_output_noise.clone();
@@ -2096,11 +2066,7 @@ pub fn run_pnoise_analysis_with_config(
     }
 
     let contributors = if config.noise_summary {
-        if let Some(reference) = reference_noise_data.as_ref() {
-            merge_uncorrelated_contributors(&noise_data, reference)
-        } else {
-            noise_data.contributions.clone()
-        }
+        noise_data.contributions.clone()
     } else {
         Vec::new()
     };
@@ -3832,57 +3798,6 @@ fn estimate_carrier_rms_for_output(
         return (mean_sq > 0.0).then_some(mean_sq.sqrt());
     }
     estimate_carrier_rms_for_node(pss_data, output_node)
-}
-
-fn merge_uncorrelated_contributors(
-    output_noise: &NoiseData,
-    reference_noise: &NoiseData,
-) -> Vec<(String, Value)> {
-    let output_psd = output_noise.output_noise.first().copied().unwrap_or(0.0).max(0.0);
-    let reference_psd = reference_noise
-        .output_noise
-        .first()
-        .copied()
-        .unwrap_or(0.0)
-        .max(0.0);
-    let total_psd = output_psd + reference_psd;
-    if total_psd <= 0.0 {
-        if !output_noise.contributions.is_empty() {
-            return output_noise.contributions.clone();
-        }
-        return reference_noise.contributions.clone();
-    }
-
-    let mut power_by_device: std::collections::BTreeMap<String, Value> =
-        std::collections::BTreeMap::new();
-
-    for (device, percentage) in output_noise.contributions.iter() {
-        let fraction = (*percentage / 100.0).max(0.0);
-        if !fraction.is_finite() || fraction <= 0.0 {
-            continue;
-        }
-        *power_by_device.entry(device.clone()).or_insert(0.0) += output_psd * fraction;
-    }
-
-    for (device, percentage) in reference_noise.contributions.iter() {
-        let fraction = (*percentage / 100.0).max(0.0);
-        if !fraction.is_finite() || fraction <= 0.0 {
-            continue;
-        }
-        *power_by_device.entry(device.clone()).or_insert(0.0) += reference_psd * fraction;
-    }
-
-    let mut merged: Vec<(String, Value)> = power_by_device
-        .into_iter()
-        .map(|(device, power)| (device, (power / total_psd * 100.0).max(0.0)))
-        .filter(|(_, percentage)| percentage.is_finite() && *percentage > 0.0)
-        .collect();
-    merged.sort_by(|a, b| {
-        b.1.partial_cmp(&a.1)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.0.cmp(&b.0))
-    });
-    merged
 }
 
 fn integrate_noise_rms(frequencies: &[Value], psd: &[Value]) -> Value {
@@ -5724,33 +5639,6 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_uncorrelated_contributors_combines_psd_weighted_percentages() {
-        let output_noise = NoiseData {
-            frequencies: vec![1.0],
-            output_noise: vec![4.0],
-            total_output_noise: 2.0,
-            contributions: vec![("R1".to_string(), 75.0), ("R2".to_string(), 25.0)],
-            num_points: 1,
-        };
-        let reference_noise = NoiseData {
-            frequencies: vec![1.0],
-            output_noise: vec![1.0],
-            total_output_noise: 1.0,
-            contributions: vec![("R2".to_string(), 50.0), ("R3".to_string(), 50.0)],
-            num_points: 1,
-        };
-
-        let merged = merge_uncorrelated_contributors(&output_noise, &reference_noise);
-        assert_eq!(merged.len(), 3);
-        assert_eq!(merged[0].0, "R1");
-        assert_eq!(merged[1].0, "R2");
-        assert_eq!(merged[2].0, "R3");
-        assert!((merged[0].1 - 60.0).abs() < 1e-12);
-        assert!((merged[1].1 - 30.0).abs() < 1e-12);
-        assert!((merged[2].1 - 10.0).abs() < 1e-12);
-    }
-
-    #[test]
     fn test_run_pnoise_analysis_with_config_executes_output_referred() {
         let netlist = "* pnoise\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
         let cfg = PnoiseRunConfig {
@@ -5852,6 +5740,7 @@ mod tests {
         let cfg = PnoiseRunConfig {
             output_node: "out".to_string(),
             output_ref: Some("in".to_string()),
+            max_sideband: 0,
             ..PnoiseRunConfig::default()
         };
         let result = run_pnoise_analysis_with_config(netlist, &cfg)
@@ -5862,11 +5751,10 @@ mod tests {
             .contributors
             .iter()
             .all(|(_, percentage)| percentage.is_finite() && *percentage >= 0.0));
-        assert!(!result.warnings.is_empty());
-        assert!(result
+        assert!(!result
             .warnings
             .iter()
-            .any(|warning| warning.contains("differential output")));
+            .any(|warning| warning.contains("uncorrelated PSD summation")));
     }
 
     #[test]
@@ -5894,9 +5782,50 @@ mod tests {
         {
             assert!(
                 *diff_value + 1e-30 >= *single_value,
-                "differential PSD {} should be >= single-ended PSD {} under uncorrelated summation",
+                "differential PSD {} should be >= single-ended PSD {}",
                 diff_value,
                 single_value
+            );
+        }
+    }
+
+    #[test]
+    fn test_run_pnoise_analysis_differential_output_matches_core_noise_port_density() {
+        let netlist = "* pnoise differential parity\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        let cfg = PnoiseRunConfig {
+            output_node: "out".to_string(),
+            output_ref: Some("in".to_string()),
+            start_freq: 10.0,
+            stop_freq: 1e6,
+            points_per_unit: 8,
+            sweep: PnoiseFrequencySweep::Decade,
+            max_sideband: 0,
+            ..PnoiseRunConfig::default()
+        };
+        let result = run_pnoise_analysis_with_config(netlist, &cfg)
+            .expect("differential PNOISE output should execute");
+
+        let parsed = rspice_core::netlist::parse_netlist(netlist).expect("netlist should parse");
+        let mut sim_config = build_engine_config(&parsed, None);
+        sim_config.tolerance = cfg.pss_tolerance;
+        let engine = Engine::new(sim_config);
+        let dc = engine.run_dc_op(&parsed).expect("dc op should execute");
+        let out_idx = resolve_node_or_ground_index("out", &dc.node_names).expect("out must resolve");
+        let ref_idx = resolve_node_or_ground_index("in", &dc.node_names).expect("in must resolve");
+        let core = engine
+            .run_noise_ports(&parsed, out_idx, Some(ref_idx), &result.frequencies, 300.0)
+            .expect("core differential noise port run should execute");
+
+        assert_eq!(core.len(), result.output_noise.len());
+        for (idx, (core_point, ui_point)) in core.iter().zip(result.output_noise.iter()).enumerate() {
+            let tol = 1e-24 + core_point.output_noise_density.abs() * 1e-9;
+            assert!(
+                (core_point.output_noise_density - *ui_point).abs() <= tol,
+                "expected UI differential output density to match core at idx {} (f={} Hz): core={}, ui={}",
+                idx,
+                core_point.frequency,
+                core_point.output_noise_density,
+                ui_point
             );
         }
     }
