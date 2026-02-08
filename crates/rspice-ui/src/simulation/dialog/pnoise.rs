@@ -126,6 +126,8 @@ pub struct PnoiseConfig {
     pub output_node: String,
     /// Reference node (ground if empty)
     pub output_ref: String,
+    /// Input source name (used for input-referred conversion)
+    pub input_source: String,
     /// Noise reference type
     pub noise_ref: NoiseReferenceType,
     /// Include spot noise
@@ -148,6 +150,7 @@ impl Default for PnoiseConfig {
             max_sideband: 5, // Sidebands to fold
             output_node: "VOUT".to_string(),
             output_ref: String::new(),
+            input_source: "VIN".to_string(),
             noise_ref: NoiseReferenceType::Output,
             spot_noise: true,
             integrated_noise: false,
@@ -190,6 +193,12 @@ impl PnoiseConfig {
     /// Set noise reference type
     pub fn with_noise_ref(mut self, noise_ref: NoiseReferenceType) -> Self {
         self.noise_ref = noise_ref;
+        self
+    }
+
+    /// Set input source
+    pub fn with_input(mut self, source: &str) -> Self {
+        self.input_source = source.to_uppercase();
         self
     }
 
@@ -301,6 +310,9 @@ impl PnoiseConfig {
         if self.output_node.is_empty() {
             return Err("Output node must be specified".to_string());
         }
+        if self.noise_ref == NoiseReferenceType::Input && self.input_source.trim().is_empty() {
+            return Err("Input source must be specified for input-referred noise".to_string());
+        }
 
         Ok(())
     }
@@ -332,6 +344,8 @@ pub struct PnoiseDialogState {
     pub output_node: String,
     /// Output reference buffer
     pub output_ref: String,
+    /// Input source buffer
+    pub input_source: String,
     /// Noise reference type index
     pub noise_ref_idx: usize,
     /// Spot noise enabled
@@ -359,6 +373,7 @@ impl PnoiseDialogState {
             max_sideband: config.max_sideband.to_string(),
             output_node: config.output_node.clone(),
             output_ref: config.output_ref.clone(),
+            input_source: config.input_source.clone(),
             noise_ref_idx: match config.noise_ref {
                 NoiseReferenceType::Output => 0,
                 NoiseReferenceType::Input => 1,
@@ -403,6 +418,7 @@ impl PnoiseDialogState {
             max_sideband: max_sb,
             output_node: self.output_node.clone(),
             output_ref: self.output_ref.clone(),
+            input_source: self.input_source.clone(),
             noise_ref,
             spot_noise: self.spot_noise,
             integrated_noise: self.integrated_noise,
@@ -511,6 +527,14 @@ impl PnoiseDialogState {
                     );
                     ui.end_row();
 
+                    ui.label("Input Source:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.input_source)
+                            .desired_width(120.0)
+                            .hint_text("VIN"),
+                    );
+                    ui.end_row();
+
                     ui.label("Noise Type:");
                     let noise_types = ["Output-Referred", "Input-Referred", "Phase Noise"];
                     egui::ComboBox::from_id_salt("pnoise_ref")
@@ -610,6 +634,7 @@ mod tests {
         assert_eq!(cfg.stop_freq, 1e6);
         assert_eq!(cfg.max_sideband, 5);
         assert_eq!(cfg.output_node, "VOUT");
+        assert_eq!(cfg.input_source, "VIN");
         assert!(cfg.spot_noise);
     }
 
@@ -633,11 +658,13 @@ mod tests {
     fn test_config_builder_chain() {
         let cfg = PnoiseConfig::new(1.0, 1e6, 10)
             .with_output("VCO_OUT")
+            .with_input("vdrive")
             .with_noise_ref(NoiseReferenceType::Phase)
             .with_sidebands(10)
             .with_integrated_noise(true);
 
         assert_eq!(cfg.output_node, "VCO_OUT");
+        assert_eq!(cfg.input_source, "VDRIVE");
         assert_eq!(cfg.noise_ref, NoiseReferenceType::Phase);
         assert_eq!(cfg.max_sideband, 10);
         assert!(cfg.integrated_noise);
@@ -705,6 +732,13 @@ mod tests {
     fn test_validate_empty_output() {
         let mut cfg = PnoiseConfig::default();
         cfg.output_node = String::new();
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_input_referred_requires_input_source() {
+        let mut cfg = PnoiseConfig::default().with_noise_ref(NoiseReferenceType::Input);
+        cfg.input_source.clear();
         assert!(cfg.validate().is_err());
     }
 
@@ -844,18 +878,21 @@ mod tests {
 
         assert!(state.initialized);
         assert_eq!(state.noise_ref_idx, 2); // Phase
+        assert_eq!(state.input_source, "VIN");
     }
 
     #[test]
     fn test_dialog_state_to_config() {
         let mut state = PnoiseDialogState::from_config(&PnoiseConfig::default());
         state.noise_ref_idx = 2; // Phase
+        state.input_source = "v1".to_string();
 
         let result = state.to_config();
         assert!(result.is_ok());
 
         let cfg = result.unwrap();
         assert_eq!(cfg.noise_ref, NoiseReferenceType::Phase);
+        assert_eq!(cfg.input_source, "v1");
     }
 
     #[test]

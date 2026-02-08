@@ -707,6 +707,7 @@ impl SimulationController {
             max_sideband: pnoise_cfg.max_sideband,
             output_node: pnoise_cfg.output_node,
             output_ref,
+            input_source: pnoise_cfg.input_source,
             noise_ref,
             integrated_noise: pnoise_cfg.integrated_noise,
             noise_summary: pnoise_cfg.noise_summary,
@@ -3361,6 +3362,7 @@ mod tests {
             crate::simulation::dialog::pnoise::PnoiseDialogState::from_config(
                 &PnoiseConfig::new(10.0, 10e6, 10)
                     .with_output("OUT")
+                    .with_input("V1")
                     .with_sidebands(2)
                     .with_noise_ref(NoiseReferenceType::Phase),
             );
@@ -3386,15 +3388,16 @@ mod tests {
         assert!(queue[0].config.is_none());
         assert!(queue[0].analysis_line.starts_with(".pnoise "));
         assert!(queue[0].spec_options.pnoise.is_some());
+        let pnoise_cfg = queue[0]
+            .spec_options
+            .pnoise
+            .as_ref()
+            .expect("PNOISE options should be present");
         assert!(matches!(
-            queue[0]
-                .spec_options
-                .pnoise
-                .as_ref()
-                .expect("PNOISE options should be present")
-                .noise_ref,
+            pnoise_cfg.noise_ref,
             crate::services::simulation_runner::PnoiseReference::Phase
         ));
+        assert_eq!(pnoise_cfg.input_source, "V1");
 
         assert!(matches!(queue[1].spec, AnalysisSpec::Tf));
         assert!(queue[1].config.is_none());
