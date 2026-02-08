@@ -768,7 +768,7 @@ pub fn run_sensitivity_analysis(
             .map_err(|e| format!("Sensitivity error for parameter '{}': {}", name, e))?
         };
 
-        let normalized = if nominal_output.abs() > 1e-18 {
+        let normalized = if nominal_output.abs() > 1e-15 {
             (value / nominal_output) * raw
         } else {
             0.0
@@ -1729,5 +1729,21 @@ mod tests {
             .sensitivities
             .iter()
             .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite()));
+    }
+
+    #[test]
+    fn test_run_sensitivity_analysis_normalized_reports_zero_when_nominal_is_near_zero() {
+        let netlist =
+            "* sens tiny\n.param RVAL=1k\nV1 in 0 1e-16\nR1 in out {RVAL}\nR2 out 0 1k\n";
+
+        let result = run_sensitivity_analysis(netlist, "V(out)", false, None)
+            .expect("sensitivity run should succeed");
+        let (_name, raw, normalized) = result
+            .sensitivities
+            .iter()
+            .find(|(name, _, _)| name.eq_ignore_ascii_case("RVAL"))
+            .expect("expected RVAL sensitivity");
+        assert!(raw.is_finite());
+        assert_eq!(*normalized, 0.0);
     }
 }
