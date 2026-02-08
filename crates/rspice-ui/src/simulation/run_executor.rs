@@ -17,11 +17,12 @@ use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc,
 };
+use std::thread;
 use std::time::Instant;
 
 use super::config::{AnalysisConfig, DcSweepConfig};
 use super::multi_run::{AnalysisRun, AnalysisRunType, AnalysisSpec, RunQueue, RunStatus};
-use super::options_translator::{EngineOptions, OptionsTranslator, PvtCorner};
+use super::options_translator::{OptionsTranslator, PvtCorner};
 use super::result_mapper::{
     MappedAnalysisType, MappedMeasurement, MappedResult, MappedWaveform, MeasurementStatus,
     MeasurementType, ResultMapper, ResultStatus,
@@ -159,6 +160,12 @@ impl ExecutionResult {
     }
 }
 
+struct ParallelRunOutcome {
+    run_id: u64,
+    run_name: String,
+    result: Result<MappedResult, String>,
+}
+
 // =============================================================================
 // Run Executor
 // =============================================================================
@@ -238,43 +245,10 @@ impl RunExecutor {
         result.state.total_runs = queue.len();
         result.state.status = ExecutionStatus::Running;
         result.state.start_time = Self::now();
-
-        // Execute runs using the queue's built-in ordering
-        while let Some(run_id) = queue.start_next(Self::now()) {
-            // Check cancellation
-            if self.is_cancelled() {
-                queue.cancel_all(Self::now());
-                result.state.status = ExecutionStatus::Cancelled;
-                break;
-            }
-
-            // Get run info
-            let run_name = queue
-                .get(run_id)
-                .map(|r| r.name.clone())
-                .unwrap_or_default();
-            result.state.current_run = Some(run_name);
-
-            // Execute this run
-            match self.execute_single(queue, run_id) {
-                Ok(mapped) => {
-                    result.results.insert(run_id, mapped);
-                    queue.complete_current(Self::now());
-                    result.state.completed_runs += 1;
-                }
-                Err(e) => {
-                    result.errors.insert(run_id, e.clone());
-                    queue.fail_current(&e, Self::now());
-                    result.state.failed_runs += 1;
-                    result.state.completed_runs += 1;
-                }
-            }
-
-            // Update progress
-            self.progress
-                .store(result.state.completed_runs, Ordering::SeqCst);
-            result.state.elapsed_seconds = start.elapsed().as_secs_f64();
-            result.state.update_eta();
+        if self.max_parallel <= 1 || queue.len() <= 1 {
+            self.execute_serial(queue, &start, &mut result);
+        } else {
+            self.execute_parallel(queue, &start, &mut result);
         }
 
         // Final state
@@ -292,6 +266,183 @@ impl RunExecutor {
         result
     }
 
+    fn execute_serial(&self, queue: &mut RunQueue, start: &Instant, result: &mut ExecutionResult) {
+        while let Some(run_id) = queue.start_next(Self::now()) {
+            if self.is_cancelled() {
+                queue.cancel_all(Self::now());
+                result.state.status = ExecutionStatus::Cancelled;
+                break;
+            }
+
+            let run_name = queue
+                .get(run_id)
+                .map(|r| r.name.clone())
+                .unwrap_or_else(|| format!("run-{}", run_id));
+            let run_result = self.execute_single(queue, run_id);
+            self.record_run_completion(queue, start, result, run_id, run_name, run_result);
+        }
+    }
+
+    fn execute_parallel(
+        &self,
+        queue: &mut RunQueue,
+        start: &Instant,
+        result: &mut ExecutionResult,
+    ) {
+        let netlist = queue.netlist().map(str::to_string);
+        let mut running: HashMap<u64, thread::JoinHandle<ParallelRunOutcome>> = HashMap::new();
+        let mut cancellation_requested = false;
+
+        loop {
+            if self.is_cancelled() {
+                cancellation_requested = true;
+            }
+
+            let finished_ids: Vec<u64> = running
+                .iter()
+                .filter_map(|(&run_id, handle)| handle.is_finished().then_some(run_id))
+                .collect();
+
+            for run_id in finished_ids {
+                let handle = running
+                    .remove(&run_id)
+                    .expect("finished run handle must exist");
+                let outcome = handle.join().unwrap_or_else(|_| ParallelRunOutcome {
+                    run_id,
+                    run_name: queue
+                        .get(run_id)
+                        .map(|run| run.name.clone())
+                        .unwrap_or_else(|| format!("run-{}", run_id)),
+                    result: Err("simulation execution thread panicked".to_string()),
+                });
+                self.record_run_completion(
+                    queue,
+                    start,
+                    result,
+                    outcome.run_id,
+                    outcome.run_name,
+                    outcome.result,
+                );
+            }
+
+            if cancellation_requested {
+                if running.is_empty() {
+                    self.cancel_pending_runs(queue);
+                    result.state.status = ExecutionStatus::Cancelled;
+                    break;
+                }
+                thread::sleep(std::time::Duration::from_millis(1));
+                continue;
+            }
+
+            let mut launched_any = false;
+            while running.len() < self.max_parallel {
+                let Some(run_id) = self.next_runnable_parallel(queue) else {
+                    break;
+                };
+                let Some(run_snapshot) = queue.get(run_id).cloned() else {
+                    break;
+                };
+
+                if let Some(run) = queue.get_mut(run_id) {
+                    run.start(Self::now());
+                }
+                let run_name = run_snapshot.name.clone();
+                let netlist_snapshot = netlist.clone();
+                let handle = thread::spawn(move || {
+                    let run_result = match netlist_snapshot.as_deref() {
+                        Some(text) => Self::execute_single_with_run(&run_snapshot, text),
+                        None => Err("No netlist configured for queue".to_string()),
+                    };
+                    ParallelRunOutcome {
+                        run_id,
+                        run_name,
+                        result: run_result,
+                    }
+                });
+                running.insert(run_id, handle);
+                launched_any = true;
+            }
+
+            let has_pending = queue
+                .runs()
+                .iter()
+                .any(|run| run.status == RunStatus::Pending);
+            if running.is_empty() {
+                // No running tasks and no launchable tasks left.
+                if !has_pending || !launched_any {
+                    break;
+                }
+            } else {
+                thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+    }
+
+    fn next_runnable_parallel(&self, queue: &RunQueue) -> Option<u64> {
+        let completed: Vec<u64> = queue
+            .runs()
+            .iter()
+            .filter(|run| run.status.is_success())
+            .map(|run| run.id)
+            .collect();
+
+        queue
+            .runs()
+            .iter()
+            .find(|run| run.status == RunStatus::Pending && run.dependencies_met(&completed))
+            .map(|run| run.id)
+    }
+
+    fn cancel_pending_runs(&self, queue: &mut RunQueue) {
+        let now = Self::now();
+        let cancellable_ids: Vec<u64> = queue
+            .runs()
+            .iter()
+            .filter(|run| matches!(run.status, RunStatus::Pending | RunStatus::Running))
+            .map(|run| run.id)
+            .collect();
+
+        for run_id in cancellable_ids {
+            if let Some(run) = queue.get_mut(run_id) {
+                run.cancel(now);
+            }
+        }
+        queue.current_run = None;
+    }
+
+    fn record_run_completion(
+        &self,
+        queue: &mut RunQueue,
+        start: &Instant,
+        result: &mut ExecutionResult,
+        run_id: u64,
+        run_name: String,
+        run_result: Result<MappedResult, String>,
+    ) {
+        result.state.current_run = Some(run_name);
+        match run_result {
+            Ok(mapped) => {
+                result.results.insert(run_id, mapped);
+                queue.current_run = Some(run_id);
+                queue.complete_current(Self::now());
+                result.state.completed_runs += 1;
+            }
+            Err(error) => {
+                result.errors.insert(run_id, error.clone());
+                queue.current_run = Some(run_id);
+                queue.fail_current(&error, Self::now());
+                result.state.failed_runs += 1;
+                result.state.completed_runs += 1;
+            }
+        }
+
+        self.progress
+            .store(result.state.completed_runs, Ordering::SeqCst);
+        result.state.elapsed_seconds = start.elapsed().as_secs_f64();
+        result.state.update_eta();
+    }
+
     /// Execute a single run item
     ///
     /// Calls the actual simulation engine based on the analysis type and returns
@@ -306,9 +457,10 @@ impl RunExecutor {
             .netlist()
             .ok_or_else(|| "No netlist configured for queue".to_string())?;
 
-        // Build options (reserved for future engine option plumbing)
-        let _options = EngineOptions::spectre_defaults();
+        Self::execute_single_with_run(run, netlist)
+    }
 
+    fn execute_single_with_run(run: &AnalysisRun, netlist: &str) -> Result<MappedResult, String> {
         let spec = run
             .spec
             .clone()
@@ -333,7 +485,7 @@ impl RunExecutor {
 
         // Execute based on analysis type
         let start = Instant::now();
-        let result = self.execute_analysis(&spec, netlist);
+        let result = Self::execute_analysis(&spec, netlist);
         let elapsed = start.elapsed().as_secs_f64();
 
         // Map result
@@ -347,7 +499,7 @@ impl RunExecutor {
     }
 
     /// Execute a specific analysis specification.
-    fn execute_analysis(&self, spec: &AnalysisSpec, netlist: &str) -> Result<MappedResult, String> {
+    fn execute_analysis(spec: &AnalysisSpec, netlist: &str) -> Result<MappedResult, String> {
         use crate::services::simulation_runner;
 
         match spec {
@@ -1710,7 +1862,7 @@ impl Default for AsyncRunExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::super::multi_run::{AnalysisRunType, AnalysisSpec, FrequencySweep};
+    use super::super::multi_run::{AnalysisRunType, AnalysisSpec, FrequencySweep, RunStatus};
     use super::*;
 
     // =========================================================================
@@ -1932,6 +2084,121 @@ mod tests {
 
         let result = executor.execute(&mut queue);
         assert_eq!(result.state.total_runs, 2);
+    }
+
+    #[test]
+    fn test_execute_parallel_completes_dependency_graph() {
+        let executor = RunExecutor::new().with_parallel(4);
+        let mut queue = RunQueue::new().with_netlist("* dep\nV1 in 0 1\nR1 in out 1k\n");
+
+        let root = queue.add(AnalysisRunType::DcOp);
+        let child_a = queue.add(AnalysisRunType::DcOp);
+        queue
+            .get_mut(child_a)
+            .expect("child_a run must exist")
+            .dependencies
+            .push(root);
+        let child_b = queue.add(AnalysisRunType::DcOp);
+        queue
+            .get_mut(child_b)
+            .expect("child_b run must exist")
+            .dependencies
+            .push(root);
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.total_runs, 3);
+        assert_eq!(result.state.failed_runs, 0);
+        assert_eq!(
+            queue.get(root).expect("root run must exist").status,
+            RunStatus::Completed
+        );
+        assert_eq!(
+            queue.get(child_a).expect("child_a run must exist").status,
+            RunStatus::Completed
+        );
+        assert_eq!(
+            queue.get(child_b).expect("child_b run must exist").status,
+            RunStatus::Completed
+        );
+    }
+
+    #[test]
+    fn test_execute_parallel_skips_dependents_on_failure() {
+        let executor = RunExecutor::new().with_parallel(2);
+        let mut queue = RunQueue::new().with_netlist("* fail deps\nV1 in 0 1\nR1 in out 1k\n");
+
+        let failing = queue.add(AnalysisRunType::Ac); // Missing AnalysisSpec by design
+        let dependent = queue.add(AnalysisRunType::DcOp);
+        queue
+            .get_mut(dependent)
+            .expect("dependent run must exist")
+            .dependencies
+            .push(failing);
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.total_runs, 2);
+        assert_eq!(result.state.failed_runs, 1);
+        assert_eq!(
+            queue.get(failing).expect("failing run must exist").status,
+            RunStatus::Failed
+        );
+        assert_eq!(
+            queue
+                .get(dependent)
+                .expect("dependent run must exist")
+                .status,
+            RunStatus::Skipped
+        );
+        let err = result
+            .errors
+            .values()
+            .next()
+            .expect("expected a failure message");
+        assert!(err.contains("missing AnalysisSpec"));
+    }
+
+    #[test]
+    fn test_execute_parallel_allows_independent_success_after_failure() {
+        let executor = RunExecutor::new().with_parallel(2);
+        let mut queue = RunQueue::new().with_netlist("* independent\nV1 in 0 1\nR1 in out 1k\n");
+
+        let failing = queue.add(AnalysisRunType::Ac); // Missing AnalysisSpec by design
+        let succeeding = queue.add(AnalysisRunType::DcOp);
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.total_runs, 2);
+        assert_eq!(result.state.failed_runs, 1);
+        assert_eq!(result.state.completed_runs, 2);
+        assert_eq!(
+            queue.get(failing).expect("failing run must exist").status,
+            RunStatus::Failed
+        );
+        assert_eq!(
+            queue
+                .get(succeeding)
+                .expect("succeeding run must exist")
+                .status,
+            RunStatus::Completed
+        );
+    }
+
+    #[test]
+    fn test_execute_parallel_missing_netlist_fails_all_runs_without_deadlock() {
+        let executor = RunExecutor::new().with_parallel(4);
+        let mut queue = RunQueue::new();
+        queue.add(AnalysisRunType::DcOp);
+        queue.add(AnalysisRunType::DcOp);
+        queue.add(AnalysisRunType::DcOp);
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.total_runs, 3);
+        assert_eq!(result.state.failed_runs, 3);
+        assert_eq!(result.state.completed_runs, 3);
+        assert_eq!(result.errors.len(), 3);
+        assert!(result
+            .errors
+            .values()
+            .all(|err| err.contains("No netlist configured for queue")));
     }
 
     #[test]
