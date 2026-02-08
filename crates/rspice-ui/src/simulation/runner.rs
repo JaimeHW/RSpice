@@ -335,6 +335,14 @@ fn run_simulation_thread(
                         });
                     }
                 }
+                AnalysisSpec::Stb {
+                    start_freq,
+                    stop_freq,
+                    ..
+                } => p.update_status(SimulationStatus::AcAnalysis {
+                    freq: *start_freq,
+                    stop_freq: *stop_freq,
+                }),
                 AnalysisSpec::MonteCarlo => p.update_status(SimulationStatus::PostProcessing),
                 AnalysisSpec::Parametric => p.update_status(SimulationStatus::DcSweep {
                     source: "STEP".to_string(),
@@ -680,6 +688,52 @@ fn run_spec_request(
                 output_noise: data.output_noise,
                 input_noise: data.input_noise,
                 contributors,
+            })
+        }
+        AnalysisSpec::Stb {
+            probe_node,
+            start_freq,
+            stop_freq,
+            points_per_decade,
+        } => {
+            let data = svc_runner::run_stb_analysis(
+                netlist,
+                &probe_node,
+                start_freq,
+                stop_freq,
+                points_per_decade,
+            )
+            .map_err(SimulationError::InvalidConfig)?;
+
+            let mut waveforms = std::collections::HashMap::new();
+            waveforms.insert(
+                "Loop Gain (dB)".to_string(),
+                WaveformData {
+                    name: "Loop Gain (dB)".to_string(),
+                    x_values: data.frequencies.clone(),
+                    y_values: data.loop_gain_db,
+                    y_unit: "dB".to_string(),
+                    x_unit: "Hz".to_string(),
+                    is_complex: false,
+                    y_imag: None,
+                },
+            );
+            waveforms.insert(
+                "Loop Phase (deg)".to_string(),
+                WaveformData {
+                    name: "Loop Phase (deg)".to_string(),
+                    x_values: data.frequencies.clone(),
+                    y_values: data.loop_phase_deg,
+                    y_unit: "deg".to_string(),
+                    x_unit: "Hz".to_string(),
+                    is_complex: false,
+                    y_imag: None,
+                },
+            );
+
+            Ok(SimulationResult::Ac {
+                frequencies: data.frequencies,
+                waveforms,
             })
         }
         unsupported => Err(SimulationError::InvalidConfig(format!(
@@ -1466,6 +1520,63 @@ C1 out 0 1n
                 assert!(output_noise.iter().all(|value| value.is_finite()));
             }
             other => panic!("Expected Noise result for PNOISE, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_stb() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* STB smoke test
+V1 in 0 DC 1
+R1 in out 1k
+C1 out 0 1n
+.end
+"#
+        .to_string();
+
+        runner
+            .start_spec(
+                AnalysisSpec::Stb {
+                    probe_node: "1".to_string(),
+                    start_freq: 1.0,
+                    stop_freq: 1e6,
+                    points_per_decade: 8,
+                },
+                netlist,
+            )
+            .expect("STB spec should start");
+        thread::sleep(std::time::Duration::from_millis(250));
+
+        let result = runner.poll_result();
+        assert!(result.is_some(), "Expected STB result");
+        let result = result.unwrap().expect("STB should succeed");
+        match result {
+            SimulationResult::Ac {
+                frequencies,
+                waveforms,
+            } => {
+                assert!(!frequencies.is_empty());
+                assert!(waveforms.contains_key("Loop Gain (dB)"));
+                assert!(waveforms.contains_key("Loop Phase (deg)"));
+                assert_eq!(
+                    waveforms
+                        .get("Loop Gain (dB)")
+                        .expect("loop-gain waveform should exist")
+                        .x_values
+                        .len(),
+                    frequencies.len()
+                );
+                assert_eq!(
+                    waveforms
+                        .get("Loop Phase (deg)")
+                        .expect("loop-phase waveform should exist")
+                        .x_values
+                        .len(),
+                    frequencies.len()
+                );
+            }
+            other => panic!("Expected AC result for STB, got {:?}", other),
         }
     }
 }

@@ -44,6 +44,8 @@ pub enum AnalysisRunType {
     Pac,
     /// Periodic noise
     Pnoise,
+    /// Loop stability
+    Stb,
     /// Monte Carlo
     MonteCarlo,
     /// Parametric
@@ -68,6 +70,7 @@ impl AnalysisRunType {
             AnalysisRunType::Pss => "PSS",
             AnalysisRunType::Pac => "PAC",
             AnalysisRunType::Pnoise => "PNoise",
+            AnalysisRunType::Stb => "STB",
             AnalysisRunType::MonteCarlo => "Monte Carlo",
             AnalysisRunType::Parametric => "Parametric",
             AnalysisRunType::Corner => "Corner",
@@ -83,6 +86,7 @@ impl AnalysisRunType {
                 | AnalysisRunType::Tf
                 | AnalysisRunType::Sensitivity
                 | AnalysisRunType::PoleZero
+                | AnalysisRunType::Stb
         )
     }
 
@@ -106,6 +110,7 @@ impl AnalysisRunType {
             AnalysisRunType::Pss => 20,
             AnalysisRunType::Pac => 5,
             AnalysisRunType::Pnoise => 10,
+            AnalysisRunType::Stb => 4,
             AnalysisRunType::MonteCarlo => 50,
             AnalysisRunType::Parametric => 30,
             AnalysisRunType::Corner => 25,
@@ -209,6 +214,13 @@ pub enum AnalysisSpec {
     Pac,
     /// Periodic noise
     Pnoise,
+    /// Stability analysis
+    Stb {
+        probe_node: String,
+        start_freq: f64,
+        stop_freq: f64,
+        points_per_decade: usize,
+    },
     /// Monte Carlo
     MonteCarlo,
     /// Parametric sweep
@@ -233,6 +245,7 @@ impl AnalysisSpec {
             AnalysisSpec::PoleZero { .. } => AnalysisRunType::PoleZero,
             AnalysisSpec::Pac => AnalysisRunType::Pac,
             AnalysisSpec::Pnoise => AnalysisRunType::Pnoise,
+            AnalysisSpec::Stb { .. } => AnalysisRunType::Stb,
             AnalysisSpec::MonteCarlo => AnalysisRunType::MonteCarlo,
             AnalysisSpec::Parametric => AnalysisRunType::Parametric,
             AnalysisSpec::Corner => AnalysisRunType::Corner,
@@ -433,6 +446,29 @@ impl AnalysisSpec {
                 let analysis = analysis_type.trim().to_ascii_uppercase();
                 if analysis != "PZ" && analysis != "POL" && analysis != "ZER" {
                     return Err("Pole-zero analysis_type must be PZ, POL, or ZER".to_string());
+                }
+                Ok(())
+            }
+            AnalysisSpec::Stb {
+                probe_node,
+                start_freq,
+                stop_freq,
+                points_per_decade,
+            } => {
+                if probe_node.trim().is_empty() {
+                    return Err("STB probe_node is required".to_string());
+                }
+                if *start_freq <= 0.0 {
+                    return Err("STB start_freq must be > 0".to_string());
+                }
+                if *stop_freq <= 0.0 {
+                    return Err("STB stop_freq must be > 0".to_string());
+                }
+                if *stop_freq <= *start_freq {
+                    return Err("STB stop_freq must be > start_freq".to_string());
+                }
+                if *points_per_decade == 0 {
+                    return Err("STB points_per_decade must be > 0".to_string());
                 }
                 Ok(())
             }
@@ -1029,14 +1065,35 @@ mod tests {
     fn test_run_type_display() {
         assert_eq!(AnalysisRunType::DcOp.display_name(), "DC Operating Point");
         assert_eq!(AnalysisRunType::Transient.display_name(), "Transient");
+        assert_eq!(AnalysisRunType::Stb.display_name(), "STB");
     }
 
     #[test]
     fn test_run_type_requires_dc_op() {
         assert!(AnalysisRunType::Ac.requires_dc_op());
         assert!(AnalysisRunType::Noise.requires_dc_op());
+        assert!(AnalysisRunType::Stb.requires_dc_op());
         assert!(!AnalysisRunType::Transient.requires_dc_op());
         assert!(!AnalysisRunType::DcOp.requires_dc_op());
+    }
+
+    #[test]
+    fn test_analysis_spec_stb_validation() {
+        let valid = AnalysisSpec::Stb {
+            probe_node: "LSTB".to_string(),
+            start_freq: 1.0,
+            stop_freq: 1e9,
+            points_per_decade: 10,
+        };
+        assert!(valid.validate().is_ok());
+
+        let invalid = AnalysisSpec::Stb {
+            probe_node: "".to_string(),
+            start_freq: 0.0,
+            stop_freq: 1.0,
+            points_per_decade: 0,
+        };
+        assert!(invalid.validate().is_err());
     }
 
     #[test]

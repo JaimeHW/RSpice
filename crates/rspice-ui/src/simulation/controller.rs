@@ -469,6 +469,7 @@ impl SimulationController {
             spec,
             AnalysisSpec::Tf
                 | AnalysisSpec::Pnoise
+                | AnalysisSpec::Stb { .. }
                 | AnalysisSpec::MonteCarlo
                 | AnalysisSpec::Parametric
                 | AnalysisSpec::Corner
@@ -918,6 +919,7 @@ impl SimulationController {
             6 => self.build_sensitivity_spec(state),
             7 => self.build_monte_carlo_spec(state),
             8 => self.build_pss_spec(state),
+            9 => self.build_stb_spec(state),
             10 => self.build_temperature_sweep_spec(state),
             11 => self.build_harmonic_balance_spec(state),
             13 => self.build_pac_spec(state),
@@ -1057,6 +1059,7 @@ impl SimulationController {
             AnalysisSpec::Parametric => self.build_temperature_step_command(state),
             AnalysisSpec::Corner => self.build_corner_temp_command(state),
             AnalysisSpec::Pss { .. } => self.build_pss_command(state),
+            AnalysisSpec::Stb { .. } => self.build_stb_command(state),
             AnalysisSpec::HarmonicBalance { .. } => self.build_harmonic_balance_command(state),
             AnalysisSpec::Pac => self.build_pac_command(state),
             AnalysisSpec::Pnoise => self.build_pnoise_command(state),
@@ -1104,6 +1107,20 @@ impl SimulationController {
             fundamental_freq: pss_cfg.fund_freq,
             num_harmonics: pss_cfg.num_harmonics as usize,
             tolerance: pss_cfg.stab_tol,
+        })
+    }
+
+    fn build_stb_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
+        let mut stb_state = state.dialogs.stb_state.clone();
+        stb_state.ensure_initialized();
+        let stb_cfg = stb_state
+            .to_config()
+            .map_err(|e| format!("invalid STB settings: {}", e))?;
+        Ok(AnalysisSpec::Stb {
+            probe_node: stb_cfg.probe_source,
+            start_freq: stb_cfg.start_freq,
+            stop_freq: stb_cfg.stop_freq,
+            points_per_decade: stb_cfg.points_per_decade as usize,
         })
     }
 
@@ -1219,6 +1236,15 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid PSS settings: {}", e))?;
         Ok(pss_cfg.to_spice())
+    }
+
+    fn build_stb_command(&self, state: &AppState) -> Result<String, String> {
+        let mut stb_state = state.dialogs.stb_state.clone();
+        stb_state.ensure_initialized();
+        let stb_cfg = stb_state
+            .to_config()
+            .map_err(|e| format!("invalid STB settings: {}", e))?;
+        Ok(stb_cfg.to_spice())
     }
 
     fn build_harmonic_balance_command(&self, state: &AppState) -> Result<String, String> {
@@ -1432,6 +1458,7 @@ impl SimulationController {
             AnalysisRunType::Pss => AnalysisType::Pss,
             AnalysisRunType::Pac => AnalysisType::Ac,
             AnalysisRunType::Pnoise => AnalysisType::Noise,
+            AnalysisRunType::Stb => AnalysisType::Ac,
             AnalysisRunType::MonteCarlo => AnalysisType::MonteCarlo,
             AnalysisRunType::Parametric => AnalysisType::Parametric,
             AnalysisRunType::Corner => AnalysisType::Corner,
@@ -2819,6 +2846,37 @@ mod tests {
     }
 
     #[test]
+    fn test_build_analysis_spec_for_stb_uses_dialog_configuration() {
+        use crate::simulation::dialog::stb::StbConfig;
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.stb_state = crate::simulation::dialog::stb::StbDialogState::from_config(
+            &StbConfig::new("L1")
+                .with_freq_range(10.0, 1e6)
+                .with_points(12),
+        );
+
+        let spec = controller
+            .build_analysis_spec_for_index(&state, 9)
+            .expect("STB spec should build");
+        match spec {
+            AnalysisSpec::Stb {
+                probe_node,
+                start_freq,
+                stop_freq,
+                points_per_decade,
+            } => {
+                assert_eq!(probe_node, "L1");
+                assert!((start_freq - 10.0).abs() < 1e-12);
+                assert!((stop_freq - 1e6).abs() < 1e-3);
+                assert_eq!(points_per_decade, 12);
+            }
+            other => panic!("expected STB spec, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_build_analysis_spec_for_harmonic_balance_uses_dialog_configuration() {
         use crate::simulation::dialog::hb::{HbConfig, HbToneConfig};
 
@@ -2987,6 +3045,35 @@ mod tests {
                 .sweep,
             crate::services::simulation_runner::PacFrequencySweep::Decade
         ));
+    }
+
+    #[test]
+    fn test_build_queue_from_plan_stores_stb_as_spec_executed_run() {
+        use crate::simulation::dialog::stb::StbConfig;
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses = [9usize].into_iter().collect();
+        state.dialogs.stb_state = crate::simulation::dialog::stb::StbDialogState::from_config(
+            &StbConfig::new("L1")
+                .with_freq_range(1.0, 1e6)
+                .with_points(16),
+        );
+
+        let plan = controller
+            .build_analysis_plan(&state)
+            .expect("plan should build");
+        let queue = controller
+            .build_queue_from_plan(&state, &plan)
+            .expect("queue should build");
+
+        assert_eq!(queue.len(), 1);
+        assert!(matches!(queue[0].spec, AnalysisSpec::Stb { .. }));
+        assert!(queue[0].config.is_none());
+        assert!(queue[0].analysis_line.starts_with(".stb "));
+        assert!(queue[0].spec_options.pac.is_none());
+        assert!(queue[0].spec_options.tf.is_none());
+        assert!(queue[0].spec_options.pnoise.is_none());
     }
 
     #[test]

@@ -1227,6 +1227,95 @@ impl RunExecutor {
                     Err(e) => Err(e),
                 }
             }
+            AnalysisSpec::Stb {
+                probe_node,
+                start_freq,
+                stop_freq,
+                points_per_decade,
+            } => {
+                let stb_result = simulation_runner::run_stb_analysis(
+                    netlist,
+                    probe_node,
+                    *start_freq,
+                    *stop_freq,
+                    *points_per_decade,
+                );
+                match stb_result {
+                    Ok(data) => Ok(MappedResult {
+                        // STB is a stability-specialized AC analysis.
+                        analysis_type: MappedAnalysisType::Ac,
+                        status: ResultStatus::Success,
+                        waveforms: vec![
+                            MappedWaveform {
+                                name: "Loop Gain (dB)".to_string(),
+                                x: data.frequencies.clone(),
+                                y: data.loop_gain_db,
+                                x_label: "Frequency".to_string(),
+                                y_label: "Loop Gain".to_string(),
+                                x_unit: "Hz".to_string(),
+                                y_unit: "dB".to_string(),
+                                is_complex: false,
+                                y_imag: None,
+                            },
+                            MappedWaveform {
+                                name: "Loop Phase (deg)".to_string(),
+                                x: data.frequencies,
+                                y: data.loop_phase_deg,
+                                x_label: "Frequency".to_string(),
+                                y_label: "Loop Phase".to_string(),
+                                x_unit: "Hz".to_string(),
+                                y_unit: "deg".to_string(),
+                                is_complex: false,
+                                y_imag: None,
+                            },
+                        ],
+                        measurements: vec![
+                            MappedMeasurement {
+                                name: "phase_margin".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.phase_margin,
+                                unit: "deg".to_string(),
+                                signal: "stb".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                            MappedMeasurement {
+                                name: "gain_margin".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.gain_margin,
+                                unit: "dB".to_string(),
+                                signal: "stb".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                            MappedMeasurement {
+                                name: "unity_gain_freq".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.unity_gain_freq,
+                                unit: "Hz".to_string(),
+                                signal: "stb".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                            MappedMeasurement {
+                                name: "phase_crossover_freq".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.phase_crossover_freq,
+                                unit: "Hz".to_string(),
+                                signal: "stb".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                            MappedMeasurement {
+                                name: "is_stable".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: if data.is_stable { 1.0 } else { 0.0 },
+                                unit: "bool".to_string(),
+                                signal: "stb".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                        ],
+                        ..Default::default()
+                    }),
+                    Err(e) => Err(e),
+                }
+            }
         }
     }
 
@@ -1251,6 +1340,7 @@ impl RunExecutor {
             AnalysisRunType::Pss => MappedAnalysisType::Pss,
             AnalysisRunType::Pac => MappedAnalysisType::Pac,
             AnalysisRunType::Pnoise => MappedAnalysisType::Pnoise,
+            AnalysisRunType::Stb => MappedAnalysisType::Ac,
             AnalysisRunType::MonteCarlo => MappedAnalysisType::MonteCarlo,
             AnalysisRunType::Parametric => MappedAnalysisType::Parametric,
             AnalysisRunType::Corner => MappedAnalysisType::Corner,
@@ -1540,6 +1630,7 @@ mod tests {
             (AnalysisRunType::Transient, MappedAnalysisType::Transient),
             (AnalysisRunType::Noise, MappedAnalysisType::Noise),
             (AnalysisRunType::PoleZero, MappedAnalysisType::PoleZero),
+            (AnalysisRunType::Stb, MappedAnalysisType::Ac),
         ];
 
         for (run_type, expected) in mappings {
@@ -1985,5 +2076,43 @@ mod tests {
         assert_eq!(mapped.analysis_type, MappedAnalysisType::Pnoise);
         assert_eq!(mapped.waveforms.len(), 1);
         assert_eq!(mapped.waveforms[0].x.len(), mapped.waveforms[0].y.len());
+    }
+
+    #[test]
+    fn test_stb_analysis_with_spec_is_executed() {
+        let executor = RunExecutor::new();
+        let mut queue =
+            RunQueue::new().with_netlist("* stb\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n");
+        queue.add_analysis(AnalysisSpec::Stb {
+            probe_node: "1".to_string(),
+            start_freq: 1.0,
+            stop_freq: 1e6,
+            points_per_decade: 8,
+        });
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.total_runs, 1);
+        assert!(
+            result.errors.is_empty(),
+            "expected STB run to succeed, got errors: {:?}",
+            result.errors
+        );
+
+        let mapped = result
+            .results
+            .values()
+            .next()
+            .expect("expected mapped STB result");
+        assert_eq!(mapped.analysis_type, MappedAnalysisType::Ac);
+        assert_eq!(mapped.waveforms.len(), 2);
+        assert!(mapped
+            .waveforms
+            .iter()
+            .any(|wf| wf.name == "Loop Gain (dB)"));
+        assert!(mapped
+            .waveforms
+            .iter()
+            .any(|wf| wf.name == "Loop Phase (deg)"));
+        assert!(mapped.measurements.iter().any(|m| m.name == "phase_margin"));
     }
 }
