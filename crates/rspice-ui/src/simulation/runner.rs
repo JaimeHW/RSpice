@@ -232,9 +232,9 @@ fn run_simulation_thread(
         return Err(SimulationError::Aborted);
     }
 
-    // Run simulation via engine bridge
+    // Run simulation via engine bridge with abort support
     log::info!("Running simulation via engine bridge: {:?}", config);
-    let result = match bridge.run(&config, &netlist) {
+    let result = match bridge.run_with_abort(&config, &netlist, &abort_flag) {
         Ok(r) => {
             log::info!("Engine bridge returned successfully");
             r

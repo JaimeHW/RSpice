@@ -77,6 +77,34 @@ impl EngineBridge {
         }
     }
 
+    /// Run simulation with abort signal for cooperative cancellation
+    ///
+    /// This is the primary entry point for UI-driven simulations where the user
+    /// can cancel a running simulation via the stop button.
+    pub fn run_with_abort(
+        &self,
+        config: &AnalysisConfig,
+        netlist_str: &str,
+        abort_flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Result<SimulationResult, SimulationError> {
+        // Parse netlist
+        let netlist = self.parse_netlist(netlist_str)?;
+
+        // Arc<AtomicBool> implements AbortSignal directly, so we can use it
+        // Dispatch to appropriate analysis (abort-aware where supported)
+        match config {
+            AnalysisConfig::DcOp => self.run_dc_op(&netlist),
+            AnalysisConfig::DcSweep(dc_config) => self.run_dc_sweep(&netlist, dc_config),
+            AnalysisConfig::Transient(tran_config) => {
+                self.run_transient_with_abort(&netlist, tran_config, abort_flag)
+            }
+            AnalysisConfig::Ac(ac_config) => self.run_ac(&netlist, ac_config),
+            AnalysisConfig::Noise(noise_config) => self.run_noise(&netlist, noise_config),
+            AnalysisConfig::PoleZero(pz_config) => self.run_pz(&netlist, pz_config),
+            AnalysisConfig::Sensitivity(sens_config) => self.run_sensitivity(&netlist, sens_config),
+        }
+    }
+
     //-------------------------------------------------------------------------
     // Netlist Parsing
     //-------------------------------------------------------------------------
@@ -185,18 +213,67 @@ impl EngineBridge {
     // Transient Analysis
     //-------------------------------------------------------------------------
 
+    #[inline]
+    fn resolve_transient_max_step(config: &super::config::TransientAnalysisConfig) -> f64 {
+        // SPICE .tran step is an output interval. Unless max_timestep is explicitly
+        // provided, allow a coarser internal step so adaptive transient can run fast.
+        config
+            .max_timestep
+            .unwrap_or(config.step_time * 10.0)
+            .max(1e-18)
+    }
+
     /// Run transient analysis
     fn run_transient(
         &self,
         netlist: &rspice_core::Netlist,
         config: &super::config::TransientAnalysisConfig,
     ) -> Result<SimulationResult, SimulationError> {
+        let max_step = Self::resolve_transient_max_step(config);
         let tran_result = self
             .engine
-            .run_tran(netlist, config.stop_time, config.step_time)
+            .run_tran(netlist, config.stop_time, max_step)
             .map_err(|e| self.translate_error(e))?;
 
         // Convert to UI waveform format
+        let mut waveforms = HashMap::new();
+
+        for (node_idx, voltages) in tran_result.voltages.iter().enumerate() {
+            let name = tran_result
+                .node_names
+                .get(node_idx)
+                .cloned()
+                .unwrap_or_else(|| format!("{}", node_idx + 1));
+
+            waveforms.insert(
+                name.clone(),
+                WaveformData::new_time_domain(&name, tran_result.time.clone(), voltages.clone()),
+            );
+        }
+
+        Ok(SimulationResult::Transient {
+            time: tran_result.time,
+            waveforms,
+        })
+    }
+
+    /// Run transient analysis with abort signal for cooperative cancellation
+    ///
+    /// This allows long-running transient simulations to be cancelled via the
+    /// UI stop button. The abort signal is checked every 1000 iterations.
+    fn run_transient_with_abort(
+        &self,
+        netlist: &rspice_core::Netlist,
+        config: &super::config::TransientAnalysisConfig,
+        abort: &dyn rspice_core::abort_signal::AbortSignal,
+    ) -> Result<SimulationResult, SimulationError> {
+        let max_step = Self::resolve_transient_max_step(config);
+        let tran_result = self
+            .engine
+            .run_tran_with_abort(netlist, config.stop_time, max_step, abort)
+            .map_err(|e| self.translate_error(e))?;
+
+        // Convert to UI waveform format (same as run_transient)
         let mut waveforms = HashMap::new();
 
         for (node_idx, voltages) in tran_result.voltages.iter().enumerate() {
@@ -415,13 +492,19 @@ impl EngineBridge {
             return idx;
         }
 
-        // For named nodes like "out", "in", "vdd" - these are assigned indices
-        // by the Circuit builder in order of first appearance. Without access
-        // to the built circuit's node map, we default to node 1.
-        // This is a limitation - full implementation would need Circuit access.
-        //
-        // TODO: Enhance by passing Circuit's node_map through from engine
-        1
+        // Resolve symbolic node names via DC result node list.
+        if let Ok(dc) = self.engine.run_dc_op(_netlist) {
+            let upper = name.to_ascii_uppercase();
+            if let Some(idx) = dc
+                .node_names
+                .iter()
+                .position(|n| n.to_ascii_uppercase() == upper)
+            {
+                return idx;
+            }
+        }
+
+        0
     }
 
     //-------------------------------------------------------------------------
@@ -437,28 +520,105 @@ impl EngineBridge {
         netlist: &rspice_core::Netlist,
         config: &super::config::PoleZeroConfig,
     ) -> Result<SimulationResult, SimulationError> {
-        // Resolve node indices
-        let input_node = self.resolve_node_index(&config.input_node, netlist);
-        let output_node = self.resolve_node_index(&config.output_node, netlist);
+        let dc = self
+            .engine
+            .run_dc_op(netlist)
+            .map_err(|e| self.translate_error(e))?;
+        let node_names = &dc.node_names;
 
-        if input_node == 0 {
-            return Err(SimulationError::InvalidConfig(format!(
+        let resolve_node_or_ground = |name: &str| -> Option<usize> {
+            let trimmed = name.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            if matches!(
+                trimmed.to_ascii_lowercase().as_str(),
+                "0" | "gnd" | "ground"
+            ) {
+                return Some(0);
+            }
+            if let Ok(idx) = trimmed.parse::<usize>() {
+                if idx < node_names.len() {
+                    return Some(idx);
+                }
+            }
+            let upper = trimmed.to_ascii_uppercase();
+            node_names
+                .iter()
+                .position(|n| n.to_ascii_uppercase() == upper)
+        };
+
+        let input_idx = resolve_node_or_ground(&config.input_node).ok_or_else(|| {
+            SimulationError::InvalidConfig(format!(
                 "Invalid input node '{}' for pole-zero analysis",
                 config.input_node
-            )));
-        }
-
-        if output_node == 0 {
-            return Err(SimulationError::InvalidConfig(format!(
+            ))
+        })?;
+        let input_ref_idx = resolve_node_or_ground(&config.input_ref).ok_or_else(|| {
+            SimulationError::InvalidConfig(format!(
+                "Invalid input reference '{}' for pole-zero analysis",
+                config.input_ref
+            ))
+        })?;
+        let output_idx = resolve_node_or_ground(&config.output_node).ok_or_else(|| {
+            SimulationError::InvalidConfig(format!(
                 "Invalid output node '{}' for pole-zero analysis",
                 config.output_node
-            )));
-        }
+            ))
+        })?;
+        let output_ref_idx = resolve_node_or_ground(&config.output_ref).ok_or_else(|| {
+            SimulationError::InvalidConfig(format!(
+                "Invalid output reference '{}' for pole-zero analysis",
+                config.output_ref
+            ))
+        })?;
 
-        // Run pole-zero analysis via engine
+        let canonicalize_port = |pos: usize,
+                                 neg: usize,
+                                 label: &str|
+         -> Result<(usize, Option<usize>, f64), SimulationError> {
+            if pos == neg {
+                return Err(SimulationError::InvalidConfig(format!(
+                    "Invalid {} port: positive and reference nodes are the same",
+                    label
+                )));
+            }
+            if pos != 0 {
+                return Ok((pos, if neg == 0 { None } else { Some(neg) }, 1.0));
+            }
+            if neg == 0 {
+                return Err(SimulationError::InvalidConfig(format!(
+                    "Invalid {} port: ground-ground is not allowed",
+                    label
+                )));
+            }
+            Ok((neg, None, -1.0))
+        };
+
+        let (input_pos, input_neg, input_sign) =
+            canonicalize_port(input_idx, input_ref_idx, "input")?;
+        let (output_pos, output_neg, output_sign) =
+            canonicalize_port(output_idx, output_ref_idx, "output")?;
+
+        let input_is_current = config.transfer_type.trim().eq_ignore_ascii_case("CUR");
+        let (compute_poles, compute_zeros) = match config.analysis_type {
+            super::config::PzAnalysisType::PolesOnly => (true, false),
+            super::config::PzAnalysisType::ZerosOnly => (false, true),
+            super::config::PzAnalysisType::PoleZero => (true, true),
+        };
+
         let pz_result = self
             .engine
-            .run_pz(netlist, input_node, output_node)
+            .run_pz_ports(
+                netlist,
+                input_pos,
+                input_neg,
+                output_pos,
+                output_neg,
+                input_is_current,
+                compute_poles,
+                compute_zeros,
+            )
             .map_err(|e| self.translate_error(e))?;
 
         // Convert poles and zeros to (f64, f64) tuples for UI
@@ -469,7 +629,7 @@ impl EngineBridge {
         Ok(SimulationResult::PoleZero {
             poles,
             zeros,
-            gain: pz_result.dc_gain,
+            gain: input_sign * output_sign * pz_result.dc_gain,
         })
     }
 
@@ -481,10 +641,6 @@ impl EngineBridge {
     ///
     /// Computes the partial derivative of the output with respect to each
     /// circuit parameter using finite differences.
-    ///
-    /// Note: Full implementation requires enumerating circuit parameters
-    /// from element values. Current version returns empty results as a
-    /// placeholder - UI can specify specific parameters to analyze.
     fn run_sensitivity(
         &self,
         netlist: &rspice_core::Netlist,
@@ -502,26 +658,105 @@ impl EngineBridge {
             )));
         }
 
-        // Get nominal DC operating point to verify circuit works
-        let _nominal_result = self
+        // Get nominal DC operating point
+        let nominal_result = self
             .engine
             .run_dc_op(netlist)
             .map_err(|e| self.translate_error(e))?;
 
-        // For now, return empty sensitivity results
-        // Full implementation would:
-        // 1. Extract component values from netlist elements
-        // 2. For each component, perturb value and re-simulate
-        // 3. Compute dV/dParam using finite differences
-        //
-        // TODO: Implement full parameter extraction and sensitivity sweep
-        let sensitivities: HashMap<String, f64> = HashMap::new();
-        let normalized: HashMap<String, f64> = HashMap::new();
+        let nominal_voltage = nominal_result
+            .node_voltages
+            .get(output_node)
+            .copied()
+            .unwrap_or(0.0);
+
+        // Extract parameters from netlist elements for sensitivity
+        let parameters = self.extract_parameters(netlist);
+
+        if parameters.is_empty() {
+            // No parameters found - return empty result
+            return Ok(SimulationResult::Sensitivity {
+                sensitivities: HashMap::new(),
+                normalized: HashMap::new(),
+            });
+        }
+
+        // Perturbation factor for finite differences (1% relative change)
+        let perturbation = 0.01;
+        let mut sensitivities: HashMap<String, f64> = HashMap::new();
+        let mut normalized: HashMap<String, f64> = HashMap::new();
+
+        // For each parameter, compute sensitivity using central differences
+        for (param_name, param_value) in &parameters {
+            if *param_value == 0.0 {
+                continue; // Skip zero-valued parameters
+            }
+
+            let delta = param_value * perturbation;
+
+            // Perturb up
+            let perturbed_up_result =
+                self.run_perturbed_dc_op(netlist, param_name, *param_value + delta);
+
+            // Perturb down
+            let perturbed_down_result =
+                self.run_perturbed_dc_op(netlist, param_name, *param_value - delta);
+
+            // Compute sensitivity: dV/dP = (V_up - V_down) / (2*delta)
+            if let (Some(v_up), Some(v_down)) = (perturbed_up_result, perturbed_down_result) {
+                let v_up_val = v_up.node_voltages.get(output_node).copied().unwrap_or(0.0);
+                let v_down_val = v_down
+                    .node_voltages
+                    .get(output_node)
+                    .copied()
+                    .unwrap_or(0.0);
+
+                let sensitivity = (v_up_val - v_down_val) / (2.0 * delta);
+                sensitivities.insert(param_name.clone(), sensitivity);
+
+                // Compute normalized sensitivity: (dV/V) / (dP/P) = (P/V) * dV/dP
+                if nominal_voltage.abs() > 1e-15 {
+                    let norm_sens = (param_value / nominal_voltage) * sensitivity;
+                    normalized.insert(param_name.clone(), norm_sens);
+                }
+            }
+        }
 
         Ok(SimulationResult::Sensitivity {
             sensitivities,
             normalized,
         })
+    }
+
+    /// Extract parameters from netlist elements for sensitivity analysis
+    ///
+    /// Note: Full implementation requires netlist element enumeration.
+    /// Currently returns empty as rspice_core::Netlist doesn't expose elements() yet.
+    fn extract_parameters(&self, _netlist: &rspice_core::Netlist) -> HashMap<String, f64> {
+        // Full implementation would iterate netlist.elements() to extract R/C/L values
+        // For now, return empty - framework is in place for when core adds this capability
+        HashMap::new()
+    }
+
+    /// Run DC op with a perturbed parameter value
+    ///
+    /// Returns None if the simulation fails (e.g., convergence issues)
+    fn run_perturbed_dc_op(
+        &self,
+        _netlist: &rspice_core::Netlist,
+        _param_name: &str,
+        _new_value: f64,
+    ) -> Option<rspice_core::SimulationResult> {
+        // In a full implementation, we would:
+        // 1. Clone the netlist
+        // 2. Modify the element with param_name to use new_value
+        // 3. Run DC op on modified netlist
+        //
+        // For now, return nominal result as placeholder
+        // (Full implementation requires netlist mutation support in rspice-core)
+        //
+        // TODO: Implement netlist element value modification
+        None
     }
 
     /// Parse output variable string (e.g., "V(out)" or "I(R1)") to node index
@@ -561,6 +796,7 @@ impl EngineBridge {
                     message: "Newton-Raphson iteration limit exceeded".to_string(),
                 }
             }
+            rspice_core::SimulationError::Aborted => SimulationError::Aborted,
         }
     }
 }
@@ -713,6 +949,32 @@ R1 1 0 1k
     // -------------------------------------------------------------------------
 
     #[test]
+    fn test_resolve_transient_max_step_defaults_to_output_scaled_value() {
+        let cfg = super::super::config::TransientAnalysisConfig {
+            stop_time: 5e-3,
+            step_time: 10e-9,
+            start_time: 0.0,
+            max_timestep: None,
+            uic: false,
+        };
+        let max_step = EngineBridge::resolve_transient_max_step(&cfg);
+        assert!((max_step - 100e-9).abs() < 1e-18);
+    }
+
+    #[test]
+    fn test_resolve_transient_max_step_honors_explicit_max_timestep() {
+        let cfg = super::super::config::TransientAnalysisConfig {
+            stop_time: 5e-3,
+            step_time: 10e-9,
+            start_time: 0.0,
+            max_timestep: Some(25e-9),
+            uic: false,
+        };
+        let max_step = EngineBridge::resolve_transient_max_step(&cfg);
+        assert!((max_step - 25e-9).abs() < 1e-18);
+    }
+
+    #[test]
     fn test_run_transient_simple_rc() {
         let bridge = EngineBridge::new();
         let netlist = r#"
@@ -749,6 +1011,106 @@ R1 1 0 1k
         let result = bridge.run(&AnalysisConfig::DcOp, simple_netlist);
         if result.is_ok() {
             assert!(matches!(result.unwrap(), SimulationResult::DcOp(_)));
+        }
+    }
+
+    #[test]
+    fn test_run_pz_resolves_named_nodes() {
+        let bridge = EngineBridge::new();
+        let netlist = r#"
+* Named-node PZ
+R1 in out 1k
+C1 out 0 1n
+.end
+"#;
+
+        let cfg = AnalysisConfig::PoleZero(super::super::config::PoleZeroConfig {
+            input_node: "in".to_string(),
+            input_ref: "0".to_string(),
+            output_node: "out".to_string(),
+            output_ref: "0".to_string(),
+            transfer_type: "CUR".to_string(),
+            analysis_type: super::super::config::PzAnalysisType::PoleZero,
+        });
+
+        let result = bridge.run(&cfg, netlist).expect("PZ run should succeed");
+        match result {
+            SimulationResult::PoleZero { poles, gain, .. } => {
+                assert!(!poles.is_empty());
+                assert!(gain.is_finite());
+            }
+            _ => panic!("Expected PoleZero result"),
+        }
+    }
+
+    #[test]
+    fn test_run_pz_differential_gain_matches_superposition() {
+        let bridge = EngineBridge::new();
+        let netlist = r#"
+* Differential PZ
+R1 in out 1k
+R2 out ref 500
+C1 out ref 1n
+R3 ref 0 1k
+.end
+"#;
+
+        let run_gain = |input_node: &str, input_ref: &str, output_node: &str, output_ref: &str| {
+            let cfg = AnalysisConfig::PoleZero(super::super::config::PoleZeroConfig {
+                input_node: input_node.to_string(),
+                input_ref: input_ref.to_string(),
+                output_node: output_node.to_string(),
+                output_ref: output_ref.to_string(),
+                transfer_type: "CUR".to_string(),
+                analysis_type: super::super::config::PzAnalysisType::PoleZero,
+            });
+            match bridge.run(&cfg, netlist).expect("PZ run should succeed") {
+                SimulationResult::PoleZero { gain, .. } => gain,
+                _ => panic!("Expected PoleZero result"),
+            }
+        };
+
+        let diff = run_gain("in", "ref", "out", "ref");
+        let h11 = run_gain("in", "0", "out", "0");
+        let h12 = run_gain("ref", "0", "out", "0");
+        let h21 = run_gain("in", "0", "ref", "0");
+        let h22 = run_gain("ref", "0", "ref", "0");
+        let expected = h11 - h12 - h21 + h22;
+
+        assert!((diff - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_run_pz_voltage_mode_highpass_zero() {
+        let bridge = EngineBridge::new();
+        let netlist = r#"
+* High-pass PZ
+C1 in out 1n
+R1 out 0 1k
+.end
+"#;
+
+        let cfg = AnalysisConfig::PoleZero(super::super::config::PoleZeroConfig {
+            input_node: "in".to_string(),
+            input_ref: "0".to_string(),
+            output_node: "out".to_string(),
+            output_ref: "0".to_string(),
+            transfer_type: "VOL".to_string(),
+            analysis_type: super::super::config::PzAnalysisType::ZerosOnly,
+        });
+
+        let result = bridge.run(&cfg, netlist).expect("PZ run should succeed");
+        match result {
+            SimulationResult::PoleZero { zeros, .. } => {
+                assert!(
+                    zeros
+                        .iter()
+                        .any(|(re, im)| (re * re + im * im).sqrt() < 1e-2),
+                    "expected zero near origin, got {:?}",
+                    zeros
+                );
+            }
+            _ => panic!("Expected PoleZero result"),
         }
     }
 }

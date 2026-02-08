@@ -113,6 +113,357 @@ impl AnalysisRunType {
     }
 }
 
+// =============================================================================
+// Analysis Specification
+// =============================================================================
+
+/// Frequency sweep mode used by AC/noise analyses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum FrequencySweep {
+    /// Decade (logarithmic)
+    #[default]
+    Decade,
+    /// Octave (logarithmic)
+    Octave,
+    /// Linear
+    Linear,
+}
+
+impl FrequencySweep {
+    /// Keyword expected by the simulation runner.
+    pub fn runner_keyword(self) -> &'static str {
+        match self {
+            FrequencySweep::Decade => "dec",
+            FrequencySweep::Octave => "oct",
+            FrequencySweep::Linear => "lin",
+        }
+    }
+}
+
+/// Strongly-typed analysis request used by queue execution.
+///
+/// This removes hidden/default execution parameters from the run executor.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum AnalysisSpec {
+    /// DC operating point
+    DcOp,
+    /// DC sweep
+    DcSweep {
+        source_name: String,
+        start: f64,
+        stop: f64,
+        step: f64,
+    },
+    /// AC analysis
+    Ac {
+        start_freq: f64,
+        stop_freq: f64,
+        points_per_unit: usize,
+        sweep: FrequencySweep,
+    },
+    /// Transient analysis
+    Transient { stop_time: f64, step_time: f64 },
+    /// Noise analysis
+    Noise {
+        output_node: String,
+        start_freq: f64,
+        stop_freq: f64,
+        points_per_decade: usize,
+        temperature: f64,
+    },
+    /// Periodic steady-state
+    Pss {
+        fundamental_freq: f64,
+        num_harmonics: usize,
+        tolerance: f64,
+    },
+    /// Harmonic balance
+    HarmonicBalance {
+        tone1_freq: f64,
+        tone1_harmonics: usize,
+        tone2_freq: Option<f64>,
+        tone2_harmonics: usize,
+    },
+    /// Transfer function
+    Tf,
+    /// Sensitivity
+    Sensitivity {
+        output_var: String,
+        ac_mode: bool,
+        frequency: Option<f64>,
+    },
+    /// Pole-zero
+    PoleZero {
+        input_node: String,
+        input_ref: String,
+        output_node: String,
+        output_ref: String,
+        transfer_type: String,
+        analysis_type: String,
+    },
+    /// Periodic AC
+    Pac,
+    /// Periodic noise
+    Pnoise,
+    /// Monte Carlo
+    MonteCarlo,
+    /// Parametric sweep
+    Parametric,
+    /// Corner analysis
+    Corner,
+}
+
+impl AnalysisSpec {
+    /// Get the corresponding run type.
+    pub fn run_type(&self) -> AnalysisRunType {
+        match self {
+            AnalysisSpec::DcOp => AnalysisRunType::DcOp,
+            AnalysisSpec::DcSweep { .. } => AnalysisRunType::DcSweep,
+            AnalysisSpec::Ac { .. } => AnalysisRunType::Ac,
+            AnalysisSpec::Transient { .. } => AnalysisRunType::Transient,
+            AnalysisSpec::Noise { .. } => AnalysisRunType::Noise,
+            AnalysisSpec::Pss { .. } => AnalysisRunType::Pss,
+            AnalysisSpec::HarmonicBalance { .. } => AnalysisRunType::HarmonicBalance,
+            AnalysisSpec::Tf => AnalysisRunType::Tf,
+            AnalysisSpec::Sensitivity { .. } => AnalysisRunType::Sensitivity,
+            AnalysisSpec::PoleZero { .. } => AnalysisRunType::PoleZero,
+            AnalysisSpec::Pac => AnalysisRunType::Pac,
+            AnalysisSpec::Pnoise => AnalysisRunType::Pnoise,
+            AnalysisSpec::MonteCarlo => AnalysisRunType::MonteCarlo,
+            AnalysisSpec::Parametric => AnalysisRunType::Parametric,
+            AnalysisSpec::Corner => AnalysisRunType::Corner,
+        }
+    }
+
+    /// Validate analysis parameters.
+    pub fn validate(&self) -> Result<(), String> {
+        match self {
+            AnalysisSpec::DcOp => Ok(()),
+            AnalysisSpec::DcSweep {
+                source_name,
+                start,
+                stop,
+                step,
+            } => {
+                if source_name.trim().is_empty() {
+                    return Err("DC sweep source_name is required".to_string());
+                }
+                if *step == 0.0 {
+                    return Err("DC sweep step cannot be zero".to_string());
+                }
+                if (stop - start).signum() != step.signum() {
+                    return Err("DC sweep step direction must match start/stop".to_string());
+                }
+                Ok(())
+            }
+            AnalysisSpec::Ac {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                ..
+            } => {
+                if *start_freq <= 0.0 {
+                    return Err("AC start_freq must be > 0".to_string());
+                }
+                if *stop_freq <= 0.0 {
+                    return Err("AC stop_freq must be > 0".to_string());
+                }
+                if *stop_freq <= *start_freq {
+                    return Err("AC stop_freq must be > start_freq".to_string());
+                }
+                if *points_per_unit == 0 {
+                    return Err("AC points_per_unit must be > 0".to_string());
+                }
+                Ok(())
+            }
+            AnalysisSpec::Transient {
+                stop_time,
+                step_time,
+            } => {
+                if *stop_time <= 0.0 {
+                    return Err("Transient stop_time must be > 0".to_string());
+                }
+                if *step_time <= 0.0 {
+                    return Err("Transient step_time must be > 0".to_string());
+                }
+                if *step_time > *stop_time {
+                    return Err("Transient step_time must be <= stop_time".to_string());
+                }
+                Ok(())
+            }
+            AnalysisSpec::Noise {
+                output_node,
+                start_freq,
+                stop_freq,
+                points_per_decade,
+                temperature,
+            } => {
+                if output_node.trim().is_empty() {
+                    return Err("Noise output_node is required".to_string());
+                }
+                if *start_freq <= 0.0 {
+                    return Err("Noise start_freq must be > 0".to_string());
+                }
+                if *stop_freq <= 0.0 {
+                    return Err("Noise stop_freq must be > 0".to_string());
+                }
+                if *stop_freq <= *start_freq {
+                    return Err("Noise stop_freq must be > start_freq".to_string());
+                }
+                if *points_per_decade == 0 {
+                    return Err("Noise points_per_decade must be > 0".to_string());
+                }
+                if *temperature <= 0.0 {
+                    return Err("Noise temperature must be > 0 K".to_string());
+                }
+                Ok(())
+            }
+            AnalysisSpec::Pss {
+                fundamental_freq,
+                num_harmonics,
+                tolerance,
+            } => {
+                if *fundamental_freq <= 0.0 {
+                    return Err("PSS fundamental_freq must be > 0".to_string());
+                }
+                if *num_harmonics == 0 {
+                    return Err("PSS num_harmonics must be > 0".to_string());
+                }
+                if *tolerance <= 0.0 {
+                    return Err("PSS tolerance must be > 0".to_string());
+                }
+                Ok(())
+            }
+            AnalysisSpec::HarmonicBalance {
+                tone1_freq,
+                tone1_harmonics,
+                tone2_freq,
+                tone2_harmonics,
+            } => {
+                if *tone1_freq <= 0.0 {
+                    return Err("HB tone1_freq must be > 0".to_string());
+                }
+                if *tone1_harmonics == 0 {
+                    return Err("HB tone1_harmonics must be > 0".to_string());
+                }
+                if tone2_freq.is_some() && *tone2_harmonics == 0 {
+                    return Err("HB tone2_harmonics must be > 0 when tone2_freq is set".to_string());
+                }
+                Ok(())
+            }
+            AnalysisSpec::Sensitivity {
+                output_var,
+                ac_mode,
+                frequency,
+            } => {
+                if output_var.trim().is_empty() {
+                    return Err("Sensitivity output_var is required".to_string());
+                }
+                if *ac_mode {
+                    if let Some(freq) = frequency {
+                        if *freq <= 0.0 {
+                            return Err("Sensitivity frequency must be > 0 for AC mode".to_string());
+                        }
+                    }
+                } else if frequency.is_some() {
+                    return Err("Sensitivity frequency is only valid in AC mode".to_string());
+                }
+                Ok(())
+            }
+            AnalysisSpec::PoleZero {
+                input_node,
+                input_ref,
+                output_node,
+                output_ref,
+                transfer_type,
+                analysis_type,
+            } => {
+                if input_node.trim().is_empty() {
+                    return Err("Pole-zero input_node is required".to_string());
+                }
+                if input_ref.trim().is_empty() {
+                    return Err("Pole-zero input_ref is required".to_string());
+                }
+                if output_node.trim().is_empty() {
+                    return Err("Pole-zero output_node is required".to_string());
+                }
+                if output_ref.trim().is_empty() {
+                    return Err("Pole-zero output_ref is required".to_string());
+                }
+                let transfer = transfer_type.trim().to_ascii_uppercase();
+                if transfer != "VOL" && transfer != "CUR" {
+                    return Err("Pole-zero transfer_type must be VOL or CUR".to_string());
+                }
+                let analysis = analysis_type.trim().to_ascii_uppercase();
+                if analysis != "PZ" && analysis != "POL" && analysis != "ZER" {
+                    return Err("Pole-zero analysis_type must be PZ, POL, or ZER".to_string());
+                }
+                Ok(())
+            }
+            AnalysisSpec::Tf
+            | AnalysisSpec::Pac
+            | AnalysisSpec::Pnoise
+            | AnalysisSpec::MonteCarlo
+            | AnalysisSpec::Parametric
+            | AnalysisSpec::Corner => Ok(()),
+        }
+    }
+}
+
+/// Ordered analysis execution plan.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AnalysisPlan {
+    /// Ordered analyses.
+    pub analyses: Vec<AnalysisSpec>,
+    /// Stop queue execution on first failed run.
+    pub stop_on_error: bool,
+}
+
+impl AnalysisPlan {
+    /// Create empty plan.
+    pub fn new() -> Self {
+        Self {
+            analyses: Vec::new(),
+            stop_on_error: true,
+        }
+    }
+
+    /// Append an analysis.
+    pub fn add(mut self, analysis: AnalysisSpec) -> Self {
+        self.analyses.push(analysis);
+        self
+    }
+
+    /// Validate all analyses in order.
+    pub fn validate(&self) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+        if self.analyses.is_empty() {
+            errors.push("Analysis plan is empty".to_string());
+        }
+        for (idx, analysis) in self.analyses.iter().enumerate() {
+            if let Err(e) = analysis.validate() {
+                errors.push(format!("Analysis #{}: {}", idx + 1, e));
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Build a run queue from this plan.
+    pub fn into_queue(self) -> Result<RunQueue, Vec<String>> {
+        self.validate()?;
+        let mut queue = RunQueue::new();
+        queue.stop_on_error = self.stop_on_error;
+        for analysis in self.analyses {
+            queue.add_analysis(analysis);
+        }
+        Ok(queue)
+    }
+}
+
 /// Status of an analysis run
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum RunStatus {
@@ -159,6 +510,8 @@ pub struct AnalysisRun {
     pub name: String,
     /// Analysis type
     pub run_type: AnalysisRunType,
+    /// Typed analysis specification (required for parameterized analyses)
+    pub spec: Option<AnalysisSpec>,
     /// Run status
     pub status: RunStatus,
     /// Progress percentage (0-100)
@@ -183,6 +536,7 @@ impl Default for AnalysisRun {
             id: 0,
             name: String::new(),
             run_type: AnalysisRunType::DcOp,
+            spec: None,
             status: RunStatus::Pending,
             progress: 0,
             error: None,
@@ -204,6 +558,13 @@ impl AnalysisRun {
             run_type,
             ..Default::default()
         }
+    }
+
+    /// Attach typed analysis spec and keep run_type consistent.
+    pub fn with_spec(mut self, spec: AnalysisSpec) -> Self {
+        self.run_type = spec.run_type();
+        self.spec = Some(spec);
+        self
     }
 
     /// Set name
@@ -228,6 +589,33 @@ impl AnalysisRun {
     pub fn with_iteration(mut self, iter: usize) -> Self {
         self.iteration = Some(iter);
         self
+    }
+
+    /// Validate run metadata and analysis spec.
+    pub fn validate(&self) -> Result<(), String> {
+        match &self.spec {
+            Some(spec) => {
+                if spec.run_type() != self.run_type {
+                    return Err(format!(
+                        "Run '{}' has mismatched run_type ({:?}) vs spec ({:?})",
+                        self.name,
+                        self.run_type,
+                        spec.run_type()
+                    ));
+                }
+                spec.validate()
+            }
+            None => {
+                if self.run_type == AnalysisRunType::DcOp {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "Run '{}' ({:?}) is missing AnalysisSpec",
+                        self.name, self.run_type
+                    ))
+                }
+            }
+        }
     }
 
     /// Mark as started
@@ -302,6 +690,8 @@ pub struct RunQueue {
     total_complexity: u32,
     /// Completed complexity
     completed_complexity: u32,
+    /// Netlist source for simulation (required for execution)
+    netlist: Option<String>,
 }
 
 impl RunQueue {
@@ -313,6 +703,22 @@ impl RunQueue {
         }
     }
 
+    /// Set netlist source for simulation
+    pub fn with_netlist(mut self, netlist: impl Into<String>) -> Self {
+        self.netlist = Some(netlist.into());
+        self
+    }
+
+    /// Set netlist source (mutable)
+    pub fn set_netlist(&mut self, netlist: impl Into<String>) {
+        self.netlist = Some(netlist.into());
+    }
+
+    /// Get netlist source
+    pub fn netlist(&self) -> Option<&str> {
+        self.netlist.as_deref()
+    }
+
     /// Add a run to the queue
     pub fn add(&mut self, run_type: AnalysisRunType) -> u64 {
         let id = self.next_id;
@@ -322,6 +728,28 @@ impl RunQueue {
         self.total_complexity += run_type.complexity();
         self.runs.push(run);
         id
+    }
+
+    /// Add a run using an explicit typed analysis spec.
+    pub fn add_analysis(&mut self, spec: AnalysisSpec) -> u64 {
+        let run_type = spec.run_type();
+        let id = self.next_id;
+        self.next_id += 1;
+
+        let run = AnalysisRun::new(id, run_type).with_spec(spec);
+        self.total_complexity += run_type.complexity();
+        self.runs.push(run);
+        id
+    }
+
+    /// Set or replace the spec for an existing run.
+    pub fn set_spec(&mut self, run_id: u64, spec: AnalysisSpec) -> Result<(), String> {
+        let run = self
+            .get_mut(run_id)
+            .ok_or_else(|| format!("Run {} not found", run_id))?;
+        run.run_type = spec.run_type();
+        run.spec = Some(spec);
+        Ok(())
     }
 
     /// Add a run with automatic dependency resolution
@@ -582,6 +1010,56 @@ mod tests {
         assert!(!AnalysisRunType::Ac.requires_pss());
     }
 
+    #[test]
+    fn test_analysis_spec_sensitivity_validation() {
+        let valid = AnalysisSpec::Sensitivity {
+            output_var: "V(out)".to_string(),
+            ac_mode: true,
+            frequency: Some(1e6),
+        };
+        assert!(valid.validate().is_ok());
+
+        let invalid = AnalysisSpec::Sensitivity {
+            output_var: "V(out)".to_string(),
+            ac_mode: false,
+            frequency: Some(1e6),
+        };
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn test_analysis_spec_pole_zero_validation() {
+        let valid = AnalysisSpec::PoleZero {
+            input_node: "in".to_string(),
+            input_ref: "0".to_string(),
+            output_node: "out".to_string(),
+            output_ref: "0".to_string(),
+            transfer_type: "VOL".to_string(),
+            analysis_type: "PZ".to_string(),
+        };
+        assert!(valid.validate().is_ok());
+
+        let invalid_transfer = AnalysisSpec::PoleZero {
+            input_node: "in".to_string(),
+            input_ref: "0".to_string(),
+            output_node: "out".to_string(),
+            output_ref: "0".to_string(),
+            transfer_type: "BAD".to_string(),
+            analysis_type: "PZ".to_string(),
+        };
+        assert!(invalid_transfer.validate().is_err());
+
+        let invalid_type = AnalysisSpec::PoleZero {
+            input_node: "in".to_string(),
+            input_ref: "0".to_string(),
+            output_node: "out".to_string(),
+            output_ref: "0".to_string(),
+            transfer_type: "VOL".to_string(),
+            analysis_type: "UNKNOWN".to_string(),
+        };
+        assert!(invalid_type.validate().is_err());
+    }
+
     // =========================================================================
     // AnalysisRun Tests
     // =========================================================================
@@ -592,6 +1070,24 @@ mod tests {
         assert_eq!(run.id, 1);
         assert_eq!(run.run_type, AnalysisRunType::Ac);
         assert_eq!(run.status, RunStatus::Pending);
+    }
+
+    #[test]
+    fn test_run_with_spec_sets_type() {
+        let run = AnalysisRun::new(1, AnalysisRunType::DcOp).with_spec(AnalysisSpec::Ac {
+            start_freq: 1.0,
+            stop_freq: 1e6,
+            points_per_unit: 20,
+            sweep: FrequencySweep::Decade,
+        });
+        assert_eq!(run.run_type, AnalysisRunType::Ac);
+        assert!(run.spec.is_some());
+    }
+
+    #[test]
+    fn test_run_validate_requires_spec_for_parameterized_run() {
+        let run = AnalysisRun::new(1, AnalysisRunType::Ac);
+        assert!(run.validate().is_err());
     }
 
     #[test]
@@ -649,6 +1145,38 @@ mod tests {
 
         assert_eq!(queue.len(), 1);
         assert!(queue.get(id).is_some());
+    }
+
+    #[test]
+    fn test_queue_add_analysis_spec() {
+        let mut queue = RunQueue::new();
+        let id = queue.add_analysis(AnalysisSpec::DcSweep {
+            source_name: "V1".to_string(),
+            start: 0.0,
+            stop: 1.0,
+            step: 0.1,
+        });
+
+        let run = queue.get(id).expect("run should exist");
+        assert_eq!(run.run_type, AnalysisRunType::DcSweep);
+        assert!(run.validate().is_ok());
+    }
+
+    #[test]
+    fn test_analysis_plan_into_queue() {
+        let plan = AnalysisPlan::new()
+            .add(AnalysisSpec::DcOp)
+            .add(AnalysisSpec::Ac {
+                start_freq: 1.0,
+                stop_freq: 1e6,
+                points_per_unit: 10,
+                sweep: FrequencySweep::Decade,
+            });
+
+        let queue = plan.into_queue().expect("valid plan should produce queue");
+        assert_eq!(queue.len(), 2);
+        assert_eq!(queue.runs()[0].run_type, AnalysisRunType::DcOp);
+        assert_eq!(queue.runs()[1].run_type, AnalysisRunType::Ac);
     }
 
     #[test]

@@ -40,7 +40,7 @@ pub struct MappedResult {
 }
 
 /// Analysis type for mapped result
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum MappedAnalysisType {
     /// DC operating point
     DcOp,
@@ -52,13 +52,30 @@ pub enum MappedAnalysisType {
     Ac,
     /// Noise analysis
     Noise,
+    /// Transfer function
+    Tf,
+    /// Sensitivity analysis
+    Sensitivity,
     /// Pole-Zero
     PoleZero,
     /// S-Parameter
     SParameter,
+    /// Harmonic Balance
+    HarmonicBalance,
+    /// Periodic Steady-State
+    Pss,
+    /// Periodic AC
+    Pac,
+    /// Periodic Noise
+    Pnoise,
     /// Monte Carlo
     MonteCarlo,
+    /// Parametric sweep
+    Parametric,
+    /// Corner analysis
+    Corner,
     /// Unknown
+    #[default]
     Unknown,
 }
 

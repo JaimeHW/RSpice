@@ -61,8 +61,16 @@ pub struct NetlistResult {
 /// This provides the same API as the legacy netlist generator for
 /// backward compatibility. For more control, use `NetlistGenerator` directly.
 pub fn generate_netlist(schematic: &SchematicState) -> NetlistResult {
+    generate_netlist_with_analysis(schematic, &[])
+}
+
+/// Generate a SPICE netlist from a schematic with explicit analysis directives.
+pub fn generate_netlist_with_analysis(
+    schematic: &SchematicState,
+    analysis_lines: &[String],
+) -> NetlistResult {
     let mut gen = NetlistGenerator::new(schematic);
-    let netlist = gen.generate();
+    let netlist = gen.generate_with_analysis(analysis_lines);
 
     // Build the nets map from the generator's data
     let mut nets: HashMap<String, Vec<Point>> = HashMap::new();
@@ -200,35 +208,22 @@ impl<'a> NetlistGenerator<'a> {
     ///
     /// Returns the netlist as a string.
     pub fn generate(&mut self) -> String {
-        // Phase 1: Extract node connectivity
-        self.extract_nets();
+        self.generate_with_analysis(&[])
+    }
 
-        // Phase 2: Identify ground
-        self.identify_ground();
-
-        // Phase 3: Generate header
-        self.generate_header();
-
-        // Phase 4: Generate component instances
-        self.generate_instances();
-
-        // Phase 5: Add models if needed
-        self.generate_models();
-
-        // Phase 6: Add analysis commands placeholder
-        self.lines.push(String::new());
-        self.lines.push("* Analysis commands".to_string());
-        self.lines.push(".op".to_string());
-
-        // Phase 7: End statement
-        self.lines.push(String::new());
-        self.lines.push(".end".to_string());
-
-        self.lines.join("\n")
+    fn reset_generation_state(&mut self) {
+        self.nets.clear();
+        self.point_to_net.clear();
+        self.ground_net = None;
+        self.lines.clear();
+        self.models.clear();
+        self.subcircuits.clear();
     }
 
     /// Generate netlist with custom analysis commands
     pub fn generate_with_analysis(&mut self, analysis_lines: &[String]) -> String {
+        self.reset_generation_state();
+
         // Phase 1: Extract node connectivity
         self.extract_nets();
 
@@ -244,7 +239,7 @@ impl<'a> NetlistGenerator<'a> {
         // Phase 5: Add models if needed
         self.generate_models();
 
-        // Phase 6: Add analysis commands
+        // Phase 6: Add analysis commands (if requested)
         if !analysis_lines.is_empty() {
             self.lines.push(String::new());
             self.lines.push("* Analysis commands".to_string());
@@ -477,105 +472,147 @@ impl<'a> NetlistGenerator<'a> {
             .collect();
 
         match component.kind {
-            // Two-terminal passive components: X name node+ node- value
+            // Two-terminal passive components: X name node+ node- value [params]
+            // Spectre format: R1 net1 net2 1k m=2 tc1=0.01
             ComponentType::Resistor
             | ComponentType::Capacitor
             | ComponentType::Inductor
             | ComponentType::Diode => {
                 let prefix = component.kind.spice_prefix();
                 let nodes = self.format_nodes(&node_names, 2);
-                let value = self.format_value(&component.value);
-                Some(format!("{}{} {} {}", prefix, component.name, nodes, value))
+                let value_with_params =
+                    self.format_value_with_params(&component.value, &component.params);
+                Some(format!(
+                    "{}{} {} {}",
+                    prefix, component.name, nodes, value_with_params
+                ))
             }
 
-            // Two-terminal voltage sources
-            ComponentType::VoltageSource
-            | ComponentType::VoltageSourceAc
-            | ComponentType::VoltageSourcePulse
+            // Two-terminal voltage sources: V name node+ node- value [params]
+            // Spectre format: V1 net1 0 DC 5 acmag=1 acphase=0
+            ComponentType::VoltageSource | ComponentType::VoltageSourceAc => {
+                let nodes = self.format_nodes(&node_names, 2);
+                let source_value = self.format_source_value(component);
+                let params = self.format_params(&component.params);
+                Some(format!(
+                    "{} {} {}{}",
+                    component.name, nodes, source_value, params
+                ))
+            }
+            // Voltage sources with positional params (SIN, PULSE, etc.) - no extra params needed
+            ComponentType::VoltageSourcePulse
             | ComponentType::VoltageSourceSin
             | ComponentType::VoltageSourcePwl
             | ComponentType::VoltageSourceExp
             | ComponentType::VoltageSourceSffm => {
                 let nodes = self.format_nodes(&node_names, 2);
-                let value = self.format_source_value(component);
-                Some(format!("V{} {} {}", component.name, nodes, value))
+                let source_value = self.format_source_value(component);
+                Some(format!("{} {} {}", component.name, nodes, source_value))
             }
 
-            // Two-terminal current sources
-            ComponentType::CurrentSource
-            | ComponentType::CurrentSourceAc
-            | ComponentType::CurrentSourcePulse
+            // Two-terminal current sources: I name node+ node- value [params]
+            // Spectre format: I1 net1 0 DC 1m acmag=1
+            ComponentType::CurrentSource | ComponentType::CurrentSourceAc => {
+                let nodes = self.format_nodes(&node_names, 2);
+                let source_value = self.format_source_value(component);
+                let params = self.format_params(&component.params);
+                Some(format!(
+                    "{} {} {}{}",
+                    component.name, nodes, source_value, params
+                ))
+            }
+            // Current sources with positional params (SIN, PULSE, etc.) - no extra params needed
+            ComponentType::CurrentSourcePulse
             | ComponentType::CurrentSourceSin
             | ComponentType::CurrentSourcePwl
             | ComponentType::CurrentSourceExp
             | ComponentType::CurrentSourceNoise => {
                 let nodes = self.format_nodes(&node_names, 2);
-                let value = self.format_source_value(component);
-                Some(format!("I{} {} {}", component.name, nodes, value))
+                let source_value = self.format_source_value(component);
+                Some(format!("{} {} {}", component.name, nodes, source_value))
             }
 
-            // Three-terminal BJT: Q name C B E model
+            // Three-terminal BJT: Q name C B E model [params]
+            // Spectre format: Q1 coll base emit npn_Q1 area=1 m=1
             ComponentType::NpnBjt | ComponentType::PnpBjt => {
                 let nodes = self.format_nodes(&node_names, 3);
-                let model = self.get_bjt_model(component);
-                Some(format!("Q{} {} {}", component.name, nodes, model))
+                let (explicit_model, params_without_model) =
+                    Self::extract_model_override(component);
+                let model = self.get_bjt_model(component, explicit_model.as_deref());
+                let params = self.format_params(&params_without_model);
+                Some(format!("{} {} {}{}", component.name, nodes, model, params))
             }
 
-            // Four-terminal MOSFET: M name D G S B model
+            // Four-terminal MOSFET: M name D G S B model [params]
+            // Spectre format: M1 drain gate source bulk nmos_M1 w=1u l=180n as=1p ad=1p
             ComponentType::Nmos | ComponentType::Pmos => {
                 let nodes = self.format_nodes(&node_names, 4);
                 let model = self.get_mosfet_model(component);
-                Some(format!("M{} {} {}", component.name, nodes, model))
+                let params = self.format_params(&component.params);
+                Some(format!("{} {} {}{}", component.name, nodes, model, params))
             }
 
-            // Three-terminal JFET: J name D G S model
+            // Three-terminal JFET: J name D G S model [params]
+            // Spectre format: J1 drain gate source njf_J1 area=1 m=1
             ComponentType::Njfet | ComponentType::Pjfet => {
                 let nodes = self.format_nodes(&node_names, 3);
                 let model = self.get_jfet_model(component);
-                Some(format!("J{} {} {}", component.name, nodes, model))
+                let params = self.format_params(&component.params);
+                Some(format!("{} {} {}{}", component.name, nodes, model, params))
             }
 
             // Controlled sources (4 terminals: + - control+ control-)
+            // Spectre format: E1 out+ out- in+ in- gain [params]
             ComponentType::Vcvs => {
                 let nodes = self.format_nodes(&node_names, 4);
-                let gain = self.format_value(&component.value);
-                Some(format!("E{} {} {}", component.name, nodes, gain))
+                let gain_with_params =
+                    self.format_value_with_params(&component.value, &component.params);
+                Some(format!("{} {} {}", component.name, nodes, gain_with_params))
             }
 
             ComponentType::Vccs => {
                 let nodes = self.format_nodes(&node_names, 4);
-                let gain = self.format_value(&component.value);
-                Some(format!("G{} {} {}", component.name, nodes, gain))
+                let gain_with_params =
+                    self.format_value_with_params(&component.value, &component.params);
+                Some(format!("{} {} {}", component.name, nodes, gain_with_params))
             }
 
             ComponentType::Ccvs => {
                 let nodes = self.format_nodes(&node_names, 4);
-                let gain = self.format_value(&component.value);
-                Some(format!("H{} {} {}", component.name, nodes, gain))
+                let gain_with_params =
+                    self.format_value_with_params(&component.value, &component.params);
+                Some(format!("{} {} {}", component.name, nodes, gain_with_params))
             }
 
             ComponentType::Cccs => {
                 let nodes = self.format_nodes(&node_names, 4);
-                let gain = self.format_value(&component.value);
-                Some(format!("F{} {} {}", component.name, nodes, gain))
+                let gain_with_params =
+                    self.format_value_with_params(&component.value, &component.params);
+                Some(format!("{} {} {}", component.name, nodes, gain_with_params))
             }
 
             // Ground - handled separately
             ComponentType::Ground => None,
 
-            // XSPICE components
+            // XSPICE components: A name nodes model [params]
             _ if component.kind.is_xspice() => {
                 let nodes = node_names.join(" ");
                 let model = format!("{}_model", component.name.to_lowercase());
-                Some(format!("A{} {} {}", component.name, nodes, model))
+                let params = self.format_params(&component.params);
+                Some(format!("{} {} {}{}", component.name, nodes, model, params))
             }
 
             // Catch-all for unhandled types
+            // Include params for forward compatibility
             _ => {
                 let prefix = component.kind.spice_prefix();
                 let nodes = node_names.join(" ");
-                let value = &component.value;
-                Some(format!("{}{} {} {}", prefix, component.name, nodes, value))
+                let value_with_params =
+                    self.format_value_with_params(&component.value, &component.params);
+                Some(format!(
+                    "{}{} {} {}",
+                    prefix, component.name, nodes, value_with_params
+                ))
             }
         }
     }
@@ -617,6 +654,42 @@ impl<'a> NetlistGenerator<'a> {
         value.to_string()
     }
 
+    /// Format component parameters for SPICE netlist
+    ///
+    /// Converts the component.params string into proper SPICE format.
+    /// Parameters are appended after the value/model in the netlist line.
+    ///
+    /// # SPICE Parameter Format (Cadence Spectre Parity)
+    ///
+    /// Passive components: `R1 net1 net2 1k m=2 tc1=0.01`
+    /// Sources: `V1 net1 0 DC 5 acmag=1`
+    /// MOSFETs: `M1 d g s b nmos w=1u l=180n`
+    ///
+    /// # Arguments
+    /// * `params` - The component.params string (e.g., "m=2 tc1=0.01")
+    ///
+    /// # Returns
+    /// Formatted parameter string with leading space if non-empty
+    fn format_params(&self, params: &str) -> String {
+        let trimmed = params.trim();
+        if trimmed.is_empty() {
+            String::new()
+        } else {
+            // Ensure single space separation from previous content
+            format!(" {}", trimmed)
+        }
+    }
+
+    /// Format component value with optional parameters appended
+    ///
+    /// Commercial-grade helper that combines value and params into
+    /// proper SPICE format: `value [params]`
+    fn format_value_with_params(&self, value: &str, params: &str) -> String {
+        let formatted_value = self.format_value(value);
+        let formatted_params = self.format_params(params);
+        format!("{}{}", formatted_value, formatted_params)
+    }
+
     /// Format source value specification
     fn format_source_value(&self, component: &Component) -> String {
         let value = &component.value;
@@ -630,44 +703,53 @@ impl<'a> NetlistGenerator<'a> {
             }
             ComponentType::VoltageSourcePulse | ComponentType::CurrentSourcePulse => {
                 // PULSE(V1 V2 TD TR TF PW PER)
-                format!(
-                    "PULSE({})",
-                    if value.is_empty() {
-                        "0 1 0 1n 1n 10n 20n"
-                    } else {
-                        value
-                    }
-                )
+                let params = crate::properties::parse_params_string(&component.params);
+                let v1 = Self::get_param_owned(&params, "v1", value, "0");
+                let v2 = Self::get_param_owned(&params, "v2", "", "1");
+                let td = Self::get_param_owned(&params, "td", "", "0");
+                let tr = Self::get_param_owned(&params, "tr", "", "1n");
+                let tf = Self::get_param_owned(&params, "tf", "", "1n");
+                let pw = Self::get_param_owned(&params, "pw", "", "10n");
+                let per = Self::get_param_owned(&params, "period", "", "20n");
+                format!("PULSE({} {} {} {} {} {} {})", v1, v2, td, tr, tf, pw, per)
             }
             ComponentType::VoltageSourceSin | ComponentType::CurrentSourceSin => {
-                // SIN(VO VA FREQ TD THETA)
-                format!("SIN({})", if value.is_empty() { "0 1 1k" } else { value })
+                // SIN(VO VA FREQ TD THETA PHASE)
+                let params = crate::properties::parse_params_string(&component.params);
+                let vo = Self::get_param_owned(&params, "vo", value, "0");
+                let va = Self::get_param_owned(&params, "va", "", "1");
+                let freq = Self::get_param_owned(&params, "freq", "", "1k");
+                let td = Self::get_param_owned(&params, "td", "", "0");
+                let theta = Self::get_param_owned(&params, "theta", "", "0");
+                let phase = Self::get_param_owned(&params, "phase", "", "0");
+                format!("SIN({} {} {} {} {} {})", vo, va, freq, td, theta, phase)
             }
             ComponentType::VoltageSourcePwl | ComponentType::CurrentSourcePwl => {
                 // PWL(T1 V1 T2 V2 ...)
-                format!("PWL({})", if value.is_empty() { "0 0 1n 1" } else { value })
+                let params = crate::properties::parse_params_string(&component.params);
+                let pwl_data = Self::get_param_owned(&params, "pwl_data", value, "0 0 1n 1");
+                format!("PWL({})", pwl_data)
             }
             ComponentType::VoltageSourceExp | ComponentType::CurrentSourceExp => {
                 // EXP(V1 V2 TD1 TAU1 TD2 TAU2)
-                format!(
-                    "EXP({})",
-                    if value.is_empty() {
-                        "0 1 0 1n 10n 1n"
-                    } else {
-                        value
-                    }
-                )
+                let params = crate::properties::parse_params_string(&component.params);
+                let v1 = Self::get_param_owned(&params, "v1", value, "0");
+                let v2 = Self::get_param_owned(&params, "v2", "", "1");
+                let td1 = Self::get_param_owned(&params, "td1", "", "0");
+                let tau1 = Self::get_param_owned(&params, "tau1", "", "1n");
+                let td2 = Self::get_param_owned(&params, "td2", "", "10n");
+                let tau2 = Self::get_param_owned(&params, "tau2", "", "1n");
+                format!("EXP({} {} {} {} {} {})", v1, v2, td1, tau1, td2, tau2)
             }
             ComponentType::VoltageSourceSffm => {
                 // SFFM(VO VA FC MDI FS)
-                format!(
-                    "SFFM({})",
-                    if value.is_empty() {
-                        "0 1 1k 1 10"
-                    } else {
-                        value
-                    }
-                )
+                let params = crate::properties::parse_params_string(&component.params);
+                let vo = Self::get_param_owned(&params, "vo", value, "0");
+                let va = Self::get_param_owned(&params, "va", "", "1");
+                let fc = Self::get_param_owned(&params, "fc", "", "1k");
+                let mdi = Self::get_param_owned(&params, "mdi", "", "1");
+                let fs = Self::get_param_owned(&params, "fs", "", "10");
+                format!("SFFM({} {} {} {} {})", vo, va, fc, mdi, fs)
             }
             _ => {
                 if value.is_empty() {
@@ -679,8 +761,58 @@ impl<'a> NetlistGenerator<'a> {
         }
     }
 
-    /// Get BJT model name and add to models
-    fn get_bjt_model(&mut self, component: &Component) -> String {
+    /// Helper to get param value with fallbacks (returns owned String)
+    fn get_param_owned(
+        params: &HashMap<String, String>,
+        key: &str,
+        value_fallback: &str,
+        default: &str,
+    ) -> String {
+        if let Some(v) = params.get(key) {
+            if !v.is_empty() {
+                return v.clone();
+            }
+        }
+        if !value_fallback.is_empty() {
+            value_fallback.to_string()
+        } else {
+            default.to_string()
+        }
+    }
+
+    /// Extract optional explicit model name and params string with model= removed.
+    ///
+    /// Users can provide model either in the primary value field (e.g. "2N2222")
+    /// or as `model=<name>` in params. When both are present, params wins.
+    fn extract_model_override(component: &Component) -> (Option<String>, String) {
+        let mut params_map = crate::properties::parse_params_string(&component.params);
+        let explicit_from_params = params_map
+            .remove("model")
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty());
+        let params_without_model =
+            crate::properties::property_bridge::format_params_string(&params_map);
+
+        let explicit_model = explicit_from_params.or_else(|| {
+            let value_model = component.value.trim();
+            if value_model.is_empty() {
+                None
+            } else {
+                Some(value_model.to_string())
+            }
+        });
+
+        (explicit_model, params_without_model)
+    }
+
+    /// Get BJT model name and add auto-generated default model when needed.
+    fn get_bjt_model(&mut self, component: &Component, explicit_model: Option<&str>) -> String {
+        if let Some(model_name) = explicit_model.map(str::trim).filter(|s| !s.is_empty()) {
+            // Explicit model selected by user: trust it and do NOT inject a generic
+            // .MODEL card that could silently override a library model.
+            return model_name.to_string();
+        }
+
         let polarity = if component.kind == ComponentType::NpnBjt {
             "NPN"
         } else {
@@ -1020,7 +1152,7 @@ mod tests {
 
         let comp =
             Component::new(1, ComponentType::NpnBjt, Point::new(0, 0)).with_name_value("Q1", "");
-        let model = gen.get_bjt_model(&comp);
+        let model = gen.get_bjt_model(&comp, None);
 
         assert!(model.contains("npn"));
         assert!(gen.models.values().any(|m| m.contains("NPN")));
@@ -1033,7 +1165,7 @@ mod tests {
 
         let comp =
             Component::new(1, ComponentType::PnpBjt, Point::new(0, 0)).with_name_value("Q2", "");
-        let model = gen.get_bjt_model(&comp);
+        let model = gen.get_bjt_model(&comp, None);
 
         assert!(model.contains("pnp"));
         assert!(gen.models.values().any(|m| m.contains("PNP")));
@@ -1135,6 +1267,44 @@ mod tests {
         assert!(!netlist.contains("* Analysis commands"));
     }
 
+    #[test]
+    fn test_generate_without_analysis_has_no_placeholder_op() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let netlist = gen.generate();
+
+        assert!(netlist.contains("* RSpice Netlist"));
+        assert!(netlist.contains(".end"));
+        assert!(!netlist.contains("* Analysis commands"));
+        assert!(!netlist.contains("\n.op\n"));
+    }
+
+    #[test]
+    fn test_generate_resets_internal_state_between_calls() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let first = gen.generate_with_analysis(&[".ac dec 10 1 1meg".to_string()]);
+        assert!(first.contains(".ac dec 10 1 1meg"));
+
+        let second = gen.generate_with_analysis(&[]);
+        assert!(!second.contains(".ac dec 10 1 1meg"));
+        assert!(!second.contains("* Analysis commands"));
+    }
+
+    #[test]
+    fn test_generate_netlist_with_analysis_convenience_api() {
+        let schematic = SchematicState::default();
+        let analysis = vec![".tran 1n 100n".to_string()];
+
+        let result = generate_netlist_with_analysis(&schematic, &analysis);
+
+        assert!(result.netlist.contains(".tran 1n 100n"));
+        assert!(result.netlist.contains(".end"));
+        assert!(result.errors.is_empty());
+    }
+
     // -------------------------------------------------------------------------
     // Timestamp Tests
     // -------------------------------------------------------------------------
@@ -1160,5 +1330,528 @@ mod tests {
         // Point not in any net should return float_XXX
         let name = gen.get_node_name(Point::new(5, 3));
         assert!(name.starts_with("float_"));
+    }
+
+    // =========================================================================
+    // Parameter Serialization Tests (Spectre Parity)
+    // =========================================================================
+    //
+    // These tests verify that component.params are correctly appended to
+    // netlist lines, following Cadence Spectre conventions.
+
+    // -------------------------------------------------------------------------
+    // Helper Function Tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_format_params_empty() {
+        let schematic = SchematicState::default();
+        let gen = NetlistGenerator::new(&schematic);
+        assert_eq!(gen.format_params(""), "");
+        assert_eq!(gen.format_params("   "), "");
+    }
+
+    #[test]
+    fn test_format_params_single() {
+        let schematic = SchematicState::default();
+        let gen = NetlistGenerator::new(&schematic);
+        assert_eq!(gen.format_params("m=2"), " m=2");
+    }
+
+    #[test]
+    fn test_format_params_multiple() {
+        let schematic = SchematicState::default();
+        let gen = NetlistGenerator::new(&schematic);
+        assert_eq!(gen.format_params("m=2 tc1=0.01"), " m=2 tc1=0.01");
+    }
+
+    #[test]
+    fn test_format_params_with_whitespace() {
+        let schematic = SchematicState::default();
+        let gen = NetlistGenerator::new(&schematic);
+        // Leading/trailing whitespace should be trimmed
+        assert_eq!(gen.format_params("  m=2  "), " m=2");
+    }
+
+    #[test]
+    fn test_format_value_with_params_value_only() {
+        let schematic = SchematicState::default();
+        let gen = NetlistGenerator::new(&schematic);
+        assert_eq!(gen.format_value_with_params("1k", ""), "1k");
+    }
+
+    #[test]
+    fn test_format_value_with_params_both() {
+        let schematic = SchematicState::default();
+        let gen = NetlistGenerator::new(&schematic);
+        assert_eq!(gen.format_value_with_params("1k", "m=2"), "1k m=2");
+    }
+
+    #[test]
+    fn test_format_value_with_params_complex() {
+        let schematic = SchematicState::default();
+        let gen = NetlistGenerator::new(&schematic);
+        assert_eq!(
+            gen.format_value_with_params("4.7k", "m=2 tc1=0.01 tc2=0.001"),
+            "4.7k m=2 tc1=0.01 tc2=0.001"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Passive Component Parameter Tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_resistor_with_params() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp = Component::new(1, ComponentType::Resistor, Point::new(0, 0))
+            .with_name_value("R1", "1k");
+        comp.params = "m=2 tc1=0.01".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.contains("R1"));
+        assert!(line.contains("1k"));
+        assert!(line.contains("m=2"));
+        assert!(line.contains("tc1=0.01"));
+    }
+
+    #[test]
+    fn test_resistor_without_params() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let comp = Component::new(1, ComponentType::Resistor, Point::new(0, 0))
+            .with_name_value("R1", "1k");
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.contains("R1"));
+        assert!(line.contains("1k"));
+        // Should not have spurious whitespace at end
+        assert!(!line.ends_with(' '));
+    }
+
+    #[test]
+    fn test_capacitor_with_params() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp = Component::new(1, ComponentType::Capacitor, Point::new(0, 0))
+            .with_name_value("C1", "100p");
+        comp.params = "ic=0 m=4".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.contains("C1"));
+        assert!(line.contains("100p"));
+        assert!(line.contains("ic=0"));
+        assert!(line.contains("m=4"));
+    }
+
+    #[test]
+    fn test_inductor_with_params() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp = Component::new(1, ComponentType::Inductor, Point::new(0, 0))
+            .with_name_value("L1", "10u");
+        comp.params = "ic=0 m=1".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.contains("L1"));
+        assert!(line.contains("10u"));
+        assert!(line.contains("ic=0"));
+    }
+
+    #[test]
+    fn test_diode_with_params() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp =
+            Component::new(1, ComponentType::Diode, Point::new(0, 0)).with_name_value("D1", "1n");
+        comp.params = "area=2 m=1".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.contains("D1"));
+        assert!(line.contains("area=2"));
+    }
+
+    // -------------------------------------------------------------------------
+    // Source Parameter Tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_voltage_source_dc_with_params() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp = Component::new(1, ComponentType::VoltageSource, Point::new(0, 0))
+            .with_name_value("V1", "5");
+        comp.params = "acmag=1 acphase=0".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.contains("V1"));
+        assert!(line.contains("DC 5"));
+        assert!(line.contains("acmag=1"));
+        assert!(line.contains("acphase=0"));
+    }
+
+    #[test]
+    fn test_voltage_source_ac_with_params() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp = Component::new(1, ComponentType::VoltageSourceAc, Point::new(0, 0))
+            .with_name_value("V2", "1");
+        comp.params = "phase=45".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.contains("V2"));
+        assert!(line.contains("AC 1"));
+        assert!(line.contains("phase=45"));
+    }
+
+    #[test]
+    fn test_voltage_source_pulse_with_params() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        // Pulse sources use structured parameters for V1, V2, TD, TR, TF, PW, PER
+        // The component.params contains key=value pairs for these parameters
+        let mut comp = Component::new(1, ComponentType::VoltageSourcePulse, Point::new(0, 0))
+            .with_name_value("V3", "");
+        comp.params = "v1=0 v2=5 td=0 tr=1n tf=1n pw=10n period=20n".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.contains("V3"));
+        assert!(line.contains("PULSE("));
+        // Check that structured parameters are parsed correctly
+        assert!(line.contains("PULSE(0 5 0 1n 1n 10n 20n)"));
+    }
+
+    #[test]
+    fn test_current_source_with_params() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp = Component::new(1, ComponentType::CurrentSource, Point::new(0, 0))
+            .with_name_value("I1", "1m");
+        comp.params = "acmag=100u".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.contains("I1"));
+        assert!(line.contains("DC 1m"));
+        assert!(line.contains("acmag=100u"));
+    }
+
+    // -------------------------------------------------------------------------
+    // Transistor Parameter Tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_nmos_with_dimension_params() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp =
+            Component::new(1, ComponentType::Nmos, Point::new(0, 0)).with_name_value("M1", "");
+        comp.params = "w=1u l=180n as=1p ad=1p ps=2u pd=2u".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.starts_with("M"));
+        assert!(line.contains("M1"));
+        assert!(line.contains("nmos"));
+        assert!(line.contains("w=1u"));
+        assert!(line.contains("l=180n"));
+        assert!(line.contains("as=1p"));
+        assert!(line.contains("ad=1p"));
+    }
+
+    #[test]
+    fn test_pmos_with_dimension_params() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp =
+            Component::new(1, ComponentType::Pmos, Point::new(0, 0)).with_name_value("M2", "");
+        comp.params = "w=2u l=180n m=4".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.contains("M2"));
+        assert!(line.contains("pmos"));
+        assert!(line.contains("w=2u"));
+        assert!(line.contains("l=180n"));
+        assert!(line.contains("m=4"));
+    }
+
+    #[test]
+    fn test_npn_bjt_with_params() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp =
+            Component::new(1, ComponentType::NpnBjt, Point::new(0, 0)).with_name_value("Q1", "");
+        comp.params = "area=2 m=1".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.starts_with("Q"));
+        assert!(line.contains("Q1"));
+        assert!(line.contains("npn"));
+        assert!(line.contains("area=2"));
+    }
+
+    #[test]
+    fn test_bjt_uses_value_as_explicit_model_name() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp = Component::new(1, ComponentType::NpnBjt, Point::new(0, 0))
+            .with_name_value("Q1", "2N2222");
+        comp.params = "area=2".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.contains(" 2N2222 "));
+        assert!(line.contains("area=2"));
+        assert!(!line.contains("model="));
+        assert!(!gen.models.contains_key("2N2222"));
+    }
+
+    #[test]
+    fn test_bjt_uses_model_param_and_removes_duplicate_model_key() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp =
+            Component::new(1, ComponentType::NpnBjt, Point::new(0, 0)).with_name_value("Q1", "");
+        comp.params = "model=2N2222 area=2 m=1".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.contains(" 2N2222 "));
+        assert!(line.contains("area=2"));
+        assert!(line.contains("m=1"));
+        assert!(!line.contains("model=2N2222"));
+        assert!(!gen.models.contains_key("2N2222"));
+    }
+
+    #[test]
+    fn test_pnp_bjt_with_params() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp =
+            Component::new(1, ComponentType::PnpBjt, Point::new(0, 0)).with_name_value("Q2", "");
+        comp.params = "area=1.5".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.contains("Q2"));
+        assert!(line.contains("pnp"));
+        assert!(line.contains("area=1.5"));
+    }
+
+    #[test]
+    fn test_njfet_with_params() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp =
+            Component::new(1, ComponentType::Njfet, Point::new(0, 0)).with_name_value("J1", "");
+        comp.params = "area=1 m=2".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.starts_with("J"));
+        assert!(line.contains("J1"));
+        assert!(line.contains("njf"));
+        assert!(line.contains("area=1"));
+        assert!(line.contains("m=2"));
+    }
+
+    // -------------------------------------------------------------------------
+    // Controlled Source Parameter Tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_vcvs_with_params() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp =
+            Component::new(1, ComponentType::Vcvs, Point::new(0, 0)).with_name_value("E1", "10");
+        comp.params = "max=5 min=-5".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.starts_with("E"));
+        assert!(line.contains("E1"));
+        assert!(line.contains("10"));
+        assert!(line.contains("max=5"));
+        assert!(line.contains("min=-5"));
+    }
+
+    #[test]
+    fn test_vccs_with_params() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp =
+            Component::new(1, ComponentType::Vccs, Point::new(0, 0)).with_name_value("G1", "1m");
+        comp.params = "ic=0".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.starts_with("G"));
+        assert!(line.contains("G1"));
+        assert!(line.contains("1m"));
+        assert!(line.contains("ic=0"));
+    }
+
+    #[test]
+    fn test_ccvs_with_params() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp =
+            Component::new(1, ComponentType::Ccvs, Point::new(0, 0)).with_name_value("H1", "1k");
+        comp.params = "max=10".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.starts_with("H"));
+        assert!(line.contains("H1"));
+        assert!(line.contains("1k"));
+        assert!(line.contains("max=10"));
+    }
+
+    #[test]
+    fn test_cccs_with_params() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp =
+            Component::new(1, ComponentType::Cccs, Point::new(0, 0)).with_name_value("F1", "100");
+        comp.params = "m=2".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.starts_with("F"));
+        assert!(line.contains("F1"));
+        assert!(line.contains("100"));
+        assert!(line.contains("m=2"));
+    }
+
+    // -------------------------------------------------------------------------
+    // Edge Case Parameter Tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_params_with_negative_values() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp = Component::new(1, ComponentType::Resistor, Point::new(0, 0))
+            .with_name_value("R1", "1k");
+        comp.params = "tc1=-0.01 tc2=-0.001".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.contains("tc1=-0.01"));
+        assert!(line.contains("tc2=-0.001"));
+    }
+
+    #[test]
+    fn test_params_with_scientific_notation() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp =
+            Component::new(1, ComponentType::Nmos, Point::new(0, 0)).with_name_value("M1", "");
+        comp.params = "w=1e-6 l=1.8e-7".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.contains("w=1e-6"));
+        assert!(line.contains("l=1.8e-7"));
+    }
+
+    #[test]
+    fn test_params_with_expressions() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp = Component::new(1, ComponentType::Resistor, Point::new(0, 0))
+            .with_name_value("R1", "1k");
+        // Spectre supports expressions in parameters
+        comp.params = "m='2*scale'".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.contains("m='2*scale'"));
+    }
+
+    #[test]
+    fn test_params_preserves_order() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp =
+            Component::new(1, ComponentType::Nmos, Point::new(0, 0)).with_name_value("M1", "");
+        comp.params = "w=1u l=180n as=1p ad=1p".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        // Parameters should maintain their order
+        let w_pos = line.find("w=1u").unwrap();
+        let l_pos = line.find("l=180n").unwrap();
+        let as_pos = line.find("as=1p").unwrap();
+        let ad_pos = line.find("ad=1p").unwrap();
+
+        assert!(w_pos < l_pos);
+        assert!(l_pos < as_pos);
+        assert!(as_pos < ad_pos);
+    }
+
+    #[test]
+    fn test_empty_params_no_trailing_space() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let comp = Component::new(1, ComponentType::Resistor, Point::new(0, 0))
+            .with_name_value("R1", "1k");
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        // Line should not end with trailing space when params are empty
+        assert!(!line.ends_with(' '));
+        assert!(line.ends_with("1k") || line.ends_with("0 0 1k") || line.contains("1k"));
+    }
+
+    #[test]
+    fn test_params_with_quoted_values() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut comp = Component::new(1, ComponentType::Resistor, Point::new(0, 0))
+            .with_name_value("R1", "1k");
+        comp.params = "model=\"res_hi\"".to_string();
+
+        let line = gen.generate_instance_line(&comp).unwrap();
+
+        assert!(line.contains("model=\"res_hi\""));
     }
 }

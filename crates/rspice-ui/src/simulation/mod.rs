@@ -33,7 +33,9 @@ pub use config::{AnalysisConfig, AnalysisType};
 pub use controller::SimulationController;
 pub use dialog::SimulationDialog;
 pub use engine_bridge::EngineBridge;
-pub use netlist_gen::{generate_netlist, Net, NetlistGenerator, NetlistResult};
+pub use netlist_gen::{
+    generate_netlist, generate_netlist_with_analysis, Net, NetlistGenerator, NetlistResult,
+};
 pub use options_translator::{EngineOptions, OptionsTranslator, PvtCorner};
 pub use result_mapper::{MappedResult, MappedWaveform, ResultMapper};
 pub use results::{SimulationResult, WaveformData};

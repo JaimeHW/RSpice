@@ -19,11 +19,19 @@ use crate::common::app::{AppState, ConsoleMessage};
 use crate::services::safety::SoAManager;
 use crate::services::yield_manager::YieldAnalysisManager;
 use crate::simulation::config::{
-    AcAnalysisConfig, AcSweepType, DcSweepConfig, TransientAnalysisConfig,
+    AcAnalysisConfig, AcSweepType, DcSweepConfig, NoiseAnalysisConfig, PoleZeroConfig,
+    PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
 };
+use crate::simulation::multi_run::{AnalysisPlan, AnalysisSpec, FrequencySweep};
 use crate::simulation::reliability_engine::ReliabilityEngine;
-use crate::simulation::{AnalysisConfig, NetlistGenerator, SimulationRunner, SimulationStatus};
+use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
 use crate::state::{AnalysisResult, AnalysisType, DcOpResult, OperatingPointValue};
+
+#[derive(Debug, Clone)]
+struct QueuedAnalysis {
+    spec: AnalysisSpec,
+    config: AnalysisConfig,
+}
 
 //=============================================================================
 // Simulation Controller
@@ -50,7 +58,7 @@ pub struct SimulationController {
     // Multi-Analysis Queue
     // =========================================================================
     /// Queue of pending analyses to run in current simulation batch
-    pending_analyses: VecDeque<AnalysisConfig>,
+    pending_analyses: VecDeque<QueuedAnalysis>,
     /// Current analysis index (1-based for display: "Analysis 2/4")
     current_analysis_idx: usize,
     /// Total number of analyses in current batch
@@ -92,6 +100,23 @@ impl SimulationController {
             self.start_simulation(state);
         }
 
+        // Handle abort trigger
+        if state.simulation.trigger_abort {
+            log::info!("Simulation abort triggered!");
+            state.simulation.trigger_abort = false;
+            self.runner.abort();
+            // Clear pending analyses since we're stopping
+            self.pending_analyses.clear();
+            self.cached_netlist = None;
+            self.current_config = None;
+            state.simulation.status = "Aborted".to_string();
+            state
+                .console_messages
+                .push(crate::common::app::ConsoleMessage::warning(
+                    "Simulation aborted by user",
+                ));
+        }
+
         // Poll for completion
         self.poll_completion(state);
 
@@ -106,9 +131,59 @@ impl SimulationController {
     fn start_simulation(&mut self, state: &mut AppState) {
         log::info!("start_simulation called");
 
-        // Generate netlist from schematic using full result for cross-probing
-        let result = crate::simulation::generate_netlist(&state.schematic);
+        self.pending_analyses.clear();
+        let plan = match self.build_analysis_plan(state) {
+            Ok(plan) => plan,
+            Err(errors) => {
+                for err in errors {
+                    state.console_messages.push(ConsoleMessage::error(err));
+                }
+                state.simulation.status = "Configuration error".to_string();
+                return;
+            }
+        };
+
+        let queued = match self.build_queue_from_plan(state, &plan) {
+            Ok(queue) => queue,
+            Err(errors) => {
+                for err in errors {
+                    state.console_messages.push(ConsoleMessage::error(err));
+                }
+                state.simulation.status = "Configuration error".to_string();
+                return;
+            }
+        };
+
+        self.total_analyses = queued.len();
+        if self.total_analyses == 0 {
+            state.console_messages.push(ConsoleMessage::error(
+                "No runnable analyses were selected".to_string(),
+            ));
+            state.simulation.status = "Configuration error".to_string();
+            return;
+        }
+        self.current_analysis_idx = 0;
+
+        let analysis_lines: Vec<String> =
+            queued.iter().map(|item| item.config.to_spice()).collect();
+        let result = crate::simulation::netlist_gen::generate_netlist_with_analysis(
+            &state.schematic,
+            &analysis_lines,
+        );
         let netlist = result.netlist.clone();
+
+        if !result.errors.is_empty() {
+            for err in result.errors {
+                state.console_messages.push(ConsoleMessage::error(err));
+            }
+            state.simulation.status = "Netlist error".to_string();
+            return;
+        }
+        for warning in result.warnings {
+            state
+                .console_messages
+                .push(ConsoleMessage::warning(warning));
+        }
 
         log::info!(
             "Generated netlist ({} bytes):\n{}",
@@ -117,7 +192,6 @@ impl SimulationController {
         );
 
         // Populate cross-probe mapping for probe mode
-        // This enables: click on wire → find net name → toggle waveform
         state
             .simulation
             .cross_probe
@@ -128,35 +202,18 @@ impl SimulationController {
             state.simulation.cross_probe.net_to_points.len()
         );
 
-        // =====================================================================
-        // Build queue of all enabled analyses (commercial multi-analysis mode)
-        // =====================================================================
-        self.pending_analyses.clear();
-        let enabled = &state.dialogs.enabled_analyses;
-
-        // Build configs for each enabled analysis in tab order (0=DCOP, 1=Tran, 2=AC, 3=DC Sweep)
-        let mut enabled_indices: Vec<usize> = enabled.iter().copied().collect();
-        enabled_indices.sort(); // Run in consistent order
-
-        if enabled_indices.is_empty() {
-            // Default to DC OP if nothing enabled
-            log::info!("No analyses enabled, defaulting to DC OP");
-            enabled_indices.push(0);
-        }
-
-        for idx in &enabled_indices {
-            let config = self.build_config_for_index(state, *idx);
-            self.pending_analyses.push_back(config);
-        }
-
-        self.total_analyses = self.pending_analyses.len();
-        self.current_analysis_idx = 0;
+        self.pending_analyses = queued.into_iter().collect();
         self.cached_netlist = Some(netlist);
 
+        let queued_names: Vec<&'static str> = self
+            .pending_analyses
+            .iter()
+            .map(|entry| self.analysis_name(&entry.config))
+            .collect();
         log::info!(
             "Queued {} analyses for execution: {:?}",
             self.total_analyses,
-            enabled_indices
+            queued_names
         );
 
         // Create new run in Results Browser
@@ -180,11 +237,16 @@ impl SimulationController {
     /// Called after start_simulation() initializes the queue, and again
     /// after each analysis completes until the queue is empty.
     fn start_next_analysis(&mut self, state: &mut AppState) {
-        let Some(config) = self.pending_analyses.pop_front() else {
+        let Some(next_analysis) = self.pending_analyses.pop_front() else {
             // Queue exhausted - should not happen if called correctly
             log::warn!("start_next_analysis called with empty queue");
             return;
         };
+        log::info!(
+            "Starting queued analysis: {:?}",
+            next_analysis.spec.run_type()
+        );
+        let config = next_analysis.config;
 
         self.current_analysis_idx += 1;
         self.current_config = Some(config.clone());
@@ -266,100 +328,358 @@ impl SimulationController {
         log::info!("Simulation batch completed");
     }
 
-    /// Build analysis config from dialog state
-    /// Prioritizes enabled analyses over the currently visible tab
-    fn build_config(&self, state: &AppState) -> AnalysisConfig {
-        // Determine which analysis to run:
-        // 1. If the active tab is enabled, use it
-        // 2. Otherwise, use the lowest-indexed enabled analysis
-        // 3. Fall back to DC OP if nothing is enabled
-        let active_tab = state.dialogs.sim_active_tab;
-        let enabled = &state.dialogs.enabled_analyses;
-
-        let analysis_idx = if enabled.contains(&active_tab) {
-            active_tab
-        } else if let Some(&first_enabled) = enabled.iter().min() {
-            log::info!(
-                "Active tab {} not enabled, using first enabled analysis: {}",
-                active_tab,
-                first_enabled
-            );
-            first_enabled
-        } else {
-            log::info!("No analyses enabled, defaulting to DC OP (tab 0)");
-            0 // Default to DC OP
-        };
-
-        log::info!(
-            "build_config: active tab = {}, using analysis_idx = {}",
-            active_tab,
-            analysis_idx
-        );
-
-        self.build_config_for_index(state, analysis_idx)
+    fn enabled_analysis_indices(state: &AppState) -> Vec<usize> {
+        let mut indices: Vec<usize> = state.dialogs.enabled_analyses.iter().copied().collect();
+        indices.sort_unstable();
+        if indices.is_empty() {
+            indices.push(0);
+        }
+        indices
     }
 
-    /// Build analysis config for a specific analysis index
-    fn build_config_for_index(&self, state: &AppState, idx: usize) -> AnalysisConfig {
+    fn analysis_label_for_index(idx: usize) -> &'static str {
         match idx {
-            0 => AnalysisConfig::DcOp,
-            1 => {
-                // Transient
-                log::info!(
-                    "Building transient config: stop={}, step={}, start={}",
-                    state.dialogs.tran_stop,
-                    state.dialogs.tran_step,
-                    state.dialogs.tran_start
-                );
-                let stop_time = parse_spice_value(&state.dialogs.tran_stop);
-                let step = parse_spice_value(&state.dialogs.tran_step);
-                let start = parse_spice_value(&state.dialogs.tran_start);
-                log::info!(
-                    "Parsed transient values: stop={}, step={}, start={}",
-                    stop_time,
-                    step,
-                    start
-                );
+            0 => "DC Operating Point",
+            1 => "Transient",
+            2 => "AC",
+            3 => "DC Sweep",
+            4 => "Noise",
+            5 => "Pole-Zero",
+            6 => "Sensitivity",
+            7 => "Monte Carlo",
+            8 => "PSS",
+            9 => "STB",
+            10 => "Temperature Sweep",
+            11 => "Harmonic Balance",
+            12 => "S-Parameter",
+            13 => "PAC",
+            14 => "PNoise",
+            15 => "PXF",
+            16 => "PSTB",
+            17 => "Transfer Function",
+            18 => "Corner",
+            19 => "Envelope",
+            20 => "Fourier",
+            21 => "Reliability",
+            22 => "Optimization",
+            23 => "Safety (SOA)",
+            _ => "Unknown",
+        }
+    }
 
-                AnalysisConfig::Transient(TransientAnalysisConfig {
-                    stop_time,
-                    step_time: step,
-                    start_time: start,
-                    max_timestep: Some(step), // Use step as max_timestep default
-                    uic: false,
-                })
-            }
-            2 => {
-                // AC
-                let fstart = parse_spice_value(&state.dialogs.ac_fstart);
-                let fstop = parse_spice_value(&state.dialogs.ac_fstop);
-                let points = state.dialogs.ac_points.parse().unwrap_or(101);
+    fn build_analysis_plan(&self, state: &AppState) -> Result<AnalysisPlan, Vec<String>> {
+        let mut plan = AnalysisPlan::new();
+        plan.stop_on_error = false;
 
-                AnalysisConfig::Ac(AcAnalysisConfig {
-                    start_freq: fstart,
-                    stop_freq: fstop,
-                    num_points: points,
-                    sweep_type: AcSweepType::Decade,
-                })
+        let mut errors = Vec::new();
+        for idx in Self::enabled_analysis_indices(state) {
+            match self.build_analysis_spec_for_index(state, idx) {
+                Ok(spec) => plan.analyses.push(spec),
+                Err(e) => errors.push(format!("{}: {}", Self::analysis_label_for_index(idx), e)),
             }
+        }
+
+        if !errors.is_empty() {
+            return Err(errors);
+        }
+        plan.validate()?;
+        Ok(plan)
+    }
+
+    fn build_queue_from_plan(
+        &self,
+        state: &AppState,
+        plan: &AnalysisPlan,
+    ) -> Result<Vec<QueuedAnalysis>, Vec<String>> {
+        let mut queue = Vec::with_capacity(plan.analyses.len());
+        let mut errors = Vec::new();
+
+        for spec in &plan.analyses {
+            match self.analysis_spec_to_config(state, spec) {
+                Ok(config) => {
+                    if let Err(errs) = config.validate() {
+                        errors.push(format!(
+                            "{} config is invalid: {}",
+                            spec.run_type().display_name(),
+                            errs.join(", ")
+                        ));
+                    } else {
+                        queue.push(QueuedAnalysis {
+                            spec: spec.clone(),
+                            config,
+                        });
+                    }
+                }
+                Err(e) => errors.push(format!("{}: {}", spec.run_type().display_name(), e)),
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(queue)
+        } else {
+            Err(errors)
+        }
+    }
+
+    fn build_analysis_spec_for_index(
+        &self,
+        state: &AppState,
+        idx: usize,
+    ) -> Result<AnalysisSpec, String> {
+        match idx {
+            0 => Ok(AnalysisSpec::DcOp),
+            1 => Ok(AnalysisSpec::Transient {
+                stop_time: parse_spice_value_checked(&state.dialogs.tran_stop)
+                    .map_err(|e| format!("invalid stop time: {}", e))?,
+                step_time: parse_spice_value_checked(&state.dialogs.tran_step)
+                    .map_err(|e| format!("invalid step time: {}", e))?,
+            }),
+            2 => Ok(AnalysisSpec::Ac {
+                start_freq: parse_spice_value_checked(&state.dialogs.ac_fstart)
+                    .map_err(|e| format!("invalid start frequency: {}", e))?,
+                stop_freq: parse_spice_value_checked(&state.dialogs.ac_fstop)
+                    .map_err(|e| format!("invalid stop frequency: {}", e))?,
+                points_per_unit: Self::parse_positive_points(
+                    &state.dialogs.ac_points,
+                    "ac_points",
+                )?,
+                sweep: Self::map_frequency_sweep(state.dialogs.ac_sweep_type),
+            }),
             3 => {
-                // DC Sweep
-                let start = parse_spice_value(&state.dialogs.dc_start);
-                let stop = parse_spice_value(&state.dialogs.dc_stop);
-                let step = parse_spice_value(&state.dialogs.dc_step);
-
-                AnalysisConfig::DcSweep(DcSweepConfig {
-                    source: state.dialogs.dc_source.clone(),
-                    start,
-                    stop,
-                    step,
-                    source2: None,
-                    start2: None,
-                    stop2: None,
-                    step2: None,
+                if state.dialogs.dc_nested {
+                    return Err(
+                        "nested DC sweep is not supported by the current simulation engine"
+                            .to_string(),
+                    );
+                }
+                Ok(AnalysisSpec::DcSweep {
+                    source_name: state.dialogs.dc_source.trim().to_string(),
+                    start: parse_spice_value_checked(&state.dialogs.dc_start)
+                        .map_err(|e| format!("invalid start value: {}", e))?,
+                    stop: parse_spice_value_checked(&state.dialogs.dc_stop)
+                        .map_err(|e| format!("invalid stop value: {}", e))?,
+                    step: parse_spice_value_checked(&state.dialogs.dc_step)
+                        .map_err(|e| format!("invalid step value: {}", e))?,
                 })
             }
-            _ => AnalysisConfig::DcOp, // Default to DC OP for other tabs
+            4 => Ok(AnalysisSpec::Noise {
+                output_node: state.dialogs.noise_output.trim().to_string(),
+                start_freq: parse_spice_value_checked(&state.dialogs.noise_fstart)
+                    .map_err(|e| format!("invalid start frequency: {}", e))?,
+                stop_freq: parse_spice_value_checked(&state.dialogs.noise_fstop)
+                    .map_err(|e| format!("invalid stop frequency: {}", e))?,
+                points_per_decade: Self::parse_positive_points(
+                    &state.dialogs.ac_points,
+                    "ac_points",
+                )?,
+                temperature: 300.0,
+            }),
+            5 => self.build_pole_zero_spec(state),
+            6 => self.build_sensitivity_spec(state),
+            _ => Err(
+                "analysis is not implemented in the current UI simulation controller".to_string(),
+            ),
+        }
+    }
+
+    fn analysis_spec_to_config(
+        &self,
+        state: &AppState,
+        spec: &AnalysisSpec,
+    ) -> Result<AnalysisConfig, String> {
+        match spec {
+            AnalysisSpec::DcOp => Ok(AnalysisConfig::DcOp),
+            AnalysisSpec::DcSweep {
+                source_name,
+                start,
+                stop,
+                step,
+            } => Ok(AnalysisConfig::DcSweep(DcSweepConfig {
+                source: source_name.clone(),
+                start: *start,
+                stop: *stop,
+                step: *step,
+                source2: None,
+                start2: None,
+                stop2: None,
+                step2: None,
+            })),
+            AnalysisSpec::Ac {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                sweep,
+            } => Ok(AnalysisConfig::Ac(AcAnalysisConfig {
+                start_freq: *start_freq,
+                stop_freq: *stop_freq,
+                num_points: *points_per_unit,
+                sweep_type: Self::map_ac_sweep(*sweep),
+            })),
+            AnalysisSpec::Transient {
+                stop_time,
+                step_time,
+            } => Ok(AnalysisConfig::Transient(TransientAnalysisConfig {
+                stop_time: *stop_time,
+                step_time: *step_time,
+                start_time: parse_spice_value_checked(&state.dialogs.tran_start)
+                    .map_err(|e| format!("invalid start time: {}", e))?,
+                max_timestep: Self::parse_optional_spice_value(&state.dialogs.tran_maxstep)
+                    .map_err(|e| format!("invalid max step: {}", e))?,
+                uic: state.dialogs.tran_uic,
+            })),
+            AnalysisSpec::Noise {
+                output_node,
+                start_freq,
+                stop_freq,
+                points_per_decade,
+                ..
+            } => Ok(AnalysisConfig::Noise(NoiseAnalysisConfig {
+                output_node: output_node.clone(),
+                reference_node: state.dialogs.noise_ref.trim().to_string(),
+                input_source: state.dialogs.noise_input.trim().to_string(),
+                sweep_type: Self::map_ac_sweep(Self::map_frequency_sweep(
+                    state.dialogs.ac_sweep_type,
+                )),
+                num_points: *points_per_decade,
+                start_freq: *start_freq,
+                stop_freq: *stop_freq,
+            })),
+            AnalysisSpec::PoleZero {
+                input_node,
+                input_ref,
+                output_node,
+                output_ref,
+                transfer_type,
+                analysis_type,
+            } => {
+                let analysis_type = match analysis_type.trim().to_ascii_uppercase().as_str() {
+                    "PZ" => PzAnalysisType::PoleZero,
+                    "POL" => PzAnalysisType::PolesOnly,
+                    "ZER" => PzAnalysisType::ZerosOnly,
+                    other => {
+                        return Err(format!(
+                            "invalid pole-zero analysis type '{}': expected PZ, POL, or ZER",
+                            other
+                        ));
+                    }
+                };
+                let transfer_type = transfer_type.trim().to_ascii_uppercase();
+                if transfer_type != "VOL" && transfer_type != "CUR" {
+                    return Err(format!(
+                        "invalid pole-zero transfer type '{}': expected VOL or CUR",
+                        transfer_type
+                    ));
+                }
+                Ok(AnalysisConfig::PoleZero(PoleZeroConfig {
+                    input_node: input_node.clone(),
+                    input_ref: input_ref.clone(),
+                    output_node: output_node.clone(),
+                    output_ref: output_ref.clone(),
+                    transfer_type,
+                    analysis_type,
+                }))
+            }
+            AnalysisSpec::Sensitivity {
+                output_var,
+                ac_mode,
+                frequency,
+            } => Ok(AnalysisConfig::Sensitivity(SensitivityConfig {
+                output_var: output_var.clone(),
+                ac_mode: *ac_mode,
+                frequency: *frequency,
+            })),
+            _ => Err(format!(
+                "{:?} is not supported by the UI runner yet",
+                spec.run_type()
+            )),
+        }
+    }
+
+    fn build_pole_zero_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
+        let mut pz_state = state.dialogs.pz_state.clone();
+        pz_state.ensure_initialized();
+        let pz_cfg = pz_state
+            .to_config()
+            .map_err(|e| format!("invalid pole-zero settings: {}", e))?;
+
+        let analysis_type = match pz_cfg.analysis_type {
+            crate::simulation::dialog::pz::PzAnalysisType::PolesAndZeros => {
+                PzAnalysisType::PoleZero
+            }
+            crate::simulation::dialog::pz::PzAnalysisType::PolesOnly => PzAnalysisType::PolesOnly,
+            crate::simulation::dialog::pz::PzAnalysisType::ZerosOnly => PzAnalysisType::ZerosOnly,
+        };
+
+        let transfer_type = match pz_cfg.transfer_type {
+            crate::simulation::dialog::pz::PzTransferType::Voltage => "VOL",
+            crate::simulation::dialog::pz::PzTransferType::Current => "CUR",
+        };
+
+        Ok(AnalysisSpec::PoleZero {
+            input_node: pz_cfg.input_pos,
+            input_ref: pz_cfg.input_neg,
+            output_node: pz_cfg.output_pos,
+            output_ref: pz_cfg.output_neg,
+            transfer_type: transfer_type.to_string(),
+            analysis_type: match analysis_type {
+                PzAnalysisType::PoleZero => "PZ".to_string(),
+                PzAnalysisType::PolesOnly => "POL".to_string(),
+                PzAnalysisType::ZerosOnly => "ZER".to_string(),
+            },
+        })
+    }
+
+    fn build_sensitivity_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
+        let mut sens_state = state.dialogs.sens_state.clone();
+        sens_state.ensure_initialized();
+        let sens_cfg = sens_state
+            .to_config()
+            .map_err(|e| format!("invalid sensitivity settings: {}", e))?;
+
+        let ac_mode = matches!(
+            sens_cfg.sens_type,
+            crate::simulation::dialog::sens::SensType::Ac
+        );
+
+        Ok(AnalysisSpec::Sensitivity {
+            output_var: sens_cfg.output_expr,
+            ac_mode,
+            frequency: ac_mode.then_some(sens_cfg.ac_freq),
+        })
+    }
+
+    fn parse_positive_points(raw: &str, field_name: &str) -> Result<usize, String> {
+        let points = raw
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| format!("{} must be a positive integer", field_name))?;
+        if points == 0 {
+            return Err(format!("{} must be greater than zero", field_name));
+        }
+        Ok(points)
+    }
+
+    fn parse_optional_spice_value(raw: &str) -> Result<Option<f64>, String> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("auto") {
+            return Ok(None);
+        }
+        parse_spice_value_checked(trimmed).map(Some)
+    }
+
+    fn map_frequency_sweep(idx: usize) -> FrequencySweep {
+        match idx {
+            1 => FrequencySweep::Octave,
+            2 => FrequencySweep::Linear,
+            _ => FrequencySweep::Decade,
+        }
+    }
+
+    fn map_ac_sweep(sweep: FrequencySweep) -> AcSweepType {
+        match sweep {
+            FrequencySweep::Decade => AcSweepType::Decade,
+            FrequencySweep::Octave => AcSweepType::Octave,
+            FrequencySweep::Linear => AcSweepType::Linear,
         }
     }
 
@@ -1070,6 +1390,60 @@ fn parse_spice_value(s: &str) -> f64 {
     base * multiplier
 }
 
+fn parse_spice_value_checked(s: &str) -> Result<f64, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("value is empty".to_string());
+    }
+
+    if let Ok(v) = s.parse::<f64>() {
+        if v.is_finite() {
+            return Ok(v);
+        }
+        return Err("value is not finite".to_string());
+    }
+
+    let mut num_end = 0;
+    for (i, c) in s.char_indices() {
+        if c.is_ascii_digit() || c == '.' || c == '-' || c == '+' || c == 'e' || c == 'E' {
+            num_end = i + c.len_utf8();
+        } else {
+            break;
+        }
+    }
+
+    if num_end == 0 || num_end == s.len() && s.parse::<f64>().is_err() {
+        return Err(format!("invalid numeric value '{}'", s));
+    }
+
+    let (num_str, suffix) = s.split_at(num_end);
+    let base: f64 = num_str
+        .parse()
+        .map_err(|_| format!("invalid numeric value '{}'", s))?;
+
+    let multiplier = match suffix.to_ascii_lowercase().as_str() {
+        "t" | "tera" => 1e12,
+        "g" | "gig" => 1e9,
+        "meg" => 1e6,
+        "k" | "kilo" => 1e3,
+        "m" | "milli" => 1e-3,
+        "u" | "micro" => 1e-6,
+        "n" | "nano" => 1e-9,
+        "p" | "pico" => 1e-12,
+        "f" | "femto" => 1e-15,
+        "a" | "atto" => 1e-18,
+        "" => 1.0,
+        _ => return Err(format!("unsupported SPICE suffix '{}'", suffix)),
+    };
+
+    let value = base * multiplier;
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err("value is not finite".to_string())
+    }
+}
+
 //=============================================================================
 // Tests
 //=============================================================================
@@ -1149,6 +1523,18 @@ mod tests {
         assert_eq!(parse_spice_value("   "), 0.0);
     }
 
+    #[test]
+    fn test_parse_spice_value_checked_valid_suffix() {
+        let value = parse_spice_value_checked("4.7k").expect("4.7k should parse");
+        assert!((value - 4700.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_parse_spice_value_checked_rejects_unknown_suffix() {
+        let err = parse_spice_value_checked("10xyz").expect_err("unknown suffix must fail");
+        assert!(err.contains("unsupported SPICE suffix"));
+    }
+
     // -------------------------------------------------------------------------
     // Controller Tests
     // -------------------------------------------------------------------------
@@ -1188,6 +1574,216 @@ mod tests {
             uic: false,
         });
         assert_eq!(controller.analysis_name(&tran), "Transient");
+    }
+
+    #[test]
+    fn test_build_transient_config_uses_output_step_without_forcing_internal_max_step() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.tran_stop = "5m".to_string();
+        state.dialogs.tran_step = "10n".to_string();
+        state.dialogs.tran_start = "0".to_string();
+
+        let spec = controller
+            .build_analysis_spec_for_index(&state, 1)
+            .expect("transient spec should build");
+        let config = controller
+            .analysis_spec_to_config(&state, &spec)
+            .expect("transient config should build");
+        let tran = match config {
+            AnalysisConfig::Transient(tran) => tran,
+            _ => panic!("Expected transient config"),
+        };
+
+        assert!((tran.stop_time - 5e-3).abs() < 1e-15);
+        assert!((tran.step_time - 10e-9).abs() < 1e-18);
+        assert_eq!(tran.max_timestep, None);
+    }
+
+    #[test]
+    fn test_enabled_analysis_indices_defaults_to_dcop() {
+        let state = AppState::default();
+        let indices = SimulationController::enabled_analysis_indices(&state);
+        assert_eq!(indices, vec![0]);
+    }
+
+    #[test]
+    fn test_build_analysis_plan_rejects_unsupported_analysis_tab() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses.insert(11); // Harmonic Balance
+
+        let errors = controller
+            .build_analysis_plan(&state)
+            .expect_err("unsupported analysis should fail planning");
+        assert!(errors.iter().any(|e| e.contains("Harmonic Balance")));
+    }
+
+    #[test]
+    fn test_build_analysis_plan_includes_supported_analyses_in_order() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses.extend([1, 2, 4]);
+        state.dialogs.tran_stop = "5m".to_string();
+        state.dialogs.tran_step = "10n".to_string();
+        state.dialogs.ac_fstart = "1".to_string();
+        state.dialogs.ac_fstop = "1Meg".to_string();
+        state.dialogs.ac_points = "20".to_string();
+        state.dialogs.noise_output = "out".to_string();
+        state.dialogs.noise_fstart = "10".to_string();
+        state.dialogs.noise_fstop = "100Meg".to_string();
+
+        let plan = controller
+            .build_analysis_plan(&state)
+            .expect("plan should build");
+        assert_eq!(plan.analyses.len(), 3);
+        assert!(matches!(plan.analyses[0], AnalysisSpec::Transient { .. }));
+        assert!(matches!(plan.analyses[1], AnalysisSpec::Ac { .. }));
+        assert!(matches!(plan.analyses[2], AnalysisSpec::Noise { .. }));
+    }
+
+    #[test]
+    fn test_build_analysis_plan_rejects_nested_dc_sweep() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses.insert(3);
+        state.dialogs.dc_nested = true;
+        state.dialogs.dc_source = "V1".to_string();
+        state.dialogs.dc_start = "0".to_string();
+        state.dialogs.dc_stop = "1".to_string();
+        state.dialogs.dc_step = "0.1".to_string();
+
+        let errors = controller
+            .build_analysis_plan(&state)
+            .expect_err("nested sweep should fail until implemented");
+        assert!(errors.iter().any(|e| e.contains("nested DC sweep")));
+    }
+
+    #[test]
+    fn test_build_queue_from_plan_maps_pole_zero_config() {
+        use crate::simulation::dialog::pz::{PzAnalysisType, PzConfig, PzTransferType};
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses.insert(5);
+        state.dialogs.pz_state = crate::simulation::dialog::pz::PzDialogState::from_config(
+            &PzConfig::new("vin", "vout")
+                .with_transfer(PzTransferType::Current)
+                .with_type(PzAnalysisType::PolesOnly),
+        );
+
+        let plan = controller
+            .build_analysis_plan(&state)
+            .expect("plan should build");
+        let queue = controller
+            .build_queue_from_plan(&state, &plan)
+            .expect("queue should build");
+        assert_eq!(queue.len(), 1);
+
+        match &queue[0].config {
+            AnalysisConfig::PoleZero(pz) => {
+                assert_eq!(pz.input_node, "VIN");
+                assert_eq!(pz.output_node, "VOUT");
+                assert_eq!(pz.transfer_type, "CUR");
+                assert!(matches!(
+                    pz.analysis_type,
+                    crate::simulation::config::PzAnalysisType::PolesOnly
+                ));
+            }
+            _ => panic!("Expected pole-zero config"),
+        }
+    }
+
+    #[test]
+    fn test_build_analysis_spec_for_pole_zero_uses_dialog_configuration() {
+        use crate::simulation::dialog::pz::{PzAnalysisType, PzConfig, PzTransferType};
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.pz_state = crate::simulation::dialog::pz::PzDialogState::from_config(
+            &PzConfig::new("in", "out")
+                .with_transfer(PzTransferType::Current)
+                .with_type(PzAnalysisType::ZerosOnly),
+        );
+
+        let spec = controller
+            .build_analysis_spec_for_index(&state, 5)
+            .expect("pole-zero spec should build");
+        match spec {
+            AnalysisSpec::PoleZero {
+                input_node,
+                input_ref,
+                output_node,
+                output_ref,
+                transfer_type,
+                analysis_type,
+            } => {
+                assert_eq!(input_node, "IN");
+                assert_eq!(input_ref, "0");
+                assert_eq!(output_node, "OUT");
+                assert_eq!(output_ref, "0");
+                assert_eq!(transfer_type, "CUR");
+                assert_eq!(analysis_type, "ZER");
+            }
+            _ => panic!("Expected pole-zero spec"),
+        }
+    }
+
+    #[test]
+    fn test_build_analysis_spec_for_sensitivity_uses_dialog_configuration() {
+        use crate::simulation::dialog::sens::{SensConfig, SensType};
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.sens_state = crate::simulation::dialog::sens::SensDialogState::from_config(
+            &SensConfig::new("V(out)")
+                .with_type(SensType::Ac)
+                .with_ac_freq(5e6),
+        );
+
+        let spec = controller
+            .build_analysis_spec_for_index(&state, 6)
+            .expect("sensitivity spec should build");
+        match spec {
+            AnalysisSpec::Sensitivity {
+                output_var,
+                ac_mode,
+                frequency,
+            } => {
+                assert_eq!(output_var, "V(out)");
+                assert!(ac_mode);
+                assert_eq!(frequency, Some(5e6));
+            }
+            _ => panic!("Expected sensitivity spec"),
+        }
+    }
+
+    #[test]
+    fn test_build_queue_from_plan_maps_transient_optional_maxstep_and_uic() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses.insert(1);
+        state.dialogs.tran_stop = "10u".to_string();
+        state.dialogs.tran_step = "1n".to_string();
+        state.dialogs.tran_start = "500n".to_string();
+        state.dialogs.tran_maxstep = "2n".to_string();
+        state.dialogs.tran_uic = true;
+
+        let plan = controller
+            .build_analysis_plan(&state)
+            .expect("plan should build");
+        let queue = controller
+            .build_queue_from_plan(&state, &plan)
+            .expect("queue should build");
+
+        match &queue[0].config {
+            AnalysisConfig::Transient(tran) => {
+                assert!((tran.start_time - 500e-9).abs() < 1e-18);
+                assert_eq!(tran.max_timestep, Some(2e-9));
+                assert!(tran.uic);
+            }
+            _ => panic!("Expected transient config"),
+        }
     }
 
     // -------------------------------------------------------------------------
