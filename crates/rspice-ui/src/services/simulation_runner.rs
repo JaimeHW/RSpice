@@ -3,10 +3,10 @@
 //! Async wrapper around rspice-core for running simulations from the GUI.
 
 use crate::output_spec::{
-    OutputSpec, OutputVoltageSpec, collect_sensitivity_parameters, dc_output_value,
-    finite_difference_derivative, normalized_sensitivity, parse_output_spec,
-    resolve_node_or_ground_index, resolve_sensitivity_ac_frequency, run_ac_output_at_frequency,
-    run_dc_output_sensitivity, validate_sensitivity_output_spec,
+    collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
+    normalized_sensitivity, parse_output_spec, resolve_node_or_ground_index,
+    resolve_sensitivity_ac_frequency, run_ac_output_at_frequency, run_dc_output_sensitivity,
+    validate_sensitivity_output_spec, OutputSpec, OutputVoltageSpec,
 };
 use num_complex::Complex64;
 use rspice_core::analysis::ac::AcResult;
@@ -18,7 +18,7 @@ use rspice_core::netlist::{
     StepTarget,
 };
 use rspice_core::solver::SimulationResult as CoreSimulationResult;
-use rspice_core::{SimulationConfigOverrides, Value, resolve_simulation_config};
+use rspice_core::{resolve_simulation_config, SimulationConfigOverrides, Value};
 
 // =============================================================================
 // Platform-agnostic timing utilities
@@ -1234,6 +1234,9 @@ pub fn run_monte_carlo_analysis(netlist_text: &str) -> Result<MonteCarloData, St
             sigma: mc_cmd.relative_spread,
         },
         MonteCarloDistribution::Uniform => Distribution::Uniform {
+            tolerance: mc_cmd.relative_spread,
+        },
+        MonteCarloDistribution::WorstCase => Distribution::WorstCase {
             tolerance: mc_cmd.relative_spread,
         },
     };
@@ -2861,12 +2864,10 @@ mod tests {
             .expect("sensitivity run should succeed");
         assert_eq!(result.output_var, "V(out)");
         assert!(!result.sensitivities.is_empty());
-        assert!(
-            result
-                .sensitivities
-                .iter()
-                .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL"))
-        );
+        assert!(result
+            .sensitivities
+            .iter()
+            .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL")));
     }
 
     #[test]
@@ -2876,18 +2877,14 @@ mod tests {
         let result = run_sensitivity_analysis(netlist, "V(out)", false, None)
             .expect("sensitivity run should succeed");
 
-        assert!(
-            result
-                .sensitivities
-                .iter()
-                .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL"))
-        );
-        assert!(
-            result
-                .sensitivities
-                .iter()
-                .all(|(name, _, _)| !name.starts_with("IC_") && !name.starts_with("NODESET_"))
-        );
+        assert!(result
+            .sensitivities
+            .iter()
+            .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL")));
+        assert!(result
+            .sensitivities
+            .iter()
+            .all(|(name, _, _)| !name.starts_with("IC_") && !name.starts_with("NODESET_")));
     }
 
     #[test]
@@ -2913,12 +2910,10 @@ mod tests {
         let result = run_sensitivity_analysis(netlist, "V(out,in)", false, None)
             .expect("differential sensitivity run should succeed");
         assert!(!result.sensitivities.is_empty());
-        assert!(
-            result
-                .sensitivities
-                .iter()
-                .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite())
-        );
+        assert!(result
+            .sensitivities
+            .iter()
+            .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite()));
     }
 
     #[test]
@@ -2946,12 +2941,10 @@ mod tests {
             .expect("current-output ac sensitivity should succeed");
         assert_eq!(result.output_var, "I(V1)");
         assert!(!result.sensitivities.is_empty());
-        assert!(
-            result
-                .sensitivities
-                .iter()
-                .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite())
-        );
+        assert!(result
+            .sensitivities
+            .iter()
+            .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite()));
     }
 
     #[test]
@@ -3026,6 +3019,16 @@ mod tests {
     }
 
     #[test]
+    fn test_run_monte_carlo_analysis_supports_worst_case_distribution() {
+        let netlist = "* mc worst\n.param RVAL=1k\nV1 in 0 1\nR1 in out {RVAL}\nR2 out 0 1k\n.MC 8 DIST WORSTCASE SPREAD 0.03 PARAMS RVAL\n.end\n";
+        let result = run_monte_carlo_analysis(netlist)
+            .expect("Monte Carlo WORSTCASE analysis should execute");
+        assert_eq!(result.runs_requested, 8);
+        assert!(result.runs_completed > 0);
+        assert!(!result.variables.is_empty());
+    }
+
+    #[test]
     fn test_run_monte_carlo_analysis_requires_command() {
         let err = run_monte_carlo_analysis("* no mc\nV1 in 0 1\nR1 in 0 1k\n")
             .expect_err("missing .MC command should fail");
@@ -3040,12 +3043,10 @@ mod tests {
         assert_eq!(result.target, "PARAM RVAL");
         assert_eq!(result.sweep_values.len(), 4);
         assert_eq!(result.num_points, 4);
-        assert!(
-            result
-                .voltages
-                .iter()
-                .any(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
-        );
+        assert!(result
+            .voltages
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("V(out)")));
     }
 
     #[test]
@@ -3126,14 +3127,12 @@ mod tests {
             .expect("temperature sweep AC base mode should execute");
         assert_eq!(result.target, "TEMP");
         assert_eq!(result.num_points, 3);
-        assert!(
-            result
-                .voltages
-                .iter()
-                .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
-                    && values.len() == 3
-                    && values.iter().all(|v| v.is_finite() && *v >= 0.0))
-        );
+        assert!(result
+            .voltages
+            .iter()
+            .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
+                && values.len() == 3
+                && values.iter().all(|v| v.is_finite() && *v >= 0.0)));
     }
 
     #[test]
@@ -3154,12 +3153,10 @@ mod tests {
         assert_eq!(result.corner_labels.len(), 3);
         assert!(result.corner_labels[0].starts_with("TT_1.000000V_"));
         assert_eq!(result.num_points, 3);
-        assert!(
-            result
-                .voltages
-                .iter()
-                .any(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
-        );
+        assert!(result
+            .voltages
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("V(out)")));
     }
 
     #[test]
@@ -3193,12 +3190,10 @@ mod tests {
         assert_eq!(result.temperatures_c.len(), 8);
         assert_eq!(result.corner_labels.len(), 8);
         assert_eq!(result.num_failures, 0);
-        assert!(
-            result
-                .corner_labels
-                .iter()
-                .any(|label| label.contains("FF_1.100000V_125.000000C"))
-        );
+        assert!(result
+            .corner_labels
+            .iter()
+            .any(|label| label.contains("FF_1.100000V_125.000000C")));
     }
 
     #[test]
@@ -3288,14 +3283,12 @@ mod tests {
         assert_eq!(result.x_label, "Temperature");
         assert_eq!(result.x_unit, "C");
         assert_eq!(result.x_values, vec![-40.0, 25.0, 125.0]);
-        assert!(
-            result
-                .voltages
-                .iter()
-                .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
-                    && values.len() == 3
-                    && values.iter().all(|v| v.is_finite() && *v >= 0.0))
-        );
+        assert!(result
+            .voltages
+            .iter()
+            .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
+                && values.len() == 3
+                && values.iter().all(|v| v.is_finite() && *v >= 0.0)));
     }
 
     #[test]

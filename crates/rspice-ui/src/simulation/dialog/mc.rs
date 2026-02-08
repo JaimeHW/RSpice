@@ -121,8 +121,7 @@ impl McConfig {
         let dist = match self.distribution {
             McDistribution::Gaussian => "GAUSS",
             McDistribution::Uniform => "UNIFORM",
-            // .MC parser currently supports GAUSS/UNIFORM only.
-            McDistribution::WorstCase => "UNIFORM",
+            McDistribution::WorstCase => "WORSTCASE",
         };
         let spread = (self.variation_pct / 100.0).abs();
         let mut cmd = format!(".mc {} DIST {} SPREAD {:.12e}", self.num_runs, dist, spread);
@@ -315,6 +314,13 @@ mod tests {
     fn test_to_spice_seed() {
         let s = McConfig::default().with_seed(99).to_spice();
         assert!(s.contains("SEED 99"));
+    }
+    #[test]
+    fn test_to_spice_worst_case_distribution() {
+        let s = McConfig::default()
+            .with_distribution(McDistribution::WorstCase)
+            .to_spice();
+        assert!(s.contains("DIST WORSTCASE"));
     }
     #[test]
     fn test_dist_all() {

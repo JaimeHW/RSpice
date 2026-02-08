@@ -912,15 +912,11 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid Monte Carlo settings: {}", e))?;
 
-        let dist_keyword =
-            match mc_cfg.distribution {
-                crate::simulation::dialog::mc::McDistribution::Gaussian => "GAUSS",
-                crate::simulation::dialog::mc::McDistribution::Uniform => "UNIFORM",
-                crate::simulation::dialog::mc::McDistribution::WorstCase => return Err(
-                    "Monte Carlo 'Worst Case' distribution is not supported by the core .MC parser"
-                        .to_string(),
-                ),
-            };
+        let dist_keyword = match mc_cfg.distribution {
+            crate::simulation::dialog::mc::McDistribution::Gaussian => "GAUSS",
+            crate::simulation::dialog::mc::McDistribution::Uniform => "UNIFORM",
+            crate::simulation::dialog::mc::McDistribution::WorstCase => "WORSTCASE",
+        };
         let relative_spread = (mc_cfg.variation_pct / 100.0).abs();
         let mut cmd = format!(
             ".mc {} DIST {} SPREAD {:.12e}",
@@ -2504,6 +2500,34 @@ mod tests {
             .build_analysis_spec_for_index(&state, 7)
             .expect("Monte Carlo spec should build");
         assert!(matches!(spec, AnalysisSpec::MonteCarlo));
+    }
+
+    #[test]
+    fn test_build_queue_from_plan_emits_worst_case_monte_carlo_command() {
+        use crate::simulation::dialog::mc::{McConfig, McDistribution};
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses.insert(7);
+        state.dialogs.mc_state = crate::simulation::dialog::mc::McDialogState::from_config(
+            &McConfig::new(16)
+                .with_distribution(McDistribution::WorstCase)
+                .with_seed(9),
+        );
+
+        let plan = controller
+            .build_analysis_plan(&state)
+            .expect("plan should build");
+        let queue = controller
+            .build_queue_from_plan(&state, &plan)
+            .expect("queue should build");
+
+        assert_eq!(queue.len(), 1);
+        assert!(matches!(queue[0].spec, AnalysisSpec::MonteCarlo));
+        assert!(
+            queue[0].analysis_line.contains("DIST WORSTCASE"),
+            "expected WORSTCASE distribution in .MC command"
+        );
     }
 
     #[test]
