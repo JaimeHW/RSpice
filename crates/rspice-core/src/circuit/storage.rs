@@ -1202,17 +1202,21 @@ impl Jfets {
         }
 
         let mut batch = crate::device::batch_jfet::BatchJfets::with_capacity(self.devices.len());
+        const K_BOLTZMANN: Value = 1.380649e-23;
+        const Q_ELECTRON: Value = 1.602176634e-19;
 
         for d in &self.devices {
+            let vt = K_BOLTZMANN * d.params.tnom / Q_ELECTRON;
             batch.add(
-                d.node_drain,
-                d.node_gate,
-                d.node_source,
+                d.drain,
+                d.gate,
+                d.source,
                 d.jfet_type,
                 d.params.vto,
                 d.params.beta,
                 d.params.lambda,
                 d.params.is,
+                d.params.n * vt,
                 d.m * d.area,
             );
         }

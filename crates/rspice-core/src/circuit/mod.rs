@@ -269,6 +269,32 @@ impl Capacitors {
         }
     }
 
+    /// Initialize capacitor voltages from DC solution
+    ///
+    /// This is critical for correct transient startup. Capacitors without explicit
+    /// IC= values should start with the DC voltage across them. Otherwise, coupling
+    /// capacitors cause massive startup current spikes.
+    pub fn set_initial_voltages_from_dc(&mut self, solution: &[Value]) {
+        for (i, stamp) in self.stamps.iter().enumerate() {
+            // Only set if no explicit IC was provided
+            if self.ic[i].is_none() {
+                let v_pos = if stamp.pp.row != 0 {
+                    solution[stamp.pp.row - 1]
+                } else {
+                    0.0
+                };
+                let v_neg = if stamp.nn.row != 0 {
+                    solution[stamp.nn.row - 1]
+                } else {
+                    0.0
+                };
+                let v_dc = v_pos - v_neg;
+                self.v_prev[i] = v_dc;
+                self.v_prev_prev[i] = v_dc;
+            }
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.names.len()
     }
@@ -573,6 +599,19 @@ impl VoltageSources {
         }
     }
 
+    /// Maximum absolute change expected from time-varying sources over [t0, t1].
+    #[inline]
+    pub fn max_expected_delta(&self, t0: Value, t1: Value) -> Value {
+        self.source_specs
+            .iter()
+            .filter_map(|spec| spec.as_ref())
+            .map(|spec| {
+                (Self::evaluate_source_at_time(spec, t1) - Self::evaluate_source_at_time(spec, t0))
+                    .abs()
+            })
+            .fold(0.0, Value::max)
+    }
+
     /// Evaluate source specification at given time
     fn evaluate_source_at_time(spec: &crate::netlist::SourceSpec, time: Value) -> Value {
         use crate::netlist::SourceSpec;
@@ -661,6 +700,41 @@ impl VoltageSources {
                         - (v2 - v1) * (1.0 - (-(time - td2) / tau2).exp())
                 }
             }
+        }
+    }
+
+    /// Enforce voltage source constraints on solution vector after force-accept
+    ///
+    /// When Newton iteration fails to converge and we force-accept a solution,
+    /// the voltage source node values may not satisfy V(n+) - V(n-) = Vs.
+    /// This method corrects the solution vector to enforce this constraint
+    /// for display purposes and to prevent drift.
+    pub fn enforce_voltage_constraints(&self, solution: &mut [Value], time: Value) {
+        for i in 0..self.names.len() {
+            let np = self.node_pos[i];
+            let nn = self.node_neg[i];
+
+            // Get the source value at this time
+            let v_source = match &self.source_specs[i] {
+                Some(spec) => Self::evaluate_source_at_time(spec, time),
+                None => self.dc_values[i],
+            };
+
+            // If negative node is ground (nn=0), positive node voltage = source voltage
+            // If negative node is not ground, we can only correct if we know its voltage
+            if nn == 0 && np > 0 {
+                // V(np) - V(ground) = Vs  =>  V(np) = Vs
+                if let Some(v) = solution.get_mut(np - 1) {
+                    *v = v_source;
+                }
+            } else if np == 0 && nn > 0 {
+                // V(ground) - V(nn) = Vs  =>  V(nn) = -Vs
+                if let Some(v) = solution.get_mut(nn - 1) {
+                    *v = -v_source;
+                }
+            }
+            // For floating voltage sources (neither terminal grounded),
+            // we cannot unambiguously correct the node voltages
         }
     }
 }
@@ -844,6 +918,58 @@ impl Inductors {
     #[inline]
     pub fn req(&self, idx: usize, dt: Value) -> Value {
         2.0 * self.inductances[idx] / dt
+    }
+
+    /// Stamp inductors for DC operating point.
+    ///
+    /// At DC, an ideal inductor is a short circuit:
+    /// V(np) - V(nn) = 0 with unconstrained branch current.
+    #[inline]
+    pub fn stamp_dc_short_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        num_nodes: usize,
+    ) {
+        for i in 0..self.names.len() {
+            let np = self.node_pos[i];
+            let nn = self.node_neg[i];
+            let br_ordinal = self.branch_indices[i];
+            let br = num_nodes + br_ordinal;
+
+            if np > 0 {
+                matrix.add(br - 1, np - 1, 1.0);
+                matrix.add(np - 1, br - 1, 1.0);
+            }
+            if nn > 0 {
+                matrix.add(br - 1, nn - 1, -1.0);
+                matrix.add(nn - 1, br - 1, -1.0);
+            }
+
+            rhs[br - 1] = 0.0;
+        }
+    }
+
+    /// Stamp inductors for DC operating point (triplet path).
+    #[inline]
+    pub fn stamp_dc_short(&self, matrix: &mut TripletMatrix, rhs: &mut [Value], num_nodes: usize) {
+        for i in 0..self.names.len() {
+            let np = self.node_pos[i];
+            let nn = self.node_neg[i];
+            let br_ordinal = self.branch_indices[i];
+            let br = num_nodes + br_ordinal;
+
+            if np > 0 {
+                matrix.push(br - 1, np - 1, 1.0);
+                matrix.push(np - 1, br - 1, 1.0);
+            }
+            if nn > 0 {
+                matrix.push(br - 1, nn - 1, -1.0);
+                matrix.push(nn - 1, br - 1, -1.0);
+            }
+
+            rhs[br - 1] = 0.0;
+        }
     }
 
     /// Stamp all inductors for transient analysis using optimized direct stamping
@@ -1232,6 +1358,8 @@ pub struct CircuitData {
     pending_cccs: Vec<(usize, String)>,
     /// CCVS elements pending control branch resolution: (ccvs_index, control_element_name)
     pending_ccvs: Vec<(usize, String)>,
+    /// ISWITCH elements pending control branch resolution: (iswitch_index, control_element_name)
+    pending_iswitch: Vec<(usize, String)>,
 
     // Advanced device storage
     pub vswitches: Vec<crate::device::VoltageSwitch>,
@@ -1281,6 +1409,7 @@ impl CircuitData {
             ccvs: Ccvs::new(),
             pending_cccs: Vec::new(),
             pending_ccvs: Vec::new(),
+            pending_iswitch: Vec::new(),
             // New device types
             vswitches: Vec::new(),
             iswitches: Vec::new(),
@@ -1511,7 +1640,13 @@ impl CircuitData {
         self.pending_ccvs.push((ccvs_index, control_element_name));
     }
 
-    /// Resolve all pending CCCS/CCVS control element references
+    /// Register an ISWITCH element for pending control branch resolution.
+    pub fn add_iswitch_pending(&mut self, iswitch_index: usize, control_element_name: String) {
+        self.pending_iswitch
+            .push((iswitch_index, control_element_name));
+    }
+
+    /// Resolve all pending CCCS/CCVS/ISWITCH control element references.
     /// Call this after all elements have been added to the circuit
     /// Returns an error if any control element is not found
     pub fn resolve_control_elements(&mut self) -> Result<(), CircuitError> {
@@ -1538,6 +1673,22 @@ impl CircuitData {
             })?;
             if ccvs_idx < self.ccvs.ctrl_branch.len() {
                 self.ccvs.ctrl_branch[ccvs_idx] = branch;
+            }
+        }
+
+        // Resolve current-controlled switch control branches.
+        // CurrentSwitch expects a matrix variable index (1-based) so convert
+        // from branch ordinal after final node count is known.
+        for (iswitch_idx, control_name) in self.pending_iswitch.drain(..).collect::<Vec<_>>() {
+            let branch_ordinal = self.get_branch_by_name(&control_name).ok_or_else(|| {
+                CircuitError::InvalidComponent(format!(
+                    "ISWITCH control element not found: {}",
+                    control_name
+                ))
+            })?;
+            let branch_matrix_index = self.get_branch_matrix_index(branch_ordinal);
+            if let Some(sw) = self.iswitches.get_mut(iswitch_idx) {
+                sw.set_ctrl_branch(branch_matrix_index);
             }
         }
 
@@ -1597,6 +1748,7 @@ impl CircuitData {
             + self.diodes.len()
             + self.bjts.len()
             + self.mosfets.len()
+            + self.jfets.len()
             + self.vcvs.len()
             + self.vccs.len()
             + self.cccs.len()
@@ -1631,12 +1783,76 @@ impl CircuitData {
         self.diodes.link_all(matrix);
         self.bjts.link_all(matrix);
         self.mosfets.link_all(matrix);
+        for jfet in &mut self.jfets {
+            jfet.link(matrix);
+        }
+    }
+
+    #[inline]
+    fn stamp_tline_port_direct(
+        matrix: &mut StaticMatrix,
+        node_pos: NodeId,
+        node_neg: NodeId,
+        g: Value,
+    ) {
+        if node_pos > 0 {
+            matrix.add(node_pos - 1, node_pos - 1, g);
+            if node_neg > 0 {
+                matrix.add(node_pos - 1, node_neg - 1, -g);
+            }
+        }
+        if node_neg > 0 {
+            if node_pos > 0 {
+                matrix.add(node_neg - 1, node_pos - 1, -g);
+            }
+            matrix.add(node_neg - 1, node_neg - 1, g);
+        }
+    }
+
+    #[inline]
+    fn stamp_tline_port_triplet(
+        matrix: &mut TripletMatrix,
+        node_pos: NodeId,
+        node_neg: NodeId,
+        g: Value,
+    ) {
+        if node_pos > 0 {
+            matrix.push(node_pos - 1, node_pos - 1, g);
+            if node_neg > 0 {
+                matrix.push(node_pos - 1, node_neg - 1, -g);
+            }
+        }
+        if node_neg > 0 {
+            if node_pos > 0 {
+                matrix.push(node_neg - 1, node_pos - 1, -g);
+            }
+            matrix.push(node_neg - 1, node_neg - 1, g);
+        }
+    }
+
+    #[inline]
+    fn stamp_tlines_dc_direct(&self, matrix: &mut StaticMatrix) {
+        for tl in &self.tlines {
+            let g = tl.conductance();
+            Self::stamp_tline_port_direct(matrix, tl.node1_pos, tl.node1_neg, g);
+            Self::stamp_tline_port_direct(matrix, tl.node2_pos, tl.node2_neg, g);
+        }
+    }
+
+    #[inline]
+    fn stamp_tlines_dc(&self, matrix: &mut TripletMatrix) {
+        for tl in &self.tlines {
+            let g = tl.conductance();
+            Self::stamp_tline_port_triplet(matrix, tl.node1_pos, tl.node1_neg, g);
+            Self::stamp_tline_port_triplet(matrix, tl.node2_pos, tl.node2_neg, g);
+        }
     }
 
     /// Stamp all linear devices for DC analysis using O(1) direct stamping
     pub fn stamp_dc_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
         self.resistors.stamp_all_direct(matrix);
         let num_nodes = self.num_nodes;
+        self.inductors.stamp_dc_short_direct(matrix, rhs, num_nodes);
         self.voltage_sources
             .stamp_all_direct(matrix, rhs, |br_ordinal| num_nodes + br_ordinal);
         self.current_sources.stamp_all(rhs);
@@ -1645,6 +1861,13 @@ impl CircuitData {
         self.vcvs
             .stamp_all_direct(matrix, |br_ordinal| num_nodes + br_ordinal);
         self.vccs.stamp_all_direct(matrix);
+        self.cccs
+            .stamp_all_direct(matrix, |br_ordinal| num_nodes + br_ordinal);
+        self.ccvs
+            .stamp_all_direct(matrix, |br_ordinal| num_nodes + br_ordinal);
+
+        // Transmission-line companion DC fallback: each port starts as Z0 shunt.
+        self.stamp_tlines_dc_direct(matrix);
     }
 
     /// Stamp all devices with scaled source values (for source stepping)
@@ -1656,28 +1879,59 @@ impl CircuitData {
     ) {
         self.resistors.stamp_all_direct(matrix);
         let num_nodes = self.num_nodes;
+        self.inductors.stamp_dc_short_direct(matrix, rhs, num_nodes);
         self.voltage_sources
             .stamp_all_direct_scaled(matrix, rhs, scale, |br_ordinal| num_nodes + br_ordinal);
         self.current_sources.stamp_all_scaled(rhs, scale);
+        self.vcvs
+            .stamp_all_direct(matrix, |br_ordinal| num_nodes + br_ordinal);
+        self.vccs.stamp_all_direct(matrix);
+        self.cccs
+            .stamp_all_direct(matrix, |br_ordinal| num_nodes + br_ordinal);
+        self.ccvs
+            .stamp_all_direct(matrix, |br_ordinal| num_nodes + br_ordinal);
+        self.stamp_tlines_dc_direct(matrix);
     }
 
     /// Stamp all linear devices for DC analysis
     pub fn stamp_dc(&self, matrix: &mut TripletMatrix, rhs: &mut [Value]) {
+        let num_nodes = self.num_nodes;
         self.resistors.stamp_all(matrix);
+        self.inductors.stamp_dc_short(matrix, rhs, num_nodes);
         self.voltage_sources.stamp_all(matrix, rhs);
         self.current_sources.stamp_all(rhs);
+        self.vcvs.stamp_all(matrix, num_nodes);
+        self.vccs.stamp_all(matrix);
+        self.cccs.stamp_all(matrix, num_nodes);
+        self.ccvs.stamp_all(matrix, num_nodes);
+        self.stamp_tlines_dc(matrix);
     }
 
     /// Check if circuit has any nonlinear devices requiring Newton-Raphson
     pub fn has_nonlinear_devices(&self) -> bool {
-        !self.diodes.is_empty() || !self.bjts.is_empty() || !self.mosfets.is_empty()
+        !self.diodes.is_empty()
+            || !self.bjts.is_empty()
+            || !self.mosfets.is_empty()
+            || !self.jfets.is_empty()
+            || !self.vswitches.is_empty()
+            || !self.iswitches.is_empty()
     }
 
     /// Update all nonlinear devices with current solution
     pub fn update_nonlinear(&mut self, voltages: &[Value]) {
+        use crate::device::NonlinearDevice;
         self.diodes.update_all(voltages);
         self.bjts.update_all(voltages);
         self.mosfets.update_all(voltages);
+        for jfet in &mut self.jfets {
+            jfet.update(voltages);
+        }
+        for vswitch in &mut self.vswitches {
+            vswitch.update(voltages);
+        }
+        for iswitch in &mut self.iswitches {
+            iswitch.update(voltages);
+        }
     }
 
     /// Stamp all nonlinear devices into matrix using O(1) direct indexing
@@ -1687,16 +1941,31 @@ impl CircuitData {
         rhs: &mut [Value],
         voltages: &[Value],
     ) {
+        use crate::device::NonlinearDevice;
         self.diodes.stamp_all_direct(matrix, rhs, voltages);
         self.bjts.stamp_all_direct(matrix, rhs, voltages);
         self.mosfets.stamp_all_direct(matrix, rhs, voltages);
+        for jfet in &self.jfets {
+            jfet.stamp_direct(matrix, rhs, voltages);
+        }
+        let mut stamper = StaticMatrixStamper { matrix, rhs };
+        for vswitch in &self.vswitches {
+            vswitch.stamp_nonlinear(voltages, &mut stamper, &mut []);
+        }
+        for iswitch in &self.iswitches {
+            iswitch.stamp_nonlinear(voltages, &mut stamper, &mut []);
+        }
     }
 
     /// Check if all nonlinear devices have converged
     pub fn nonlinear_converged(&self, tolerance: Value) -> bool {
+        use crate::device::NonlinearDevice;
         self.diodes.all_converged(tolerance)
             && self.bjts.all_converged(tolerance)
             && self.mosfets.all_converged(tolerance)
+            && self.jfets.iter().all(|jfet| jfet.is_converged(tolerance))
+            && self.vswitches.iter().all(|sw| sw.is_converged(tolerance))
+            && self.iswitches.iter().all(|sw| sw.is_converged(tolerance))
     }
 
     //=========================================================================
@@ -1869,6 +2138,7 @@ pub type Circuit = CircuitData;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::netlist::SourceSpec;
 
     #[test]
     fn test_circuit_creation() {
@@ -1905,5 +2175,48 @@ mod tests {
         assert_eq!(gnd, 0);
         assert_eq!(gnd2, 0);
         assert_eq!(gnd3, 0);
+    }
+
+    #[test]
+    fn test_voltage_sources_max_expected_delta_with_sin() {
+        let mut vs = VoltageSources::new();
+        vs.add_with_ac_and_spec(
+            "VIN".to_string(),
+            1,
+            0,
+            1,
+            0.0,
+            0.0,
+            0.0,
+            Some(SourceSpec::Sin {
+                offset: 0.0,
+                amplitude: 1.0,
+                frequency: 1_000.0,
+                delay: 0.0,
+                damping: 0.0,
+                phase: 0.0,
+            }),
+        );
+
+        let delta = vs.max_expected_delta(0.0, 1e-6);
+        assert!(delta > 1e-6, "expected non-zero transient source delta");
+    }
+
+    #[test]
+    fn test_voltage_sources_max_expected_delta_ignores_dc() {
+        let mut vs = VoltageSources::new();
+        vs.add_with_ac_and_spec(
+            "VDC".to_string(),
+            1,
+            0,
+            1,
+            5.0,
+            0.0,
+            0.0,
+            Some(SourceSpec::Dc(5.0)),
+        );
+
+        let delta = vs.max_expected_delta(0.0, 1e-3);
+        assert_eq!(delta, 0.0);
     }
 }
