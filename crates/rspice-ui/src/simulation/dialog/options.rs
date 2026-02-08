@@ -571,6 +571,7 @@ impl SimulationOptions {
                 gmin_target: 1e-15,
                 voltage_reltol: self.reltol,
                 voltage_abstol: self.vntol,
+                current_abstol: self.iabstol,
                 verbose: self.verbose,
             },
         }
@@ -1149,12 +1150,14 @@ mod tests {
         let mut opts = SimulationOptions::default();
         opts.reltol = 2e-3;
         opts.vntol = 3e-6;
+        opts.iabstol = 4e-12;
         opts.gmin = 5e-10;
 
         let sim = opts.to_simulation_config();
         assert!((sim.tolerance - 2e-3).abs() < 1e-15);
         assert!((sim.convergence_config.voltage_reltol - 2e-3).abs() < 1e-15);
         assert!((sim.convergence_config.voltage_abstol - 3e-6).abs() < 1e-15);
+        assert!((sim.convergence_config.current_abstol - 4e-12).abs() < 1e-24);
         assert!((sim.convergence_config.gmin_initial - 5e-10).abs() < 1e-21);
     }
 
