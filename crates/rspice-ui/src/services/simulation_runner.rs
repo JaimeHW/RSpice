@@ -886,6 +886,262 @@ pub fn run_pss_analysis(
     })
 }
 
+// =============================================================================
+// PAC (Periodic AC) Analysis
+// =============================================================================
+
+/// Frequency sweep type for PAC analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PacFrequencySweep {
+    Decade,
+    Octave,
+    Linear,
+}
+
+impl PacFrequencySweep {
+    fn to_core(self) -> rspice_core::analysis::advanced::pac::PacSweepType {
+        match self {
+            Self::Decade => rspice_core::analysis::advanced::pac::PacSweepType::Decade,
+            Self::Octave => rspice_core::analysis::advanced::pac::PacSweepType::Octave,
+            Self::Linear => rspice_core::analysis::advanced::pac::PacSweepType::Linear,
+        }
+    }
+}
+
+/// Explicit configuration for PAC execution.
+#[derive(Debug, Clone)]
+pub struct PacRunConfig {
+    pub pss_fundamental_freq: Value,
+    pub pss_num_harmonics: usize,
+    pub pss_tolerance: Value,
+    pub start_freq: Value,
+    pub stop_freq: Value,
+    pub points_per_unit: usize,
+    pub sweep: PacFrequencySweep,
+    pub max_sideband: i32,
+    pub input_source: String,
+    pub output_node: String,
+    pub output_ref: Option<String>,
+    pub pac_magnitude: Value,
+    pub include_dc: bool,
+    pub reltol: Value,
+    pub abstol: Value,
+}
+
+impl Default for PacRunConfig {
+    fn default() -> Self {
+        Self {
+            pss_fundamental_freq: 1e6,
+            pss_num_harmonics: 10,
+            pss_tolerance: 1e-3,
+            start_freq: 1e3,
+            stop_freq: 1e9,
+            points_per_unit: 10,
+            sweep: PacFrequencySweep::Decade,
+            max_sideband: 5,
+            input_source: "VRF".to_string(),
+            output_node: "VOUT".to_string(),
+            output_ref: None,
+            pac_magnitude: 1.0,
+            include_dc: true,
+            reltol: 1e-3,
+            abstol: 1e-12,
+        }
+    }
+}
+
+impl PacRunConfig {
+    fn validate(&self) -> Result<(), String> {
+        if !self.pss_fundamental_freq.is_finite() || self.pss_fundamental_freq <= 0.0 {
+            return Err("PAC requires a positive PSS fundamental frequency".to_string());
+        }
+        if self.pss_num_harmonics == 0 {
+            return Err("PAC requires at least one PSS harmonic".to_string());
+        }
+        if !self.pss_tolerance.is_finite() || self.pss_tolerance <= 0.0 {
+            return Err("PAC requires a positive PSS tolerance".to_string());
+        }
+        if !self.start_freq.is_finite() || self.start_freq <= 0.0 {
+            return Err("PAC start frequency must be positive".to_string());
+        }
+        if !self.stop_freq.is_finite() || self.stop_freq < self.start_freq {
+            return Err("PAC stop frequency must be >= start frequency".to_string());
+        }
+        if self.points_per_unit == 0 {
+            return Err("PAC points per unit must be greater than zero".to_string());
+        }
+        if self.max_sideband < 0 {
+            return Err("PAC max sideband must be non-negative".to_string());
+        }
+        if self.max_sideband == 0 && !self.include_dc {
+            return Err("PAC configuration must include at least one sideband".to_string());
+        }
+        if self.input_source.trim().is_empty() {
+            return Err("PAC input source must be specified".to_string());
+        }
+        if self.output_node.trim().is_empty() {
+            return Err("PAC output node must be specified".to_string());
+        }
+        if !self.pac_magnitude.is_finite() || self.pac_magnitude <= 0.0 {
+            return Err("PAC magnitude must be positive".to_string());
+        }
+        if !self.reltol.is_finite() || self.reltol <= 0.0 {
+            return Err("PAC relative tolerance must be positive".to_string());
+        }
+        if !self.abstol.is_finite() || self.abstol <= 0.0 {
+            return Err("PAC absolute tolerance must be positive".to_string());
+        }
+        Ok(())
+    }
+}
+
+/// PAC analysis data.
+#[derive(Debug, Clone)]
+pub struct PacData {
+    /// Frequency offsets from carrier in Hz.
+    pub frequencies: Vec<Value>,
+    /// Sidebands included in spectra.
+    pub sidebands: Vec<i32>,
+    /// Spectra: (trace_name, [(frequency_offset_hz, magnitude, phase_deg)])
+    pub spectra: Vec<(String, Vec<(Value, Value, Value)>)>,
+    /// Whether solution converged.
+    pub converged: bool,
+}
+
+/// Run PAC analysis by first solving PSS and then linearizing around the periodic solution.
+pub fn run_pac_analysis(netlist_text: &str, config: &PacRunConfig) -> Result<PacData, String> {
+    use rspice_core::analysis::advanced::pac::{PacAnalyzer, PacConfig};
+    use rspice_core::analysis::PssConfig;
+
+    config.validate()?;
+
+    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
+        .map_err(|e| format!("Parse error: {}", e))?;
+
+    let mut sim_config = build_engine_config(&netlist, None);
+    sim_config.tolerance = config.pss_tolerance;
+    let engine = Engine::new(sim_config);
+
+    let pss_config = PssConfig::new(config.pss_fundamental_freq)
+        .with_harmonics(config.pss_num_harmonics)
+        .with_tolerance(config.pss_tolerance)
+        .with_max_iterations(50)
+        .with_tstab_periods(10);
+    let pss_result = engine
+        .run_pss(&netlist, pss_config)
+        .map_err(|e| format!("PAC prerequisite PSS error: {}", e))?;
+
+    let fundamental = if pss_result.period > 0.0 {
+        1.0 / pss_result.period
+    } else {
+        return Err("PAC prerequisite PSS returned non-positive period".to_string());
+    };
+
+    let mut pac_config = PacConfig::new()
+        .with_sweep(config.start_freq, config.stop_freq, config.points_per_unit)
+        .with_sweep_type(config.sweep.to_core())
+        .with_sidebands(-config.max_sideband, config.max_sideband)
+        .with_input_source(config.input_source.trim())
+        .with_output_node(&normalize_pac_node_name(&config.output_node))
+        .with_tolerances(config.reltol, config.abstol)
+        .with_dc(config.include_dc)
+        .with_fundamental(fundamental);
+
+    if let Some(output_ref) = &config.output_ref {
+        let trimmed = output_ref.trim();
+        if !trimmed.is_empty() {
+            pac_config = pac_config.with_output_ref(trimmed);
+        }
+    }
+
+    pac_config
+        .validate()
+        .map_err(|e| format!("PAC configuration error: {}", e))?;
+
+    let mut analyzer = PacAnalyzer::new(pac_config);
+    let pac_result = analyzer
+        .analyze(
+            &pss_result.result,
+            pss_result.result.num_nodes(),
+            pss_result.result.node_names.clone(),
+            Vec::new(),
+        )
+        .map_err(|e| format!("PAC error: {}", e))?;
+
+    let output_node_idx =
+        resolve_pac_output_node(&pac_result, &config.output_node).ok_or_else(|| {
+            format!(
+                "PAC output node '{}' was not found in PSS result nodes {:?}",
+                config.output_node, pac_result.node_names
+            )
+        })?;
+
+    let sidebands: Vec<i32> = pac_result
+        .sideband_indices()
+        .into_iter()
+        .filter(|sb| config.include_dc || *sb != 0)
+        .collect();
+    if sidebands.is_empty() {
+        return Err("PAC produced no sidebands with current configuration".to_string());
+    }
+
+    let frequencies = pac_result.frequencies.clone();
+    let output_node_name = pac_result
+        .node_names
+        .get(output_node_idx)
+        .cloned()
+        .unwrap_or_else(|| normalize_pac_node_name(&config.output_node));
+
+    let mut spectra: Vec<(String, Vec<(Value, Value, Value)>)> =
+        Vec::with_capacity(sidebands.len());
+    for sideband in &sidebands {
+        let mut spectrum = Vec::with_capacity(frequencies.len());
+        for (freq_idx, freq_offset) in frequencies.iter().copied().enumerate() {
+            let voltage = pac_result.voltage(output_node_idx, freq_idx, *sideband)
+                * Complex64::new(config.pac_magnitude, 0.0);
+            spectrum.push((freq_offset, voltage.norm(), voltage.arg().to_degrees()));
+        }
+        spectra.push((
+            format!("V({})[sb={:+}]", output_node_name, sideband),
+            spectrum,
+        ));
+    }
+
+    Ok(PacData {
+        frequencies,
+        sidebands,
+        spectra,
+        converged: true,
+    })
+}
+
+fn normalize_pac_node_name(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.len() >= 3
+        && trimmed
+            .get(0..2)
+            .map(|prefix| prefix.eq_ignore_ascii_case("V("))
+            .unwrap_or(false)
+        && trimmed.ends_with(')')
+    {
+        return trimmed[2..trimmed.len() - 1].trim().to_string();
+    }
+    trimmed.to_string()
+}
+
+fn resolve_pac_output_node(
+    result: &rspice_core::analysis::advanced::pac::PacResult,
+    requested: &str,
+) -> Option<usize> {
+    let trimmed = requested.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    result
+        .node_index(trimmed)
+        .or_else(|| result.node_index(&normalize_pac_node_name(trimmed)))
+}
+
 /// Compute FFT harmonics from time-domain waveform
 fn compute_fft_harmonics(
     waveform: &[Value],
@@ -3389,5 +3645,59 @@ mod tests {
                 .any(|(_, spectrum)| !spectrum.is_empty()),
             "expected at least one non-empty HB spectrum"
         );
+    }
+
+    #[test]
+    fn test_run_pac_analysis_executes_for_driven_rc() {
+        let netlist = "* pac\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        let cfg = PacRunConfig {
+            pss_fundamental_freq: 1e6,
+            pss_num_harmonics: 8,
+            pss_tolerance: 1e-4,
+            start_freq: 1e3,
+            stop_freq: 1e6,
+            points_per_unit: 8,
+            sweep: PacFrequencySweep::Decade,
+            max_sideband: 2,
+            input_source: "V1".to_string(),
+            output_node: "out".to_string(),
+            output_ref: None,
+            pac_magnitude: 0.5,
+            include_dc: true,
+            reltol: 1e-3,
+            abstol: 1e-12,
+        };
+
+        let result = run_pac_analysis(netlist, &cfg).expect("PAC analysis should execute");
+        assert!(result.converged);
+        assert!(!result.frequencies.is_empty());
+        assert!(result.sidebands.contains(&0));
+        assert_eq!(result.sidebands, vec![-2, -1, 0, 1, 2]);
+        assert_eq!(result.spectra.len(), result.sidebands.len());
+        assert!(
+            result.spectra.iter().all(|(_, spectrum)| {
+                spectrum.len() == result.frequencies.len()
+                    && spectrum.iter().all(|(f, mag, phase)| {
+                        f.is_finite() && mag.is_finite() && phase.is_finite()
+                    })
+            }),
+            "expected finite PAC spectra at all sweep points"
+        );
+    }
+
+    #[test]
+    fn test_run_pac_analysis_rejects_empty_sideband_configuration() {
+        let netlist = "* pac invalid\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        let cfg = PacRunConfig {
+            max_sideband: 0,
+            include_dc: false,
+            output_node: "out".to_string(),
+            input_source: "V1".to_string(),
+            ..PacRunConfig::default()
+        };
+
+        let err = run_pac_analysis(netlist, &cfg)
+            .expect_err("PAC without any enabled sidebands should be rejected");
+        assert!(err.contains("at least one sideband"));
     }
 }
