@@ -3353,4 +3353,41 @@ mod tests {
         let temps = extract_temp_points(&netlist);
         assert_eq!(temps, vec![-40.0, 27.0, 125.0]);
     }
+
+    #[test]
+    fn test_run_pss_analysis_executes_for_driven_rc() {
+        let netlist = "* pss\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        let result = run_pss_analysis(netlist, 1e6, 8, 1e-4)
+            .expect("PSS analysis should execute for driven RC");
+        assert!(result.period > 0.0);
+        assert!(result.frequency > 0.0);
+        assert!(!result.time.is_empty());
+        assert!(!result.waveforms.is_empty());
+        assert!(
+            result
+                .harmonics
+                .iter()
+                .any(|(_, harmonics)| !harmonics.is_empty()),
+            "expected harmonic content for at least one waveform"
+        );
+    }
+
+    #[test]
+    fn test_run_hb_analysis_executes_for_driven_rc() {
+        let netlist = "* hb\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        let result = run_hb_analysis(netlist, 1e6, 5, None, 0)
+            .expect("HB analysis should execute for driven RC");
+        assert_eq!(result.fundamentals, vec![1e6]);
+        assert_eq!(result.harmonics_per_tone, vec![5]);
+        assert!(result.converged);
+        assert!(result.num_components >= 2);
+        assert!(!result.dc_voltages.is_empty());
+        assert!(
+            result
+                .spectra
+                .iter()
+                .any(|(_, spectrum)| !spectrum.is_empty()),
+            "expected at least one non-empty HB spectrum"
+        );
+    }
 }
