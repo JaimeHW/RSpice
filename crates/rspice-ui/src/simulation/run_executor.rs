@@ -1273,77 +1273,7 @@ impl RunExecutor {
             AnalysisSpec::Pnoise => {
                 let pnoise_result = simulation_runner::run_pnoise_analysis(netlist);
                 match pnoise_result {
-                    Ok(data) => {
-                        let y_label = match data.reference {
-                            crate::services::simulation_runner::PnoiseReference::Phase => {
-                                "Phase Noise"
-                            }
-                            crate::services::simulation_runner::PnoiseReference::Input => {
-                                "Input-Referred Noise"
-                            }
-                            crate::services::simulation_runner::PnoiseReference::Output => {
-                                "Output-Referred Noise"
-                            }
-                        };
-                        let y_unit = match data.reference {
-                            crate::services::simulation_runner::PnoiseReference::Phase => "dBc/Hz",
-                            _ => "V^2/Hz",
-                        };
-
-                        let mut measurements = vec![
-                            MappedMeasurement {
-                                name: "carrier_frequency".to_string(),
-                                meas_type: MeasurementType::Custom,
-                                value: data.carrier_frequency,
-                                unit: "Hz".to_string(),
-                                signal: "pnoise".to_string(),
-                                status: MeasurementStatus::Success,
-                            },
-                            MappedMeasurement {
-                                name: "sideband_factor".to_string(),
-                                meas_type: MeasurementType::Custom,
-                                value: data.sideband_factor as f64,
-                                unit: "x".to_string(),
-                                signal: "pnoise".to_string(),
-                                status: MeasurementStatus::Success,
-                            },
-                        ];
-                        if let Some(total) = data.total_output_noise {
-                            measurements.push(MappedMeasurement {
-                                name: "integrated_noise".to_string(),
-                                meas_type: MeasurementType::Rms,
-                                value: total,
-                                unit: "Vrms".to_string(),
-                                signal: "pnoise".to_string(),
-                                status: MeasurementStatus::Success,
-                            });
-                        }
-
-                        let status = if data.warnings.is_empty() {
-                            ResultStatus::Success
-                        } else {
-                            ResultStatus::Warning
-                        };
-
-                        Ok(MappedResult {
-                            analysis_type: MappedAnalysisType::Pnoise,
-                            status,
-                            waveforms: vec![MappedWaveform {
-                                name: "pnoise".to_string(),
-                                x: data.frequencies,
-                                y: data.output_noise,
-                                x_label: "Frequency Offset".to_string(),
-                                y_label: y_label.to_string(),
-                                x_unit: "Hz".to_string(),
-                                y_unit: y_unit.to_string(),
-                                is_complex: false,
-                                y_imag: None,
-                            }],
-                            measurements,
-                            warnings: data.warnings,
-                            ..Default::default()
-                        })
-                    }
+                    Ok(data) => Ok(Self::map_pnoise_data(data)),
                     Err(e) => Err(e),
                 }
             }
@@ -1591,6 +1521,80 @@ impl RunExecutor {
                     Err(e) => Err(e),
                 }
             }
+        }
+    }
+
+    fn map_pnoise_data(data: crate::services::simulation_runner::PnoiseData) -> MappedResult {
+        let y_label = match data.reference {
+            crate::services::simulation_runner::PnoiseReference::Phase => "Phase Noise",
+            crate::services::simulation_runner::PnoiseReference::Input => "Input-Referred Noise",
+            crate::services::simulation_runner::PnoiseReference::Output => "Output-Referred Noise",
+        };
+        let y_unit = match data.reference {
+            crate::services::simulation_runner::PnoiseReference::Phase => "dBc/Hz",
+            _ => "V^2/Hz",
+        };
+        let waveform_y =
+            if data.reference == crate::services::simulation_runner::PnoiseReference::Input {
+                data.input_noise
+                    .clone()
+                    .unwrap_or_else(|| data.output_noise.clone())
+            } else {
+                data.output_noise.clone()
+            };
+
+        let mut measurements = vec![
+            MappedMeasurement {
+                name: "carrier_frequency".to_string(),
+                meas_type: MeasurementType::Custom,
+                value: data.carrier_frequency,
+                unit: "Hz".to_string(),
+                signal: "pnoise".to_string(),
+                status: MeasurementStatus::Success,
+            },
+            MappedMeasurement {
+                name: "sideband_factor".to_string(),
+                meas_type: MeasurementType::Custom,
+                value: data.sideband_factor as f64,
+                unit: "x".to_string(),
+                signal: "pnoise".to_string(),
+                status: MeasurementStatus::Success,
+            },
+        ];
+        if let Some(total) = data.total_output_noise {
+            measurements.push(MappedMeasurement {
+                name: "integrated_noise".to_string(),
+                meas_type: MeasurementType::Rms,
+                value: total,
+                unit: "Vrms".to_string(),
+                signal: "pnoise".to_string(),
+                status: MeasurementStatus::Success,
+            });
+        }
+
+        let status = if data.warnings.is_empty() {
+            ResultStatus::Success
+        } else {
+            ResultStatus::Warning
+        };
+
+        MappedResult {
+            analysis_type: MappedAnalysisType::Pnoise,
+            status,
+            waveforms: vec![MappedWaveform {
+                name: "pnoise".to_string(),
+                x: data.frequencies,
+                y: waveform_y,
+                x_label: "Frequency Offset".to_string(),
+                y_label: y_label.to_string(),
+                x_unit: "Hz".to_string(),
+                y_unit: y_unit.to_string(),
+                is_complex: false,
+                y_imag: None,
+            }],
+            measurements,
+            warnings: data.warnings,
+            ..Default::default()
         }
     }
 
@@ -2391,6 +2395,47 @@ mod tests {
         assert_eq!(mapped.analysis_type, MappedAnalysisType::Pnoise);
         assert_eq!(mapped.waveforms.len(), 1);
         assert_eq!(mapped.waveforms[0].x.len(), mapped.waveforms[0].y.len());
+    }
+
+    #[test]
+    fn test_map_pnoise_data_prefers_input_noise_for_input_reference() {
+        let data = crate::services::simulation_runner::PnoiseData {
+            frequencies: vec![1e3, 1e4],
+            output_noise: vec![10.0, 20.0],
+            input_noise: Some(vec![1.0, 2.0]),
+            total_output_noise: Some(3e-6),
+            contributors: vec![],
+            carrier_frequency: 1e6,
+            sideband_factor: 1,
+            reference: crate::services::simulation_runner::PnoiseReference::Input,
+            warnings: vec![],
+        };
+
+        let mapped = RunExecutor::map_pnoise_data(data);
+        assert_eq!(mapped.analysis_type, MappedAnalysisType::Pnoise);
+        assert_eq!(mapped.waveforms.len(), 1);
+        assert_eq!(mapped.waveforms[0].y, vec![1.0, 2.0]);
+        assert_eq!(mapped.waveforms[0].y_label, "Input-Referred Noise");
+        assert_eq!(mapped.waveforms[0].y_unit, "V^2/Hz");
+    }
+
+    #[test]
+    fn test_map_pnoise_data_input_reference_falls_back_to_output_noise() {
+        let data = crate::services::simulation_runner::PnoiseData {
+            frequencies: vec![1e3, 1e4],
+            output_noise: vec![7.0, 8.0],
+            input_noise: None,
+            total_output_noise: None,
+            contributors: vec![],
+            carrier_frequency: 1e6,
+            sideband_factor: 1,
+            reference: crate::services::simulation_runner::PnoiseReference::Input,
+            warnings: vec![],
+        };
+
+        let mapped = RunExecutor::map_pnoise_data(data);
+        assert_eq!(mapped.waveforms.len(), 1);
+        assert_eq!(mapped.waveforms[0].y, vec![7.0, 8.0]);
     }
 
     #[test]
