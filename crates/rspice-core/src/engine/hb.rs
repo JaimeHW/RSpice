@@ -184,10 +184,18 @@ impl Engine {
     }
 
     /// Build node names from circuit node map
-    fn hb_build_node_names(&self, _circuit: &CircuitData, num_nodes: usize) -> Vec<String> {
-        // Generate simple numbered node names
-        // In a production system, we would use circuit's actual node names
-        (1..=num_nodes).map(|i| format!("n{}", i)).collect()
+    fn hb_build_node_names(&self, circuit: &CircuitData, num_nodes: usize) -> Vec<String> {
+        let mut node_names = circuit.node_names_sorted();
+        if node_names.len() > num_nodes {
+            node_names.truncate(num_nodes);
+        } else if node_names.len() < num_nodes {
+            let mut synthetic_index = node_names.len() + 1;
+            while node_names.len() < num_nodes {
+                node_names.push(format!("n{}", synthetic_index));
+                synthetic_index += 1;
+            }
+        }
+        node_names
     }
 
     /// Stamp resistors into HB solver G matrix
@@ -684,6 +692,52 @@ mod tests {
             // Should have nodes for in, mid, out
             assert!(r.result.num_nodes() >= 2);
         }
+    }
+
+    #[test]
+    fn test_run_hb_preserves_circuit_node_names_in_results() {
+        use crate::Netlist;
+
+        let netlist_str = r#"
+            * Node-name preservation
+            V1 vin 0 DC 1
+            R1 vin vout 1k
+            C1 vout 0 1n
+            .END
+        "#;
+
+        let netlist = Netlist::parse(netlist_str).expect("Parse failed");
+        let engine = Engine::default();
+        let config = HbConfig::new(1e6).with_harmonics(5);
+
+        let result = engine.run_hb(&netlist, config);
+        assert!(
+            result.is_ok(),
+            "HB should preserve netlist node names: {:?}",
+            result.err()
+        );
+
+        let hb = result.expect("HB run should succeed");
+        assert!(hb
+            .result
+            .node_names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case("vin")));
+        assert!(hb
+            .result
+            .node_names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case("vout")));
+        assert!(hb
+            .result
+            .spectral_voltages
+            .iter()
+            .any(|spectrum| spectrum.node_name.eq_ignore_ascii_case("vin")));
+        assert!(hb
+            .result
+            .spectral_voltages
+            .iter()
+            .any(|spectrum| spectrum.node_name.eq_ignore_ascii_case("vout")));
     }
 
     #[test]
@@ -1415,7 +1469,6 @@ mod tests {
     fn test_run_hb_rl_inductor_impedance() {
         // Test inductor impedance: |Z_L| = ωL at fundamental
         use crate::Netlist;
-        use std::f64::consts::PI;
 
         let netlist_str = r#"
             I1 0 out DC 0 AC 1
@@ -1695,8 +1748,8 @@ mod tests {
     fn test_dcac_parsing_and_circuit_building() {
         // Comprehensive test to verify DC AC combined syntax parsing
         // and propagation through circuit building to HB solver
-        use crate::Netlist;
         use crate::netlist::{ElementKind, SourceSpec};
+        use crate::Netlist;
 
         let netlist_str = r#"
             * Test DC AC combined source
@@ -1785,7 +1838,7 @@ mod tests {
         let r: f64 = 100.0;
         let l: f64 = 1e-3; // 1mH
         let c: f64 = 10e-9; // 10nF
-        // Resonant frequency = 1/(2π√(1e-3 * 10e-9)) ≈ 50.33 kHz
+                            // Resonant frequency = 1/(2π√(1e-3 * 10e-9)) ≈ 50.33 kHz
         let f0 = 1.0 / (2.0 * PI * (l * c).sqrt());
 
         // Test at resonance
