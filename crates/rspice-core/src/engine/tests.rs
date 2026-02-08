@@ -2789,6 +2789,72 @@ R1 2 0 1k
     }
 
     #[test]
+    fn test_engine_with_pseudo_transient_only_convergence() {
+        use crate::Netlist;
+        use crate::engine::{ConvergenceConfig, Engine, SimulationConfig};
+
+        let netlist_str = r#"
+* Nonlinear diode clamp, solved via pseudo-transient continuation
+V1 in 0 5
+R1 in out 1k
+D1 out 0 DMOD
+.MODEL DMOD D (IS=1e-14 N=1 RS=0)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+
+        let mut config = SimulationConfig::default();
+        config.max_iterations = 0; // Force fallback paths
+        config.convergence_config = ConvergenceConfig {
+            gmin_stepping: false,
+            source_stepping: false,
+            pseudo_transient: true,
+            arc_length: false,
+            ..ConvergenceConfig::default()
+        };
+
+        let engine = Engine::new(config);
+        let result = engine.run_dc_op(&netlist).unwrap();
+
+        assert!(result.voltage(2).is_finite());
+        assert!(result.voltage(2) > 0.0);
+        assert!(result.voltage(2) < 5.0);
+    }
+
+    #[test]
+    fn test_engine_with_arc_length_only_convergence() {
+        use crate::Netlist;
+        use crate::engine::{ConvergenceConfig, Engine, SimulationConfig};
+
+        let netlist_str = r#"
+* Nonlinear diode clamp, solved via arc-length continuation
+V1 in 0 5
+R1 in out 1k
+D1 out 0 DMOD
+.MODEL DMOD D (IS=1e-14 N=1 RS=0)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+
+        let mut config = SimulationConfig::default();
+        config.max_iterations = 0; // Force fallback paths
+        config.convergence_config = ConvergenceConfig {
+            gmin_stepping: false,
+            source_stepping: false,
+            pseudo_transient: false,
+            arc_length: true,
+            ..ConvergenceConfig::default()
+        };
+
+        let engine = Engine::new(config);
+        let result = engine.run_dc_op(&netlist).unwrap();
+
+        assert!(result.voltage(2).is_finite());
+        assert!(result.voltage(2) > 0.0);
+        assert!(result.voltage(2) < 5.0);
+    }
+
+    #[test]
     fn test_engine_with_line_search_damping_strategy() {
         use crate::Netlist;
         use crate::engine::{ConvergenceConfig, DampingStrategy, Engine, SimulationConfig};
