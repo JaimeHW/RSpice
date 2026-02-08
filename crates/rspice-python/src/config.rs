@@ -281,6 +281,17 @@ impl PyConvergenceConfig {
         self.inner.voltage_abstol = value;
     }
 
+    /// Absolute current tolerance for equation residual convergence checks.
+    #[getter]
+    fn get_current_abstol(&self) -> f64 {
+        self.inner.current_abstol
+    }
+
+    #[setter]
+    fn set_current_abstol(&mut self, value: f64) {
+        self.inner.current_abstol = value;
+    }
+
     /// Enable verbose convergence logging
     #[getter]
     fn get_verbose(&self) -> bool {
@@ -294,14 +305,15 @@ impl PyConvergenceConfig {
 
     fn __repr__(&self) -> String {
         format!(
-            "ConvergenceConfig(gmin_stepping={}, source_stepping={}, pseudo_transient={}, arc_length={}, damping={:?}, voltage_reltol={:.0e}, voltage_abstol={:.0e})",
+            "ConvergenceConfig(gmin_stepping={}, source_stepping={}, pseudo_transient={}, arc_length={}, damping={:?}, voltage_reltol={:.0e}, voltage_abstol={:.0e}, current_abstol={:.0e})",
             self.inner.gmin_stepping,
             self.inner.source_stepping,
             self.inner.pseudo_transient,
             self.inner.arc_length,
             self.inner.damping_strategy,
             self.inner.voltage_reltol,
-            self.inner.voltage_abstol
+            self.inner.voltage_abstol,
+            self.inner.current_abstol
         )
     }
 }
@@ -478,6 +490,7 @@ mod tests {
         );
         assert!(config.inner.voltage_reltol > 0.0);
         assert_eq!(config.inner.voltage_abstol, 0.0);
+        assert!(config.inner.current_abstol > 0.0);
     }
 
     #[test]
@@ -594,6 +607,7 @@ mod tests {
         let repr = config.__repr__();
         assert!(repr.contains("gmin_stepping=true"));
         assert!(repr.contains("arc_length=true"));
+        assert!(repr.contains("current_abstol="));
     }
 
     #[test]
@@ -649,6 +663,9 @@ mod tests {
 
         config.set_voltage_abstol(5e-7);
         assert!((config.get_voltage_abstol() - 5e-7).abs() < 1e-18);
+
+        config.set_current_abstol(3e-12);
+        assert!((config.get_current_abstol() - 3e-12).abs() < 1e-24);
 
         config.set_verbose(true);
         assert!(config.get_verbose());
