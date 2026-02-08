@@ -8,6 +8,10 @@ use rspice_core::analysis::noise::NoiseResult;
 use rspice_core::engine::{Engine, SimulationConfig, TransientResult};
 use rspice_core::netlist::AnalysisCommand;
 use rspice_core::{resolve_simulation_config, SimulationConfigOverrides, Value};
+use crate::output_spec::{
+    dc_output_value, parse_output_spec, resolve_node_or_ground_index, run_ac_output_at_frequency,
+    run_dc_output_sensitivity, OutputSpec, OutputVoltageSpec,
+};
 
 // =============================================================================
 // Platform-agnostic timing utilities
@@ -712,7 +716,7 @@ pub fn run_sensitivity_analysis(
                 output_var
             )
         })?;
-    if let OutputSpec::Voltage(vspec) = output_spec {
+    if let OutputSpec::Voltage(vspec) = &output_spec {
         if vspec.pos == 0 && vspec.neg.is_none() {
             return Err("Sensitivity output node cannot be ground".to_string());
         }
@@ -751,8 +755,8 @@ pub fn run_sensitivity_analysis(
                 freq,
             )
             .map_err(|e| format!("Sensitivity error for parameter '{}': {}", name, e))?
-        } else if let OutputSpec::Voltage(vspec) = output_spec {
-            run_dc_output_sensitivity(&engine, &netlist, vspec, &name, value)
+        } else if let OutputSpec::Voltage(vspec) = &output_spec {
+            run_dc_output_sensitivity(&engine, &netlist, *vspec, &name, value)
                 .map_err(|e| format!("Sensitivity error for parameter '{}': {}", name, e))?
         } else {
             run_dc_output_sensitivity_finite_difference(
@@ -1199,42 +1203,6 @@ pub fn run_stb_analysis(
 // Helper functions
 // =============================================================================
 
-fn is_ground_node(name: &str) -> bool {
-    matches!(
-        name.trim().to_ascii_lowercase().as_str(),
-        "0" | "gnd" | "ground"
-    )
-}
-
-fn resolve_node_index(node_name: &str, node_names: &[String]) -> Option<usize> {
-    let trimmed = node_name.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    if let Ok(idx) = trimmed.parse::<usize>() {
-        if idx < node_names.len() {
-            return Some(idx);
-        }
-    }
-
-    let upper = trimmed.to_ascii_uppercase();
-    node_names
-        .iter()
-        .position(|name| name.to_ascii_uppercase() == upper)
-}
-
-fn resolve_node_or_ground_index(node_name: &str, node_names: &[String]) -> Option<usize> {
-    let trimmed = node_name.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    if is_ground_node(trimmed) {
-        return Some(0);
-    }
-    resolve_node_index(trimmed, node_names)
-}
-
 fn canonicalize_pz_port(pos: usize, neg: usize) -> Result<(usize, Option<usize>, Value), String> {
     if pos == neg {
         return Err("positive and reference nodes cannot be the same".to_string());
@@ -1250,197 +1218,6 @@ fn canonicalize_pz_port(pos: usize, neg: usize) -> Result<(usize, Option<usize>,
 
     // Canonicalize V(0, n) or I(0, n) to -(V(n,0) / I(n,0)).
     Ok((neg, None, -1.0))
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct OutputVoltageSpec {
-    pos: usize,
-    neg: Option<usize>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum OutputSpec {
-    Voltage(OutputVoltageSpec),
-    BranchCurrent {
-        branch_ordinal: usize, // 1-based branch ordinal from CircuitData
-        branch_name: String,
-    },
-}
-
-fn parse_output_spec(
-    output_var: &str,
-    node_names: &[String],
-    circuit: &rspice_core::CircuitData,
-) -> Option<OutputSpec> {
-    let trimmed = output_var.trim();
-    if trimmed.len() > 3 && trimmed[..2].eq_ignore_ascii_case("I(") && trimmed.ends_with(')') {
-        let branch_name = trimmed[2..trimmed.len() - 1].trim();
-        if branch_name.is_empty() {
-            return None;
-        }
-        let branch_ordinal = circuit.get_branch_by_name(branch_name)? as usize;
-        return Some(OutputSpec::BranchCurrent {
-            branch_ordinal,
-            branch_name: branch_name.to_string(),
-        });
-    }
-
-    parse_output_voltage_spec(trimmed, node_names).map(OutputSpec::Voltage)
-}
-
-fn parse_output_voltage_spec(output_var: &str, node_names: &[String]) -> Option<OutputVoltageSpec> {
-    let trimmed = output_var.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    if trimmed.len() > 3 && trimmed[..2].eq_ignore_ascii_case("V(") && trimmed.ends_with(')') {
-        let inner = trimmed[2..trimmed.len() - 1].trim();
-        if inner.is_empty() {
-            return None;
-        }
-
-        if let Some((pos, neg)) = inner.split_once(',') {
-            let pos_idx = resolve_node_or_ground_index(pos.trim(), node_names)?;
-            let neg_idx = resolve_node_or_ground_index(neg.trim(), node_names)?;
-            return Some(OutputVoltageSpec {
-                pos: pos_idx,
-                neg: Some(neg_idx),
-            });
-        }
-
-        let pos_idx = resolve_node_or_ground_index(inner, node_names)?;
-        return Some(OutputVoltageSpec {
-            pos: pos_idx,
-            neg: None,
-        });
-    }
-
-    // I(...) output handling is owned by parse_output_spec().
-    if trimmed.len() > 3 && trimmed[..2].eq_ignore_ascii_case("I(") && trimmed.ends_with(')') {
-        return None;
-    }
-
-    let pos_idx = resolve_node_or_ground_index(trimmed, node_names)?;
-    Some(OutputVoltageSpec {
-        pos: pos_idx,
-        neg: None,
-    })
-}
-
-fn dc_output_value(
-    dc_result: &rspice_core::SimulationResult,
-    output_spec: &OutputSpec,
-) -> Result<Value, String> {
-    match output_spec {
-        OutputSpec::Voltage(vspec) => {
-            let v_pos = if vspec.pos == 0 {
-                0.0
-            } else {
-                dc_result
-                    .node_voltages
-                    .get(vspec.pos)
-                    .copied()
-                    .unwrap_or(0.0)
-            };
-            let v_neg = match vspec.neg {
-                Some(0) => 0.0,
-                Some(idx) => dc_result.node_voltages.get(idx).copied().unwrap_or(0.0),
-                None => 0.0,
-            };
-            Ok(v_pos - v_neg)
-        }
-        OutputSpec::BranchCurrent {
-            branch_ordinal,
-            branch_name,
-        } => {
-            let idx = branch_ordinal.saturating_sub(1);
-            dc_result.branch_currents.get(idx).copied().ok_or_else(|| {
-                format!(
-                    "Branch current for '{}' is unavailable (index {})",
-                    branch_name, idx
-                )
-            })
-        }
-    }
-}
-
-fn ac_output_value(ac_result: &AcResult, output_spec: &OutputSpec) -> Result<Complex64, String> {
-    match output_spec {
-        OutputSpec::Voltage(vspec) => {
-            let v_pos = if vspec.pos == 0 {
-                Complex64::new(0.0, 0.0)
-            } else {
-                ac_result
-                    .voltages
-                    .get(vspec.pos.saturating_sub(1))
-                    .copied()
-                    .unwrap_or_else(|| Complex64::new(0.0, 0.0))
-            };
-            let v_neg = match vspec.neg {
-                Some(0) => Complex64::new(0.0, 0.0),
-                Some(idx) => ac_result
-                    .voltages
-                    .get(idx.saturating_sub(1))
-                    .copied()
-                    .unwrap_or_else(|| Complex64::new(0.0, 0.0)),
-                None => Complex64::new(0.0, 0.0),
-            };
-            Ok(v_pos - v_neg)
-        }
-        OutputSpec::BranchCurrent {
-            branch_ordinal,
-            branch_name,
-        } => {
-            let idx = branch_ordinal.saturating_sub(1);
-            ac_result.currents.get(idx).copied().ok_or_else(|| {
-                format!(
-                    "AC branch current for '{}' is unavailable (index {})",
-                    branch_name, idx
-                )
-            })
-        }
-    }
-}
-
-fn run_ac_output_at_frequency(
-    engine: &Engine,
-    netlist: &rspice_core::Netlist,
-    output_spec: &OutputSpec,
-    frequency: Value,
-) -> Result<Complex64, String> {
-    let ac_results = engine
-        .run_ac(netlist, &[frequency])
-        .map_err(|e| format!("AC analysis error at {} Hz: {}", frequency, e))?;
-    let point = ac_results
-        .first()
-        .ok_or_else(|| format!("AC analysis produced no data at {} Hz", frequency))?;
-    ac_output_value(point, output_spec)
-}
-
-fn run_dc_output_sensitivity(
-    engine: &Engine,
-    netlist: &rspice_core::Netlist,
-    output_spec: OutputVoltageSpec,
-    param_name: &str,
-    param_value: Value,
-) -> Result<Value, String> {
-    let pos_sensitivity = if output_spec.pos == 0 {
-        0.0
-    } else {
-        engine
-            .run_sensitivity(netlist, output_spec.pos, param_name, param_value, None)
-            .map_err(|e| e.to_string())?
-    };
-
-    let neg_sensitivity = match output_spec.neg {
-        Some(0) | None => 0.0,
-        Some(idx) => engine
-            .run_sensitivity(netlist, idx, param_name, param_value, None)
-            .map_err(|e| e.to_string())?,
-    };
-
-    Ok(pos_sensitivity - neg_sensitivity)
 }
 
 fn run_ac_output_sensitivity_finite_difference(
@@ -1488,16 +1265,6 @@ fn run_dc_output_sensitivity_finite_difference(
     let minus = dc_output_value(&minus_result, output_spec)?;
 
     Ok((plus - minus) / (2.0 * delta))
-}
-
-fn parse_output_node(output_var: &str, node_names: &[String]) -> Option<usize> {
-    parse_output_voltage_spec(output_var, node_names).and_then(|spec| {
-        if spec.neg.is_none() {
-            Some(spec.pos)
-        } else {
-            None
-        }
-    })
 }
 
 /// Generate frequency sweep points
@@ -1702,59 +1469,37 @@ mod tests {
     }
 
     #[test]
-    fn test_ground_node_helper() {
-        assert!(is_ground_node("0"));
-        assert!(is_ground_node("gnd"));
-        assert!(is_ground_node("GROUND"));
-        assert!(!is_ground_node("out"));
-    }
-
-    #[test]
-    fn test_resolve_node_index_helper() {
-        let names = vec![
-            "0".to_string(),
-            "IN".to_string(),
-            "OUT".to_string(),
-            "VDD".to_string(),
-        ];
-        assert_eq!(resolve_node_index("IN", &names), Some(1));
-        assert_eq!(resolve_node_index("out", &names), Some(2));
-        assert_eq!(resolve_node_index("3", &names), Some(3));
-        assert_eq!(resolve_node_index("missing", &names), None);
-    }
-
-    #[test]
     fn test_parse_output_node_helper() {
         let names = vec!["0".to_string(), "IN".to_string(), "OUT".to_string()];
-        assert_eq!(parse_output_node("V(OUT)", &names), Some(2));
-        assert_eq!(parse_output_node("out", &names), Some(2));
-        assert_eq!(parse_output_node("2", &names), Some(2));
-        assert_eq!(parse_output_node("V(OUT,IN)", &names), None);
-        assert_eq!(parse_output_node("I(R1)", &names), None);
+        assert_eq!(crate::output_spec::parse_output_node("V(OUT)", &names), Some(2));
+        assert_eq!(crate::output_spec::parse_output_node("out", &names), Some(2));
+        assert_eq!(crate::output_spec::parse_output_node("2", &names), Some(2));
+        assert_eq!(crate::output_spec::parse_output_node("V(OUT,IN)", &names), None);
+        assert_eq!(crate::output_spec::parse_output_node("I(R1)", &names), None);
     }
 
     #[test]
     fn test_parse_output_voltage_spec_helper() {
         let names = vec!["0".to_string(), "IN".to_string(), "OUT".to_string()];
         assert_eq!(
-            parse_output_voltage_spec("V(OUT)", &names),
+            crate::output_spec::parse_output_voltage_spec("V(OUT)", &names),
             Some(OutputVoltageSpec { pos: 2, neg: None })
         );
         assert_eq!(
-            parse_output_voltage_spec("V(OUT,IN)", &names),
+            crate::output_spec::parse_output_voltage_spec("V(OUT,IN)", &names),
             Some(OutputVoltageSpec {
                 pos: 2,
                 neg: Some(1)
             })
         );
         assert_eq!(
-            parse_output_voltage_spec("V(OUT,GND)", &names),
+            crate::output_spec::parse_output_voltage_spec("V(OUT,GND)", &names),
             Some(OutputVoltageSpec {
                 pos: 2,
                 neg: Some(0)
             })
         );
-        assert_eq!(parse_output_voltage_spec("I(R1)", &names), None);
+        assert_eq!(crate::output_spec::parse_output_voltage_spec("I(R1)", &names), None);
     }
 
     #[test]
@@ -1767,7 +1512,7 @@ mod tests {
             .expect("circuit build should succeed");
         let node_names = vec!["0".to_string(), "IN".to_string()];
 
-        let spec = parse_output_spec("I(V1)", &node_names, &circuit);
+        let spec = crate::output_spec::parse_output_spec("I(V1)", &node_names, &circuit);
         assert!(matches!(
             spec,
             Some(OutputSpec::BranchCurrent {
