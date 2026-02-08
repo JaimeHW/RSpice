@@ -18,6 +18,7 @@
 mod ac;
 mod advanced;
 mod builder;
+mod config_resolver;
 mod convergence;
 mod dc;
 mod hb;
@@ -31,6 +32,9 @@ mod tests;
 
 // Re-export CompressionConfig for public API
 pub use crate::analysis::waveform::CompressionConfig;
+pub use config_resolver::{
+    ConvergencePreset, SimulationConfigOverrides, resolve_simulation_config,
+};
 
 use crate::Value;
 use crate::analysis::waveform::TransientResultCompressed;
