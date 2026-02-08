@@ -2247,27 +2247,14 @@ fn compute_input_referred_pnoise(
                     configured_source, error
                 )
             })?;
-        if core_results.len() == translated_frequencies.len() {
-            return Ok((fold_input_density(&core_results)?, None));
+        if let Some(message) = classify_pnoise_input_core_point_count(
+            Some(configured_source),
+            core_results.len(),
+            translated_frequencies.len(),
+        )? {
+            return Err(message);
         }
-
-        let fallback = compute_input_referred_pnoise_from_tf(
-            netlist_text,
-            netlist,
-            node_names,
-            config,
-            output_noise,
-            frequencies,
-        )?;
-        return Ok((
-            fallback,
-            Some(format!(
-                "PNOISE input-referred conversion used TF fallback because core source '{}' path returned {} points (expected {})",
-                configured_source,
-                core_results.len(),
-                translated_frequencies.len()
-            )),
-        ));
+        return Ok((fold_input_density(&core_results)?, None));
     }
 
     if let Some(source_name) = infer_primary_source_name(netlist) {
@@ -2280,25 +2267,22 @@ fn compute_input_referred_pnoise(
             temperature,
         ) {
             Ok(core_results) => {
-                if core_results.len() == translated_frequencies.len() {
-                    return Ok((fold_input_density(&core_results)?, None));
+                if let Some(warning) = classify_pnoise_input_core_point_count(
+                    None,
+                    core_results.len(),
+                    translated_frequencies.len(),
+                )? {
+                    let fallback = compute_input_referred_pnoise_from_tf(
+                        netlist_text,
+                        netlist,
+                        node_names,
+                        config,
+                        output_noise,
+                        frequencies,
+                    )?;
+                    return Ok((fallback, Some(warning)));
                 }
-                let fallback = compute_input_referred_pnoise_from_tf(
-                    netlist_text,
-                    netlist,
-                    node_names,
-                    config,
-                    output_noise,
-                    frequencies,
-                )?;
-                return Ok((
-                    fallback,
-                    Some(format!(
-                        "PNOISE input-referred conversion used TF fallback because core path returned {} points (expected {})",
-                        core_results.len(),
-                        translated_frequencies.len()
-                    )),
-                ));
+                return Ok((fold_input_density(&core_results)?, None));
             }
             Err(error) => {
                 let fallback = compute_input_referred_pnoise_from_tf(
@@ -2335,6 +2319,28 @@ fn compute_input_referred_pnoise(
                 .to_string(),
         ),
     ))
+}
+
+fn classify_pnoise_input_core_point_count(
+    explicit_source: Option<&str>,
+    actual_points: usize,
+    expected_points: usize,
+) -> Result<Option<String>, String> {
+    if actual_points == expected_points {
+        return Ok(None);
+    }
+
+    if let Some(source) = explicit_source {
+        return Err(format!(
+            "PNOISE input source '{}' returned {} points during source-referred noise evaluation (expected {}); explicit input sources must not degrade to TF fallback",
+            source, actual_points, expected_points
+        ));
+    }
+
+    Ok(Some(format!(
+        "PNOISE input-referred conversion used TF fallback because core path returned {} points (expected {})",
+        actual_points, expected_points
+    )))
 }
 
 fn compute_input_referred_pnoise_from_tf(
@@ -6246,6 +6252,33 @@ mod tests {
             "expected sideband-folded contributor percentages to normalize to 100, got {}",
             total_percentage
         );
+    }
+
+    #[test]
+    fn test_classify_pnoise_input_core_point_count_requires_exact_match_for_explicit_source() {
+        let err = classify_pnoise_input_core_point_count(Some("V1"), 5, 7)
+            .expect_err("explicit source mismatch should be a hard error");
+        assert!(err.contains("V1"));
+        assert!(err.contains("5"));
+        assert!(err.contains("7"));
+        assert!(err.contains("must not degrade to TF fallback"));
+    }
+
+    #[test]
+    fn test_classify_pnoise_input_core_point_count_returns_tf_fallback_warning_when_inferred() {
+        let warning = classify_pnoise_input_core_point_count(None, 4, 6)
+            .expect("inferred mismatch should not be a hard error")
+            .expect("inferred mismatch should produce fallback warning");
+        assert!(warning.contains("TF fallback"));
+        assert!(warning.contains("4"));
+        assert!(warning.contains("6"));
+    }
+
+    #[test]
+    fn test_classify_pnoise_input_core_point_count_accepts_exact_match() {
+        let classification = classify_pnoise_input_core_point_count(Some("V1"), 8, 8)
+            .expect("exact-match explicit source should be accepted");
+        assert!(classification.is_none());
     }
 
     #[test]
