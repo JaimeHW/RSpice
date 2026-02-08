@@ -2668,11 +2668,12 @@ fn parse_pz_command(
 }
 
 /// Parse .MC command:
-/// .MC runs [SEED n] [DIST GAUSS|UNIFORM] [SPREAD rel] [PARAMS p1 p2 ...]
+/// .MC runs [SEED n] [DIST GAUSS|UNIFORM|WORSTCASE] [SPREAD rel] [PARAMS p1 p2 ...]
 ///
 /// Supported shorthand:
 /// .MC runs GAUSS sigma
 /// .MC runs UNIFORM tol
+/// .MC runs WORSTCASE tol
 fn parse_mc_command(
     stream: &mut TokenStream,
     line_num: usize,
@@ -2694,6 +2695,7 @@ fn parse_mc_command(
         match s.to_ascii_uppercase().as_str() {
             "GAUSS" | "GAUSSIAN" | "NORMAL" => Some(MonteCarloDistribution::Gaussian),
             "UNIFORM" | "UNIF" => Some(MonteCarloDistribution::Uniform),
+            "WORST" | "WORSTCASE" | "WC" => Some(MonteCarloDistribution::WorstCase),
             _ => None,
         }
     };
@@ -2720,7 +2722,7 @@ fn parse_mc_command(
                     parse_distribution(&dist).ok_or_else(|| ParseError::Syntax {
                         line: line_num,
                         message: format!(
-                            "Invalid .MC distribution '{}': expected GAUSS or UNIFORM",
+                            "Invalid .MC distribution '{}': expected GAUSS, UNIFORM, or WORSTCASE",
                             dist
                         ),
                     })?;
@@ -2737,6 +2739,12 @@ fn parse_mc_command(
             }
             "UNIFORM" | "UNIF" => {
                 command.distribution = MonteCarloDistribution::Uniform;
+                if let Some(spread) = try_value(stream, params) {
+                    command.relative_spread = spread;
+                }
+            }
+            "WORST" | "WORSTCASE" | "WC" => {
+                command.distribution = MonteCarloDistribution::WorstCase;
                 if let Some(spread) = try_value(stream, params) {
                     command.relative_spread = spread;
                 }
@@ -3731,13 +3739,35 @@ R1 1 0 1k
     }
 
     #[test]
+    fn test_parse_mc_with_worst_case_distribution() {
+        let netlist = r#"Monte Carlo Worst Case
+.MC 32 DIST WORSTCASE SPREAD 0.03 PARAMS RVAL
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+
+        match &result.analyses[0] {
+            AnalysisCommand::MonteCarlo(cmd) => {
+                assert_eq!(cmd.runs, 32);
+                assert_eq!(cmd.distribution, MonteCarloDistribution::WorstCase);
+                assert!((cmd.relative_spread - 0.03).abs() < 1e-12);
+                assert_eq!(cmd.params, vec!["RVAL".to_string()]);
+            }
+            _ => panic!("Expected MonteCarlo command"),
+        }
+    }
+
+    #[test]
     fn test_parse_mc_invalid_distribution() {
         let netlist = r#"Monte Carlo Invalid Dist
 .MC 16 DIST BAD
 .END
 "#;
         let err = parse_netlist(netlist).expect_err("expected .MC distribution parse error");
-        assert!(err.to_string().contains("expected GAUSS or UNIFORM"));
+        assert!(
+            err.to_string()
+                .contains("expected GAUSS, UNIFORM, or WORSTCASE")
+        );
     }
 
     #[test]

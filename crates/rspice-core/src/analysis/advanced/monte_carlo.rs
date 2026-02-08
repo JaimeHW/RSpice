@@ -40,6 +40,12 @@ pub enum Distribution {
         /// Relative half-width (e.g., 0.05 for ±5%)
         tolerance: Value,
     },
+
+    /// Worst-case two-point distribution: value is always nominal ± tolerance.
+    WorstCase {
+        /// Relative half-width (e.g., 0.05 for ±5%)
+        tolerance: Value,
+    },
 }
 
 impl Distribution {
@@ -51,6 +57,11 @@ impl Distribution {
     /// Create a uniform distribution with given tolerance
     pub fn uniform(tolerance: Value) -> Self {
         Distribution::Uniform { tolerance }
+    }
+
+    /// Create a worst-case distribution with given tolerance
+    pub fn worst_case(tolerance: Value) -> Self {
+        Distribution::WorstCase { tolerance }
     }
 
     /// Sample from this distribution using a random number generator
@@ -65,6 +76,11 @@ impl Distribution {
                 let delta = nominal * tolerance;
                 let u = rng.next_f64();
                 nominal + (2.0 * u - 1.0) * delta
+            }
+            Distribution::WorstCase { tolerance } => {
+                let delta = nominal * tolerance;
+                let sign = if (rng.next_u64() & 1) == 0 { -1.0 } else { 1.0 };
+                nominal + sign * delta
             }
         }
     }
@@ -713,6 +729,34 @@ mod tests {
         // All values should be within ±5% (950 to 1050)
         assert!(min >= 950.0 - 0.1);
         assert!(max <= 1050.0 + 0.1);
+    }
+
+    #[test]
+    fn test_worst_case_distribution_samples_extremes_only() {
+        let mut rng = Xorshift128Plus::new(12345);
+        let dist = Distribution::WorstCase { tolerance: 0.05 };
+        let nominal = 1000.0;
+        let low = nominal * 0.95;
+        let high = nominal * 1.05;
+
+        let mut saw_low = false;
+        let mut saw_high = false;
+        for _ in 0..200 {
+            let sample = dist.sample(&mut rng, nominal);
+            assert!(
+                (sample - low).abs() < 1e-12 || (sample - high).abs() < 1e-12,
+                "worst-case sample must be at tolerance edge"
+            );
+            if (sample - low).abs() < 1e-12 {
+                saw_low = true;
+            }
+            if (sample - high).abs() < 1e-12 {
+                saw_high = true;
+            }
+        }
+
+        assert!(saw_low, "expected to observe lower worst-case sample");
+        assert!(saw_high, "expected to observe upper worst-case sample");
     }
 
     #[test]

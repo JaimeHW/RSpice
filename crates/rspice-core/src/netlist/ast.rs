@@ -630,6 +630,8 @@ impl MonteCarloCommand {
 pub enum MonteCarloDistribution {
     Gaussian,
     Uniform,
+    /// Two-point worst-case spread (nominal ± relative_spread).
+    WorstCase,
 }
 
 /// Parametric sweep specification
@@ -1066,6 +1068,21 @@ mod tests {
             assert_eq!(parsed.distribution, MonteCarloDistribution::Uniform);
             assert!((parsed.relative_spread - 0.05).abs() < 1e-12);
             assert_eq!(parsed.params, vec!["RVAL".to_string(), "CVAL".to_string()]);
+        } else {
+            panic!("expected MonteCarlo command");
+        }
+    }
+
+    #[test]
+    fn test_monte_carlo_analysis_worst_case_distribution() {
+        let mut mc = MonteCarloCommand::new(32);
+        mc.distribution = MonteCarloDistribution::WorstCase;
+        mc.relative_spread = 0.03;
+
+        let cmd = AnalysisCommand::MonteCarlo(mc);
+        if let AnalysisCommand::MonteCarlo(parsed) = cmd {
+            assert_eq!(parsed.distribution, MonteCarloDistribution::WorstCase);
+            assert!((parsed.relative_spread - 0.03).abs() < 1e-12);
         } else {
             panic!("expected MonteCarlo command");
         }

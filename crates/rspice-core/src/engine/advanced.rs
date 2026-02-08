@@ -422,6 +422,7 @@ impl Engine {
         let spread = match distribution {
             Distribution::Gaussian { sigma } => sigma,
             Distribution::Uniform { tolerance } => tolerance,
+            Distribution::WorstCase { tolerance } => tolerance,
         };
         if !spread.is_finite() || spread < 0.0 {
             return Err(SimulationError::Circuit(format!(
@@ -609,6 +610,12 @@ impl Engine {
                 let tolerance = tolerance.abs();
                 let delta = magnitude * tolerance;
                 nominal + (2.0 * rng.next_f64() - 1.0) * delta
+            }
+            Distribution::WorstCase { tolerance } => {
+                let tolerance = tolerance.abs();
+                let delta = magnitude * tolerance;
+                let sign = if (rng.next_u64() & 1) == 0 { -1.0 } else { 1.0 };
+                nominal + sign * delta
             }
         }
     }
@@ -2223,6 +2230,43 @@ mod tests {
         assert!(
             out.max <= max_expected + 1e-6,
             "uniform max outside expected range"
+        );
+    }
+
+    #[test]
+    fn test_run_monte_carlo_supports_worst_case_distribution() {
+        let netlist = crate::netlist::parse_netlist(
+            "* Monte Carlo worst case\n\
+             .PARAM RVAL=1k\n\
+             V1 in 0 1\n\
+             R1 in out {RVAL}\n\
+             R2 out 0 1k\n\
+             .END\n",
+        )
+        .expect("netlist should parse");
+        let engine = Engine::default();
+
+        let result = engine
+            .run_monte_carlo_with_options(
+                &netlist,
+                256,
+                21,
+                Distribution::WorstCase { tolerance: 0.05 },
+                None,
+            )
+            .expect("worst-case monte carlo should succeed");
+
+        let out = result.variables.get("V(2)").expect("V(2) statistics");
+        let min_expected = 1e3 / (1e3 * 1.05 + 1e3);
+        let max_expected = 1e3 / (1e3 * 0.95 + 1e3);
+        assert!(out.std_dev > 0.0);
+        assert!(
+            out.min >= min_expected - 1e-6,
+            "worst-case min outside expected range"
+        );
+        assert!(
+            out.max <= max_expected + 1e-6,
+            "worst-case max outside expected range"
         );
     }
 
