@@ -125,6 +125,12 @@ pub enum AnalysisType {
     PoleZero,
     /// Sensitivity analysis - output sensitivity to parameters
     Sensitivity,
+    /// Monte Carlo statistical analysis
+    MonteCarlo,
+    /// Parametric sweep analysis
+    Parametric,
+    /// Corner sweep analysis
+    Corner,
     /// Harmonic Balance analysis for RF circuits
     HarmonicBalance,
     /// Periodic Steady State analysis
@@ -142,6 +148,9 @@ impl AnalysisType {
             AnalysisType::Noise => "Noise",
             AnalysisType::PoleZero => "Pole-Zero",
             AnalysisType::Sensitivity => "Sensitivity",
+            AnalysisType::MonteCarlo => "Monte Carlo",
+            AnalysisType::Parametric => "Parametric Sweep",
+            AnalysisType::Corner => "Corner Sweep",
             AnalysisType::HarmonicBalance => "Harmonic Balance",
             AnalysisType::Pss => "PSS",
         }
@@ -157,6 +166,9 @@ impl AnalysisType {
             AnalysisType::Noise => "NS",
             AnalysisType::PoleZero => "PZ",
             AnalysisType::Sensitivity => "SN",
+            AnalysisType::MonteCarlo => "MC",
+            AnalysisType::Parametric => "PAR",
+            AnalysisType::Corner => "CRN",
             AnalysisType::HarmonicBalance => "HB",
             AnalysisType::Pss => "PSS",
         }
@@ -173,6 +185,9 @@ impl AnalysisType {
             AnalysisType::DcOp => ("", "", "Voltage", "V"),
             AnalysisType::PoleZero => ("Real", "", "Imaginary", ""),
             AnalysisType::Sensitivity => ("Parameter", "", "Sensitivity", ""),
+            AnalysisType::MonteCarlo => ("Value", "", "Count", "count"),
+            AnalysisType::Parametric => ("Sweep", "", "Voltage", "V"),
+            AnalysisType::Corner => ("Temperature", "C", "Voltage", "V"),
             AnalysisType::HarmonicBalance => ("Harmonic", "", "Magnitude", "V"),
         }
     }
@@ -911,6 +926,9 @@ mod tests {
         assert_eq!(AnalysisType::Transient.display_name(), "Transient");
         assert_eq!(AnalysisType::Noise.display_name(), "Noise");
         assert_eq!(AnalysisType::PoleZero.display_name(), "Pole-Zero");
+        assert_eq!(AnalysisType::MonteCarlo.display_name(), "Monte Carlo");
+        assert_eq!(AnalysisType::Parametric.display_name(), "Parametric Sweep");
+        assert_eq!(AnalysisType::Corner.display_name(), "Corner Sweep");
     }
 
     #[test]
@@ -918,6 +936,9 @@ mod tests {
         assert_eq!(AnalysisType::DcOp.short_label(), "DC");
         assert_eq!(AnalysisType::Ac.short_label(), "AC");
         assert_eq!(AnalysisType::Transient.short_label(), "TR");
+        assert_eq!(AnalysisType::MonteCarlo.short_label(), "MC");
+        assert_eq!(AnalysisType::Parametric.short_label(), "PAR");
+        assert_eq!(AnalysisType::Corner.short_label(), "CRN");
         assert_eq!(AnalysisType::HarmonicBalance.short_label(), "HB");
         assert_eq!(AnalysisType::Pss.short_label(), "PSS");
     }

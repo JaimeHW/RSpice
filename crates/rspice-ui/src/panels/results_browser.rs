@@ -323,6 +323,9 @@ fn analysis_type_icon(analysis_type: AnalysisType) -> &'static str {
         AnalysisType::Noise => "[NO]",
         AnalysisType::PoleZero => "[PZ]",
         AnalysisType::Sensitivity => "[SN]",
+        AnalysisType::MonteCarlo => "[MC]",
+        AnalysisType::Parametric => "[PA]",
+        AnalysisType::Corner => "[CR]",
         AnalysisType::HarmonicBalance => "[HB]",
         AnalysisType::Pss => "[PS]",
     }
@@ -338,6 +341,9 @@ fn analysis_type_to_tab(analysis_type: AnalysisType) -> BottomPanelTab {
         AnalysisType::Noise => BottomPanelTab::Waveform,
         AnalysisType::PoleZero => BottomPanelTab::Waveform, // PoleZero uses waveform viewer for now
         AnalysisType::Sensitivity => BottomPanelTab::Waveform,
+        AnalysisType::MonteCarlo => BottomPanelTab::Waveform,
+        AnalysisType::Parametric => BottomPanelTab::Waveform,
+        AnalysisType::Corner => BottomPanelTab::Waveform,
         AnalysisType::HarmonicBalance => BottomPanelTab::Waveform,
         AnalysisType::Pss => BottomPanelTab::Waveform,
     }
@@ -362,6 +368,9 @@ mod tests {
             AnalysisType::Noise,
             AnalysisType::PoleZero,
             AnalysisType::Sensitivity,
+            AnalysisType::MonteCarlo,
+            AnalysisType::Parametric,
+            AnalysisType::Corner,
             AnalysisType::HarmonicBalance,
             AnalysisType::Pss,
         ];
@@ -383,6 +392,9 @@ mod tests {
             AnalysisType::Noise,
             AnalysisType::PoleZero,
             AnalysisType::Sensitivity,
+            AnalysisType::MonteCarlo,
+            AnalysisType::Parametric,
+            AnalysisType::Corner,
             AnalysisType::HarmonicBalance,
             AnalysisType::Pss,
         ];
