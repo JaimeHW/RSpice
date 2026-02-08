@@ -25,6 +25,7 @@ use super::result_mapper::{
     MappedAnalysisType, MappedMeasurement, MappedResult, MappedWaveform, MeasurementStatus,
     MeasurementType, ResultMapper, ResultStatus,
 };
+use crate::output_spec::sensitivity_raw_unit;
 
 // =============================================================================
 // Execution State
@@ -605,14 +606,7 @@ impl RunExecutor {
                 ac_mode,
                 frequency,
             } => {
-                let raw_unit = if output_var.trim().len() > 3
-                    && output_var.trim()[..2].eq_ignore_ascii_case("I(")
-                    && output_var.trim().ends_with(')')
-                {
-                    "A/unit"
-                } else {
-                    "V/unit"
-                };
+                let raw_unit = sensitivity_raw_unit(output_var);
 
                 let sens_result = simulation_runner::run_sensitivity_analysis(
                     netlist, output_var, *ac_mode, *frequency,

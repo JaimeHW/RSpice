@@ -24,6 +24,33 @@ pub(crate) enum OutputSpec {
 }
 
 #[inline]
+fn parse_branch_current_name(output_var: &str) -> Option<&str> {
+    let trimmed = output_var.trim();
+    if trimmed.len() <= 3 || !trimmed[..2].eq_ignore_ascii_case("I(") || !trimmed.ends_with(')') {
+        return None;
+    }
+    let branch_name = trimmed[2..trimmed.len() - 1].trim();
+    if branch_name.is_empty() {
+        return None;
+    }
+    Some(branch_name)
+}
+
+#[inline]
+pub(crate) fn is_branch_current_output(output_var: &str) -> bool {
+    parse_branch_current_name(output_var).is_some()
+}
+
+#[inline]
+pub(crate) fn sensitivity_raw_unit(output_var: &str) -> &'static str {
+    if is_branch_current_output(output_var) {
+        "A/unit"
+    } else {
+        "V/unit"
+    }
+}
+
+#[inline]
 fn is_ground_node(name: &str) -> bool {
     matches!(
         name.trim().to_ascii_lowercase().as_str(),
@@ -69,11 +96,7 @@ pub(crate) fn parse_output_spec(
     circuit: &rspice_core::CircuitData,
 ) -> Option<OutputSpec> {
     let trimmed = output_var.trim();
-    if trimmed.len() > 3 && trimmed[..2].eq_ignore_ascii_case("I(") && trimmed.ends_with(')') {
-        let branch_name = trimmed[2..trimmed.len() - 1].trim();
-        if branch_name.is_empty() {
-            return None;
-        }
+    if let Some(branch_name) = parse_branch_current_name(trimmed) {
         let branch_ordinal = circuit.get_branch_by_name(branch_name)? as usize;
         return Some(OutputSpec::BranchCurrent {
             branch_ordinal,
@@ -116,7 +139,7 @@ pub(crate) fn parse_output_voltage_spec(
     }
 
     // I(...) output handling is owned by parse_output_spec().
-    if trimmed.len() > 3 && trimmed[..2].eq_ignore_ascii_case("I(") && trimmed.ends_with(')') {
+    if is_branch_current_output(trimmed) {
         return None;
     }
 
@@ -346,6 +369,23 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn test_branch_current_output_detection() {
+        assert!(is_branch_current_output("I(V1)"));
+        assert!(is_branch_current_output(" i(vsrc) "));
+        assert!(!is_branch_current_output("I()"));
+        assert!(!is_branch_current_output("V(out)"));
+        assert!(!is_branch_current_output("out"));
+    }
+
+    #[test]
+    fn test_sensitivity_raw_unit_helper() {
+        assert_eq!(sensitivity_raw_unit("I(V1)"), "A/unit");
+        assert_eq!(sensitivity_raw_unit(" i(v1) "), "A/unit");
+        assert_eq!(sensitivity_raw_unit("V(out)"), "V/unit");
+        assert_eq!(sensitivity_raw_unit("out"), "V/unit");
     }
 
     #[test]
