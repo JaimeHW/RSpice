@@ -7,7 +7,7 @@
 //! - Transient time-domain analysis
 
 use pyo3::prelude::*;
-use rspice_core::Engine;
+use rspice_core::{Engine, SimulationConfigOverrides, resolve_simulation_config};
 
 use crate::config::PySimulationConfig;
 use crate::netlist::PyNetlist;
@@ -25,6 +25,17 @@ use crate::results::{PyAcResult, PyDcSweepResult, PySimulationResult, PyTransien
 #[pyclass(name = "Engine")]
 pub struct PyEngine {
     inner: Engine,
+}
+
+impl PyEngine {
+    fn engine_for_netlist(&self, netlist: &rspice_core::Netlist) -> Engine {
+        let resolved = resolve_simulation_config(
+            self.inner.config(),
+            Some(&netlist.options),
+            &SimulationConfigOverrides::default(),
+        );
+        Engine::new(resolved)
+    }
 }
 
 #[pymethods]
@@ -69,8 +80,8 @@ impl PyEngine {
     ///     >>> result = engine.run_dc_op(netlist)
     ///     >>> print(f"V(out) = {result.voltage('out'):.3f} V")
     pub fn run_dc_op(&self, netlist: &PyNetlist) -> PyResult<PySimulationResult> {
-        let result = self
-            .inner
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let result = engine
             .run_dc_op(&netlist.inner)
             .map_err(crate::errors::simulation_error_to_pyerr)?;
         Ok(PySimulationResult::new(result))
@@ -106,8 +117,8 @@ impl PyEngine {
         stop: f64,
         step: f64,
     ) -> PyResult<PyDcSweepResult> {
-        let results = self
-            .inner
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let results = engine
             .run_dc_sweep(&netlist.inner, source_name, start, stop, step)
             .map_err(crate::errors::simulation_error_to_pyerr)?;
         Ok(PyDcSweepResult::new(results))
@@ -134,8 +145,8 @@ impl PyEngine {
     ///     >>> for f, mag in zip(result.frequencies, result.voltage_magnitude(2)):
     ///     ...     print(f"{f:.0f} Hz: {20*np.log10(mag):.1f} dB")
     pub fn run_ac(&self, netlist: &PyNetlist, frequencies: Vec<f64>) -> PyResult<PyAcResult> {
-        let results = self
-            .inner
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let results = engine
             .run_ac(&netlist.inner, &frequencies)
             .map_err(crate::errors::simulation_error_to_pyerr)?;
         Ok(PyAcResult::new(frequencies, results))
@@ -170,8 +181,8 @@ impl PyEngine {
         stop_time: f64,
         max_step: f64,
     ) -> PyResult<PyTransientResult> {
-        let result = self
-            .inner
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let result = engine
             .run_tran(&netlist.inner, stop_time, max_step)
             .map_err(crate::errors::simulation_error_to_pyerr)?;
         Ok(PyTransientResult::new(result))
@@ -210,8 +221,8 @@ impl PyEngine {
     ) -> PyResult<Vec<crate::results::PyNoiseResult>> {
         let temp = temperature.unwrap_or(300.0);
 
-        let results = self
-            .inner
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let results = engine
             .run_noise(&netlist.inner, output_node, &frequencies, temp)
             .map_err(crate::errors::simulation_error_to_pyerr)?;
 
@@ -246,8 +257,8 @@ impl PyEngine {
         input_node: usize,
         output_node: usize,
     ) -> PyResult<crate::results::PyPoleZeroResult> {
-        let result = self
-            .inner
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let result = engine
             .run_pz(&netlist.inner, input_node, output_node)
             .map_err(crate::errors::simulation_error_to_pyerr)?;
 
@@ -277,8 +288,8 @@ impl PyEngine {
         num_runs: usize,
         seed: u64,
     ) -> PyResult<crate::results::PyMonteCarloResult> {
-        let result = self
-            .inner
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let result = engine
             .run_monte_carlo(&netlist.inner, num_runs, seed)
             .map_err(crate::errors::simulation_error_to_pyerr)?;
 
@@ -323,12 +334,12 @@ impl PyEngine {
         netlist_minus.params.set(param_name, param_value - h);
 
         // Run DC analysis at both points
-        let result_plus = self
-            .inner
+        let plus_engine = self.engine_for_netlist(&netlist_plus);
+        let minus_engine = self.engine_for_netlist(&netlist_minus);
+        let result_plus = plus_engine
             .run_dc_op(&netlist_plus)
             .map_err(crate::errors::simulation_error_to_pyerr)?;
-        let result_minus = self
-            .inner
+        let result_minus = minus_engine
             .run_dc_op(&netlist_minus)
             .map_err(crate::errors::simulation_error_to_pyerr)?;
 
@@ -363,8 +374,8 @@ impl PyEngine {
         param_name: &str,
         values: Vec<f64>,
     ) -> PyResult<Vec<(f64, crate::results::PySimulationResult)>> {
-        let results = self
-            .inner
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let results = engine
             .run_step(&netlist.inner, param_name, &values)
             .map_err(crate::errors::simulation_error_to_pyerr)?;
 
@@ -490,6 +501,63 @@ R1 2 0 1k
         let cfg = engine.config();
         assert!((cfg.inner.tolerance - 1e-12).abs() < 1e-15);
         assert_eq!(cfg.inner.max_iterations, 100);
+    }
+
+    #[test]
+    fn test_engine_for_netlist_applies_netlist_options() {
+        let engine = PyEngine::new(None);
+        let netlist = PyNetlist::parse(
+            r#"
+* Netlist options mapping
+V1 1 0 1
+R1 1 0 1k
+.OPTIONS TEMP=85 ITL1=120 METHOD=GEAR RELTOL=2e-4 VNTOL=3e-6 IABSTOL=4e-12 GMIN=1e-11
+.END
+"#,
+        )
+        .unwrap();
+
+        let resolved = engine.engine_for_netlist(&netlist.inner);
+        let cfg = resolved.config();
+
+        assert!((cfg.temperature - 358.15).abs() < 1e-12);
+        assert_eq!(cfg.max_iterations, 120);
+        assert_eq!(
+            cfg.integration_method,
+            rspice_core::analysis::IntegrationMethod::Gear2
+        );
+        assert!((cfg.tolerance - 2e-4).abs() < 1e-15);
+        assert!((cfg.convergence_config.voltage_reltol - 2e-4).abs() < 1e-15);
+        assert!((cfg.convergence_config.residual_reltol - 2e-4).abs() < 1e-15);
+        assert!((cfg.convergence_config.voltage_abstol - 3e-6).abs() < 1e-18);
+        assert!((cfg.convergence_config.current_abstol - 4e-12).abs() < 1e-24);
+        assert!((cfg.convergence_config.gmin_initial - 1e-11).abs() < 1e-24);
+    }
+
+    #[test]
+    fn test_engine_for_netlist_preserves_base_for_unspecified_options() {
+        let mut config = PySimulationConfig::new();
+        config.set_tolerance(8e-4);
+        config.set_max_iterations(88);
+        let engine = PyEngine::new(Some(config));
+
+        let netlist = PyNetlist::parse(
+            r#"
+* Netlist options partial override
+V1 1 0 1
+R1 1 0 1k
+.OPTIONS TEMP=125
+.END
+"#,
+        )
+        .unwrap();
+
+        let resolved = engine.engine_for_netlist(&netlist.inner);
+        let cfg = resolved.config();
+
+        assert!((cfg.temperature - 398.15).abs() < 1e-12);
+        assert!((cfg.tolerance - 8e-4).abs() < 1e-15);
+        assert_eq!(cfg.max_iterations, 88);
     }
 
     #[test]
