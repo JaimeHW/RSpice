@@ -186,6 +186,8 @@ pub struct TransmissionLine {
     pub freq: Option<Value>,
     /// Normalized length (optional)
     pub nl: Option<Value>,
+    /// One-way attenuation factor (0 < a <= 1)
+    attenuation: Value,
 
     // Internal state
     /// Branch indices for current variables
@@ -223,6 +225,7 @@ impl TransmissionLine {
             td,
             freq: None,
             nl: None,
+            attenuation: 1.0,
             branch1: None,
             branch2: None,
             history_forward: DelayBuffer::new(td),
@@ -269,6 +272,19 @@ impl TransmissionLine {
         self.td
     }
 
+    /// Set one-way attenuation factor.
+    ///
+    /// Values are clamped to the physically meaningful range `(0, 1]`.
+    pub fn set_attenuation(&mut self, attenuation: Value) {
+        self.attenuation = attenuation.clamp(1e-6, 1.0);
+    }
+
+    /// Get one-way attenuation factor.
+    #[inline]
+    pub fn attenuation(&self) -> Value {
+        self.attenuation
+    }
+
     /// Get propagation velocity (if freq and nl are set)
     pub fn velocity(&self) -> Option<Value> {
         match (self.freq, self.nl) {
@@ -294,13 +310,22 @@ impl TransmissionLine {
 
     /// Get delayed forward wave (arrives at port 2)
     pub fn delayed_forward(&self) -> Value {
-        self.history_forward.get_delayed(self.current_time, self.td)
+        self.delayed_forward_at(self.current_time)
     }
 
     /// Get delayed backward wave (arrives at port 1)
     pub fn delayed_backward(&self) -> Value {
-        self.history_backward
-            .get_delayed(self.current_time, self.td)
+        self.delayed_backward_at(self.current_time)
+    }
+
+    /// Get delayed forward wave at an explicit simulation time.
+    pub fn delayed_forward_at(&self, time: Value) -> Value {
+        self.history_forward.get_delayed(time, self.td) * self.attenuation
+    }
+
+    /// Get delayed backward wave at an explicit simulation time.
+    pub fn delayed_backward_at(&self, time: Value) -> Value {
+        self.history_backward.get_delayed(time, self.td) * self.attenuation
     }
 
     /// Reset for new simulation
@@ -524,6 +549,39 @@ mod tests {
 
         // TD = NL/freq = 0.25 / 1e9 = 0.25ns
         assert!((tl.td - 0.25e-9).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_tline_attenuation_affects_delayed_wave() {
+        let mut tl = TransmissionLine::new("T1".to_string(), 1, 0, 2, 0, 50.0, 1e-9);
+        tl.set_attenuation(0.5);
+
+        tl.update_history(0.0, 1.0, 0.0, 0.0, 0.0);
+        tl.update_history(0.5e-9, 1.0, 0.0, 0.0, 0.0);
+        tl.update_history(1.0e-9, 1.0, 0.0, 0.0, 0.0);
+        tl.update_history(1.5e-9, 1.0, 0.0, 0.0, 0.0);
+
+        let delayed = tl.delayed_forward();
+        assert!(
+            (delayed - 0.5).abs() < 0.1,
+            "expected attenuated delayed wave near 0.5, got {}",
+            delayed
+        );
+    }
+
+    #[test]
+    fn test_tline_delayed_at_uses_explicit_time() {
+        let mut tl = TransmissionLine::new("T1".to_string(), 1, 0, 2, 0, 50.0, 1e-9);
+        tl.update_history(0.0, 0.0, 0.0, 0.0, 0.0);
+        tl.update_history(1.0e-9, 1.0, 0.0, 0.0, 0.0);
+        tl.update_history(2.0e-9, 2.0, 0.0, 0.0, 0.0);
+
+        let delayed = tl.delayed_forward_at(2.0e-9);
+        assert!(
+            (delayed - 1.0).abs() < 0.15,
+            "expected delayed value near 1.0 at explicit time, got {}",
+            delayed
+        );
     }
 
     #[test]

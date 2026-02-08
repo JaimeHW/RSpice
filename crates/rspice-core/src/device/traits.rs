@@ -1,15 +1,11 @@
 //! Device behavior traits
 
-use crate::{circuit::NodeId, Value};
+use crate::{Value, circuit::NodeId};
 
 /// Trait for devices that contribute to the conductance matrix (linear elements)
 pub trait LinearDevice {
     /// Stamp the device into the conductance matrix
-    fn stamp_linear(
-        &self,
-        matrix: &mut impl MatrixStamper,
-        rhs: &mut [Value],
-    );
+    fn stamp_linear(&self, matrix: &mut impl MatrixStamper, rhs: &mut [Value]);
 }
 
 /// Trait for devices that require Newton-Raphson iteration (nonlinear elements)
@@ -48,7 +44,7 @@ pub trait DynamicDevice {
 pub trait MatrixStamper {
     /// Add a value to the conductance matrix at (row, col)
     fn stamp(&mut self, row: NodeId, col: NodeId, value: Value);
-    
+
     /// Add a value to the RHS vector at index
     fn stamp_rhs(&mut self, index: NodeId, value: Value);
 }
