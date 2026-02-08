@@ -14,9 +14,6 @@
 
 <img src="assets/image.png" alt="RSpice Studio" width="100%" style="border-radius: 8px; box-shadow: 0 12px 40px rgba(0,0,0,0.6);" />
 
-<br/>
-
-*Next-generation analog verification for the post-Moore era.*
 
 </div>
 

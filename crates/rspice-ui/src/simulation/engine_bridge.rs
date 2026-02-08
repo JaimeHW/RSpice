@@ -19,6 +19,9 @@
 
 use std::collections::HashMap;
 
+use num_complex::Complex64;
+use rspice_core::analysis::ac::AcResult;
+
 use super::config::AnalysisConfig;
 use super::results::{DcOpResult, SimulationResult, WaveformData};
 use super::runner::SimulationError;
@@ -33,6 +36,21 @@ use super::runner::SimulationError;
 pub struct EngineBridge {
     /// Core engine instance
     engine: rspice_core::Engine,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OutputVoltageSpec {
+    pos: usize,
+    neg: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum OutputSpec {
+    Voltage(OutputVoltageSpec),
+    BranchCurrent {
+        branch_ordinal: usize, // 1-based branch ordinal from CircuitData
+        branch_name: String,
+    },
 }
 
 impl Default for EngineBridge {
@@ -232,15 +250,6 @@ impl EngineBridge {
             .max_timestep
             .unwrap_or(config.step_time * 10.0)
             .max(1e-18)
-    }
-
-    #[inline]
-    fn ac_voltage_index(node_index: usize) -> Option<usize> {
-        if node_index == 0 {
-            None
-        } else {
-            Some(node_index - 1)
-        }
     }
 
     /// Run transient analysis
@@ -667,7 +676,6 @@ impl EngineBridge {
         config: &super::config::SensitivityConfig,
     ) -> Result<SimulationResult, SimulationError> {
         let engine = self.engine_for_netlist(netlist);
-        use std::collections::HashMap;
 
         let ac_frequency = if config.ac_mode {
             let freq = config.frequency.unwrap_or(1.0);
@@ -685,52 +693,37 @@ impl EngineBridge {
             None
         };
 
-        // Parse output variable to get node index
-        let output_node = self.parse_output_variable(&config.output_var, netlist);
-
-        if output_node == 0 {
-            return Err(SimulationError::InvalidConfig(format!(
-                "Invalid output variable '{}' for sensitivity analysis",
-                config.output_var
-            )));
-        }
-
-        let nominal_value = if let Some(freq) = ac_frequency {
-            let ac_results = engine
-                .run_ac(netlist, &[freq])
-                .map_err(|e| self.translate_error(e))?;
-            let point = ac_results.first().ok_or_else(|| {
-                SimulationError::InvalidConfig("AC analysis produced no data".to_string())
-            })?;
-            let ac_output_idx = Self::ac_voltage_index(output_node).ok_or_else(|| {
+        let dc_result = engine
+            .run_dc_op(netlist)
+            .map_err(|e| self.translate_error(e))?;
+        let circuit = engine
+            .build_circuit(netlist)
+            .map_err(|e| self.translate_error(e))?;
+        let output_spec = self
+            .parse_output_spec(&config.output_var, &dc_result.node_names, &circuit)
+            .ok_or_else(|| {
                 SimulationError::InvalidConfig(format!(
-                    "Invalid output node '{}' for AC sensitivity analysis",
+                    "Sensitivity output '{}' could not be resolved to a node or branch",
                     config.output_var
                 ))
             })?;
-            let output = point.voltages.get(ac_output_idx).ok_or_else(|| {
-                SimulationError::InvalidConfig(format!(
-                    "Output node '{}' not found in AC result (dc index {}, ac index {}, available {})",
-                    config.output_var,
-                    output_node,
-                    ac_output_idx,
-                    point.voltages.len()
-                ))
-            })?;
-            output.norm()
+        if let OutputSpec::Voltage(vspec) = &output_spec {
+            if vspec.pos == 0 && vspec.neg.is_none() {
+                return Err(SimulationError::InvalidConfig(
+                    "Sensitivity output node cannot be ground".to_string(),
+                ));
+            }
+        }
+
+        let nominal_value = if let Some(freq) = ac_frequency {
+            self.run_ac_output_at_frequency(&engine, netlist, &output_spec, freq)?
+                .norm()
         } else {
-            let nominal_result = engine
-                .run_dc_op(netlist)
-                .map_err(|e| self.translate_error(e))?;
-            nominal_result
-                .node_voltages
-                .get(output_node)
-                .copied()
-                .unwrap_or(0.0)
+            self.dc_output_value(&dc_result, &output_spec)?
         };
 
-        // Extract parameters from netlist elements for sensitivity
-        let parameters = self.extract_parameters(netlist);
+        let mut parameters: Vec<(String, f64)> = self.extract_parameters(netlist).into_iter().collect();
+        parameters.sort_by(|a, b| a.0.cmp(&b.0));
 
         if parameters.is_empty() {
             // No parameters found - return empty result
@@ -746,8 +739,8 @@ impl EngineBridge {
         let mut normalized: HashMap<String, f64> = HashMap::new();
 
         // For each parameter, compute sensitivity using central differences
-        for (param_name, param_value) in &parameters {
-            if *param_value == 0.0 {
+        for (param_name, param_value) in parameters {
+            if !param_value.is_finite() || param_value == 0.0 {
                 continue; // Skip zero-valued parameters
             }
 
@@ -755,16 +748,16 @@ impl EngineBridge {
             let sensitivity = if let Some(freq) = ac_frequency {
                 let up = self.run_perturbed_ac_output(
                     netlist,
-                    output_node,
-                    param_name,
-                    *param_value + delta,
+                    &output_spec,
+                    &param_name,
+                    param_value + delta,
                     freq,
                 );
                 let down = self.run_perturbed_ac_output(
                     netlist,
-                    output_node,
-                    param_name,
-                    *param_value - delta,
+                    &output_spec,
+                    &param_name,
+                    param_value - delta,
                     freq,
                 );
                 if let (Some(v_up), Some(v_down)) = (up, down) {
@@ -773,21 +766,38 @@ impl EngineBridge {
                     continue;
                 }
             } else {
-                let perturbed_up_result =
-                    self.run_perturbed_dc_op(netlist, param_name, *param_value + delta);
-                let perturbed_down_result =
-                    self.run_perturbed_dc_op(netlist, param_name, *param_value - delta);
-
-                if let (Some(v_up), Some(v_down)) = (perturbed_up_result, perturbed_down_result) {
-                    let v_up_val = v_up.node_voltages.get(output_node).copied().unwrap_or(0.0);
-                    let v_down_val = v_down
-                        .node_voltages
-                        .get(output_node)
-                        .copied()
-                        .unwrap_or(0.0);
-                    (v_up_val - v_down_val) / (2.0 * delta)
-                } else {
-                    continue;
+                match &output_spec {
+                    OutputSpec::Voltage(vspec) => {
+                        match self.run_dc_output_sensitivity(
+                            &engine,
+                            netlist,
+                            *vspec,
+                            &param_name,
+                            param_value,
+                        ) {
+                            Ok(raw) => raw,
+                            Err(_) => continue,
+                        }
+                    }
+                    OutputSpec::BranchCurrent { .. } => {
+                        let up = self.run_perturbed_dc_output(
+                            netlist,
+                            &output_spec,
+                            &param_name,
+                            param_value + delta,
+                        );
+                        let down = self.run_perturbed_dc_output(
+                            netlist,
+                            &output_spec,
+                            &param_name,
+                            param_value - delta,
+                        );
+                        if let (Some(v_up), Some(v_down)) = (up, down) {
+                            (v_up - v_down) / (2.0 * delta)
+                        } else {
+                            continue;
+                        }
+                    }
                 }
             };
 
@@ -822,28 +832,236 @@ impl EngineBridge {
         params
     }
 
-    /// Run DC op with a perturbed parameter value
-    ///
-    /// Returns None if the simulation fails (e.g., convergence issues)
-    fn run_perturbed_dc_op(
+    fn parse_output_spec(
+        &self,
+        output_var: &str,
+        node_names: &[String],
+        circuit: &rspice_core::CircuitData,
+    ) -> Option<OutputSpec> {
+        let trimmed = output_var.trim();
+        if trimmed.len() > 3 && trimmed[..2].eq_ignore_ascii_case("I(") && trimmed.ends_with(')') {
+            let branch_name = trimmed[2..trimmed.len() - 1].trim();
+            if branch_name.is_empty() {
+                return None;
+            }
+            let branch_ordinal = circuit.get_branch_by_name(branch_name)? as usize;
+            return Some(OutputSpec::BranchCurrent {
+                branch_ordinal,
+                branch_name: branch_name.to_string(),
+            });
+        }
+
+        self.parse_output_voltage_spec(trimmed, node_names)
+            .map(OutputSpec::Voltage)
+    }
+
+    fn parse_output_voltage_spec(
+        &self,
+        output_var: &str,
+        node_names: &[String],
+    ) -> Option<OutputVoltageSpec> {
+        let trimmed = output_var.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        if trimmed.len() > 3 && trimmed[..2].eq_ignore_ascii_case("V(") && trimmed.ends_with(')') {
+            let inner = trimmed[2..trimmed.len() - 1].trim();
+            if inner.is_empty() {
+                return None;
+            }
+
+            if let Some((pos, neg)) = inner.split_once(',') {
+                let pos_idx = self.resolve_node_or_ground_index(pos.trim(), node_names)?;
+                let neg_idx = self.resolve_node_or_ground_index(neg.trim(), node_names)?;
+                return Some(OutputVoltageSpec {
+                    pos: pos_idx,
+                    neg: Some(neg_idx),
+                });
+            }
+
+            let pos_idx = self.resolve_node_or_ground_index(inner, node_names)?;
+            return Some(OutputVoltageSpec {
+                pos: pos_idx,
+                neg: None,
+            });
+        }
+
+        if trimmed.len() > 3 && trimmed[..2].eq_ignore_ascii_case("I(") && trimmed.ends_with(')') {
+            return None;
+        }
+
+        let pos_idx = self.resolve_node_or_ground_index(trimmed, node_names)?;
+        Some(OutputVoltageSpec {
+            pos: pos_idx,
+            neg: None,
+        })
+    }
+
+    fn resolve_node_or_ground_index(&self, name: &str, node_names: &[String]) -> Option<usize> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        let lower = trimmed.to_ascii_lowercase();
+        if lower == "0" || lower == "gnd" || lower == "ground" {
+            return Some(0);
+        }
+
+        if let Ok(idx) = trimmed.parse::<usize>() {
+            return Some(idx);
+        }
+
+        let upper = trimmed.to_ascii_uppercase();
+        node_names
+            .iter()
+            .position(|node_name| node_name.to_ascii_uppercase() == upper)
+    }
+
+    fn dc_output_value(
+        &self,
+        dc_result: &rspice_core::SimulationResult,
+        output_spec: &OutputSpec,
+    ) -> Result<f64, SimulationError> {
+        match output_spec {
+            OutputSpec::Voltage(vspec) => {
+                let v_pos = if vspec.pos == 0 {
+                    0.0
+                } else {
+                    dc_result.node_voltages.get(vspec.pos).copied().unwrap_or(0.0)
+                };
+                let v_neg = match vspec.neg {
+                    Some(0) => 0.0,
+                    Some(idx) => dc_result.node_voltages.get(idx).copied().unwrap_or(0.0),
+                    None => 0.0,
+                };
+                Ok(v_pos - v_neg)
+            }
+            OutputSpec::BranchCurrent {
+                branch_ordinal,
+                branch_name,
+            } => {
+                let idx = branch_ordinal.saturating_sub(1);
+                dc_result
+                    .branch_currents
+                    .get(idx)
+                    .copied()
+                    .ok_or_else(|| {
+                        SimulationError::InvalidConfig(format!(
+                            "Branch current for '{}' is unavailable (index {})",
+                            branch_name, idx
+                        ))
+                    })
+            }
+        }
+    }
+
+    fn ac_output_value(
+        &self,
+        ac_result: &AcResult,
+        output_spec: &OutputSpec,
+    ) -> Result<Complex64, SimulationError> {
+        match output_spec {
+            OutputSpec::Voltage(vspec) => {
+                let v_pos = if vspec.pos == 0 {
+                    Complex64::new(0.0, 0.0)
+                } else {
+                    ac_result
+                        .voltages
+                        .get(vspec.pos.saturating_sub(1))
+                        .copied()
+                        .unwrap_or_else(|| Complex64::new(0.0, 0.0))
+                };
+                let v_neg = match vspec.neg {
+                    Some(0) => Complex64::new(0.0, 0.0),
+                    Some(idx) => ac_result
+                        .voltages
+                        .get(idx.saturating_sub(1))
+                        .copied()
+                        .unwrap_or_else(|| Complex64::new(0.0, 0.0)),
+                    None => Complex64::new(0.0, 0.0),
+                };
+                Ok(v_pos - v_neg)
+            }
+            OutputSpec::BranchCurrent {
+                branch_ordinal,
+                branch_name,
+            } => {
+                let idx = branch_ordinal.saturating_sub(1);
+                ac_result.currents.get(idx).copied().ok_or_else(|| {
+                    SimulationError::InvalidConfig(format!(
+                        "AC branch current for '{}' is unavailable (index {})",
+                        branch_name, idx
+                    ))
+                })
+            }
+        }
+    }
+
+    fn run_ac_output_at_frequency(
+        &self,
+        engine: &rspice_core::Engine,
+        netlist: &rspice_core::Netlist,
+        output_spec: &OutputSpec,
+        frequency: f64,
+    ) -> Result<Complex64, SimulationError> {
+        let ac_results = engine
+            .run_ac(netlist, &[frequency])
+            .map_err(|e| self.translate_error(e))?;
+        let point = ac_results.first().ok_or_else(|| {
+            SimulationError::InvalidConfig(format!("AC analysis produced no data at {} Hz", frequency))
+        })?;
+        self.ac_output_value(point, output_spec)
+    }
+
+    fn run_dc_output_sensitivity(
+        &self,
+        engine: &rspice_core::Engine,
+        netlist: &rspice_core::Netlist,
+        output_spec: OutputVoltageSpec,
+        param_name: &str,
+        param_value: f64,
+    ) -> Result<f64, SimulationError> {
+        let pos_sensitivity = if output_spec.pos == 0 {
+            0.0
+        } else {
+            engine
+                .run_sensitivity(netlist, output_spec.pos, param_name, param_value, None)
+                .map_err(|e| self.translate_error(e))?
+        };
+
+        let neg_sensitivity = match output_spec.neg {
+            Some(0) | None => 0.0,
+            Some(idx) => engine
+                .run_sensitivity(netlist, idx, param_name, param_value, None)
+                .map_err(|e| self.translate_error(e))?,
+        };
+
+        Ok(pos_sensitivity - neg_sensitivity)
+    }
+
+    fn run_perturbed_dc_output(
         &self,
         netlist: &rspice_core::Netlist,
+        output_spec: &OutputSpec,
         param_name: &str,
         new_value: f64,
-    ) -> Option<rspice_core::SimulationResult> {
+    ) -> Option<f64> {
         if !new_value.is_finite() {
             return None;
         }
         let mut perturbed = netlist.clone();
         perturbed.params.set(param_name, new_value);
         let engine = self.engine_for_netlist(&perturbed);
-        engine.run_dc_op(&perturbed).ok()
+        let dc_result = engine.run_dc_op(&perturbed).ok()?;
+        self.dc_output_value(&dc_result, output_spec).ok()
     }
 
     fn run_perturbed_ac_output(
         &self,
         netlist: &rspice_core::Netlist,
-        output_node: usize,
+        output_spec: &OutputSpec,
         param_name: &str,
         new_value: f64,
         frequency: f64,
@@ -854,30 +1072,10 @@ impl EngineBridge {
         let mut perturbed = netlist.clone();
         perturbed.params.set(param_name, new_value);
         let engine = self.engine_for_netlist(&perturbed);
-        let ac = engine.run_ac(&perturbed, &[frequency]).ok()?;
-        let point = ac.first()?;
-        let ac_output_idx = Self::ac_voltage_index(output_node)?;
-        let output = point.voltages.get(ac_output_idx)?;
-        Some(output.norm())
-    }
-
-    /// Parse output variable string (e.g., "V(out)" or "I(R1)") to node index
-    fn parse_output_variable(&self, var: &str, netlist: &rspice_core::Netlist) -> usize {
-        let trimmed = var.trim();
-
-        // V(node) format
-        if trimmed.to_uppercase().starts_with("V(") && trimmed.ends_with(')') {
-            let node_name = &trimmed[2..trimmed.len() - 1];
-            return self.resolve_node_index(node_name, netlist);
-        }
-
-        // Numeric index
-        if let Ok(idx) = trimmed.parse::<usize>() {
-            return idx;
-        }
-
-        // Try as node name directly
-        self.resolve_node_index(trimmed, netlist)
+        let value = self
+            .run_ac_output_at_frequency(&engine, &perturbed, output_spec, frequency)
+            .ok()?;
+        Some(value.norm())
     }
 
     //-------------------------------------------------------------------------
