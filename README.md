@@ -20,7 +20,22 @@
 
 </div>
 
+
 ---
+
+## Table of Contents
+- [Overview](#overview)
+- [Why RSpice?](#why-rspice)
+- [Capabilities](#capabilities)
+- [RSpice Studio](#rspice-studio)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Roadmap](#roadmap)
+- [Community](#community)
+- [License](#license)
+
+---
+
 
 ## Overview
 
@@ -37,7 +52,7 @@ Bridging the gap between academic tools and commercial EDA, RSpice features a **
 
 ### 🎯 **Precision & Reliability**
 *   **Adaptive Stepping**: Advanced Gear/Trapezoidal integration with dynamic local truncation error (LTE) control.
-*   **Robust Convergence**: Homotopy methods (Gmin, Source Stepping) and pseudo-transient continuation for difficult operating points.
+*   **Robust Convergence**: Tiered solver strategy featuring **Enhanced Newton-Raphson**, **Arc-Length Continuation**, and Homotopy methods (Gmin, Source Stepping) for absolute convergence stability.
 *   **Measurement Engine**: Built-in support for complex `.MEAS` statements including `RISE`, `FALL`, `DELAY`, `INTEG`, `RMS`, and `FIND...WHEN` conditional extractions.
 
 ### 🔌 **Extensible Architecture**
@@ -57,11 +72,13 @@ Bridging the gap between academic tools and commercial EDA, RSpice features a **
 | | **Envelope** | Multi-rate envelope transient for modulated signals |
 | **Freq** | **AC Small-Signal** | Frequency domain response |
 | | **Harmonic Balance** | Nonlinear steady-state solution for RF circuits |
+| | **PAC** | Periodic AC small-signal analysis |
 | | **PNoise** | Phase noise and cyclostationary noise analysis |
+| | **PXF** | Periodic Transfer Function analysis |
 | | **Noise** | Thermal, Shot, and Flicker (1/f) noise summary |
 | | **S-Parameter** | N-port network scattering parameters |
 | | **STB** | Loop gain and stability analysis |
-| | **Transfer Function** | Transfer function computation |
+| | **XF (Transfer)** | Small-signal transfer function computation |
 | **Param** | **DC Sweep** | Nested voltage/current/parameter sweeps |
 | | **Temperature** | Temperature sweep analysis |
 | | **Monte Carlo** | Statistical yield verification with histogram & 3-sigma |
@@ -89,7 +106,7 @@ The visual interface is designed for the modern engineer:
 
 *   **GPU Rendering**: Powered by **WebGPU** and **`wgpu`**, rendering massive waveforms and complex schematics at a fluid 60FPS.
 *   **Cross-Probing**: Interactive linking between schematic nodes and waveform traces.
-*   **Virtuoso-Style Hierarchy**: Professional Library/Cell/View management for complex design reuse.
+*   **Virtuoso-Style Hierarchy**: Full **Library/Cell/View (LCV)** commercial registry for hierarchical design management and PDK integration.
 *   **Format Support**: Import/Export standard formats including Touchstone (`.s2p`), CSV, and **LTspice® RAW**.
 
 ---
@@ -106,9 +123,31 @@ RSpice is optimized for modern instruction sets. For maximum performance:
 git clone https://github.com/rspice/rspice.git
 cd rspice
 
+```bash
 # Build with native CPU optimizations (AVX/SSE)
 RUSTFLAGS="-C target-cpu=native" cargo build --release
 ```
+
+## Quick Start
+
+Create a simple netlist `rc_circuit.sp`:
+
+```spice
+* Simple RC Circuit
+V1 1 0 PULSE(0 5 0 1n 1n 1u 2u)
+R1 1 2 1k
+C1 2 0 1n
+
+.TRAN 10n 5u
+.MEAS TRAN risetime TRIG V(2) VAL=0.5 RISE=1 TARG V(2) VAL=4.5 RISE=1
+```
+
+Run the simulation:
+
+```bash
+cargo run -p rspice-cli --release -- run rc_circuit.sp
+```
+
 
 ## Usage
 
@@ -160,6 +199,18 @@ We are consistently pushing the boundaries of open-source EDA:
 
 *   [x] **Advanced RF**: Harmonic Balance, PSS, & PNoise.
 *   [x] **Measurement Engine**: Automated extraction of circuit metrics.
+*   [ ] **Heterogeneous Simulation**: Mixed-signal co-simulation with external digital solvers.
+*   [ ] **Python Bindings**: PyO3-based scripting interface for data post-processing.
+
+## Community
+
+Join the revolution in open analog verification:
+
+*   **Discord**: [Join the RSpice Server](https://discord.gg/rspice) - Chat with the developers.
+*   **Discussion**: [GitHub Discussions](https://github.com/rspice/rspice/discussions) - Q&A and feature requests.
+*   **Contribute**: Read our [Contribution Guide](CONTRIBUTING.md) to get started.
+
+
 
 ## License
 
