@@ -36,11 +36,15 @@ pub mod solver;
 pub mod testing;
 pub mod xspice;
 
+/// Abort signal for cancelling long-running simulations
+pub mod abort_signal;
+
 /// SIMD-accelerated operations (optional, requires `simd` feature)
 #[cfg(feature = "simd")]
 pub mod simd;
 
 // Re-export primary types for convenience
+pub use abort_signal::{AbortSignal, AtomicAbort, NoAbort};
 pub use analysis::{AcAnalysis, DcAnalysis, MeasureEngine, TransientAnalysis};
 pub use circuit::{Circuit, CircuitData, Node, NodeId};
 pub use device::{Device, DeviceModel};
