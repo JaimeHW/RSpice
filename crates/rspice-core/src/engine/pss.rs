@@ -87,6 +87,8 @@ pub struct PssAnalysisResult {
     pub final_residual: Value,
     /// Detected/refined period
     pub period: Value,
+    /// Monodromy matrix (state transition over one period)
+    pub monodromy: Vec<Vec<Value>>,
     /// Floquet multipliers (for stability analysis)
     pub floquet_multipliers: Vec<num_complex::Complex64>,
     /// Whether circuit is stable (all multipliers inside unit circle)
@@ -239,6 +241,7 @@ impl Engine {
             iterations: iteration,
             final_residual: shooting_state.residual_norm(),
             period: detected_period,
+            monodromy,
             floquet_multipliers,
             is_stable,
         })
@@ -1203,6 +1206,52 @@ mod tests {
 
             // For a stable passive circuit, all multipliers should be inside unit circle
             assert!(result.is_stable, "Passive RC should be stable");
+        }
+    }
+
+    #[test]
+    fn test_run_pss_returns_square_finite_monodromy_matrix() {
+        use crate::Netlist;
+
+        let netlist_str = r#"
+            * RC for monodromy test
+            V1 in 0 DC 1
+            R1 in out 1k
+            C1 out 0 1n
+            .END
+        "#;
+
+        let netlist = Netlist::parse(netlist_str).expect("Parse failed");
+        let engine = Engine::default();
+
+        let config = PssConfig::new(1e6)
+            .with_tstab(1e-6)
+            .with_tolerance(1e-3)
+            .with_max_iterations(10)
+            .with_points_per_period(32);
+
+        if let Ok(result) = engine.run_pss(&netlist, config) {
+            assert!(
+                !result.monodromy.is_empty(),
+                "Monodromy matrix must be present for PSTB post-processing"
+            );
+            assert_eq!(
+                result.monodromy.len(),
+                result.floquet_multipliers.len(),
+                "Monodromy dimension should align with multiplier count"
+            );
+
+            for row in &result.monodromy {
+                assert_eq!(
+                    row.len(),
+                    result.monodromy.len(),
+                    "Monodromy matrix must be square"
+                );
+                assert!(
+                    row.iter().all(|value| value.is_finite()),
+                    "Monodromy entries must be finite"
+                );
+            }
         }
     }
 
