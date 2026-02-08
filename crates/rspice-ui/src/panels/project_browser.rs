@@ -212,13 +212,22 @@ fn cell_name_to_component_type(cell_name: &str) -> Option<ComponentType> {
         "Capacitor" => Some(ComponentType::Capacitor),
         "Inductor" => Some(ComponentType::Inductor),
         "Ground" => Some(ComponentType::Ground),
-        // Sources
+        // Voltage Sources
         "VSource DC" => Some(ComponentType::VoltageSource),
         "VSource AC" => Some(ComponentType::VoltageSourceAc),
         "VSource Pulse" => Some(ComponentType::VoltageSourcePulse),
         "VSource Sin" => Some(ComponentType::VoltageSourceSin),
+        "VSource PWL" => Some(ComponentType::VoltageSourcePwl),
+        "VSource Exp" => Some(ComponentType::VoltageSourceExp),
+        "VSource SFFM" => Some(ComponentType::VoltageSourceSffm),
+        // Current Sources
         "ISource DC" => Some(ComponentType::CurrentSource),
         "ISource AC" => Some(ComponentType::CurrentSourceAc),
+        "ISource Pulse" => Some(ComponentType::CurrentSourcePulse),
+        "ISource Sin" => Some(ComponentType::CurrentSourceSin),
+        "ISource PWL" => Some(ComponentType::CurrentSourcePwl),
+        "ISource Exp" => Some(ComponentType::CurrentSourceExp),
+        "ISource Noise" => Some(ComponentType::CurrentSourceNoise),
         // Controlled Sources
         "VCVS" => Some(ComponentType::Vcvs),
         "VCCS" => Some(ComponentType::Vccs),

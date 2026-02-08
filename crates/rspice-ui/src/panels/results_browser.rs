@@ -65,7 +65,7 @@ pub fn render_results_browser(ui: &mut Ui, state: &mut AppState) {
         .auto_shrink([false, false])
         .show(ui, |ui| {
             // We need to collect indices first to avoid borrow issues
-            let run_count = state.simulation.runs.len();
+            let _run_count = state.simulation.runs.len();
             let active_run = state.simulation.active_run_idx;
             let active_analysis = state.simulation.active_analysis_idx;
 
@@ -260,7 +260,7 @@ fn render_analysis(
     ui: &mut Ui,
     analysis: &AnalysisDisplayData,
     is_active: bool,
-    state: &AppState,
+    _state: &AppState,
 ) -> AnalysisRenderResponse {
     let mut response = AnalysisRenderResponse {
         selected: false,
@@ -331,12 +331,12 @@ fn analysis_type_icon(analysis_type: AnalysisType) -> &'static str {
 /// Map analysis type to appropriate bottom panel tab
 fn analysis_type_to_tab(analysis_type: AnalysisType) -> BottomPanelTab {
     match analysis_type {
-        AnalysisType::DcOp => BottomPanelTab::Console, // TODO: Add OperatingPoint tab
+        AnalysisType::DcOp => BottomPanelTab::Console,
         AnalysisType::DcSweep => BottomPanelTab::Waveform,
-        AnalysisType::Ac => BottomPanelTab::Waveform, // TODO: Add Bode tab
+        AnalysisType::Ac => BottomPanelTab::Waveform, // AC uses waveform viewer for now
         AnalysisType::Transient => BottomPanelTab::Waveform,
         AnalysisType::Noise => BottomPanelTab::Waveform,
-        AnalysisType::PoleZero => BottomPanelTab::Waveform, // TODO: Add PoleZero tab
+        AnalysisType::PoleZero => BottomPanelTab::Waveform, // PoleZero uses waveform viewer for now
         AnalysisType::Sensitivity => BottomPanelTab::Waveform,
         AnalysisType::HarmonicBalance => BottomPanelTab::Waveform,
         AnalysisType::Pss => BottomPanelTab::Waveform,
