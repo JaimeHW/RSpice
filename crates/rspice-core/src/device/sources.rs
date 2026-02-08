@@ -1,7 +1,7 @@
 //! Voltage and current source models
 
-use crate::{circuit::NodeId, Value};
 use super::traits::{LinearDevice, MatrixStamper};
+use crate::{Value, circuit::NodeId};
 
 /// Independent voltage source
 #[derive(Debug, Clone)]
@@ -76,16 +76,33 @@ impl VoltageSource {
     pub fn voltage_at(&self, time: Value) -> Value {
         match &self.transient_fn {
             None => self.dc_value,
-            Some(TransientSource::Sin { offset, amplitude, frequency, delay, damping, phase }) => {
+            Some(TransientSource::Sin {
+                offset,
+                amplitude,
+                frequency,
+                delay,
+                damping,
+                phase,
+            }) => {
                 if time < *delay {
                     *offset
                 } else {
                     let t = time - delay;
-                    offset + amplitude * (-damping * t).exp() 
-                        * (2.0 * std::f64::consts::PI * frequency * t + phase).sin()
+                    offset
+                        + amplitude
+                            * (-damping * t).exp()
+                            * (2.0 * std::f64::consts::PI * frequency * t + phase).sin()
                 }
             }
-            Some(TransientSource::Pulse { v1, v2, delay, rise, fall, width, period }) => {
+            Some(TransientSource::Pulse {
+                v1,
+                v2,
+                delay,
+                rise,
+                fall,
+                width,
+                period,
+            }) => {
                 if time < *delay {
                     return *v1;
                 }
@@ -120,7 +137,14 @@ impl VoltageSource {
                 }
                 self.dc_value
             }
-            Some(TransientSource::Exp { v1, v2, td1, tau1, td2, tau2 }) => {
+            Some(TransientSource::Exp {
+                v1,
+                v2,
+                td1,
+                tau1,
+                td2,
+                tau2,
+            }) => {
                 if time < *td1 {
                     *v1
                 } else if time < *td2 {
@@ -135,22 +159,20 @@ impl VoltageSource {
 }
 
 impl LinearDevice for VoltageSource {
-    fn stamp_linear(
-        &self,
-        matrix: &mut impl MatrixStamper,
-        _rhs: &mut [Value],
-    ) {
-        let branch = self.branch_index.expect("Branch index must be set for voltage source");
-        
+    fn stamp_linear(&self, matrix: &mut impl MatrixStamper, _rhs: &mut [Value]) {
+        let branch = self
+            .branch_index
+            .expect("Branch index must be set for voltage source");
+
         // MNA stamp for ideal voltage source
         // Adds extra equation: V(n+) - V(n-) = Vs
         // Adds branch current variable
-        
+
         matrix.stamp(branch, self.node_pos, 1.0);
         matrix.stamp(branch, self.node_neg, -1.0);
         matrix.stamp(self.node_pos, branch, 1.0);
         matrix.stamp(self.node_neg, branch, -1.0);
-        
+
         matrix.stamp_rhs(branch, self.dc_value);
     }
 }
@@ -189,13 +211,22 @@ impl CurrentSource {
         // Similar implementation to VoltageSource::voltage_at
         match &self.transient_fn {
             None => self.dc_value,
-            Some(TransientSource::Sin { offset, amplitude, frequency, delay, damping, phase }) => {
+            Some(TransientSource::Sin {
+                offset,
+                amplitude,
+                frequency,
+                delay,
+                damping,
+                phase,
+            }) => {
                 if time < *delay {
                     *offset
                 } else {
                     let t = time - delay;
-                    offset + amplitude * (-damping * t).exp() 
-                        * (2.0 * std::f64::consts::PI * frequency * t + phase).sin()
+                    offset
+                        + amplitude
+                            * (-damping * t).exp()
+                            * (2.0 * std::f64::consts::PI * frequency * t + phase).sin()
                 }
             }
             // Other transient sources follow same pattern as voltage source
@@ -205,11 +236,7 @@ impl CurrentSource {
 }
 
 impl LinearDevice for CurrentSource {
-    fn stamp_linear(
-        &self,
-        matrix: &mut impl MatrixStamper,
-        _rhs: &mut [Value],
-    ) {
+    fn stamp_linear(&self, matrix: &mut impl MatrixStamper, _rhs: &mut [Value]) {
         // Current source stamps directly into RHS
         // Current flows from node_pos to node_neg
         matrix.stamp_rhs(self.node_pos, -self.dc_value);
@@ -235,19 +262,19 @@ mod tests {
         vs.transient_fn = Some(TransientSource::Sin {
             offset: 0.0,
             amplitude: 1.0,
-            frequency: 1000.0,  // 1kHz
+            frequency: 1000.0, // 1kHz
             delay: 0.0,
             damping: 0.0,
             phase: 0.0,
         });
-        
+
         // At t=0, sin(0) = 0
         assert!(vs.voltage_at(0.0).abs() < 0.01);
-        
+
         // At t=0.25ms (quarter period), sin(π/2) = 1
         let v = vs.voltage_at(0.00025);
         assert!((v - 1.0).abs() < 0.01);
-        
+
         // At t=0.5ms (half period), sin(π) = 0
         let v = vs.voltage_at(0.0005);
         assert!(v.abs() < 0.01);
@@ -260,18 +287,18 @@ mod tests {
             offset: 2.5,
             amplitude: 1.0,
             frequency: 1000.0,
-            delay: 1e-3,  // 1ms delay
+            delay: 1e-3, // 1ms delay
             damping: 0.0,
             phase: 0.0,
         });
-        
+
         // Before delay, should be offset
         assert_eq!(vs.voltage_at(0.0), 2.5);
         assert_eq!(vs.voltage_at(0.5e-3), 2.5);
-        
+
         // After delay, should oscillate around offset
-        let v = vs.voltage_at(1.25e-3);  // 0.25ms after delay
-        assert!((v - 3.5).abs() < 0.1);  // offset + amplitude
+        let v = vs.voltage_at(1.25e-3); // 0.25ms after delay
+        assert!((v - 3.5).abs() < 0.1); // offset + amplitude
     }
 
     #[test]
@@ -281,18 +308,18 @@ mod tests {
             v1: 0.0,
             v2: 5.0,
             delay: 0.0,
-            rise: 1e-9,   // 1ns rise
-            fall: 1e-9,   // 1ns fall
-            width: 10e-6, // 10µs width
+            rise: 1e-9,    // 1ns rise
+            fall: 1e-9,    // 1ns fall
+            width: 10e-6,  // 10µs width
             period: 20e-6, // 20µs period (50% duty)
         });
-        
+
         // At start, should be V1
         assert!(vs.voltage_at(0.0).abs() < 0.01);
-        
+
         // During pulse width, should be V2
         assert!((vs.voltage_at(5e-6) - 5.0).abs() < 0.01);
-        
+
         // After fall, should be V1
         assert!(vs.voltage_at(15e-6).abs() < 0.01);
     }
@@ -303,17 +330,17 @@ mod tests {
         vs.transient_fn = Some(TransientSource::Pulse {
             v1: 0.0,
             v2: 3.3,
-            delay: 1e-6,  // 1µs delay
+            delay: 1e-6, // 1µs delay
             rise: 10e-9,
             fall: 10e-9,
             width: 5e-6,
             period: 10e-6,
         });
-        
+
         // Before delay
         assert_eq!(vs.voltage_at(0.0), 0.0);
         assert_eq!(vs.voltage_at(0.5e-6), 0.0);
-        
+
         // After delay
         assert!((vs.voltage_at(3e-6) - 3.3).abs() < 0.01);
     }
@@ -322,23 +349,18 @@ mod tests {
     fn test_pwl_source() {
         let mut vs = VoltageSource::new_dc("V1".to_string(), 1, 0, 0.0);
         vs.transient_fn = Some(TransientSource::Pwl {
-            points: vec![
-                (0.0, 0.0),
-                (1e-3, 1.0),
-                (2e-3, 1.0),
-                (3e-3, 0.0),
-            ],
+            points: vec![(0.0, 0.0), (1e-3, 1.0), (2e-3, 1.0), (3e-3, 0.0)],
         });
-        
+
         // At defined points
         assert!(vs.voltage_at(0.0).abs() < 0.01);
         assert!((vs.voltage_at(1e-3) - 1.0).abs() < 0.01);
         assert!((vs.voltage_at(2e-3) - 1.0).abs() < 0.01);
-        
+
         // Interpolated
         let v = vs.voltage_at(0.5e-3);
         assert!((v - 0.5).abs() < 0.01);
-        
+
         // After last point
         assert!(vs.voltage_at(5e-3).abs() < 0.01);
     }
@@ -350,14 +372,14 @@ mod tests {
             v1: 0.0,
             v2: 5.0,
             td1: 0.0,
-            tau1: 1e-3,   // 1ms rise time constant
-            td2: 10e-3,   // 10ms before decay starts
-            tau2: 2e-3,   // 2ms decay time constant
+            tau1: 1e-3, // 1ms rise time constant
+            td2: 10e-3, // 10ms before decay starts
+            tau2: 2e-3, // 2ms decay time constant
         });
-        
+
         // At t=0, should be v1
         assert_eq!(vs.voltage_at(0.0), 0.0);
-        
+
         // At ~5*tau1 = 5ms, should be close to v2
         let v = vs.voltage_at(5e-3);
         assert!((v - 5.0).abs() < 0.1);
@@ -381,7 +403,7 @@ mod tests {
             damping: 0.0,
             phase: 0.0,
         });
-        
+
         // At t=0, should be offset (sin(0) = 0)
         assert!((cs.current_at(0.0) - 1e-3).abs() < 1e-6);
     }
