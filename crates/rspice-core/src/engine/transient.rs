@@ -475,7 +475,8 @@ impl Engine {
         let practical_min = (max_step / 1000.0).max(self.config.min_timestep);
         let mut timestep = TimestepController::new(initial_step, practical_min, max_step);
         let mut breakpoints = BreakpointManager::new();
-        let mut lte_estimator = LteEstimator::new(self.config.tolerance);
+        let mut lte_estimator =
+            LteEstimator::with_tolerances(self.voltage_reltol(), self.voltage_abstol());
 
         // Initialize TrapGear controller for automatic method switching
         let mut trapgear = TrapGearController::new();

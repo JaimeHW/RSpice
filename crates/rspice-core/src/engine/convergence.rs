@@ -56,12 +56,12 @@ impl Engine {
     }
 
     #[inline]
-    fn voltage_reltol(&self) -> Value {
+    pub(crate) fn voltage_reltol(&self) -> Value {
         Self::sanitize_positive_tolerance(self.config.convergence_config.voltage_reltol, 1e-3)
     }
 
     #[inline]
-    fn voltage_abstol(&self) -> Value {
+    pub(crate) fn voltage_abstol(&self) -> Value {
         let configured = self.config.convergence_config.voltage_abstol;
         if configured.is_finite() && configured > 0.0 {
             configured

@@ -581,7 +581,8 @@ impl Engine {
         let mut timestep =
             TimestepController::new(initial_step, self.config.min_timestep, max_step);
         let mut breakpoints = BreakpointManager::new();
-        let mut lte_estimator = LteEstimator::new(self.config.tolerance);
+        let mut lte_estimator =
+            LteEstimator::with_tolerances(self.voltage_reltol(), self.voltage_abstol());
         let mut trapgear = TrapGearController::new();
 
         let node_names = circuit.node_names_sorted();

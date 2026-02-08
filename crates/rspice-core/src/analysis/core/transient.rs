@@ -325,8 +325,10 @@ pub struct LteEstimator {
     prev_dt: Value,
     /// Timestep before previous
     prev_prev_dt: Value,
-    /// LTE tolerance
-    tolerance: Value,
+    /// Relative LTE tolerance.
+    reltol: Value,
+    /// Absolute LTE tolerance floor for state variables.
+    abstol: Value,
     /// Number of valid history entries
     history_count: usize,
     /// Current integration method (for order-aware scaling)
@@ -334,18 +336,47 @@ pub struct LteEstimator {
 }
 
 impl LteEstimator {
-    /// Create a new LTE estimator with given tolerance
+    /// Create a new LTE estimator with legacy single-tolerance semantics.
+    ///
+    /// `tolerance` is used for both relative and absolute LTE control.
     pub fn new(tolerance: Value) -> Self {
+        Self::with_tolerances(tolerance, tolerance)
+    }
+
+    /// Create a new LTE estimator with explicit relative and absolute tolerances.
+    pub fn with_tolerances(reltol: Value, abstol: Value) -> Self {
+        let reltol = if reltol.is_finite() && reltol > 0.0 {
+            reltol
+        } else {
+            1e-3
+        };
+        let abstol = if abstol.is_finite() && abstol > 0.0 {
+            abstol
+        } else {
+            reltol
+        };
+
         Self {
             prev_solution: Vec::new(),
             prev_prev_solution: Vec::new(),
             prev_prev_prev_solution: Vec::new(),
             prev_dt: 0.0,
             prev_prev_dt: 0.0,
-            tolerance,
+            reltol,
+            abstol,
             history_count: 0,
             method_order: 2, // Default to trapezoidal order
         }
+    }
+
+    #[inline]
+    fn lte_scale_denominator(&self, magnitude: Value) -> Value {
+        // Enforce SPICE-like weighted tolerance:
+        // |err| <= ABSTOL + RELTOL * |x|
+        // Rearranged to a normalized metric compared against RELTOL:
+        // |err| / (ABSTOL/RELTOL + |x|) <= RELTOL
+        let reltol = self.reltol.max(1e-30);
+        (self.abstol / reltol + magnitude.abs()).max(1e-30)
     }
 
     /// Set the integration method order for accurate timestep scaling
@@ -393,20 +424,15 @@ impl LteEstimator {
                 prev_val // No second derivative, predict same value
             };
 
-            // LTE estimate: |actual - predicted|
+            // LTE estimate: |actual - predicted| with weighted SPICE-like scaling.
             let lte = (curr_val - predicted).abs();
-
-            // Normalize by value magnitude to avoid small absolute errors on small values
-            let normalized_lte = if curr_val.abs() > 1e-12 {
-                lte / curr_val.abs().max(1.0)
-            } else {
-                lte
-            };
+            let scale = self.lte_scale_denominator(curr_val.abs().max(predicted.abs()));
+            let normalized_lte = lte / scale;
 
             max_lte = max_lte.max(normalized_lte);
         }
 
-        let accept = max_lte <= self.tolerance;
+        let accept = max_lte <= self.reltol;
         (max_lte, accept)
     }
 
@@ -436,30 +462,28 @@ impl LteEstimator {
             // Richardson extrapolation error estimate
             let richardson_error = (half - full).abs() / order_factor;
 
-            // Normalize by value magnitude
-            let normalized = if half.abs() > 1e-12 {
-                richardson_error / half.abs().max(1.0)
-            } else {
-                richardson_error
-            };
+            let scale = self.lte_scale_denominator(half.abs().max(full.abs()));
+            let normalized = richardson_error / scale;
 
             max_lte = max_lte.max(normalized);
         }
 
-        let accept = max_lte <= self.tolerance;
+        let accept = max_lte <= self.reltol;
         (max_lte, accept)
     }
 
     /// Get recommended timestep scaling factor based on LTE
     /// Uses method order for proper scaling exponent
     pub fn recommend_scale(&self, lte: Value) -> Value {
-        if lte < 1e-15 {
+        if !lte.is_finite() {
+            0.25
+        } else if lte < 1e-15 {
             2.0 // Error negligible, can increase
         } else {
             // Optimal scaling: (tol/lte)^(1/(p+1)) where p is method order
             // For order 2: exponent = 1/3, for order 1: exponent = 1/2
             let exponent = 1.0 / (self.method_order as Value + 1.0);
-            let ratio = self.tolerance / lte;
+            let ratio = self.reltol / lte;
             ratio.powf(exponent).clamp(0.25, 2.0)
         }
     }
@@ -527,7 +551,7 @@ impl LteEstimator {
             max_lte = max_lte.max(normalized_lte);
         }
 
-        let accept = max_lte <= self.tolerance;
+        let accept = max_lte <= self.reltol;
         (max_lte, accept)
     }
 
@@ -1053,8 +1077,29 @@ mod tests {
     }
 
     #[test]
+    fn test_lte_with_explicit_tolerances_uses_absolute_floor() {
+        let mut lte = LteEstimator::with_tolerances(1e-3, 1e-6);
+        lte.record(&[0.0], 1e-9);
+
+        // Near-zero state should be governed by abstol floor.
+        let (lte_est, accept) = lte.estimate(&[5e-7], 1e-9);
+        assert!(accept, "5e-7 error should pass with 1e-6 abstol floor");
+        assert!(lte_est <= 1e-3);
+
+        let (_lte_est, reject) = lte.estimate(&[2e-6], 1e-9);
+        assert!(!reject, "2e-6 error should fail with 1e-6 abstol floor");
+    }
+
+    #[test]
+    fn test_lte_recommend_scale_handles_non_finite_error() {
+        let lte = LteEstimator::new(1e-3);
+        assert!((lte.recommend_scale(f64::NAN) - 0.25).abs() < 1e-15);
+        assert!((lte.recommend_scale(f64::INFINITY) - 0.25).abs() < 1e-15);
+    }
+
+    #[test]
     fn test_richardson_extrapolation() {
-        // Use tolerance of 0.01 since our test data produces LTE ~0.0097
+        // Use tolerance of 0.01 since our test data produces LTE on that scale.
         let lte = LteEstimator::new(0.01);
 
         // Simulate full step and half-step results
@@ -1066,10 +1111,10 @@ mod tests {
 
         // LTE ≈ |x_half - x_full| / 3
         // max(|0.03|, |0.06|, |0.09|) / 3 = 0.09 / 3 = 0.03
-        // Normalized by value: 0.03 / 3.09 ≈ 0.0097
+        // Weighted normalization keeps the value in the same order as reltol.
         assert!(
-            (lte_est - 0.00971).abs() < 0.001,
-            "LTE should be ~0.0097, got {}",
+            lte_est > 0.005 && lte_est < 0.01,
+            "LTE should be in weighted range (0.005, 0.01), got {}",
             lte_est
         );
         assert!(accept, "Should accept: LTE {} <= tolerance 0.01", lte_est);
