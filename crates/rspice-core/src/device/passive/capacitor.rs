@@ -1,7 +1,7 @@
 //! Capacitor device model
 
-use crate::{circuit::NodeId, Value};
 use crate::device::traits::{DynamicDevice, MatrixStamper};
+use crate::{Value, circuit::NodeId};
 
 /// Capacitor with companion model for transient analysis
 #[derive(Debug, Clone)]
@@ -50,30 +50,38 @@ impl DynamicDevice for Capacitor {
         // Trapezoidal companion model:
         // i = geq * v + ieq
         // where geq = 2C/dt and ieq = 2C/dt * v_prev + i_prev
-        
+
         let geq = self.geq(dt);
-        
+
         // Stamp conductance
         matrix.stamp(self.node_pos, self.node_pos, geq);
         matrix.stamp(self.node_pos, self.node_neg, -geq);
         matrix.stamp(self.node_neg, self.node_pos, -geq);
         matrix.stamp(self.node_neg, self.node_neg, geq);
-        
+
         // Stamp current source (ieq)
         matrix.stamp_rhs(self.node_pos, -self.ieq);
         matrix.stamp_rhs(self.node_neg, self.ieq);
     }
 
     fn step(&mut self, voltages: &[Value], dt: Value) {
-        let v_pos = if self.node_pos == 0 { 0.0 } else { voltages[self.node_pos - 1] };
-        let v_neg = if self.node_neg == 0 { 0.0 } else { voltages[self.node_neg - 1] };
+        let v_pos = if self.node_pos == 0 {
+            0.0
+        } else {
+            voltages[self.node_pos - 1]
+        };
+        let v_neg = if self.node_neg == 0 {
+            0.0
+        } else {
+            voltages[self.node_neg - 1]
+        };
         let v = v_pos - v_neg;
-        
+
         // Update companion model current source for next step
         // For trapezoidal: ieq = 2C/dt * v + i_prev = 2C/dt * v + 2C/dt * v_prev + ieq_prev
         let geq = self.geq(dt);
         self.ieq = geq * v + geq * self.voltage_prev + self.ieq;
-        
+
         self.voltage_prev = v;
     }
 }

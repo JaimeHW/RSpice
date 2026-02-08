@@ -27,8 +27,8 @@
 //! | NSAT | Saturation exponent (knee sharpness) | 2.0 |
 //! | IC | Initial current | 0.0 |
 
-use crate::{circuit::NodeId, Value};
 use crate::device::traits::{DynamicDevice, MatrixStamper, NonlinearDevice};
+use crate::{Value, circuit::NodeId};
 
 //=============================================================================
 // Saturable Inductor
@@ -43,14 +43,13 @@ pub struct SaturableInductor {
     pub node_pos: NodeId,
     /// Negative terminal node
     pub node_neg: NodeId,
-    
+
     // Current branch variable index in MNA
     pub branch_index: Option<NodeId>,
-    
+
     //=========================================================================
     // Model Parameters
     //=========================================================================
-    
     /// Unsaturated (initial) inductance in Henries
     pub l0: Value,
     /// Minimum inductance when fully saturated (H)
@@ -59,11 +58,10 @@ pub struct SaturableInductor {
     pub i_sat: Value,
     /// Saturation exponent - controls knee sharpness (typically 1-10)
     pub n_sat: Value,
-    
+
     //=========================================================================
-    // State Variables  
+    // State Variables
     //=========================================================================
-    
     /// Current magnetic flux linkage (Weber-turns = V·s)
     flux: Value,
     /// Current through inductor
@@ -86,12 +84,12 @@ impl SaturableInductor {
             node_pos,
             node_neg,
             branch_index: None,
-            
+
             l0,
-            l_min: l0 / 100.0,  // Default: saturated L is 1% of unsaturated
-            i_sat: 1.0,         // Default: 1A saturation current
-            n_sat: 2.0,         // Default: quadratic saturation curve
-            
+            l_min: l0 / 100.0, // Default: saturated L is 1% of unsaturated
+            i_sat: 1.0,        // Default: 1A saturation current
+            n_sat: 2.0,        // Default: quadratic saturation curve
+
             flux: 0.0,
             current: 0.0,
             current_prev: 0.0,
@@ -103,13 +101,30 @@ impl SaturableInductor {
 
     /// Set model parameters from a parameter map
     pub fn with_params(mut self, params: &std::collections::HashMap<String, Value>) -> Self {
-        if let Some(&v) = params.get("L0") { self.l0 = v; self.l_eff = v; }
-        if let Some(&v) = params.get("L") { self.l0 = v; self.l_eff = v; }  // Alias
-        if let Some(&v) = params.get("LMIN") { self.l_min = v; }
-        if let Some(&v) = params.get("ISAT") { self.i_sat = v; }
-        if let Some(&v) = params.get("NSAT") { self.n_sat = v; }
-        if let Some(&v) = params.get("N") { self.n_sat = v; }  // Alias
-        if let Some(&v) = params.get("IC") { self.current_prev = v; self.current = v; }
+        if let Some(&v) = params.get("L0") {
+            self.l0 = v;
+            self.l_eff = v;
+        }
+        if let Some(&v) = params.get("L") {
+            self.l0 = v;
+            self.l_eff = v;
+        } // Alias
+        if let Some(&v) = params.get("LMIN") {
+            self.l_min = v;
+        }
+        if let Some(&v) = params.get("ISAT") {
+            self.i_sat = v;
+        }
+        if let Some(&v) = params.get("NSAT") {
+            self.n_sat = v;
+        }
+        if let Some(&v) = params.get("N") {
+            self.n_sat = v;
+        } // Alias
+        if let Some(&v) = params.get("IC") {
+            self.current_prev = v;
+            self.current = v;
+        }
         self
     }
 
@@ -136,7 +151,7 @@ impl SaturableInductor {
     }
 
     /// Calculate effective inductance L(I) based on current
-    /// 
+    ///
     /// Uses a smooth saturation curve:
     /// L(I) = L_min + (L0 - L_min) / (1 + |I/I_sat|^n)
     pub fn inductance_at_current(&self, current: Value) -> Value {
@@ -150,17 +165,18 @@ impl SaturableInductor {
     pub fn dl_di(&self, current: Value) -> Value {
         let i_abs = current.abs();
         if i_abs < 1e-12 {
-            return 0.0;  // At zero current, derivative is zero
+            return 0.0; // At zero current, derivative is zero
         }
-        
+
         let i_norm = i_abs / self.i_sat;
         let i_norm_n = i_norm.powf(self.n_sat);
         let denom = 1.0 + i_norm_n;
-        
+
         // d/dI [ 1/(1 + |I/Isat|^n) ] = -n * |I/Isat|^(n-1) * sign(I) / (Isat * (1 + |I/Isat|^n)^2)
-        let dl_di = -(self.l0 - self.l_min) * self.n_sat * i_norm.powf(self.n_sat - 1.0) 
-                    * current.signum() / (self.i_sat * denom * denom);
-        
+        let dl_di =
+            -(self.l0 - self.l_min) * self.n_sat * i_norm.powf(self.n_sat - 1.0) * current.signum()
+                / (self.i_sat * denom * denom);
+
         dl_di
     }
 
@@ -212,43 +228,53 @@ impl DynamicDevice for SaturableInductor {
         matrix: &mut impl MatrixStamper,
         _rhs: &mut [Value],
     ) {
-        let branch = self.branch_index.expect("Branch index must be set for inductor");
-        
+        let branch = self
+            .branch_index
+            .expect("Branch index must be set for inductor");
+
         // Use incremental inductance for better convergence
         let l_inc = self.incremental_inductance(self.current);
         let req = 2.0 * l_inc.max(self.l_min) / dt;
-        
+
         // MNA stamp for inductor (treated as voltage source with series resistance)
         // Row for branch current equation: v+ - v- - req*i = veq
         matrix.stamp(branch, self.node_pos, 1.0);
         matrix.stamp(branch, self.node_neg, -1.0);
         matrix.stamp(branch, branch, -req);
-        
+
         // Node equations: current contribution
         matrix.stamp(self.node_pos, branch, 1.0);
         matrix.stamp(self.node_neg, branch, -1.0);
-        
+
         // Equivalent voltage source for trapezoidal rule
         let veq = req * self.current_prev + self.voltage_prev;
         matrix.stamp_rhs(branch, veq);
     }
 
     fn step(&mut self, voltages: &[Value], dt: Value) {
-        let v_pos = if self.node_pos == 0 { 0.0 } else { voltages[self.node_pos - 1] };
-        let v_neg = if self.node_neg == 0 { 0.0 } else { voltages[self.node_neg - 1] };
+        let v_pos = if self.node_pos == 0 {
+            0.0
+        } else {
+            voltages[self.node_pos - 1]
+        };
+        let v_neg = if self.node_neg == 0 {
+            0.0
+        } else {
+            voltages[self.node_neg - 1]
+        };
         let v = v_pos - v_neg;
-        
+
         // Update flux: Φ = ∫v dt (using trapezoidal rule)
         self.flux = self.flux_prev + (dt / 2.0) * (v + self.voltage_prev);
-        
+
         // Update effective inductance based on current
         self.l_eff = self.inductance_at_current(self.current);
-        
+
         // Update current for next step using trapezoidal rule
         // Using current effective inductance
         let l_inc = self.incremental_inductance(self.current).max(self.l_min);
         self.current = self.current_prev + (dt / (2.0 * l_inc)) * (v + self.voltage_prev);
-        
+
         // Store for next iteration
         self.current_prev = self.current;
         self.flux_prev = self.flux;
@@ -262,7 +288,7 @@ impl NonlinearDevice for SaturableInductor {
         if branch > 0 && branch <= voltages.len() {
             self.current = voltages[branch - 1];
         }
-        
+
         // Update effective inductance
         self.l_eff = self.inductance_at_current(self.current);
     }
@@ -275,7 +301,7 @@ impl NonlinearDevice for SaturableInductor {
     ) {
         // The nonlinear stamp handles the current-dependent inductance
         // This is used during Newton-Raphson iteration within a timestep
-        
+
         // Note: Most of the stamping is done in stamp_transient
         // This method can be used for additional nonlinear corrections if needed
     }
@@ -306,8 +332,8 @@ mod tests {
     #[test]
     fn test_inductance_unsaturated() {
         let ind = SaturableInductor::new("L1".to_string(), 1, 2, 100e-6)
-            .with_saturation(10.0, 10e-6, 2.0);  // 10A saturation current
-        
+            .with_saturation(10.0, 10e-6, 2.0); // 10A saturation current
+
         // At zero current, inductance should be L0
         let l = ind.inductance_at_current(0.0);
         assert!((l - 100e-6).abs() < 1e-12);
@@ -315,9 +341,9 @@ mod tests {
 
     #[test]
     fn test_inductance_at_isat() {
-        let ind = SaturableInductor::new("L1".to_string(), 1, 2, 100e-6)
-            .with_saturation(1.0, 0.0, 1.0);  // Linear saturation for easy math
-        
+        let ind =
+            SaturableInductor::new("L1".to_string(), 1, 2, 100e-6).with_saturation(1.0, 0.0, 1.0); // Linear saturation for easy math
+
         // At I = I_sat with n=1, L = L0/2
         let l = ind.inductance_at_current(1.0);
         assert!((l - 50e-6).abs() < 1e-9);
@@ -325,56 +351,56 @@ mod tests {
 
     #[test]
     fn test_inductance_fully_saturated() {
-        let ind = SaturableInductor::new("L1".to_string(), 1, 2, 100e-6)
-            .with_saturation(1.0, 10e-6, 2.0);
-        
+        let ind =
+            SaturableInductor::new("L1".to_string(), 1, 2, 100e-6).with_saturation(1.0, 10e-6, 2.0);
+
         // At very high current, inductance should approach L_min
-        let l = ind.inductance_at_current(100.0);  // 100x saturation current
-        assert!(l < 15e-6);  // Should be close to L_min = 10e-6
-        assert!(l >= 10e-6);  // But not below L_min
+        let l = ind.inductance_at_current(100.0); // 100x saturation current
+        assert!(l < 15e-6); // Should be close to L_min = 10e-6
+        assert!(l >= 10e-6); // But not below L_min
     }
 
     #[test]
     fn test_saturation_symmetric() {
-        let ind = SaturableInductor::new("L1".to_string(), 1, 2, 100e-6)
-            .with_saturation(1.0, 10e-6, 2.0);
-        
+        let ind =
+            SaturableInductor::new("L1".to_string(), 1, 2, 100e-6).with_saturation(1.0, 10e-6, 2.0);
+
         let l_pos = ind.inductance_at_current(2.0);
         let l_neg = ind.inductance_at_current(-2.0);
-        
+
         // Saturation should be symmetric
         assert!((l_pos - l_neg).abs() < 1e-15);
     }
 
     #[test]
     fn test_incremental_inductance() {
-        let ind = SaturableInductor::new("L1".to_string(), 1, 2, 100e-6)
-            .with_saturation(1.0, 10e-6, 2.0);
-        
+        let ind =
+            SaturableInductor::new("L1".to_string(), 1, 2, 100e-6).with_saturation(1.0, 10e-6, 2.0);
+
         // At I=0, incremental inductance = L0 (no dL/dI contribution)
         let l_inc_0 = ind.incremental_inductance(0.0);
         assert!((l_inc_0 - 100e-6).abs() < 1e-12);
-        
+
         // At higher current, incremental inductance is less than chord inductance
         // due to the negative slope
         let l_chord = ind.inductance_at_current(2.0);
         let l_inc = ind.incremental_inductance(2.0);
-        assert!(l_inc < l_chord);  // Incremental < chord in saturation region
+        assert!(l_inc < l_chord); // Incremental < chord in saturation region
     }
 
     #[test]
     fn test_dl_di() {
-        let ind = SaturableInductor::new("L1".to_string(), 1, 2, 100e-6)
-            .with_saturation(1.0, 10e-6, 2.0);
-        
+        let ind =
+            SaturableInductor::new("L1".to_string(), 1, 2, 100e-6).with_saturation(1.0, 10e-6, 2.0);
+
         // At zero current, dL/dI should be zero (at the peak of L(I))
         let dl_di_0 = ind.dl_di(0.0);
         assert_eq!(dl_di_0, 0.0);
-        
+
         // At positive current, dL/dI should be negative (L decreases as |I| increases)
         let dl_di_pos = ind.dl_di(1.0);
         assert!(dl_di_pos < 0.0);
-        
+
         // dL/dI should be antisymmetric: dL/dI(-I) = -dL/dI(I)
         let dl_di_neg = ind.dl_di(-1.0);
         assert!((dl_di_pos + dl_di_neg).abs() < 1e-15);
@@ -382,9 +408,9 @@ mod tests {
 
     #[test]
     fn test_saturation_ratio() {
-        let ind = SaturableInductor::new("L1".to_string(), 1, 2, 100e-6)
-            .with_saturation(1.0, 10e-6, 2.0);
-        
+        let ind =
+            SaturableInductor::new("L1".to_string(), 1, 2, 100e-6).with_saturation(1.0, 10e-6, 2.0);
+
         // At zero current (unsaturated), ratio should be 0
         let ratio_0 = ind.saturation_ratio();
         assert!((ratio_0 - 0.0).abs() < 1e-10);
@@ -397,10 +423,9 @@ mod tests {
         params.insert("L0".to_string(), 200e-6);
         params.insert("ISAT".to_string(), 5.0);
         params.insert("NSAT".to_string(), 3.0);
-        
-        let ind = SaturableInductor::new("L1".to_string(), 1, 2, 100e-6)
-            .with_params(&params);
-        
+
+        let ind = SaturableInductor::new("L1".to_string(), 1, 2, 100e-6).with_params(&params);
+
         assert_eq!(ind.l0, 200e-6);
         assert_eq!(ind.i_sat, 5.0);
         assert_eq!(ind.n_sat, 3.0);
@@ -410,10 +435,10 @@ mod tests {
     fn test_initial_current() {
         let mut ind = SaturableInductor::new("L1".to_string(), 1, 2, 100e-6);
         ind.set_initial_current(2.0);
-        
+
         assert_eq!(ind.current, 2.0);
         assert_eq!(ind.current_prev, 2.0);
         // Flux should be set to match initial current
-        assert!((ind.flux - 200e-6).abs() < 1e-12);  // Φ = L0 * I = 100e-6 * 2 = 200e-6 Wb
+        assert!((ind.flux - 200e-6).abs() < 1e-12); // Φ = L0 * I = 100e-6 * 2 = 200e-6 Wb
     }
 }

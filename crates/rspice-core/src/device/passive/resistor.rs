@@ -1,7 +1,7 @@
 //! Resistor device model
 
-use crate::{circuit::NodeId, Value};
 use crate::device::traits::{LinearDevice, MatrixStamper};
+use crate::{Value, circuit::NodeId};
 
 /// Linear resistor
 #[derive(Debug, Clone)]
@@ -30,19 +30,15 @@ impl Resistor {
 }
 
 impl LinearDevice for Resistor {
-    fn stamp_linear(
-        &self,
-        matrix: &mut impl MatrixStamper,
-        _rhs: &mut [Value],
-    ) {
+    fn stamp_linear(&self, matrix: &mut impl MatrixStamper, _rhs: &mut [Value]) {
         let g = self.conductance();
-        
+
         // Standard conductance stamp pattern
         // G(n+, n+) += g
         // G(n+, n-) -= g
         // G(n-, n+) -= g
         // G(n-, n-) += g
-        
+
         matrix.stamp(self.node_pos, self.node_pos, g);
         matrix.stamp(self.node_pos, self.node_neg, -g);
         matrix.stamp(self.node_neg, self.node_pos, -g);

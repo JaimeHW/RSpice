@@ -37,8 +37,8 @@
 //! ```
 //! where [L] is the inductance matrix with Lij = k*sqrt(Li*Lj) for i≠j.
 
-use crate::{circuit::NodeId, Value};
 use crate::device::traits::{DynamicDevice, MatrixStamper};
+use crate::{Value, circuit::NodeId};
 
 //=============================================================================
 // Coupling Coefficient
@@ -85,25 +85,25 @@ impl InductorCoupling {
 pub struct CoupledInductorPair {
     /// Coupling name
     pub name: String,
-    
+
     // Primary winding
     pub node1_pos: NodeId,
     pub node1_neg: NodeId,
     pub l1: Value,
     pub branch1: Option<NodeId>,
-    
+
     // Secondary winding
     pub node2_pos: NodeId,
     pub node2_neg: NodeId,
     pub l2: Value,
     pub branch2: Option<NodeId>,
-    
+
     /// Coupling coefficient
     pub k: Value,
-    
+
     /// Mutual inductance (M = k * sqrt(L1 * L2))
     pub m: Value,
-    
+
     // State for transient
     current1_prev: Value,
     current2_prev: Value,
@@ -115,12 +115,16 @@ impl CoupledInductorPair {
     /// Create a new coupled inductor pair
     pub fn new(
         name: String,
-        node1_pos: NodeId, node1_neg: NodeId, l1: Value,
-        node2_pos: NodeId, node2_neg: NodeId, l2: Value,
+        node1_pos: NodeId,
+        node1_neg: NodeId,
+        l1: Value,
+        node2_pos: NodeId,
+        node2_neg: NodeId,
+        l2: Value,
         k: Value,
     ) -> Self {
         let m = k.abs().min(1.0) * (l1 * l2).sqrt();
-        
+
         Self {
             name,
             node1_pos,
@@ -175,15 +179,15 @@ impl CoupledInductorPair {
         // [v2] = [R21 R22] [i2] + [v2_eq]
         //
         // where R11 = 2*L1/dt, R22 = 2*L2/dt, R12 = R21 = 2*M/dt
-        
+
         let r11 = 2.0 * self.l1 / dt;
         let r22 = 2.0 * self.l2 / dt;
         let r12 = 2.0 * self.m / dt;
-        
+
         // Equivalent voltage sources
         let v1_eq = r11 * self.current1_prev + r12 * self.current2_prev + self.voltage1_prev;
         let v2_eq = r12 * self.current1_prev + r22 * self.current2_prev + self.voltage2_prev;
-        
+
         (r11, r22, r12, v1_eq, v2_eq)
     }
 }
@@ -198,31 +202,31 @@ impl DynamicDevice for CoupledInductorPair {
     ) {
         let branch1 = self.branch1.expect("Branch1 index must be set");
         let branch2 = self.branch2.expect("Branch2 index must be set");
-        
+
         let (r11, r22, r12, v1_eq, v2_eq) = self.companion_values(dt);
 
         // MNA for coupled inductors:
         // Branch 1 equation: v1+ - v1- = R11*i1 + R12*i2 + V1_eq
         // Branch 2 equation: v2+ - v2- = R12*i1 + R22*i2 + V2_eq
-        
+
         // Row for branch1 current
         matrix.stamp(branch1, self.node1_pos, 1.0);
         matrix.stamp(branch1, self.node1_neg, -1.0);
         matrix.stamp(branch1, branch1, -r11);
         matrix.stamp(branch1, branch2, -r12);
-        
+
         // Row for branch2 current
         matrix.stamp(branch2, self.node2_pos, 1.0);
         matrix.stamp(branch2, self.node2_neg, -1.0);
-        matrix.stamp(branch2, branch1, -r12);  // Mutual coupling
+        matrix.stamp(branch2, branch1, -r12); // Mutual coupling
         matrix.stamp(branch2, branch2, -r22);
-        
+
         // KCL: current contributions to nodes
         matrix.stamp(self.node1_pos, branch1, 1.0);
         matrix.stamp(self.node1_neg, branch1, -1.0);
         matrix.stamp(self.node2_pos, branch2, 1.0);
         matrix.stamp(self.node2_neg, branch2, -1.0);
-        
+
         // RHS for equivalent voltage sources
         matrix.stamp_rhs(branch1, v1_eq);
         matrix.stamp_rhs(branch2, v2_eq);
@@ -230,41 +234,65 @@ impl DynamicDevice for CoupledInductorPair {
 
     fn step(&mut self, voltages: &[Value], _dt: Value) {
         // Get node voltages
-        let v1_pos = if self.node1_pos == 0 { 0.0 } else { voltages[self.node1_pos - 1] };
-        let v1_neg = if self.node1_neg == 0 { 0.0 } else { voltages[self.node1_neg - 1] };
-        let v2_pos = if self.node2_pos == 0 { 0.0 } else { voltages[self.node2_pos - 1] };
-        let v2_neg = if self.node2_neg == 0 { 0.0 } else { voltages[self.node2_neg - 1] };
-        
+        let v1_pos = if self.node1_pos == 0 {
+            0.0
+        } else {
+            voltages[self.node1_pos - 1]
+        };
+        let v1_neg = if self.node1_neg == 0 {
+            0.0
+        } else {
+            voltages[self.node1_neg - 1]
+        };
+        let v2_pos = if self.node2_pos == 0 {
+            0.0
+        } else {
+            voltages[self.node2_pos - 1]
+        };
+        let v2_neg = if self.node2_neg == 0 {
+            0.0
+        } else {
+            voltages[self.node2_neg - 1]
+        };
+
         let v1 = v1_pos - v1_neg;
         let v2 = v2_pos - v2_neg;
-        
+
         // Get branch currents (stored in extended voltage vector)
         let branch1 = self.branch1.unwrap();
         let branch2 = self.branch2.unwrap();
-        let i1 = if branch1 > 0 && branch1 <= voltages.len() { voltages[branch1 - 1] } else { 0.0 };
-        let i2 = if branch2 > 0 && branch2 <= voltages.len() { voltages[branch2 - 1] } else { 0.0 };
-        
+        let i1 = if branch1 > 0 && branch1 <= voltages.len() {
+            voltages[branch1 - 1]
+        } else {
+            0.0
+        };
+        let i2 = if branch2 > 0 && branch2 <= voltages.len() {
+            voltages[branch2 - 1]
+        } else {
+            0.0
+        };
+
         // Update for next step using trapezoidal rule
         // For coupled inductors: d/dt [L][i] = [v]
         // This requires solving the coupled system
-        
+
         // Using the inverse of the inductance matrix:
         // [L]^-1 = 1/(L1*L2 - M^2) * [L2, -M; -M, L1]
         let det = self.l1 * self.l2 - self.m * self.m;
-        
+
         if det.abs() > 1e-20 {
             let inv_det = 1.0 / det;
-            
+
             // di/dt = [L]^-1 * [v]
             let _di1_dt = inv_det * (self.l2 * v1 - self.m * v2);
             let _di2_dt = inv_det * (-self.m * v1 + self.l1 * v2);
-            
+
             // Trapezoidal update (simplified, using average of old and new di/dt)
             // For better accuracy, we'd need to iterate
             self.current1_prev = i1;
             self.current2_prev = i2;
         }
-        
+
         self.voltage1_prev = v1;
         self.voltage2_prev = v2;
     }
@@ -312,7 +340,7 @@ impl MultiWindingTransformer {
         let n = inductances.len();
         assert_eq!(nodes.len(), n);
         assert_eq!(coupling_coefficients.len(), n);
-        
+
         // Build inductance matrix
         let mut l_matrix = vec![vec![0.0; n]; n];
         for i in 0..n {
@@ -325,7 +353,7 @@ impl MultiWindingTransformer {
                 }
             }
         }
-        
+
         Self {
             name,
             num_windings: n,
@@ -367,13 +395,14 @@ impl DynamicDevice for MultiWindingTransformer {
         _rhs: &mut [Value],
     ) {
         let n = self.num_windings;
-        
+
         // Calculate equivalent resistances: R[i][j] = 2 * L[i][j] / dt
-        let r_matrix: Vec<Vec<Value>> = self.inductance_matrix
+        let r_matrix: Vec<Vec<Value>> = self
+            .inductance_matrix
             .iter()
             .map(|row| row.iter().map(|&l| 2.0 * l / dt).collect())
             .collect();
-        
+
         // Calculate equivalent voltages for each branch
         let mut v_eq = vec![0.0; n];
         for i in 0..n {
@@ -387,20 +416,20 @@ impl DynamicDevice for MultiWindingTransformer {
         for i in 0..n {
             let branch_i = self.branches[i].expect("Branch index must be set");
             let (pos_i, neg_i) = self.nodes[i];
-            
+
             // Row for branch i: v_pos - v_neg = sum_j(R[i][j] * i[j]) + V_eq[i]
             matrix.stamp(branch_i, pos_i, 1.0);
             matrix.stamp(branch_i, neg_i, -1.0);
-            
+
             for j in 0..n {
                 let branch_j = self.branches[j].expect("Branch index must be set");
                 matrix.stamp(branch_i, branch_j, -r_matrix[i][j]);
             }
-            
+
             // KCL stamps
             matrix.stamp(pos_i, branch_i, 1.0);
             matrix.stamp(neg_i, branch_i, -1.0);
-            
+
             // RHS
             matrix.stamp_rhs(branch_i, v_eq[i]);
         }
@@ -413,7 +442,7 @@ impl DynamicDevice for MultiWindingTransformer {
             let v_pos = if pos == 0 { 0.0 } else { voltages[pos - 1] };
             let v_neg = if neg == 0 { 0.0 } else { voltages[neg - 1] };
             self.voltages_prev[i] = v_pos - v_neg;
-            
+
             if let Some(branch) = self.branches[i] {
                 if branch > 0 && branch <= voltages.len() {
                     self.currents_prev[i] = voltages[branch - 1];
@@ -438,7 +467,7 @@ mod tests {
             vec!["L1".to_string(), "L2".to_string()],
             0.95,
         );
-        
+
         let m = coupling.mutual_inductance(100e-6, 100e-6);
         // M = 0.95 * sqrt(100e-6 * 100e-6) = 0.95 * 100e-6 = 95e-6
         assert!((m - 95e-6).abs() < 1e-10);
@@ -448,15 +477,19 @@ mod tests {
     fn test_coupled_pair_creation() {
         let pair = CoupledInductorPair::new(
             "T1".to_string(),
-            1, 0, 100e-6,  // Primary: 100µH
-            2, 0, 25e-6,   // Secondary: 25µH (2:1 turns ratio)
+            1,
+            0,
+            100e-6, // Primary: 100µH
+            2,
+            0,
+            25e-6, // Secondary: 25µH (2:1 turns ratio)
             0.99,
         );
-        
+
         // Check turns ratio
         let n = pair.turns_ratio();
         assert!((n - 2.0).abs() < 0.01);
-        
+
         // Check mutual inductance
         // M = 0.99 * sqrt(100e-6 * 25e-6) = 0.99 * 50e-6 = 49.5e-6
         assert!((pair.m - 49.5e-6).abs() < 1e-10);
@@ -466,11 +499,15 @@ mod tests {
     fn test_leakage_inductance() {
         let pair = CoupledInductorPair::new(
             "T1".to_string(),
-            1, 0, 100e-6,
-            2, 0, 100e-6,
-            0.9,  // 10% leakage
+            1,
+            0,
+            100e-6,
+            2,
+            0,
+            100e-6,
+            0.9, // 10% leakage
         );
-        
+
         // Leakage = L * (1 - k^2) = 100e-6 * (1 - 0.81) = 19e-6
         let leakage = pair.leakage_primary();
         assert!((leakage - 19e-6).abs() < 1e-10);
@@ -480,11 +517,15 @@ mod tests {
     fn test_perfect_coupling() {
         let pair = CoupledInductorPair::new(
             "T1".to_string(),
-            1, 0, 100e-6,
-            2, 0, 100e-6,
-            1.0,  // Perfect coupling
+            1,
+            0,
+            100e-6,
+            2,
+            0,
+            100e-6,
+            1.0, // Perfect coupling
         );
-        
+
         // No leakage with perfect coupling
         assert!(pair.leakage_primary() < 1e-15);
         assert!(pair.leakage_secondary() < 1e-15);
@@ -499,19 +540,15 @@ mod tests {
             vec![0.99, 1.0, 0.99],
             vec![0.99, 0.99, 1.0],
         ];
-        
-        let transformer = MultiWindingTransformer::new(
-            "T1".to_string(),
-            nodes,
-            inductances,
-            couplings,
-        );
-        
+
+        let transformer =
+            MultiWindingTransformer::new("T1".to_string(), nodes, inductances, couplings);
+
         assert_eq!(transformer.num_windings, 3);
-        
+
         // Check self-inductance
         assert_eq!(transformer.mutual_inductance(0, 0), 100e-6);
-        
+
         // Check mutual inductance
         let m01 = transformer.mutual_inductance(0, 1);
         // M = 0.99 * sqrt(100e-6 * 100e-6) = 99e-6
@@ -524,9 +561,9 @@ mod tests {
         let coupling = InductorCoupling::new(
             "K1".to_string(),
             vec!["L1".to_string(), "L2".to_string()],
-            1.5,  // Invalid, should be clamped to 1.0
+            1.5, // Invalid, should be clamped to 1.0
         );
-        
+
         assert_eq!(coupling.coefficient, 1.0);
     }
 
@@ -535,11 +572,15 @@ mod tests {
         // 10:1 turns ratio (100:1 inductance ratio)
         let pair = CoupledInductorPair::new(
             "T1".to_string(),
-            1, 0, 1e-3,    // Primary: 1mH
-            2, 0, 10e-6,   // Secondary: 10µH
+            1,
+            0,
+            1e-3, // Primary: 1mH
+            2,
+            0,
+            10e-6, // Secondary: 10µH
             0.99,
         );
-        
+
         // Turns ratio = sqrt(1e-3 / 10e-6) = sqrt(100) = 10
         let n = pair.turns_ratio();
         assert!((n - 10.0).abs() < 0.01);
