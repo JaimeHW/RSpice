@@ -1817,7 +1817,8 @@ C1 out 0 1n
         let netlist = r#"
 * PSTB smoke test
 V1 in 0 DC 1
-R1 in out 1k
+R1 in mid 1k
+LPROBE mid out 1u
 C1 out 0 1n
 .end
 "#

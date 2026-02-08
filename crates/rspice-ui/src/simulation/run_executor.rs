@@ -1510,6 +1510,54 @@ impl RunExecutor {
                                 signal: "pstb".to_string(),
                                 status: MeasurementStatus::Success,
                             },
+                            MappedMeasurement {
+                                name: "probe_branch_ordinal".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.probe_branch_ordinal as f64,
+                                unit: "ordinal".to_string(),
+                                signal: "pstb".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                            MappedMeasurement {
+                                name: "probe_state_index".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.probe_state_index as f64,
+                                unit: "index".to_string(),
+                                signal: "pstb".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                            MappedMeasurement {
+                                name: "probe_state_self_transition".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.probe_state_self_transition,
+                                unit: "".to_string(),
+                                signal: "pstb".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                            MappedMeasurement {
+                                name: "probe_state_column_norm".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.probe_state_column_norm,
+                                unit: "".to_string(),
+                                signal: "pstb".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                            MappedMeasurement {
+                                name: "probe_state_row_norm".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.probe_state_row_norm,
+                                unit: "".to_string(),
+                                signal: "pstb".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                            MappedMeasurement {
+                                name: "probe_state_persistence_db".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.probe_state_persistence_db,
+                                unit: "dB".to_string(),
+                                signal: "pstb".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
                         ],
                         ..Default::default()
                     }),
@@ -2359,8 +2407,9 @@ mod tests {
     #[test]
     fn test_pstb_analysis_with_spec_is_executed() {
         let executor = RunExecutor::new();
-        let mut queue =
-            RunQueue::new().with_netlist("* pstb\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n");
+        let mut queue = RunQueue::new().with_netlist(
+            "* pstb\nV1 in 0 1\nR1 in mid 1k\nLPROBE mid out 1u\nC1 out 0 1n\n.end\n",
+        );
         queue.add_analysis(AnalysisSpec::Pstb);
 
         let result = executor.execute(&mut queue);
@@ -2390,5 +2439,13 @@ mod tests {
             .measurements
             .iter()
             .any(|m| m.name == "dominant_multiplier"));
+        assert!(mapped
+            .measurements
+            .iter()
+            .any(|m| m.name == "probe_state_index"));
+        assert!(mapped
+            .measurements
+            .iter()
+            .any(|m| m.name == "probe_state_persistence_db"));
     }
 }
