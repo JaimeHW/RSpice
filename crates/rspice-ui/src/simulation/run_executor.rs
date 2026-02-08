@@ -19,6 +19,7 @@ use std::sync::{
 };
 use std::time::Instant;
 
+use super::config::{AnalysisConfig, DcSweepConfig};
 use super::multi_run::{AnalysisRun, AnalysisRunType, AnalysisSpec, RunQueue, RunStatus};
 use super::options_translator::{EngineOptions, OptionsTranslator, PvtCorner};
 use super::result_mapper::{
@@ -443,32 +444,49 @@ impl RunExecutor {
                 start,
                 stop,
                 step,
+                source2,
+                start2,
+                stop2,
+                step2,
             } => {
-                let sweep_result =
-                    simulation_runner::run_dc_sweep(netlist, source_name, *start, *stop, *step);
-                match sweep_result {
-                    Ok(data) => {
-                        let x: Vec<f64> = data.sweep_values.into_iter().collect();
-                        let waveforms = data
-                            .voltages
-                            .into_iter()
-                            .map(|(name, values)| {
-                                MappedWaveform::time_domain(
-                                    name,
-                                    x.clone(),
-                                    values.into_iter().collect(),
-                                )
-                            })
-                            .collect();
+                let bridge = super::engine_bridge::EngineBridge::new();
+                let dc_cfg = AnalysisConfig::DcSweep(DcSweepConfig {
+                    source: source_name.clone(),
+                    start: *start,
+                    stop: *stop,
+                    step: *step,
+                    source2: source2.clone(),
+                    start2: *start2,
+                    stop2: *stop2,
+                    step2: *step2,
+                });
 
-                        Ok(MappedResult {
-                            analysis_type: MappedAnalysisType::DcSweep,
-                            status: ResultStatus::Success,
-                            waveforms,
-                            ..Default::default()
+                let sim_result = bridge.run(&dc_cfg, netlist).map_err(|e| e.to_string())?;
+                if let super::results::SimulationResult::DcSweep {
+                    sweep_values,
+                    waveforms,
+                    ..
+                } = sim_result
+                {
+                    let waveforms = waveforms
+                        .into_iter()
+                        .map(|(name, wf)| {
+                            MappedWaveform::time_domain(
+                                name,
+                                sweep_values.clone(),
+                                wf.y_values.into_iter().collect(),
+                            )
                         })
-                    }
-                    Err(e) => Err(e),
+                        .collect();
+
+                    Ok(MappedResult {
+                        analysis_type: MappedAnalysisType::DcSweep,
+                        status: ResultStatus::Success,
+                        waveforms,
+                        ..Default::default()
+                    })
+                } else {
+                    Err("engine bridge returned unexpected result type for DC sweep".to_string())
                 }
             }
             AnalysisSpec::Noise {
@@ -1490,8 +1508,8 @@ mod tests {
     #[test]
     fn test_sensitivity_voltage_output_uses_voltage_units() {
         let executor = RunExecutor::new();
-        let mut queue =
-            RunQueue::new().with_netlist("* sens v\n.param RVAL=1k\nV1 in 0 1\nR1 in out {RVAL}\nR2 out 0 1k\n");
+        let mut queue = RunQueue::new()
+            .with_netlist("* sens v\n.param RVAL=1k\nV1 in 0 1\nR1 in out {RVAL}\nR2 out 0 1k\n");
         queue.add_analysis(AnalysisSpec::Sensitivity {
             output_var: "V(out)".to_string(),
             ac_mode: false,

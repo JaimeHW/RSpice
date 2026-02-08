@@ -187,35 +187,108 @@ impl EngineBridge {
         config: &super::config::DcSweepConfig,
     ) -> Result<SimulationResult, SimulationError> {
         let engine = self.engine_for_netlist(netlist);
-        let sweep_results = engine
-            .run_dc_sweep(
-                netlist,
-                &config.source,
-                config.start,
-                config.stop,
-                config.step,
-            )
-            .map_err(|e| self.translate_error(e))?;
 
-        // Convert to UI format
-        let sweep_values: Vec<f64> = sweep_results.iter().map(|(v, _)| *v).collect();
+        let nested_cfg = match (&config.source2, config.start2, config.stop2, config.step2) {
+            (None, None, None, None) => None,
+            (Some(source2), Some(start2), Some(stop2), Some(step2)) => {
+                Some((source2.as_str(), start2, stop2, step2))
+            }
+            _ => {
+                return Err(SimulationError::InvalidConfig(
+                    "Nested DC sweep requires source2/start2/stop2/step2".to_string(),
+                ));
+            }
+        };
+
+        let mut sweep_values = Vec::new();
         let mut waveforms = HashMap::new();
 
-        // For each node, create a waveform
-        if let Some((_, first_result)) = sweep_results.first() {
-            for (i, name) in first_result.node_names.iter().enumerate() {
-                if i == 0 {
-                    continue;
-                } // Skip ground
-                let voltages: Vec<f64> = sweep_results
-                    .iter()
-                    .map(|(_, result)| result.node_voltages.get(i).copied().unwrap_or(0.0))
-                    .collect();
+        if let Some((source2, start2, stop2, step2)) = nested_cfg {
+            let sweep2 =
+                rspice_core::analysis::DcSweep::new(source2.to_string(), start2, stop2, step2);
+            let sweep2_values = sweep2.points();
+            if sweep2_values.is_empty() {
+                return Err(SimulationError::InvalidConfig(
+                    "Nested DC secondary sweep produced no points".to_string(),
+                ));
+            }
 
-                waveforms.insert(
-                    name.clone(),
-                    WaveformData::new_time_domain(name, sweep_values.clone(), voltages),
-                );
+            for &sweep2_value in &sweep2_values {
+                let mut nested_netlist = netlist.clone();
+                Self::set_dc_source_value(&mut nested_netlist, source2, sweep2_value)?;
+
+                let sweep_results = engine
+                    .run_dc_sweep(
+                        &nested_netlist,
+                        &config.source,
+                        config.start,
+                        config.stop,
+                        config.step,
+                    )
+                    .map_err(|e| self.translate_error(e))?;
+
+                if sweep_results.is_empty() {
+                    continue;
+                }
+
+                if sweep_values.is_empty() {
+                    sweep_values = sweep_results.iter().map(|(v, _)| *v).collect();
+                }
+
+                if let Some((_, first_result)) = sweep_results.first() {
+                    for (node_idx, node_name) in first_result.node_names.iter().enumerate() {
+                        if node_idx == 0 {
+                            continue;
+                        }
+                        let voltages: Vec<f64> = sweep_results
+                            .iter()
+                            .map(|(_, result)| {
+                                result.node_voltages.get(node_idx).copied().unwrap_or(0.0)
+                            })
+                            .collect();
+                        let trace_name =
+                            format!("{} [{}={:.6}]", node_name, source2, sweep2_value);
+                        waveforms.insert(
+                            trace_name.clone(),
+                            WaveformData::new_time_domain(
+                                trace_name,
+                                sweep_values.clone(),
+                                voltages,
+                            ),
+                        );
+                    }
+                }
+            }
+        } else {
+            let sweep_results = engine
+                .run_dc_sweep(
+                    netlist,
+                    &config.source,
+                    config.start,
+                    config.stop,
+                    config.step,
+                )
+                .map_err(|e| self.translate_error(e))?;
+
+            // Convert to UI format
+            sweep_values = sweep_results.iter().map(|(v, _)| *v).collect();
+
+            // For each node, create a waveform
+            if let Some((_, first_result)) = sweep_results.first() {
+                for (i, name) in first_result.node_names.iter().enumerate() {
+                    if i == 0 {
+                        continue;
+                    } // Skip ground
+                    let voltages: Vec<f64> = sweep_results
+                        .iter()
+                        .map(|(_, result)| result.node_voltages.get(i).copied().unwrap_or(0.0))
+                        .collect();
+
+                    waveforms.insert(
+                        name.clone(),
+                        WaveformData::new_time_domain(name, sweep_values.clone(), voltages),
+                    );
+                }
             }
         }
 
@@ -224,6 +297,52 @@ impl EngineBridge {
             sweep_values,
             waveforms,
         })
+    }
+
+    fn set_dc_source_value(
+        netlist: &mut rspice_core::Netlist,
+        source_name: &str,
+        value: f64,
+    ) -> Result<(), SimulationError> {
+        if source_name.trim().is_empty() {
+            return Err(SimulationError::InvalidConfig(
+                "DC sweep source name cannot be empty".to_string(),
+            ));
+        }
+
+        for element in &mut netlist.elements {
+            if !element.name.eq_ignore_ascii_case(source_name) {
+                continue;
+            }
+            if let rspice_core::netlist::ElementKind::VoltageSource(spec) = &mut element.kind {
+                if Self::set_source_spec_dc(spec, value) {
+                    return Ok(());
+                }
+                return Err(SimulationError::InvalidConfig(format!(
+                    "Source '{}' is not a DC or DC/AC voltage source",
+                    source_name
+                )));
+            }
+        }
+
+        Err(SimulationError::InvalidConfig(format!(
+            "Source '{}' not found in netlist",
+            source_name
+        )))
+    }
+
+    fn set_source_spec_dc(spec: &mut rspice_core::netlist::SourceSpec, value: f64) -> bool {
+        match spec {
+            rspice_core::netlist::SourceSpec::Dc(v) => {
+                *v = value;
+                true
+            }
+            rspice_core::netlist::SourceSpec::DcAc { dc_value, .. } => {
+                *dc_value = value;
+                true
+            }
+            _ => false,
+        }
     }
 
     //-------------------------------------------------------------------------
@@ -725,8 +844,13 @@ impl EngineBridge {
             } else {
                 match &output_spec {
                     OutputSpec::Voltage(vspec) => {
-                        match run_dc_output_sensitivity(&engine, netlist, *vspec, &param_name, param_value)
-                        {
+                        match run_dc_output_sensitivity(
+                            &engine,
+                            netlist,
+                            *vspec,
+                            &param_name,
+                            param_value,
+                        ) {
                             Ok(raw) => raw,
                             Err(_) => continue,
                         }
@@ -930,6 +1054,74 @@ R1 1 0 1k
 
         let result = bridge.run(&AnalysisConfig::DcOp, netlist);
         assert!(result.is_ok(), "DC OP should succeed for simple circuit");
+    }
+
+    #[test]
+    fn test_run_dc_sweep_supports_nested_secondary_source() {
+        let bridge = EngineBridge::new();
+        let netlist = r#"
+V1 in 0 DC 0
+V2 ctrl 0 DC 0
+R1 in out 1k
+R2 out ctrl 1k
+R3 out 0 1k
+.end
+"#;
+        let config = AnalysisConfig::DcSweep(super::super::config::DcSweepConfig {
+            source: "V1".to_string(),
+            start: 0.0,
+            stop: 1.0,
+            step: 0.5,
+            source2: Some("V2".to_string()),
+            start2: Some(0.0),
+            stop2: Some(1.0),
+            step2: Some(1.0),
+        });
+
+        let result = bridge
+            .run(&config, netlist)
+            .expect("nested DC sweep should run");
+        match result {
+            SimulationResult::DcSweep {
+                sweep_values,
+                waveforms,
+                ..
+            } => {
+                assert_eq!(sweep_values, vec![0.0, 0.5, 1.0]);
+                assert!(!waveforms.is_empty());
+                assert!(waveforms.keys().any(|name| name.contains("[V2=0")));
+                assert!(waveforms.keys().any(|name| name.contains("[V2=1")));
+                assert!(waveforms
+                    .values()
+                    .all(|wf| wf.y_values.len() == sweep_values.len()));
+            }
+            other => panic!("expected DC sweep result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_run_dc_sweep_rejects_partial_nested_config() {
+        let bridge = EngineBridge::new();
+        let netlist = r#"
+V1 in 0 DC 0
+R1 in 0 1k
+.end
+"#;
+        let config = AnalysisConfig::DcSweep(super::super::config::DcSweepConfig {
+            source: "V1".to_string(),
+            start: 0.0,
+            stop: 1.0,
+            step: 0.5,
+            source2: Some("V2".to_string()),
+            start2: Some(0.0),
+            stop2: Some(1.0),
+            step2: None,
+        });
+
+        let err = bridge
+            .run(&config, netlist)
+            .expect_err("partial nested config should be rejected");
+        assert!(matches!(err, SimulationError::InvalidConfig(_)));
     }
 
     // -------------------------------------------------------------------------
@@ -1196,12 +1388,8 @@ R2 out 0 1k
             } => {
                 assert!(!sensitivities.is_empty());
                 assert!(!normalized.is_empty());
-                assert!(sensitivities
-                    .iter()
-                    .all(|(_, raw)| raw.is_finite()));
-                assert!(normalized
-                    .iter()
-                    .all(|(_, norm)| norm.is_finite()));
+                assert!(sensitivities.iter().all(|(_, raw)| raw.is_finite()));
+                assert!(normalized.iter().all(|(_, norm)| norm.is_finite()));
             }
             _ => panic!("Expected Sensitivity result"),
         }
