@@ -1411,7 +1411,7 @@ impl RunExecutor {
                             ResultStatus::Warning
                         };
                         Ok(MappedResult {
-                            analysis_type: MappedAnalysisType::Ac,
+                            analysis_type: MappedAnalysisType::Pxf,
                             status,
                             waveforms,
                             measurements,
@@ -1444,8 +1444,7 @@ impl RunExecutor {
                 );
                 match stb_result {
                     Ok(data) => Ok(MappedResult {
-                        // STB is a stability-specialized AC analysis.
-                        analysis_type: MappedAnalysisType::Ac,
+                        analysis_type: MappedAnalysisType::Stb,
                         status: ResultStatus::Success,
                         waveforms: vec![
                             MappedWaveform {
@@ -1522,7 +1521,7 @@ impl RunExecutor {
                 let pstb_result = simulation_runner::run_pstb_analysis(netlist);
                 match pstb_result {
                     Ok(data) => Ok(MappedResult {
-                        analysis_type: MappedAnalysisType::Ac,
+                        analysis_type: MappedAnalysisType::Pstb,
                         status: ResultStatus::Success,
                         waveforms: vec![
                             MappedWaveform {
@@ -1771,9 +1770,9 @@ impl RunExecutor {
             AnalysisRunType::Pss => MappedAnalysisType::Pss,
             AnalysisRunType::Pac => MappedAnalysisType::Pac,
             AnalysisRunType::Pnoise => MappedAnalysisType::Pnoise,
-            AnalysisRunType::Pxf => MappedAnalysisType::Ac,
-            AnalysisRunType::Pstb => MappedAnalysisType::Ac,
-            AnalysisRunType::Stb => MappedAnalysisType::Ac,
+            AnalysisRunType::Pxf => MappedAnalysisType::Pxf,
+            AnalysisRunType::Pstb => MappedAnalysisType::Pstb,
+            AnalysisRunType::Stb => MappedAnalysisType::Stb,
             AnalysisRunType::MonteCarlo => MappedAnalysisType::MonteCarlo,
             AnalysisRunType::Parametric => MappedAnalysisType::Parametric,
             AnalysisRunType::Corner => MappedAnalysisType::Corner,
@@ -2063,8 +2062,9 @@ mod tests {
             (AnalysisRunType::Transient, MappedAnalysisType::Transient),
             (AnalysisRunType::Noise, MappedAnalysisType::Noise),
             (AnalysisRunType::PoleZero, MappedAnalysisType::PoleZero),
-            (AnalysisRunType::Pxf, MappedAnalysisType::Ac),
-            (AnalysisRunType::Stb, MappedAnalysisType::Ac),
+            (AnalysisRunType::Pxf, MappedAnalysisType::Pxf),
+            (AnalysisRunType::Pstb, MappedAnalysisType::Pstb),
+            (AnalysisRunType::Stb, MappedAnalysisType::Stb),
         ];
 
         for (run_type, expected) in mappings {
@@ -2622,7 +2622,7 @@ mod tests {
             .values()
             .next()
             .expect("expected mapped PXF result");
-        assert_eq!(mapped.analysis_type, MappedAnalysisType::Ac);
+        assert_eq!(mapped.analysis_type, MappedAnalysisType::Pxf);
         assert!(
             mapped
                 .waveforms
@@ -2730,7 +2730,7 @@ mod tests {
             .values()
             .next()
             .expect("expected mapped STB result");
-        assert_eq!(mapped.analysis_type, MappedAnalysisType::Ac);
+        assert_eq!(mapped.analysis_type, MappedAnalysisType::Stb);
         assert_eq!(mapped.waveforms.len(), 2);
         assert!(mapped
             .waveforms
@@ -2764,7 +2764,7 @@ mod tests {
             .values()
             .next()
             .expect("expected mapped PSTB result");
-        assert_eq!(mapped.analysis_type, MappedAnalysisType::Ac);
+        assert_eq!(mapped.analysis_type, MappedAnalysisType::Pstb);
         assert_eq!(mapped.waveforms.len(), 4);
         assert!(mapped
             .waveforms

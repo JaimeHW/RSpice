@@ -66,6 +66,12 @@ pub enum MappedAnalysisType {
     Pss,
     /// Periodic AC
     Pac,
+    /// Periodic transfer function
+    Pxf,
+    /// Stability analysis
+    Stb,
+    /// Periodic stability analysis
+    Pstb,
     /// Periodic Noise
     Pnoise,
     /// Monte Carlo
