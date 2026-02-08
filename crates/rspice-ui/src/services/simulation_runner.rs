@@ -1941,6 +1941,7 @@ pub fn run_pnoise_analysis_with_config(
         .map_err(|e| format!("Parse error: {}", e))?;
     let mut sim_config = build_engine_config(&netlist, None);
     sim_config.tolerance = config.pss_tolerance;
+    let noise_temperature = sim_config.temperature;
     let engine = Engine::new(sim_config);
 
     let dc_result = engine
@@ -1985,7 +1986,13 @@ pub fn run_pnoise_analysis_with_config(
     }
 
     let noise_results = engine
-        .run_noise_ports(&netlist, output_idx, output_ref_idx, &frequencies, 300.0)
+        .run_noise_ports(
+            &netlist,
+            output_idx,
+            output_ref_idx,
+            &frequencies,
+            noise_temperature,
+        )
         .map_err(|e| format!("PNOISE noise analysis error: {}", e))?;
     let noise_data = NoiseData::from_results(noise_results);
 
@@ -2031,6 +2038,7 @@ pub fn run_pnoise_analysis_with_config(
                 &folded_output_noise,
                 &noise_data.frequencies,
                 sideband_factor,
+                noise_temperature,
             ) {
                 Ok((estimate, method_warning)) => {
                     input_noise = Some(estimate);
@@ -2104,6 +2112,7 @@ fn compute_input_referred_pnoise(
     output_noise: &[Value],
     frequencies: &[Value],
     sideband_factor: usize,
+    temperature: Value,
 ) -> Result<(Vec<Value>, Option<String>), String> {
     if let Some(source_name) = infer_primary_source_name(netlist) {
         match engine.run_noise_with_input_source(
@@ -2112,7 +2121,7 @@ fn compute_input_referred_pnoise(
             output_ref_idx,
             &source_name,
             frequencies,
-            300.0,
+            temperature,
         ) {
             Ok(core_results) => {
                 if core_results.len() == output_noise.len() {
@@ -5771,6 +5780,44 @@ mod tests {
         assert_eq!(result.reference, PnoiseReference::Phase);
         assert_eq!(result.output_noise.len(), result.frequencies.len());
         assert!(result.output_noise.iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn test_run_pnoise_analysis_respects_netlist_temperature_options() {
+        let netlist_cold = "* pnoise cold\n.OPTIONS TEMP=-40\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\nC1 out 0 1n\n.end\n";
+        let netlist_hot = "* pnoise hot\n.OPTIONS TEMP=125\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\nC1 out 0 1n\n.end\n";
+        let cfg = PnoiseRunConfig {
+            output_node: "out".to_string(),
+            noise_ref: PnoiseReference::Output,
+            start_freq: 1e3,
+            stop_freq: 1e3,
+            points_per_unit: 1,
+            sweep: PnoiseFrequencySweep::Linear,
+            max_sideband: 0,
+            ..PnoiseRunConfig::default()
+        };
+
+        let cold = run_pnoise_analysis_with_config(netlist_cold, &cfg)
+            .expect("cold-temperature PNOISE should execute");
+        let hot =
+            run_pnoise_analysis_with_config(netlist_hot, &cfg).expect("hot-temperature PNOISE should execute");
+
+        let cold_psd = *cold
+            .output_noise
+            .first()
+            .expect("cold PNOISE run should contain one noise point");
+        let hot_psd = *hot
+            .output_noise
+            .first()
+            .expect("hot PNOISE run should contain one noise point");
+        assert!(cold_psd.is_finite() && cold_psd > 0.0);
+        assert!(hot_psd.is_finite() && hot_psd > cold_psd);
+        let ratio = hot_psd / cold_psd;
+        assert!(
+            ratio > 1.4,
+            "expected hot/cold output-noise ratio to reflect temperature scaling, got {}",
+            ratio
+        );
     }
 
     #[test]
