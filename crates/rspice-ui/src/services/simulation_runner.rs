@@ -1546,12 +1546,15 @@ impl PxfRunConfig {
                 self.output_sideband, self.max_sideband
             ));
         }
-        if let Some(reference) = self.output_ref.as_deref() {
-            let trimmed = reference.trim();
-            if !trimmed.is_empty() && !is_ground_like(trimmed) {
+        if let Some(reference) = self
+            .output_ref
+            .as_deref()
+            .map(str::trim)
+            .filter(|node| !node.is_empty() && !is_ground_like(node))
+        {
+            if reference.eq_ignore_ascii_case(self.output_node.trim()) {
                 return Err(
-                    "PXF differential output references are not supported by the current engine path"
-                        .to_string(),
+                    "PXF output node and output reference cannot be the same node".to_string(),
                 );
             }
         }
@@ -1734,7 +1737,7 @@ pub fn run_pxf_analysis_with_config(
     let group_delay_curve = pxf_result.group_delay_curve();
     let group_delay = (!group_delay_curve.is_empty()).then_some(group_delay_curve);
 
-    let output_label = format!("V({})", pac_internal.output_node_name);
+    let output_label = build_voltage_output_expr(config.output_node.trim(), config.output_ref.as_deref());
 
     Ok(PxfData {
         frequencies: sweep_freqs,
@@ -5617,7 +5620,7 @@ mod tests {
     }
 
     #[test]
-    fn test_run_pxf_analysis_with_config_rejects_non_ground_reference_node() {
+    fn test_run_pxf_analysis_with_config_supports_differential_reference_node() {
         let netlist = "* pxf ref\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
         let cfg = PxfRunConfig {
             input_source: "V1".to_string(),
@@ -5626,9 +5629,26 @@ mod tests {
             ..PxfRunConfig::default()
         };
 
+        let result = run_pxf_analysis_with_config(netlist, &cfg)
+            .expect("differential output reference should execute");
+        assert_eq!(result.frequencies.len(), result.transfer.len());
+        assert!(result.output_label.contains("out"));
+        assert!(result.output_label.contains("in"));
+    }
+
+    #[test]
+    fn test_run_pxf_analysis_with_config_rejects_identical_output_and_reference_nodes() {
+        let netlist = "* pxf invalid ref\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        let cfg = PxfRunConfig {
+            input_source: "V1".to_string(),
+            output_node: "out".to_string(),
+            output_ref: Some("out".to_string()),
+            ..PxfRunConfig::default()
+        };
+
         let err = run_pxf_analysis_with_config(netlist, &cfg)
-            .expect_err("differential output reference should be rejected");
-        assert!(err.contains("differential"));
+            .expect_err("matching output and reference nodes should fail");
+        assert!(err.contains("cannot be the same"));
     }
 
     #[test]
