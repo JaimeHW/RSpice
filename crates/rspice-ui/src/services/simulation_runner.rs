@@ -1737,7 +1737,8 @@ pub fn run_pxf_analysis_with_config(
     let group_delay_curve = pxf_result.group_delay_curve();
     let group_delay = (!group_delay_curve.is_empty()).then_some(group_delay_curve);
 
-    let output_label = build_voltage_output_expr(config.output_node.trim(), config.output_ref.as_deref());
+    let output_label =
+        build_voltage_output_expr(config.output_node.trim(), config.output_ref.as_deref());
 
     Ok(PxfData {
         frequencies: sweep_freqs,
@@ -1831,6 +1832,7 @@ pub struct PnoiseRunConfig {
     pub max_sideband: i32,
     pub output_node: String,
     pub output_ref: Option<String>,
+    pub input_source: String,
     pub noise_ref: PnoiseReference,
     pub integrated_noise: bool,
     pub noise_summary: bool,
@@ -1851,6 +1853,7 @@ impl Default for PnoiseRunConfig {
             max_sideband: 5,
             output_node: "VOUT".to_string(),
             output_ref: None,
+            input_source: "VIN".to_string(),
             noise_ref: PnoiseReference::Output,
             integrated_noise: false,
             noise_summary: true,
@@ -1885,6 +1888,11 @@ impl PnoiseRunConfig {
         }
         if self.output_node.trim().is_empty() {
             return Err("PNOISE output node must be specified".to_string());
+        }
+        if self.noise_ref == PnoiseReference::Input && self.input_source.trim().is_empty() {
+            return Err(
+                "PNOISE input source must be specified for input-referred noise".to_string(),
+            );
         }
         if !self.reltol.is_finite() || self.reltol <= 0.0 {
             return Err("PNOISE relative tolerance must be positive".to_string());
@@ -2047,11 +2055,7 @@ pub fn run_pnoise_analysis_with_config(
                     }
                 }
                 Err(error) => {
-                    input_noise = Some(output_noise.clone());
-                    warnings.push(format!(
-                        "PNOISE input-referred conversion fell back to unity gain: {}",
-                        error
-                    ));
+                    return Err(error);
                 }
             }
         }
@@ -2114,6 +2118,51 @@ fn compute_input_referred_pnoise(
     sideband_factor: usize,
     temperature: Value,
 ) -> Result<(Vec<Value>, Option<String>), String> {
+    let configured_source = config.input_source.trim();
+    if !configured_source.is_empty() {
+        let core_results = engine
+            .run_noise_with_input_source(
+                netlist,
+                output_idx,
+                output_ref_idx,
+                configured_source,
+                frequencies,
+                temperature,
+            )
+            .map_err(|error| {
+                format!(
+                    "PNOISE input source '{}' failed during source-referred noise evaluation: {}",
+                    configured_source, error
+                )
+            })?;
+        if core_results.len() == output_noise.len() {
+            let scaled_input_noise: Vec<Value> = core_results
+                .iter()
+                .map(|point| point.input_referred_density.max(0.0))
+                .map(|point| point * sideband_factor as Value)
+                .collect();
+            return Ok((scaled_input_noise, None));
+        }
+
+        let fallback = compute_input_referred_pnoise_from_tf(
+            netlist_text,
+            netlist,
+            node_names,
+            config,
+            output_noise,
+            frequencies,
+        )?;
+        return Ok((
+            fallback,
+            Some(format!(
+                "PNOISE input-referred conversion used TF fallback because core source '{}' path returned {} points (expected {})",
+                configured_source,
+                core_results.len(),
+                output_noise.len()
+            )),
+        ));
+    }
+
     if let Some(source_name) = infer_primary_source_name(netlist) {
         match engine.run_noise_with_input_source(
             netlist,
@@ -2169,8 +2218,14 @@ fn compute_input_referred_pnoise(
         }
     }
 
-    let fallback =
-        compute_input_referred_pnoise_from_tf(netlist_text, netlist, node_names, config, output_noise, frequencies)?;
+    let fallback = compute_input_referred_pnoise_from_tf(
+        netlist_text,
+        netlist,
+        node_names,
+        config,
+        output_noise,
+        frequencies,
+    )?;
     Ok((
         fallback,
         Some(
@@ -2188,13 +2243,17 @@ fn compute_input_referred_pnoise_from_tf(
     output_noise: &[Value],
     frequencies: &[Value],
 ) -> Result<Vec<Value>, String> {
-    let inferred_tf = infer_tf_run_config(netlist, node_names)?;
+    let input_source = if config.input_source.trim().is_empty() {
+        infer_tf_run_config(netlist, node_names)?.input_source
+    } else {
+        config.input_source.trim().to_string()
+    };
     let tf_config = TfRunConfig {
         start_freq: config.start_freq,
         stop_freq: config.stop_freq,
         points_per_unit: config.points_per_unit,
         sweep: config.sweep.as_tf_sweep(),
-        input_source: inferred_tf.input_source,
+        input_source,
         output_node: config.output_node.trim().to_string(),
         output_ref: config
             .output_ref
@@ -2288,9 +2347,11 @@ pub fn run_pnoise_analysis(netlist_text: &str) -> Result<PnoiseData, String> {
         "PNOISE could not infer an output node; ensure at least one non-ground node exists"
             .to_string()
     })?;
+    let input_source = infer_primary_source_name(&netlist).unwrap_or_else(|| "VIN".to_string());
 
     let cfg = PnoiseRunConfig {
         output_node,
+        input_source,
         ..PnoiseRunConfig::default()
     };
     run_pnoise_analysis_with_config(netlist_text, &cfg)
@@ -5748,6 +5809,7 @@ mod tests {
             max_sideband: 3,
             output_node: "out".to_string(),
             output_ref: None,
+            input_source: "V1".to_string(),
             noise_ref: PnoiseReference::Output,
             integrated_noise: true,
             noise_summary: true,
@@ -5799,8 +5861,8 @@ mod tests {
 
         let cold = run_pnoise_analysis_with_config(netlist_cold, &cfg)
             .expect("cold-temperature PNOISE should execute");
-        let hot =
-            run_pnoise_analysis_with_config(netlist_hot, &cfg).expect("hot-temperature PNOISE should execute");
+        let hot = run_pnoise_analysis_with_config(netlist_hot, &cfg)
+            .expect("hot-temperature PNOISE should execute");
 
         let cold_psd = *cold
             .output_noise
@@ -5826,6 +5888,7 @@ mod tests {
         let output_cfg = PnoiseRunConfig {
             output_node: "out".to_string(),
             output_ref: Some("in".to_string()),
+            input_source: "V1".to_string(),
             noise_ref: PnoiseReference::Output,
             start_freq: 10.0,
             stop_freq: 1e7,
@@ -5863,7 +5926,8 @@ mod tests {
         sim_config.tolerance = input_cfg.pss_tolerance;
         let engine = Engine::new(sim_config);
         let dc = engine.run_dc_op(&parsed).expect("dc op should execute");
-        let out_idx = resolve_node_or_ground_index("out", &dc.node_names).expect("out must resolve");
+        let out_idx =
+            resolve_node_or_ground_index("out", &dc.node_names).expect("out must resolve");
         let ref_idx = resolve_node_or_ground_index("in", &dc.node_names).expect("in must resolve");
         let core_input = engine
             .run_noise_with_input_source(
@@ -5887,6 +5951,27 @@ mod tests {
                 ui_point
             );
         }
+    }
+
+    #[test]
+    fn test_run_pnoise_analysis_input_reference_rejects_unknown_input_source() {
+        let netlist = "* pnoise input unknown source\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        let cfg = PnoiseRunConfig {
+            output_node: "out".to_string(),
+            noise_ref: PnoiseReference::Input,
+            input_source: "V_NOT_PRESENT".to_string(),
+            start_freq: 1e3,
+            stop_freq: 1e5,
+            points_per_unit: 3,
+            sweep: PnoiseFrequencySweep::Decade,
+            max_sideband: 0,
+            ..PnoiseRunConfig::default()
+        };
+
+        let err = run_pnoise_analysis_with_config(netlist, &cfg)
+            .expect_err("input-referred PNOISE should reject unknown explicit input source");
+        assert!(err.contains("V_NOT_PRESENT"));
+        assert!(err.contains("input source"));
     }
 
     #[test]
@@ -5933,7 +6018,10 @@ mod tests {
         let differential = run_pnoise_analysis_with_config(netlist, &differential_cfg)
             .expect("differential PNOISE should execute");
         assert_eq!(single.output_noise.len(), differential.output_noise.len());
-        for (single_value, diff_value) in single.output_noise.iter().zip(differential.output_noise.iter())
+        for (single_value, diff_value) in single
+            .output_noise
+            .iter()
+            .zip(differential.output_noise.iter())
         {
             assert!(
                 *diff_value + 1e-30 >= *single_value,
@@ -5965,14 +6053,16 @@ mod tests {
         sim_config.tolerance = cfg.pss_tolerance;
         let engine = Engine::new(sim_config);
         let dc = engine.run_dc_op(&parsed).expect("dc op should execute");
-        let out_idx = resolve_node_or_ground_index("out", &dc.node_names).expect("out must resolve");
+        let out_idx =
+            resolve_node_or_ground_index("out", &dc.node_names).expect("out must resolve");
         let ref_idx = resolve_node_or_ground_index("in", &dc.node_names).expect("in must resolve");
         let core = engine
             .run_noise_ports(&parsed, out_idx, Some(ref_idx), &result.frequencies, 300.0)
             .expect("core differential noise port run should execute");
 
         assert_eq!(core.len(), result.output_noise.len());
-        for (idx, (core_point, ui_point)) in core.iter().zip(result.output_noise.iter()).enumerate() {
+        for (idx, (core_point, ui_point)) in core.iter().zip(result.output_noise.iter()).enumerate()
+        {
             let tol = 1e-24 + core_point.output_noise_density.abs() * 1e-9;
             assert!(
                 (core_point.output_noise_density - *ui_point).abs() <= tol,

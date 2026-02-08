@@ -1735,6 +1735,7 @@ C1 out 0 1n
                 max_sideband: 3,
                 output_node: "out".to_string(),
                 output_ref: None,
+                input_source: "V1".to_string(),
                 noise_ref: crate::services::simulation_runner::PnoiseReference::Output,
                 integrated_noise: true,
                 noise_summary: true,
