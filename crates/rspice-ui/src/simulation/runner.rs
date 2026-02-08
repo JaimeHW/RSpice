@@ -7,8 +7,8 @@
 //! - Result caching
 
 use std::sync::{
-    Arc, Mutex,
     atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
 };
 use std::thread::{self, JoinHandle};
 
@@ -776,6 +776,7 @@ R2 out 0 1k
                 temperatures_c: vec![25.0],
                 full_matrix: true,
                 nominal_voltage: Some(1.0),
+                base_mode: crate::services::simulation_runner::CornerBaseMode::Op,
             }),
         };
 
@@ -795,10 +796,63 @@ R2 out 0 1k
             } => {
                 assert_eq!(temperatures_c.len(), 4);
                 assert_eq!(corner_labels.len(), 4);
+                assert!(corner_labels
+                    .iter()
+                    .any(|label| label.contains("FF_1.100000V")));
+            }
+            other => panic!("Expected Corner result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_corner_with_ac_base_mode_options() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* Corner AC sweep smoke test
+V1 in 0 DC 1 AC 1
+R1 in out 1k
+C1 out 0 1n
+.end
+"#
+        .to_string();
+
+        let options = SpecExecutionOptions {
+            corner: Some(crate::services::simulation_runner::CornerRunConfig {
+                process_corners: vec![crate::services::simulation_runner::CornerProcess::TT],
+                voltages: vec![1.0],
+                temperatures_c: vec![-40.0, 25.0, 125.0],
+                full_matrix: true,
+                nominal_voltage: Some(1.0),
+                base_mode: crate::services::simulation_runner::CornerBaseMode::Ac {
+                    start_freq: 1e3,
+                    stop_freq: 1e6,
+                    points_per_unit: 8,
+                    sweep: crate::services::simulation_runner::CornerFrequencySweep::Decade,
+                },
+            }),
+        };
+
+        runner
+            .start_spec_with_options(AnalysisSpec::Corner, netlist, options)
+            .expect("corner AC options should start");
+        thread::sleep(std::time::Duration::from_millis(250));
+
+        let result = runner.poll_result();
+        assert!(result.is_some(), "Expected corner AC result");
+        let result = result.unwrap().expect("Corner AC should succeed");
+        match result {
+            SimulationResult::Corner {
+                temperatures_c,
+                waveforms,
+                ..
+            } => {
+                assert_eq!(temperatures_c.len(), 3);
                 assert!(
-                    corner_labels
-                        .iter()
-                        .any(|label| label.contains("FF_1.100000V"))
+                    waveforms
+                        .keys()
+                        .any(|name| name.eq_ignore_ascii_case("|V(out)|")),
+                    "expected |V(out)| trace, got {:?}",
+                    waveforms.keys().collect::<Vec<_>>()
                 );
             }
             other => panic!("Expected Corner result, got {:?}", other),
