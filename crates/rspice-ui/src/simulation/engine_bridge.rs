@@ -1487,6 +1487,119 @@ C1 out 0 1n
     }
 
     #[test]
+    fn test_run_sensitivity_supports_differential_output() {
+        let bridge = EngineBridge::new();
+        let netlist = r#"
+* Sensitivity differential output
+.param RVAL=1k
+V1 in 0 DC 10
+R1 in out {RVAL}
+R2 out 0 1k
+.end
+"#;
+
+        let cfg = AnalysisConfig::Sensitivity(super::super::config::SensitivityConfig {
+            output_var: "V(out,in)".to_string(),
+            ac_mode: false,
+            frequency: None,
+        });
+
+        let result = bridge
+            .run(&cfg, netlist)
+            .expect("differential sensitivity run should succeed");
+        match result {
+            SimulationResult::Sensitivity {
+                sensitivities,
+                normalized,
+            } => {
+                assert!(!sensitivities.is_empty());
+                assert!(!normalized.is_empty());
+                assert!(sensitivities
+                    .iter()
+                    .all(|(_, raw)| raw.is_finite()));
+                assert!(normalized
+                    .iter()
+                    .all(|(_, norm)| norm.is_finite()));
+            }
+            _ => panic!("Expected Sensitivity result"),
+        }
+    }
+
+    #[test]
+    fn test_run_sensitivity_supports_current_output_dc() {
+        let bridge = EngineBridge::new();
+        let netlist = r#"
+* Sensitivity branch current output
+.param RVAL=1k
+V1 in 0 DC 10
+R1 in 0 {RVAL}
+.end
+"#;
+
+        let cfg = AnalysisConfig::Sensitivity(super::super::config::SensitivityConfig {
+            output_var: "I(V1)".to_string(),
+            ac_mode: false,
+            frequency: None,
+        });
+
+        let result = bridge
+            .run(&cfg, netlist)
+            .expect("current-output dc sensitivity run should succeed");
+        match result {
+            SimulationResult::Sensitivity {
+                sensitivities,
+                normalized,
+            } => {
+                assert!(!sensitivities.is_empty());
+                let key = sensitivities
+                    .keys()
+                    .find(|k| k.eq_ignore_ascii_case("RVAL"))
+                    .expect("expected RVAL sensitivity key");
+                assert!(sensitivities[key].is_finite());
+                assert!(normalized[key].is_finite());
+            }
+            _ => panic!("Expected Sensitivity result"),
+        }
+    }
+
+    #[test]
+    fn test_run_sensitivity_supports_current_output_ac() {
+        let bridge = EngineBridge::new();
+        let netlist = r#"
+* Sensitivity branch current output AC
+.param RVAL=1k
+V1 in 0 DC 0 AC 1
+R1 in 0 {RVAL}
+.end
+"#;
+
+        let cfg = AnalysisConfig::Sensitivity(super::super::config::SensitivityConfig {
+            output_var: "I(V1)".to_string(),
+            ac_mode: true,
+            frequency: Some(1e3),
+        });
+
+        let result = bridge
+            .run(&cfg, netlist)
+            .expect("current-output ac sensitivity run should succeed");
+        match result {
+            SimulationResult::Sensitivity {
+                sensitivities,
+                normalized,
+            } => {
+                assert!(!sensitivities.is_empty());
+                let key = sensitivities
+                    .keys()
+                    .find(|k| k.eq_ignore_ascii_case("RVAL"))
+                    .expect("expected RVAL sensitivity key");
+                assert!(sensitivities[key].is_finite());
+                assert!(normalized[key].is_finite());
+            }
+            _ => panic!("Expected Sensitivity result"),
+        }
+    }
+
+    #[test]
     fn test_run_sensitivity_rejects_frequency_without_ac_mode() {
         let bridge = EngineBridge::new();
         let netlist = r#"
@@ -1534,6 +1647,32 @@ C1 out 0 1n
             .run(&cfg, netlist)
             .expect_err("expected validation error");
         assert!(err.to_string().contains("must be > 0"));
+    }
+
+    #[test]
+    fn test_run_sensitivity_rejects_unresolved_branch_output() {
+        let bridge = EngineBridge::new();
+        let netlist = r#"
+* Sensitivity parameterized divider
+.param RVAL=1k
+V1 in 0 DC 10
+R1 in out {RVAL}
+R2 out 0 1k
+.end
+"#;
+
+        let cfg = AnalysisConfig::Sensitivity(super::super::config::SensitivityConfig {
+            output_var: "I(NO_SUCH_BRANCH)".to_string(),
+            ac_mode: false,
+            frequency: None,
+        });
+
+        let err = bridge
+            .run(&cfg, netlist)
+            .expect_err("expected unresolved output error");
+        assert!(err
+            .to_string()
+            .contains("could not be resolved to a node or branch"));
     }
 
     #[test]

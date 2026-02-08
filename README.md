@@ -10,15 +10,13 @@
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg?style=flat-square)](https://github.com/JaimeHW/rspice/actions)
 [![Platform](https://img.shields.io/badge/platform-win%20|%20macos%20|%20linux%20|%20web-lightgrey.svg?style=flat-square)](https://rspice.org)
 
-<br/>
-
 <img src="assets/image.png" alt="RSpice Studio" width="100%" style="border-radius: 8px; box-shadow: 0 12px 40px rgba(0,0,0,0.6);" />
 
 
 </div>
 
 
----
+
 
 ## Table of Contents
 - [Overview](#overview)
