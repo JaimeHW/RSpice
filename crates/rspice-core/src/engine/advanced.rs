@@ -117,8 +117,14 @@ impl Engine {
                     .copied()
                     .unwrap_or(1.0);
             if r > 0.0 && r < 1e12 {
+                let name = circuit
+                    .resistors
+                    .names
+                    .get(i)
+                    .cloned()
+                    .unwrap_or_else(|| format!("R{}", i + 1));
                 noise_sources.push(NoiseSource::thermal(
-                    format!("R{}", i + 1),
+                    name,
                     stamp.pp.row,
                     stamp.nn.row,
                     r,
@@ -2171,6 +2177,30 @@ mod tests {
             }
             other => panic!("expected Circuit error, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_run_noise_contributions_use_resistor_instance_names() {
+        let netlist = crate::netlist::parse_netlist(
+            "* Noise resistor names\n\
+             V1 in 0 1\n\
+             RFEED in out 1k\n\
+             RLOAD out 0 2k\n\
+             .END\n",
+        )
+        .expect("netlist should parse");
+        let engine = Engine::default();
+        let results = engine
+            .run_noise(&netlist, 2, &[1e3], 300.0)
+            .expect("noise analysis should succeed");
+        let first = results.first().expect("noise result should contain one point");
+        let names: std::collections::HashSet<&str> = first
+            .contributions
+            .iter()
+            .map(|contrib| contrib.device_name.as_str())
+            .collect();
+        assert!(names.contains("RFEED"));
+        assert!(names.contains("RLOAD"));
     }
 
     #[test]
