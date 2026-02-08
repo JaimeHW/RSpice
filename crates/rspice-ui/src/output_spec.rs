@@ -97,7 +97,9 @@ pub(crate) fn normalized_sensitivity(
     }
 }
 
-pub(crate) fn collect_sensitivity_parameters(netlist: &rspice_core::Netlist) -> Vec<(String, Value)> {
+pub(crate) fn collect_sensitivity_parameters(
+    netlist: &rspice_core::Netlist,
+) -> Vec<(String, Value)> {
     let mut params: Vec<(String, Value)> = netlist
         .params
         .all_params()
@@ -165,7 +167,10 @@ fn resolve_node_index(node_name: &str, node_names: &[String]) -> Option<usize> {
 }
 
 #[inline]
-pub(crate) fn resolve_node_or_ground_index(node_name: &str, node_names: &[String]) -> Option<usize> {
+pub(crate) fn resolve_node_or_ground_index(
+    node_name: &str,
+    node_names: &[String],
+) -> Option<usize> {
     let trimmed = node_name.trim();
     if trimmed.is_empty() {
         return None;
@@ -255,13 +260,17 @@ pub(crate) fn dc_output_value(
             let v_pos = if vspec.pos == 0 {
                 0.0
             } else {
-                dc_result.node_voltages.get(vspec.pos).copied().ok_or_else(|| {
-                    format!(
-                        "Voltage output node index {} is out of range ({} available)",
-                        vspec.pos,
-                        dc_result.node_voltages.len()
-                    )
-                })?
+                dc_result
+                    .node_voltages
+                    .get(vspec.pos)
+                    .copied()
+                    .ok_or_else(|| {
+                        format!(
+                            "Voltage output node index {} is out of range ({} available)",
+                            vspec.pos,
+                            dc_result.node_voltages.len()
+                        )
+                    })?
             };
             let v_neg = match vspec.neg {
                 Some(0) => 0.0,
@@ -291,7 +300,10 @@ pub(crate) fn dc_output_value(
     }
 }
 
-pub(crate) fn ac_output_value(ac_result: &AcResult, output_spec: &OutputSpec) -> Result<Complex64, String> {
+pub(crate) fn ac_output_value(
+    ac_result: &AcResult,
+    output_spec: &OutputSpec,
+) -> Result<Complex64, String> {
     match output_spec {
         OutputSpec::Voltage(vspec) => {
             let v_pos = if vspec.pos == 0 {
@@ -514,7 +526,10 @@ mod tests {
         let params = collect_sensitivity_parameters(&netlist);
         let names: Vec<String> = params.into_iter().map(|(name, _)| name).collect();
 
-        assert_eq!(names, vec!["A".to_string(), "M".to_string(), "Z".to_string()]);
+        assert_eq!(
+            names,
+            vec!["A".to_string(), "M".to_string(), "Z".to_string()]
+        );
     }
 
     #[test]
@@ -529,7 +544,8 @@ mod tests {
             Some(5e6)
         );
         assert_eq!(
-            resolve_sensitivity_ac_frequency(false, None).expect("DC mode should have no AC frequency"),
+            resolve_sensitivity_ac_frequency(false, None)
+                .expect("DC mode should have no AC frequency"),
             None
         );
         assert!(resolve_sensitivity_ac_frequency(true, Some(0.0))

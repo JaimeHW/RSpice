@@ -885,11 +885,9 @@ R2 out 0 1k
                 assert_eq!(x_label, "Corner Index");
                 assert_eq!(x_unit, "");
                 assert_eq!(corner_labels.len(), 4);
-                assert!(
-                    corner_labels
-                        .iter()
-                        .any(|label| label.contains("FF_1.100000V"))
-                );
+                assert!(corner_labels
+                    .iter()
+                    .any(|label| label.contains("FF_1.100000V")));
             }
             other => panic!("Expected Corner result, got {:?}", other),
         }

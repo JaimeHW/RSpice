@@ -246,8 +246,7 @@ impl EngineBridge {
                                 result.node_voltages.get(node_idx).copied().unwrap_or(0.0)
                             })
                             .collect();
-                        let trace_name =
-                            format!("{} [{}={:.6}]", node_name, source2, sweep2_value);
+                        let trace_name = format!("{} [{}={:.6}]", node_name, source2, sweep2_value);
                         waveforms.insert(
                             trace_name.clone(),
                             WaveformData::new_time_domain(
