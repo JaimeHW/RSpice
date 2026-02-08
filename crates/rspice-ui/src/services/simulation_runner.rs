@@ -4,9 +4,13 @@
 
 use num_complex::Complex64;
 use rspice_core::analysis::ac::AcResult;
+use rspice_core::analysis::monte_carlo::Distribution;
 use rspice_core::analysis::noise::NoiseResult;
 use rspice_core::engine::{Engine, SimulationConfig, TransientResult};
-use rspice_core::netlist::AnalysisCommand;
+use rspice_core::netlist::{
+    AnalysisCommand, MonteCarloDistribution, StepCommand, StepSweep, StepTarget,
+};
+use rspice_core::solver::SimulationResult as CoreSimulationResult;
 use rspice_core::{resolve_simulation_config, SimulationConfigOverrides, Value};
 use crate::output_spec::{
     collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
@@ -37,6 +41,8 @@ fn now_ms() -> f64 {
         .map(|p| p.now())
         .unwrap_or(0.0)
 }
+
+const DEFAULT_MONTE_CARLO_SEED: u64 = 0x5EED_5EED;
 
 fn build_engine_config(
     netlist: &rspice_core::Netlist,
@@ -1183,8 +1189,387 @@ pub fn run_stb_analysis(
 }
 
 // =============================================================================
+// Monte Carlo Analysis
+// =============================================================================
+
+/// Monte Carlo variable summary statistics.
+#[derive(Debug, Clone)]
+pub struct MonteCarloVariableData {
+    pub name: String,
+    pub mean: Value,
+    pub std_dev: Value,
+    pub min: Value,
+    pub max: Value,
+    pub histogram: Vec<usize>,
+    pub bin_edges: Vec<Value>,
+}
+
+/// Monte Carlo analysis data.
+#[derive(Debug, Clone)]
+pub struct MonteCarloData {
+    pub runs_requested: usize,
+    pub runs_completed: usize,
+    pub num_failures: usize,
+    pub all_converged: bool,
+    pub variables: Vec<MonteCarloVariableData>,
+}
+
+/// Run Monte Carlo analysis by executing the first `.MC` command in the netlist.
+pub fn run_monte_carlo_analysis(netlist_text: &str) -> Result<MonteCarloData, String> {
+    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
+        .map_err(|e| format!("Parse error: {}", e))?;
+
+    let mc_cmd = netlist
+        .analyses
+        .iter()
+        .find_map(|analysis| match analysis {
+            AnalysisCommand::MonteCarlo(cmd) => Some(cmd),
+            _ => None,
+        })
+        .ok_or_else(|| "Monte Carlo analysis requires a .MC command in the netlist".to_string())?;
+
+    let distribution = match mc_cmd.distribution {
+        MonteCarloDistribution::Gaussian => Distribution::Gaussian {
+            sigma: mc_cmd.relative_spread,
+        },
+        MonteCarloDistribution::Uniform => Distribution::Uniform {
+            tolerance: mc_cmd.relative_spread,
+        },
+    };
+
+    let seed = mc_cmd.seed.unwrap_or(DEFAULT_MONTE_CARLO_SEED);
+    let parameter_filter = (!mc_cmd.params.is_empty()).then_some(mc_cmd.params.as_slice());
+
+    let engine = Engine::new(build_engine_config(&netlist, None));
+    let result = engine
+        .run_monte_carlo_with_options(
+            &netlist,
+            mc_cmd.runs,
+            seed,
+            distribution,
+            parameter_filter,
+        )
+        .map_err(|e| format!("Monte Carlo analysis error: {}", e))?;
+
+    let mut variables: Vec<MonteCarloVariableData> = result
+        .variables
+        .into_values()
+        .map(|stats| MonteCarloVariableData {
+            name: stats.name,
+            mean: stats.mean,
+            std_dev: stats.std_dev,
+            min: stats.min,
+            max: stats.max,
+            histogram: stats.histogram,
+            bin_edges: stats.bin_edges,
+        })
+        .collect();
+    variables.sort_by(|a, b| a.name.cmp(&b.name));
+
+    Ok(MonteCarloData {
+        runs_requested: mc_cmd.runs,
+        runs_completed: result.num_runs,
+        num_failures: result.num_failures,
+        all_converged: result.all_converged,
+        variables,
+    })
+}
+
+// =============================================================================
+// Parametric (.STEP) Analysis
+// =============================================================================
+
+/// Parametric sweep data.
+#[derive(Debug, Clone)]
+pub struct ParametricData {
+    pub target: String,
+    pub sweep_values: Vec<Value>,
+    pub voltages: Vec<(String, Vec<Value>)>,
+    pub num_points: usize,
+    pub num_failures: usize,
+}
+
+/// Run parametric analysis by executing the first `.STEP` command in the netlist.
+pub fn run_parametric_analysis(netlist_text: &str) -> Result<ParametricData, String> {
+    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
+        .map_err(|e| format!("Parse error: {}", e))?;
+
+    let step_cmd = netlist
+        .analyses
+        .iter()
+        .find_map(|analysis| match analysis {
+            AnalysisCommand::Step(step) => Some(step),
+            _ => None,
+        })
+        .ok_or_else(|| "Parametric analysis requires a .STEP command in the netlist".to_string())?;
+
+    let values = expand_step_sweep_values(&step_cmd.sweep)?;
+    if values.is_empty() {
+        return Err("Parametric analysis has no sweep points to execute".to_string());
+    }
+
+    let results = if step_cmd.target == StepTarget::Temp {
+        run_temperature_sweep_dc(&netlist, &values)?
+    } else {
+        let engine = Engine::new(build_engine_config(&netlist, None));
+        engine
+            .run_step_command(&netlist, step_cmd, &values)
+            .map_err(|e| format!("Parametric analysis error: {}", e))?
+    };
+
+    if results.is_empty() {
+        return Err("Parametric analysis produced no converged sweep points".to_string());
+    }
+
+    let num_failures = values.len().saturating_sub(results.len());
+    let (sweep_values, voltages) = map_dc_sweep_results(&results);
+
+    Ok(ParametricData {
+        target: describe_step_target(step_cmd),
+        num_points: sweep_values.len(),
+        sweep_values,
+        voltages,
+        num_failures,
+    })
+}
+
+// =============================================================================
+// Corner Analysis
+// =============================================================================
+
+/// Temperature-corner analysis data.
+#[derive(Debug, Clone)]
+pub struct CornerData {
+    pub temperatures_c: Vec<Value>,
+    pub voltages: Vec<(String, Vec<Value>)>,
+    pub num_points: usize,
+    pub num_failures: usize,
+}
+
+/// Run corner analysis from `.TEMP` commands in the netlist.
+pub fn run_corner_analysis(netlist_text: &str) -> Result<CornerData, String> {
+    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
+        .map_err(|e| format!("Parse error: {}", e))?;
+    let temperatures = extract_temp_points(&netlist);
+
+    if temperatures.is_empty() {
+        return Err("Corner analysis requires at least one .TEMP command".to_string());
+    }
+
+    let results = run_temperature_sweep_dc(&netlist, &temperatures)?;
+    if results.is_empty() {
+        return Err("Corner analysis produced no converged corner points".to_string());
+    }
+
+    let num_failures = temperatures.len().saturating_sub(results.len());
+    let (temperatures_c, voltages) = map_dc_sweep_results(&results);
+
+    Ok(CornerData {
+        num_points: temperatures_c.len(),
+        temperatures_c,
+        voltages,
+        num_failures,
+    })
+}
+
+// =============================================================================
 // Helper functions
 // =============================================================================
+
+fn describe_step_target(step_cmd: &StepCommand) -> String {
+    match step_cmd.target {
+        StepTarget::Param => format!("PARAM {}", step_cmd.name),
+        StepTarget::Device => match step_cmd.param_name.as_deref() {
+            Some(param) => format!("DEVICE {}.{}", step_cmd.name, param),
+            None => format!("DEVICE {}", step_cmd.name),
+        },
+        StepTarget::Model => {
+            let param = step_cmd.param_name.as_deref().unwrap_or("PARAM");
+            format!("MODEL {}.{}", step_cmd.name, param)
+        }
+        StepTarget::Temp => "TEMP".to_string(),
+    }
+}
+
+fn map_dc_sweep_results(results: &[(Value, CoreSimulationResult)]) -> (Vec<Value>, Vec<(String, Vec<Value>)>) {
+    let sweep_values: Vec<Value> = results.iter().map(|(value, _)| *value).collect();
+    let mut voltages = Vec::new();
+
+    if let Some((_, first)) = results.first() {
+        for node_idx in 1..first.node_voltages.len() {
+            let node_name = first
+                .node_names
+                .get(node_idx)
+                .cloned()
+                .unwrap_or_else(|| node_idx.to_string());
+            let values: Vec<Value> = results
+                .iter()
+                .map(|(_, result)| result.node_voltages.get(node_idx).copied().unwrap_or(0.0))
+                .collect();
+            voltages.push((format!("V({})", node_name), values));
+        }
+    }
+
+    (sweep_values, voltages)
+}
+
+fn run_temperature_sweep_dc(
+    netlist: &rspice_core::Netlist,
+    temperatures_c: &[Value],
+) -> Result<Vec<(Value, CoreSimulationResult)>, String> {
+    let mut results = Vec::with_capacity(temperatures_c.len());
+
+    for &temp_c in temperatures_c {
+        if !temp_c.is_finite() {
+            return Err("Temperature sweep contains non-finite value".to_string());
+        }
+
+        let mut config = build_engine_config(netlist, None);
+        config.temperature = temp_c + 273.15;
+        let engine = Engine::new(config);
+
+        match engine.run_dc_op(netlist) {
+            Ok(dc) => results.push((temp_c, dc)),
+            Err(e) => {
+                log::warn!("Temperature corner {}°C failed: {}", temp_c, e);
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+fn expand_step_sweep_values(sweep: &StepSweep) -> Result<Vec<Value>, String> {
+    const MAX_SWEEP_POINTS: usize = 1_000_000;
+
+    match sweep {
+        StepSweep::Linear { start, stop, step } => {
+            if !start.is_finite() || !stop.is_finite() || !step.is_finite() {
+                return Err("Parametric linear sweep requires finite start/stop/step".to_string());
+            }
+            if *step == 0.0 {
+                return Err("Parametric linear sweep step cannot be zero".to_string());
+            }
+            if (stop - start).signum() != step.signum() && (stop - start).abs() > 0.0 {
+                return Err(
+                    "Parametric linear sweep step direction must match start/stop".to_string(),
+                );
+            }
+
+            if (stop - start).abs() == 0.0 {
+                return Ok(vec![*start]);
+            }
+
+            let mut values = Vec::new();
+            let mut current = *start;
+            let tolerance = (step.abs() * 1e-12).max((start.abs().max(stop.abs())) * 1e-12);
+
+            if *step > 0.0 {
+                while current <= *stop + tolerance {
+                    values.push(current);
+                    if values.len() > MAX_SWEEP_POINTS {
+                        return Err("Parametric sweep exceeds maximum supported point count".to_string());
+                    }
+                    current += *step;
+                }
+            } else {
+                while current >= *stop - tolerance {
+                    values.push(current);
+                    if values.len() > MAX_SWEEP_POINTS {
+                        return Err("Parametric sweep exceeds maximum supported point count".to_string());
+                    }
+                    current += *step;
+                }
+            }
+
+            if values.is_empty() {
+                return Err("Parametric linear sweep produced no points".to_string());
+            }
+
+            Ok(values)
+        }
+        StepSweep::Decade {
+            points_per_decade,
+            start,
+            stop,
+        } => {
+            if *points_per_decade == 0 {
+                return Err("Parametric decade sweep points_per_decade must be > 0".to_string());
+            }
+            if !start.is_finite() || !stop.is_finite() || *start <= 0.0 || *stop <= 0.0 {
+                return Err("Parametric decade sweep requires positive finite start/stop".to_string());
+            }
+            let start_log = start.log10();
+            let stop_log = stop.log10();
+            let span = (stop_log - start_log).abs();
+            let total_points = (span * (*points_per_decade as f64)).ceil() as usize + 1;
+            if total_points > MAX_SWEEP_POINTS {
+                return Err("Parametric sweep exceeds maximum supported point count".to_string());
+            }
+            let denom = (total_points - 1).max(1) as f64;
+            Ok((0..total_points)
+                .map(|i| {
+                    let t = i as f64 / denom;
+                    let log_value = start_log + (stop_log - start_log) * t;
+                    10.0_f64.powf(log_value)
+                })
+                .collect())
+        }
+        StepSweep::Octave {
+            points_per_octave,
+            start,
+            stop,
+        } => {
+            if *points_per_octave == 0 {
+                return Err("Parametric octave sweep points_per_octave must be > 0".to_string());
+            }
+            if !start.is_finite() || !stop.is_finite() || *start <= 0.0 || *stop <= 0.0 {
+                return Err("Parametric octave sweep requires positive finite start/stop".to_string());
+            }
+            let start_log = start.log2();
+            let stop_log = stop.log2();
+            let span = (stop_log - start_log).abs();
+            let total_points = (span * (*points_per_octave as f64)).ceil() as usize + 1;
+            if total_points > MAX_SWEEP_POINTS {
+                return Err("Parametric sweep exceeds maximum supported point count".to_string());
+            }
+            let denom = (total_points - 1).max(1) as f64;
+            Ok((0..total_points)
+                .map(|i| {
+                    let t = i as f64 / denom;
+                    let log_value = start_log + (stop_log - start_log) * t;
+                    2.0_f64.powf(log_value)
+                })
+                .collect())
+        }
+        StepSweep::List(values) => {
+            if values.is_empty() {
+                return Err("Parametric LIST sweep requires at least one value".to_string());
+            }
+            if values.iter().any(|value| !value.is_finite()) {
+                return Err("Parametric LIST sweep requires finite values".to_string());
+            }
+            Ok(values.clone())
+        }
+    }
+}
+
+fn extract_temp_points(netlist: &rspice_core::Netlist) -> Vec<Value> {
+    let mut temperatures: Vec<Value> = Vec::new();
+    for analysis in &netlist.analyses {
+        if let AnalysisCommand::Temp { temperatures: temps } = analysis {
+            for &temp in temps {
+                if !temperatures
+                    .iter()
+                    .any(|existing| (*existing - temp).abs() < 1e-15)
+                {
+                    temperatures.push(temp);
+                }
+            }
+        }
+    }
+    temperatures
+}
 
 fn canonicalize_pz_port(pos: usize, neg: usize) -> Result<(usize, Option<usize>, Value), String> {
     if pos == neg {
@@ -1691,5 +2076,111 @@ mod tests {
             .expect("expected RVAL sensitivity");
         assert!(raw.is_finite());
         assert_eq!(*normalized, 0.0);
+    }
+
+    #[test]
+    fn test_expand_step_sweep_values_linear_descending() {
+        let values = expand_step_sweep_values(&StepSweep::Linear {
+            start: 5.0,
+            stop: 1.0,
+            step: -2.0,
+        })
+        .expect("descending linear sweep should expand");
+        assert_eq!(values, vec![5.0, 3.0, 1.0]);
+    }
+
+    #[test]
+    fn test_expand_step_sweep_values_rejects_wrong_direction() {
+        let err = expand_step_sweep_values(&StepSweep::Linear {
+            start: 1.0,
+            stop: 5.0,
+            step: -1.0,
+        })
+        .expect_err("mismatched direction should fail");
+        assert!(err.contains("direction"));
+    }
+
+    #[test]
+    fn test_run_monte_carlo_analysis_executes_mc_command() {
+        let netlist = "* mc\n.param RVAL=1k\nV1 in 0 1\nR1 in out {RVAL}\nR2 out 0 1k\n.MC 6 SEED 3 DIST GAUSS SPREAD 0.01 PARAMS RVAL\n.end\n";
+        let result =
+            run_monte_carlo_analysis(netlist).expect("Monte Carlo analysis should execute");
+        assert_eq!(result.runs_requested, 6);
+        assert!(result.runs_completed > 0);
+        assert!(!result.variables.is_empty());
+        assert!(result.variables.iter().all(|var| var.mean.is_finite()));
+    }
+
+    #[test]
+    fn test_run_monte_carlo_analysis_requires_command() {
+        let err = run_monte_carlo_analysis("* no mc\nV1 in 0 1\nR1 in 0 1k\n")
+            .expect_err("missing .MC command should fail");
+        assert!(err.contains(".MC command"));
+    }
+
+    #[test]
+    fn test_run_parametric_analysis_executes_step_param_command() {
+        let netlist = "* step param\n.param RVAL=1k\nV1 in 0 1\nR1 in out {RVAL}\nR2 out 0 1k\n.STEP PARAM RVAL 1k 4k 1k\n.end\n";
+        let result =
+            run_parametric_analysis(netlist).expect("parametric .STEP PARAM should execute");
+        assert_eq!(result.target, "PARAM RVAL");
+        assert_eq!(result.sweep_values.len(), 4);
+        assert_eq!(result.num_points, 4);
+        assert!(
+            result
+                .voltages
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
+        );
+    }
+
+    #[test]
+    fn test_run_parametric_analysis_executes_step_temp_command() {
+        let netlist = "* step temp\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.STEP TEMP LIST -40 27 125\n.end\n";
+        let result =
+            run_parametric_analysis(netlist).expect("parametric .STEP TEMP should execute");
+        assert_eq!(result.target, "TEMP");
+        assert_eq!(result.sweep_values, vec![-40.0, 27.0, 125.0]);
+        assert_eq!(result.num_points, 3);
+    }
+
+    #[test]
+    fn test_run_parametric_analysis_requires_step_command() {
+        let err = run_parametric_analysis("* no step\nV1 in 0 1\nR1 in 0 1k\n")
+            .expect_err("missing .STEP command should fail");
+        assert!(err.contains(".STEP command"));
+    }
+
+    #[test]
+    fn test_run_corner_analysis_executes_temp_directives() {
+        let netlist =
+            "* corners\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.TEMP -40 27 125\n.end\n";
+        let result = run_corner_analysis(netlist).expect("corner analysis should execute");
+        assert_eq!(result.temperatures_c, vec![-40.0, 27.0, 125.0]);
+        assert_eq!(result.num_points, 3);
+        assert!(
+            result
+                .voltages
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
+        );
+    }
+
+    #[test]
+    fn test_run_corner_analysis_requires_temp_command() {
+        let err = run_corner_analysis("* no corners\nV1 in 0 1\nR1 in 0 1k\n")
+            .expect_err("missing .TEMP command should fail");
+        assert!(err.contains(".TEMP"));
+    }
+
+    #[test]
+    fn test_extract_temp_points_deduplicates_values() {
+        let netlist = rspice_core::netlist::parse_netlist(
+            "* dedupe\nV1 in 0 1\nR1 in 0 1k\n.TEMP -40 27\n.TEMP 27 125\n.end\n",
+        )
+        .expect("netlist should parse");
+
+        let temps = extract_temp_points(&netlist);
+        assert_eq!(temps, vec![-40.0, 27.0, 125.0]);
     }
 }
