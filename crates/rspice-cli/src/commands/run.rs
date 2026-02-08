@@ -220,11 +220,10 @@ fn build_sim_config(args: &RunArgs, config: &Config) -> SimulationConfig {
     }
 
     // Tolerances
-    if let Some(abstol) = args.abstol {
-        sim_config.tolerance = abstol;
-    } else {
-        sim_config.tolerance = config.simulation.abstol;
-    }
+    // Keep legacy `SimulationConfig::tolerance` aligned with RELTOL semantics.
+    let reltol = args.reltol.unwrap_or(config.simulation.reltol);
+    let abstol = args.abstol.unwrap_or(config.simulation.abstol);
+    sim_config.tolerance = reltol;
 
     // Iterations
     if let Some(maxiter) = args.maxiter {
@@ -247,11 +246,14 @@ fn build_sim_config(args: &RunArgs, config: &Config) -> SimulationConfig {
         .as_deref()
         .unwrap_or(&config.simulation.convergence_mode);
 
-    sim_config.convergence_config = match convergence_mode {
+    let mut convergence_config = match convergence_mode {
         "fast" => ConvergenceConfig::fast(),
         "robust" => ConvergenceConfig::robust(),
         _ => ConvergenceConfig::default(), // "default" or any other
     };
+    convergence_config.voltage_reltol = reltol;
+    convergence_config.voltage_abstol = abstol;
+    sim_config.convergence_config = convergence_config;
 
     sim_config
 }
@@ -2331,6 +2333,15 @@ mod tests {
 
         assert_eq!(sim_config.temperature, 300.15); // 27°C in K
         assert_eq!(sim_config.max_iterations, 50);
+        assert_eq!(sim_config.tolerance, config.simulation.reltol);
+        assert_eq!(
+            sim_config.convergence_config.voltage_reltol,
+            config.simulation.reltol
+        );
+        assert_eq!(
+            sim_config.convergence_config.voltage_abstol,
+            config.simulation.abstol
+        );
     }
 
     #[test]
@@ -2338,13 +2349,46 @@ mod tests {
         let mut args = make_default_run_args();
         args.temp = Some(85.0);
         args.maxiter = Some(100);
+        args.reltol = Some(5e-4);
         args.abstol = Some(1e-15);
         let config = Config::default();
         let sim_config = build_sim_config(&args, &config);
 
         assert_eq!(sim_config.temperature, 358.15); // 85°C in K
         assert_eq!(sim_config.max_iterations, 100);
-        assert_eq!(sim_config.tolerance, 1e-15);
+        assert_eq!(sim_config.tolerance, 5e-4);
+        assert_eq!(sim_config.convergence_config.voltage_reltol, 5e-4);
+        assert_eq!(sim_config.convergence_config.voltage_abstol, 1e-15);
+    }
+
+    #[test]
+    fn test_build_sim_config_abstol_override_keeps_reltol_target() {
+        let mut args = make_default_run_args();
+        args.abstol = Some(2e-14);
+        let config = Config::default();
+        let sim_config = build_sim_config(&args, &config);
+
+        assert_eq!(sim_config.tolerance, config.simulation.reltol);
+        assert_eq!(
+            sim_config.convergence_config.voltage_reltol,
+            config.simulation.reltol
+        );
+        assert_eq!(sim_config.convergence_config.voltage_abstol, 2e-14);
+    }
+
+    #[test]
+    fn test_build_sim_config_fast_mode_preserves_explicit_tolerances() {
+        let mut args = make_default_run_args();
+        args.convergence = Some("fast".to_string());
+        args.reltol = Some(8e-4);
+        args.abstol = Some(4e-12);
+        let config = Config::default();
+        let sim_config = build_sim_config(&args, &config);
+
+        assert!(!sim_config.convergence_config.gmin_stepping);
+        assert!(!sim_config.convergence_config.source_stepping);
+        assert_eq!(sim_config.convergence_config.voltage_reltol, 8e-4);
+        assert_eq!(sim_config.convergence_config.voltage_abstol, 4e-12);
     }
 
     #[test]
