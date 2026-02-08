@@ -4,6 +4,7 @@
 //! Highlights pass/fail zones and specification violations.
 
 use crate::services::yield_manager::YieldSpec;
+use egui::{Color32, Painter, Rect, Rounding};
 use serde::{Deserialize, Serialize};
 
 /// Visual representation of a design specification on a plot
@@ -21,6 +22,8 @@ pub struct SpecOverlay {
     pub show_target: bool,
     /// Whether to highlight violations on the trace
     pub highlight_violations: bool,
+    /// Whether this overlay is visible
+    pub visible: bool,
 }
 
 impl Default for SpecOverlay {
@@ -32,6 +35,7 @@ impl Default for SpecOverlay {
             opacity: 0.2,
             show_target: true,
             highlight_violations: true,
+            visible: true,
         }
     }
 }
@@ -48,5 +52,251 @@ impl SpecOverlay {
     /// Check if a coordinate (x, y) violates the spec
     pub fn is_violating(&self, _x: f64, y: f64) -> bool {
         !self.spec.evaluates(y)
+    }
+
+    /// Get pass zone color as Color32
+    pub fn pass_color32(&self) -> Color32 {
+        Color32::from_rgba_unmultiplied(
+            self.pass_color[0],
+            self.pass_color[1],
+            self.pass_color[2],
+            (self.pass_color[3] as f32 * self.opacity) as u8,
+        )
+    }
+
+    /// Get fail zone color as Color32
+    pub fn fail_color32(&self) -> Color32 {
+        Color32::from_rgba_unmultiplied(
+            self.fail_color[0],
+            self.fail_color[1],
+            self.fail_color[2],
+            (self.fail_color[3] as f32 * self.opacity) as u8,
+        )
+    }
+
+    /// Render this spec overlay on the waveform plot
+    ///
+    /// Draws pass/fail zones and optional target line based on the spec type.
+    pub fn render(&self, painter: &Painter, plot_rect: Rect, y_min: f64, y_max: f64) {
+        if !self.visible || y_max <= y_min {
+            return;
+        }
+
+        let y_range = y_max - y_min;
+        let plot_height = plot_rect.height() as f64;
+
+        // Helper: convert data Y to screen Y (inverted)
+        let y_to_screen = |y: f64| -> f32 {
+            let frac = (y_max - y) / y_range;
+            plot_rect.top() + (frac * plot_height) as f32
+        };
+
+        // Draw based on spec type
+        match (self.spec.min, self.spec.max) {
+            // Range: min <= value <= max
+            (Some(min), Some(max)) if min < max => {
+                // Fail zone: above max
+                if max < y_max {
+                    let top = plot_rect.top();
+                    let bottom = y_to_screen(max);
+                    let fail_rect = Rect::from_min_max(
+                        egui::pos2(plot_rect.left(), top),
+                        egui::pos2(plot_rect.right(), bottom),
+                    );
+                    painter.rect_filled(fail_rect, Rounding::ZERO, self.fail_color32());
+                }
+
+                // Pass zone: between min and max
+                let pass_top = y_to_screen(max.min(y_max));
+                let pass_bottom = y_to_screen(min.max(y_min));
+                let pass_rect = Rect::from_min_max(
+                    egui::pos2(plot_rect.left(), pass_top),
+                    egui::pos2(plot_rect.right(), pass_bottom),
+                );
+                painter.rect_filled(pass_rect, Rounding::ZERO, self.pass_color32());
+
+                // Fail zone: below min
+                if min > y_min {
+                    let top = y_to_screen(min);
+                    let bottom = plot_rect.bottom();
+                    let fail_rect = Rect::from_min_max(
+                        egui::pos2(plot_rect.left(), top),
+                        egui::pos2(plot_rect.right(), bottom),
+                    );
+                    painter.rect_filled(fail_rect, Rounding::ZERO, self.fail_color32());
+                }
+
+                // Target line (midpoint)
+                if self.show_target {
+                    let target = (min + max) / 2.0;
+                    if target >= y_min && target <= y_max {
+                        let target_y = y_to_screen(target);
+                        painter.hline(
+                            plot_rect.x_range(),
+                            target_y,
+                            egui::Stroke::new(1.0, Color32::from_rgb(255, 193, 7)),
+                        );
+                    }
+                }
+            }
+
+            // Minimum only: value >= min
+            (Some(min), None) => {
+                // Pass zone: above min
+                if min < y_max {
+                    let pass_top = plot_rect.top();
+                    let pass_bottom = y_to_screen(min.max(y_min));
+                    let pass_rect = Rect::from_min_max(
+                        egui::pos2(plot_rect.left(), pass_top),
+                        egui::pos2(plot_rect.right(), pass_bottom),
+                    );
+                    painter.rect_filled(pass_rect, Rounding::ZERO, self.pass_color32());
+                }
+
+                // Fail zone: below min
+                if min > y_min {
+                    let fail_top = y_to_screen(min);
+                    let fail_bottom = plot_rect.bottom();
+                    let fail_rect = Rect::from_min_max(
+                        egui::pos2(plot_rect.left(), fail_top),
+                        egui::pos2(plot_rect.right(), fail_bottom),
+                    );
+                    painter.rect_filled(fail_rect, Rounding::ZERO, self.fail_color32());
+                }
+
+                // Target line at min threshold
+                if self.show_target && min >= y_min && min <= y_max {
+                    painter.hline(
+                        plot_rect.x_range(),
+                        y_to_screen(min),
+                        egui::Stroke::new(1.0, Color32::from_rgb(255, 193, 7)),
+                    );
+                }
+            }
+
+            // Maximum only: value <= max
+            (None, Some(max)) => {
+                // Fail zone: above max
+                if max < y_max {
+                    let fail_top = plot_rect.top();
+                    let fail_bottom = y_to_screen(max);
+                    let fail_rect = Rect::from_min_max(
+                        egui::pos2(plot_rect.left(), fail_top),
+                        egui::pos2(plot_rect.right(), fail_bottom),
+                    );
+                    painter.rect_filled(fail_rect, Rounding::ZERO, self.fail_color32());
+                }
+
+                // Pass zone: below max
+                if max > y_min {
+                    let pass_top = y_to_screen(max.min(y_max));
+                    let pass_bottom = plot_rect.bottom();
+                    let pass_rect = Rect::from_min_max(
+                        egui::pos2(plot_rect.left(), pass_top),
+                        egui::pos2(plot_rect.right(), pass_bottom),
+                    );
+                    painter.rect_filled(pass_rect, Rounding::ZERO, self.pass_color32());
+                }
+
+                // Target line at max threshold
+                if self.show_target && max >= y_min && max <= y_max {
+                    painter.hline(
+                        plot_rect.x_range(),
+                        y_to_screen(max),
+                        egui::Stroke::new(1.0, Color32::from_rgb(255, 193, 7)),
+                    );
+                }
+            }
+
+            // No valid limits
+            _ => {}
+        }
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_spec_overlay_default() {
+        let overlay = SpecOverlay::default();
+        assert!(overlay.visible);
+        assert!(overlay.show_target);
+        assert!(overlay.highlight_violations);
+        assert!((overlay.opacity - 0.2).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_from_spec() {
+        let spec = YieldSpec::range("voltage", 0.5, 2.5, "V");
+        let overlay = SpecOverlay::from_spec(spec.clone());
+        assert_eq!(overlay.spec.target, "voltage");
+        assert_eq!(overlay.spec.min, Some(0.5));
+        assert_eq!(overlay.spec.max, Some(2.5));
+    }
+
+    #[test]
+    fn test_is_violating_range() {
+        let spec = YieldSpec::range("test", 1.0, 3.0, "V");
+        let overlay = SpecOverlay::from_spec(spec);
+
+        assert!(!overlay.is_violating(0.0, 2.0)); // In range
+        assert!(overlay.is_violating(0.0, 0.5)); // Below min
+        assert!(overlay.is_violating(0.0, 3.5)); // Above max
+    }
+
+    #[test]
+    fn test_is_violating_min_only() {
+        let spec = YieldSpec::lower("test", 1.0, "V");
+        let overlay = SpecOverlay::from_spec(spec);
+
+        assert!(!overlay.is_violating(0.0, 1.5)); // Passes
+        assert!(!overlay.is_violating(0.0, 1.0)); // Boundary
+        assert!(overlay.is_violating(0.0, 0.5)); // Fails
+    }
+
+    #[test]
+    fn test_is_violating_max_only() {
+        let spec = YieldSpec::upper("test", 3.0, "V");
+        let overlay = SpecOverlay::from_spec(spec);
+
+        assert!(!overlay.is_violating(0.0, 2.5)); // Passes
+        assert!(!overlay.is_violating(0.0, 3.0)); // Boundary
+        assert!(overlay.is_violating(0.0, 3.5)); // Fails
+    }
+
+    #[test]
+    fn test_pass_color32_with_opacity() {
+        let mut overlay = SpecOverlay::default();
+        overlay.opacity = 0.5;
+        overlay.pass_color = [100, 200, 50, 200];
+
+        let color = overlay.pass_color32();
+        // Expected alpha: 200 * 0.5 = 100
+        assert_eq!(color.a(), 100);
+    }
+
+    #[test]
+    fn test_fail_color32_with_opacity() {
+        let mut overlay = SpecOverlay::default();
+        overlay.opacity = 1.0;
+        overlay.fail_color = [255, 100, 50, 128];
+
+        let color = overlay.fail_color32();
+        // Expected alpha: 128 * 1.0 = 128
+        assert_eq!(color.a(), 128);
+    }
+
+    #[test]
+    fn test_visibility_toggle() {
+        let mut overlay = SpecOverlay::default();
+        assert!(overlay.visible);
+        overlay.visible = false;
+        assert!(!overlay.visible);
     }
 }

@@ -413,43 +413,43 @@ mod tests {
 
     #[test]
     fn test_si_prefix_pico() {
-        let (scale, prefix) = si_prefix_for_value(1e-12);
+        let (_scale, prefix) = si_prefix_for_value(1e-12);
         assert_eq!(prefix, "p");
     }
 
     #[test]
     fn test_si_prefix_nano() {
-        let (scale, prefix) = si_prefix_for_value(1e-9);
+        let (_scale, prefix) = si_prefix_for_value(1e-9);
         assert_eq!(prefix, "n");
     }
 
     #[test]
     fn test_si_prefix_micro() {
-        let (scale, prefix) = si_prefix_for_value(1e-6);
+        let (_scale, prefix) = si_prefix_for_value(1e-6);
         assert_eq!(prefix, "µ");
     }
 
     #[test]
     fn test_si_prefix_milli() {
-        let (scale, prefix) = si_prefix_for_value(1e-3);
+        let (_scale, prefix) = si_prefix_for_value(1e-3);
         assert_eq!(prefix, "m");
     }
 
     #[test]
     fn test_si_prefix_kilo() {
-        let (scale, prefix) = si_prefix_for_value(1e3);
+        let (_scale, prefix) = si_prefix_for_value(1e3);
         assert_eq!(prefix, "k");
     }
 
     #[test]
     fn test_si_prefix_mega() {
-        let (scale, prefix) = si_prefix_for_value(1e6);
+        let (_scale, prefix) = si_prefix_for_value(1e6);
         assert_eq!(prefix, "M");
     }
 
     #[test]
     fn test_si_prefix_giga() {
-        let (scale, prefix) = si_prefix_for_value(1e9);
+        let (_scale, prefix) = si_prefix_for_value(1e9);
         assert_eq!(prefix, "G");
     }
 
@@ -464,10 +464,10 @@ mod tests {
 
     #[test]
     fn test_si_prefix_for_range() {
-        let (scale, prefix) = si_prefix_for_range(0.0, 1e-6);
+        let (_scale, prefix) = si_prefix_for_range(0.0, 1e-6);
         assert_eq!(prefix, "µ");
 
-        let (scale2, prefix2) = si_prefix_for_range(-1e-3, 1e-3);
+        let (_scale2, prefix2) = si_prefix_for_range(-1e-3, 1e-3);
         assert_eq!(prefix2, "m");
     }
 

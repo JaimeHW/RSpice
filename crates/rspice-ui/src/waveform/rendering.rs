@@ -20,7 +20,9 @@
 //! maintain 60fps rendering. This is a standard technique used by
 //! commercial tools like Cadence ViVA.
 
-use egui::{Color32, FontId, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui, Vec2};
+use egui::{
+    Color32, FontId, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2,
+};
 
 use super::axis::{self, GridLineType};
 use super::state::{TraceData, ViewTransform, WaveformViewerState};
@@ -237,7 +239,7 @@ fn render_header(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Waveform
 
     // Create a UI area for header controls
     let header_rect = layout.header.shrink(4.0);
-    ui.allocate_ui_at_rect(header_rect, |ui| {
+    ui.allocate_new_ui(UiBuilder::new().max_rect(header_rect), |ui| {
         ui.horizontal(|ui| {
             ui.add_space(8.0);
 
@@ -441,6 +443,16 @@ fn render_plot_area(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Wavef
 
     // Grid lines
     render_grid(painter, layout, viewer_state, clip_rect);
+
+    // Spec overlays (render before traces so they appear as background)
+    for overlay in viewer_state.spec_overlays.iter().filter(|o| o.visible) {
+        overlay.render(
+            painter,
+            layout.plot,
+            viewer_state.view.y_min,
+            viewer_state.view.y_max,
+        );
+    }
 
     // Waveform traces
     for trace in viewer_state.traces.iter().filter(|t| t.visible) {
@@ -898,7 +910,7 @@ fn render_legend(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Waveform
 
     // Create UI area for legend items
     let legend_inner = layout.legend.shrink(8.0);
-    ui.allocate_ui_at_rect(legend_inner, |ui| {
+    ui.allocate_new_ui(UiBuilder::new().max_rect(legend_inner), |ui| {
         ui.vertical(|ui| {
             ui.label(
                 egui::RichText::new("Traces")

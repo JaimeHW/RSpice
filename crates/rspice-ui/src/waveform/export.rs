@@ -110,7 +110,7 @@ pub fn export_to_csv(traces: &[TraceData], options: &ExportOptions) -> String {
     }
 
     // Find the trace with the most points for x-axis
-    let max_len = visible_traces.iter().map(|t| t.len()).max().unwrap_or(0);
+    let _max_len = visible_traces.iter().map(|t| t.len()).max().unwrap_or(0);
 
     // Use the first visible trace as the time reference
     let time_trace = visible_traces.first();

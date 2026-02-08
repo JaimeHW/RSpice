@@ -670,7 +670,7 @@ mod tests {
 
     #[test]
     fn test_bus_radix_formatting() {
-        let bus = DigitalBus {
+        let _bus = DigitalBus {
             name: "TEST".to_string(),
             signals: vec![], // Empty for this test
             display_radix: BusRadix::Hex,

@@ -996,6 +996,9 @@ pub struct WaveformViewerState {
 
     /// Whether an initial fit has been performed
     pub has_initial_fit: bool,
+
+    /// Specification overlays for pass/fail visualization
+    pub spec_overlays: Vec<super::spec_overlay::SpecOverlay>,
 }
 
 impl WaveformViewerState {
@@ -1019,6 +1022,16 @@ impl WaveformViewerState {
                 let (r, g, b) =
                     Self::parse_hex_color(&wf.color).unwrap_or_else(|| Self::palette_color(i));
                 trace.style = TraceStyle::with_color(r, g, b);
+
+                // Debug: show trace statistics to diagnose flat waveform issue
+                log::info!(
+                    "Loaded trace '{}': {} points, y_min={:?}, y_max={:?}",
+                    trace.name,
+                    trace.len(),
+                    trace.y_min(),
+                    trace.y_max()
+                );
+
                 trace
             })
             .collect();
