@@ -184,6 +184,21 @@ impl EngineOptions {
             self.temp,
             self.tnom
         ));
+        let mut custom_options: Vec<_> = self.custom.iter().collect();
+        custom_options.sort_by(|(lhs, _), (rhs, _)| lhs.cmp(rhs));
+        for (key, value) in custom_options {
+            let key = key.trim();
+            if key.is_empty() {
+                continue;
+            }
+            let key_upper = key.to_ascii_uppercase();
+            let value = value.trim();
+            if value.is_empty() {
+                lines.push(format!(".OPTIONS {}", key_upper));
+            } else {
+                lines.push(format!(".OPTIONS {}={}", key_upper, value));
+            }
+        }
 
         lines.join("\n")
     }
@@ -368,6 +383,27 @@ mod tests {
         let parsed = rspice_core::netlist::parse_netlist(&netlist)
             .expect("options-augmented netlist should parse");
         assert_eq!(parsed.options.temp, Some(85.0));
+    }
+
+    #[test]
+    fn test_to_spice_options_includes_custom_options_in_stable_order() {
+        let mut opts = EngineOptions::spectre_defaults();
+        opts.custom.insert("zeta".to_string(), "2".to_string());
+        opts.custom.insert("alpha".to_string(), "1".to_string());
+        opts.custom.insert("nopage".to_string(), String::new());
+
+        let spice = opts.to_spice_options();
+        let alpha_pos = spice
+            .find(".OPTIONS ALPHA=1")
+            .expect("alpha option should be emitted");
+        let zeta_pos = spice
+            .find(".OPTIONS ZETA=2")
+            .expect("zeta option should be emitted");
+        assert!(
+            alpha_pos < zeta_pos,
+            "custom options should be sorted by key"
+        );
+        assert!(spice.contains(".OPTIONS NOPAGE"));
     }
 
     #[test]
