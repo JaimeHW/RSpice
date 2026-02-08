@@ -46,6 +46,8 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
             &netlist,
             num_runs,
             args.seed.unwrap_or(1),
+            rspice_core::analysis::Distribution::Gaussian { sigma: 0.01 },
+            None,
             &args,
             verbose,
             quiet,
@@ -280,13 +282,15 @@ fn run_analysis(
             step,
             stop,
             start,
-            max_step: _,
+            max_step,
         } => {
             let tstart = start.unwrap_or(0.0);
-            run_transient(engine, netlist, *stop, *step, tstart, args, quiet)?;
+            run_transient(
+                engine, netlist, *stop, *step, tstart, *max_step, args, quiet,
+            )?;
         }
         AnalysisCommand::Ac {
-            variation: _,
+            variation,
             points,
             start_freq,
             stop_freq,
@@ -294,6 +298,7 @@ fn run_analysis(
             run_ac(
                 engine,
                 netlist,
+                *variation,
                 *points,
                 *start_freq,
                 *stop_freq,
@@ -304,20 +309,59 @@ fn run_analysis(
         }
         AnalysisCommand::Noise {
             output_node,
+            reference_node,
             input_source,
+            variation,
             points,
             start_freq,
             stop_freq,
-            ..
         } => {
             run_noise(
                 engine,
                 netlist,
                 output_node,
+                reference_node.as_deref(),
                 input_source,
+                *variation,
                 *points,
                 *start_freq,
                 *stop_freq,
+                quiet,
+            )?;
+        }
+        AnalysisCommand::Sensitivity {
+            output_node,
+            reference_node,
+            ac_sweep,
+        } => {
+            run_sensitivity_from_command(
+                engine,
+                netlist,
+                output_node,
+                reference_node.as_deref(),
+                *ac_sweep,
+                verbose,
+                quiet,
+            )?;
+        }
+        AnalysisCommand::PoleZero {
+            input_pos,
+            input_neg,
+            output_pos,
+            output_neg,
+            transfer_type,
+            analysis_type,
+        } => {
+            run_pz_from_command(
+                engine,
+                netlist,
+                input_pos,
+                input_neg,
+                output_pos,
+                output_neg,
+                *transfer_type,
+                *analysis_type,
+                verbose,
                 quiet,
             )?;
         }
@@ -342,6 +386,9 @@ fn run_analysis(
         }
         AnalysisCommand::Temp { temperatures } => {
             run_temp(engine, netlist, temperatures, args, verbose, quiet)?;
+        }
+        AnalysisCommand::MonteCarlo(mc_cmd) => {
+            run_monte_carlo_from_command(engine, netlist, mc_cmd, args, verbose, quiet)?;
         }
     }
     Ok(())
@@ -578,9 +625,14 @@ fn run_transient(
     tstop: f64,
     tstep: f64,
     tstart: f64,
+    max_step: Option<f64>,
     args: &RunArgs,
     quiet: bool,
 ) -> Result<(), CliError> {
+    // .tran step is the output interval. Internal solver max step can be
+    // explicitly set by .tran tmax, otherwise use a practical adaptive default.
+    let internal_max_step = max_step.unwrap_or(tstep * 10.0).max(1e-18);
+
     // Progress indicator
     let pb = if quiet {
         ProgressBar::hidden()
@@ -619,7 +671,7 @@ fn run_transient(
             rel_tol: compression_tol,
             min_interval: tstep / 10.0,
         };
-        match engine.run_tran_compressed(netlist, tstop, tstep, compression) {
+        match engine.run_tran_compressed(netlist, tstop, internal_max_step, compression) {
             Ok(compressed) => {
                 pb.finish_and_clear();
                 if !quiet {
@@ -637,7 +689,7 @@ fn run_transient(
         }
     } else {
         pb.finish_and_clear();
-        engine.run_tran(netlist, tstop, tstep)
+        engine.run_tran(netlist, tstop, internal_max_step)
     };
 
     match result {
@@ -688,6 +740,7 @@ fn run_transient(
 fn run_ac(
     engine: &Engine,
     netlist: &Netlist,
+    variation: rspice_core::netlist::FreqVariation,
     points: usize,
     start_freq: f64,
     stop_freq: f64,
@@ -702,10 +755,7 @@ fn run_ac(
         );
     }
 
-    // Generate frequency points (decade sweep)
-    let frequencies: Vec<f64> = (0..points)
-        .map(|i| start_freq * (stop_freq / start_freq).powf(i as f64 / (points as f64 - 1.0)))
-        .collect();
+    let frequencies = generate_frequency_sweep(variation, points, start_freq, stop_freq);
 
     match engine.run_ac(netlist, &frequencies) {
         Ok(results) => {
@@ -767,7 +817,9 @@ fn run_noise(
     engine: &Engine,
     netlist: &Netlist,
     output_node: &str,
+    reference_node: Option<&str>,
     input_source: &str,
+    variation: rspice_core::netlist::FreqVariation,
     points: usize,
     start_freq: f64,
     stop_freq: f64,
@@ -780,18 +832,81 @@ fn run_noise(
         );
     }
 
-    // Generate frequency points
-    let frequencies: Vec<f64> = (0..points)
-        .map(|i| start_freq * (stop_freq / start_freq).powf(i as f64 / (points as f64 - 1.0)))
-        .collect();
+    let resolver = NodeResolver::from_netlist(engine, netlist)?;
+    let output = resolver
+        .resolve_node(output_node)
+        .ok_or_else(|| CliError::SimulationError {
+            message: format!("Invalid .NOISE output node '{}'", output_node),
+            analysis: Some("Noise".to_string()),
+        })?;
+    let output_neg = match reference_node {
+        Some(reference) => {
+            Some(
+                resolver
+                    .resolve_node(reference)
+                    .ok_or_else(|| CliError::SimulationError {
+                        message: format!("Invalid .NOISE reference node '{}'", reference),
+                        analysis: Some("Noise".to_string()),
+                    })?,
+            )
+        }
+        None => None,
+    };
 
-    match engine.run_ac(netlist, &frequencies) {
-        Ok(_) => {
+    let input_source_exists = netlist.elements.iter().any(|element| {
+        element.name.eq_ignore_ascii_case(input_source)
+            && matches!(
+                element.kind,
+                rspice_core::netlist::ElementKind::VoltageSource(_)
+                    | rspice_core::netlist::ElementKind::CurrentSource(_)
+            )
+    });
+    if !input_source_exists {
+        return Err(CliError::SimulationError {
+            message: format!(
+                "Invalid .NOISE input source '{}': expected an independent V or I source name",
+                input_source
+            ),
+            analysis: Some("Noise".to_string()),
+        });
+    }
+
+    let frequencies = generate_frequency_sweep(variation, points, start_freq, stop_freq);
+    match engine.run_noise_with_input_source(
+        netlist,
+        output,
+        output_neg,
+        input_source,
+        &frequencies,
+        engine.config().temperature,
+    ) {
+        Ok(results) => {
             if !quiet {
-                println!("Noise Analysis: {} frequency points", frequencies.len());
-                println!("  Output node: {}", output_node);
+                println!("Noise Analysis: {} frequency points", results.len());
+                if let Some(reference) = reference_node {
+                    println!("  Output node: V({},{})", output_node, reference);
+                } else {
+                    println!("  Output node: V({})", output_node);
+                }
                 println!("  Input source: {}", input_source);
-                println!("  (Noise spectral density calculation pending full integration)");
+                if let (Some(first), Some(last)) = (results.first(), results.last()) {
+                    println!(
+                        "  @ {:e} Hz: output_noise={:.6e} V^2/Hz",
+                        first.frequency, first.output_noise_density
+                    );
+                    println!(
+                        "  @ {:e} Hz: input_referred={:.6e}",
+                        first.frequency, first.input_referred_density
+                    );
+                    println!(
+                        "  @ {:e} Hz: output_noise={:.6e} V^2/Hz",
+                        last.frequency, last.output_noise_density
+                    );
+                    println!(
+                        "  @ {:e} Hz: input_referred={:.6e}",
+                        last.frequency, last.input_referred_density
+                    );
+                }
             }
             Ok(())
         }
@@ -804,93 +919,79 @@ fn run_step(
     engine: &Engine,
     netlist: &Netlist,
     step_cmd: &rspice_core::netlist::StepCommand,
-    _args: &RunArgs,
+    args: &RunArgs,
     verbose: bool,
     quiet: bool,
 ) -> Result<(), CliError> {
-    use rspice_core::netlist::{StepSweep, StepTarget};
+    use rspice_core::netlist::StepTarget;
 
-    // Generate parameter values
-    let values: Vec<f64> = match &step_cmd.sweep {
-        StepSweep::Linear { start, stop, step } => {
-            let mut vals = Vec::new();
-            let mut v = *start;
-            while v <= *stop {
-                vals.push(v);
-                v += step;
-            }
-            vals
-        }
-        StepSweep::Decade {
-            points_per_decade,
-            start,
-            stop,
-        } => {
-            let decades = (stop / start).log10();
-            let num_points = (decades * (*points_per_decade as f64)).ceil() as usize;
-            (0..=num_points)
-                .map(|i| start * 10_f64.powf(i as f64 / *points_per_decade as f64))
-                .take_while(|&v| v <= *stop)
-                .collect()
-        }
-        StepSweep::Octave {
-            points_per_octave,
-            start,
-            stop,
-        } => {
-            let octaves = (stop / start).log2();
-            let num_points = (octaves * (*points_per_octave as f64)).ceil() as usize;
-            (0..=num_points)
-                .map(|i| start * 2_f64.powf(i as f64 / *points_per_octave as f64))
-                .take_while(|&v| v <= *stop)
-                .collect()
-        }
-        StepSweep::List(vals) => vals.clone(),
-    };
-
-    if !quiet {
-        let target_name = match step_cmd.target {
-            StepTarget::Param => format!("PARAM {}", step_cmd.name),
-            StepTarget::Device => format!("device {}", step_cmd.name),
-            StepTarget::Model => format!("MODEL {}", step_cmd.name),
-            StepTarget::Temp => "TEMP".to_string(),
-        };
-        println!(
-            "Running .STEP sweep on {}: {} values ({:.3e} to {:.3e})...",
-            target_name,
-            values.len(),
-            values.first().unwrap_or(&0.0),
-            values.last().unwrap_or(&0.0)
-        );
+    let values = generate_step_values(&step_cmd.sweep)?;
+    if values.is_empty() {
+        return Err(CliError::SimulationError {
+            message: ".STEP produced no sweep values".to_string(),
+            analysis: Some("Step".to_string()),
+        });
     }
 
-    // Run DC OP for each parameter value
-    for (i, value) in values.iter().enumerate() {
-        if verbose && !quiet {
-            println!(
-                "  Step {}/{}: {} = {:.4e}",
-                i + 1,
-                values.len(),
-                step_cmd.name,
-                value
-            );
-        }
-        match engine.run_dc_op(netlist) {
-            Ok(result) => {
+    match step_cmd.target {
+        StepTarget::Param | StepTarget::Device | StepTarget::Model => {
+            let target_desc = match step_cmd.target {
+                StepTarget::Param => format!("PARAM {}", step_cmd.name),
+                StepTarget::Device => {
+                    if let Some(param) = &step_cmd.param_name {
+                        format!("DEVICE {}.{}", step_cmd.name, param)
+                    } else {
+                        format!("DEVICE {}", step_cmd.name)
+                    }
+                }
+                StepTarget::Model => {
+                    if let Some(param) = &step_cmd.param_name {
+                        format!("MODEL {}.{}", step_cmd.name, param)
+                    } else {
+                        format!("MODEL {}", step_cmd.name)
+                    }
+                }
+                StepTarget::Temp => unreachable!("handled separately"),
+            };
+
+            if !quiet {
+                println!(
+                    "Running .STEP sweep on {}: {} values ({:.3e} to {:.3e})...",
+                    target_desc,
+                    values.len(),
+                    values.first().unwrap_or(&0.0),
+                    values.last().unwrap_or(&0.0)
+                );
+            }
+
+            let sweep_results = engine
+                .run_step_command(netlist, step_cmd, &values)
+                .map_err(|e| CliError::simulation_error_in(e.to_string(), "Step"))?;
+
+            for (i, (value, result)) in sweep_results.iter().enumerate() {
                 if verbose && !quiet {
+                    println!(
+                        "  Step {}/{}: {} = {:.4e}",
+                        i + 1,
+                        values.len(),
+                        target_desc,
+                        value
+                    );
                     println!("    V(1) = {:.6} V", result.voltage(1));
                 }
             }
-            Err(e) => {
-                eprintln!("  Step {} failed: {}", i + 1, e);
-            }
-        }
-    }
 
-    if !quiet {
-        println!("✓ .STEP sweep complete: {} iterations", values.len());
+            if !quiet {
+                println!(
+                    ".STEP sweep complete: {} converged / {} requested",
+                    sweep_results.len(),
+                    values.len()
+                );
+            }
+            Ok(())
+        }
+        StepTarget::Temp => run_temp(engine, netlist, &values, args, verbose, quiet),
     }
-    Ok(())
 }
 
 /// Process .MEAS commands and return measurement reports
@@ -957,6 +1058,8 @@ fn run_monte_carlo(
     netlist: &Netlist,
     num_runs: usize,
     seed: u64,
+    distribution: rspice_core::analysis::Distribution,
+    parameter_filter: Option<&[String]>,
     _args: &RunArgs,
     verbose: bool,
     quiet: bool,
@@ -983,7 +1086,13 @@ fn run_monte_carlo(
         pb
     };
 
-    match engine.run_monte_carlo(netlist, num_runs, seed) {
+    match engine.run_monte_carlo_with_options(
+        netlist,
+        num_runs,
+        seed,
+        distribution,
+        parameter_filter,
+    ) {
         Ok(result) => {
             pb.finish_and_clear();
 
@@ -1012,6 +1121,46 @@ fn run_monte_carlo(
             Err(CliError::simulation_error_in(e.to_string(), "Monte Carlo"))
         }
     }
+}
+
+fn run_monte_carlo_from_command(
+    engine: &Engine,
+    netlist: &Netlist,
+    mc_cmd: &rspice_core::netlist::MonteCarloCommand,
+    args: &RunArgs,
+    verbose: bool,
+    quiet: bool,
+) -> Result<(), CliError> {
+    let seed = args.seed.or(mc_cmd.seed).unwrap_or(1);
+    let distribution = match mc_cmd.distribution {
+        rspice_core::netlist::MonteCarloDistribution::Gaussian => {
+            rspice_core::analysis::Distribution::Gaussian {
+                sigma: mc_cmd.relative_spread,
+            }
+        }
+        rspice_core::netlist::MonteCarloDistribution::Uniform => {
+            rspice_core::analysis::Distribution::Uniform {
+                tolerance: mc_cmd.relative_spread,
+            }
+        }
+    };
+    let parameter_filter = if mc_cmd.params.is_empty() {
+        None
+    } else {
+        Some(mc_cmd.params.as_slice())
+    };
+
+    run_monte_carlo(
+        engine,
+        netlist,
+        mc_cmd.runs,
+        seed,
+        distribution,
+        parameter_filter,
+        args,
+        verbose,
+        quiet,
+    )
 }
 
 /// Run PSS (Periodic Steady-State) analysis
@@ -1161,6 +1310,98 @@ fn run_pz(
     }
 }
 
+/// Run Pole-Zero analysis from netlist `.PZ` command with named/differential ports.
+fn run_pz_from_command(
+    engine: &Engine,
+    netlist: &Netlist,
+    input_pos: &str,
+    input_neg: &str,
+    output_pos: &str,
+    output_neg: &str,
+    transfer_type: rspice_core::netlist::PoleZeroTransferType,
+    analysis_type: rspice_core::netlist::PoleZeroAnalysisType,
+    verbose: bool,
+    quiet: bool,
+) -> Result<(), CliError> {
+    let resolver = NodeResolver::from_netlist(engine, netlist)?;
+
+    let resolve = |node: &str| {
+        resolver
+            .resolve_node(node)
+            .ok_or_else(|| CliError::SimulationError {
+                message: format!("Invalid .PZ node reference '{}'", node),
+                analysis: Some("Pole-Zero".to_string()),
+            })
+    };
+
+    let in_pos = resolve(input_pos)?;
+    let in_neg = resolve(input_neg)?;
+    let out_pos = resolve(output_pos)?;
+    let out_neg = resolve(output_neg)?;
+
+    let input_is_current = matches!(
+        transfer_type,
+        rspice_core::netlist::PoleZeroTransferType::Current
+    );
+    let (compute_poles, compute_zeros) = match analysis_type {
+        rspice_core::netlist::PoleZeroAnalysisType::PoleZero => (true, true),
+        rspice_core::netlist::PoleZeroAnalysisType::PolesOnly => (true, false),
+        rspice_core::netlist::PoleZeroAnalysisType::ZerosOnly => (false, true),
+    };
+
+    if !quiet {
+        println!(
+            "Running Pole-Zero analysis from netlist command: in=({},{}) out=({},{}) transfer={:?} mode={:?}",
+            in_pos, in_neg, out_pos, out_neg, transfer_type, analysis_type
+        );
+    }
+
+    match engine.run_pz_ports(
+        netlist,
+        in_pos,
+        Some(in_neg),
+        out_pos,
+        Some(out_neg),
+        input_is_current,
+        compute_poles,
+        compute_zeros,
+    ) {
+        Ok(result) => {
+            if !quiet {
+                println!("✓ Pole-Zero analysis complete");
+                println!("  Poles: {}", result.poles.len());
+                println!("  Zeros: {}", result.zeros.len());
+
+                if verbose {
+                    println!("\n  Poles:");
+                    for (i, pole) in result.poles.iter().enumerate() {
+                        let freq = pole.im / (2.0 * std::f64::consts::PI);
+                        let q = if pole.re.abs() > 1e-15 {
+                            -pole.im / (2.0 * pole.re)
+                        } else {
+                            f64::INFINITY
+                        };
+                        println!(
+                            "    P{}: {:.3e} + j{:.3e}  (f={:.3e} Hz, Q={:.2})",
+                            i,
+                            pole.re,
+                            pole.im,
+                            freq.abs(),
+                            q
+                        );
+                    }
+                    println!("\n  Zeros:");
+                    for (i, zero) in result.zeros.iter().enumerate() {
+                        println!("    Z{}: {:.3e} + j{:.3e}", i, zero.re, zero.im);
+                    }
+                }
+            }
+            Ok(())
+        }
+        Err(e) => Err(CliError::simulation_error_in(e.to_string(), "Pole-Zero")),
+    }
+}
+
 /// Run sensitivity analysis
 fn run_sensitivity(
     engine: &Engine,
@@ -1200,6 +1441,152 @@ fn run_sensitivity(
         }
         Err(e) => Err(CliError::simulation_error_in(e.to_string(), "Sensitivity")),
     }
+}
+
+/// Run sensitivity analysis from parsed `.SENS` command.
+fn run_sensitivity_from_command(
+    engine: &Engine,
+    netlist: &Netlist,
+    output_node: &str,
+    reference_node: Option<&str>,
+    ac_sweep: Option<rspice_core::netlist::SensitivityAcSweep>,
+    verbose: bool,
+    quiet: bool,
+) -> Result<(), CliError> {
+    let resolver = NodeResolver::from_netlist(engine, netlist)?;
+    let out_pos = resolver
+        .resolve_node(output_node)
+        .ok_or_else(|| CliError::SimulationError {
+            message: format!("Invalid .SENS output node '{}'", output_node),
+            analysis: Some("Sensitivity".to_string()),
+        })?;
+    let out_neg = match reference_node {
+        Some(node) => resolver
+            .resolve_node(node)
+            .ok_or_else(|| CliError::SimulationError {
+                message: format!("Invalid .SENS reference node '{}'", node),
+                analysis: Some("Sensitivity".to_string()),
+            })?,
+        None => 0,
+    };
+
+    let mut params: Vec<(String, f64)> = netlist
+        .params
+        .all_params()
+        .into_iter()
+        .filter(|(name, value)| {
+            !name.starts_with("IC_")
+                && !name.starts_with("NODESET_")
+                && value.is_finite()
+                && value.abs() > 0.0
+        })
+        .collect();
+    params.sort_by(|a, b| a.0.cmp(&b.0));
+
+    if params.is_empty() {
+        return Err(CliError::SimulationError {
+            message: ".SENS requires at least one non-zero top-level .PARAM".to_string(),
+            analysis: Some("Sensitivity".to_string()),
+        });
+    }
+
+    if let Some(ac) = ac_sweep {
+        let freqs = generate_frequency_sweep(ac.variation, ac.points, ac.start_freq, ac.stop_freq);
+        if freqs.is_empty() {
+            return Err(CliError::SimulationError {
+                message: "Invalid .SENS AC frequency sweep configuration".to_string(),
+                analysis: Some("Sensitivity".to_string()),
+            });
+        }
+
+        if !quiet {
+            println!(
+                "Running AC Sensitivity analysis: V({},{}) over {} frequencies",
+                output_node,
+                reference_node.unwrap_or("0"),
+                freqs.len()
+            );
+        }
+
+        for (param_name, param_value) in &params {
+            let pos = engine
+                .run_sensitivity_ac(netlist, out_pos, param_name, *param_value, &freqs, None)
+                .map_err(|e| CliError::simulation_error_in(e.to_string(), "Sensitivity AC"))?;
+            let combined = if out_neg == 0 {
+                pos
+            } else {
+                let neg = engine
+                    .run_sensitivity_ac(netlist, out_neg, param_name, *param_value, &freqs, None)
+                    .map_err(|e| CliError::simulation_error_in(e.to_string(), "Sensitivity AC"))?;
+                pos.iter()
+                    .zip(neg.iter())
+                    .map(|(sp, sn)| sp - sn)
+                    .collect::<Vec<_>>()
+            };
+
+            if !quiet {
+                let first = combined.first().copied().unwrap_or(0.0);
+                let last = combined.last().copied().unwrap_or(0.0);
+                println!(
+                    "  d|V|/d{}: {:.6e} @ {:e} Hz, {:.6e} @ {:e} Hz",
+                    param_name,
+                    first,
+                    freqs.first().copied().unwrap_or(0.0),
+                    last,
+                    freqs.last().copied().unwrap_or(0.0)
+                );
+            }
+
+            if verbose && !quiet {
+                let peak = combined
+                    .iter()
+                    .map(|v| v.abs())
+                    .fold(0.0_f64, |acc, v| acc.max(v));
+                println!("    peak |d|V|/d{}| = {:.6e}", param_name, peak);
+            }
+        }
+
+        return Ok(());
+    }
+
+    if !quiet {
+        println!(
+            "Running DC Sensitivity analysis: V({},{})",
+            output_node,
+            reference_node.unwrap_or("0")
+        );
+    }
+
+    let mut results: Vec<(String, f64)> = Vec::with_capacity(params.len());
+    for (param_name, param_value) in &params {
+        let pos = engine
+            .run_sensitivity(netlist, out_pos, param_name, *param_value, None)
+            .map_err(|e| CliError::simulation_error_in(e.to_string(), "Sensitivity"))?;
+        let combined = if out_neg == 0 {
+            pos
+        } else {
+            let neg = engine
+                .run_sensitivity(netlist, out_neg, param_name, *param_value, None)
+                .map_err(|e| CliError::simulation_error_in(e.to_string(), "Sensitivity"))?;
+            pos - neg
+        };
+        results.push((param_name.clone(), combined));
+    }
+
+    results.sort_by(|a, b| {
+        b.1.abs()
+            .partial_cmp(&a.1.abs())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    if !quiet {
+        println!("✓ Sensitivity analysis complete");
+        for (name, value) in &results {
+            println!("  ∂V/∂{} = {:.6e}", name, value);
+        }
+    }
+
+    Ok(())
 }
 
 /// Run corner sweep (process corners)
@@ -1344,6 +1731,7 @@ fn run_fourier(
     // Configure Fourier analysis
     let config = FourierConfig::new(fundamental).with_harmonics(num_harmonics);
     let fourier = FourierAnalysis::new(config);
+    let resolver = NodeResolver::from_netlist(engine, netlist)?;
 
     if !quiet {
         println!("\n┌────────────────────────────────────────────────────────────────┐");
@@ -1353,12 +1741,20 @@ fn run_fourier(
 
     // Analyze each output
     for output in outputs {
-        // Parse output node (e.g., "V(out)" -> node index)
-        let node_index = parse_output_node(output, netlist);
-
-        if let Some(node_idx) = node_index {
-            let waveform = tran_result.voltage_waveform(node_idx);
-            let result = fourier.analyze(&tran_result.time, waveform);
+        if let Some((node_idx, reference_idx)) = resolver.parse_voltage_probe(output) {
+            let result = if reference_idx == 0 {
+                let waveform = tran_result.voltage_waveform(node_idx);
+                fourier.analyze(&tran_result.time, waveform)
+            } else {
+                let pos_waveform = tran_result.voltage_waveform(node_idx);
+                let neg_waveform = tran_result.voltage_waveform(reference_idx);
+                let diff_waveform: Vec<f64> = pos_waveform
+                    .iter()
+                    .zip(neg_waveform.iter())
+                    .map(|(vp, vn)| vp - vn)
+                    .collect();
+                fourier.analyze(&tran_result.time, &diff_waveform)
+            };
 
             if !quiet {
                 println!("│ Output: {:54} │", output);
@@ -1426,25 +1822,319 @@ fn run_fourier(
     Ok(())
 }
 
-/// Parse output node specification (e.g., "V(out)", "V(3)", "out")
-fn parse_output_node(output: &str, _netlist: &Netlist) -> Option<usize> {
-    // Handle V(node) syntax
-    if output.starts_with("V(") && output.ends_with(')') {
-        let inner = &output[2..output.len() - 1];
-        // Try parsing as number first
-        if let Ok(idx) = inner.parse::<usize>() {
+/// Parse output node specification (e.g., "V(out)", "V(3)", "out").
+/// Returns the positive node index only (reference defaults to ground).
+fn parse_output_node(output: &str, resolver: &NodeResolver) -> Option<usize> {
+    resolver.parse_voltage_probe(output).map(|(pos, _)| pos)
+}
+
+#[derive(Debug, Clone)]
+struct NodeResolver {
+    node_name_to_index: std::collections::HashMap<String, usize>,
+}
+
+impl NodeResolver {
+    fn from_netlist(engine: &Engine, netlist: &Netlist) -> Result<Self, CliError> {
+        let circuit = engine
+            .build_circuit(netlist)
+            .map_err(|e| CliError::simulation_error_in(e.to_string(), "Node Resolution"))?;
+
+        let node_name_to_index = circuit
+            .node_names_sorted()
+            .iter()
+            .enumerate()
+            .map(|(idx, name)| (name.to_ascii_uppercase(), idx + 1))
+            .collect();
+
+        Ok(Self { node_name_to_index })
+    }
+
+    fn resolve_node(&self, node: &str) -> Option<usize> {
+        let node = node.trim();
+        if node.is_empty() {
+            return None;
+        }
+        if node == "0" || node.eq_ignore_ascii_case("gnd") {
+            return Some(0);
+        }
+        if let Ok(idx) = node.parse::<usize>() {
             return Some(idx);
         }
-        // TODO: look up node name in netlist
-        return Some(1); // Fallback to node 1
+
+        self.node_name_to_index
+            .get(&node.to_ascii_uppercase())
+            .copied()
     }
 
-    // Try direct number
-    if let Ok(idx) = output.parse::<usize>() {
-        return Some(idx);
+    fn parse_voltage_probe(&self, spec: &str) -> Option<(usize, usize)> {
+        let (pos_spec, neg_spec) = parse_voltage_probe_spec(spec)?;
+        let pos = self.resolve_node(&pos_spec)?;
+        let neg = match neg_spec {
+            Some(ref_name) => self.resolve_node(&ref_name)?,
+            None => 0,
+        };
+        Some((pos, neg))
+    }
+}
+
+fn parse_voltage_probe_spec(spec: &str) -> Option<(String, Option<String>)> {
+    let trimmed = spec.trim();
+    if trimmed.is_empty() {
+        return None;
     }
 
-    None
+    if trimmed.len() >= 3
+        && trimmed.get(..2).map(|s| s.eq_ignore_ascii_case("V(")) == Some(true)
+        && trimmed.ends_with(')')
+    {
+        let inner = &trimmed[2..trimmed.len() - 1];
+        let mut parts = inner.split(',').map(|s| s.trim()).filter(|s| !s.is_empty());
+        let pos = parts.next()?.to_string();
+        let neg = parts.next().map(|s| s.to_string());
+        if parts.next().is_some() {
+            return None;
+        }
+        return Some((pos, neg));
+    }
+
+    Some((trimmed.to_string(), None))
+}
+
+fn generate_step_values(sweep: &rspice_core::netlist::StepSweep) -> Result<Vec<f64>, CliError> {
+    use rspice_core::netlist::StepSweep;
+
+    const MAX_STEP_POINTS: usize = 1_000_000;
+
+    match sweep {
+        StepSweep::Linear { start, stop, step } => {
+            if !start.is_finite() || !stop.is_finite() || !step.is_finite() {
+                return Err(CliError::SimulationError {
+                    message: ".STEP linear sweep requires finite start/stop/step values"
+                        .to_string(),
+                    analysis: Some("Step".to_string()),
+                });
+            }
+            if step.abs() <= f64::EPSILON {
+                return Err(CliError::SimulationError {
+                    message: ".STEP linear sweep step cannot be zero".to_string(),
+                    analysis: Some("Step".to_string()),
+                });
+            }
+            if (*stop - *start).abs() <= f64::EPSILON {
+                return Ok(vec![*start]);
+            }
+            if (*stop - *start) * *step < 0.0 {
+                return Err(CliError::SimulationError {
+                    message: ".STEP linear sweep step sign is inconsistent with start/stop range"
+                        .to_string(),
+                    analysis: Some("Step".to_string()),
+                });
+            }
+
+            let mut values = Vec::new();
+            let mut v = *start;
+            let tol = start.abs().max(stop.abs()).max(1.0) * 1e-12;
+
+            for _ in 0..MAX_STEP_POINTS {
+                values.push(v);
+                let next = v + *step;
+                let finished = if *step > 0.0 {
+                    next > *stop + tol
+                } else {
+                    next < *stop - tol
+                };
+                if finished {
+                    return Ok(values);
+                }
+                v = next;
+            }
+
+            Err(CliError::SimulationError {
+                message: format!(
+                    ".STEP linear sweep exceeded {} points; check start/stop/step values",
+                    MAX_STEP_POINTS
+                ),
+                analysis: Some("Step".to_string()),
+            })
+        }
+        StepSweep::Decade {
+            points_per_decade,
+            start,
+            stop,
+        } => {
+            if *points_per_decade == 0 {
+                return Err(CliError::SimulationError {
+                    message: ".STEP DEC sweep requires points_per_decade > 0".to_string(),
+                    analysis: Some("Step".to_string()),
+                });
+            }
+            if !start.is_finite() || !stop.is_finite() || *start <= 0.0 || *stop <= 0.0 {
+                return Err(CliError::SimulationError {
+                    message: ".STEP DEC sweep requires finite positive start/stop values"
+                        .to_string(),
+                    analysis: Some("Step".to_string()),
+                });
+            }
+            if (*stop - *start).abs() <= f64::EPSILON {
+                return Ok(vec![*start]);
+            }
+
+            let ascending = stop > start;
+            let ratio = if ascending {
+                stop / start
+            } else {
+                start / stop
+            };
+            let total_steps = (ratio.log10() * (*points_per_decade as f64)).ceil() as usize;
+            let tol = stop.abs().max(1.0) * 1e-12;
+
+            let mut values = Vec::with_capacity(total_steps + 2);
+            for i in 0..=total_steps {
+                let factor = 10_f64.powf(i as f64 / *points_per_decade as f64);
+                let value = if ascending {
+                    start * factor
+                } else {
+                    start / factor
+                };
+
+                let in_range = if ascending {
+                    value <= *stop + tol
+                } else {
+                    value >= *stop - tol
+                };
+                if in_range {
+                    values.push(value);
+                }
+            }
+
+            if values.is_empty() {
+                values.push(*start);
+            }
+            let last = *values.last().unwrap_or(start);
+            if (last - *stop).abs() > tol {
+                values.push(*stop);
+            }
+
+            Ok(values)
+        }
+        StepSweep::Octave {
+            points_per_octave,
+            start,
+            stop,
+        } => {
+            if *points_per_octave == 0 {
+                return Err(CliError::SimulationError {
+                    message: ".STEP OCT sweep requires points_per_octave > 0".to_string(),
+                    analysis: Some("Step".to_string()),
+                });
+            }
+            if !start.is_finite() || !stop.is_finite() || *start <= 0.0 || *stop <= 0.0 {
+                return Err(CliError::SimulationError {
+                    message: ".STEP OCT sweep requires finite positive start/stop values"
+                        .to_string(),
+                    analysis: Some("Step".to_string()),
+                });
+            }
+            if (*stop - *start).abs() <= f64::EPSILON {
+                return Ok(vec![*start]);
+            }
+
+            let ascending = stop > start;
+            let ratio = if ascending {
+                stop / start
+            } else {
+                start / stop
+            };
+            let total_steps = (ratio.log2() * (*points_per_octave as f64)).ceil() as usize;
+            let tol = stop.abs().max(1.0) * 1e-12;
+
+            let mut values = Vec::with_capacity(total_steps + 2);
+            for i in 0..=total_steps {
+                let factor = 2_f64.powf(i as f64 / *points_per_octave as f64);
+                let value = if ascending {
+                    start * factor
+                } else {
+                    start / factor
+                };
+
+                let in_range = if ascending {
+                    value <= *stop + tol
+                } else {
+                    value >= *stop - tol
+                };
+                if in_range {
+                    values.push(value);
+                }
+            }
+
+            if values.is_empty() {
+                values.push(*start);
+            }
+            let last = *values.last().unwrap_or(start);
+            if (last - *stop).abs() > tol {
+                values.push(*stop);
+            }
+
+            Ok(values)
+        }
+        StepSweep::List(values) => {
+            if values.is_empty() {
+                return Err(CliError::SimulationError {
+                    message: ".STEP LIST requires at least one value".to_string(),
+                    analysis: Some("Step".to_string()),
+                });
+            }
+            if values.iter().any(|v| !v.is_finite()) {
+                return Err(CliError::SimulationError {
+                    message: ".STEP LIST values must be finite".to_string(),
+                    analysis: Some("Step".to_string()),
+                });
+            }
+            Ok(values.clone())
+        }
+    }
+}
+
+fn generate_frequency_sweep(
+    variation: rspice_core::netlist::FreqVariation,
+    points: usize,
+    start_freq: f64,
+    stop_freq: f64,
+) -> Vec<f64> {
+    if points == 0 || start_freq <= 0.0 || stop_freq <= 0.0 {
+        return Vec::new();
+    }
+    if (stop_freq - start_freq).abs() < f64::EPSILON || points == 1 {
+        return vec![start_freq];
+    }
+
+    match variation {
+        rspice_core::netlist::FreqVariation::Lin => (0..points)
+            .map(|i| start_freq + (stop_freq - start_freq) * (i as f64) / ((points - 1) as f64))
+            .collect(),
+        rspice_core::netlist::FreqVariation::Oct => {
+            let octaves = (stop_freq / start_freq).log2().abs();
+            let total_points = (octaves * points as f64).ceil() as usize + 1;
+            (0..total_points)
+                .map(|i| {
+                    start_freq
+                        * (stop_freq / start_freq)
+                            .powf((i as f64) / ((total_points.saturating_sub(1)) as f64))
+                })
+                .collect()
+        }
+        rspice_core::netlist::FreqVariation::Dec => {
+            let decades = (stop_freq / start_freq).log10().abs();
+            let total_points = (decades * points as f64).ceil() as usize + 1;
+            (0..total_points)
+                .map(|i| {
+                    start_freq
+                        * (stop_freq / start_freq)
+                            .powf((i as f64) / ((total_points.saturating_sub(1)) as f64))
+                })
+                .collect()
+        }
+    }
 }
 
 /// Run temperature sweep analysis
@@ -1592,9 +2282,8 @@ fn run_temp(
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_build_sim_config_defaults() {
-        let args = RunArgs {
+    fn make_default_run_args() -> RunArgs {
+        RunArgs {
             input: std::path::PathBuf::from("test.sp"),
             output: None,
             format: OutputFormat::Raw,
@@ -1631,7 +2320,12 @@ mod tests {
             corners: None,
             corner_lib: None,
             convergence: None,
-        };
+        }
+    }
+
+    #[test]
+    fn test_build_sim_config_defaults() {
+        let args = make_default_run_args();
         let config = Config::default();
         let sim_config = build_sim_config(&args, &config);
 
@@ -1641,44 +2335,10 @@ mod tests {
 
     #[test]
     fn test_build_sim_config_overrides() {
-        let args = RunArgs {
-            input: std::path::PathBuf::from("test.sp"),
-            output: None,
-            format: OutputFormat::Raw,
-            batch: false,
-            temp: Some(85.0),
-            meas: false,
-            progress: false,
-            node_names: false,
-            compress: false,
-            compress_tol: None,
-            maxiter: Some(100),
-            abstol: Some(1e-15),
-            reltol: None,
-            min_step: None,
-            max_step: None,
-            includes: vec![],
-            defines: vec![],
-            monte_carlo: None,
-            seed: None,
-            report_format: None,
-            report_file: None,
-            meas_format: None,
-            meas_file: None,
-            pss_freq: None,
-            pss_harmonics: 9,
-            pss_tstab: None,
-            hb_freq: None,
-            hb_harmonics: 9,
-            pz_input: None,
-            pz_output: None,
-            sens_output: None,
-            sens_param: None,
-            sens_value: None,
-            corners: None,
-            corner_lib: None,
-            convergence: None,
-        };
+        let mut args = make_default_run_args();
+        args.temp = Some(85.0);
+        args.maxiter = Some(100);
+        args.abstol = Some(1e-15);
         let config = Config::default();
         let sim_config = build_sim_config(&args, &config);
 
@@ -1689,26 +2349,303 @@ mod tests {
 
     #[test]
     fn test_parse_output_node_voltage_syntax() {
-        let netlist = rspice_core::Netlist::default();
+        let resolver = NodeResolver {
+            node_name_to_index: std::collections::HashMap::new(),
+        };
 
         // V(3) should parse to node 3
-        assert_eq!(parse_output_node("V(3)", &netlist), Some(3));
+        assert_eq!(parse_output_node("V(3)", &resolver), Some(3));
 
         // V(10) should parse to node 10
-        assert_eq!(parse_output_node("V(10)", &netlist), Some(10));
+        assert_eq!(parse_output_node("V(10)", &resolver), Some(10));
 
         // Direct number should work
-        assert_eq!(parse_output_node("5", &netlist), Some(5));
+        assert_eq!(parse_output_node("5", &resolver), Some(5));
     }
 
     #[test]
     fn test_parse_output_node_named() {
-        let netlist = rspice_core::Netlist::default();
+        let mut node_map = std::collections::HashMap::new();
+        node_map.insert("OUT".to_string(), 7);
+        let resolver = NodeResolver {
+            node_name_to_index: node_map,
+        };
 
-        // V(out) with named node - falls back to node 1 for now
-        assert_eq!(parse_output_node("V(out)", &netlist), Some(1));
+        // V(out) with named node resolves by netlist node map
+        assert_eq!(parse_output_node("V(out)", &resolver), Some(7));
 
         // Invalid format returns None
-        assert_eq!(parse_output_node("invalid", &netlist), None);
+        assert_eq!(parse_output_node("invalid", &resolver), None);
+    }
+
+    #[test]
+    fn test_node_resolver_resolve_node() {
+        let mut node_map = std::collections::HashMap::new();
+        node_map.insert("IN".to_string(), 1);
+        node_map.insert("OUT".to_string(), 2);
+        let resolver = NodeResolver {
+            node_name_to_index: node_map,
+        };
+
+        assert_eq!(resolver.resolve_node("in"), Some(1));
+        assert_eq!(resolver.resolve_node("OUT"), Some(2));
+        assert_eq!(resolver.resolve_node("0"), Some(0));
+        assert_eq!(resolver.resolve_node("gnd"), Some(0));
+        assert_eq!(resolver.resolve_node("3"), Some(3));
+        assert_eq!(resolver.resolve_node("missing"), None);
+    }
+
+    #[test]
+    fn test_parse_voltage_probe_spec() {
+        assert_eq!(
+            parse_voltage_probe_spec("V(out,ref)"),
+            Some(("out".to_string(), Some("ref".to_string())))
+        );
+        assert_eq!(
+            parse_voltage_probe_spec("V(3)"),
+            Some(("3".to_string(), None))
+        );
+        assert_eq!(
+            parse_voltage_probe_spec("out"),
+            Some(("out".to_string(), None))
+        );
+        assert_eq!(parse_voltage_probe_spec(""), None);
+    }
+
+    #[test]
+    fn test_generate_frequency_sweep_dec_and_lin() {
+        let dec = generate_frequency_sweep(rspice_core::netlist::FreqVariation::Dec, 10, 1.0, 1e3);
+        assert!(!dec.is_empty());
+        assert!((dec.first().copied().unwrap_or(0.0) - 1.0).abs() < 1e-12);
+        assert!((dec.last().copied().unwrap_or(0.0) - 1e3).abs() < 1e-6);
+
+        let lin = generate_frequency_sweep(rspice_core::netlist::FreqVariation::Lin, 5, 10.0, 50.0);
+        assert_eq!(lin.len(), 5);
+        assert!((lin[0] - 10.0).abs() < 1e-12);
+        assert!((lin[4] - 50.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_generate_step_values_linear_descending() {
+        let sweep = rspice_core::netlist::StepSweep::Linear {
+            start: 10.0,
+            stop: 2.0,
+            step: -2.0,
+        };
+        let values = generate_step_values(&sweep).expect("descending linear sweep should work");
+        assert_eq!(values, vec![10.0, 8.0, 6.0, 4.0, 2.0]);
+    }
+
+    #[test]
+    fn test_generate_step_values_linear_rejects_inconsistent_step_sign() {
+        let sweep = rspice_core::netlist::StepSweep::Linear {
+            start: 0.0,
+            stop: 10.0,
+            step: -1.0,
+        };
+        let err = generate_step_values(&sweep).expect_err("invalid step sign should fail");
+        assert!(
+            err.to_string()
+                .contains("step sign is inconsistent with start/stop range")
+        );
+    }
+
+    #[test]
+    fn test_generate_step_values_octave_descending() {
+        let sweep = rspice_core::netlist::StepSweep::Octave {
+            points_per_octave: 1,
+            start: 8.0,
+            stop: 1.0,
+        };
+        let values = generate_step_values(&sweep).expect("descending octave sweep should work");
+        assert_eq!(values, vec![8.0, 4.0, 2.0, 1.0]);
+    }
+
+    #[test]
+    fn test_run_analysis_parsed_pz_command() {
+        let netlist = rspice_core::netlist::parse_netlist(
+            "* RC\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n",
+        )
+        .expect("netlist should parse");
+        let analysis = AnalysisCommand::PoleZero {
+            input_pos: "in".to_string(),
+            input_neg: "0".to_string(),
+            output_pos: "out".to_string(),
+            output_neg: "0".to_string(),
+            transfer_type: rspice_core::netlist::PoleZeroTransferType::Voltage,
+            analysis_type: rspice_core::netlist::PoleZeroAnalysisType::PoleZero,
+        };
+        let engine = Engine::default();
+        let args = make_default_run_args();
+        let config = Config::default();
+
+        run_analysis(&engine, &netlist, &analysis, &args, &config, false, true)
+            .expect("parsed .PZ analysis should run");
+    }
+
+    #[test]
+    fn test_run_analysis_parsed_sens_command() {
+        let netlist = rspice_core::netlist::parse_netlist(
+            "* SENS\n.PARAM RVAL=1k\nV1 in 0 1\nR1 in out {RVAL}\nR2 out 0 1k\n.SENS V(out)\n.end\n",
+        )
+        .expect("netlist should parse");
+        let analysis = AnalysisCommand::Sensitivity {
+            output_node: "out".to_string(),
+            reference_node: None,
+            ac_sweep: None,
+        };
+        let engine = Engine::default();
+        let args = make_default_run_args();
+        let config = Config::default();
+
+        run_analysis(&engine, &netlist, &analysis, &args, &config, false, true)
+            .expect("parsed .SENS analysis should run");
+    }
+
+    #[test]
+    fn test_run_analysis_parsed_noise_differential_command() {
+        let netlist = rspice_core::netlist::parse_netlist(
+            "* Differential NOISE\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.end\n",
+        )
+        .expect("netlist should parse");
+        let analysis = AnalysisCommand::Noise {
+            output_node: "out".to_string(),
+            reference_node: Some("in".to_string()),
+            input_source: "V1".to_string(),
+            variation: rspice_core::netlist::FreqVariation::Dec,
+            points: 5,
+            start_freq: 1.0,
+            stop_freq: 1e3,
+        };
+        let engine = Engine::default();
+        let args = make_default_run_args();
+        let config = Config::default();
+
+        run_analysis(&engine, &netlist, &analysis, &args, &config, false, true)
+            .expect("parsed differential .NOISE analysis should run");
+    }
+
+    #[test]
+    fn test_run_analysis_noise_invalid_input_source_errors() {
+        let netlist = rspice_core::netlist::parse_netlist(
+            "* NOISE invalid source\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.end\n",
+        )
+        .expect("netlist should parse");
+        let analysis = AnalysisCommand::Noise {
+            output_node: "out".to_string(),
+            reference_node: None,
+            input_source: "VMISSING".to_string(),
+            variation: rspice_core::netlist::FreqVariation::Dec,
+            points: 5,
+            start_freq: 1.0,
+            stop_freq: 1e3,
+        };
+        let engine = Engine::default();
+        let args = make_default_run_args();
+        let config = Config::default();
+
+        let err = run_analysis(&engine, &netlist, &analysis, &args, &config, false, true)
+            .expect_err("missing .NOISE input source should fail");
+        assert!(err.to_string().contains("Invalid .NOISE input source"));
+    }
+
+    #[test]
+    fn test_run_analysis_parsed_monte_carlo_command() {
+        let netlist = rspice_core::netlist::parse_netlist(
+            "* MC\n.PARAM RVAL=1k\nV1 in 0 1\nR1 in out {RVAL}\nR2 out 0 1k\n.MC 32 DIST UNIFORM SPREAD 0.02 PARAMS RVAL\n.end\n",
+        )
+        .expect("netlist should parse");
+        let analysis = AnalysisCommand::MonteCarlo(rspice_core::netlist::MonteCarloCommand {
+            runs: 32,
+            seed: Some(9),
+            distribution: rspice_core::netlist::MonteCarloDistribution::Uniform,
+            relative_spread: 0.02,
+            params: vec!["RVAL".to_string()],
+        });
+        let engine = Engine::default();
+        let args = make_default_run_args();
+        let config = Config::default();
+
+        run_analysis(&engine, &netlist, &analysis, &args, &config, false, true)
+            .expect("parsed .MC analysis should run");
+    }
+
+    #[test]
+    fn test_run_analysis_parsed_step_param_command() {
+        let netlist = rspice_core::netlist::parse_netlist(
+            "* STEP\n.PARAM RVAL=1k\nV1 in 0 1\nR1 in out {RVAL}\nR2 out 0 1k\n.end\n",
+        )
+        .expect("netlist should parse");
+        let analysis = AnalysisCommand::Step(rspice_core::netlist::StepCommand {
+            target: rspice_core::netlist::StepTarget::Param,
+            name: "RVAL".to_string(),
+            param_name: None,
+            sweep: rspice_core::netlist::StepSweep::List(vec![1e3, 2e3, 4e3]),
+        });
+        let engine = Engine::default();
+        let args = make_default_run_args();
+        let config = Config::default();
+
+        run_analysis(&engine, &netlist, &analysis, &args, &config, false, true)
+            .expect("parsed .STEP PARAM analysis should run");
+    }
+
+    #[test]
+    fn test_run_analysis_parsed_step_temp_command() {
+        let netlist =
+            rspice_core::netlist::parse_netlist("* STEP TEMP\nV1 in 0 1\nR1 in 0 1k\n.end\n")
+                .expect("netlist should parse");
+        let analysis = AnalysisCommand::Step(rspice_core::netlist::StepCommand {
+            target: rspice_core::netlist::StepTarget::Temp,
+            name: "TEMP".to_string(),
+            param_name: None,
+            sweep: rspice_core::netlist::StepSweep::List(vec![-40.0, 27.0, 125.0]),
+        });
+        let engine = Engine::default();
+        let args = make_default_run_args();
+        let config = Config::default();
+
+        run_analysis(&engine, &netlist, &analysis, &args, &config, false, true)
+            .expect("parsed .STEP TEMP analysis should run");
+    }
+
+    #[test]
+    fn test_run_analysis_step_device_target_runs() {
+        let netlist = rspice_core::netlist::parse_netlist(
+            "* STEP device target\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.end\n",
+        )
+        .expect("netlist should parse");
+        let analysis = AnalysisCommand::Step(rspice_core::netlist::StepCommand {
+            target: rspice_core::netlist::StepTarget::Device,
+            name: "R1".to_string(),
+            param_name: Some("VALUE".to_string()),
+            sweep: rspice_core::netlist::StepSweep::List(vec![500.0, 1000.0]),
+        });
+        let engine = Engine::default();
+        let args = make_default_run_args();
+        let config = Config::default();
+
+        run_analysis(&engine, &netlist, &analysis, &args, &config, false, true)
+            .expect(".STEP DEVICE target should run");
+    }
+
+    #[test]
+    fn test_run_analysis_step_model_target_runs() {
+        let netlist = rspice_core::netlist::parse_netlist(
+            "* STEP model target\nV1 in 0 1\nR1 in out 1k\nD1 out 0 DMOD\n.MODEL DMOD D (IS=1e-12 N=1)\n.end\n",
+        )
+        .expect("netlist should parse");
+        let analysis = AnalysisCommand::Step(rspice_core::netlist::StepCommand {
+            target: rspice_core::netlist::StepTarget::Model,
+            name: "DMOD".to_string(),
+            param_name: Some("IS".to_string()),
+            sweep: rspice_core::netlist::StepSweep::List(vec![1e-12, 1e-8]),
+        });
+        let engine = Engine::default();
+        let args = make_default_run_args();
+        let config = Config::default();
+
+        run_analysis(&engine, &netlist, &analysis, &args, &config, false, true)
+            .expect(".STEP MODEL target should run");
     }
 }

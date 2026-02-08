@@ -41,7 +41,7 @@ rspice check circuit.sp --connectivity
 
 | Analysis | CLI Flag | Description |
 |----------|----------|-------------|
-| DC Operating Point | `rspice run` | Finds DC solution with Newton-Raphson |
+| DC Operating Point | `rspice run` | Finds DC solution with Enhanced Newton-Raphson |
 | DC Sweep | Built-in | Nested voltage/current/parameter sweeps |
 | Transient | Built-in | Time-domain with adaptive timestepping |
 | AC Small-Signal | Built-in | Frequency response |
@@ -52,6 +52,8 @@ rspice check circuit.sp --connectivity
 | Corner Analysis | `--corners tt,ss,ff` | PVT sweep with NMOS/PMOS scaling |
 | PSS | `--pss-freq F` | Periodic Steady-State for oscillators |
 | Harmonic Balance | `--hb-freq F` | RF steady-state solution |
+| PAC | Built-in | Periodic AC analysis (.PAC) |
+| PXF | Built-in | Periodic Transfer Function (.PXF) |
 | Pole-Zero | `--pz-input/output` | Transfer function analysis |
 | Sensitivity | `--sens-*` | DC/AC sensitivity |
 
