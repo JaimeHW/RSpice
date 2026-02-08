@@ -22,6 +22,7 @@ use super::status::{SimulationProgress, SimulationStatus};
 pub struct SpecExecutionOptions {
     pub temp: Option<crate::services::simulation_runner::TempRunConfig>,
     pub corner: Option<crate::services::simulation_runner::CornerRunConfig>,
+    pub pac: Option<crate::services::simulation_runner::PacRunConfig>,
 }
 
 //=============================================================================
@@ -268,7 +269,7 @@ fn run_simulation_thread(
                 }),
                 _ => p.update_status(SimulationStatus::DcOperatingPoint),
             },
-            SimulationRequest::Spec { spec, .. } => match spec {
+            SimulationRequest::Spec { spec, options } => match spec {
                 AnalysisSpec::DcOp => p.update_status(SimulationStatus::DcOperatingPoint),
                 AnalysisSpec::DcSweep { source_name, .. } => {
                     p.update_status(SimulationStatus::DcSweep {
@@ -319,6 +320,19 @@ fn run_simulation_thread(
                     freq: *tone1_freq,
                     stop_freq: *tone1_freq * (*tone1_harmonics).max(1) as f64,
                 }),
+                AnalysisSpec::Pac => {
+                    if let Some(pac) = &options.pac {
+                        p.update_status(SimulationStatus::AcAnalysis {
+                            freq: pac.start_freq,
+                            stop_freq: pac.stop_freq,
+                        });
+                    } else {
+                        p.update_status(SimulationStatus::AcAnalysis {
+                            freq: 1.0,
+                            stop_freq: 1.0,
+                        });
+                    }
+                }
                 AnalysisSpec::MonteCarlo => p.update_status(SimulationStatus::PostProcessing),
                 AnalysisSpec::Parametric => p.update_status(SimulationStatus::DcSweep {
                     source: "STEP".to_string(),
@@ -539,6 +553,40 @@ fn run_spec_request(
 
             Ok(SimulationResult::Ac {
                 frequencies,
+                waveforms,
+            })
+        }
+        AnalysisSpec::Pac => {
+            let pac_cfg = options.pac.ok_or_else(|| {
+                SimulationError::InvalidConfig(
+                    "PAC analysis requires explicit PAC execution options".to_string(),
+                )
+            })?;
+            let data = svc_runner::run_pac_analysis(netlist, &pac_cfg)
+                .map_err(SimulationError::InvalidConfig)?;
+
+            let waveforms: std::collections::HashMap<String, WaveformData> = data
+                .spectra
+                .into_iter()
+                .map(|(name, spectrum)| {
+                    let freqs: Vec<f64> = spectrum.iter().map(|(freq, _, _)| *freq).collect();
+                    let real: Vec<f64> = spectrum
+                        .iter()
+                        .map(|(_, mag, phase_deg)| *mag * phase_deg.to_radians().cos())
+                        .collect();
+                    let imag: Vec<f64> = spectrum
+                        .iter()
+                        .map(|(_, mag, phase_deg)| *mag * phase_deg.to_radians().sin())
+                        .collect();
+                    (
+                        name.clone(),
+                        WaveformData::new_complex(name, freqs, real, imag),
+                    )
+                })
+                .collect();
+
+            Ok(SimulationResult::Ac {
+                frequencies: data.frequencies,
                 waveforms,
             })
         }
@@ -857,6 +905,7 @@ C1 out 0 1n
                 },
             }),
             corner: None,
+            pac: None,
         };
 
         runner
@@ -950,6 +999,7 @@ R2 out 0 1k
                 nominal_voltage: Some(1.0),
                 base_mode: crate::services::simulation_runner::CornerBaseMode::Op,
             }),
+            pac: None,
         };
 
         runner
@@ -1009,6 +1059,7 @@ C1 out 0 1n
                     sweep: crate::services::simulation_runner::CornerFrequencySweep::Decade,
                 },
             }),
+            pac: None,
         };
 
         runner
@@ -1123,6 +1174,72 @@ C1 out 0 1n
                 );
             }
             other => panic!("Expected AC result for HB, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_pac() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* PAC smoke test
+V1 in 0 DC 1
+R1 in out 1k
+C1 out 0 1n
+.end
+"#
+        .to_string();
+
+        let options = SpecExecutionOptions {
+            temp: None,
+            corner: None,
+            pac: Some(crate::services::simulation_runner::PacRunConfig {
+                pss_fundamental_freq: 1e6,
+                pss_num_harmonics: 8,
+                pss_tolerance: 1e-4,
+                start_freq: 1e3,
+                stop_freq: 1e6,
+                points_per_unit: 8,
+                sweep: crate::services::simulation_runner::PacFrequencySweep::Decade,
+                max_sideband: 2,
+                input_source: "V1".to_string(),
+                output_node: "out".to_string(),
+                output_ref: None,
+                pac_magnitude: 1.0,
+                include_dc: true,
+                reltol: 1e-3,
+                abstol: 1e-12,
+            }),
+        };
+
+        runner
+            .start_spec_with_options(AnalysisSpec::Pac, netlist, options)
+            .expect("PAC spec should start");
+        thread::sleep(std::time::Duration::from_millis(250));
+
+        let result = runner.poll_result();
+        assert!(result.is_some(), "Expected PAC result");
+        let result = result.unwrap().expect("PAC should succeed");
+        match result {
+            SimulationResult::Ac {
+                frequencies,
+                waveforms,
+            } => {
+                assert!(!frequencies.is_empty());
+                assert!(!waveforms.is_empty());
+                assert!(
+                    waveforms
+                        .keys()
+                        .any(|name| name.contains("[sb=") && name.starts_with("V(")),
+                    "expected PAC sideband trace names, got {:?}",
+                    waveforms.keys().collect::<Vec<_>>()
+                );
+                assert!(waveforms.values().all(|wf| wf.is_complex
+                    && wf
+                        .y_imag
+                        .as_ref()
+                        .is_some_and(|imag| imag.len() == wf.y_values.len())));
+            }
+            other => panic!("Expected AC result for PAC, got {:?}", other),
         }
     }
 }

@@ -472,6 +472,7 @@ impl SimulationController {
                 | AnalysisSpec::Corner
                 | AnalysisSpec::Pss { .. }
                 | AnalysisSpec::HarmonicBalance { .. }
+                | AnalysisSpec::Pac
         )
     }
 
@@ -490,6 +491,7 @@ impl SimulationController {
                 Ok(SpecExecutionOptions {
                     temp: Some(Self::temp_run_config_from_dialog(state, &temp_cfg)?),
                     corner: None,
+                    pac: None,
                 })
             }
             AnalysisSpec::Corner => {
@@ -501,10 +503,65 @@ impl SimulationController {
                 Ok(SpecExecutionOptions {
                     temp: None,
                     corner: Some(Self::corner_run_config_from_dialog(state, &corner_cfg)?),
+                    pac: None,
                 })
             }
-            _ => Ok(SpecExecutionOptions::default()),
+            AnalysisSpec::Pac => Ok(SpecExecutionOptions {
+                temp: None,
+                corner: None,
+                pac: Some(Self::pac_run_config_from_dialog(state)?),
+            }),
+            _ => Ok(SpecExecutionOptions {
+                temp: None,
+                corner: None,
+                pac: None,
+            }),
         }
+    }
+
+    fn pac_run_config_from_dialog(
+        state: &AppState,
+    ) -> Result<crate::services::simulation_runner::PacRunConfig, String> {
+        use crate::services::simulation_runner::{PacFrequencySweep, PacRunConfig};
+
+        let mut pac_state = state.dialogs.pac_state.clone();
+        pac_state.ensure_initialized();
+        let pac_cfg = pac_state
+            .to_config()
+            .map_err(|e| format!("invalid PAC settings: {}", e))?;
+
+        let mut pss_state = state.dialogs.pss_state.clone();
+        pss_state.ensure_initialized();
+        let pss_cfg = pss_state
+            .to_config()
+            .map_err(|e| format!("invalid PSS settings required for PAC: {}", e))?;
+
+        let sweep = match pac_cfg.sweep_type {
+            crate::simulation::dialog::pac::PacSweepType::Decade => PacFrequencySweep::Decade,
+            crate::simulation::dialog::pac::PacSweepType::Octave => PacFrequencySweep::Octave,
+            crate::simulation::dialog::pac::PacSweepType::Linear => PacFrequencySweep::Linear,
+        };
+
+        let output_ref =
+            (!pac_cfg.output_ref.trim().is_empty()).then(|| pac_cfg.output_ref.clone());
+
+        Ok(PacRunConfig {
+            pss_fundamental_freq: pss_cfg.fund_freq,
+            pss_num_harmonics: pss_cfg.num_harmonics as usize,
+            pss_tolerance: pss_cfg.stab_tol,
+            start_freq: pac_cfg.start_freq,
+            stop_freq: pac_cfg.stop_freq,
+            points_per_unit: pac_cfg.num_points as usize,
+            sweep,
+            max_sideband: pac_cfg.max_sideband,
+            input_source: pac_cfg.input_source,
+            output_node: pac_cfg.output_node,
+            output_ref,
+            pac_magnitude: pac_cfg.pac_magnitude,
+            include_dc: pac_cfg.include_dc,
+            reltol: 1e-3,
+            abstol: 1e-12,
+        })
     }
 
     fn temp_run_config_from_dialog(
@@ -745,6 +802,7 @@ impl SimulationController {
             8 => self.build_pss_spec(state),
             10 => self.build_temperature_sweep_spec(state),
             11 => self.build_harmonic_balance_spec(state),
+            13 => self.build_pac_spec(state),
             18 => self.build_corner_sweep_spec(state),
             _ => Err(
                 "analysis is not implemented in the current UI simulation controller".to_string(),
@@ -880,6 +938,7 @@ impl SimulationController {
             AnalysisSpec::Corner => self.build_corner_temp_command(state),
             AnalysisSpec::Pss { .. } => self.build_pss_command(state),
             AnalysisSpec::HarmonicBalance { .. } => self.build_harmonic_balance_command(state),
+            AnalysisSpec::Pac => self.build_pac_command(state),
             _ => self
                 .analysis_spec_to_config(state, spec)
                 .map(|cfg| cfg.to_spice()),
@@ -939,6 +998,15 @@ impl SimulationController {
             tone2_freq: tone2.map(|tone| tone.frequency),
             tone2_harmonics: tone2.map(|tone| tone.harmonics as usize).unwrap_or(0),
         })
+    }
+
+    fn build_pac_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
+        let mut pac_state = state.dialogs.pac_state.clone();
+        pac_state.ensure_initialized();
+        pac_state
+            .to_config()
+            .map_err(|e| format!("invalid PAC settings: {}", e))?;
+        Ok(AnalysisSpec::Pac)
     }
 
     fn build_monte_carlo_command(&self, state: &AppState) -> Result<String, String> {
@@ -1020,6 +1088,15 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid harmonic balance settings: {}", e))?;
         Ok(hb_cfg.to_spice())
+    }
+
+    fn build_pac_command(&self, state: &AppState) -> Result<String, String> {
+        let mut pac_state = state.dialogs.pac_state.clone();
+        pac_state.ensure_initialized();
+        let pac_cfg = pac_state
+            .to_config()
+            .map_err(|e| format!("invalid PAC settings: {}", e))?;
+        Ok(pac_cfg.to_spice())
     }
 
     fn build_pole_zero_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
@@ -2314,12 +2391,12 @@ mod tests {
     fn test_build_analysis_plan_rejects_unsupported_analysis_tab() {
         let controller = SimulationController::new();
         let mut state = AppState::default();
-        state.dialogs.enabled_analyses.insert(13); // PAC
+        state.dialogs.enabled_analyses.insert(14); // PNoise
 
         let errors = controller
             .build_analysis_plan(&state)
             .expect_err("unsupported analysis should fail planning");
-        assert!(errors.iter().any(|e| e.contains("PAC")));
+        assert!(errors.iter().any(|e| e.contains("PNoise")));
     }
 
     #[test]
@@ -2613,6 +2690,25 @@ mod tests {
     }
 
     #[test]
+    fn test_build_analysis_spec_for_pac_accepts_valid_dialog_configuration() {
+        use crate::simulation::dialog::pac::PacConfig;
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.pac_state = crate::simulation::dialog::pac::PacDialogState::from_config(
+            &PacConfig::new(10e3, 5e6, 12)
+                .with_input("V1")
+                .with_output("OUT")
+                .with_sidebands(3),
+        );
+
+        let spec = controller
+            .build_analysis_spec_for_index(&state, 13)
+            .expect("PAC spec should build");
+        assert!(matches!(spec, AnalysisSpec::Pac));
+    }
+
+    #[test]
     fn test_build_queue_from_plan_emits_worst_case_monte_carlo_command() {
         use crate::simulation::dialog::mc::{McConfig, McDistribution};
 
@@ -2643,15 +2739,22 @@ mod tests {
     #[test]
     fn test_build_queue_from_plan_stores_pss_and_hb_as_spec_executed_runs() {
         use crate::simulation::dialog::hb::HbConfig;
+        use crate::simulation::dialog::pac::PacConfig;
         use crate::simulation::dialog::pss::PssConfig;
 
         let controller = SimulationController::new();
         let mut state = AppState::default();
-        state.dialogs.enabled_analyses = [8usize, 11usize].into_iter().collect();
+        state.dialogs.enabled_analyses = [8usize, 11usize, 13usize].into_iter().collect();
         state.dialogs.pss_state =
             crate::simulation::dialog::pss::PssDialogState::from_config(&PssConfig::new(10e6));
         state.dialogs.hb_state =
             crate::simulation::dialog::hb::HbDialogState::from_config(&HbConfig::new(2.4e9, 9));
+        state.dialogs.pac_state = crate::simulation::dialog::pac::PacDialogState::from_config(
+            &PacConfig::new(1e3, 1e6, 8)
+                .with_input("V1")
+                .with_output("OUT")
+                .with_sidebands(2),
+        );
 
         let plan = controller
             .build_analysis_plan(&state)
@@ -2660,7 +2763,7 @@ mod tests {
             .build_queue_from_plan(&state, &plan)
             .expect("queue should build");
 
-        assert_eq!(queue.len(), 2);
+        assert_eq!(queue.len(), 3);
         assert!(matches!(queue[0].spec, AnalysisSpec::Pss { .. }));
         assert!(queue[0].config.is_none());
         assert!(queue[0].analysis_line.starts_with(".pss "));
@@ -2671,6 +2774,20 @@ mod tests {
         ));
         assert!(queue[1].config.is_none());
         assert!(queue[1].analysis_line.starts_with(".hb "));
+
+        assert!(matches!(queue[2].spec, AnalysisSpec::Pac));
+        assert!(queue[2].config.is_none());
+        assert!(queue[2].analysis_line.starts_with(".pac "));
+        assert!(queue[2].spec_options.pac.is_some());
+        assert!(matches!(
+            queue[2]
+                .spec_options
+                .pac
+                .as_ref()
+                .expect("PAC options should be present")
+                .sweep,
+            crate::services::simulation_runner::PacFrequencySweep::Decade
+        ));
     }
 
     #[test]
