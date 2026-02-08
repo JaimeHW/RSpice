@@ -395,7 +395,7 @@ fn process_function_key_shortcuts(ctx: &Context) -> Option<ShortcutCommand> {
 /// Process schematic-specific shortcuts (no modifiers)
 fn process_schematic_shortcuts_impl(
     ctx: &Context,
-    shortcut_ctx: ShortcutContext,
+    _shortcut_ctx: ShortcutContext,
 ) -> Option<ShortcutCommand> {
     ctx.input(|i| {
         // Skip if any modifier is pressed (except shift for some cases)
