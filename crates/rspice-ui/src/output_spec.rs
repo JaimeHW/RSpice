@@ -110,6 +110,32 @@ pub(crate) fn collect_sensitivity_parameters(netlist: &rspice_core::Netlist) -> 
     params
 }
 
+pub(crate) fn resolve_sensitivity_ac_frequency(
+    ac_mode: bool,
+    frequency: Option<Value>,
+) -> Result<Option<Value>, String> {
+    if ac_mode {
+        let freq = frequency.unwrap_or(1.0);
+        if freq <= 0.0 {
+            return Err("Sensitivity AC frequency must be > 0".to_string());
+        }
+        Ok(Some(freq))
+    } else if frequency.is_some() {
+        Err("Sensitivity frequency is only valid when AC mode is enabled".to_string())
+    } else {
+        Ok(None)
+    }
+}
+
+pub(crate) fn validate_sensitivity_output_spec(output_spec: &OutputSpec) -> Result<(), String> {
+    if let OutputSpec::Voltage(vspec) = output_spec {
+        if vspec.pos == 0 && vspec.neg.is_none() {
+            return Err("Sensitivity output node cannot be ground".to_string());
+        }
+    }
+    Ok(())
+}
+
 #[inline]
 fn is_ground_node(name: &str) -> bool {
     matches!(
@@ -489,6 +515,51 @@ mod tests {
         let names: Vec<String> = params.into_iter().map(|(name, _)| name).collect();
 
         assert_eq!(names, vec!["A".to_string(), "M".to_string(), "Z".to_string()]);
+    }
+
+    #[test]
+    fn test_resolve_sensitivity_ac_frequency_validation() {
+        assert_eq!(
+            resolve_sensitivity_ac_frequency(true, None).expect("AC mode should default to 1 Hz"),
+            Some(1.0)
+        );
+        assert_eq!(
+            resolve_sensitivity_ac_frequency(true, Some(5e6))
+                .expect("valid AC frequency should pass"),
+            Some(5e6)
+        );
+        assert_eq!(
+            resolve_sensitivity_ac_frequency(false, None).expect("DC mode should have no AC frequency"),
+            None
+        );
+        assert!(resolve_sensitivity_ac_frequency(true, Some(0.0))
+            .expect_err("non-positive AC frequency should fail")
+            .contains("must be > 0"));
+        assert!(resolve_sensitivity_ac_frequency(false, Some(1e3))
+            .expect_err("frequency without AC mode should fail")
+            .contains("only valid when AC mode is enabled"));
+    }
+
+    #[test]
+    fn test_validate_sensitivity_output_spec_helper() {
+        validate_sensitivity_output_spec(&OutputSpec::Voltage(OutputVoltageSpec {
+            pos: 2,
+            neg: None,
+        }))
+        .expect("non-ground voltage output should validate");
+
+        validate_sensitivity_output_spec(&OutputSpec::BranchCurrent {
+            branch_ordinal: 1,
+            branch_name: "V1".to_string(),
+        })
+        .expect("branch-current output should validate");
+
+        let err = validate_sensitivity_output_spec(&OutputSpec::Voltage(OutputVoltageSpec {
+            pos: 0,
+            neg: None,
+        }))
+        .expect_err("ground output should fail");
+        assert!(err.contains("cannot be ground"));
     }
 
     #[test]
