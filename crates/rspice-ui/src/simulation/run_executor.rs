@@ -22,7 +22,7 @@ use std::time::Instant;
 
 use super::config::{AnalysisConfig, DcSweepConfig};
 use super::multi_run::{AnalysisRun, AnalysisRunType, AnalysisSpec, RunQueue, RunStatus};
-use super::options_translator::{OptionsTranslator, PvtCorner};
+use super::options_translator::{EngineOptions, OptionsTranslator, PvtCorner};
 use super::result_mapper::{
     MappedAnalysisType, MappedMeasurement, MappedResult, MappedWaveform, MeasurementStatus,
     MeasurementType, ResultMapper, ResultStatus,
@@ -174,6 +174,8 @@ struct ParallelRunOutcome {
 pub struct RunExecutor {
     /// Options translator
     options_translator: OptionsTranslator,
+    /// Optional per-executor engine option overrides injected into run netlists.
+    engine_options_override: Option<EngineOptions>,
     /// Result mapper
     result_mapper: ResultMapper,
     /// Cancellation flag
@@ -195,6 +197,7 @@ impl RunExecutor {
     pub fn new() -> Self {
         Self {
             options_translator: OptionsTranslator::new(),
+            engine_options_override: None,
             result_mapper: ResultMapper::new(),
             cancelled: Arc::new(AtomicBool::new(false)),
             progress: Arc::new(AtomicUsize::new(0)),
@@ -205,6 +208,21 @@ impl RunExecutor {
     /// Set max parallel runs
     pub fn with_parallel(mut self, max: usize) -> Self {
         self.max_parallel = max;
+        self
+    }
+
+    /// Override engine options used by all runs in this executor.
+    pub fn with_engine_options(mut self, options: EngineOptions) -> Self {
+        self.engine_options_override = Some(options);
+        self
+    }
+
+    /// Build and apply engine option overrides from convergence settings.
+    pub fn with_convergence_options(
+        mut self,
+        convergence: &super::convergence::ConvergenceOptions,
+    ) -> Self {
+        self.engine_options_override = Some(self.options_translator.from_convergence(convergence));
         self
     }
 
@@ -290,6 +308,7 @@ impl RunExecutor {
         result: &mut ExecutionResult,
     ) {
         let netlist = queue.netlist().map(str::to_string);
+        let options_override = self.engine_options_override.clone();
         let mut running: HashMap<u64, thread::JoinHandle<ParallelRunOutcome>> = HashMap::new();
         let mut cancellation_requested = false;
 
@@ -349,9 +368,14 @@ impl RunExecutor {
                 }
                 let run_name = run_snapshot.name.clone();
                 let netlist_snapshot = netlist.clone();
+                let options_snapshot = options_override.clone();
                 let handle = thread::spawn(move || {
                     let run_result = match netlist_snapshot.as_deref() {
-                        Some(text) => Self::execute_single_with_run(&run_snapshot, text),
+                        Some(text) => Self::execute_single_with_run(
+                            &run_snapshot,
+                            text,
+                            options_snapshot.as_ref(),
+                        ),
                         None => Err("No netlist configured for queue".to_string()),
                     };
                     ParallelRunOutcome {
@@ -457,10 +481,14 @@ impl RunExecutor {
             .netlist()
             .ok_or_else(|| "No netlist configured for queue".to_string())?;
 
-        Self::execute_single_with_run(run, netlist)
+        Self::execute_single_with_run(run, netlist, self.engine_options_override.as_ref())
     }
 
-    fn execute_single_with_run(run: &AnalysisRun, netlist: &str) -> Result<MappedResult, String> {
+    fn execute_single_with_run(
+        run: &AnalysisRun,
+        netlist: &str,
+        options_override: Option<&EngineOptions>,
+    ) -> Result<MappedResult, String> {
         let spec = run
             .spec
             .clone()
@@ -483,9 +511,11 @@ impl RunExecutor {
 
         spec.validate()?;
 
+        let effective_netlist = Self::apply_engine_options_to_netlist(netlist, options_override);
+
         // Execute based on analysis type
         let start = Instant::now();
-        let result = Self::execute_analysis(&spec, netlist);
+        let result = Self::execute_analysis(&spec, &effective_netlist);
         let elapsed = start.elapsed().as_secs_f64();
 
         // Map result
@@ -496,6 +526,65 @@ impl RunExecutor {
             }),
             Err(e) => Err(format!("{} [{}]", e, run.name)),
         }
+    }
+
+    fn apply_engine_options_to_netlist(
+        netlist: &str,
+        options_override: Option<&EngineOptions>,
+    ) -> String {
+        let Some(options) = options_override else {
+            return netlist.to_string();
+        };
+        Self::inject_options_block_before_end(netlist, &options.to_spice_options())
+    }
+
+    fn inject_options_block_before_end(netlist: &str, options_block: &str) -> String {
+        let trimmed_block = options_block.trim();
+        if trimmed_block.is_empty() {
+            return netlist.to_string();
+        }
+
+        let mut out = String::with_capacity(netlist.len() + trimmed_block.len() + 4);
+        match Self::find_last_end_directive_offset(netlist) {
+            Some(end_offset) => {
+                out.push_str(&netlist[..end_offset]);
+                if !out.ends_with('\n') && !out.ends_with('\r') {
+                    out.push('\n');
+                }
+                out.push_str(trimmed_block);
+                out.push('\n');
+                out.push_str(&netlist[end_offset..]);
+            }
+            None => {
+                out.push_str(netlist);
+                if !out.ends_with('\n') && !out.ends_with('\r') {
+                    out.push('\n');
+                }
+                out.push_str(trimmed_block);
+                out.push('\n');
+            }
+        }
+        out
+    }
+
+    fn find_last_end_directive_offset(netlist: &str) -> Option<usize> {
+        let mut offset = 0usize;
+        let mut end_offset = None;
+        for line in netlist.split_inclusive('\n') {
+            if line.trim_start().to_ascii_lowercase().starts_with(".end") {
+                end_offset = Some(offset);
+            }
+            offset += line.len();
+        }
+        if end_offset.is_none()
+            && netlist
+                .trim_start()
+                .to_ascii_lowercase()
+                .starts_with(".end")
+        {
+            return Some(0);
+        }
+        end_offset
     }
 
     /// Execute a specific analysis specification.
@@ -1861,6 +1950,7 @@ impl Default for AsyncRunExecutor {
 
 #[cfg(test)]
 mod tests {
+    use super::super::convergence::ConvergenceOptions;
     use super::super::multi_run::{AnalysisRunType, AnalysisSpec, FrequencySweep, RunStatus};
     use super::*;
 
@@ -2084,6 +2174,91 @@ mod tests {
 
         let result = executor.execute(&mut queue);
         assert_eq!(result.state.total_runs, 2);
+    }
+
+    #[test]
+    fn test_inject_options_block_before_end_inserts_before_end_directive() {
+        let netlist = "* test\nV1 in 0 1\nR1 in 0 1k\n.END\n";
+        let options_block = ".OPTIONS RELTOL=1e-4\n.TEMP 85";
+        let injected = RunExecutor::inject_options_block_before_end(netlist, options_block);
+        assert!(injected.contains(options_block));
+        let end_pos = injected
+            .to_ascii_lowercase()
+            .rfind(".end")
+            .expect("injected netlist should contain .end");
+        let opt_pos = injected
+            .find(".OPTIONS")
+            .expect("injected netlist should contain .OPTIONS block");
+        assert!(
+            opt_pos < end_pos,
+            "options block must appear before .end directive"
+        );
+    }
+
+    #[test]
+    fn test_inject_options_block_before_end_appends_when_end_missing() {
+        let netlist = "* test\nV1 in 0 1\nR1 in 0 1k";
+        let options_block = ".OPTIONS RELTOL=1e-4\n.TEMP 85";
+        let injected = RunExecutor::inject_options_block_before_end(netlist, options_block);
+        assert!(injected.starts_with(netlist));
+        assert!(injected.contains(options_block));
+    }
+
+    #[test]
+    fn test_with_convergence_options_populates_engine_override() {
+        let mut conv = ConvergenceOptions::default();
+        conv.temperature = 85.0;
+        conv.tnom = 30.0;
+        conv.tolerances.reltol = 2e-4;
+
+        let executor = RunExecutor::new().with_convergence_options(&conv);
+        let override_opts = executor
+            .engine_options_override
+            .as_ref()
+            .expect("convergence options should produce engine override");
+        assert!((override_opts.temp - 85.0).abs() < 1e-12);
+        assert!((override_opts.tnom - 30.0).abs() < 1e-12);
+        assert!((override_opts.reltol - 2e-4).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_execute_with_engine_options_injects_options_into_execution_path() {
+        let netlist = "* option injection path\nV1 in 0 1\nR1 in 0 1k\n.end\n";
+
+        let mut baseline_queue = RunQueue::new().with_netlist(netlist);
+        baseline_queue.add_analysis(AnalysisSpec::DcOp);
+        let baseline_result = RunExecutor::new().execute(&mut baseline_queue);
+        assert!(
+            baseline_result.errors.is_empty(),
+            "baseline run should succeed: {:?}",
+            baseline_result.errors
+        );
+
+        let mut invalid_opts = EngineOptions::spectre_defaults();
+        invalid_opts.reltol = f64::NAN;
+
+        let mut override_queue = RunQueue::new().with_netlist(netlist);
+        override_queue.add_analysis(AnalysisSpec::DcOp);
+        let override_result = RunExecutor::new()
+            .with_engine_options(invalid_opts)
+            .execute(&mut override_queue);
+
+        assert!(
+            !override_result.errors.is_empty(),
+            "override run should fail when injected options produce invalid netlist syntax"
+        );
+        let joined_errors = override_result
+            .errors
+            .values()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined_errors
+                .to_ascii_lowercase()
+                .contains("expected value, found identifier 'nan'"),
+            "error should come from injected invalid RELTOL option, got: {joined_errors}"
+        );
     }
 
     #[test]
