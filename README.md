@@ -23,7 +23,6 @@
 - [Why RSpice?](#why-rspice)
 - [Capabilities](#capabilities)
 - [Architecture](#architecture)
-- [RSpice Studio](#rspice-studio)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Usage](#usage)
