@@ -7,18 +7,34 @@
 //! - Result caching
 
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
 };
 use std::thread::{self, JoinHandle};
 
 use super::config::AnalysisConfig;
-use super::results::SimulationResult;
+use super::multi_run::AnalysisSpec;
+use super::results::{MonteCarloVariableResult, SimulationResult, WaveformData};
 use super::status::{SimulationProgress, SimulationStatus};
+
+/// Optional execution overrides for spec-driven analyses.
+#[derive(Debug, Clone, Default)]
+pub struct SpecExecutionOptions {
+    pub corner: Option<crate::services::simulation_runner::CornerRunConfig>,
+}
 
 //=============================================================================
 // Simulation Runner
 //=============================================================================
+
+#[derive(Debug, Clone)]
+enum SimulationRequest {
+    Config(AnalysisConfig),
+    Spec {
+        spec: AnalysisSpec,
+        options: SpecExecutionOptions,
+    },
+}
 
 /// Thread-safe simulation runner
 ///
@@ -130,6 +146,33 @@ impl SimulationRunner {
         config: AnalysisConfig,
         netlist: String,
     ) -> Result<(), SimulationError> {
+        self.start_request(SimulationRequest::Config(config), netlist)
+    }
+
+    /// Start a simulation from strongly-typed analysis spec.
+    pub fn start_spec(
+        &mut self,
+        spec: AnalysisSpec,
+        netlist: String,
+    ) -> Result<(), SimulationError> {
+        self.start_spec_with_options(spec, netlist, SpecExecutionOptions::default())
+    }
+
+    /// Start a simulation from strongly-typed analysis spec with explicit execution options.
+    pub fn start_spec_with_options(
+        &mut self,
+        spec: AnalysisSpec,
+        netlist: String,
+        options: SpecExecutionOptions,
+    ) -> Result<(), SimulationError> {
+        self.start_request(SimulationRequest::Spec { spec, options }, netlist)
+    }
+
+    fn start_request(
+        &mut self,
+        request: SimulationRequest,
+        netlist: String,
+    ) -> Result<(), SimulationError> {
         if self.is_running() {
             return Err(SimulationError::AlreadyRunning);
         }
@@ -147,7 +190,7 @@ impl SimulationRunner {
 
         // Spawn simulation thread with real engine
         let handle =
-            thread::spawn(move || run_simulation_thread(config, netlist, progress, abort_flag));
+            thread::spawn(move || run_simulation_thread(request, netlist, progress, abort_flag));
 
         self.thread_handle = Some(handle);
         Ok(())
@@ -168,7 +211,7 @@ impl SimulationRunner {
 ///
 /// Runs the actual rspice-core simulation engine.
 fn run_simulation_thread(
-    config: AnalysisConfig,
+    request: SimulationRequest,
     netlist: String,
     progress: Arc<Mutex<SimulationProgress>>,
     abort_flag: Arc<AtomicBool>,
@@ -207,21 +250,66 @@ fn run_simulation_thread(
     // Update status based on analysis type
     {
         let mut p = progress.lock().unwrap();
-        match &config {
-            AnalysisConfig::DcOp => p.update_status(SimulationStatus::DcOperatingPoint),
-            AnalysisConfig::DcSweep(dc) => p.update_status(SimulationStatus::DcSweep {
-                source: dc.source.clone(),
-                progress: 0.0,
-            }),
-            AnalysisConfig::Transient(tran) => p.update_status(SimulationStatus::Transient {
-                time: 0.0,
-                stop_time: tran.stop_time,
-            }),
-            AnalysisConfig::Ac(ac) => p.update_status(SimulationStatus::AcAnalysis {
-                freq: ac.start_freq,
-                stop_freq: ac.stop_freq,
-            }),
-            _ => p.update_status(SimulationStatus::DcOperatingPoint),
+        match &request {
+            SimulationRequest::Config(config) => match config {
+                AnalysisConfig::DcOp => p.update_status(SimulationStatus::DcOperatingPoint),
+                AnalysisConfig::DcSweep(dc) => p.update_status(SimulationStatus::DcSweep {
+                    source: dc.source.clone(),
+                    progress: 0.0,
+                }),
+                AnalysisConfig::Transient(tran) => p.update_status(SimulationStatus::Transient {
+                    time: 0.0,
+                    stop_time: tran.stop_time,
+                }),
+                AnalysisConfig::Ac(ac) => p.update_status(SimulationStatus::AcAnalysis {
+                    freq: ac.start_freq,
+                    stop_freq: ac.stop_freq,
+                }),
+                _ => p.update_status(SimulationStatus::DcOperatingPoint),
+            },
+            SimulationRequest::Spec { spec, .. } => match spec {
+                AnalysisSpec::DcOp => p.update_status(SimulationStatus::DcOperatingPoint),
+                AnalysisSpec::DcSweep { source_name, .. } => {
+                    p.update_status(SimulationStatus::DcSweep {
+                        source: source_name.clone(),
+                        progress: 0.0,
+                    })
+                }
+                AnalysisSpec::Transient { stop_time, .. } => {
+                    p.update_status(SimulationStatus::Transient {
+                        time: 0.0,
+                        stop_time: *stop_time,
+                    })
+                }
+                AnalysisSpec::Ac {
+                    start_freq,
+                    stop_freq,
+                    ..
+                } => p.update_status(SimulationStatus::AcAnalysis {
+                    freq: *start_freq,
+                    stop_freq: *stop_freq,
+                }),
+                AnalysisSpec::Noise {
+                    start_freq,
+                    stop_freq,
+                    ..
+                } => p.update_status(SimulationStatus::NoiseAnalysis {
+                    freq: *start_freq,
+                    stop_freq: *stop_freq,
+                }),
+                AnalysisSpec::MonteCarlo => p.update_status(SimulationStatus::PostProcessing),
+                AnalysisSpec::Parametric => p.update_status(SimulationStatus::DcSweep {
+                    source: "STEP".to_string(),
+                    progress: 0.0,
+                }),
+                AnalysisSpec::Corner => p.update_status(SimulationStatus::DcSweep {
+                    source: "TEMP".to_string(),
+                    progress: 0.0,
+                }),
+                AnalysisSpec::PoleZero { .. } => p.update_status(SimulationStatus::PoleZero),
+                AnalysisSpec::Sensitivity { .. } => p.update_status(SimulationStatus::Sensitivity),
+                _ => p.update_status(SimulationStatus::PostProcessing),
+            },
         }
     }
 
@@ -232,16 +320,24 @@ fn run_simulation_thread(
         return Err(SimulationError::Aborted);
     }
 
-    // Run simulation via engine bridge with abort support
-    log::info!("Running simulation via engine bridge: {:?}", config);
-    let result = match bridge.run_with_abort(&config, &netlist, &abort_flag) {
-        Ok(r) => {
-            log::info!("Engine bridge returned successfully");
-            r
+    let result = match request {
+        SimulationRequest::Config(config) => {
+            // Run simulation via engine bridge with abort support
+            log::info!("Running simulation via engine bridge: {:?}", config);
+            match bridge.run_with_abort(&config, &netlist, &abort_flag) {
+                Ok(r) => {
+                    log::info!("Engine bridge returned successfully");
+                    r
+                }
+                Err(e) => {
+                    log::error!("Engine bridge error: {:?}", e);
+                    return Err(e);
+                }
+            }
         }
-        Err(e) => {
-            log::error!("Engine bridge error: {:?}", e);
-            return Err(e);
+        SimulationRequest::Spec { spec, options } => {
+            log::info!("Running simulation via spec path: {:?}", spec.run_type());
+            run_spec_request(spec, options, &netlist, &abort_flag)?
         }
     };
 
@@ -253,6 +349,97 @@ fn run_simulation_thread(
 
     log::info!("Simulation thread completed successfully");
     Ok(result)
+}
+
+fn run_spec_request(
+    spec: AnalysisSpec,
+    options: SpecExecutionOptions,
+    netlist: &str,
+    abort_flag: &Arc<AtomicBool>,
+) -> Result<SimulationResult, SimulationError> {
+    use crate::services::simulation_runner as svc_runner;
+
+    if abort_flag.load(Ordering::SeqCst) {
+        return Err(SimulationError::Aborted);
+    }
+
+    match spec {
+        AnalysisSpec::MonteCarlo => {
+            let data = svc_runner::run_monte_carlo_analysis(netlist)
+                .map_err(SimulationError::InvalidConfig)?;
+            let variables = data
+                .variables
+                .into_iter()
+                .map(|var| MonteCarloVariableResult {
+                    name: var.name,
+                    mean: var.mean,
+                    std_dev: var.std_dev,
+                    min: var.min,
+                    max: var.max,
+                    histogram: var.histogram,
+                    bin_edges: var.bin_edges,
+                })
+                .collect();
+            Ok(SimulationResult::MonteCarlo {
+                runs_requested: data.runs_requested,
+                runs_completed: data.runs_completed,
+                num_failures: data.num_failures,
+                all_converged: data.all_converged,
+                variables,
+            })
+        }
+        AnalysisSpec::Parametric => {
+            let data = svc_runner::run_parametric_analysis(netlist)
+                .map_err(SimulationError::InvalidConfig)?;
+            let sweep_values = data.sweep_values;
+            let waveforms: std::collections::HashMap<String, WaveformData> = data
+                .voltages
+                .into_iter()
+                .map(|(name, values)| {
+                    (
+                        name.clone(),
+                        WaveformData::new_time_domain(name, sweep_values.clone(), values),
+                    )
+                })
+                .collect();
+            Ok(SimulationResult::Parametric {
+                target: data.target,
+                sweep_values,
+                waveforms,
+                num_failures: data.num_failures,
+            })
+        }
+        AnalysisSpec::Corner => {
+            let data = if let Some(corner_cfg) = options.corner {
+                svc_runner::run_corner_analysis_with_config(netlist, &corner_cfg)
+                    .map_err(SimulationError::InvalidConfig)?
+            } else {
+                svc_runner::run_corner_analysis(netlist).map_err(SimulationError::InvalidConfig)?
+            };
+            let temperatures_c = data.temperatures_c;
+            let corner_labels = data.corner_labels;
+            let waveforms: std::collections::HashMap<String, WaveformData> = data
+                .voltages
+                .into_iter()
+                .map(|(name, values)| {
+                    (
+                        name.clone(),
+                        WaveformData::new_time_domain(name, temperatures_c.clone(), values),
+                    )
+                })
+                .collect();
+            Ok(SimulationResult::Corner {
+                temperatures_c,
+                corner_labels,
+                waveforms,
+                num_failures: data.num_failures,
+            })
+        }
+        unsupported => Err(SimulationError::InvalidConfig(format!(
+            "{:?} is not supported by SimulationRunner::start_spec",
+            unsupported.run_type()
+        ))),
+    }
 }
 
 //=============================================================================
@@ -470,5 +657,151 @@ mod tests {
         thread::sleep(std::time::Duration::from_millis(200));
         let result = runner.poll_result();
         assert!(result.is_some(), "Expected result from dc_op");
+    }
+
+    #[test]
+    fn test_runner_start_spec_monte_carlo() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* Monte Carlo smoke test
+.param RV=1k
+V1 in 0 1
+R1 in 0 {RV}
+.mc 8 gauss 0.05
+.end
+"#
+        .to_string();
+
+        runner
+            .start_spec(AnalysisSpec::MonteCarlo, netlist)
+            .expect("spec run should start");
+        thread::sleep(std::time::Duration::from_millis(250));
+
+        let result = runner.poll_result();
+        assert!(result.is_some(), "Expected Monte Carlo result");
+        let result = result.unwrap().expect("Monte Carlo should succeed");
+        match result {
+            SimulationResult::MonteCarlo {
+                runs_requested,
+                runs_completed,
+                ..
+            } => {
+                assert_eq!(runs_requested, 8);
+                assert!(runs_completed <= runs_requested);
+            }
+            other => panic!("Expected MonteCarlo result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_parametric_temp() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* Parametric TEMP sweep smoke test
+V1 in 0 1
+R1 in 0 1k
+.step temp list -40 25 85
+.end
+"#
+        .to_string();
+
+        runner
+            .start_spec(AnalysisSpec::Parametric, netlist)
+            .expect("parametric spec should start");
+        thread::sleep(std::time::Duration::from_millis(250));
+
+        let result = runner.poll_result();
+        assert!(result.is_some(), "Expected parametric result");
+        let result = result.unwrap().expect("Parametric should succeed");
+        match result {
+            SimulationResult::Parametric {
+                target,
+                sweep_values,
+                ..
+            } => {
+                assert_eq!(target, "TEMP");
+                assert!(!sweep_values.is_empty());
+            }
+            other => panic!("Expected Parametric result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_corner_temp() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* Corner TEMP sweep smoke test
+V1 in 0 1
+R1 in 0 1k
+.temp -40 25 85
+.end
+"#
+        .to_string();
+
+        runner
+            .start_spec(AnalysisSpec::Corner, netlist)
+            .expect("corner spec should start");
+        thread::sleep(std::time::Duration::from_millis(250));
+
+        let result = runner.poll_result();
+        assert!(result.is_some(), "Expected corner result");
+        let result = result.unwrap().expect("Corner should succeed");
+        match result {
+            SimulationResult::Corner { temperatures_c, .. } => {
+                assert_eq!(temperatures_c.len(), 3);
+            }
+            other => panic!("Expected Corner result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_corner_with_options() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* Corner PVT sweep smoke test
+VDD vdd 0 1.0
+R1 vdd out 1k
+R2 out 0 1k
+.end
+"#
+        .to_string();
+
+        let options = SpecExecutionOptions {
+            corner: Some(crate::services::simulation_runner::CornerRunConfig {
+                process_corners: vec![
+                    crate::services::simulation_runner::CornerProcess::TT,
+                    crate::services::simulation_runner::CornerProcess::FF,
+                ],
+                voltages: vec![0.9, 1.1],
+                temperatures_c: vec![25.0],
+                full_matrix: true,
+                nominal_voltage: Some(1.0),
+            }),
+        };
+
+        runner
+            .start_spec_with_options(AnalysisSpec::Corner, netlist, options)
+            .expect("corner spec with options should start");
+        thread::sleep(std::time::Duration::from_millis(250));
+
+        let result = runner.poll_result();
+        assert!(result.is_some(), "Expected corner result");
+        let result = result.unwrap().expect("Corner should succeed");
+        match result {
+            SimulationResult::Corner {
+                temperatures_c,
+                corner_labels,
+                ..
+            } => {
+                assert_eq!(temperatures_c.len(), 4);
+                assert_eq!(corner_labels.len(), 4);
+                assert!(
+                    corner_labels
+                        .iter()
+                        .any(|label| label.contains("FF_1.100000V"))
+                );
+            }
+            other => panic!("Expected Corner result, got {:?}", other),
+        }
     }
 }

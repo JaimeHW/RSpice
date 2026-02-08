@@ -22,15 +22,18 @@ use crate::simulation::config::{
     AcAnalysisConfig, AcSweepType, DcSweepConfig, NoiseAnalysisConfig, PoleZeroConfig,
     PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
 };
-use crate::simulation::multi_run::{AnalysisPlan, AnalysisSpec, FrequencySweep};
+use crate::simulation::multi_run::{AnalysisPlan, AnalysisRunType, AnalysisSpec, FrequencySweep};
 use crate::simulation::reliability_engine::ReliabilityEngine;
+use crate::simulation::runner::SpecExecutionOptions;
 use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
 use crate::state::{AnalysisResult, AnalysisType, DcOpResult, OperatingPointValue};
 
 #[derive(Debug, Clone)]
 struct QueuedAnalysis {
     spec: AnalysisSpec,
-    config: AnalysisConfig,
+    config: Option<AnalysisConfig>,
+    spec_options: SpecExecutionOptions,
+    analysis_line: String,
 }
 
 //=============================================================================
@@ -53,6 +56,8 @@ pub struct SimulationController {
     reliability_engine: ReliabilityEngine,
     /// Current analysis config (stored for result processing when polling completes)
     current_config: Option<AnalysisConfig>,
+    /// Current strongly-typed analysis spec (always set while running)
+    current_spec: Option<AnalysisSpec>,
 
     // =========================================================================
     // Multi-Analysis Queue
@@ -82,6 +87,7 @@ impl SimulationController {
             soa_manager: SoAManager::new(),
             reliability_engine: ReliabilityEngine::new(),
             current_config: None,
+            current_spec: None,
             pending_analyses: VecDeque::new(),
             current_analysis_idx: 0,
             total_analyses: 0,
@@ -109,6 +115,7 @@ impl SimulationController {
             self.pending_analyses.clear();
             self.cached_netlist = None;
             self.current_config = None;
+            self.current_spec = None;
             state.simulation.status = "Aborted".to_string();
             state
                 .console_messages
@@ -164,8 +171,10 @@ impl SimulationController {
         }
         self.current_analysis_idx = 0;
 
-        let analysis_lines: Vec<String> =
-            queued.iter().map(|item| item.config.to_spice()).collect();
+        let analysis_lines: Vec<String> = queued
+            .iter()
+            .map(|item| item.analysis_line.clone())
+            .collect();
         let result = crate::simulation::netlist_gen::generate_netlist_with_analysis(
             &state.schematic,
             &analysis_lines,
@@ -208,7 +217,7 @@ impl SimulationController {
         let queued_names: Vec<&'static str> = self
             .pending_analyses
             .iter()
-            .map(|entry| self.analysis_name(&entry.config))
+            .map(|entry| self.analysis_name_for_spec(&entry.spec))
             .collect();
         log::info!(
             "Queued {} analyses for execution: {:?}",
@@ -246,21 +255,23 @@ impl SimulationController {
             "Starting queued analysis: {:?}",
             next_analysis.spec.run_type()
         );
+        let spec = next_analysis.spec;
         let config = next_analysis.config;
+        let spec_options = next_analysis.spec_options;
+        let analysis_name = self.analysis_name_for_spec(&spec);
 
         self.current_analysis_idx += 1;
-        self.current_config = Some(config.clone());
+        self.current_config = config.clone();
+        self.current_spec = Some(spec.clone());
 
         // Update status with multi-analysis progress
         let status_msg = if self.total_analyses > 1 {
             format!(
                 "Analysis {}/{}: {}",
-                self.current_analysis_idx,
-                self.total_analyses,
-                self.analysis_name(&config)
+                self.current_analysis_idx, self.total_analyses, analysis_name
             )
         } else {
-            self.analysis_name(&config).to_string()
+            analysis_name.to_string()
         };
         state.simulation.status = status_msg.clone();
 
@@ -270,12 +281,10 @@ impl SimulationController {
             if self.total_analyses > 1 {
                 format!(
                     "{} ({}/{})",
-                    self.analysis_name(&config),
-                    self.current_analysis_idx,
-                    self.total_analyses
+                    analysis_name, self.current_analysis_idx, self.total_analyses
                 )
             } else {
-                self.analysis_name(&config).to_string()
+                analysis_name.to_string()
             }
         )));
 
@@ -286,7 +295,13 @@ impl SimulationController {
             .expect("Netlist should be cached");
 
         // Start the simulation
-        match self.runner.start(config, netlist) {
+        let start_result = if let Some(cfg) = config {
+            self.runner.start(cfg, netlist)
+        } else {
+            self.runner
+                .start_spec_with_options(spec, netlist, spec_options)
+        };
+        match start_result {
             Ok(()) => log::info!(
                 "Analysis {}/{} started successfully",
                 self.current_analysis_idx,
@@ -320,6 +335,7 @@ impl SimulationController {
         // Clear cached netlist
         self.cached_netlist = None;
         self.current_config = None;
+        self.current_spec = None;
         self.current_analysis_idx = 0;
         self.total_analyses = 0;
 
@@ -395,6 +411,31 @@ impl SimulationController {
         let mut errors = Vec::new();
 
         for spec in &plan.analyses {
+            let analysis_line = match self.analysis_spec_to_spice_line(state, spec) {
+                Ok(line) => line,
+                Err(e) => {
+                    errors.push(format!("{}: {}", spec.run_type().display_name(), e));
+                    continue;
+                }
+            };
+            let spec_options = match self.analysis_spec_execution_options(state, spec) {
+                Ok(opts) => opts,
+                Err(e) => {
+                    errors.push(format!("{}: {}", spec.run_type().display_name(), e));
+                    continue;
+                }
+            };
+
+            if Self::executes_via_spec(spec) {
+                queue.push(QueuedAnalysis {
+                    spec: spec.clone(),
+                    config: None,
+                    spec_options,
+                    analysis_line,
+                });
+                continue;
+            }
+
             match self.analysis_spec_to_config(state, spec) {
                 Ok(config) => {
                     if let Err(errs) = config.validate() {
@@ -406,7 +447,9 @@ impl SimulationController {
                     } else {
                         queue.push(QueuedAnalysis {
                             spec: spec.clone(),
-                            config,
+                            config: Some(config),
+                            spec_options,
+                            analysis_line,
                         });
                     }
                 }
@@ -418,6 +461,66 @@ impl SimulationController {
             Ok(queue)
         } else {
             Err(errors)
+        }
+    }
+
+    fn executes_via_spec(spec: &AnalysisSpec) -> bool {
+        matches!(
+            spec,
+            AnalysisSpec::MonteCarlo | AnalysisSpec::Parametric | AnalysisSpec::Corner
+        )
+    }
+
+    fn analysis_spec_execution_options(
+        &self,
+        state: &AppState,
+        spec: &AnalysisSpec,
+    ) -> Result<SpecExecutionOptions, String> {
+        match spec {
+            AnalysisSpec::Corner => {
+                let mut corner_state = state.dialogs.corner_state.clone();
+                corner_state.ensure_initialized();
+                let corner_cfg = corner_state
+                    .to_config()
+                    .map_err(|e| format!("invalid corner settings: {}", e))?;
+                Ok(SpecExecutionOptions {
+                    corner: Some(Self::corner_run_config_from_dialog(&corner_cfg)),
+                })
+            }
+            _ => Ok(SpecExecutionOptions::default()),
+        }
+    }
+
+    fn corner_run_config_from_dialog(
+        corner_cfg: &crate::simulation::dialog::corner::CornerConfig,
+    ) -> crate::services::simulation_runner::CornerRunConfig {
+        use crate::services::simulation_runner::{CornerProcess, CornerRunConfig};
+        use crate::simulation::dialog::corner::ProcessCorner;
+
+        let process_corners = corner_cfg
+            .process_corners
+            .iter()
+            .map(|corner| match corner {
+                ProcessCorner::TT => CornerProcess::TT,
+                ProcessCorner::SS => CornerProcess::SS,
+                ProcessCorner::FF => CornerProcess::FF,
+                ProcessCorner::SF => CornerProcess::SF,
+                ProcessCorner::FS => CornerProcess::FS,
+            })
+            .collect();
+
+        let nominal_voltage = match corner_cfg.voltages.len() {
+            0 => None,
+            1 => Some(corner_cfg.voltages[0]),
+            n => Some(corner_cfg.voltages[n / 2]),
+        };
+
+        CornerRunConfig {
+            process_corners,
+            voltages: corner_cfg.voltages.clone(),
+            temperatures_c: corner_cfg.temperatures.clone(),
+            full_matrix: corner_cfg.full_matrix,
+            nominal_voltage,
         }
     }
 
@@ -476,6 +579,9 @@ impl SimulationController {
             }),
             5 => self.build_pole_zero_spec(state),
             6 => self.build_sensitivity_spec(state),
+            7 => self.build_monte_carlo_spec(state),
+            10 => self.build_temperature_sweep_spec(state),
+            18 => self.build_corner_sweep_spec(state),
             _ => Err(
                 "analysis is not implemented in the current UI simulation controller".to_string(),
             ),
@@ -595,6 +701,135 @@ impl SimulationController {
         }
     }
 
+    fn analysis_spec_to_spice_line(
+        &self,
+        state: &AppState,
+        spec: &AnalysisSpec,
+    ) -> Result<String, String> {
+        match spec {
+            AnalysisSpec::MonteCarlo => self.build_monte_carlo_command(state),
+            AnalysisSpec::Parametric => self.build_temperature_step_command(state),
+            AnalysisSpec::Corner => self.build_corner_temp_command(state),
+            _ => self
+                .analysis_spec_to_config(state, spec)
+                .map(|cfg| cfg.to_spice()),
+        }
+    }
+
+    fn build_monte_carlo_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
+        let mut mc_state = state.dialogs.mc_state.clone();
+        mc_state.ensure_initialized();
+        mc_state
+            .to_config()
+            .map_err(|e| format!("invalid Monte Carlo settings: {}", e))?;
+        Ok(AnalysisSpec::MonteCarlo)
+    }
+
+    fn build_temperature_sweep_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
+        let mut temp_state = state.dialogs.temp_state.clone();
+        temp_state.ensure_initialized();
+        let temp_cfg = temp_state
+            .to_config()
+            .map_err(|e| format!("invalid temperature sweep settings: {}", e))?;
+        use crate::simulation::dialog::temp::TempBaseAnalysis;
+        if !matches!(
+            temp_cfg.base_analysis,
+            TempBaseAnalysis::Op | TempBaseAnalysis::Dc
+        ) {
+            return Err(
+                "temperature sweep currently supports only OP/DC base analyses in the active controller path"
+                    .to_string(),
+            );
+        }
+        Ok(AnalysisSpec::Parametric)
+    }
+
+    fn build_corner_sweep_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
+        let mut corner_state = state.dialogs.corner_state.clone();
+        corner_state.ensure_initialized();
+        let corner_cfg = corner_state
+            .to_config()
+            .map_err(|e| format!("invalid corner settings: {}", e))?;
+        use crate::simulation::dialog::corner::CornerBaseAnalysis;
+        if !matches!(
+            corner_cfg.base_analysis,
+            CornerBaseAnalysis::Op | CornerBaseAnalysis::Dc
+        ) {
+            return Err(
+                "corner analysis currently supports only OP/DC base analyses in the active controller path"
+                    .to_string(),
+            );
+        }
+        Ok(AnalysisSpec::Corner)
+    }
+
+    fn build_monte_carlo_command(&self, state: &AppState) -> Result<String, String> {
+        let mut mc_state = state.dialogs.mc_state.clone();
+        mc_state.ensure_initialized();
+        let mc_cfg = mc_state
+            .to_config()
+            .map_err(|e| format!("invalid Monte Carlo settings: {}", e))?;
+
+        let dist_keyword =
+            match mc_cfg.distribution {
+                crate::simulation::dialog::mc::McDistribution::Gaussian => "GAUSS",
+                crate::simulation::dialog::mc::McDistribution::Uniform => "UNIFORM",
+                crate::simulation::dialog::mc::McDistribution::WorstCase => return Err(
+                    "Monte Carlo 'Worst Case' distribution is not supported by the core .MC parser"
+                        .to_string(),
+                ),
+            };
+        let relative_spread = (mc_cfg.variation_pct / 100.0).abs();
+        let mut cmd = format!(
+            ".mc {} DIST {} SPREAD {:.12e}",
+            mc_cfg.num_runs, dist_keyword, relative_spread
+        );
+        if mc_cfg.seed > 0 {
+            cmd.push_str(&format!(" SEED {}", mc_cfg.seed));
+        }
+        Ok(cmd)
+    }
+
+    fn build_temperature_step_command(&self, state: &AppState) -> Result<String, String> {
+        let mut temp_state = state.dialogs.temp_state.clone();
+        temp_state.ensure_initialized();
+        let temp_cfg = temp_state
+            .to_config()
+            .map_err(|e| format!("invalid temperature sweep settings: {}", e))?;
+
+        if !temp_cfg.specific_temps.is_empty() {
+            let values: Vec<String> = temp_cfg
+                .specific_temps
+                .iter()
+                .map(|t| format!("{:.12e}", t))
+                .collect();
+            Ok(format!(".step temp list {}", values.join(" ")))
+        } else {
+            Ok(format!(
+                ".step temp {:.12e} {:.12e} {:.12e}",
+                temp_cfg.temp_start, temp_cfg.temp_stop, temp_cfg.temp_step
+            ))
+        }
+    }
+
+    fn build_corner_temp_command(&self, state: &AppState) -> Result<String, String> {
+        let mut corner_state = state.dialogs.corner_state.clone();
+        corner_state.ensure_initialized();
+        let corner_cfg = corner_state
+            .to_config()
+            .map_err(|e| format!("invalid corner settings: {}", e))?;
+
+        if corner_cfg.temperatures.is_empty() {
+            return Err("corner analysis requires at least one temperature".to_string());
+        }
+        let temps: Vec<String> = corner_cfg
+            .temperatures
+            .iter()
+            .map(|temp| format!("{:.12e}", temp))
+            .collect();
+        Ok(format!(".temp {}", temps.join(" ")))
+    }
+
     fn build_pole_zero_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
         let mut pz_state = state.dialogs.pz_state.clone();
         pz_state.ensure_initialized();
@@ -696,6 +931,10 @@ impl SimulationController {
         }
     }
 
+    fn analysis_name_for_spec(&self, spec: &AnalysisSpec) -> &'static str {
+        spec.run_type().display_name()
+    }
+
     /// Convert AnalysisConfig to corresponding AnalysisType enum
     ///
     /// Maps the engine's analysis configuration to the UI state's analysis type
@@ -712,6 +951,26 @@ impl SimulationController {
         }
     }
 
+    fn spec_to_analysis_type(&self, spec: &AnalysisSpec) -> AnalysisType {
+        match spec.run_type() {
+            AnalysisRunType::DcOp => AnalysisType::DcOp,
+            AnalysisRunType::DcSweep => AnalysisType::DcSweep,
+            AnalysisRunType::Ac => AnalysisType::Ac,
+            AnalysisRunType::Transient => AnalysisType::Transient,
+            AnalysisRunType::Noise => AnalysisType::Noise,
+            AnalysisRunType::Tf => AnalysisType::Sensitivity,
+            AnalysisRunType::Sensitivity => AnalysisType::Sensitivity,
+            AnalysisRunType::PoleZero => AnalysisType::PoleZero,
+            AnalysisRunType::HarmonicBalance => AnalysisType::HarmonicBalance,
+            AnalysisRunType::Pss => AnalysisType::Pss,
+            AnalysisRunType::Pac => AnalysisType::Ac,
+            AnalysisRunType::Pnoise => AnalysisType::Noise,
+            AnalysisRunType::MonteCarlo => AnalysisType::MonteCarlo,
+            AnalysisRunType::Parametric => AnalysisType::Parametric,
+            AnalysisRunType::Corner => AnalysisType::Corner,
+        }
+    }
+
     /// Convert SimulationResult to AnalysisResult for storage in Results Browser
     ///
     /// Extracts data from the engine's SimulationResult and creates an AnalysisResult
@@ -721,11 +980,19 @@ impl SimulationController {
         sim_result: &crate::simulation::SimulationResult,
         config: &AnalysisConfig,
     ) -> AnalysisResult {
-        use crate::simulation::SimulationResult;
-        use crate::state::WaveformData;
-
         let analysis_type = self.config_to_analysis_type(config);
         let label = self.analysis_name(config).to_string();
+        self.convert_to_analysis_result_with_metadata(sim_result, analysis_type, &label)
+    }
+
+    fn convert_to_analysis_result_with_metadata(
+        &self,
+        sim_result: &crate::simulation::SimulationResult,
+        analysis_type: AnalysisType,
+        label: &str,
+    ) -> AnalysisResult {
+        use crate::simulation::SimulationResult;
+        use crate::state::WaveformData;
 
         match sim_result {
             SimulationResult::DcOp(dc_result) => {
@@ -754,7 +1021,7 @@ impl SimulationController {
                     power_dissipation: Vec::new(),
                 };
 
-                AnalysisResult::new(1, analysis_type, label).with_dc_op(state_dc_op)
+                AnalysisResult::new(1, analysis_type, label.to_string()).with_dc_op(state_dc_op)
             }
 
             SimulationResult::Transient { time, waveforms } => {
@@ -770,7 +1037,7 @@ impl SimulationController {
                         )
                     })
                     .collect();
-                AnalysisResult::new(1, analysis_type, label).with_waveforms(wf_data)
+                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
             }
 
             SimulationResult::Ac {
@@ -790,7 +1057,7 @@ impl SimulationController {
                         )
                     })
                     .collect();
-                AnalysisResult::new(1, analysis_type, label).with_waveforms(wf_data)
+                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
             }
 
             SimulationResult::DcSweep {
@@ -810,7 +1077,7 @@ impl SimulationController {
                         )
                     })
                     .collect();
-                AnalysisResult::new(1, analysis_type, label).with_waveforms(wf_data)
+                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
             }
 
             SimulationResult::Noise {
@@ -824,20 +1091,86 @@ impl SimulationController {
                     output_noise.clone(),
                     Self::color_for_index(0),
                 )];
-                AnalysisResult::new(1, analysis_type, label).with_waveforms(wf_data)
+                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
             }
 
             SimulationResult::PoleZero { .. } => {
                 // Pole-Zero results are displayed in console, not as waveforms
-                AnalysisResult::new(1, analysis_type, label)
+                AnalysisResult::new(1, analysis_type, label.to_string())
             }
 
             SimulationResult::Sensitivity { .. } => {
                 // Sensitivity results are displayed in console, not as waveforms
-                AnalysisResult::new(1, analysis_type, label)
+                AnalysisResult::new(1, analysis_type, label.to_string())
             }
 
-            SimulationResult::Empty { .. } => AnalysisResult::new(1, analysis_type, label),
+            SimulationResult::MonteCarlo { variables, .. } => {
+                let wf_data: Vec<WaveformData> = variables
+                    .iter()
+                    .filter_map(|var| {
+                        if var.histogram.is_empty() || var.bin_edges.len() < 2 {
+                            return None;
+                        }
+                        let x: Vec<f64> = var
+                            .bin_edges
+                            .windows(2)
+                            .map(|window| (window[0] + window[1]) * 0.5)
+                            .collect();
+                        let y: Vec<f64> = var.histogram.iter().map(|count| *count as f64).collect();
+                        Some(WaveformData::new(
+                            format!("hist({})", var.name),
+                            x,
+                            y,
+                            Self::color_for_index(0),
+                        ))
+                    })
+                    .collect();
+                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
+            }
+
+            SimulationResult::Parametric {
+                sweep_values,
+                waveforms,
+                ..
+            } => {
+                let wf_data: Vec<WaveformData> = waveforms
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, (name, wf))| {
+                        WaveformData::new(
+                            name.clone(),
+                            sweep_values.clone(),
+                            wf.y_values.clone(),
+                            Self::color_for_index(idx),
+                        )
+                    })
+                    .collect();
+                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
+            }
+
+            SimulationResult::Corner {
+                temperatures_c,
+                waveforms,
+                ..
+            } => {
+                let wf_data: Vec<WaveformData> = waveforms
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, (name, wf))| {
+                        WaveformData::new(
+                            name.clone(),
+                            temperatures_c.clone(),
+                            wf.y_values.clone(),
+                            Self::color_for_index(idx),
+                        )
+                    })
+                    .collect();
+                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
+            }
+
+            SimulationResult::Empty { .. } => {
+                AnalysisResult::new(1, analysis_type, label.to_string())
+            }
         }
     }
 
@@ -892,15 +1225,16 @@ impl SimulationController {
                     );
 
                     // Log completion to console
+                    let current_label = self
+                        .current_spec
+                        .as_ref()
+                        .map(|spec| self.analysis_name_for_spec(spec))
+                        .or_else(|| self.current_config.as_ref().map(|c| self.analysis_name(c)))
+                        .unwrap_or("Analysis");
                     let completion_msg = if self.total_analyses > 1 {
                         format!(
                             "{} completed ({}/{})",
-                            self.current_config
-                                .as_ref()
-                                .map(|c| self.analysis_name(c))
-                                .unwrap_or("Analysis"),
-                            self.current_analysis_idx,
-                            self.total_analyses
+                            current_label, self.current_analysis_idx, self.total_analyses
                         )
                     } else {
                         "Simulation completed successfully".to_string()
@@ -910,30 +1244,43 @@ impl SimulationController {
                         .push(ConsoleMessage::info(completion_msg));
 
                     // Convert SimulationResult to AnalysisResult and add to run
-                    if let Some(config) = &self.current_config {
-                        let analysis_result = self.convert_to_analysis_result(&sim_result, config);
-                        if let Some(run) = state.simulation.active_run_mut() {
-                            run.add_analysis(analysis_result);
-                            log::info!(
-                                "Added analysis to run {} (now has {} analyses)",
-                                run.id,
-                                run.analyses.len()
-                            );
-                        }
+                    let analysis_type = self
+                        .current_spec
+                        .as_ref()
+                        .map(|spec| self.spec_to_analysis_type(spec))
+                        .or_else(|| {
+                            self.current_config
+                                .as_ref()
+                                .map(|cfg| self.config_to_analysis_type(cfg))
+                        })
+                        .unwrap_or(AnalysisType::DcOp);
+                    let analysis_result = if let Some(config) = &self.current_config {
+                        self.convert_to_analysis_result(&sim_result, config)
+                    } else {
+                        self.convert_to_analysis_result_with_metadata(
+                            &sim_result,
+                            analysis_type,
+                            current_label,
+                        )
+                    };
+                    if let Some(run) = state.simulation.active_run_mut() {
+                        run.add_analysis(analysis_result);
+                        log::info!(
+                            "Added analysis to run {} (now has {} analyses)",
+                            run.id,
+                            run.analyses.len()
+                        );
                     }
 
                     // Update waveform data (legacy compatibility)
                     self.update_waveforms(state, &sim_result);
 
                     // Set axis labels based on current analysis type
-                    if let Some(config) = &self.current_config {
-                        let analysis_type = self.config_to_analysis_type(config);
-                        let (x_label, x_unit, y_label, y_unit) = analysis_type.axis_info();
-                        state.waveform_viewer.x_axis_label = x_label.to_string();
-                        state.waveform_viewer.x_axis_unit = x_unit.to_string();
-                        state.waveform_viewer.y_axis_label = y_label.to_string();
-                        state.waveform_viewer.y_axis_unit = y_unit.to_string();
-                    }
+                    let (x_label, x_unit, y_label, y_unit) = analysis_type.axis_info();
+                    state.waveform_viewer.x_axis_label = x_label.to_string();
+                    state.waveform_viewer.x_axis_unit = x_unit.to_string();
+                    state.waveform_viewer.y_axis_label = y_label.to_string();
+                    state.waveform_viewer.y_axis_unit = y_unit.to_string();
 
                     // --- Phase 10-11-12 Integration Glue (run once per analysis) ---
 
@@ -981,17 +1328,32 @@ impl SimulationController {
                         .push(ConsoleMessage::error(format!("Analysis failed: {}", e)));
 
                     // Mark run as partially failed and add failed analysis entry
-                    if let Some(config) = &self.current_config {
-                        let failed_analysis = AnalysisResult::failed(
-                            1,
-                            self.config_to_analysis_type(config),
-                            self.analysis_name(config),
-                            e.to_string(),
-                        );
-                        if let Some(run) = state.simulation.active_run_mut() {
-                            run.add_analysis(failed_analysis);
-                            run.success = false;
-                        }
+                    let failed_label = self
+                        .current_spec
+                        .as_ref()
+                        .map(|spec| self.analysis_name_for_spec(spec))
+                        .or_else(|| {
+                            self.current_config
+                                .as_ref()
+                                .map(|cfg| self.analysis_name(cfg))
+                        })
+                        .unwrap_or("Analysis")
+                        .to_string();
+                    let failed_type = self
+                        .current_spec
+                        .as_ref()
+                        .map(|spec| self.spec_to_analysis_type(spec))
+                        .or_else(|| {
+                            self.current_config
+                                .as_ref()
+                                .map(|cfg| self.config_to_analysis_type(cfg))
+                        })
+                        .unwrap_or(AnalysisType::DcOp);
+                    let failed_analysis =
+                        AnalysisResult::failed(1, failed_type, failed_label, e.to_string());
+                    if let Some(run) = state.simulation.active_run_mut() {
+                        run.add_analysis(failed_analysis);
+                        run.success = false;
                     }
 
                     // Continue with remaining analyses (commercial behavior: don't abort batch)
@@ -1310,6 +1672,115 @@ impl SimulationController {
                             )));
                     }
                 }
+            }
+
+            SimulationResult::MonteCarlo {
+                runs_requested,
+                runs_completed,
+                num_failures,
+                all_converged,
+                variables,
+            } => {
+                for (idx, var) in variables.iter().enumerate() {
+                    if var.histogram.is_empty() || var.bin_edges.len() < 2 {
+                        continue;
+                    }
+                    let x: Vec<f64> = var
+                        .bin_edges
+                        .windows(2)
+                        .map(|window| (window[0] + window[1]) * 0.5)
+                        .collect();
+                    let y: Vec<f64> = var.histogram.iter().map(|count| *count as f64).collect();
+                    let waveform = WaveformData::new(
+                        format!("hist({})", var.name),
+                        x,
+                        y,
+                        COLORS[idx % COLORS.len()].to_string(),
+                    );
+                    state.simulation.waveforms.push(waveform);
+                }
+
+                state
+                    .console_messages
+                    .push(crate::common::app::ConsoleMessage::info(format!(
+                        "Monte Carlo: {}/{} runs converged ({} failed), all_converged={}",
+                        runs_completed, runs_requested, num_failures, all_converged
+                    )));
+
+                for var in variables.iter().take(8) {
+                    state
+                        .console_messages
+                        .push(crate::common::app::ConsoleMessage::info(format!(
+                            "  {}: mean={:.6e}, sigma={:.6e}, min={:.6e}, max={:.6e}",
+                            var.name, var.mean, var.std_dev, var.min, var.max
+                        )));
+                }
+
+                state.panels.bottom_panel = true;
+                state.panels.active_bottom_tab = if state.simulation.waveforms.is_empty() {
+                    crate::common::app::BottomPanelTab::Console
+                } else {
+                    crate::common::app::BottomPanelTab::Waveform
+                };
+            }
+
+            SimulationResult::Parametric {
+                target,
+                sweep_values,
+                waveforms,
+                num_failures,
+            } => {
+                for (idx, (name, wf_data)) in waveforms.iter().enumerate() {
+                    let waveform = WaveformData::new(
+                        name.clone(),
+                        sweep_values.clone(),
+                        wf_data.y_values.clone(),
+                        COLORS[idx % COLORS.len()].to_string(),
+                    );
+                    state.simulation.waveforms.push(waveform);
+                }
+
+                state
+                    .console_messages
+                    .push(crate::common::app::ConsoleMessage::info(format!(
+                        "Parametric ({}): {} points, {} waveforms, {} failed points",
+                        target,
+                        sweep_values.len(),
+                        waveforms.len(),
+                        num_failures
+                    )));
+
+                state.panels.bottom_panel = true;
+                state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
+            }
+
+            SimulationResult::Corner {
+                temperatures_c,
+                waveforms,
+                num_failures,
+                ..
+            } => {
+                for (idx, (name, wf_data)) in waveforms.iter().enumerate() {
+                    let waveform = WaveformData::new(
+                        name.clone(),
+                        temperatures_c.clone(),
+                        wf_data.y_values.clone(),
+                        COLORS[idx % COLORS.len()].to_string(),
+                    );
+                    state.simulation.waveforms.push(waveform);
+                }
+
+                state
+                    .console_messages
+                    .push(crate::common::app::ConsoleMessage::info(format!(
+                        "Corner (temperature): {} points, {} waveforms, {} failed corners",
+                        temperatures_c.len(),
+                        waveforms.len(),
+                        num_failures
+                    )));
+
+                state.panels.bottom_panel = true;
+                state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
             }
 
             SimulationResult::Empty { .. } => {
@@ -1681,7 +2152,7 @@ mod tests {
         assert_eq!(queue.len(), 1);
 
         match &queue[0].config {
-            AnalysisConfig::PoleZero(pz) => {
+            Some(AnalysisConfig::PoleZero(pz)) => {
                 assert_eq!(pz.input_node, "VIN");
                 assert_eq!(pz.output_node, "VOUT");
                 assert_eq!(pz.transfer_type, "CUR");
@@ -1759,6 +2230,104 @@ mod tests {
     }
 
     #[test]
+    fn test_build_analysis_spec_for_monte_carlo_uses_dialog_validation() {
+        use crate::simulation::dialog::mc::{McBaseAnalysis, McConfig, McDistribution};
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.mc_state = crate::simulation::dialog::mc::McDialogState::from_config(
+            &McConfig::new(64)
+                .with_distribution(McDistribution::Gaussian)
+                .with_base(McBaseAnalysis::Dc)
+                .with_seed(1234),
+        );
+
+        let spec = controller
+            .build_analysis_spec_for_index(&state, 7)
+            .expect("Monte Carlo spec should build");
+        assert!(matches!(spec, AnalysisSpec::MonteCarlo));
+    }
+
+    #[test]
+    fn test_build_analysis_spec_for_temperature_sweep_rejects_unsupported_base() {
+        use crate::simulation::dialog::temp::{TempBaseAnalysis, TempConfig};
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.temp_state = crate::simulation::dialog::temp::TempDialogState::from_config(
+            &TempConfig::new(-40.0, 125.0, 25.0).with_base(TempBaseAnalysis::Transient),
+        );
+
+        let err = controller
+            .build_analysis_spec_for_index(&state, 10)
+            .expect_err("Transient base is not supported in active controller path");
+        assert!(err.contains("OP/DC base analyses"));
+    }
+
+    #[test]
+    fn test_build_analysis_spec_for_corner_accepts_process_and_voltage_sweeps() {
+        use crate::simulation::dialog::corner::{CornerBaseAnalysis, CornerConfig, ProcessCorner};
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.corner_state =
+            crate::simulation::dialog::corner::CornerDialogState::from_config(
+                &CornerConfig::default()
+                    .with_process_corners(vec![ProcessCorner::TT, ProcessCorner::FF])
+                    .with_voltages(vec![0.9, 1.0, 1.1])
+                    .with_temperatures(vec![-40.0, 25.0, 125.0])
+                    .with_base_analysis(CornerBaseAnalysis::Op),
+            );
+
+        let spec = controller
+            .build_analysis_spec_for_index(&state, 18)
+            .expect("corner spec should build for full PVT sweep");
+        assert!(matches!(spec, AnalysisSpec::Corner));
+    }
+
+    #[test]
+    fn test_build_queue_from_plan_stores_spec_executed_analyses_without_config() {
+        use crate::simulation::dialog::corner::{CornerBaseAnalysis, CornerConfig, ProcessCorner};
+        use crate::simulation::dialog::temp::{TempBaseAnalysis, TempConfig};
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses = [7usize, 10usize, 18usize].into_iter().collect();
+        state.dialogs.temp_state = crate::simulation::dialog::temp::TempDialogState::from_config(
+            &TempConfig::new(-40.0, 85.0, 25.0).with_base(TempBaseAnalysis::Op),
+        );
+        state.dialogs.corner_state =
+            crate::simulation::dialog::corner::CornerDialogState::from_config(
+                &CornerConfig::default()
+                    .with_process_corners(vec![ProcessCorner::TT])
+                    .with_base_analysis(CornerBaseAnalysis::Op),
+            );
+
+        let plan = controller
+            .build_analysis_plan(&state)
+            .expect("plan should build");
+        let queue = controller
+            .build_queue_from_plan(&state, &plan)
+            .expect("queue should build");
+
+        assert_eq!(queue.len(), 3);
+        assert!(matches!(queue[0].spec, AnalysisSpec::MonteCarlo));
+        assert!(queue[0].config.is_none());
+        assert!(queue[0].spec_options.corner.is_none());
+        assert!(queue[0].analysis_line.starts_with(".mc "));
+
+        assert!(matches!(queue[1].spec, AnalysisSpec::Parametric));
+        assert!(queue[1].config.is_none());
+        assert!(queue[1].spec_options.corner.is_none());
+        assert!(queue[1].analysis_line.starts_with(".step temp "));
+
+        assert!(matches!(queue[2].spec, AnalysisSpec::Corner));
+        assert!(queue[2].config.is_none());
+        assert!(queue[2].spec_options.corner.is_some());
+        assert!(queue[2].analysis_line.starts_with(".temp "));
+    }
+
+    #[test]
     fn test_build_queue_from_plan_maps_transient_optional_maxstep_and_uic() {
         let controller = SimulationController::new();
         let mut state = AppState::default();
@@ -1777,7 +2346,7 @@ mod tests {
             .expect("queue should build");
 
         match &queue[0].config {
-            AnalysisConfig::Transient(tran) => {
+            Some(AnalysisConfig::Transient(tran)) => {
                 assert!((tran.start_time - 500e-9).abs() < 1e-18);
                 assert_eq!(tran.max_timestep, Some(2e-9));
                 assert!(tran.uic);
@@ -1903,8 +2472,8 @@ mod tests {
 
     #[test]
     fn test_convert_dc_op_result() {
-        use crate::simulation::results::DcOpResult as EngineDcOpResult;
         use crate::simulation::SimulationResult;
+        use crate::simulation::results::DcOpResult as EngineDcOpResult;
 
         let controller = SimulationController::new();
         let config = AnalysisConfig::DcOp;
@@ -1936,8 +2505,8 @@ mod tests {
 
     #[test]
     fn test_convert_transient_result() {
-        use crate::simulation::results::WaveformData as EngineWaveformData;
         use crate::simulation::SimulationResult;
+        use crate::simulation::results::WaveformData as EngineWaveformData;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -1974,8 +2543,8 @@ mod tests {
 
     #[test]
     fn test_convert_ac_result() {
-        use crate::simulation::results::WaveformData as EngineWaveformData;
         use crate::simulation::SimulationResult;
+        use crate::simulation::results::WaveformData as EngineWaveformData;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -2010,8 +2579,8 @@ mod tests {
 
     #[test]
     fn test_convert_dc_sweep_result() {
-        use crate::simulation::results::WaveformData as EngineWaveformData;
         use crate::simulation::SimulationResult;
+        use crate::simulation::results::WaveformData as EngineWaveformData;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -2051,8 +2620,8 @@ mod tests {
 
     #[test]
     fn test_convert_pole_zero_result() {
-        use crate::simulation::config::{PoleZeroConfig, PzAnalysisType};
         use crate::simulation::SimulationResult;
+        use crate::simulation::config::{PoleZeroConfig, PzAnalysisType};
 
         let controller = SimulationController::new();
         let config = AnalysisConfig::PoleZero(PoleZeroConfig {
@@ -2073,6 +2642,116 @@ mod tests {
 
         assert_eq!(analysis.analysis_type, crate::state::AnalysisType::PoleZero);
         assert!(analysis.waveforms.is_empty()); // PZ results are console-only
+    }
+
+    #[test]
+    fn test_convert_monte_carlo_result() {
+        use crate::simulation::SimulationResult;
+        use crate::simulation::results::MonteCarloVariableResult;
+
+        let controller = SimulationController::new();
+        let sim_result = SimulationResult::MonteCarlo {
+            runs_requested: 16,
+            runs_completed: 15,
+            num_failures: 1,
+            all_converged: false,
+            variables: vec![MonteCarloVariableResult {
+                name: "V(out)".to_string(),
+                mean: 0.99,
+                std_dev: 0.02,
+                min: 0.9,
+                max: 1.05,
+                histogram: vec![2, 5, 6, 2],
+                bin_edges: vec![0.9, 0.95, 1.0, 1.05, 1.1],
+            }],
+        };
+
+        let analysis = controller.convert_to_analysis_result_with_metadata(
+            &sim_result,
+            crate::state::AnalysisType::MonteCarlo,
+            "Monte Carlo",
+        );
+        assert_eq!(
+            analysis.analysis_type,
+            crate::state::AnalysisType::MonteCarlo
+        );
+        assert_eq!(analysis.waveforms.len(), 1);
+        assert_eq!(analysis.waveforms[0].name, "hist(V(out))");
+    }
+
+    #[test]
+    fn test_convert_parametric_result() {
+        use crate::simulation::SimulationResult;
+        use crate::simulation::results::WaveformData as EngineWaveformData;
+        use std::collections::HashMap;
+
+        let controller = SimulationController::new();
+        let sweep_values = vec![-40.0, 25.0, 85.0];
+        let mut waveforms = HashMap::new();
+        waveforms.insert(
+            "V(out)".to_string(),
+            EngineWaveformData::new_time_domain(
+                "V(out)",
+                sweep_values.clone(),
+                vec![1.1, 1.0, 0.9],
+            ),
+        );
+        let sim_result = SimulationResult::Parametric {
+            target: "TEMP".to_string(),
+            sweep_values,
+            waveforms,
+            num_failures: 0,
+        };
+
+        let analysis = controller.convert_to_analysis_result_with_metadata(
+            &sim_result,
+            crate::state::AnalysisType::Parametric,
+            "Parametric",
+        );
+        assert_eq!(
+            analysis.analysis_type,
+            crate::state::AnalysisType::Parametric
+        );
+        assert_eq!(analysis.waveforms.len(), 1);
+        assert_eq!(analysis.waveforms[0].x.len(), 3);
+    }
+
+    #[test]
+    fn test_convert_corner_result() {
+        use crate::simulation::SimulationResult;
+        use crate::simulation::results::WaveformData as EngineWaveformData;
+        use std::collections::HashMap;
+
+        let controller = SimulationController::new();
+        let temperatures = vec![-40.0, 25.0, 125.0];
+        let mut waveforms = HashMap::new();
+        waveforms.insert(
+            "V(out)".to_string(),
+            EngineWaveformData::new_time_domain(
+                "V(out)",
+                temperatures.clone(),
+                vec![1.2, 1.0, 0.8],
+            ),
+        );
+        let sim_result = SimulationResult::Corner {
+            temperatures_c: temperatures,
+            corner_labels: vec![
+                "TT_1.000000V_-40.000000C".to_string(),
+                "TT_1.000000V_25.000000C".to_string(),
+                "TT_1.000000V_125.000000C".to_string(),
+            ],
+            waveforms,
+            num_failures: 0,
+        };
+
+        let analysis = controller.convert_to_analysis_result_with_metadata(
+            &sim_result,
+            crate::state::AnalysisType::Corner,
+            "Corner",
+        );
+        assert_eq!(analysis.analysis_type, crate::state::AnalysisType::Corner);
+        assert_eq!(analysis.waveforms.len(), 1);
+        assert_eq!(analysis.waveforms[0].x.len(), 3);
     }
 
     #[test]
@@ -2099,5 +2778,6 @@ mod tests {
     fn test_current_config_none_initially() {
         let controller = SimulationController::new();
         assert!(controller.current_config.is_none());
+        assert!(controller.current_spec.is_none());
     }
 }

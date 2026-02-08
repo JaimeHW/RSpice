@@ -2,22 +2,23 @@
 //!
 //! Async wrapper around rspice-core for running simulations from the GUI.
 
+use crate::output_spec::{
+    OutputSpec, OutputVoltageSpec, collect_sensitivity_parameters, dc_output_value,
+    finite_difference_derivative, normalized_sensitivity, parse_output_spec,
+    resolve_node_or_ground_index, resolve_sensitivity_ac_frequency, run_ac_output_at_frequency,
+    run_dc_output_sensitivity, validate_sensitivity_output_spec,
+};
 use num_complex::Complex64;
 use rspice_core::analysis::ac::AcResult;
 use rspice_core::analysis::monte_carlo::Distribution;
 use rspice_core::analysis::noise::NoiseResult;
 use rspice_core::engine::{Engine, SimulationConfig, TransientResult};
 use rspice_core::netlist::{
-    AnalysisCommand, MonteCarloDistribution, StepCommand, StepSweep, StepTarget,
+    AnalysisCommand, ElementKind, MonteCarloDistribution, SourceSpec, StepCommand, StepSweep,
+    StepTarget,
 };
 use rspice_core::solver::SimulationResult as CoreSimulationResult;
-use rspice_core::{resolve_simulation_config, SimulationConfigOverrides, Value};
-use crate::output_spec::{
-    collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
-    normalized_sensitivity, parse_output_spec, resolve_node_or_ground_index,
-    resolve_sensitivity_ac_frequency, run_ac_output_at_frequency, run_dc_output_sensitivity,
-    validate_sensitivity_output_spec, OutputSpec, OutputVoltageSpec,
-};
+use rspice_core::{SimulationConfigOverrides, Value, resolve_simulation_config};
 
 // =============================================================================
 // Platform-agnostic timing utilities
@@ -1242,13 +1243,7 @@ pub fn run_monte_carlo_analysis(netlist_text: &str) -> Result<MonteCarloData, St
 
     let engine = Engine::new(build_engine_config(&netlist, None));
     let result = engine
-        .run_monte_carlo_with_options(
-            &netlist,
-            mc_cmd.runs,
-            seed,
-            distribution,
-            parameter_filter,
-        )
+        .run_monte_carlo_with_options(&netlist, mc_cmd.runs, seed, distribution, parameter_filter)
         .map_err(|e| format!("Monte Carlo analysis error: {}", e))?;
 
     let mut variables: Vec<MonteCarloVariableData> = result
@@ -1337,16 +1332,130 @@ pub fn run_parametric_analysis(netlist_text: &str) -> Result<ParametricData, Str
 // Corner Analysis
 // =============================================================================
 
-/// Temperature-corner analysis data.
+/// Process-corner designation for UI corner sweeps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CornerProcess {
+    TT,
+    SS,
+    FF,
+    SF,
+    FS,
+}
+
+impl CornerProcess {
+    fn as_keyword(self) -> &'static str {
+        match self {
+            Self::TT => "TT",
+            Self::SS => "SS",
+            Self::FF => "FF",
+            Self::SF => "SF",
+            Self::FS => "FS",
+        }
+    }
+
+    fn nmos_factor(self) -> Value {
+        match self {
+            Self::TT => 1.0,
+            Self::SS | Self::SF => 0.9,
+            Self::FF | Self::FS => 1.1,
+        }
+    }
+
+    fn pmos_factor(self) -> Value {
+        match self {
+            Self::TT => 1.0,
+            Self::SS | Self::FS => 0.9,
+            Self::FF | Self::SF => 1.1,
+        }
+    }
+}
+
+/// Explicit configuration for corner sweep execution.
+#[derive(Debug, Clone)]
+pub struct CornerRunConfig {
+    pub process_corners: Vec<CornerProcess>,
+    pub voltages: Vec<Value>,
+    pub temperatures_c: Vec<Value>,
+    pub full_matrix: bool,
+    pub nominal_voltage: Option<Value>,
+}
+
+impl Default for CornerRunConfig {
+    fn default() -> Self {
+        Self {
+            process_corners: vec![CornerProcess::TT],
+            voltages: vec![1.0],
+            temperatures_c: vec![25.0],
+            full_matrix: true,
+            nominal_voltage: Some(1.0),
+        }
+    }
+}
+
+impl CornerRunConfig {
+    fn validate(&self) -> Result<(), String> {
+        if self.process_corners.is_empty() {
+            return Err("Corner analysis requires at least one process corner".to_string());
+        }
+        if self.voltages.is_empty() {
+            return Err("Corner analysis requires at least one voltage corner".to_string());
+        }
+        if self.voltages.iter().any(|v| !v.is_finite() || *v <= 0.0) {
+            return Err(
+                "Corner analysis voltage corners must be positive finite values".to_string(),
+            );
+        }
+        if self.temperatures_c.is_empty() {
+            return Err("Corner analysis requires at least one temperature corner".to_string());
+        }
+        if self.temperatures_c.iter().any(|t| !t.is_finite()) {
+            return Err("Corner analysis temperature corners must be finite values".to_string());
+        }
+        if let Some(vnom) = self.nominal_voltage {
+            if !vnom.is_finite() || vnom <= 0.0 {
+                return Err(
+                    "Corner analysis nominal voltage must be a positive finite value".to_string(),
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CornerPoint {
+    process: CornerProcess,
+    voltage: Value,
+    temperature_c: Value,
+}
+
+impl CornerPoint {
+    fn label(&self) -> String {
+        format!(
+            "{}_{:.6}V_{:.6}C",
+            self.process.as_keyword(),
+            self.voltage,
+            self.temperature_c
+        )
+    }
+}
+
+/// Temperature/process/voltage corner sweep data.
 #[derive(Debug, Clone)]
 pub struct CornerData {
+    /// Temperature for each executed corner point.
     pub temperatures_c: Vec<Value>,
+    /// Human-readable corner labels in execution order.
+    pub corner_labels: Vec<String>,
+    /// Per-node values for each corner point.
     pub voltages: Vec<(String, Vec<Value>)>,
     pub num_points: usize,
     pub num_failures: usize,
 }
 
 /// Run corner analysis from `.TEMP` commands in the netlist.
+///
+/// This compatibility entry point executes temperature-only TT/nominal sweeps.
 pub fn run_corner_analysis(netlist_text: &str) -> Result<CornerData, String> {
     let netlist = rspice_core::netlist::parse_netlist(netlist_text)
         .map_err(|e| format!("Parse error: {}", e))?;
@@ -1356,17 +1465,49 @@ pub fn run_corner_analysis(netlist_text: &str) -> Result<CornerData, String> {
         return Err("Corner analysis requires at least one .TEMP command".to_string());
     }
 
-    let results = run_temperature_sweep_dc(&netlist, &temperatures)?;
+    let config = CornerRunConfig {
+        temperatures_c: temperatures,
+        ..Default::default()
+    };
+    run_corner_analysis_with_netlist(&netlist, &config)
+}
+
+/// Run corner analysis with explicit process/voltage/temperature configuration.
+pub fn run_corner_analysis_with_config(
+    netlist_text: &str,
+    config: &CornerRunConfig,
+) -> Result<CornerData, String> {
+    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
+        .map_err(|e| format!("Parse error: {}", e))?;
+    run_corner_analysis_with_netlist(&netlist, config)
+}
+
+fn run_corner_analysis_with_netlist(
+    netlist: &rspice_core::Netlist,
+    config: &CornerRunConfig,
+) -> Result<CornerData, String> {
+    config.validate()?;
+    let points = expand_corner_points(config);
+    if points.is_empty() {
+        return Err("Corner analysis produced no corner points".to_string());
+    }
+
+    let nominal_voltage = config
+        .nominal_voltage
+        .or_else(|| infer_nominal_supply_voltage(netlist))
+        .unwrap_or(1.0);
+    let results = run_corner_sweep_dc(netlist, &points, nominal_voltage)?;
     if results.is_empty() {
         return Err("Corner analysis produced no converged corner points".to_string());
     }
 
-    let num_failures = temperatures.len().saturating_sub(results.len());
-    let (temperatures_c, voltages) = map_dc_sweep_results(&results);
+    let num_failures = points.len().saturating_sub(results.len());
+    let (temperatures_c, corner_labels, voltages) = map_corner_results(&results);
 
     Ok(CornerData {
         num_points: temperatures_c.len(),
         temperatures_c,
+        corner_labels,
         voltages,
         num_failures,
     })
@@ -1391,7 +1532,9 @@ fn describe_step_target(step_cmd: &StepCommand) -> String {
     }
 }
 
-fn map_dc_sweep_results(results: &[(Value, CoreSimulationResult)]) -> (Vec<Value>, Vec<(String, Vec<Value>)>) {
+fn map_dc_sweep_results(
+    results: &[(Value, CoreSimulationResult)],
+) -> (Vec<Value>, Vec<(String, Vec<Value>)>) {
     let sweep_values: Vec<Value> = results.iter().map(|(value, _)| *value).collect();
     let mut voltages = Vec::new();
 
@@ -1411,6 +1554,267 @@ fn map_dc_sweep_results(results: &[(Value, CoreSimulationResult)]) -> (Vec<Value
     }
 
     (sweep_values, voltages)
+}
+
+fn map_corner_results(
+    results: &[(CornerPoint, CoreSimulationResult)],
+) -> (Vec<Value>, Vec<String>, Vec<(String, Vec<Value>)>) {
+    let temperatures_c: Vec<Value> = results
+        .iter()
+        .map(|(point, _)| point.temperature_c)
+        .collect();
+    let corner_labels: Vec<String> = results.iter().map(|(point, _)| point.label()).collect();
+    let mut voltages = Vec::new();
+
+    if let Some((_, first)) = results.first() {
+        for node_idx in 1..first.node_voltages.len() {
+            let node_name = first
+                .node_names
+                .get(node_idx)
+                .cloned()
+                .unwrap_or_else(|| node_idx.to_string());
+            let values: Vec<Value> = results
+                .iter()
+                .map(|(_, result)| result.node_voltages.get(node_idx).copied().unwrap_or(0.0))
+                .collect();
+            voltages.push((format!("V({})", node_name), values));
+        }
+    }
+
+    (temperatures_c, corner_labels, voltages)
+}
+
+fn expand_corner_points(config: &CornerRunConfig) -> Vec<CornerPoint> {
+    if config.full_matrix {
+        let mut points = Vec::with_capacity(
+            config.process_corners.len() * config.voltages.len() * config.temperatures_c.len(),
+        );
+        for process in &config.process_corners {
+            for &voltage in &config.voltages {
+                for &temperature_c in &config.temperatures_c {
+                    points.push(CornerPoint {
+                        process: *process,
+                        voltage,
+                        temperature_c,
+                    });
+                }
+            }
+        }
+        return points;
+    }
+
+    let n = config
+        .process_corners
+        .len()
+        .max(config.voltages.len())
+        .max(config.temperatures_c.len());
+    let mut points = Vec::with_capacity(n);
+    for idx in 0..n {
+        points.push(CornerPoint {
+            process: config.process_corners[idx % config.process_corners.len()],
+            voltage: config.voltages[idx % config.voltages.len()],
+            temperature_c: config.temperatures_c[idx % config.temperatures_c.len()],
+        });
+    }
+    points
+}
+
+fn run_corner_sweep_dc(
+    netlist: &rspice_core::Netlist,
+    points: &[CornerPoint],
+    nominal_voltage: Value,
+) -> Result<Vec<(CornerPoint, CoreSimulationResult)>, String> {
+    if !nominal_voltage.is_finite() || nominal_voltage <= 0.0 {
+        return Err("Corner analysis nominal voltage must be a positive finite value".to_string());
+    }
+
+    let mut results = Vec::with_capacity(points.len());
+
+    for point in points {
+        if !point.voltage.is_finite() || point.voltage <= 0.0 {
+            return Err(format!(
+                "Corner voltage must be positive and finite (got {})",
+                point.voltage
+            ));
+        }
+        if !point.temperature_c.is_finite() {
+            return Err(format!(
+                "Corner temperature must be finite (got {})",
+                point.temperature_c
+            ));
+        }
+
+        let mut corner_netlist = netlist.clone();
+        apply_process_corner(&mut corner_netlist, point.process);
+        apply_voltage_corner(&mut corner_netlist, point.voltage, nominal_voltage)?;
+
+        let mut config = build_engine_config(&corner_netlist, None);
+        config.temperature = point.temperature_c + 273.15;
+        let engine = Engine::new(config);
+
+        match engine.run_dc_op(&corner_netlist) {
+            Ok(dc) => results.push((point.clone(), dc)),
+            Err(e) => {
+                log::warn!("Corner {} failed: {}", point.label(), e);
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+fn apply_process_corner(netlist: &mut rspice_core::Netlist, process: CornerProcess) {
+    let nmos_factor = process.nmos_factor();
+    let pmos_factor = process.pmos_factor();
+
+    for model in &mut netlist.models {
+        let factor = process_factor_for_model_type(&model.model_type, nmos_factor, pmos_factor);
+        if (factor - 1.0).abs() < 1e-15 {
+            continue;
+        }
+        for (param_name, param_value) in &mut model.params {
+            if is_mobility_like_model_param(param_name) {
+                *param_value *= factor;
+            }
+        }
+    }
+}
+
+fn process_factor_for_model_type(
+    model_type: &str,
+    nmos_factor: Value,
+    pmos_factor: Value,
+) -> Value {
+    let ty = model_type.trim().to_ascii_uppercase();
+    if ty.contains("PMOS") || ty.contains("PJF") || ty.contains("PMF") || ty.contains("PNP") {
+        pmos_factor
+    } else if ty.contains("NMOS") || ty.contains("NJF") || ty.contains("NMF") || ty.contains("NPN")
+    {
+        nmos_factor
+    } else {
+        (nmos_factor + pmos_factor) * 0.5
+    }
+}
+
+fn is_mobility_like_model_param(param_name: &str) -> bool {
+    let upper = param_name.trim().to_ascii_uppercase();
+    matches!(
+        upper.as_str(),
+        "KP" | "BETA" | "U0" | "UO" | "MU" | "MOBILITY" | "KP0" | "KP1"
+    )
+}
+
+fn apply_voltage_corner(
+    netlist: &mut rspice_core::Netlist,
+    corner_voltage: Value,
+    nominal_voltage: Value,
+) -> Result<(), String> {
+    if !corner_voltage.is_finite() || corner_voltage <= 0.0 {
+        return Err("Corner voltage must be a positive finite value".to_string());
+    }
+    if !nominal_voltage.is_finite() || nominal_voltage <= 0.0 {
+        return Err("Corner nominal voltage must be a positive finite value".to_string());
+    }
+    let scale = corner_voltage / nominal_voltage;
+
+    let mut candidate_indices = Vec::new();
+    for (idx, element) in netlist.elements.iter().enumerate() {
+        let Some(neg) = element.nodes.get(1) else {
+            continue;
+        };
+        if !is_ground_node(neg) {
+            continue;
+        }
+        if let ElementKind::VoltageSource(spec) = &element.kind {
+            if dc_value_from_source(spec).is_some() {
+                candidate_indices.push(idx);
+            }
+        }
+    }
+
+    if candidate_indices.is_empty() {
+        for (idx, element) in netlist.elements.iter().enumerate() {
+            if let ElementKind::VoltageSource(spec) = &element.kind {
+                if dc_value_from_source(spec).is_some() {
+                    candidate_indices.push(idx);
+                }
+            }
+        }
+    }
+
+    for idx in candidate_indices {
+        let Some(element) = netlist.elements.get_mut(idx) else {
+            continue;
+        };
+        if let ElementKind::VoltageSource(spec) = &mut element.kind {
+            if let Some(dc) = dc_value_from_source(spec) {
+                let _ = set_dc_value_for_source(spec, dc * scale);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn infer_nominal_supply_voltage(netlist: &rspice_core::Netlist) -> Option<Value> {
+    let mut ground_referenced = Vec::new();
+    let mut all_sources = Vec::new();
+
+    for element in &netlist.elements {
+        if let ElementKind::VoltageSource(spec) = &element.kind {
+            if let Some(dc) = dc_value_from_source(spec) {
+                let abs_dc = dc.abs();
+                if abs_dc <= 1e-15 {
+                    continue;
+                }
+                all_sources.push(abs_dc);
+                if element
+                    .nodes
+                    .get(1)
+                    .map(|name| is_ground_node(name))
+                    .unwrap_or(false)
+                {
+                    ground_referenced.push(abs_dc);
+                }
+            }
+        }
+    }
+
+    if !ground_referenced.is_empty() {
+        return ground_referenced
+            .into_iter()
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    }
+    all_sources
+        .into_iter()
+        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+}
+
+fn is_ground_node(node: &str) -> bool {
+    let n = node.trim();
+    n == "0" || n.eq_ignore_ascii_case("gnd") || n.eq_ignore_ascii_case("ground")
+}
+
+fn dc_value_from_source(spec: &SourceSpec) -> Option<Value> {
+    match spec {
+        SourceSpec::Dc(v) => Some(*v),
+        SourceSpec::DcAc { dc_value, .. } => Some(*dc_value),
+        _ => None,
+    }
+}
+
+fn set_dc_value_for_source(spec: &mut SourceSpec, value: Value) -> bool {
+    match spec {
+        SourceSpec::Dc(v) => {
+            *v = value;
+            true
+        }
+        SourceSpec::DcAc { dc_value, .. } => {
+            *dc_value = value;
+            true
+        }
+        _ => false,
+    }
 }
 
 fn run_temperature_sweep_dc(
@@ -1468,7 +1872,9 @@ fn expand_step_sweep_values(sweep: &StepSweep) -> Result<Vec<Value>, String> {
                 while current <= *stop + tolerance {
                     values.push(current);
                     if values.len() > MAX_SWEEP_POINTS {
-                        return Err("Parametric sweep exceeds maximum supported point count".to_string());
+                        return Err(
+                            "Parametric sweep exceeds maximum supported point count".to_string()
+                        );
                     }
                     current += *step;
                 }
@@ -1476,7 +1882,9 @@ fn expand_step_sweep_values(sweep: &StepSweep) -> Result<Vec<Value>, String> {
                 while current >= *stop - tolerance {
                     values.push(current);
                     if values.len() > MAX_SWEEP_POINTS {
-                        return Err("Parametric sweep exceeds maximum supported point count".to_string());
+                        return Err(
+                            "Parametric sweep exceeds maximum supported point count".to_string()
+                        );
                     }
                     current += *step;
                 }
@@ -1497,7 +1905,9 @@ fn expand_step_sweep_values(sweep: &StepSweep) -> Result<Vec<Value>, String> {
                 return Err("Parametric decade sweep points_per_decade must be > 0".to_string());
             }
             if !start.is_finite() || !stop.is_finite() || *start <= 0.0 || *stop <= 0.0 {
-                return Err("Parametric decade sweep requires positive finite start/stop".to_string());
+                return Err(
+                    "Parametric decade sweep requires positive finite start/stop".to_string(),
+                );
             }
             let start_log = start.log10();
             let stop_log = stop.log10();
@@ -1524,7 +1934,9 @@ fn expand_step_sweep_values(sweep: &StepSweep) -> Result<Vec<Value>, String> {
                 return Err("Parametric octave sweep points_per_octave must be > 0".to_string());
             }
             if !start.is_finite() || !stop.is_finite() || *start <= 0.0 || *stop <= 0.0 {
-                return Err("Parametric octave sweep requires positive finite start/stop".to_string());
+                return Err(
+                    "Parametric octave sweep requires positive finite start/stop".to_string(),
+                );
             }
             let start_log = start.log2();
             let stop_log = stop.log2();
@@ -1557,7 +1969,10 @@ fn expand_step_sweep_values(sweep: &StepSweep) -> Result<Vec<Value>, String> {
 fn extract_temp_points(netlist: &rspice_core::Netlist) -> Vec<Value> {
     let mut temperatures: Vec<Value> = Vec::new();
     for analysis in &netlist.analyses {
-        if let AnalysisCommand::Temp { temperatures: temps } = analysis {
+        if let AnalysisCommand::Temp {
+            temperatures: temps,
+        } = analysis
+        {
             for &temp in temps {
                 if !temperatures
                     .iter()
@@ -1792,10 +2207,19 @@ mod tests {
     #[test]
     fn test_parse_output_node_helper() {
         let names = vec!["0".to_string(), "IN".to_string(), "OUT".to_string()];
-        assert_eq!(crate::output_spec::parse_output_node("V(OUT)", &names), Some(2));
-        assert_eq!(crate::output_spec::parse_output_node("out", &names), Some(2));
+        assert_eq!(
+            crate::output_spec::parse_output_node("V(OUT)", &names),
+            Some(2)
+        );
+        assert_eq!(
+            crate::output_spec::parse_output_node("out", &names),
+            Some(2)
+        );
         assert_eq!(crate::output_spec::parse_output_node("2", &names), Some(2));
-        assert_eq!(crate::output_spec::parse_output_node("V(OUT,IN)", &names), None);
+        assert_eq!(
+            crate::output_spec::parse_output_node("V(OUT,IN)", &names),
+            None
+        );
         assert_eq!(crate::output_spec::parse_output_node("I(R1)", &names), None);
     }
 
@@ -1820,7 +2244,10 @@ mod tests {
                 neg: Some(0)
             })
         );
-        assert_eq!(crate::output_spec::parse_output_voltage_spec("I(R1)", &names), None);
+        assert_eq!(
+            crate::output_spec::parse_output_voltage_spec("I(R1)", &names),
+            None
+        );
     }
 
     #[test]
@@ -1957,10 +2384,12 @@ mod tests {
             .expect("sensitivity run should succeed");
         assert_eq!(result.output_var, "V(out)");
         assert!(!result.sensitivities.is_empty());
-        assert!(result
-            .sensitivities
-            .iter()
-            .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL")));
+        assert!(
+            result
+                .sensitivities
+                .iter()
+                .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL"))
+        );
     }
 
     #[test]
@@ -1970,14 +2399,18 @@ mod tests {
         let result = run_sensitivity_analysis(netlist, "V(out)", false, None)
             .expect("sensitivity run should succeed");
 
-        assert!(result
-            .sensitivities
-            .iter()
-            .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL")));
-        assert!(result
-            .sensitivities
-            .iter()
-            .all(|(name, _, _)| !name.starts_with("IC_") && !name.starts_with("NODESET_")));
+        assert!(
+            result
+                .sensitivities
+                .iter()
+                .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL"))
+        );
+        assert!(
+            result
+                .sensitivities
+                .iter()
+                .all(|(name, _, _)| !name.starts_with("IC_") && !name.starts_with("NODESET_"))
+        );
     }
 
     #[test]
@@ -2003,10 +2436,12 @@ mod tests {
         let result = run_sensitivity_analysis(netlist, "V(out,in)", false, None)
             .expect("differential sensitivity run should succeed");
         assert!(!result.sensitivities.is_empty());
-        assert!(result
-            .sensitivities
-            .iter()
-            .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite()));
+        assert!(
+            result
+                .sensitivities
+                .iter()
+                .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite())
+        );
     }
 
     #[test]
@@ -2034,15 +2469,18 @@ mod tests {
             .expect("current-output ac sensitivity should succeed");
         assert_eq!(result.output_var, "I(V1)");
         assert!(!result.sensitivities.is_empty());
-        assert!(result
-            .sensitivities
-            .iter()
-            .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite()));
+        assert!(
+            result
+                .sensitivities
+                .iter()
+                .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite())
+        );
     }
 
     #[test]
     fn test_run_sensitivity_analysis_current_output_handles_multiple_parameters() {
-        let netlist = "* sens i2\n.param RA=1k\n.param RB=2k\nV1 in 0 1\nR1 in mid {RA}\nR2 mid 0 {RB}\n";
+        let netlist =
+            "* sens i2\n.param RA=1k\n.param RB=2k\nV1 in 0 1\nR1 in mid {RA}\nR2 mid 0 {RB}\n";
 
         let result = run_sensitivity_analysis(netlist, "I(V1)", false, None)
             .expect("multi-parameter current-output sensitivity should succeed");
@@ -2064,8 +2502,7 @@ mod tests {
 
     #[test]
     fn test_run_sensitivity_analysis_normalized_reports_zero_when_nominal_is_near_zero() {
-        let netlist =
-            "* sens tiny\n.param RVAL=1k\nV1 in 0 1e-16\nR1 in out {RVAL}\nR2 out 0 1k\n";
+        let netlist = "* sens tiny\n.param RVAL=1k\nV1 in 0 1e-16\nR1 in out {RVAL}\nR2 out 0 1k\n";
 
         let result = run_sensitivity_analysis(netlist, "V(out)", false, None)
             .expect("sensitivity run should succeed");
@@ -2136,7 +2573,8 @@ mod tests {
 
     #[test]
     fn test_run_parametric_analysis_executes_step_temp_command() {
-        let netlist = "* step temp\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.STEP TEMP LIST -40 27 125\n.end\n";
+        let netlist =
+            "* step temp\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.STEP TEMP LIST -40 27 125\n.end\n";
         let result =
             run_parametric_analysis(netlist).expect("parametric .STEP TEMP should execute");
         assert_eq!(result.target, "TEMP");
@@ -2153,10 +2591,11 @@ mod tests {
 
     #[test]
     fn test_run_corner_analysis_executes_temp_directives() {
-        let netlist =
-            "* corners\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.TEMP -40 27 125\n.end\n";
+        let netlist = "* corners\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.TEMP -40 27 125\n.end\n";
         let result = run_corner_analysis(netlist).expect("corner analysis should execute");
         assert_eq!(result.temperatures_c, vec![-40.0, 27.0, 125.0]);
+        assert_eq!(result.corner_labels.len(), 3);
+        assert!(result.corner_labels[0].starts_with("TT_1.000000V_"));
         assert_eq!(result.num_points, 3);
         assert!(
             result
@@ -2171,6 +2610,66 @@ mod tests {
         let err = run_corner_analysis("* no corners\nV1 in 0 1\nR1 in 0 1k\n")
             .expect_err("missing .TEMP command should fail");
         assert!(err.contains(".TEMP"));
+    }
+
+    #[test]
+    fn test_run_corner_analysis_with_config_executes_full_matrix() {
+        let netlist = "* corners cfg\nVDD vdd 0 1.0\nR1 vdd out 1k\nR2 out 0 1k\n.end\n";
+        let cfg = CornerRunConfig {
+            process_corners: vec![CornerProcess::TT, CornerProcess::FF],
+            voltages: vec![0.9, 1.1],
+            temperatures_c: vec![-40.0, 125.0],
+            full_matrix: true,
+            nominal_voltage: Some(1.0),
+        };
+
+        let result = run_corner_analysis_with_config(netlist, &cfg)
+            .expect("corner analysis with explicit config should execute");
+        assert_eq!(result.num_points, 8);
+        assert_eq!(result.temperatures_c.len(), 8);
+        assert_eq!(result.corner_labels.len(), 8);
+        assert_eq!(result.num_failures, 0);
+        assert!(
+            result
+                .corner_labels
+                .iter()
+                .any(|label| label.contains("FF_1.100000V_125.000000C"))
+        );
+    }
+
+    #[test]
+    fn test_run_corner_analysis_with_config_executes_diagonal_mode() {
+        let netlist = "* corners diag\nVDD vdd 0 1.0\nR1 vdd out 1k\nR2 out 0 1k\n.end\n";
+        let cfg = CornerRunConfig {
+            process_corners: vec![CornerProcess::SS, CornerProcess::TT, CornerProcess::FF],
+            voltages: vec![0.95, 1.0],
+            temperatures_c: vec![25.0],
+            full_matrix: false,
+            nominal_voltage: Some(1.0),
+        };
+
+        let result = run_corner_analysis_with_config(netlist, &cfg)
+            .expect("diagonal corner analysis should execute");
+        assert_eq!(result.num_points, 3);
+        assert_eq!(result.corner_labels.len(), 3);
+        assert!(result.corner_labels[0].starts_with("SS_0.950000V_25.000000C"));
+        assert!(result.corner_labels[1].starts_with("TT_1.000000V_25.000000C"));
+        assert!(result.corner_labels[2].starts_with("FF_0.950000V_25.000000C"));
+    }
+
+    #[test]
+    fn test_run_corner_analysis_with_config_rejects_invalid_voltage() {
+        let netlist = "* corners invalid\nV1 in 0 1\nR1 in 0 1k\n.end\n";
+        let cfg = CornerRunConfig {
+            process_corners: vec![CornerProcess::TT],
+            voltages: vec![0.0],
+            temperatures_c: vec![25.0],
+            full_matrix: true,
+            nominal_voltage: Some(1.0),
+        };
+        let err = run_corner_analysis_with_config(netlist, &cfg)
+            .expect_err("invalid voltage corner must be rejected");
+        assert!(err.contains("voltage corners"));
     }
 
     #[test]

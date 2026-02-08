@@ -202,6 +202,25 @@ pub struct DeviceOpPoint {
     pub parameters: HashMap<String, f64>,
 }
 
+/// Monte Carlo variable summary in UI-friendly form.
+#[derive(Debug, Clone)]
+pub struct MonteCarloVariableResult {
+    /// Variable name (e.g., V(out), I(V1))
+    pub name: String,
+    /// Arithmetic mean over converged runs
+    pub mean: f64,
+    /// Standard deviation
+    pub std_dev: f64,
+    /// Minimum observed value
+    pub min: f64,
+    /// Maximum observed value
+    pub max: f64,
+    /// Histogram counts for post-processing/visualization
+    pub histogram: Vec<usize>,
+    /// Histogram bin edges (length = histogram.len() + 1)
+    pub bin_edges: Vec<f64>,
+}
+
 //=============================================================================
 // Simulation Result Container
 //=============================================================================
@@ -268,6 +287,44 @@ pub enum SimulationResult {
         normalized: HashMap<String, f64>,
     },
 
+    /// Monte Carlo statistical analysis results.
+    MonteCarlo {
+        /// Number of samples requested by .MC
+        runs_requested: usize,
+        /// Number of converged runs completed
+        runs_completed: usize,
+        /// Number of failed/non-converged runs
+        num_failures: usize,
+        /// Whether all runs converged according to engine summary
+        all_converged: bool,
+        /// Per-variable statistical summaries
+        variables: Vec<MonteCarloVariableResult>,
+    },
+
+    /// Parametric sweep result (including .STEP TEMP).
+    Parametric {
+        /// Sweep target label (e.g., PARAM rload, TEMP)
+        target: String,
+        /// Sweep values in execution order
+        sweep_values: Vec<f64>,
+        /// Waveforms indexed by signal name
+        waveforms: HashMap<String, WaveformData>,
+        /// Number of failed points (if any)
+        num_failures: usize,
+    },
+
+    /// Corner sweep result.
+    Corner {
+        /// Corner temperatures (Celsius) in execution order.
+        temperatures_c: Vec<f64>,
+        /// Corner labels in execution order (e.g. `TT_1.000000V_25.000000C`).
+        corner_labels: Vec<String>,
+        /// Waveforms indexed by signal name
+        waveforms: HashMap<String, WaveformData>,
+        /// Number of failed corners
+        num_failures: usize,
+    },
+
     /// Empty placeholder result (for unimplemented analyses)
     Empty {
         /// Associated measurements
@@ -306,6 +363,15 @@ impl SimulationResult {
             SimulationResult::Ac { waveforms, .. } => {
                 waveforms.keys().map(|s| s.as_str()).collect()
             }
+            SimulationResult::Parametric { waveforms, .. } => {
+                waveforms.keys().map(|s| s.as_str()).collect()
+            }
+            SimulationResult::Corner { waveforms, .. } => {
+                waveforms.keys().map(|s| s.as_str()).collect()
+            }
+            SimulationResult::MonteCarlo { variables, .. } => {
+                variables.iter().map(|v| v.name.as_str()).collect()
+            }
             _ => vec![],
         }
     }
@@ -316,6 +382,8 @@ impl SimulationResult {
             SimulationResult::DcSweep { waveforms, .. } => waveforms.get(name),
             SimulationResult::Transient { waveforms, .. } => waveforms.get(name),
             SimulationResult::Ac { waveforms, .. } => waveforms.get(name),
+            SimulationResult::Parametric { waveforms, .. } => waveforms.get(name),
+            SimulationResult::Corner { waveforms, .. } => waveforms.get(name),
             _ => None,
         }
     }
@@ -332,6 +400,13 @@ impl SimulationResult {
                 !poles.is_empty() || !zeros.is_empty()
             }
             SimulationResult::Sensitivity { sensitivities, .. } => !sensitivities.is_empty(),
+            SimulationResult::MonteCarlo {
+                runs_completed,
+                variables,
+                ..
+            } => *runs_completed > 0 || !variables.is_empty(),
+            SimulationResult::Parametric { sweep_values, .. } => !sweep_values.is_empty(),
+            SimulationResult::Corner { temperatures_c, .. } => !temperatures_c.is_empty(),
             SimulationResult::Empty { .. } => false,
         }
     }
@@ -346,6 +421,9 @@ impl SimulationResult {
             SimulationResult::Noise { .. } => "Noise Analysis",
             SimulationResult::PoleZero { .. } => "Pole-Zero",
             SimulationResult::Sensitivity { .. } => "Sensitivity",
+            SimulationResult::MonteCarlo { .. } => "Monte Carlo",
+            SimulationResult::Parametric { .. } => "Parametric",
+            SimulationResult::Corner { .. } => "Corner",
             SimulationResult::Empty { .. } => "Empty",
         }
     }
@@ -478,5 +556,70 @@ mod tests {
     fn test_waveform_with_y_unit() {
         let wf = WaveformData::new_time_domain("I(R1)", vec![0.0], vec![1e-3]).with_y_unit("A");
         assert_eq!(wf.y_unit, "A");
+    }
+
+    #[test]
+    fn test_simulation_result_monte_carlo_waveform_names() {
+        let result = SimulationResult::MonteCarlo {
+            runs_requested: 10,
+            runs_completed: 10,
+            num_failures: 0,
+            all_converged: true,
+            variables: vec![MonteCarloVariableResult {
+                name: "V(out)".to_string(),
+                mean: 1.0,
+                std_dev: 0.01,
+                min: 0.95,
+                max: 1.05,
+                histogram: vec![1, 4, 5],
+                bin_edges: vec![0.9, 0.97, 1.03, 1.1],
+            }],
+        };
+
+        assert!(result.has_data());
+        assert_eq!(result.type_name(), "Monte Carlo");
+        assert_eq!(result.waveform_names(), vec!["V(out)"]);
+    }
+
+    #[test]
+    fn test_simulation_result_parametric_waveforms() {
+        let mut waveforms = HashMap::new();
+        waveforms.insert(
+            "V(out)".to_string(),
+            WaveformData::new_time_domain("V(out)", vec![-40.0, 25.0, 85.0], vec![1.1, 1.0, 0.9]),
+        );
+        let result = SimulationResult::Parametric {
+            target: "TEMP".to_string(),
+            sweep_values: vec![-40.0, 25.0, 85.0],
+            waveforms,
+            num_failures: 0,
+        };
+
+        assert!(result.has_data());
+        assert_eq!(result.type_name(), "Parametric");
+        assert!(result.get_waveform("V(out)").is_some());
+    }
+
+    #[test]
+    fn test_simulation_result_corner_waveforms() {
+        let mut waveforms = HashMap::new();
+        waveforms.insert(
+            "V(out)".to_string(),
+            WaveformData::new_time_domain("V(out)", vec![-40.0, 25.0, 125.0], vec![1.2, 1.0, 0.8]),
+        );
+        let result = SimulationResult::Corner {
+            temperatures_c: vec![-40.0, 25.0, 125.0],
+            corner_labels: vec![
+                "TT_1.000000V_-40.000000C".to_string(),
+                "TT_1.000000V_25.000000C".to_string(),
+                "TT_1.000000V_125.000000C".to_string(),
+            ],
+            waveforms,
+            num_failures: 0,
+        };
+
+        assert!(result.has_data());
+        assert_eq!(result.type_name(), "Corner");
+        assert!(result.get_waveform("V(out)").is_some());
     }
 }
