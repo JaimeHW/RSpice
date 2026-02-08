@@ -7,7 +7,7 @@ use rspice_core::analysis::ac::AcResult;
 use rspice_core::analysis::noise::NoiseResult;
 use rspice_core::engine::{Engine, SimulationConfig, TransientResult};
 use rspice_core::netlist::AnalysisCommand;
-use rspice_core::Value;
+use rspice_core::{resolve_simulation_config, SimulationConfigOverrides, Value};
 
 // =============================================================================
 // Platform-agnostic timing utilities
@@ -30,6 +30,20 @@ fn now_ms() -> f64 {
         .and_then(|w| w.performance())
         .map(|p| p.now())
         .unwrap_or(0.0)
+}
+
+fn build_engine_config(
+    netlist: &rspice_core::Netlist,
+    options: Option<&crate::simulation::dialog::SimulationOptions>,
+) -> SimulationConfig {
+    match options {
+        Some(opts) => opts.resolve_simulation_config(Some(&netlist.options)),
+        None => resolve_simulation_config(
+            &SimulationConfig::default(),
+            Some(&netlist.options),
+            &SimulationConfigOverrides::default(),
+        ),
+    }
 }
 
 /// Result of a simulation run
@@ -130,11 +144,9 @@ pub fn run_simulation_with_options(
     };
     stats.parse_time_ms = now_ms() - parse_start;
 
-    // Create engine with custom config if options provided
-    let config = match options {
-        Some(opts) => opts.to_simulation_config(),
-        None => SimulationConfig::default(),
-    };
+    // Create engine config with proper precedence:
+    // default/UI base < netlist .OPTIONS < explicit UI overrides.
+    let config = build_engine_config(&netlist, options);
     let engine = Engine::new(config);
 
     // Extract transient parameters from analyses
@@ -254,7 +266,7 @@ pub fn run_transient_analysis(
     let netlist = rspice_core::netlist::parse_netlist(netlist_text)
         .map_err(|e| format!("Parse error: {}", e))?;
 
-    let engine = Engine::new(SimulationConfig::default());
+    let engine = Engine::new(build_engine_config(&netlist, None));
     let result = engine
         .run_tran(&netlist, stop_time, step_time)
         .map_err(|e| format!("Transient analysis error: {}", e))?;
@@ -345,7 +357,7 @@ pub fn run_ac_analysis(
     let frequencies = generate_freq_points(start_freq, stop_freq, num_points, sweep_type);
 
     // Create engine
-    let engine = Engine::new(SimulationConfig::default());
+    let engine = Engine::new(build_engine_config(&netlist, None));
 
     // Run DC OP first to get node names
     let dc_result = engine
@@ -391,7 +403,7 @@ pub fn run_dc_sweep(
         .map_err(|e| format!("Parse error: {}", e))?;
 
     // Create engine and run DC sweep
-    let engine = Engine::new(SimulationConfig::default());
+    let engine = Engine::new(build_engine_config(&netlist, None));
     let results = engine
         .run_dc_sweep(&netlist, source_name, start, stop, step)
         .map_err(|e| format!("DC sweep error: {}", e))?;
@@ -503,7 +515,7 @@ pub fn run_noise_analysis(
         .map_err(|e| format!("Parse error: {}", e))?;
 
     // Create engine
-    let engine = Engine::new(SimulationConfig::default());
+    let engine = Engine::new(build_engine_config(&netlist, None));
 
     // Run DC OP to get node names and find output node index
     let dc_result = engine
@@ -575,7 +587,7 @@ pub fn run_pole_zero_analysis(
 
     let netlist = rspice_core::netlist::parse_netlist(netlist_text)
         .map_err(|e| format!("Parse error: {}", e))?;
-    let engine = Engine::new(SimulationConfig::default());
+    let engine = Engine::new(build_engine_config(&netlist, None));
 
     let dc_result = engine
         .run_dc_op(&netlist)
@@ -681,7 +693,7 @@ pub fn run_sensitivity_analysis(
 
     let netlist = rspice_core::netlist::parse_netlist(netlist_text)
         .map_err(|e| format!("Parse error: {}", e))?;
-    let engine = Engine::new(SimulationConfig::default());
+    let engine = Engine::new(build_engine_config(&netlist, None));
 
     let circuit = engine.build_circuit(&netlist).map_err(|e| {
         format!(
@@ -813,7 +825,7 @@ pub fn run_pss_analysis(
         .map_err(|e| format!("Parse error: {}", e))?;
 
     // Create engine with appropriate tolerance
-    let mut sim_config = SimulationConfig::default();
+    let mut sim_config = build_engine_config(&netlist, None);
     sim_config.tolerance = tolerance;
     let engine = Engine::new(sim_config);
 
@@ -961,7 +973,7 @@ pub fn run_hb_analysis(
     let netlist = rspice_core::netlist::parse_netlist(netlist_text)
         .map_err(|e| format!("Parse error: {}", e))?;
 
-    let engine = Engine::new(SimulationConfig::default());
+    let engine = Engine::new(build_engine_config(&netlist, None));
 
     // Build HB configuration
     // Note: Multi-tone HB requires additional configuration - for now we focus on single tone
@@ -1119,7 +1131,7 @@ pub fn run_stb_analysis(
     let netlist = rspice_core::netlist::parse_netlist(netlist_text)
         .map_err(|e| format!("Parse error: {}", e))?;
 
-    let engine = Engine::new(SimulationConfig::default());
+    let engine = Engine::new(build_engine_config(&netlist, None));
 
     // Create STB configuration
     let stb_config = StbConfig::new()
@@ -1612,6 +1624,68 @@ mod tests {
         assert_eq!(data.responses[0].1[0], Complex64::new(1.0, 0.0));
         assert_eq!(data.responses[1].0, "V(OUT)");
         assert_eq!(data.responses[1].1[0], Complex64::new(0.5, 0.0));
+    }
+
+    #[test]
+    fn test_build_engine_config_applies_netlist_options_when_ui_is_none() {
+        let netlist = rspice_core::netlist::parse_netlist(
+            r#"Test
+.OPTIONS TEMP=85 ITL1=120 METHOD=GEAR RELTOL=2e-4 VNTOL=3e-6 IABSTOL=4e-12 GMIN=1e-11
+.END
+"#,
+        )
+        .expect("netlist should parse");
+
+        let config = build_engine_config(&netlist, None);
+
+        assert!((config.temperature - 358.15).abs() < 1e-12);
+        assert_eq!(config.max_iterations, 120);
+        assert_eq!(
+            config.integration_method,
+            rspice_core::analysis::IntegrationMethod::Gear2
+        );
+        assert!((config.tolerance - 2e-4).abs() < 1e-15);
+        assert!((config.convergence_config.voltage_reltol - 2e-4).abs() < 1e-15);
+        assert!((config.convergence_config.residual_reltol - 2e-4).abs() < 1e-15);
+        assert!((config.convergence_config.voltage_abstol - 3e-6).abs() < 1e-18);
+        assert!((config.convergence_config.current_abstol - 4e-12).abs() < 1e-24);
+        assert!((config.convergence_config.gmin_initial - 1e-11).abs() < 1e-24);
+    }
+
+    #[test]
+    fn test_build_engine_config_ui_options_override_netlist_options() {
+        let netlist = rspice_core::netlist::parse_netlist(
+            r#"Test
+.OPTIONS TEMP=125 ITL1=200 METHOD=GEAR RELTOL=2e-4 VNTOL=2e-6 IABSTOL=2e-12 GMIN=1e-11
+.END
+"#,
+        )
+        .expect("netlist should parse");
+
+        let mut ui = crate::simulation::dialog::SimulationOptions::default();
+        ui.temp = 27.0;
+        ui.itl1 = 90;
+        ui.method = crate::simulation::dialog::IntegrationMethod::Trap;
+        ui.reltol = 7e-4;
+        ui.residual_reltol = 4e-4;
+        ui.vntol = 9e-6;
+        ui.iabstol = 8e-12;
+        ui.gmin = 3e-10;
+
+        let config = build_engine_config(&netlist, Some(&ui));
+
+        assert!((config.temperature - 300.15).abs() < 1e-12);
+        assert_eq!(config.max_iterations, 90);
+        assert_eq!(
+            config.integration_method,
+            rspice_core::analysis::IntegrationMethod::Trapezoidal
+        );
+        assert!((config.tolerance - 7e-4).abs() < 1e-15);
+        assert!((config.convergence_config.voltage_reltol - 7e-4).abs() < 1e-15);
+        assert!((config.convergence_config.residual_reltol - 4e-4).abs() < 1e-15);
+        assert!((config.convergence_config.voltage_abstol - 9e-6).abs() < 1e-18);
+        assert!((config.convergence_config.current_abstol - 8e-12).abs() < 1e-24);
+        assert!((config.convergence_config.gmin_initial - 3e-10).abs() < 1e-22);
     }
 
     #[test]
