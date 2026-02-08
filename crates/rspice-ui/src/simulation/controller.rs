@@ -467,7 +467,11 @@ impl SimulationController {
     fn executes_via_spec(spec: &AnalysisSpec) -> bool {
         matches!(
             spec,
-            AnalysisSpec::MonteCarlo | AnalysisSpec::Parametric | AnalysisSpec::Corner
+            AnalysisSpec::MonteCarlo
+                | AnalysisSpec::Parametric
+                | AnalysisSpec::Corner
+                | AnalysisSpec::Pss { .. }
+                | AnalysisSpec::HarmonicBalance { .. }
         )
     }
 
@@ -738,7 +742,9 @@ impl SimulationController {
             5 => self.build_pole_zero_spec(state),
             6 => self.build_sensitivity_spec(state),
             7 => self.build_monte_carlo_spec(state),
+            8 => self.build_pss_spec(state),
             10 => self.build_temperature_sweep_spec(state),
+            11 => self.build_harmonic_balance_spec(state),
             18 => self.build_corner_sweep_spec(state),
             _ => Err(
                 "analysis is not implemented in the current UI simulation controller".to_string(),
@@ -872,6 +878,8 @@ impl SimulationController {
             AnalysisSpec::MonteCarlo => self.build_monte_carlo_command(state),
             AnalysisSpec::Parametric => self.build_temperature_step_command(state),
             AnalysisSpec::Corner => self.build_corner_temp_command(state),
+            AnalysisSpec::Pss { .. } => self.build_pss_command(state),
+            AnalysisSpec::HarmonicBalance { .. } => self.build_harmonic_balance_command(state),
             _ => self
                 .analysis_spec_to_config(state, spec)
                 .map(|cfg| cfg.to_spice()),
@@ -903,6 +911,34 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid corner settings: {}", e))?;
         Ok(AnalysisSpec::Corner)
+    }
+
+    fn build_pss_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
+        let mut pss_state = state.dialogs.pss_state.clone();
+        pss_state.ensure_initialized();
+        let pss_cfg = pss_state
+            .to_config()
+            .map_err(|e| format!("invalid PSS settings: {}", e))?;
+        Ok(AnalysisSpec::Pss {
+            fundamental_freq: pss_cfg.fund_freq,
+            num_harmonics: pss_cfg.num_harmonics as usize,
+            tolerance: pss_cfg.stab_tol,
+        })
+    }
+
+    fn build_harmonic_balance_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
+        let mut hb_state = state.dialogs.hb_state.clone();
+        hb_state.ensure_initialized();
+        let hb_cfg = hb_state
+            .to_config()
+            .map_err(|e| format!("invalid harmonic balance settings: {}", e))?;
+        let tone2 = hb_cfg.additional_tones.first();
+        Ok(AnalysisSpec::HarmonicBalance {
+            tone1_freq: hb_cfg.fundamental_freq,
+            tone1_harmonics: hb_cfg.num_harmonics as usize,
+            tone2_freq: tone2.map(|tone| tone.frequency),
+            tone2_harmonics: tone2.map(|tone| tone.harmonics as usize).unwrap_or(0),
+        })
     }
 
     fn build_monte_carlo_command(&self, state: &AppState) -> Result<String, String> {
@@ -966,6 +1002,24 @@ impl SimulationController {
             .map(|temp| format!("{:.12e}", temp))
             .collect();
         Ok(format!(".temp {}", temps.join(" ")))
+    }
+
+    fn build_pss_command(&self, state: &AppState) -> Result<String, String> {
+        let mut pss_state = state.dialogs.pss_state.clone();
+        pss_state.ensure_initialized();
+        let pss_cfg = pss_state
+            .to_config()
+            .map_err(|e| format!("invalid PSS settings: {}", e))?;
+        Ok(pss_cfg.to_spice())
+    }
+
+    fn build_harmonic_balance_command(&self, state: &AppState) -> Result<String, String> {
+        let mut hb_state = state.dialogs.hb_state.clone();
+        hb_state.ensure_initialized();
+        let hb_cfg = hb_state
+            .to_config()
+            .map_err(|e| format!("invalid harmonic balance settings: {}", e))?;
+        Ok(hb_cfg.to_spice())
     }
 
     fn build_pole_zero_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
@@ -2260,12 +2314,12 @@ mod tests {
     fn test_build_analysis_plan_rejects_unsupported_analysis_tab() {
         let controller = SimulationController::new();
         let mut state = AppState::default();
-        state.dialogs.enabled_analyses.insert(11); // Harmonic Balance
+        state.dialogs.enabled_analyses.insert(13); // PAC
 
         let errors = controller
             .build_analysis_plan(&state)
             .expect_err("unsupported analysis should fail planning");
-        assert!(errors.iter().any(|e| e.contains("Harmonic Balance")));
+        assert!(errors.iter().any(|e| e.contains("PAC")));
     }
 
     #[test]
@@ -2503,6 +2557,62 @@ mod tests {
     }
 
     #[test]
+    fn test_build_analysis_spec_for_pss_uses_dialog_configuration() {
+        use crate::simulation::dialog::pss::PssConfig;
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.pss_state = crate::simulation::dialog::pss::PssDialogState::from_config(
+            &PssConfig::new(2.5e6).with_harmonics(15),
+        );
+
+        let spec = controller
+            .build_analysis_spec_for_index(&state, 8)
+            .expect("PSS spec should build");
+        match spec {
+            AnalysisSpec::Pss {
+                fundamental_freq,
+                num_harmonics,
+                tolerance,
+            } => {
+                assert!((fundamental_freq - 2.5e6).abs() < 1e-6);
+                assert_eq!(num_harmonics, 15);
+                assert!((tolerance - 1e-3).abs() < 1e-15);
+            }
+            other => panic!("expected PSS spec, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_analysis_spec_for_harmonic_balance_uses_dialog_configuration() {
+        use crate::simulation::dialog::hb::{HbConfig, HbToneConfig};
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.hb_state = crate::simulation::dialog::hb::HbDialogState::from_config(
+            &HbConfig::new(1.2e9, 11).add_tone(HbToneConfig::new(900e6, 5)),
+        );
+
+        let spec = controller
+            .build_analysis_spec_for_index(&state, 11)
+            .expect("HB spec should build");
+        match spec {
+            AnalysisSpec::HarmonicBalance {
+                tone1_freq,
+                tone1_harmonics,
+                tone2_freq,
+                tone2_harmonics,
+            } => {
+                assert!((tone1_freq - 1.2e9).abs() < 1e-3);
+                assert_eq!(tone1_harmonics, 11);
+                assert_eq!(tone2_freq, Some(900e6));
+                assert_eq!(tone2_harmonics, 5);
+            }
+            other => panic!("expected harmonic balance spec, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_build_queue_from_plan_emits_worst_case_monte_carlo_command() {
         use crate::simulation::dialog::mc::{McConfig, McDistribution};
 
@@ -2528,6 +2638,39 @@ mod tests {
             queue[0].analysis_line.contains("DIST WORSTCASE"),
             "expected WORSTCASE distribution in .MC command"
         );
+    }
+
+    #[test]
+    fn test_build_queue_from_plan_stores_pss_and_hb_as_spec_executed_runs() {
+        use crate::simulation::dialog::hb::HbConfig;
+        use crate::simulation::dialog::pss::PssConfig;
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses = [8usize, 11usize].into_iter().collect();
+        state.dialogs.pss_state =
+            crate::simulation::dialog::pss::PssDialogState::from_config(&PssConfig::new(10e6));
+        state.dialogs.hb_state =
+            crate::simulation::dialog::hb::HbDialogState::from_config(&HbConfig::new(2.4e9, 9));
+
+        let plan = controller
+            .build_analysis_plan(&state)
+            .expect("plan should build");
+        let queue = controller
+            .build_queue_from_plan(&state, &plan)
+            .expect("queue should build");
+
+        assert_eq!(queue.len(), 2);
+        assert!(matches!(queue[0].spec, AnalysisSpec::Pss { .. }));
+        assert!(queue[0].config.is_none());
+        assert!(queue[0].analysis_line.starts_with(".pss "));
+
+        assert!(matches!(
+            queue[1].spec,
+            AnalysisSpec::HarmonicBalance { .. }
+        ));
+        assert!(queue[1].config.is_none());
+        assert!(queue[1].analysis_line.starts_with(".hb "));
     }
 
     #[test]
