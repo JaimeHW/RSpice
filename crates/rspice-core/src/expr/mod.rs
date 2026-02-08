@@ -12,7 +12,7 @@ mod compiler;
 mod parser;
 mod vm;
 
-pub use ast::{Expr, BinaryOp, UnaryOp, Function};
+pub use ast::{BinaryOp, Expr, Function, UnaryOp};
 pub use compiler::compile;
 pub use parser::parse_expression;
-pub use vm::{Vm, CompiledExpr, Context, Instruction};
+pub use vm::{CompiledExpr, Context, Instruction, Vm};
