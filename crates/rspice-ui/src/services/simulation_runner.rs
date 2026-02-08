@@ -740,32 +740,33 @@ pub fn run_sensitivity_analysis(
     }
 
     let mut sensitivities = Vec::new();
+    let mut perturbed_netlist = netlist.clone();
     for (name, value) in params {
         if !value.is_finite() || value == 0.0 {
             continue;
         }
 
         let raw = if let Some(freq) = ac_frequency {
-            let mut perturbed = netlist.clone();
-            finite_difference_derivative(value, |candidate| {
-                perturbed.params.set(&name, candidate);
-                run_ac_output_at_frequency(&engine, &perturbed, &output_spec, freq)
+            let result = finite_difference_derivative(value, |candidate| {
+                perturbed_netlist.params.set(&name, candidate);
+                run_ac_output_at_frequency(&engine, &perturbed_netlist, &output_spec, freq)
                     .map(|value| value.norm())
-            })
-            .map_err(|e| format!("Sensitivity error for parameter '{}': {}", name, e))?
+            });
+            perturbed_netlist.params.set(&name, value);
+            result.map_err(|e| format!("Sensitivity error for parameter '{}': {}", name, e))?
         } else if let OutputSpec::Voltage(vspec) = &output_spec {
             run_dc_output_sensitivity(&engine, &netlist, *vspec, &name, value)
                 .map_err(|e| format!("Sensitivity error for parameter '{}': {}", name, e))?
         } else {
-            let mut perturbed = netlist.clone();
-            finite_difference_derivative(value, |candidate| {
-                perturbed.params.set(&name, candidate);
+            let result = finite_difference_derivative(value, |candidate| {
+                perturbed_netlist.params.set(&name, candidate);
                 let dc_result = engine
-                    .run_dc_op(&perturbed)
+                    .run_dc_op(&perturbed_netlist)
                     .map_err(|e| format!("DC OP error (perturbation): {}", e))?;
                 dc_output_value(&dc_result, &output_spec)
-            })
-            .map_err(|e| format!("Sensitivity error for parameter '{}': {}", name, e))?
+            });
+            perturbed_netlist.params.set(&name, value);
+            result.map_err(|e| format!("Sensitivity error for parameter '{}': {}", name, e))?
         };
 
         let normalized = normalized_sensitivity(raw, value, nominal_output);
@@ -1665,6 +1666,28 @@ mod tests {
             .sensitivities
             .iter()
             .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite()));
+    }
+
+    #[test]
+    fn test_run_sensitivity_analysis_current_output_handles_multiple_parameters() {
+        let netlist = "* sens i2\n.param RA=1k\n.param RB=2k\nV1 in 0 1\nR1 in mid {RA}\nR2 mid 0 {RB}\n";
+
+        let result = run_sensitivity_analysis(netlist, "I(V1)", false, None)
+            .expect("multi-parameter current-output sensitivity should succeed");
+        let ra = result
+            .sensitivities
+            .iter()
+            .find(|(name, _, _)| name.eq_ignore_ascii_case("RA"))
+            .expect("expected RA sensitivity");
+        let rb = result
+            .sensitivities
+            .iter()
+            .find(|(name, _, _)| name.eq_ignore_ascii_case("RB"))
+            .expect("expected RB sensitivity");
+
+        assert!(ra.1.is_finite() && ra.2.is_finite());
+        assert!(rb.1.is_finite() && rb.2.is_finite());
+        assert!((ra.1 - rb.1).abs() < 1e-12);
     }
 
     #[test]
