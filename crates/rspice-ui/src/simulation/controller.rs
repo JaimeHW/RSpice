@@ -1303,7 +1303,7 @@ impl SimulationController {
             }
 
             SimulationResult::Corner {
-                temperatures_c,
+                x_values,
                 waveforms,
                 ..
             } => {
@@ -1313,7 +1313,7 @@ impl SimulationController {
                     .map(|(idx, (name, wf))| {
                         WaveformData::new(
                             name.clone(),
-                            temperatures_c.clone(),
+                            x_values.clone(),
                             wf.y_values.clone(),
                             Self::color_for_index(idx),
                         )
@@ -1909,7 +1909,7 @@ impl SimulationController {
             }
 
             SimulationResult::Corner {
-                temperatures_c,
+                x_values,
                 waveforms,
                 num_failures,
                 ..
@@ -1917,7 +1917,7 @@ impl SimulationController {
                 for (idx, (name, wf_data)) in waveforms.iter().enumerate() {
                     let waveform = WaveformData::new(
                         name.clone(),
-                        temperatures_c.clone(),
+                        x_values.clone(),
                         wf_data.y_values.clone(),
                         COLORS[idx % COLORS.len()].to_string(),
                     );
@@ -1927,8 +1927,8 @@ impl SimulationController {
                 state
                     .console_messages
                     .push(crate::common::app::ConsoleMessage::info(format!(
-                        "Corner (temperature): {} points, {} waveforms, {} failed corners",
-                        temperatures_c.len(),
+                        "Corner sweep: {} points, {} waveforms, {} failed corners",
+                        x_values.len(),
                         waveforms.len(),
                         num_failures
                     )));
@@ -2855,8 +2855,8 @@ mod tests {
 
     #[test]
     fn test_convert_dc_op_result() {
-        use crate::simulation::results::DcOpResult as EngineDcOpResult;
         use crate::simulation::SimulationResult;
+        use crate::simulation::results::DcOpResult as EngineDcOpResult;
 
         let controller = SimulationController::new();
         let config = AnalysisConfig::DcOp;
@@ -2888,8 +2888,8 @@ mod tests {
 
     #[test]
     fn test_convert_transient_result() {
-        use crate::simulation::results::WaveformData as EngineWaveformData;
         use crate::simulation::SimulationResult;
+        use crate::simulation::results::WaveformData as EngineWaveformData;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -2926,8 +2926,8 @@ mod tests {
 
     #[test]
     fn test_convert_ac_result() {
-        use crate::simulation::results::WaveformData as EngineWaveformData;
         use crate::simulation::SimulationResult;
+        use crate::simulation::results::WaveformData as EngineWaveformData;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -2962,8 +2962,8 @@ mod tests {
 
     #[test]
     fn test_convert_dc_sweep_result() {
-        use crate::simulation::results::WaveformData as EngineWaveformData;
         use crate::simulation::SimulationResult;
+        use crate::simulation::results::WaveformData as EngineWaveformData;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -3003,8 +3003,8 @@ mod tests {
 
     #[test]
     fn test_convert_pole_zero_result() {
-        use crate::simulation::config::{PoleZeroConfig, PzAnalysisType};
         use crate::simulation::SimulationResult;
+        use crate::simulation::config::{PoleZeroConfig, PzAnalysisType};
 
         let controller = SimulationController::new();
         let config = AnalysisConfig::PoleZero(PoleZeroConfig {
@@ -3029,8 +3029,8 @@ mod tests {
 
     #[test]
     fn test_convert_monte_carlo_result() {
-        use crate::simulation::results::MonteCarloVariableResult;
         use crate::simulation::SimulationResult;
+        use crate::simulation::results::MonteCarloVariableResult;
 
         let controller = SimulationController::new();
         let sim_result = SimulationResult::MonteCarlo {
@@ -3064,8 +3064,8 @@ mod tests {
 
     #[test]
     fn test_convert_parametric_result() {
-        use crate::simulation::results::WaveformData as EngineWaveformData;
         use crate::simulation::SimulationResult;
+        use crate::simulation::results::WaveformData as EngineWaveformData;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -3101,8 +3101,8 @@ mod tests {
 
     #[test]
     fn test_convert_corner_result() {
-        use crate::simulation::results::WaveformData as EngineWaveformData;
         use crate::simulation::SimulationResult;
+        use crate::simulation::results::WaveformData as EngineWaveformData;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -3117,6 +3117,9 @@ mod tests {
             ),
         );
         let sim_result = SimulationResult::Corner {
+            x_values: temperatures.clone(),
+            x_label: "Temperature".to_string(),
+            x_unit: "C".to_string(),
             temperatures_c: temperatures,
             corner_labels: vec![
                 "TT_1.000000V_-40.000000C".to_string(),

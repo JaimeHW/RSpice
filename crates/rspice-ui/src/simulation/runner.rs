@@ -422,19 +422,31 @@ fn run_spec_request(
             } else {
                 svc_runner::run_corner_analysis(netlist).map_err(SimulationError::InvalidConfig)?
             };
+            let x_values = data.x_values;
+            let x_label = data.x_label;
+            let x_unit = data.x_unit;
             let temperatures_c = data.temperatures_c;
             let corner_labels = data.corner_labels;
             let waveforms: std::collections::HashMap<String, WaveformData> = data
                 .voltages
                 .into_iter()
                 .map(|(name, values)| {
-                    (
-                        name.clone(),
-                        WaveformData::new_time_domain(name, temperatures_c.clone(), values),
-                    )
+                    let waveform = WaveformData {
+                        name: name.clone(),
+                        x_values: x_values.clone(),
+                        y_values: values,
+                        y_unit: "V".to_string(),
+                        x_unit: x_unit.clone(),
+                        is_complex: false,
+                        y_imag: None,
+                    };
+                    (name.clone(), waveform)
                 })
                 .collect();
             Ok(SimulationResult::Corner {
+                x_values,
+                x_label,
+                x_unit,
                 temperatures_c,
                 corner_labels,
                 waveforms,
@@ -808,8 +820,17 @@ R1 in 0 1k
         assert!(result.is_some(), "Expected corner result");
         let result = result.unwrap().expect("Corner should succeed");
         match result {
-            SimulationResult::Corner { temperatures_c, .. } => {
+            SimulationResult::Corner {
+                x_values,
+                x_label,
+                x_unit,
+                temperatures_c,
+                ..
+            } => {
                 assert_eq!(temperatures_c.len(), 3);
+                assert_eq!(x_values, vec![-40.0, 25.0, 85.0]);
+                assert_eq!(x_label, "Temperature");
+                assert_eq!(x_unit, "C");
             }
             other => panic!("Expected Corner result, got {:?}", other),
         }
@@ -852,15 +873,23 @@ R2 out 0 1k
         let result = result.unwrap().expect("Corner should succeed");
         match result {
             SimulationResult::Corner {
+                x_values,
+                x_label,
+                x_unit,
                 temperatures_c,
                 corner_labels,
                 ..
             } => {
                 assert_eq!(temperatures_c.len(), 4);
+                assert_eq!(x_values, vec![0.0, 1.0, 2.0, 3.0]);
+                assert_eq!(x_label, "Corner Index");
+                assert_eq!(x_unit, "");
                 assert_eq!(corner_labels.len(), 4);
-                assert!(corner_labels
-                    .iter()
-                    .any(|label| label.contains("FF_1.100000V")));
+                assert!(
+                    corner_labels
+                        .iter()
+                        .any(|label| label.contains("FF_1.100000V"))
+                );
             }
             other => panic!("Expected Corner result, got {:?}", other),
         }
@@ -905,11 +934,17 @@ C1 out 0 1n
         let result = result.unwrap().expect("Corner AC should succeed");
         match result {
             SimulationResult::Corner {
+                x_values,
+                x_label,
+                x_unit,
                 temperatures_c,
                 waveforms,
                 ..
             } => {
                 assert_eq!(temperatures_c.len(), 3);
+                assert_eq!(x_values, vec![-40.0, 25.0, 125.0]);
+                assert_eq!(x_label, "Temperature");
+                assert_eq!(x_unit, "C");
                 assert!(
                     waveforms
                         .keys()

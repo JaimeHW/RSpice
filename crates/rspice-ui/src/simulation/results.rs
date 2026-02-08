@@ -315,6 +315,12 @@ pub enum SimulationResult {
 
     /// Corner sweep result.
     Corner {
+        /// X-axis values in execution order.
+        x_values: Vec<f64>,
+        /// X-axis label (e.g. Temperature, Corner Index).
+        x_label: String,
+        /// X-axis unit (e.g. C for temperature).
+        x_unit: String,
         /// Corner temperatures (Celsius) in execution order.
         temperatures_c: Vec<f64>,
         /// Corner labels in execution order (e.g. `TT_1.000000V_25.000000C`).
@@ -406,7 +412,7 @@ impl SimulationResult {
                 ..
             } => *runs_completed > 0 || !variables.is_empty(),
             SimulationResult::Parametric { sweep_values, .. } => !sweep_values.is_empty(),
-            SimulationResult::Corner { temperatures_c, .. } => !temperatures_c.is_empty(),
+            SimulationResult::Corner { x_values, .. } => !x_values.is_empty(),
             SimulationResult::Empty { .. } => false,
         }
     }
@@ -608,6 +614,9 @@ mod tests {
             WaveformData::new_time_domain("V(out)", vec![-40.0, 25.0, 125.0], vec![1.2, 1.0, 0.8]),
         );
         let result = SimulationResult::Corner {
+            x_values: vec![-40.0, 25.0, 125.0],
+            x_label: "Temperature".to_string(),
+            x_unit: "C".to_string(),
             temperatures_c: vec![-40.0, 25.0, 125.0],
             corner_labels: vec![
                 "TT_1.000000V_-40.000000C".to_string(),

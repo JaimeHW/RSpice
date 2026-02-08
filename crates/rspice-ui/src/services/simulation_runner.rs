@@ -3,10 +3,10 @@
 //! Async wrapper around rspice-core for running simulations from the GUI.
 
 use crate::output_spec::{
-    collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
-    normalized_sensitivity, parse_output_spec, resolve_node_or_ground_index,
-    resolve_sensitivity_ac_frequency, run_ac_output_at_frequency, run_dc_output_sensitivity,
-    validate_sensitivity_output_spec, OutputSpec, OutputVoltageSpec,
+    OutputSpec, OutputVoltageSpec, collect_sensitivity_parameters, dc_output_value,
+    finite_difference_derivative, normalized_sensitivity, parse_output_spec,
+    resolve_node_or_ground_index, resolve_sensitivity_ac_frequency, run_ac_output_at_frequency,
+    run_dc_output_sensitivity, validate_sensitivity_output_spec,
 };
 use num_complex::Complex64;
 use rspice_core::analysis::ac::AcResult;
@@ -18,7 +18,7 @@ use rspice_core::netlist::{
     StepTarget,
 };
 use rspice_core::solver::SimulationResult as CoreSimulationResult;
-use rspice_core::{resolve_simulation_config, SimulationConfigOverrides, Value};
+use rspice_core::{SimulationConfigOverrides, Value, resolve_simulation_config};
 
 // =============================================================================
 // Platform-agnostic timing utilities
@@ -1691,6 +1691,12 @@ impl CornerMetricLabel {
 /// Temperature/process/voltage corner sweep data.
 #[derive(Debug, Clone)]
 pub struct CornerData {
+    /// X-axis values for each executed corner point.
+    pub x_values: Vec<Value>,
+    /// X-axis label for corner traces.
+    pub x_label: String,
+    /// X-axis unit for corner traces.
+    pub x_unit: String,
     /// Temperature for each executed corner point.
     pub temperatures_c: Vec<Value>,
     /// Human-readable corner labels in execution order.
@@ -1751,9 +1757,13 @@ fn run_corner_analysis_with_netlist(
 
     let num_failures = points.len().saturating_sub(results.len());
     let metric = config.base_mode.metric_label();
-    let (temperatures_c, corner_labels, voltages) = map_corner_results(&results, metric);
+    let (x_values, x_label, x_unit, temperatures_c, corner_labels, voltages) =
+        map_corner_results(&results, metric);
 
     Ok(CornerData {
+        x_values,
+        x_label,
+        x_unit,
         num_points: temperatures_c.len(),
         temperatures_c,
         corner_labels,
@@ -1833,11 +1843,19 @@ fn map_temperature_results(
 fn map_corner_results(
     results: &[(CornerPoint, SweepPointResult)],
     metric_label: CornerMetricLabel,
-) -> (Vec<Value>, Vec<String>, Vec<(String, Vec<Value>)>) {
+) -> (
+    Vec<Value>,
+    String,
+    String,
+    Vec<Value>,
+    Vec<String>,
+    Vec<(String, Vec<Value>)>,
+) {
     let temperatures_c: Vec<Value> = results
         .iter()
         .map(|(point, _)| point.temperature_c)
         .collect();
+    let (x_values, x_label, x_unit) = corner_axis_from_points(results, &temperatures_c);
     let corner_labels: Vec<String> = results.iter().map(|(point, _)| point.label()).collect();
     let mut voltages = Vec::new();
 
@@ -1856,7 +1874,50 @@ fn map_corner_results(
         }
     }
 
-    (temperatures_c, corner_labels, voltages)
+    (
+        x_values,
+        x_label,
+        x_unit,
+        temperatures_c,
+        corner_labels,
+        voltages,
+    )
+}
+
+fn corner_axis_from_points(
+    results: &[(CornerPoint, SweepPointResult)],
+    temperatures_c: &[Value],
+) -> (Vec<Value>, String, String) {
+    if results.is_empty() {
+        return (Vec::new(), "Corner Index".to_string(), String::new());
+    }
+
+    let first_point = &results[0].0;
+    let single_process = results
+        .iter()
+        .all(|(point, _)| point.process == first_point.process);
+    let single_voltage = results
+        .iter()
+        .all(|(point, _)| (point.voltage - first_point.voltage).abs() < 1e-15);
+
+    let mut seen_temps = std::collections::HashSet::with_capacity(temperatures_c.len());
+    let has_duplicate_temp = temperatures_c
+        .iter()
+        .any(|temperature| !seen_temps.insert(temperature.to_bits()));
+
+    if single_process && single_voltage && !has_duplicate_temp {
+        return (
+            temperatures_c.to_vec(),
+            "Temperature".to_string(),
+            "C".to_string(),
+        );
+    }
+
+    (
+        (0..results.len()).map(|index| index as Value).collect(),
+        "Corner Index".to_string(),
+        String::new(),
+    )
 }
 
 fn expand_corner_points(config: &CornerRunConfig) -> Vec<CornerPoint> {
@@ -2800,10 +2861,12 @@ mod tests {
             .expect("sensitivity run should succeed");
         assert_eq!(result.output_var, "V(out)");
         assert!(!result.sensitivities.is_empty());
-        assert!(result
-            .sensitivities
-            .iter()
-            .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL")));
+        assert!(
+            result
+                .sensitivities
+                .iter()
+                .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL"))
+        );
     }
 
     #[test]
@@ -2813,14 +2876,18 @@ mod tests {
         let result = run_sensitivity_analysis(netlist, "V(out)", false, None)
             .expect("sensitivity run should succeed");
 
-        assert!(result
-            .sensitivities
-            .iter()
-            .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL")));
-        assert!(result
-            .sensitivities
-            .iter()
-            .all(|(name, _, _)| !name.starts_with("IC_") && !name.starts_with("NODESET_")));
+        assert!(
+            result
+                .sensitivities
+                .iter()
+                .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL"))
+        );
+        assert!(
+            result
+                .sensitivities
+                .iter()
+                .all(|(name, _, _)| !name.starts_with("IC_") && !name.starts_with("NODESET_"))
+        );
     }
 
     #[test]
@@ -2846,10 +2913,12 @@ mod tests {
         let result = run_sensitivity_analysis(netlist, "V(out,in)", false, None)
             .expect("differential sensitivity run should succeed");
         assert!(!result.sensitivities.is_empty());
-        assert!(result
-            .sensitivities
-            .iter()
-            .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite()));
+        assert!(
+            result
+                .sensitivities
+                .iter()
+                .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite())
+        );
     }
 
     #[test]
@@ -2877,10 +2946,12 @@ mod tests {
             .expect("current-output ac sensitivity should succeed");
         assert_eq!(result.output_var, "I(V1)");
         assert!(!result.sensitivities.is_empty());
-        assert!(result
-            .sensitivities
-            .iter()
-            .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite()));
+        assert!(
+            result
+                .sensitivities
+                .iter()
+                .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite())
+        );
     }
 
     #[test]
@@ -2969,10 +3040,12 @@ mod tests {
         assert_eq!(result.target, "PARAM RVAL");
         assert_eq!(result.sweep_values.len(), 4);
         assert_eq!(result.num_points, 4);
-        assert!(result
-            .voltages
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("V(out)")));
+        assert!(
+            result
+                .voltages
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
+        );
     }
 
     #[test]
@@ -3053,12 +3126,14 @@ mod tests {
             .expect("temperature sweep AC base mode should execute");
         assert_eq!(result.target, "TEMP");
         assert_eq!(result.num_points, 3);
-        assert!(result
-            .voltages
-            .iter()
-            .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
-                && values.len() == 3
-                && values.iter().all(|v| v.is_finite() && *v >= 0.0)));
+        assert!(
+            result
+                .voltages
+                .iter()
+                .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
+                    && values.len() == 3
+                    && values.iter().all(|v| v.is_finite() && *v >= 0.0))
+        );
     }
 
     #[test]
@@ -3072,14 +3147,19 @@ mod tests {
     fn test_run_corner_analysis_executes_temp_directives() {
         let netlist = "* corners\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.TEMP -40 27 125\n.end\n";
         let result = run_corner_analysis(netlist).expect("corner analysis should execute");
+        assert_eq!(result.x_label, "Temperature");
+        assert_eq!(result.x_unit, "C");
+        assert_eq!(result.x_values, vec![-40.0, 27.0, 125.0]);
         assert_eq!(result.temperatures_c, vec![-40.0, 27.0, 125.0]);
         assert_eq!(result.corner_labels.len(), 3);
         assert!(result.corner_labels[0].starts_with("TT_1.000000V_"));
         assert_eq!(result.num_points, 3);
-        assert!(result
-            .voltages
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("V(out)")));
+        assert!(
+            result
+                .voltages
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
+        );
     }
 
     #[test]
@@ -3104,13 +3184,21 @@ mod tests {
         let result = run_corner_analysis_with_config(netlist, &cfg)
             .expect("corner analysis with explicit config should execute");
         assert_eq!(result.num_points, 8);
+        assert_eq!(result.x_label, "Corner Index");
+        assert_eq!(result.x_unit, "");
+        assert_eq!(
+            result.x_values,
+            vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
+        );
         assert_eq!(result.temperatures_c.len(), 8);
         assert_eq!(result.corner_labels.len(), 8);
         assert_eq!(result.num_failures, 0);
-        assert!(result
-            .corner_labels
-            .iter()
-            .any(|label| label.contains("FF_1.100000V_125.000000C")));
+        assert!(
+            result
+                .corner_labels
+                .iter()
+                .any(|label| label.contains("FF_1.100000V_125.000000C"))
+        );
     }
 
     #[test]
@@ -3197,12 +3285,17 @@ mod tests {
         let result =
             run_corner_analysis_with_config(netlist, &cfg).expect("corner AC base mode should run");
         assert_eq!(result.num_points, 3);
-        assert!(result
-            .voltages
-            .iter()
-            .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
-                && values.len() == 3
-                && values.iter().all(|v| v.is_finite() && *v >= 0.0)));
+        assert_eq!(result.x_label, "Temperature");
+        assert_eq!(result.x_unit, "C");
+        assert_eq!(result.x_values, vec![-40.0, 25.0, 125.0]);
+        assert!(
+            result
+                .voltages
+                .iter()
+                .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
+                    && values.len() == 3
+                    && values.iter().all(|v| v.is_finite() && *v >= 0.0))
+        );
     }
 
     #[test]
@@ -3225,6 +3318,9 @@ mod tests {
         let result = run_corner_analysis_with_config(netlist, &cfg)
             .expect("corner DC sweep base mode should execute");
         assert_eq!(result.num_points, 2);
+        assert_eq!(result.x_label, "Corner Index");
+        assert_eq!(result.x_unit, "");
+        assert_eq!(result.x_values, vec![0.0, 1.0]);
         let trace = result
             .voltages
             .iter()

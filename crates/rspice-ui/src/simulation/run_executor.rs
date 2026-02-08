@@ -930,16 +930,18 @@ impl RunExecutor {
                 let corner_result = simulation_runner::run_corner_analysis(netlist);
                 match corner_result {
                     Ok(data) => {
-                        let temperatures = data.temperatures_c;
+                        let x_values = data.x_values;
+                        let x_label = data.x_label;
+                        let x_unit = data.x_unit;
                         let waveforms = data
                             .voltages
                             .into_iter()
                             .map(|(name, values)| MappedWaveform {
                                 name,
-                                x: temperatures.clone(),
+                                x: x_values.clone(),
                                 y: values.into_iter().collect(),
-                                x_label: "Temperature".to_string(),
-                                x_unit: "C".to_string(),
+                                x_label: x_label.clone(),
+                                x_unit: x_unit.clone(),
                                 y_label: "Voltage".to_string(),
                                 y_unit: "V".to_string(),
                                 ..Default::default()
