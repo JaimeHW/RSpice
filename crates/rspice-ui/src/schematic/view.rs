@@ -228,7 +228,8 @@ pub fn render_schematic_view(
         // Detect hover over wire vertices for visual feedback
         if let Some(pos) = response.hover_pos() {
             let wire_grid_pos = screen_to_wire_grid(pos);
-            if state.schematic.wire_vertex_at(wire_grid_pos).is_some() {
+            // Use is_draggable_wire_point to detect vertices AND junctions
+            if state.schematic.is_draggable_wire_point(wire_grid_pos) {
                 state.dialogs.interaction.hover_wire_vertex =
                     Some((wire_grid_pos.x, wire_grid_pos.y));
             } else {
@@ -248,7 +249,8 @@ pub fn render_schematic_view(
 
                 // Priority 1: Check for wire vertex at position (for wire corner/junction dragging)
                 // Use wire grid for more precise positioning
-                if state.schematic.wire_vertex_at(wire_grid_pos).is_some() {
+                // Use is_draggable_wire_point to detect vertices AND junctions (including T-junctions)
+                if state.schematic.is_draggable_wire_point(wire_grid_pos) {
                     // Start vertex/junction drag - track the POSITION, not specific wire
                     // This allows dragging all wires meeting at a junction together
                     state.dialogs.interaction.vertex_drag_pos =
@@ -491,15 +493,16 @@ pub fn render_schematic_view(
                             );
 
                             // For voltage sources, probe the current I(Vname)
-                            // For other components, probe voltage at first terminal
+                            // For other components, probe voltage at the nearest terminal.
                             let probe_name = if component.kind.spice_prefix() == "V" {
                                 format!("I(V{})", comp_name)
                             } else {
-                                // Get first terminal position and look up its net
+                                // Choose terminal nearest the click to avoid ambiguous picks.
                                 let terminals = component.terminal_positions();
-                                if let Some((_, term_pos)) = terminals.first() {
+                                if let Some((_, term_pos)) = nearest_terminal(&terminals, grid_pos)
+                                {
                                     if let Some(net_name) =
-                                        state.simulation.cross_probe.net_at(*term_pos)
+                                        state.simulation.cross_probe.net_at(term_pos)
                                     {
                                         format!("V({})", net_name)
                                     } else {
@@ -546,11 +549,41 @@ pub fn render_schematic_view(
                 // Select the component and open properties panel
                 state.schematic.selection.clear();
                 state.schematic.selection.select_component(comp_id);
+
+                // Find the component to get its type and current values
+                if let Some(component) = state.schematic.components.iter().find(|c| c.id == comp_id)
+                {
+                    let component_type = component.kind;
+
+                    // Use property bridge for comprehensive property collection
+                    // This properly parses all component properties including secondary params
+                    let properties =
+                        crate::properties::property_bridge::collect_properties_from_component(
+                            component,
+                            &state.property_registry,
+                        );
+
+                    // Get property sheet from registry
+                    if let Some(sheet) = state.property_registry.get(component_type) {
+                        // Open the tabbed property dialog
+                        state.tabbed_property_dialog.open_for_component(
+                            comp_id,
+                            &component.name,
+                            component_type,
+                            sheet,
+                            properties,
+                        );
+                        log::info!(
+                            "Double-clicked component {} ({:?}), opening properties dialog",
+                            comp_id,
+                            component_type
+                        );
+                    } else {
+                        log::warn!("No property sheet found for {:?}", component_type);
+                    }
+                }
+
                 state.panels.properties = true;
-                log::info!(
-                    "Double-clicked component {}, opening properties panel",
-                    comp_id
-                );
             }
         }
     }
@@ -627,13 +660,15 @@ pub fn render_schematic_view(
 
             // Try to use SVG symbol for preview (matches placed component appearance)
             let svg_rendered = if let Some(library) = symbol_library {
-                if let Some(symbol) = library.get(component_type) {
+                if let Some((symbol, adjusted_rotation)) =
+                    library.get_with_rotation(component_type, preview_rotation_degrees)
+                {
                     super::symbols::draw_symbol(
                         &painter,
                         symbol,
                         preview_pos,
                         viewport.zoom,
-                        preview_rotation_degrees,
+                        adjusted_rotation,
                         false, // Preview doesn't use mirror_h
                         false, // Preview doesn't use mirror_v
                         preview_stroke,
@@ -1025,14 +1060,16 @@ fn draw_component(
 
     // Try to use SVG symbol if available
     let svg_rendered = if let Some(library) = symbol_library {
-        if let Some(symbol) = library.get(component.kind) {
+        if let Some((symbol, adjusted_rotation)) =
+            library.get_with_rotation(component.kind, rotation_degrees)
+        {
             // Note: SVG symbol is being used (removed per-frame logging)
             super::symbols::draw_symbol(
                 painter,
                 symbol,
                 pos,
                 scale,
-                rotation_degrees,
+                adjusted_rotation,
                 component.mirror_h,
                 component.mirror_v,
                 stroke,
@@ -1755,6 +1792,22 @@ fn rotation_to_delta(rotation: i32) -> (f32, f32) {
     }
 }
 
+#[inline]
+fn manhattan_distance(a: Point, b: Point) -> i32 {
+    (a.x - b.x).abs() + (a.y - b.y).abs()
+}
+
+#[inline]
+fn nearest_terminal(
+    terminals: &[(&'static str, Point)],
+    target: Point,
+) -> Option<(&'static str, Point)> {
+    terminals
+        .iter()
+        .copied()
+        .min_by_key(|(_, pos)| manhattan_distance(*pos, target))
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -1861,5 +1914,23 @@ mod tests {
         // Should be offset by bounds.min
         assert_eq!(screen.x, 150.0);
         assert_eq!(screen.y, 150.0);
+    }
+
+    #[test]
+    fn test_nearest_terminal_selects_closest_point() {
+        let terminals = vec![
+            ("A", Point::new(100, 100)),
+            ("B", Point::new(120, 100)),
+            ("C", Point::new(100, 120)),
+        ];
+        let nearest = nearest_terminal(&terminals, Point::new(118, 101)).unwrap();
+        assert_eq!(nearest.0, "B");
+        assert_eq!(nearest.1, Point::new(120, 100));
+    }
+
+    #[test]
+    fn test_nearest_terminal_empty_returns_none() {
+        let terminals: Vec<(&'static str, Point)> = Vec::new();
+        assert!(nearest_terminal(&terminals, Point::new(0, 0)).is_none());
     }
 }

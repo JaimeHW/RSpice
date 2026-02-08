@@ -16,6 +16,7 @@
 //! - User interactions are translated to state mutations
 
 pub mod export;
+pub mod op_annotation;
 pub mod symbols;
 pub mod toolbar;
 pub mod view;

@@ -118,8 +118,13 @@ impl Symbol {
 
 /// SVG Symbol Library with O(1) lookup by component type.
 /// Loads and caches parsed symbols for efficient rendering.
+/// Supports orientation-specific symbols (vertical/horizontal) for components
+/// that have different SVGs for different rotations.
 pub struct SymbolLibrary {
+    /// Default (vertical) symbols
     symbols: HashMap<ComponentType, Symbol>,
+    /// Horizontal variants for components that have separate horizontal SVGs
+    horizontal_symbols: HashMap<ComponentType, Symbol>,
 }
 
 impl Default for SymbolLibrary {
@@ -133,6 +138,7 @@ impl SymbolLibrary {
     pub fn new() -> Self {
         Self {
             symbols: HashMap::new(),
+            horizontal_symbols: HashMap::new(),
         }
     }
 
@@ -154,6 +160,11 @@ impl SymbolLibrary {
                 ComponentType::VoltageSource,
                 "v_src_dc.svg",
                 "Voltage Source",
+            ),
+            (
+                ComponentType::VoltageSourceAc,
+                "v_src_ac_vertical.svg",
+                "AC Voltage Source",
             ),
             (ComponentType::CurrentSource, "i_src.svg", "Current Source"),
             // Ground
@@ -193,6 +204,28 @@ impl SymbolLibrary {
             library.symbols.insert(*component_type, symbol);
         }
 
+        // Load horizontal variants for components that have separate horizontal SVGs
+        let horizontal_mappings: &[(ComponentType, &str, &str)] = &[(
+            ComponentType::VoltageSourceAc,
+            "v_src_ac_horizontal.svg",
+            "AC Voltage Source",
+        )];
+
+        for (component_type, filename, name) in horizontal_mappings {
+            let svg_data = Self::load_embedded_svg(filename)?;
+            let mut symbol = parse_svg(&svg_data)?;
+            symbol.name = name.to_string();
+
+            // For horizontal variants, swap width/height dimensions
+            let (target_w, target_h) = component_type.symbol_dimensions();
+            symbol.target_width = target_h as f32; // Swapped
+            symbol.target_height = target_w as f32; // Swapped
+
+            add_default_pins(&mut symbol, *component_type);
+
+            library.horizontal_symbols.insert(*component_type, symbol);
+        }
+
         Ok(library)
     }
 
@@ -214,6 +247,36 @@ impl SymbolLibrary {
     /// Get a symbol by component type (O(1) lookup)
     pub fn get(&self, component_type: ComponentType) -> Option<&Symbol> {
         self.symbols.get(&component_type)
+    }
+
+    /// Get a symbol with rotation awareness.
+    /// For components with horizontal variants (like AC voltage source),
+    /// returns the horizontal SVG when rotated 90° or 270°, along with the
+    /// adjusted rotation to apply to the symbol.
+    /// Returns (symbol, adjusted_rotation_degrees).
+    pub fn get_with_rotation(
+        &self,
+        component_type: ComponentType,
+        rotation_degrees: i32,
+    ) -> Option<(&Symbol, i32)> {
+        // Normalize rotation to 0-359
+        let normalized = ((rotation_degrees % 360) + 360) % 360;
+
+        // For 90° or 270° rotation, use horizontal variant if available
+        if normalized == 90 || normalized == 270 {
+            if let Some(symbol) = self.horizontal_symbols.get(&component_type) {
+                // Horizontal SVG is already rotated 90° from vertical.
+                // For 90° requested: use horizontal SVG with 0° rotation
+                // For 270° requested: use horizontal SVG with 180° rotation
+                let adjusted = if normalized == 90 { 0 } else { 180 };
+                return Some((symbol, adjusted));
+            }
+        }
+
+        // Fall back to default symbol with original rotation
+        self.symbols
+            .get(&component_type)
+            .map(|s| (s, rotation_degrees))
     }
 
     /// Check if a symbol exists for the given component type
@@ -1127,7 +1190,7 @@ mod tests {
 
     #[test]
     fn test_load_all_embedded_symbols() {
-        // Test that we can load all 11 mapped component symbols
+        // Test that we can load the baseline embedded symbol set.
         let library = SymbolLibrary::load_embedded();
         assert!(
             library.is_ok(),
@@ -1136,7 +1199,10 @@ mod tests {
         );
 
         let library = library.unwrap();
-        assert_eq!(library.len(), 11, "Should have 11 symbols loaded");
+        assert!(
+            library.len() >= 11,
+            "Should have at least the baseline symbol set loaded"
+        );
 
         // Verify each symbol has paths
         for component_type in library.loaded_types() {

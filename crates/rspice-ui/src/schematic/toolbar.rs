@@ -40,6 +40,7 @@ pub enum IconType {
     Waveform,
     Shell,
     Results,
+    PanelBottom,
 }
 
 /// Paint an icon into a given rect using the painter
@@ -448,9 +449,27 @@ pub fn paint_icon(ui: &mut Ui, rect: Rect, icon: IconType, color: Color32) {
                 let y = center.y + (i as f32 - 1.0) * line_spacing;
                 painter.line_segment([pos2(start_x, y), pos2(end_x, y)], stroke);
 
-                // Bullet point at the start of each line
                 painter.circle_filled(pos2(start_x - bullet_offset, y), 1.5, color);
             }
+        }
+        IconType::PanelBottom => {
+            // Layout icon with bottom panel highlighted
+            // Outer frame
+            let frame = Rect::from_center_size(center, egui::vec2(w * 0.9, h * 0.75));
+            painter.rect_stroke(frame, 1.0, stroke);
+
+            // Separator line (approx 2/3 down)
+            let split_y = frame.top() + frame.height() * 0.65;
+            painter.line_segment(
+                [pos2(frame.left(), split_y), pos2(frame.right(), split_y)],
+                stroke,
+            );
+
+            // Fill bottom section to indicate it's the active part
+            let bottom_rect = Rect::from_min_max(pos2(frame.left(), split_y), frame.right_bottom());
+            // Use a slightly transparent fill for the "active" look
+            let fill_color = color.linear_multiply(0.3);
+            painter.rect_filled(bottom_rect, 0.0, fill_color);
         }
     }
 }
@@ -652,11 +671,12 @@ pub fn render_toolbar(ui: &mut Ui, state: &mut AppState) {
             .on_hover_text("Stop Simulation")
             .clicked()
         {
-            state.simulation.is_running = false;
+            // Set the abort trigger - SimulationController will call runner.abort()
+            state.simulation.trigger_abort = true;
             state
                 .console_messages
                 .push(crate::common::app::ConsoleMessage::warning(
-                    "Simulation stopped",
+                    "Stopping simulation...",
                 ));
         }
 
