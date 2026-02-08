@@ -477,6 +477,17 @@ impl SimulationController {
         spec: &AnalysisSpec,
     ) -> Result<SpecExecutionOptions, String> {
         match spec {
+            AnalysisSpec::Parametric => {
+                let mut temp_state = state.dialogs.temp_state.clone();
+                temp_state.ensure_initialized();
+                let temp_cfg = temp_state
+                    .to_config()
+                    .map_err(|e| format!("invalid temperature sweep settings: {}", e))?;
+                Ok(SpecExecutionOptions {
+                    temp: Some(Self::temp_run_config_from_dialog(state, &temp_cfg)?),
+                    corner: None,
+                })
+            }
             AnalysisSpec::Corner => {
                 let mut corner_state = state.dialogs.corner_state.clone();
                 corner_state.ensure_initialized();
@@ -484,11 +495,84 @@ impl SimulationController {
                     .to_config()
                     .map_err(|e| format!("invalid corner settings: {}", e))?;
                 Ok(SpecExecutionOptions {
+                    temp: None,
                     corner: Some(Self::corner_run_config_from_dialog(state, &corner_cfg)?),
                 })
             }
             _ => Ok(SpecExecutionOptions::default()),
         }
+    }
+
+    fn temp_run_config_from_dialog(
+        state: &AppState,
+        temp_cfg: &crate::simulation::dialog::temp::TempConfig,
+    ) -> Result<crate::services::simulation_runner::TempRunConfig, String> {
+        use crate::services::simulation_runner::{
+            CornerBaseMode, CornerFrequencySweep, TempRunConfig,
+        };
+        use crate::simulation::dialog::temp::TempBaseAnalysis;
+
+        let temperatures_c = if !temp_cfg.specific_temps.is_empty() {
+            temp_cfg.specific_temps.clone()
+        } else {
+            Self::expand_temperature_points(
+                temp_cfg.temp_start,
+                temp_cfg.temp_stop,
+                temp_cfg.temp_step,
+            )?
+        };
+
+        let base_mode = match temp_cfg.base_analysis {
+            TempBaseAnalysis::Op => CornerBaseMode::Op,
+            TempBaseAnalysis::Dc => {
+                let source_name = state.dialogs.dc_source.trim();
+                if source_name.is_empty() {
+                    return Err(
+                        "temperature sweep DC base analysis requires a non-empty sweep source"
+                            .to_string(),
+                    );
+                }
+                CornerBaseMode::DcSweep {
+                    source_name: source_name.to_string(),
+                    start: parse_spice_value_checked(&state.dialogs.dc_start)
+                        .map_err(|e| format!("invalid temperature DC start value: {}", e))?,
+                    stop: parse_spice_value_checked(&state.dialogs.dc_stop)
+                        .map_err(|e| format!("invalid temperature DC stop value: {}", e))?,
+                    step: parse_spice_value_checked(&state.dialogs.dc_step)
+                        .map_err(|e| format!("invalid temperature DC step value: {}", e))?,
+                }
+            }
+            TempBaseAnalysis::Transient => CornerBaseMode::Transient {
+                stop_time: parse_spice_value_checked(&state.dialogs.tran_stop)
+                    .map_err(|e| format!("invalid temperature transient stop time: {}", e))?,
+                step_time: parse_spice_value_checked(&state.dialogs.tran_step)
+                    .map_err(|e| format!("invalid temperature transient step time: {}", e))?,
+            },
+            TempBaseAnalysis::Ac => {
+                let sweep = match Self::map_frequency_sweep(state.dialogs.ac_sweep_type) {
+                    FrequencySweep::Decade => CornerFrequencySweep::Decade,
+                    FrequencySweep::Octave => CornerFrequencySweep::Octave,
+                    FrequencySweep::Linear => CornerFrequencySweep::Linear,
+                };
+                CornerBaseMode::Ac {
+                    start_freq: parse_spice_value_checked(&state.dialogs.ac_fstart)
+                        .map_err(|e| format!("invalid temperature AC start frequency: {}", e))?,
+                    stop_freq: parse_spice_value_checked(&state.dialogs.ac_fstop)
+                        .map_err(|e| format!("invalid temperature AC stop frequency: {}", e))?,
+                    points_per_unit: Self::parse_positive_points(
+                        &state.dialogs.ac_points,
+                        "ac_points",
+                    )
+                    .map_err(|e| format!("invalid temperature AC points: {}", e))?,
+                    sweep,
+                }
+            }
+        };
+
+        Ok(TempRunConfig {
+            temperatures_c,
+            base_mode,
+        })
     }
 
     fn corner_run_config_from_dialog(
@@ -778,19 +862,9 @@ impl SimulationController {
     fn build_temperature_sweep_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
         let mut temp_state = state.dialogs.temp_state.clone();
         temp_state.ensure_initialized();
-        let temp_cfg = temp_state
+        temp_state
             .to_config()
             .map_err(|e| format!("invalid temperature sweep settings: {}", e))?;
-        use crate::simulation::dialog::temp::TempBaseAnalysis;
-        if !matches!(
-            temp_cfg.base_analysis,
-            TempBaseAnalysis::Op | TempBaseAnalysis::Dc
-        ) {
-            return Err(
-                "temperature sweep currently supports only OP/DC base analyses in the active controller path"
-                    .to_string(),
-            );
-        }
         Ok(AnalysisSpec::Parametric)
     }
 
@@ -921,6 +995,46 @@ impl SimulationController {
             ac_mode,
             frequency: ac_mode.then_some(sens_cfg.ac_freq),
         })
+    }
+
+    fn expand_temperature_points(start: f64, stop: f64, step: f64) -> Result<Vec<f64>, String> {
+        if !start.is_finite() || !stop.is_finite() || !step.is_finite() {
+            return Err(
+                "temperature sweep range requires finite start/stop/step values".to_string(),
+            );
+        }
+        if step == 0.0 {
+            return Err("temperature sweep step cannot be zero".to_string());
+        }
+        if (stop - start).abs() > 0.0 && (stop - start).signum() != step.signum() {
+            return Err("temperature sweep step direction must match start/stop range".to_string());
+        }
+
+        if (stop - start).abs() == 0.0 {
+            return Ok(vec![start]);
+        }
+
+        let mut values = Vec::new();
+        let mut current = start;
+        let tolerance = (step.abs() * 1e-12).max((start.abs().max(stop.abs())) * 1e-12);
+
+        if step > 0.0 {
+            while current <= stop + tolerance {
+                values.push(current);
+                current += step;
+            }
+        } else {
+            while current >= stop - tolerance {
+                values.push(current);
+                current += step;
+            }
+        }
+
+        if values.is_empty() {
+            return Err("temperature sweep produced no points".to_string());
+        }
+
+        Ok(values)
     }
 
     fn parse_positive_points(raw: &str, field_name: &str) -> Result<usize, String> {
@@ -2289,7 +2403,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_analysis_spec_for_temperature_sweep_rejects_unsupported_base() {
+    fn test_build_analysis_spec_for_temperature_sweep_accepts_transient_base() {
         use crate::simulation::dialog::temp::{TempBaseAnalysis, TempConfig};
 
         let controller = SimulationController::new();
@@ -2298,10 +2412,10 @@ mod tests {
             &TempConfig::new(-40.0, 125.0, 25.0).with_base(TempBaseAnalysis::Transient),
         );
 
-        let err = controller
+        let spec = controller
             .build_analysis_spec_for_index(&state, 10)
-            .expect_err("Transient base is not supported in active controller path");
-        assert!(err.contains("OP/DC base analyses"));
+            .expect("Transient base should be accepted for temperature sweeps");
+        assert!(matches!(spec, AnalysisSpec::Parametric));
     }
 
     #[test]
@@ -2359,6 +2473,16 @@ mod tests {
         assert!(matches!(queue[1].spec, AnalysisSpec::Parametric));
         assert!(queue[1].config.is_none());
         assert!(queue[1].spec_options.corner.is_none());
+        assert!(queue[1].spec_options.temp.is_some());
+        assert!(matches!(
+            queue[1]
+                .spec_options
+                .temp
+                .as_ref()
+                .expect("temperature options must be present")
+                .base_mode,
+            crate::services::simulation_runner::CornerBaseMode::Op
+        ));
         assert!(queue[1].analysis_line.starts_with(".step temp "));
 
         assert!(matches!(queue[2].spec, AnalysisSpec::Corner));
@@ -2391,6 +2515,77 @@ mod tests {
             .build_analysis_spec_for_index(&state, 18)
             .expect("corner transient base mode should be accepted");
         assert!(matches!(spec, AnalysisSpec::Corner));
+    }
+
+    #[test]
+    fn test_build_queue_from_plan_maps_temperature_ac_base_mode() {
+        use crate::simulation::dialog::temp::{TempBaseAnalysis, TempConfig};
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses = [10usize].into_iter().collect();
+        state.dialogs.temp_state = crate::simulation::dialog::temp::TempDialogState::from_config(
+            &TempConfig::new(-40.0, 125.0, 82.5).with_base(TempBaseAnalysis::Ac),
+        );
+        state.dialogs.ac_fstart = "1k".to_string();
+        state.dialogs.ac_fstop = "10Meg".to_string();
+        state.dialogs.ac_points = "12".to_string();
+        state.dialogs.ac_sweep_type = 1; // octave
+
+        let plan = controller
+            .build_analysis_plan(&state)
+            .expect("plan should build");
+        let queue = controller
+            .build_queue_from_plan(&state, &plan)
+            .expect("queue should build");
+
+        assert_eq!(queue.len(), 1);
+        let temp = queue[0]
+            .spec_options
+            .temp
+            .as_ref()
+            .expect("temperature options must be present");
+        match &temp.base_mode {
+            crate::services::simulation_runner::CornerBaseMode::Ac {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                sweep,
+            } => {
+                assert!((*start_freq - 1e3).abs() < 1e-12);
+                assert!((*stop_freq - 1e7).abs() < 1e-4);
+                assert_eq!(*points_per_unit, 12);
+                assert!(matches!(
+                    sweep,
+                    crate::services::simulation_runner::CornerFrequencySweep::Octave
+                ));
+            }
+            other => panic!("expected AC temp base mode, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_queue_from_plan_rejects_temperature_dc_without_source() {
+        use crate::simulation::dialog::temp::{TempBaseAnalysis, TempConfig};
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses = [10usize].into_iter().collect();
+        state.dialogs.temp_state = crate::simulation::dialog::temp::TempDialogState::from_config(
+            &TempConfig::new(-40.0, 125.0, 25.0).with_base(TempBaseAnalysis::Dc),
+        );
+        state.dialogs.dc_source.clear();
+        state.dialogs.dc_start = "0".to_string();
+        state.dialogs.dc_stop = "1".to_string();
+        state.dialogs.dc_step = "0.1".to_string();
+
+        let plan = controller
+            .build_analysis_plan(&state)
+            .expect("plan should build");
+        let err = controller
+            .build_queue_from_plan(&state, &plan)
+            .expect_err("temperature DC base mode should require source");
+        assert!(err.iter().any(|msg| msg.contains("non-empty sweep source")));
     }
 
     #[test]

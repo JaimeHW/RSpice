@@ -20,6 +20,7 @@ use super::status::{SimulationProgress, SimulationStatus};
 /// Optional execution overrides for spec-driven analyses.
 #[derive(Debug, Clone, Default)]
 pub struct SpecExecutionOptions {
+    pub temp: Option<crate::services::simulation_runner::TempRunConfig>,
     pub corner: Option<crate::services::simulation_runner::CornerRunConfig>,
 }
 
@@ -389,8 +390,13 @@ fn run_spec_request(
             })
         }
         AnalysisSpec::Parametric => {
-            let data = svc_runner::run_parametric_analysis(netlist)
-                .map_err(SimulationError::InvalidConfig)?;
+            let data = if let Some(temp_cfg) = options.temp {
+                svc_runner::run_parametric_analysis_with_config(netlist, &temp_cfg)
+                    .map_err(SimulationError::InvalidConfig)?
+            } else {
+                svc_runner::run_parametric_analysis(netlist)
+                    .map_err(SimulationError::InvalidConfig)?
+            };
             let sweep_values = data.sweep_values;
             let waveforms: std::collections::HashMap<String, WaveformData> = data
                 .voltages
@@ -727,6 +733,61 @@ R1 in 0 1k
     }
 
     #[test]
+    fn test_runner_start_spec_parametric_with_temp_ac_options() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* Parametric TEMP sweep with AC base-mode override
+V1 in 0 DC 1 AC 1
+R1 in out 1k
+C1 out 0 1n
+.step temp list -40 25 125
+.end
+"#
+        .to_string();
+
+        let options = SpecExecutionOptions {
+            temp: Some(crate::services::simulation_runner::TempRunConfig {
+                temperatures_c: vec![-40.0, 25.0, 125.0],
+                base_mode: crate::services::simulation_runner::CornerBaseMode::Ac {
+                    start_freq: 1e3,
+                    stop_freq: 1e6,
+                    points_per_unit: 8,
+                    sweep: crate::services::simulation_runner::CornerFrequencySweep::Decade,
+                },
+            }),
+            corner: None,
+        };
+
+        runner
+            .start_spec_with_options(AnalysisSpec::Parametric, netlist, options)
+            .expect("parametric AC options should start");
+        thread::sleep(std::time::Duration::from_millis(250));
+
+        let result = runner.poll_result();
+        assert!(result.is_some(), "Expected parametric AC result");
+        let result = result.unwrap().expect("Parametric AC should succeed");
+        match result {
+            SimulationResult::Parametric {
+                target,
+                sweep_values,
+                waveforms,
+                ..
+            } => {
+                assert_eq!(target, "TEMP");
+                assert_eq!(sweep_values.len(), 3);
+                assert!(
+                    waveforms
+                        .keys()
+                        .any(|name| name.eq_ignore_ascii_case("|V(out)|")),
+                    "expected |V(out)| trace, got {:?}",
+                    waveforms.keys().collect::<Vec<_>>()
+                );
+            }
+            other => panic!("Expected Parametric result, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_runner_start_spec_corner_temp() {
         let mut runner = SimulationRunner::new();
         let netlist = r#"
@@ -767,6 +828,7 @@ R2 out 0 1k
         .to_string();
 
         let options = SpecExecutionOptions {
+            temp: None,
             corner: Some(crate::services::simulation_runner::CornerRunConfig {
                 process_corners: vec![
                     crate::services::simulation_runner::CornerProcess::TT,
@@ -817,6 +879,7 @@ C1 out 0 1n
         .to_string();
 
         let options = SpecExecutionOptions {
+            temp: None,
             corner: Some(crate::services::simulation_runner::CornerRunConfig {
                 process_corners: vec![crate::services::simulation_runner::CornerProcess::TT],
                 voltages: vec![1.0],
