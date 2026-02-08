@@ -152,7 +152,10 @@ impl SignalPath {
         if self.depth() >= other.depth() {
             return false;
         }
-        self.components.iter().zip(other.components.iter()).all(|(a, b)| a == b)
+        self.components
+            .iter()
+            .zip(other.components.iter())
+            .all(|(a, b)| a == b)
     }
 
     /// Get components iterator
@@ -548,15 +551,13 @@ mod tests {
 
     #[test]
     fn test_probeable_signal_with_type() {
-        let sig = ProbeableSignal::new("output")
-            .with_type(SignalType::Voltage);
+        let sig = ProbeableSignal::new("output").with_type(SignalType::Voltage);
         assert_eq!(sig.signal_type, SignalType::Voltage);
     }
 
     #[test]
     fn test_probeable_signal_with_description() {
-        let sig = ProbeableSignal::new("v(out)")
-            .with_description("Output voltage");
+        let sig = ProbeableSignal::new("v(out)").with_description("Output voltage");
         assert_eq!(sig.description, Some("Output voltage".to_string()));
     }
 }

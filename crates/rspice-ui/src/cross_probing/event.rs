@@ -177,7 +177,7 @@ impl ProbeEventBus {
     }
 
     /// Broadcast event to all handlers
-    pub fn broadcast(&self, event: &ProbeEvent, exclude_source: Option<ProbeSource>) {
+    pub fn broadcast(&self, event: &ProbeEvent, _exclude_source: Option<ProbeSource>) {
         if self.paused {
             return;
         }

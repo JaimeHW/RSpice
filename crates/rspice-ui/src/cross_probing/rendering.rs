@@ -50,7 +50,7 @@ fn dim_text_color() -> Color32 {
 
 /// Render the signal browser panel
 pub fn render_signal_browser(ui: &mut Ui, state: &mut CrossProbeState) {
-    let available = ui.available_rect_before_wrap();
+    let _available = ui.available_rect_before_wrap();
 
     // Header
     render_browser_header(ui, state);
