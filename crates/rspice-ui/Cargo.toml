@@ -16,6 +16,8 @@ path = "src/main.rs"
 
 [features]
 default = []
+desktop = []
+veriloga = []
 
 [dependencies]
 # RSpice core simulation engine
@@ -75,6 +77,9 @@ svgtypes = "0.15"
 
 # Native file dialogs
 rfd = "0.15"
+
+# Cross-platform config directories
+dirs = "5.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 env_logger = "0.11"
