@@ -573,7 +573,8 @@ impl SnapEngine {
                 let in_y_bounds = (closest.y >= segment.start.y.min(segment.end.y))
                     && (closest.y <= segment.start.y.max(segment.end.y));
 
-                if closest != segment.start && closest != segment.end && in_x_bounds && in_y_bounds {
+                if closest != segment.start && closest != segment.end && in_x_bounds && in_y_bounds
+                {
                     candidates.push(SnapTarget::wire_segment(closest, wire.id, idx, dist));
                 }
             }

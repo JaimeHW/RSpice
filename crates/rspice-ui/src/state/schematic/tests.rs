@@ -1250,7 +1250,7 @@ fn test_auto_place_junctions() {
 #[test]
 fn test_remove_orphan_junctions() {
     let mut state = SchematicState::default();
-    let wire_id = state
+    let _wire_id = state
         .add_wire(vec![Point::new(0, 0), Point::new(10, 0)])
         .unwrap();
 

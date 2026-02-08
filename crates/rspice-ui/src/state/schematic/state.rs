@@ -2116,20 +2116,28 @@ impl SchematicState {
     /// Call this after wire operations to maintain junction consistency.
     pub fn auto_place_junctions(&mut self) {
         let junction_points = self.detect_junction_points();
+        let mut changes = false;
 
         // Add junctions at detected points that don't have one
         for point in &junction_points {
             let has_junction = self.junctions.iter().any(|j| j.pos == *point);
             if !has_junction {
                 self.add_junction(*point);
+                changes = true;
             }
         }
 
         // Remove junctions that are no longer at intersection points
+        let len_before = self.junctions.len();
         self.junctions.retain(|j| junction_points.contains(&j.pos));
+        if self.junctions.len() != len_before {
+            changes = true;
+        }
 
-        self.is_dirty = true;
-        self.bump_topology_version();
+        if changes {
+            self.is_dirty = true;
+            self.bump_topology_version();
+        }
     }
 
     /// Remove orphaned junctions that no longer have wire connections

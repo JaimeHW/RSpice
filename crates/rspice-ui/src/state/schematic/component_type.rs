@@ -383,37 +383,38 @@ impl ComponentType {
             | ComponentType::CurrentSourceNoise => {
                 vec![("+", Point::new(0, -hh)), ("-", Point::new(0, hh))]
             }
-            // BJTs: Base on left at center, Collector/Emitter at right top/bottom
+            // BJTs: SPICE format is Q name C B E model, so order must be C, B, E
             // With 40x80 dimensions (matching SVG aspect ratio), C/E at ±40 (on major grid)
             ComponentType::NpnBjt => vec![
-                ("B", Point::new(-hw, 0)),  // Base (center-left)
-                ("C", Point::new(hw, -hh)), // Collector (top-right)
-                ("E", Point::new(hw, hh)),  // Emitter (bottom-right)
+                ("C", Point::new(hw, -hh)), // Collector (top-right) - SPICE order: 1st
+                ("B", Point::new(-hw, 0)),  // Base (center-left) - SPICE order: 2nd
+                ("E", Point::new(hw, hh)),  // Emitter (bottom-right) - SPICE order: 3rd
             ],
             ComponentType::PnpBjt => vec![
-                ("B", Point::new(-hw, 0)),
-                ("C", Point::new(hw, hh)),  // Collector (bottom for PNP)
-                ("E", Point::new(hw, -hh)), // Emitter (top for PNP)
+                ("C", Point::new(hw, hh)),  // Collector (bottom for PNP) - SPICE order: 1st
+                ("B", Point::new(-hw, 0)),  // Base - SPICE order: 2nd
+                ("E", Point::new(hw, -hh)), // Emitter (top for PNP) - SPICE order: 3rd
             ],
-            // MOSFETs: Gate on left, Drain at top-right, Source at bottom-right
+            // MOSFETs: SPICE format is M name D G S B model, so order must be D, G, S, B
             // With 40x80 dimensions, D/S at ±40 (on major grid)
             ComponentType::Nmos | ComponentType::Pmos => vec![
-                ("G", Point::new(-hw, 0)),  // Gate (center-left)
-                ("D", Point::new(hw, -hh)), // Drain (top-right)
-                ("S", Point::new(hw, hh)),  // Source (bottom-right)
-                ("B", Point::new(hw, 0)),   // Bulk (center-right)
+                ("D", Point::new(hw, -hh)), // Drain (top-right) - SPICE order: 1st
+                ("G", Point::new(-hw, 0)),  // Gate (center-left) - SPICE order: 2nd
+                ("S", Point::new(hw, hh)),  // Source (bottom-right) - SPICE order: 3rd
+                ("B", Point::new(hw, 0)),   // Bulk (center-right) - SPICE order: 4th
             ],
+            // JFETs: SPICE format is J name D G S model, so order must be D, G, S
             ComponentType::Njfet | ComponentType::Pjfet => vec![
-                ("G", Point::new(-hw, 0)),  // Gate (center-left)
-                ("D", Point::new(hw, -hh)), // Drain (top-right)
-                ("S", Point::new(hw, hh)),  // Source (bottom-right)
+                ("D", Point::new(hw, -hh)), // Drain (top-right) - SPICE order: 1st
+                ("G", Point::new(-hw, 0)),  // Gate (center-left) - SPICE order: 2nd
+                ("S", Point::new(hw, hh)),  // Source (bottom-right) - SPICE order: 3rd
             ],
-            // Power MOSFETs (VDMOS) - same terminal layout as MOSFET
+            // Power MOSFETs (VDMOS) - same terminal layout as MOSFET (D, G, S, B)
             ComponentType::NVdmos | ComponentType::PVdmos => vec![
-                ("G", Point::new(-hw, 0)),  // Gate (center-left)
-                ("D", Point::new(hw, -hh)), // Drain (top-right)
-                ("S", Point::new(hw, hh)),  // Source (bottom-right)
-                ("B", Point::new(hw, 0)),   // Bulk (center-right)
+                ("D", Point::new(hw, -hh)), // Drain (top-right) - SPICE order: 1st
+                ("G", Point::new(-hw, 0)),  // Gate (center-left) - SPICE order: 2nd
+                ("S", Point::new(hw, hh)),  // Source (bottom-right) - SPICE order: 3rd
+                ("B", Point::new(hw, 0)),   // Bulk (center-right) - SPICE order: 4th
             ],
             // Saturable inductor - same as regular inductor
             ComponentType::SaturableInductor => {
@@ -579,6 +580,14 @@ impl ComponentType {
                 | ComponentType::XspiceSrLatch
                 | ComponentType::XspiceAdcBridge
                 | ComponentType::XspiceDacBridge
+        )
+    }
+
+    /// Check if this is a PWL (Piecewise Linear) source
+    pub fn is_pwl_source(&self) -> bool {
+        matches!(
+            self,
+            ComponentType::VoltageSourcePwl | ComponentType::CurrentSourcePwl
         )
     }
 
