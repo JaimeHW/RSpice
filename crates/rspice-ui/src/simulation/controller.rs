@@ -470,6 +470,7 @@ impl SimulationController {
             AnalysisSpec::Tf
                 | AnalysisSpec::Pnoise
                 | AnalysisSpec::Pxf
+                | AnalysisSpec::Pstb
                 | AnalysisSpec::Stb { .. }
                 | AnalysisSpec::MonteCarlo
                 | AnalysisSpec::Parametric
@@ -499,6 +500,7 @@ impl SimulationController {
                     pxf: None,
                     tf: None,
                     pnoise: None,
+                    pstb: None,
                 })
             }
             AnalysisSpec::Corner => {
@@ -514,6 +516,7 @@ impl SimulationController {
                     pxf: None,
                     tf: None,
                     pnoise: None,
+                    pstb: None,
                 })
             }
             AnalysisSpec::Pac => Ok(SpecExecutionOptions {
@@ -523,6 +526,7 @@ impl SimulationController {
                 pxf: None,
                 tf: None,
                 pnoise: None,
+                pstb: None,
             }),
             AnalysisSpec::Pxf => Ok(SpecExecutionOptions {
                 temp: None,
@@ -531,6 +535,7 @@ impl SimulationController {
                 pxf: Some(Self::pxf_run_config_from_dialog(state)?),
                 tf: None,
                 pnoise: None,
+                pstb: None,
             }),
             AnalysisSpec::Tf => Ok(SpecExecutionOptions {
                 temp: None,
@@ -539,6 +544,7 @@ impl SimulationController {
                 pxf: None,
                 tf: Some(Self::tf_run_config_from_dialog(state)?),
                 pnoise: None,
+                pstb: None,
             }),
             AnalysisSpec::Pnoise => Ok(SpecExecutionOptions {
                 temp: None,
@@ -547,6 +553,16 @@ impl SimulationController {
                 pxf: None,
                 tf: None,
                 pnoise: Some(Self::pnoise_run_config_from_dialog(state)?),
+                pstb: None,
+            }),
+            AnalysisSpec::Pstb => Ok(SpecExecutionOptions {
+                temp: None,
+                corner: None,
+                pac: None,
+                pxf: None,
+                tf: None,
+                pnoise: None,
+                pstb: Some(Self::pstb_run_config_from_dialog(state)?),
             }),
             _ => Ok(SpecExecutionOptions {
                 temp: None,
@@ -555,6 +571,7 @@ impl SimulationController {
                 pxf: None,
                 tf: None,
                 pnoise: None,
+                pstb: None,
             }),
         }
     }
@@ -721,7 +738,8 @@ impl SimulationController {
             crate::simulation::dialog::pxf::PxfSweepType::Linear => PxfFrequencySweep::Linear,
         };
 
-        let output_ref = (!pxf_cfg.output_ref.trim().is_empty()).then(|| pxf_cfg.output_ref.clone());
+        let output_ref =
+            (!pxf_cfg.output_ref.trim().is_empty()).then(|| pxf_cfg.output_ref.clone());
 
         Ok(PxfRunConfig {
             pss_fundamental_freq: pss_cfg.fund_freq,
@@ -739,6 +757,36 @@ impl SimulationController {
             max_sideband: pxf_cfg.max_sideband,
             reltol: 1e-3,
             abstol: 1e-12,
+        })
+    }
+
+    fn pstb_run_config_from_dialog(
+        state: &AppState,
+    ) -> Result<crate::services::simulation_runner::PstbRunConfig, String> {
+        use crate::services::simulation_runner::PstbRunConfig;
+
+        let mut pstb_state = state.dialogs.pstb_state.clone();
+        pstb_state.ensure_initialized();
+        let pstb_cfg = pstb_state
+            .to_config()
+            .map_err(|e| format!("invalid PSTB settings: {}", e))?;
+
+        let mut pss_state = state.dialogs.pss_state.clone();
+        pss_state.ensure_initialized();
+        let pss_cfg = pss_state
+            .to_config()
+            .map_err(|e| format!("invalid PSS settings required for PSTB: {}", e))?;
+
+        Ok(PstbRunConfig {
+            pss_fundamental_freq: pss_cfg.fund_freq,
+            pss_num_harmonics: pss_cfg.num_harmonics as usize,
+            pss_tolerance: pss_cfg.stab_tol,
+            probe_instance: pstb_cfg.probe,
+            max_harmonics: pstb_cfg.max_harmonics as usize,
+            num_multipliers: pstb_cfg.num_multipliers as usize,
+            stability_threshold: 1.0 + 1e-6,
+            detect_subharmonics: true,
+            eigenvalue_tolerance: 1e-10,
         })
     }
 
@@ -984,6 +1032,7 @@ impl SimulationController {
             13 => self.build_pac_spec(state),
             14 => self.build_pnoise_spec(state),
             15 => self.build_pxf_spec(state),
+            16 => self.build_pstb_spec(state),
             17 => self.build_tf_spec(state),
             18 => self.build_corner_sweep_spec(state),
             _ => Err(
@@ -1124,6 +1173,7 @@ impl SimulationController {
             AnalysisSpec::Pac => self.build_pac_command(state),
             AnalysisSpec::Pnoise => self.build_pnoise_command(state),
             AnalysisSpec::Pxf => self.build_pxf_command(state),
+            AnalysisSpec::Pstb => self.build_pstb_command(state),
             AnalysisSpec::Tf => self.build_tf_command(state),
             _ => self
                 .analysis_spec_to_config(state, spec)
@@ -1225,6 +1275,15 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid PXF settings: {}", e))?;
         Ok(AnalysisSpec::Pxf)
+    }
+
+    fn build_pstb_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
+        let mut pstb_state = state.dialogs.pstb_state.clone();
+        pstb_state.ensure_initialized();
+        pstb_state
+            .to_config()
+            .map_err(|e| format!("invalid PSTB settings: {}", e))?;
+        Ok(AnalysisSpec::Pstb)
     }
 
     fn build_tf_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
@@ -1351,6 +1410,15 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid PXF settings: {}", e))?;
         Ok(pxf_cfg.to_spice())
+    }
+
+    fn build_pstb_command(&self, state: &AppState) -> Result<String, String> {
+        let mut pstb_state = state.dialogs.pstb_state.clone();
+        pstb_state.ensure_initialized();
+        let pstb_cfg = pstb_state
+            .to_config()
+            .map_err(|e| format!("invalid PSTB settings: {}", e))?;
+        Ok(pstb_cfg.to_spice())
     }
 
     fn build_tf_command(&self, state: &AppState) -> Result<String, String> {
@@ -1538,6 +1606,7 @@ impl SimulationController {
             AnalysisRunType::Pac => AnalysisType::Ac,
             AnalysisRunType::Pnoise => AnalysisType::Noise,
             AnalysisRunType::Pxf => AnalysisType::Ac,
+            AnalysisRunType::Pstb => AnalysisType::Ac,
             AnalysisRunType::Stb => AnalysisType::Ac,
             AnalysisRunType::MonteCarlo => AnalysisType::MonteCarlo,
             AnalysisRunType::Parametric => AnalysisType::Parametric,
@@ -2653,15 +2722,15 @@ mod tests {
     }
 
     #[test]
-    fn test_build_analysis_plan_rejects_unsupported_analysis_tab() {
+    fn test_build_analysis_plan_rejects_unimplemented_analysis_tab() {
         let controller = SimulationController::new();
         let mut state = AppState::default();
-        state.dialogs.enabled_analyses.insert(16); // PSTB (not yet implemented)
+        state.dialogs.enabled_analyses.insert(19); // Envelope (not yet implemented in controller)
 
         let errors = controller
             .build_analysis_plan(&state)
             .expect_err("unsupported analysis should fail planning");
-        assert!(errors.iter().any(|e| e.contains("PSTB")));
+        assert!(errors.iter().any(|e| e.contains("Envelope")));
     }
 
     #[test]
@@ -3044,6 +3113,25 @@ mod tests {
     }
 
     #[test]
+    fn test_build_analysis_spec_for_pstb_accepts_valid_dialog_configuration() {
+        use crate::simulation::dialog::pstb::PstbConfig;
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.pstb_state = crate::simulation::dialog::pstb::PstbDialogState::from_config(
+            &PstbConfig::new("lprobe")
+                .with_harmonics(12)
+                .with_multipliers(6)
+                .with_annotate(false),
+        );
+
+        let spec = controller
+            .build_analysis_spec_for_index(&state, 16)
+            .expect("PSTB spec should build");
+        assert!(matches!(spec, AnalysisSpec::Pstb));
+    }
+
+    #[test]
     fn test_build_analysis_spec_for_tf_accepts_valid_dialog_configuration() {
         use crate::simulation::dialog::xf::{XfConfig, XfSweepType};
 
@@ -3216,6 +3304,45 @@ mod tests {
             pxf_cfg.sweep,
             crate::services::simulation_runner::PxfFrequencySweep::Decade
         ));
+    }
+
+    #[test]
+    fn test_build_queue_from_plan_stores_pstb_as_spec_executed_run() {
+        use crate::simulation::dialog::pss::PssConfig;
+        use crate::simulation::dialog::pstb::PstbConfig;
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses = [16usize].into_iter().collect();
+        state.dialogs.pss_state =
+            crate::simulation::dialog::pss::PssDialogState::from_config(&PssConfig::new(6e6));
+        state.dialogs.pstb_state = crate::simulation::dialog::pstb::PstbDialogState::from_config(
+            &PstbConfig::new("LPROBE")
+                .with_harmonics(12)
+                .with_multipliers(4),
+        );
+
+        let plan = controller
+            .build_analysis_plan(&state)
+            .expect("plan should build");
+        let queue = controller
+            .build_queue_from_plan(&state, &plan)
+            .expect("queue should build");
+
+        assert_eq!(queue.len(), 1);
+        assert!(matches!(queue[0].spec, AnalysisSpec::Pstb));
+        assert!(queue[0].config.is_none());
+        assert!(queue[0].analysis_line.starts_with(".pstb "));
+
+        let pstb_cfg = queue[0]
+            .spec_options
+            .pstb
+            .as_ref()
+            .expect("PSTB options should be present");
+        assert_eq!(pstb_cfg.probe_instance, "LPROBE");
+        assert_eq!(pstb_cfg.max_harmonics, 12);
+        assert_eq!(pstb_cfg.num_multipliers, 4);
+        assert!((pstb_cfg.pss_fundamental_freq - 6e6).abs() < 1e-6);
     }
 
     #[test]

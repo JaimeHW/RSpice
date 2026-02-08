@@ -1436,6 +1436,86 @@ impl RunExecutor {
                     Err(e) => Err(e),
                 }
             }
+            AnalysisSpec::Pstb => {
+                let pstb_result = simulation_runner::run_pstb_analysis(netlist);
+                match pstb_result {
+                    Ok(data) => Ok(MappedResult {
+                        analysis_type: MappedAnalysisType::Ac,
+                        status: ResultStatus::Success,
+                        waveforms: vec![
+                            MappedWaveform {
+                                name: "Floquet |lambda|".to_string(),
+                                x: data.mode_indices.clone(),
+                                y: data.multiplier_magnitude,
+                                x_label: "Mode Index".to_string(),
+                                y_label: "Multiplier Magnitude".to_string(),
+                                x_unit: "".to_string(),
+                                y_unit: "".to_string(),
+                                is_complex: false,
+                                y_imag: None,
+                            },
+                            MappedWaveform {
+                                name: "Stability Margin (dB)".to_string(),
+                                x: data.mode_indices.clone(),
+                                y: data.stability_margin_db,
+                                x_label: "Mode Index".to_string(),
+                                y_label: "Stability Margin".to_string(),
+                                x_unit: "".to_string(),
+                                y_unit: "dB".to_string(),
+                                is_complex: false,
+                                y_imag: None,
+                            },
+                            MappedWaveform {
+                                name: "Mode Damping (1/s)".to_string(),
+                                x: data.mode_indices,
+                                y: data.mode_damping,
+                                x_label: "Mode Index".to_string(),
+                                y_label: "Damping".to_string(),
+                                x_unit: "".to_string(),
+                                y_unit: "1/s".to_string(),
+                                is_complex: false,
+                                y_imag: None,
+                            },
+                        ],
+                        measurements: vec![
+                            MappedMeasurement {
+                                name: "dominant_multiplier".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.dominant_multiplier_magnitude,
+                                unit: "".to_string(),
+                                signal: "pstb".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                            MappedMeasurement {
+                                name: "min_stability_margin_db".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.min_stability_margin_db,
+                                unit: "dB".to_string(),
+                                signal: "pstb".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                            MappedMeasurement {
+                                name: "num_unstable".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.num_unstable as f64,
+                                unit: "count".to_string(),
+                                signal: "pstb".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                            MappedMeasurement {
+                                name: "is_stable".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: if data.is_stable { 1.0 } else { 0.0 },
+                                unit: "bool".to_string(),
+                                signal: "pstb".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                        ],
+                        ..Default::default()
+                    }),
+                    Err(e) => Err(e),
+                }
+            }
         }
     }
 
@@ -1461,6 +1541,7 @@ impl RunExecutor {
             AnalysisRunType::Pac => MappedAnalysisType::Pac,
             AnalysisRunType::Pnoise => MappedAnalysisType::Pnoise,
             AnalysisRunType::Pxf => MappedAnalysisType::Ac,
+            AnalysisRunType::Pstb => MappedAnalysisType::Ac,
             AnalysisRunType::Stb => MappedAnalysisType::Ac,
             AnalysisRunType::MonteCarlo => MappedAnalysisType::MonteCarlo,
             AnalysisRunType::Parametric => MappedAnalysisType::Parametric,
@@ -2197,7 +2278,10 @@ mod tests {
             .expect("expected mapped PXF result");
         assert_eq!(mapped.analysis_type, MappedAnalysisType::Ac);
         assert!(
-            mapped.waveforms.iter().any(|wf| wf.name.starts_with("H(sb")),
+            mapped
+                .waveforms
+                .iter()
+                .any(|wf| wf.name.starts_with("H(sb")),
             "expected transfer waveform in mapped PXF result"
         );
         assert!(
@@ -2270,5 +2354,41 @@ mod tests {
             .iter()
             .any(|wf| wf.name == "Loop Phase (deg)"));
         assert!(mapped.measurements.iter().any(|m| m.name == "phase_margin"));
+    }
+
+    #[test]
+    fn test_pstb_analysis_with_spec_is_executed() {
+        let executor = RunExecutor::new();
+        let mut queue =
+            RunQueue::new().with_netlist("* pstb\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n");
+        queue.add_analysis(AnalysisSpec::Pstb);
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.total_runs, 1);
+        assert!(
+            result.errors.is_empty(),
+            "expected PSTB run to succeed, got errors: {:?}",
+            result.errors
+        );
+
+        let mapped = result
+            .results
+            .values()
+            .next()
+            .expect("expected mapped PSTB result");
+        assert_eq!(mapped.analysis_type, MappedAnalysisType::Ac);
+        assert_eq!(mapped.waveforms.len(), 3);
+        assert!(mapped
+            .waveforms
+            .iter()
+            .any(|wf| wf.name == "Floquet |lambda|"));
+        assert!(mapped
+            .waveforms
+            .iter()
+            .any(|wf| wf.name == "Stability Margin (dB)"));
+        assert!(mapped
+            .measurements
+            .iter()
+            .any(|m| m.name == "dominant_multiplier"));
     }
 }

@@ -26,6 +26,7 @@ pub struct SpecExecutionOptions {
     pub pxf: Option<crate::services::simulation_runner::PxfRunConfig>,
     pub tf: Option<crate::services::simulation_runner::TfRunConfig>,
     pub pnoise: Option<crate::services::simulation_runner::PnoiseRunConfig>,
+    pub pstb: Option<crate::services::simulation_runner::PstbRunConfig>,
 }
 
 //=============================================================================
@@ -357,6 +358,19 @@ fn run_simulation_thread(
                     freq: *start_freq,
                     stop_freq: *stop_freq,
                 }),
+                AnalysisSpec::Pstb => {
+                    if let Some(pstb) = &options.pstb {
+                        p.update_status(SimulationStatus::AcAnalysis {
+                            freq: pstb.pss_fundamental_freq,
+                            stop_freq: pstb.pss_fundamental_freq,
+                        });
+                    } else {
+                        p.update_status(SimulationStatus::AcAnalysis {
+                            freq: 1.0,
+                            stop_freq: 1.0,
+                        });
+                    }
+                }
                 AnalysisSpec::MonteCarlo => p.update_status(SimulationStatus::PostProcessing),
                 AnalysisSpec::Parametric => p.update_status(SimulationStatus::DcSweep {
                     source: "STEP".to_string(),
@@ -796,6 +810,58 @@ fn run_spec_request(
                 waveforms,
             })
         }
+        AnalysisSpec::Pstb => {
+            let pstb_cfg = options.pstb.ok_or_else(|| {
+                SimulationError::InvalidConfig(
+                    "PSTB analysis requires explicit PSTB execution options".to_string(),
+                )
+            })?;
+            let data = svc_runner::run_pstb_analysis_with_config(netlist, &pstb_cfg)
+                .map_err(SimulationError::InvalidConfig)?;
+
+            let mut waveforms = std::collections::HashMap::new();
+            waveforms.insert(
+                "Floquet |lambda|".to_string(),
+                WaveformData {
+                    name: "Floquet |lambda|".to_string(),
+                    x_values: data.mode_indices.clone(),
+                    y_values: data.multiplier_magnitude,
+                    y_unit: "".to_string(),
+                    x_unit: "mode".to_string(),
+                    is_complex: false,
+                    y_imag: None,
+                },
+            );
+            waveforms.insert(
+                "Stability Margin (dB)".to_string(),
+                WaveformData {
+                    name: "Stability Margin (dB)".to_string(),
+                    x_values: data.mode_indices.clone(),
+                    y_values: data.stability_margin_db,
+                    y_unit: "dB".to_string(),
+                    x_unit: "mode".to_string(),
+                    is_complex: false,
+                    y_imag: None,
+                },
+            );
+            waveforms.insert(
+                "Mode Damping (1/s)".to_string(),
+                WaveformData {
+                    name: "Mode Damping (1/s)".to_string(),
+                    x_values: data.mode_indices.clone(),
+                    y_values: data.mode_damping,
+                    y_unit: "1/s".to_string(),
+                    x_unit: "mode".to_string(),
+                    is_complex: false,
+                    y_imag: None,
+                },
+            );
+
+            Ok(SimulationResult::Ac {
+                frequencies: data.mode_indices,
+                waveforms,
+            })
+        }
         unsupported => Err(SimulationError::InvalidConfig(format!(
             "{:?} is not supported by SimulationRunner::start_spec",
             unsupported.run_type()
@@ -1115,6 +1181,7 @@ C1 out 0 1n
             pxf: None,
             tf: None,
             pnoise: None,
+            pstb: None,
         };
 
         runner
@@ -1212,6 +1279,7 @@ R2 out 0 1k
             pxf: None,
             tf: None,
             pnoise: None,
+            pstb: None,
         };
 
         runner
@@ -1275,6 +1343,7 @@ C1 out 0 1n
             pxf: None,
             tf: None,
             pnoise: None,
+            pstb: None,
         };
 
         runner
@@ -1427,6 +1496,7 @@ C1 out 0 1n
             pxf: None,
             tf: None,
             pnoise: None,
+            pstb: None,
         };
 
         runner
@@ -1496,6 +1566,7 @@ C1 out 0 1n
             }),
             tf: None,
             pnoise: None,
+            pstb: None,
         };
 
         runner
@@ -1548,11 +1619,9 @@ C1 out 0 1n
             .expect("Expected PXF completion result")
             .expect_err("PXF without options should fail");
         assert!(matches!(result, SimulationError::InvalidConfig(_)));
-        assert!(
-            result
-                .to_string()
-                .contains("requires explicit PXF execution options")
-        );
+        assert!(result
+            .to_string()
+            .contains("requires explicit PXF execution options"));
     }
 
     #[test]
@@ -1585,6 +1654,7 @@ C1 out 0 1n
                 output_impedance: true,
             }),
             pnoise: None,
+            pstb: None,
         };
 
         runner
@@ -1659,6 +1729,7 @@ C1 out 0 1n
                 reltol: 1e-3,
                 abstol: 1e-18,
             }),
+            pstb: None,
         };
 
         runner
@@ -1738,5 +1809,94 @@ C1 out 0 1n
             }
             other => panic!("Expected AC result for STB, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_runner_start_spec_pstb_with_options() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* PSTB smoke test
+V1 in 0 DC 1
+R1 in out 1k
+C1 out 0 1n
+.end
+"#
+        .to_string();
+
+        let options = SpecExecutionOptions {
+            temp: None,
+            corner: None,
+            pac: None,
+            pxf: None,
+            tf: None,
+            pnoise: None,
+            pstb: Some(crate::services::simulation_runner::PstbRunConfig {
+                pss_fundamental_freq: 1e6,
+                pss_num_harmonics: 8,
+                pss_tolerance: 1e-4,
+                probe_instance: "LPROBE".to_string(),
+                max_harmonics: 8,
+                num_multipliers: 4,
+                stability_threshold: 1.0 + 1e-6,
+                detect_subharmonics: true,
+                eigenvalue_tolerance: 1e-10,
+            }),
+        };
+
+        runner
+            .start_spec_with_options(AnalysisSpec::Pstb, netlist, options)
+            .expect("PSTB spec should start");
+        thread::sleep(std::time::Duration::from_millis(250));
+
+        let result = runner.poll_result();
+        assert!(result.is_some(), "Expected PSTB result");
+        let result = result.unwrap().expect("PSTB should succeed");
+        match result {
+            SimulationResult::Ac {
+                frequencies,
+                waveforms,
+            } => {
+                assert!(!frequencies.is_empty());
+                assert!(waveforms.contains_key("Floquet |lambda|"));
+                assert!(waveforms.contains_key("Stability Margin (dB)"));
+                assert!(waveforms.contains_key("Mode Damping (1/s)"));
+                assert_eq!(
+                    waveforms
+                        .get("Floquet |lambda|")
+                        .expect("Floquet waveform should exist")
+                        .x_values
+                        .len(),
+                    frequencies.len()
+                );
+            }
+            other => panic!("Expected AC result for PSTB, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_pstb_requires_options() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* PSTB missing options
+V1 in 0 DC 1
+R1 in out 1k
+C1 out 0 1n
+.end
+"#
+        .to_string();
+
+        runner
+            .start_spec(AnalysisSpec::Pstb, netlist)
+            .expect("PSTB launch without options should still start thread");
+        thread::sleep(std::time::Duration::from_millis(250));
+
+        let result = runner
+            .poll_result()
+            .expect("Expected PSTB completion result")
+            .expect_err("PSTB without options should fail");
+        assert!(matches!(result, SimulationError::InvalidConfig(_)));
+        assert!(result
+            .to_string()
+            .contains("requires explicit PSTB execution options"));
     }
 }
