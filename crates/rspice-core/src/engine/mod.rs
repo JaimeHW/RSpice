@@ -98,6 +98,13 @@ pub struct ConvergenceConfig {
     pub gmin_initial: Value,
     /// Target GMIN value (typically 1e-15)
     pub gmin_target: Value,
+    /// Relative voltage tolerance for Newton voltage convergence checks.
+    pub voltage_reltol: Value,
+    /// Absolute voltage tolerance for Newton voltage convergence checks.
+    ///
+    /// A non-positive value keeps legacy behavior and falls back to
+    /// `SimulationConfig::tolerance`.
+    pub voltage_abstol: Value,
     /// Verbose convergence logging
     pub verbose: bool,
 }
@@ -128,6 +135,8 @@ impl Default for ConvergenceConfig {
             damping_strategy: DampingStrategy::VoltageLimiting,
             gmin_initial: 1e-12,
             gmin_target: 1e-15,
+            voltage_reltol: 1e-3,
+            voltage_abstol: 0.0,
             verbose: false,
         }
     }
@@ -168,6 +177,13 @@ impl ConvergenceConfig {
     /// Set damping strategy
     pub fn with_damping(mut self, strategy: DampingStrategy) -> Self {
         self.damping_strategy = strategy;
+        self
+    }
+
+    /// Set Newton voltage convergence tolerances.
+    pub fn with_voltage_tolerances(mut self, reltol: Value, abstol: Value) -> Self {
+        self.voltage_reltol = reltol;
+        self.voltage_abstol = abstol;
         self
     }
 }

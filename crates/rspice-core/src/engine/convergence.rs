@@ -46,6 +46,45 @@ impl Engine {
         self.nonlinear_iteration_budget(multiplier).max(minimum)
     }
 
+    #[inline]
+    fn sanitize_positive_tolerance(value: Value, fallback: Value) -> Value {
+        if value.is_finite() && value > 0.0 {
+            value
+        } else {
+            fallback
+        }
+    }
+
+    #[inline]
+    fn voltage_reltol(&self) -> Value {
+        Self::sanitize_positive_tolerance(self.config.convergence_config.voltage_reltol, 1e-3)
+    }
+
+    #[inline]
+    fn voltage_abstol(&self) -> Value {
+        let configured = self.config.convergence_config.voltage_abstol;
+        if configured.is_finite() && configured > 0.0 {
+            configured
+        } else {
+            Self::sanitize_positive_tolerance(self.config.tolerance, 1e-6)
+        }
+    }
+
+    #[inline]
+    pub(crate) fn device_convergence_tolerance(&self) -> Value {
+        self.voltage_abstol()
+    }
+
+    #[inline]
+    fn voltage_convergence_met(&self, old: &[Value], new: &[Value]) -> bool {
+        Self::check_voltage_convergence_with_tolerances(
+            old,
+            new,
+            self.voltage_abstol(),
+            self.voltage_reltol(),
+        )
+    }
+
     fn build_descending_schedule(mut start: Value, mut end: Value) -> Vec<Value> {
         if !start.is_finite() || start <= 0.0 {
             start = 1e-3;
@@ -378,12 +417,12 @@ impl Engine {
                 });
             Self::clamp_solution_to_physical_bounds(&mut new_solution);
 
-            let voltage_converged =
-                Self::check_voltage_convergence(&solution, &new_solution, self.config.tolerance);
+            let voltage_converged = self.voltage_convergence_met(&solution, &new_solution);
             circuit.update_nonlinear(&new_solution);
             solution = new_solution;
 
-            if voltage_converged && circuit.nonlinear_converged(self.config.tolerance) {
+            if voltage_converged && circuit.nonlinear_converged(self.device_convergence_tolerance())
+            {
                 return (solution, true, used_iterations);
             }
         }
@@ -453,8 +492,8 @@ impl Engine {
             return false;
         };
 
-        Self::check_voltage_convergence(solution, &next_solution, self.config.tolerance)
-            && circuit.nonlinear_converged(self.config.tolerance)
+        self.voltage_convergence_met(solution, &next_solution)
+            && circuit.nonlinear_converged(self.device_convergence_tolerance())
     }
 
     /// Try solving with a specific GMIN value
@@ -843,11 +882,10 @@ impl Engine {
                 }
             }
             // Check convergence (both voltage change and device convergence)
-            let voltage_converged =
-                Self::check_voltage_convergence(&solution, &new_solution, self.config.tolerance);
+            let voltage_converged = self.voltage_convergence_met(&solution, &new_solution);
             // Device convergence must be checked at the candidate iterate, not the prior iterate.
             circuit.update_nonlinear(&new_solution);
-            let device_converged = circuit.nonlinear_converged(self.config.tolerance);
+            let device_converged = circuit.nonlinear_converged(self.device_convergence_tolerance());
             solution = new_solution;
             if voltage_converged && device_converged {
                 if hit_voltage_limit {
@@ -983,23 +1021,41 @@ impl Engine {
         Err(SimulationError::ConvergenceFailed(dc_max_iterations))
     }
 
-    /// Check if voltage solution has converged
+    /// Check if voltage solution has converged using legacy signature.
+    ///
+    /// Uses `tolerance` as an absolute voltage tolerance with default SPICE-like
+    /// relative tolerance of 1e-3.
     pub(crate) fn check_voltage_convergence(
         old: &[Value],
         new: &[Value],
         tolerance: Value,
     ) -> bool {
+        Self::check_voltage_convergence_with_tolerances(old, new, tolerance, 1e-3)
+    }
+
+    /// Check voltage convergence using explicit absolute and relative tolerances.
+    ///
+    /// Criterion: `|ΔV| <= VABSTOL + RELTOL * max(|Vnew|, |Vold|)`
+    pub(crate) fn check_voltage_convergence_with_tolerances(
+        old: &[Value],
+        new: &[Value],
+        voltage_abstol: Value,
+        voltage_reltol: Value,
+    ) -> bool {
         if old.len() != new.len() {
             return false;
         }
+        let abstol = Self::sanitize_positive_tolerance(voltage_abstol, 1e-12);
+        let reltol = Self::sanitize_positive_tolerance(voltage_reltol, 1e-3);
+
         for (&v_old, &v_new) in old.iter().zip(new.iter()) {
-            let abs_diff = (v_new - v_old).abs();
-            let rel_diff = if v_new.abs() > tolerance {
-                abs_diff / v_new.abs()
-            } else {
-                0.0
-            };
-            if abs_diff > tolerance && rel_diff > 1e-3 {
+            if !v_old.is_finite() || !v_new.is_finite() {
+                return false;
+            }
+
+            let delta = (v_new - v_old).abs();
+            let limit = abstol + reltol * v_new.abs().max(v_old.abs());
+            if delta > limit {
                 return false;
             }
         }
@@ -1081,14 +1137,12 @@ impl Engine {
                         );
                         Self::clamp_solution_to_physical_bounds(&mut new_solution);
 
-                        let converged = Self::check_voltage_convergence(
-                            &solution,
-                            &new_solution,
-                            self.config.tolerance,
-                        );
+                        let converged = self.voltage_convergence_met(&solution, &new_solution);
                         circuit.update_nonlinear(&new_solution);
                         solution = new_solution;
-                        if converged && circuit.nonlinear_converged(self.config.tolerance) {
+                        if converged
+                            && circuit.nonlinear_converged(self.device_convergence_tolerance())
+                        {
                             break;
                         }
                     }
@@ -1167,15 +1221,11 @@ impl Engine {
                 );
                 Self::clamp_solution_to_physical_bounds(&mut new_solution);
 
-                let converged = Self::check_voltage_convergence(
-                    &solution,
-                    &new_solution,
-                    self.config.tolerance,
-                );
+                let converged = self.voltage_convergence_met(&solution, &new_solution);
                 circuit.update_nonlinear(&new_solution);
                 solution = new_solution;
 
-                if converged && circuit.nonlinear_converged(self.config.tolerance) {
+                if converged && circuit.nonlinear_converged(self.device_convergence_tolerance()) {
                     stage_converged = true;
                     break;
                 }
@@ -1337,14 +1387,12 @@ impl Engine {
                         );
                         Self::clamp_solution_to_physical_bounds(&mut new_solution);
 
-                        let converged = Self::check_voltage_convergence(
-                            &solution,
-                            &new_solution,
-                            self.config.tolerance,
-                        );
+                        let converged = self.voltage_convergence_met(&solution, &new_solution);
                         circuit.update_nonlinear(&new_solution);
                         solution = new_solution;
-                        if converged && circuit.nonlinear_converged(self.config.tolerance) {
+                        if converged
+                            && circuit.nonlinear_converged(self.device_convergence_tolerance())
+                        {
                             break;
                         }
                     }
@@ -1502,6 +1550,54 @@ mod tests {
         let a = vec![5.0, -5.0, 0.0];
         let b = vec![5.0, -5.0, 0.0];
         assert!(Engine::check_voltage_convergence(&a, &b, 1e-9));
+    }
+
+    #[test]
+    fn test_voltage_convergence_with_explicit_tolerances_uses_spice_rule() {
+        let old = vec![1000.0, 1e-8];
+        let new = vec![1000.8, 2e-8];
+
+        assert!(Engine::check_voltage_convergence_with_tolerances(
+            &old, &new, 1e-6, 1e-3
+        ));
+        assert!(!Engine::check_voltage_convergence_with_tolerances(
+            &old, &new, 1e-6, 1e-5
+        ));
+    }
+
+    #[test]
+    fn test_voltage_convergence_with_explicit_tolerances_rejects_non_finite() {
+        let old = vec![0.0, 1.0];
+        let new_nan = vec![0.0, f64::NAN];
+        let new_inf = vec![0.0, f64::INFINITY];
+        assert!(!Engine::check_voltage_convergence_with_tolerances(
+            &old, &new_nan, 1e-6, 1e-3
+        ));
+        assert!(!Engine::check_voltage_convergence_with_tolerances(
+            &old, &new_inf, 1e-6, 1e-3
+        ));
+    }
+
+    #[test]
+    fn test_engine_voltage_tolerance_falls_back_to_legacy_tolerance() {
+        let mut config = crate::engine::SimulationConfig::default();
+        config.tolerance = 2e-5;
+        config.convergence_config.voltage_abstol = 0.0;
+        config.convergence_config.voltage_reltol = 1e-3;
+        let engine = Engine::new(config);
+
+        let old = vec![1.0];
+        let new = vec![1.0 + 1.5e-5];
+        assert!(engine.voltage_convergence_met(&old, &new));
+    }
+
+    #[test]
+    fn test_device_convergence_tolerance_uses_configured_voltage_abstol() {
+        let mut config = crate::engine::SimulationConfig::default();
+        config.tolerance = 1e-3;
+        config.convergence_config.voltage_abstol = 7e-7;
+        let engine = Engine::new(config);
+        assert!((engine.device_convergence_tolerance() - 7e-7).abs() < 1e-18);
     }
 
     /// Test that configured GMIN schedule is in decreasing order.
