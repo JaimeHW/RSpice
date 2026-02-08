@@ -195,6 +195,26 @@ impl DcSweepConfig {
             errors.push("Step direction must match sweep direction".to_string());
         }
 
+        match (&self.source2, self.start2, self.stop2, self.step2) {
+            (None, None, None, None) => {}
+            (Some(source2), Some(start2), Some(stop2), Some(step2)) => {
+                if source2.trim().is_empty() {
+                    errors.push("Secondary source name is required".to_string());
+                }
+                if source2.eq_ignore_ascii_case(&self.source) {
+                    errors.push("Secondary source must differ from primary source".to_string());
+                }
+                if step2 == 0.0 {
+                    errors.push("Secondary step size cannot be zero".to_string());
+                }
+                if (stop2 - start2).signum() != step2.signum() {
+                    errors.push("Secondary step direction must match sweep direction".to_string());
+                }
+            }
+            _ => errors
+                .push("Secondary sweep requires source2/start2/stop2/step2 values".to_string()),
+        }
+
         if errors.is_empty() {
             Ok(())
         } else {
@@ -877,6 +897,31 @@ mod tests {
             ..Default::default()
         };
         assert!(bad.validate().is_err());
+    }
+
+    #[test]
+    fn test_dc_sweep_validate_rejects_partial_secondary_config() {
+        let cfg = DcSweepConfig {
+            source2: Some("Vbias".to_string()),
+            start2: Some(0.0),
+            stop2: Some(1.0),
+            step2: None,
+            ..Default::default()
+        };
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_dc_sweep_validate_rejects_duplicate_secondary_source() {
+        let cfg = DcSweepConfig {
+            source: "Vin".to_string(),
+            source2: Some("vin".to_string()),
+            start2: Some(0.0),
+            stop2: Some(1.0),
+            step2: Some(0.1),
+            ..Default::default()
+        };
+        assert!(cfg.validate().is_err());
     }
 
     #[test]

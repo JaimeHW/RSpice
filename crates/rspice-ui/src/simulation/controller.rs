@@ -683,12 +683,32 @@ impl SimulationController {
                 sweep: Self::map_frequency_sweep(state.dialogs.ac_sweep_type),
             }),
             3 => {
-                if state.dialogs.dc_nested {
-                    return Err(
-                        "nested DC sweep is not supported by the current simulation engine"
-                            .to_string(),
-                    );
-                }
+                let (source2, start2, stop2, step2) = if state.dialogs.dc_nested {
+                    let source2 = state.dialogs.dc_source2.trim();
+                    if source2.is_empty() {
+                        return Err(
+                            "nested DC sweep requires a non-empty secondary sweep source"
+                                .to_string(),
+                        );
+                    }
+                    (
+                        Some(source2.to_string()),
+                        Some(
+                            parse_spice_value_checked(&state.dialogs.dc_start2)
+                                .map_err(|e| format!("invalid secondary start value: {}", e))?,
+                        ),
+                        Some(
+                            parse_spice_value_checked(&state.dialogs.dc_stop2)
+                                .map_err(|e| format!("invalid secondary stop value: {}", e))?,
+                        ),
+                        Some(
+                            parse_spice_value_checked(&state.dialogs.dc_step2)
+                                .map_err(|e| format!("invalid secondary step value: {}", e))?,
+                        ),
+                    )
+                } else {
+                    (None, None, None, None)
+                };
                 Ok(AnalysisSpec::DcSweep {
                     source_name: state.dialogs.dc_source.trim().to_string(),
                     start: parse_spice_value_checked(&state.dialogs.dc_start)
@@ -697,6 +717,10 @@ impl SimulationController {
                         .map_err(|e| format!("invalid stop value: {}", e))?,
                     step: parse_spice_value_checked(&state.dialogs.dc_step)
                         .map_err(|e| format!("invalid step value: {}", e))?,
+                    source2,
+                    start2,
+                    stop2,
+                    step2,
                 })
             }
             4 => Ok(AnalysisSpec::Noise {
@@ -734,15 +758,19 @@ impl SimulationController {
                 start,
                 stop,
                 step,
+                source2,
+                start2,
+                stop2,
+                step2,
             } => Ok(AnalysisConfig::DcSweep(DcSweepConfig {
                 source: source_name.clone(),
                 start: *start,
                 stop: *stop,
                 step: *step,
-                source2: None,
-                start2: None,
-                stop2: None,
-                step2: None,
+                source2: source2.clone(),
+                start2: *start2,
+                stop2: *stop2,
+                step2: *step2,
             })),
             AnalysisSpec::Ac {
                 start_freq,
@@ -2268,7 +2296,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_analysis_plan_rejects_nested_dc_sweep() {
+    fn test_build_analysis_plan_accepts_nested_dc_sweep() {
         let controller = SimulationController::new();
         let mut state = AppState::default();
         state.dialogs.enabled_analyses.insert(3);
@@ -2277,11 +2305,87 @@ mod tests {
         state.dialogs.dc_start = "0".to_string();
         state.dialogs.dc_stop = "1".to_string();
         state.dialogs.dc_step = "0.1".to_string();
+        state.dialogs.dc_source2 = "V2".to_string();
+        state.dialogs.dc_start2 = "0".to_string();
+        state.dialogs.dc_stop2 = "2".to_string();
+        state.dialogs.dc_step2 = "0.5".to_string();
+
+        let plan = controller
+            .build_analysis_plan(&state)
+            .expect("nested sweep should build a valid plan");
+        assert_eq!(plan.analyses.len(), 1);
+        match &plan.analyses[0] {
+            AnalysisSpec::DcSweep {
+                source_name,
+                source2,
+                start2,
+                stop2,
+                step2,
+                ..
+            } => {
+                assert_eq!(source_name, "V1");
+                assert_eq!(source2.as_deref(), Some("V2"));
+                assert_eq!(*start2, Some(0.0));
+                assert_eq!(*stop2, Some(2.0));
+                assert_eq!(*step2, Some(0.5));
+            }
+            other => panic!("expected DC sweep spec, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_analysis_plan_rejects_nested_dc_without_secondary_source() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses.insert(3);
+        state.dialogs.dc_nested = true;
+        state.dialogs.dc_source = "V1".to_string();
+        state.dialogs.dc_start = "0".to_string();
+        state.dialogs.dc_stop = "1".to_string();
+        state.dialogs.dc_step = "0.1".to_string();
+        state.dialogs.dc_source2.clear();
+        state.dialogs.dc_start2 = "0".to_string();
+        state.dialogs.dc_stop2 = "2".to_string();
+        state.dialogs.dc_step2 = "0.5".to_string();
 
         let errors = controller
             .build_analysis_plan(&state)
-            .expect_err("nested sweep should fail until implemented");
-        assert!(errors.iter().any(|e| e.contains("nested DC sweep")));
+            .expect_err("nested sweep with missing source2 should fail");
+        assert!(errors.iter().any(|e| e.contains("secondary sweep source")));
+    }
+
+    #[test]
+    fn test_build_queue_from_plan_maps_nested_dc_config() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses.insert(3);
+        state.dialogs.dc_nested = true;
+        state.dialogs.dc_source = "V1".to_string();
+        state.dialogs.dc_start = "0".to_string();
+        state.dialogs.dc_stop = "1".to_string();
+        state.dialogs.dc_step = "0.1".to_string();
+        state.dialogs.dc_source2 = "V2".to_string();
+        state.dialogs.dc_start2 = "0".to_string();
+        state.dialogs.dc_stop2 = "2".to_string();
+        state.dialogs.dc_step2 = "0.5".to_string();
+
+        let plan = controller
+            .build_analysis_plan(&state)
+            .expect("plan should build");
+        let queue = controller
+            .build_queue_from_plan(&state, &plan)
+            .expect("queue should build");
+        assert_eq!(queue.len(), 1);
+        match &queue[0].config {
+            Some(AnalysisConfig::DcSweep(dc)) => {
+                assert_eq!(dc.source, "V1");
+                assert_eq!(dc.source2.as_deref(), Some("V2"));
+                assert_eq!(dc.start2, Some(0.0));
+                assert_eq!(dc.stop2, Some(2.0));
+                assert_eq!(dc.step2, Some(0.5));
+            }
+            other => panic!("expected nested DC config, got {:?}", other),
+        }
     }
 
     #[test]
@@ -2855,8 +2959,8 @@ mod tests {
 
     #[test]
     fn test_convert_dc_op_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::DcOpResult as EngineDcOpResult;
+        use crate::simulation::SimulationResult;
 
         let controller = SimulationController::new();
         let config = AnalysisConfig::DcOp;
@@ -2888,8 +2992,8 @@ mod tests {
 
     #[test]
     fn test_convert_transient_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::WaveformData as EngineWaveformData;
+        use crate::simulation::SimulationResult;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -2926,8 +3030,8 @@ mod tests {
 
     #[test]
     fn test_convert_ac_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::WaveformData as EngineWaveformData;
+        use crate::simulation::SimulationResult;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -2962,8 +3066,8 @@ mod tests {
 
     #[test]
     fn test_convert_dc_sweep_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::WaveformData as EngineWaveformData;
+        use crate::simulation::SimulationResult;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -3003,8 +3107,8 @@ mod tests {
 
     #[test]
     fn test_convert_pole_zero_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::config::{PoleZeroConfig, PzAnalysisType};
+        use crate::simulation::SimulationResult;
 
         let controller = SimulationController::new();
         let config = AnalysisConfig::PoleZero(PoleZeroConfig {
@@ -3029,8 +3133,8 @@ mod tests {
 
     #[test]
     fn test_convert_monte_carlo_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::MonteCarloVariableResult;
+        use crate::simulation::SimulationResult;
 
         let controller = SimulationController::new();
         let sim_result = SimulationResult::MonteCarlo {
@@ -3064,8 +3168,8 @@ mod tests {
 
     #[test]
     fn test_convert_parametric_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::WaveformData as EngineWaveformData;
+        use crate::simulation::SimulationResult;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -3101,8 +3205,8 @@ mod tests {
 
     #[test]
     fn test_convert_corner_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::WaveformData as EngineWaveformData;
+        use crate::simulation::SimulationResult;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();

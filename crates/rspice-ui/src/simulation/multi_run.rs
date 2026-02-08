@@ -153,6 +153,10 @@ pub enum AnalysisSpec {
         start: f64,
         stop: f64,
         step: f64,
+        source2: Option<String>,
+        start2: Option<f64>,
+        stop2: Option<f64>,
+        step2: Option<f64>,
     },
     /// AC analysis
     Ac {
@@ -244,6 +248,10 @@ impl AnalysisSpec {
                 start,
                 stop,
                 step,
+                source2,
+                start2,
+                stop2,
+                step2,
             } => {
                 if source_name.trim().is_empty() {
                     return Err("DC sweep source_name is required".to_string());
@@ -253,6 +261,34 @@ impl AnalysisSpec {
                 }
                 if (stop - start).signum() != step.signum() {
                     return Err("DC sweep step direction must match start/stop".to_string());
+                }
+
+                match (source2, start2, stop2, step2) {
+                    (None, None, None, None) => {}
+                    (Some(source2), Some(start2), Some(stop2), Some(step2)) => {
+                        if source2.trim().is_empty() {
+                            return Err("DC sweep secondary source2 is required".to_string());
+                        }
+                        if source2.eq_ignore_ascii_case(source_name) {
+                            return Err("DC sweep secondary source2 must differ from source_name"
+                                .to_string());
+                        }
+                        if *step2 == 0.0 {
+                            return Err("DC sweep secondary step2 cannot be zero".to_string());
+                        }
+                        if (stop2 - start2).signum() != step2.signum() {
+                            return Err(
+                                "DC sweep secondary step direction must match start2/stop2"
+                                    .to_string(),
+                            );
+                        }
+                    }
+                    _ => {
+                        return Err(
+                            "DC sweep secondary sweep requires source2/start2/stop2/step2"
+                                .to_string(),
+                        );
+                    }
                 }
                 Ok(())
             }
@@ -1060,6 +1096,36 @@ mod tests {
         assert!(invalid_type.validate().is_err());
     }
 
+    #[test]
+    fn test_analysis_spec_dc_sweep_nested_validation() {
+        let valid = AnalysisSpec::DcSweep {
+            source_name: "V1".to_string(),
+            start: 0.0,
+            stop: 1.0,
+            step: 0.1,
+            source2: Some("V2".to_string()),
+            start2: Some(0.0),
+            stop2: Some(2.0),
+            step2: Some(0.5),
+        };
+        assert!(valid.validate().is_ok());
+    }
+
+    #[test]
+    fn test_analysis_spec_dc_sweep_nested_requires_complete_secondary_fields() {
+        let invalid = AnalysisSpec::DcSweep {
+            source_name: "V1".to_string(),
+            start: 0.0,
+            stop: 1.0,
+            step: 0.1,
+            source2: Some("V2".to_string()),
+            start2: Some(0.0),
+            stop2: Some(2.0),
+            step2: None,
+        };
+        assert!(invalid.validate().is_err());
+    }
+
     // =========================================================================
     // AnalysisRun Tests
     // =========================================================================
@@ -1155,6 +1221,10 @@ mod tests {
             start: 0.0,
             stop: 1.0,
             step: 0.1,
+            source2: None,
+            start2: None,
+            stop2: None,
+            step2: None,
         });
 
         let run = queue.get(id).expect("run should exist");
