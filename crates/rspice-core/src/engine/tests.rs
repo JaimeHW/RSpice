@@ -2612,6 +2612,7 @@ Rload 2 0 50
         assert!(config.voltage_reltol > 0.0);
         assert_eq!(config.voltage_abstol, 0.0);
         assert!(config.current_abstol > 0.0);
+        assert!(config.residual_reltol > 0.0);
         assert!(!config.verbose);
     }
 
@@ -2676,6 +2677,14 @@ Rload 2 0 50
 
         let config = ConvergenceConfig::default().with_current_tolerance(8e-13);
         assert!((config.current_abstol - 8e-13).abs() < 1e-24);
+    }
+
+    #[test]
+    fn test_convergence_config_with_residual_reltol() {
+        use crate::engine::ConvergenceConfig;
+
+        let config = ConvergenceConfig::default().with_residual_reltol(2e-4);
+        assert!((config.residual_reltol - 2e-4).abs() < 1e-18);
     }
 
     #[test]

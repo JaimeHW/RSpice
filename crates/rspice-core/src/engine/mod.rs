@@ -110,6 +110,11 @@ pub struct ConvergenceConfig {
     /// This is used when normalizing `A*x-b` residuals in Newton acceptance.
     /// A non-positive value falls back to a conservative 1e-12 default.
     pub current_abstol: Value,
+    /// Relative tolerance for equation residual convergence checks.
+    ///
+    /// This controls normalized `A*x-b` acceptance independently from
+    /// voltage-step convergence (`voltage_reltol`).
+    pub residual_reltol: Value,
     /// Verbose convergence logging
     pub verbose: bool,
 }
@@ -143,6 +148,7 @@ impl Default for ConvergenceConfig {
             voltage_reltol: 1e-3,
             voltage_abstol: 0.0,
             current_abstol: 1e-12,
+            residual_reltol: 1e-3,
             verbose: false,
         }
     }
@@ -196,6 +202,12 @@ impl ConvergenceConfig {
     /// Set absolute current tolerance used for residual convergence checks.
     pub fn with_current_tolerance(mut self, abstol: Value) -> Self {
         self.current_abstol = abstol;
+        self
+    }
+
+    /// Set relative residual tolerance used for equation residual checks.
+    pub fn with_residual_reltol(mut self, reltol: Value) -> Self {
+        self.residual_reltol = reltol;
         self
     }
 }

@@ -76,6 +76,16 @@ impl Engine {
     }
 
     #[inline]
+    pub(crate) fn residual_reltol(&self) -> Value {
+        let configured = self.config.convergence_config.residual_reltol;
+        if configured.is_finite() && configured > 0.0 {
+            configured
+        } else {
+            self.voltage_reltol()
+        }
+    }
+
+    #[inline]
     pub(crate) fn device_convergence_tolerance(&self) -> Value {
         self.voltage_abstol()
     }
@@ -101,7 +111,7 @@ impl Engine {
             solution,
             rhs,
             self.current_abstol(),
-            self.voltage_reltol(),
+            self.residual_reltol(),
         ) {
             Ok(norm) => norm.is_finite() && norm <= 1.0,
             Err(_) => false,
@@ -1779,6 +1789,23 @@ mod tests {
     }
 
     #[test]
+    fn test_residual_reltol_uses_configured_residual_tolerance() {
+        let mut config = crate::engine::SimulationConfig::default();
+        config.convergence_config.residual_reltol = 6e-4;
+        let engine = Engine::new(config);
+        assert!((engine.residual_reltol() - 6e-4).abs() < 1e-18);
+    }
+
+    #[test]
+    fn test_residual_reltol_falls_back_to_voltage_reltol_when_invalid() {
+        let mut config = crate::engine::SimulationConfig::default();
+        config.convergence_config.voltage_reltol = 7e-4;
+        config.convergence_config.residual_reltol = 0.0;
+        let engine = Engine::new(config);
+        assert!((engine.residual_reltol() - 7e-4).abs() < 1e-18);
+    }
+
+    #[test]
     fn test_residual_convergence_met_accepts_exact_solution() {
         let engine = Engine::new(crate::engine::SimulationConfig::default());
         let triplets = vec![(0, 0, 2.0), (0, 1, 1.0), (1, 0, 1.0), (1, 1, 3.0)];
@@ -1806,6 +1833,28 @@ mod tests {
         let rhs = vec![0.0];
         let solution = vec![f64::NAN];
         assert!(!engine.residual_convergence_met(&matrix, &solution, &rhs));
+    }
+
+    #[test]
+    fn test_residual_convergence_met_uses_residual_reltol_not_voltage_reltol() {
+        let triplets = vec![(0, 0, 1.0)];
+        let matrix = StaticMatrix::from_triplets(1, 1, &triplets).unwrap();
+        let rhs = vec![1.0];
+        let solution = vec![1.001];
+
+        let mut loose_cfg = crate::engine::SimulationConfig::default();
+        loose_cfg.convergence_config.current_abstol = 1e-12;
+        loose_cfg.convergence_config.voltage_reltol = 1.0;
+        loose_cfg.convergence_config.residual_reltol = 1e-3;
+        let loose_engine = Engine::new(loose_cfg);
+        assert!(loose_engine.residual_convergence_met(&matrix, &solution, &rhs));
+
+        let mut tight_cfg = crate::engine::SimulationConfig::default();
+        tight_cfg.convergence_config.current_abstol = 1e-12;
+        tight_cfg.convergence_config.voltage_reltol = 1.0;
+        tight_cfg.convergence_config.residual_reltol = 1e-4;
+        let tight_engine = Engine::new(tight_cfg);
+        assert!(!tight_engine.residual_convergence_met(&matrix, &solution, &rhs));
     }
 
     /// Test that configured GMIN schedule is in decreasing order.
