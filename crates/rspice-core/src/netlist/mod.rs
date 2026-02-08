@@ -8,7 +8,7 @@
 //! - Advanced elements (K, S, W, T)
 //! - Controlled sources (E, F, G, H, B)
 //! - XSPICE code models (A) with bracket port syntax
-//! - Analysis commands (.OP, .DC, .AC, .TRAN, .NOISE, .FOUR, .STEP, .TEMP)
+//! - Analysis commands (.OP, .DC, .AC, .TRAN, .NOISE, .PZ, .SENS, .FOUR, .STEP, .MC, .TEMP)
 //! - File inclusion (.INCLUDE, .LIB)
 //! - Subcircuits with parameter passing
 
@@ -85,6 +85,9 @@ pub struct Netlist {
     pub options: SimulationOptions,
     /// Verilog-A model includes from .VERILOGA statements
     pub veriloga_includes: Vec<VerilogAInclude>,
+    /// Optional original netlist text used to build this AST.
+    /// Stored to support parameter re-application workflows (e.g., sensitivity).
+    pub source_text: Option<String>,
 }
 
 /// Verilog-A model include directive
@@ -116,7 +119,7 @@ impl Netlist {
 
     /// Parse a netlist from a file with include expansion
     pub fn parse_file(path: &std::path::Path) -> Result<Self, ParseError> {
-        let content = std::fs::read_to_string(path)?;
+        let content = read_file_with_encoding(path)?;
 
         // Preprocess includes
         let processed = Self::preprocess_includes(&content, path)?;
@@ -236,6 +239,78 @@ impl Default for Netlist {
             measurements: Vec::new(),
             options: SimulationOptions::default(),
             veriloga_includes: Vec::new(),
+            source_text: None,
         }
     }
+}
+
+/// Read a file with automatic encoding detection
+///
+/// Handles:
+/// - UTF-8 with or without BOM
+/// - UTF-16 LE (common from Windows Notepad "Unicode" option)
+/// - UTF-16 BE
+/// - Falls back to Latin-1 if UTF-8 decoding fails
+fn read_file_with_encoding(path: &std::path::Path) -> Result<String, std::io::Error> {
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path)?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+
+    // Check for BOM and decode accordingly
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        // UTF-8 with BOM - skip BOM bytes
+        String::from_utf8(bytes[3..].to_vec())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    } else if bytes.starts_with(&[0xFF, 0xFE]) {
+        // UTF-16 LE BOM
+        decode_utf16_le(&bytes[2..])
+    } else if bytes.starts_with(&[0xFE, 0xFF]) {
+        // UTF-16 BE BOM
+        decode_utf16_be(&bytes[2..])
+    } else {
+        // Try UTF-8 first, fall back to Latin-1
+        match String::from_utf8(bytes.clone()) {
+            Ok(s) => Ok(s),
+            Err(_) => {
+                // Latin-1 fallback (each byte is a valid codepoint)
+                Ok(bytes.iter().map(|&b| b as char).collect())
+            }
+        }
+    }
+}
+
+/// Decode UTF-16 LE bytes to String
+fn decode_utf16_le(bytes: &[u8]) -> Result<String, std::io::Error> {
+    if bytes.len() % 2 != 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "UTF-16 data has odd number of bytes",
+        ));
+    }
+
+    let utf16: Vec<u16> = bytes
+        .chunks(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect();
+
+    String::from_utf16(&utf16).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
+/// Decode UTF-16 BE bytes to String  
+fn decode_utf16_be(bytes: &[u8]) -> Result<String, std::io::Error> {
+    if bytes.len() % 2 != 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "UTF-16 data has odd number of bytes",
+        ));
+    }
+
+    let utf16: Vec<u16> = bytes
+        .chunks(2)
+        .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+        .collect();
+
+    String::from_utf16(&utf16).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }

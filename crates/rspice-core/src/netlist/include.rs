@@ -104,6 +104,11 @@ impl IncludeProcessor {
             message: format!("Failed to include '{}': {}", filename, e),
         })?;
 
+        // Included model/library files often contain a terminal `.END`.
+        // Keeping it inline would terminate parsing of the parent netlist early,
+        // so strip only bare `.END` records from included content.
+        let content = strip_terminal_end_cards(&content);
+
         self.current_depth -= 1;
         Ok(content)
     }
@@ -267,6 +272,18 @@ impl Default for IncludeProcessor {
     }
 }
 
+fn strip_terminal_end_cards(content: &str) -> String {
+    let mut out = String::with_capacity(content.len());
+    for line in content.lines() {
+        if line.trim().eq_ignore_ascii_case(".END") {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
 //=============================================================================
 // Helper Functions
 //=============================================================================
@@ -402,6 +419,26 @@ mod tests {
                 Some("section".to_string())
             ))
         );
+    }
+
+    #[test]
+    fn test_strip_terminal_end_cards_removes_only_bare_end() {
+        let content = r#"* model library
+.MODEL M1 NMOS (VTO=0.7)
+.END
+.SUBCKT INV IN OUT VDD VSS
+M1 OUT IN VDD VDD PMOS
+.ENDS INV
+"#;
+        let stripped = strip_terminal_end_cards(content);
+        assert!(
+            !stripped
+                .lines()
+                .any(|l| l.trim().eq_ignore_ascii_case(".END"))
+        );
+        assert!(stripped.contains(".MODEL M1 NMOS (VTO=0.7)"));
+        assert!(stripped.contains(".SUBCKT INV IN OUT VDD VSS"));
+        assert!(stripped.contains(".ENDS INV"));
     }
 
     #[test]

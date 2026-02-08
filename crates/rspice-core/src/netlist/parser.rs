@@ -10,9 +10,10 @@ use super::expr::eval_expression;
 use super::lexer::{LexError, TokenKind, TokenStream, tokenize};
 use super::xspice_parser;
 use super::{
-    AnalysisCommand, Element, ElementKind, FreqVariation, InitialCondition, ModelDef, Netlist,
-    ParamContext, ParseError, SourceSpec, StepCommand, StepSweep, StepTarget, SubcircuitDef,
-    SwitchState, VerilogAInclude,
+    AnalysisCommand, Element, ElementKind, FreqVariation, InitialCondition, ModelDef,
+    MonteCarloCommand, MonteCarloDistribution, Netlist, ParamContext, ParseError,
+    PoleZeroAnalysisType, PoleZeroTransferType, SensitivityAcSweep, SourceSpec, StepCommand,
+    StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
 };
 use crate::Value;
 
@@ -49,8 +50,11 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
     for line in lines.iter().skip(1) {
         line_num += 1;
 
-        // Skip empty lines and comments
-        let trimmed = line.trim();
+        // Strip inline ';' comments (common SPICE syntax), then trim.
+        // We intentionally keep this simple and treat ';' as comment start.
+        // This matches common model-card usage where ';' appears outside quotes.
+        let no_inline_comment = strip_inline_semicolon_comment(line);
+        let trimmed = no_inline_comment.trim();
         if trimmed.is_empty() || trimmed.starts_with('*') {
             continue;
         }
@@ -144,7 +148,15 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
         measurements,
         options: super::SimulationOptions::default(),
         veriloga_includes,
+        source_text: Some(input.to_string()),
     })
+}
+
+fn strip_inline_semicolon_comment(line: &str) -> &str {
+    match line.find(';') {
+        Some(idx) => &line[..idx],
+        None => line,
+    }
 }
 
 fn process_line(
@@ -280,8 +292,8 @@ fn parse_line(
         'W' => parse_iswitch(&mut stream, line_num, elements),
         // Transmission lines
         'T' => parse_transmission_line(&mut stream, line_num, elements, params),
-        'O' => parse_lossless_tline(&mut stream, line_num, elements),
-        'Y' => parse_lossy_tline(&mut stream, line_num, elements),
+        'O' => parse_lossless_tline(&mut stream, line_num, elements, params),
+        'Y' => parse_lossy_tline(&mut stream, line_num, elements, params),
         'P' => parse_coupled_tlines(&mut stream, line_num, elements),
         // MESFET (Z element) - treat like JFET with model
         'Z' => parse_mesfet(&mut stream, line_num, elements),
@@ -383,6 +395,10 @@ fn parse_command(
             let step_cmd = parse_step_command(stream, line_num, params)?;
             analyses.push(AnalysisCommand::Step(step_cmd));
         }
+        ".MC" => {
+            let mc_cmd = parse_mc_command(stream, line_num, params)?;
+            analyses.push(AnalysisCommand::MonteCarlo(mc_cmd));
+        }
         ".TEMP" => {
             let temperatures = parse_temp_command(stream, params)?;
             analyses.push(AnalysisCommand::Temp { temperatures });
@@ -398,6 +414,14 @@ fn parse_command(
         ".NOISE" => {
             let noise = parse_noise_command(stream, line_num, params)?;
             analyses.push(noise);
+        }
+        ".SENS" => {
+            let sens = parse_sens_command(stream, line_num, params)?;
+            analyses.push(sens);
+        }
+        ".PZ" => {
+            let pz = parse_pz_command(stream, line_num)?;
+            analyses.push(pz);
         }
         ".IC" => {
             // Parse initial conditions - stored as params for now
@@ -942,10 +966,24 @@ fn parse_bjt(
 
             // Now peek at next token
             match &stream.peek().kind {
-                TokenKind::Ident(_) => {
-                    // Two identifiers in a row: first is substrate node, second is model
-                    let model = expect_ident(stream, line_num)?;
-                    (Some(first_ident), model)
+                TokenKind::Ident(next_s) => {
+                    // Two identifiers in a row - BUT need to check if second is a parameter name
+                    // If the token AFTER the second ident is '=', then second is a param name
+                    // and first_ident is the model name (not substrate)
+                    let next_ident = next_s.clone();
+
+                    // Peek ahead: is there an '=' after the next ident?
+                    // stream.peek_n(1) would be the token after the current peek
+                    if matches!(stream.peek_n(1).kind, TokenKind::Equals) {
+                        // Pattern: model_name param=value
+                        // first_ident is the model, don't treat next_ident as model
+                        (None, first_ident)
+                    } else {
+                        // Pattern: substrate model_name
+                        // first is substrate node, second is model
+                        stream.advance();
+                        (Some(first_ident), next_ident)
+                    }
                 }
                 TokenKind::Newline | TokenKind::Eof | TokenKind::Comma => {
                     // Only one identifier: it's the model name
@@ -1058,6 +1096,7 @@ fn parse_lossless_tline(
     stream: &mut TokenStream,
     line_num: usize,
     elements: &mut Vec<Element>,
+    params: &ParamContext,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
     let port1_pos = expect_node(stream, line_num)?;
@@ -1065,16 +1104,22 @@ fn parse_lossless_tline(
     let port2_pos = expect_node(stream, line_num)?;
     let port2_neg = expect_node(stream, line_num)?;
 
-    // For now, skip to end of line (unsupported, but parsed)
-    stream.skip_to_eol();
+    let parsed = parse_tline_params(stream, line_num, params, true)?;
+    if parsed.model.is_none() && parsed.z0.is_none() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "O-line transmission line requires MODEL name or Z0".to_string(),
+        });
+    }
 
     elements.push(Element {
         name,
         kind: ElementKind::TransmissionLine {
-            z0: 50.0, // Default
-            td: Some(1e-9),
-            freq: None,
-            nl: None,
+            z0: parsed.z0,
+            td: parsed.td,
+            freq: parsed.freq,
+            nl: parsed.nl,
+            model: parsed.model,
         },
         nodes: vec![port1_pos, port1_neg, port2_pos, port2_neg],
     });
@@ -1087,6 +1132,7 @@ fn parse_lossy_tline(
     stream: &mut TokenStream,
     line_num: usize,
     elements: &mut Vec<Element>,
+    params: &ParamContext,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
     let port1_pos = expect_node(stream, line_num)?;
@@ -1094,16 +1140,22 @@ fn parse_lossy_tline(
     let port2_pos = expect_node(stream, line_num)?;
     let port2_neg = expect_node(stream, line_num)?;
 
-    // For now, skip to end of line (unsupported, but parsed)
-    stream.skip_to_eol();
+    let parsed = parse_tline_params(stream, line_num, params, true)?;
+    if parsed.model.is_none() && parsed.z0.is_none() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "Y-line transmission line requires MODEL name or Z0".to_string(),
+        });
+    }
 
     elements.push(Element {
         name,
         kind: ElementKind::TransmissionLine {
-            z0: 50.0,
-            td: Some(1e-9),
-            freq: None,
-            nl: None,
+            z0: parsed.z0,
+            td: parsed.td,
+            freq: parsed.freq,
+            nl: parsed.nl,
+            model: parsed.model,
         },
         nodes: vec![port1_pos, port1_neg, port2_pos, port2_neg],
     });
@@ -1130,16 +1182,25 @@ fn parse_coupled_tlines(
         }
     }
 
-    // Skip rest of line
-    stream.skip_to_eol();
+    // In P-line syntax the final token is typically the model name.
+    let model = if let Some(last) = nodes.last() {
+        if nodes.len() >= 3 && last.parse::<f64>().is_err() {
+            nodes.pop()
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     elements.push(Element {
         name,
         kind: ElementKind::TransmissionLine {
-            z0: 50.0,
-            td: Some(1e-9),
+            z0: None,
+            td: None,
             freq: None,
             nl: None,
+            model,
         },
         nodes,
     });
@@ -2070,64 +2131,112 @@ fn parse_transmission_line(
     let port2_pos = expect_node(stream, line_num)?;
     let port2_neg = expect_node(stream, line_num)?;
 
-    // Parse parameters (Z0, TD, F, NL)
-    let mut z0: Option<Value> = None;
-    let mut td: Option<Value> = None;
-    let mut freq: Option<Value> = None;
-    let mut nl: Option<Value> = None;
-
-    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        skip_commas(stream);
-
-        if let TokenKind::Ident(param) = &stream.peek().kind {
-            let param_upper = param.to_uppercase();
-            stream.advance();
-
-            // Consume = if present
-            stream.consume(&TokenKind::Equals);
-
-            match param_upper.as_str() {
-                "Z0" | "ZO" => {
-                    z0 = try_value(stream, params);
-                }
-                "TD" => {
-                    td = try_value(stream, params);
-                }
-                "F" | "FREQ" => {
-                    freq = try_value(stream, params);
-                }
-                "NL" => {
-                    nl = try_value(stream, params);
-                }
-                _ => {
-                    // Skip unknown parameter
-                    try_value(stream, params);
-                }
-            }
-        } else if let Some(v) = try_value(stream, params) {
-            // Positional Z0
-            if z0.is_none() {
-                z0 = Some(v);
-            } else if td.is_none() {
-                td = Some(v);
-            }
-        } else {
-            stream.advance(); // Skip unknown token
-        }
-    }
-
-    let z0 = z0.ok_or_else(|| ParseError::Syntax {
+    let parsed = parse_tline_params(stream, line_num, params, false)?;
+    let z0 = parsed.z0.ok_or_else(|| ParseError::Syntax {
         line: line_num,
         message: "Transmission line requires Z0".to_string(),
     })?;
 
     elements.push(Element {
         name,
-        kind: ElementKind::TransmissionLine { z0, td, freq, nl },
+        kind: ElementKind::TransmissionLine {
+            z0: Some(z0),
+            td: parsed.td,
+            freq: parsed.freq,
+            nl: parsed.nl,
+            model: parsed.model,
+        },
         nodes: vec![port1_pos, port1_neg, port2_pos, port2_neg],
     });
 
     Ok(())
+}
+
+#[derive(Default)]
+struct ParsedTlineParams {
+    z0: Option<Value>,
+    td: Option<Value>,
+    freq: Option<Value>,
+    nl: Option<Value>,
+    model: Option<String>,
+}
+
+fn parse_tline_params(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    allow_bare_model: bool,
+) -> Result<ParsedTlineParams, ParseError> {
+    let mut parsed = ParsedTlineParams::default();
+
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        skip_commas(stream);
+        if stream.is_eof() || matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
+        }
+
+        if let Some(v) = try_value(stream, params) {
+            // Positional values map to Z0 then TD.
+            if parsed.z0.is_none() {
+                parsed.z0 = Some(v);
+            } else if parsed.td.is_none() {
+                parsed.td = Some(v);
+            }
+            continue;
+        }
+
+        let TokenKind::Ident(token) = &stream.peek().kind else {
+            stream.advance();
+            continue;
+        };
+
+        let token = token.clone();
+        let token_upper = token.to_ascii_uppercase();
+        let has_equals = matches!(stream.peek_n(1).kind, TokenKind::Equals);
+
+        // O/Y/P legacy syntax often uses a bare model token after node list.
+        if allow_bare_model
+            && !has_equals
+            && parsed.model.is_none()
+            && !matches!(
+                token_upper.as_str(),
+                "Z0" | "ZO" | "TD" | "F" | "FREQ" | "NL" | "MODEL"
+            )
+        {
+            stream.advance();
+            parsed.model = Some(token);
+            continue;
+        }
+
+        stream.advance();
+        if has_equals {
+            stream.consume(&TokenKind::Equals);
+        }
+
+        match token_upper.as_str() {
+            "Z0" | "ZO" => {
+                parsed.z0 = Some(expect_value(stream, line_num, params)?);
+            }
+            "TD" => {
+                parsed.td = Some(expect_value(stream, line_num, params)?);
+            }
+            "F" | "FREQ" => {
+                parsed.freq = Some(expect_value(stream, line_num, params)?);
+            }
+            "NL" => {
+                parsed.nl = Some(expect_value(stream, line_num, params)?);
+            }
+            "MODEL" => {
+                parsed.model = Some(expect_ident(stream, line_num)?);
+            }
+            _ => {
+                // Unknown key/value token; skip one optional value token if present.
+                let _ = try_value(stream, params);
+            }
+        }
+    }
+
+    Ok(parsed)
 }
 
 //=============================================================================
@@ -2140,6 +2249,8 @@ fn parse_transmission_line(
 /// - .STEP PARAM name LIST v1 v2 v3...
 /// - .STEP DEC PARAM name start stop points
 /// - .STEP OCT PARAM name start stop points
+/// - .STEP TEMP start stop increment
+/// - .STEP TEMP LIST t1 t2 t3...
 fn parse_step_command(
     stream: &mut TokenStream,
     line_num: usize,
@@ -2154,13 +2265,19 @@ fn parse_step_command(
     let (sweep_prefix, target_str, name) = match first_upper.as_str() {
         "DEC" | "OCT" | "LIN" => {
             let target = expect_ident(stream, line_num)?;
-            let name = expect_ident(stream, line_num)?;
-            (Some(first_upper), target.to_uppercase(), name)
+            let target_upper = target.to_uppercase();
+            let name = if target_upper == "TEMP" {
+                "TEMP".to_string()
+            } else {
+                expect_ident(stream, line_num)?
+            };
+            (Some(first_upper), target_upper, name)
         }
-        "PARAM" | "MODEL" | "TEMP" => {
+        "PARAM" | "MODEL" => {
             let name = expect_ident(stream, line_num)?;
             (None, first_upper, name)
         }
+        "TEMP" => (None, first_upper, "TEMP".to_string()),
         _ => {
             // Assume device parameter: .STEP R1(value) or .STEP R1 start stop step
             (None, "DEVICE".to_string(), first)
@@ -2173,6 +2290,46 @@ fn parse_step_command(
         "TEMP" => StepTarget::Temp,
         _ => StepTarget::Device,
     };
+
+    let mut param_name: Option<String> = None;
+    match target {
+        StepTarget::Model => {
+            param_name = Some(expect_ident(stream, line_num)?);
+        }
+        StepTarget::Device => {
+            // Optional device-parameter spec:
+            // - .STEP R1(<param>) ...
+            // - .STEP R1 <param> ...
+            if stream.consume(&TokenKind::LParen) {
+                let pname = expect_ident(stream, line_num)?;
+                if !stream.consume(&TokenKind::RParen) {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: "Expected ')' after .STEP device parameter name".to_string(),
+                    });
+                }
+                param_name = Some(pname);
+            } else if let TokenKind::Ident(candidate) = &stream.peek().kind {
+                let candidate_upper = candidate.to_ascii_uppercase();
+                let reserved = ["LIST", "LIN", "DEC", "OCT", "PARAM", "MODEL", "TEMP"];
+                let next_is_value_like = matches!(
+                    stream.peek_n(1).kind,
+                    TokenKind::Number(_)
+                        | TokenKind::Expression(_)
+                        | TokenKind::Plus
+                        | TokenKind::Minus
+                ) || matches!(
+                    &stream.peek_n(1).kind,
+                    TokenKind::Ident(next) if next.eq_ignore_ascii_case("LIST")
+                );
+                if !reserved.contains(&candidate_upper.as_str()) && next_is_value_like {
+                    param_name = Some(candidate.clone());
+                    stream.advance();
+                }
+            }
+        }
+        _ => {}
+    }
 
     // Check for LIST keyword
     skip_commas(stream);
@@ -2228,7 +2385,7 @@ fn parse_step_command(
     Ok(StepCommand {
         target,
         name,
-        param_name: None,
+        param_name,
         sweep,
     })
 }
@@ -2286,33 +2443,7 @@ fn parse_noise_command(
     line_num: usize,
     params: &ParamContext,
 ) -> Result<AnalysisCommand, ParseError> {
-    // Parse output specification - could be V(node), V(node,ref), or just node
-    let first = expect_ident(stream, line_num)?;
-
-    let (output_node, reference_node) =
-        if first.to_uppercase() == "V" && matches!(stream.peek().kind, TokenKind::LParen) {
-            // Consume LP, then parse V(node) or V(node,ref)
-            stream.advance(); // (
-            let node = expect_node(stream, line_num)?;
-            let reference = if stream.consume(&TokenKind::Comma) {
-                Some(expect_node(stream, line_num)?)
-            } else {
-                None
-            };
-            if !stream.consume(&TokenKind::RParen) {
-                return Err(ParseError::Syntax {
-                    line: line_num,
-                    message: "Expected ')' in V(node) specification".to_string(),
-                });
-            }
-            (node, reference)
-        } else if first.to_uppercase().starts_with("V(") {
-            // Already parsed as V(node) string
-            parse_voltage_reference(&first)?
-        } else {
-            // Simple node name
-            (first, None)
-        };
+    let (output_node, reference_node) = parse_voltage_output_reference(stream, line_num)?;
 
     // Input source
     let input_source = expect_ident(stream, line_num)?;
@@ -2341,6 +2472,245 @@ fn parse_noise_command(
     })
 }
 
+/// Parse .SENS command: .SENS V(out[,ref]) [AC DEC|LIN|OCT np fstart fstop]
+fn parse_sens_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<AnalysisCommand, ParseError> {
+    let (output_node, reference_node) = parse_voltage_output_reference(stream, line_num)?;
+    let mut ac_sweep = None;
+
+    if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        let mode = expect_ident(stream, line_num)?;
+        if !mode.eq_ignore_ascii_case("AC") {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Invalid .SENS mode '{}': expected AC or end-of-line", mode),
+            });
+        }
+
+        let var_str = expect_ident(stream, line_num)?;
+        let variation = match var_str.to_uppercase().as_str() {
+            "LIN" => FreqVariation::Lin,
+            "OCT" => FreqVariation::Oct,
+            "DEC" => FreqVariation::Dec,
+            _ => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "Invalid .SENS AC sweep variation '{}': expected LIN, OCT, or DEC",
+                        var_str
+                    ),
+                });
+            }
+        };
+
+        let points = expect_value(stream, line_num, params)? as usize;
+        let start_freq = expect_value(stream, line_num, params)?;
+        let stop_freq = expect_value(stream, line_num, params)?;
+
+        ac_sweep = Some(SensitivityAcSweep {
+            variation,
+            points,
+            start_freq,
+            stop_freq,
+        });
+    }
+
+    Ok(AnalysisCommand::Sensitivity {
+        output_node,
+        reference_node,
+        ac_sweep,
+    })
+}
+
+/// Parse .PZ command: .PZ in+ in- out+ out- VOL|CUR PZ|POL|ZER
+fn parse_pz_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<AnalysisCommand, ParseError> {
+    let input_pos = expect_node(stream, line_num)?;
+    let input_neg = expect_node(stream, line_num)?;
+    let output_pos = expect_node(stream, line_num)?;
+    let output_neg = expect_node(stream, line_num)?;
+
+    let transfer_type = expect_ident(stream, line_num)?;
+    let transfer_type = match transfer_type.to_uppercase().as_str() {
+        "VOL" => PoleZeroTransferType::Voltage,
+        "CUR" => PoleZeroTransferType::Current,
+        _ => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Invalid .PZ transfer type '{}': expected VOL or CUR",
+                    transfer_type
+                ),
+            });
+        }
+    };
+
+    let analysis_type = expect_ident(stream, line_num)?;
+    let analysis_type = match analysis_type.to_uppercase().as_str() {
+        "PZ" => PoleZeroAnalysisType::PoleZero,
+        "POL" => PoleZeroAnalysisType::PolesOnly,
+        "ZER" => PoleZeroAnalysisType::ZerosOnly,
+        _ => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Invalid .PZ analysis type '{}': expected PZ, POL, or ZER",
+                    analysis_type
+                ),
+            });
+        }
+    };
+
+    Ok(AnalysisCommand::PoleZero {
+        input_pos,
+        input_neg,
+        output_pos,
+        output_neg,
+        transfer_type,
+        analysis_type,
+    })
+}
+
+/// Parse .MC command:
+/// .MC runs [SEED n] [DIST GAUSS|UNIFORM] [SPREAD rel] [PARAMS p1 p2 ...]
+///
+/// Supported shorthand:
+/// .MC runs GAUSS sigma
+/// .MC runs UNIFORM tol
+fn parse_mc_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<MonteCarloCommand, ParseError> {
+    let runs_raw = expect_value(stream, line_num, params)?;
+    if !runs_raw.is_finite() || runs_raw < 1.0 || (runs_raw.fract().abs() > 1e-12) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Invalid .MC run count '{}': expected positive integer",
+                runs_raw
+            ),
+        });
+    }
+    let mut command = MonteCarloCommand::new(runs_raw as usize);
+
+    let parse_distribution = |s: &str| -> Option<MonteCarloDistribution> {
+        match s.to_ascii_uppercase().as_str() {
+            "GAUSS" | "GAUSSIAN" | "NORMAL" => Some(MonteCarloDistribution::Gaussian),
+            "UNIFORM" | "UNIF" => Some(MonteCarloDistribution::Uniform),
+            _ => None,
+        }
+    };
+
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        let keyword = expect_ident(stream, line_num)?;
+        match keyword.as_str() {
+            "SEED" => {
+                let seed_raw = expect_value(stream, line_num, params)?;
+                if !seed_raw.is_finite() || seed_raw < 0.0 || (seed_raw.fract().abs() > 1e-12) {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "Invalid .MC seed '{}': expected non-negative integer",
+                            seed_raw
+                        ),
+                    });
+                }
+                command.seed = Some(seed_raw as u64);
+            }
+            "DIST" | "DISTRIBUTION" => {
+                let dist = expect_ident(stream, line_num)?;
+                command.distribution =
+                    parse_distribution(&dist).ok_or_else(|| ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "Invalid .MC distribution '{}': expected GAUSS or UNIFORM",
+                            dist
+                        ),
+                    })?;
+
+                if let Some(spread) = try_value(stream, params) {
+                    command.relative_spread = spread;
+                }
+            }
+            "GAUSS" | "GAUSSIAN" | "NORMAL" => {
+                command.distribution = MonteCarloDistribution::Gaussian;
+                if let Some(spread) = try_value(stream, params) {
+                    command.relative_spread = spread;
+                }
+            }
+            "UNIFORM" | "UNIF" => {
+                command.distribution = MonteCarloDistribution::Uniform;
+                if let Some(spread) = try_value(stream, params) {
+                    command.relative_spread = spread;
+                }
+            }
+            "SPREAD" | "SIGMA" | "TOL" | "TOLERANCE" => {
+                command.relative_spread = expect_value(stream, line_num, params)?;
+            }
+            "PARAMS" | "PARAMETERS" => {
+                while !stream.is_eof()
+                    && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
+                {
+                    skip_commas(stream);
+                    match &stream.peek().kind {
+                        TokenKind::Ident(name) => {
+                            let name = name.clone();
+                            stream.advance();
+                            if !command.params.iter().any(|p| p == &name) {
+                                command.params.push(name);
+                            }
+                        }
+                        other => {
+                            return Err(ParseError::Syntax {
+                                line: line_num,
+                                message: format!(
+                                    "Invalid .MC parameter list token {:?}: expected identifier",
+                                    other
+                                ),
+                            });
+                        }
+                    }
+                }
+
+                if command.params.is_empty() {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: "Invalid .MC PARAMS list: expected at least one parameter name"
+                            .to_string(),
+                    });
+                }
+            }
+            _ => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "Invalid .MC keyword '{}': expected SEED, DIST, SPREAD, or PARAMS",
+                        keyword
+                    ),
+                });
+            }
+        }
+    }
+
+    if !command.relative_spread.is_finite() || command.relative_spread < 0.0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Invalid .MC spread '{}': expected non-negative finite value",
+                command.relative_spread
+            ),
+        });
+    }
+
+    Ok(command)
+}
+
 /// Parse voltage reference like V(out) or V(out,0)
 fn parse_voltage_reference(spec: &str) -> Result<(String, Option<String>), ParseError> {
     let spec_upper = spec.to_uppercase();
@@ -2365,6 +2735,40 @@ fn parse_voltage_reference(spec: &str) -> Result<(String, Option<String>), Parse
     };
 
     Ok((node, reference))
+}
+
+/// Parse voltage output specification from stream:
+/// - `V(node)`
+/// - `V(node,ref)`
+/// - bare `node`
+fn parse_voltage_output_reference(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<(String, Option<String>), ParseError> {
+    let first = expect_ident(stream, line_num)?;
+
+    if first.to_uppercase() == "V" && matches!(stream.peek().kind, TokenKind::LParen) {
+        stream.advance(); // (
+        let node = expect_node(stream, line_num)?;
+        let reference = if stream.consume(&TokenKind::Comma) {
+            Some(expect_node(stream, line_num)?)
+        } else {
+            None
+        };
+        if !stream.consume(&TokenKind::RParen) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: "Expected ')' in V(node) specification".to_string(),
+            });
+        }
+        return Ok((node, reference));
+    }
+
+    if first.to_uppercase().starts_with("V(") {
+        return parse_voltage_reference(&first);
+    }
+
+    Ok((first, None))
 }
 
 /// Parse .NODESET command: .NODESET V(node1)=val V(node2)=val...
@@ -2647,6 +3051,43 @@ X1 A B VCC GND INVERTER
     }
 
     #[test]
+    fn test_parse_model_with_inline_semicolon_comments() {
+        let netlist = r#"Model Inline Comment Test
+.MODEL 2N2222 NPN (
++ IS=14.34E-15 ; Saturation current
++ BF=255.9 ; Forward beta
++ VAF=74.03 ; Early voltage
++)
+Q1 2 1 0 2N2222
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+        assert_eq!(result.models.len(), 1);
+        assert_eq!(result.models[0].name, "2N2222");
+
+        let params: std::collections::HashMap<String, Value> =
+            result.models[0].params.iter().cloned().collect();
+        assert!((params.get("IS").unwrap() - 14.34e-15).abs() < 1e-24);
+        assert!((params.get("BF").unwrap() - 255.9).abs() < 1e-12);
+        assert!((params.get("VAF").unwrap() - 74.03).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_parse_element_with_inline_semicolon_comment() {
+        let netlist = r#"Inline Element Comment Test
+V1 1 0 5 ; DC supply
+R1 1 0 1k ; load resistor
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+        assert_eq!(result.elements.len(), 2);
+        match &result.elements[1].kind {
+            ElementKind::Resistor { value } => assert!((*value - 1000.0).abs() < 1e-10),
+            _ => panic!("Expected resistor"),
+        }
+    }
+
+    #[test]
     fn test_parse_pwl() {
         let netlist = r#"PWL Test
 V1 1 0 PWL(0 0 1u 5 2u 0)
@@ -2747,16 +3188,88 @@ T1 in 0 out 0 Z0=50 TD=1n
 "#;
         let result = parse_netlist(netlist).unwrap();
         match &result.elements[0].kind {
-            ElementKind::TransmissionLine { z0, td, freq, nl } => {
-                assert!((*z0 - 50.0).abs() < 1e-10);
+            ElementKind::TransmissionLine {
+                z0,
+                td,
+                freq,
+                nl,
+                model,
+            } => {
+                assert_eq!(*z0, Some(50.0));
                 assert!(td.is_some());
                 assert!((td.unwrap() - 1e-9).abs() < 1e-20);
                 assert!(freq.is_none());
                 assert!(nl.is_none());
+                assert!(model.is_none());
             }
             _ => panic!("Expected TransmissionLine element"),
         }
         assert_eq!(result.elements[0].nodes.len(), 4);
+    }
+
+    #[test]
+    fn test_parse_lossless_tline_model_reference() {
+        let netlist = r#"O-Line Model Test
+O1 1 0 2 0 LLINE
+.END
+"#;
+        let result = parse_netlist(netlist).expect("O-line with model should parse");
+        match &result.elements[0].kind {
+            ElementKind::TransmissionLine {
+                z0,
+                td,
+                freq,
+                nl,
+                model,
+            } => {
+                assert!(z0.is_none());
+                assert!(td.is_none());
+                assert!(freq.is_none());
+                assert!(nl.is_none());
+                assert_eq!(model.as_deref(), Some("LLINE"));
+            }
+            _ => panic!("Expected TransmissionLine element"),
+        }
+    }
+
+    #[test]
+    fn test_parse_lossy_tline_model_with_inline_overrides() {
+        let netlist = r#"Y-Line Model Test
+Y1 1 0 2 0 YMOD Z0=75 TD=2N
+.END
+"#;
+        let result = parse_netlist(netlist).expect("Y-line with model and overrides should parse");
+        match &result.elements[0].kind {
+            ElementKind::TransmissionLine {
+                z0,
+                td,
+                freq,
+                nl,
+                model,
+            } => {
+                assert_eq!(*z0, Some(75.0));
+                assert_eq!(*td, Some(2e-9));
+                assert!(freq.is_none());
+                assert!(nl.is_none());
+                assert_eq!(model.as_deref(), Some("YMOD"));
+            }
+            _ => panic!("Expected TransmissionLine element"),
+        }
+    }
+
+    #[test]
+    fn test_parse_lossless_tline_requires_model_or_z0() {
+        let netlist = r#"Invalid O-Line
+O1 1 0 2 0
+.END
+"#;
+        let err = parse_netlist(netlist).expect_err("O-line without model/z0 should fail");
+        match err {
+            ParseError::Syntax { message, .. } => {
+                assert!(message.contains("requires MODEL name or Z0"));
+            }
+            _ => panic!("Expected syntax error"),
+        }
     }
 
     // =========================================================================
@@ -2808,6 +3321,146 @@ R1 1 0 1k
                 }
                 _ => panic!("Expected List sweep"),
             },
+            _ => panic!("Expected Step command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_step_device_parenthesized_param_name() {
+        let netlist = r#"Step Device Param
+.STEP R1(VALUE) 1k 5k 1k
+.END
+"#;
+        let result = parse_netlist(netlist).expect(".STEP device(param) should parse");
+
+        match &result.analyses[0] {
+            AnalysisCommand::Step(cmd) => {
+                assert_eq!(cmd.target, StepTarget::Device);
+                assert_eq!(cmd.name, "R1");
+                assert_eq!(cmd.param_name.as_deref(), Some("VALUE"));
+                match &cmd.sweep {
+                    StepSweep::Linear { start, stop, step } => {
+                        assert!((*start - 1e3).abs() < 1e-10);
+                        assert!((*stop - 5e3).abs() < 1e-10);
+                        assert!((*step - 1e3).abs() < 1e-10);
+                    }
+                    _ => panic!("Expected Linear sweep"),
+                }
+            }
+            _ => panic!("Expected Step command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_step_device_named_param_name() {
+        let netlist = r#"Step Device Named Param
+.STEP R1 VALUE 1k 3k 1k
+.END
+"#;
+        let result = parse_netlist(netlist).expect(".STEP device param should parse");
+
+        match &result.analyses[0] {
+            AnalysisCommand::Step(cmd) => {
+                assert_eq!(cmd.target, StepTarget::Device);
+                assert_eq!(cmd.name, "R1");
+                assert_eq!(cmd.param_name.as_deref(), Some("VALUE"));
+            }
+            _ => panic!("Expected Step command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_step_device_named_param_with_list() {
+        let netlist = r#"Step Device Named Param List
+.STEP R1 VALUE LIST 1k 2k 5k
+.END
+"#;
+        let result = parse_netlist(netlist).expect(".STEP device param LIST should parse");
+
+        match &result.analyses[0] {
+            AnalysisCommand::Step(cmd) => {
+                assert_eq!(cmd.target, StepTarget::Device);
+                assert_eq!(cmd.name, "R1");
+                assert_eq!(cmd.param_name.as_deref(), Some("VALUE"));
+                match &cmd.sweep {
+                    StepSweep::List(values) => assert_eq!(values, &vec![1e3, 2e3, 5e3]),
+                    _ => panic!("Expected List sweep"),
+                }
+            }
+            _ => panic!("Expected Step command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_step_model_param_name() {
+        let netlist = r#"Step Model Param
+.STEP MODEL NMOS VTO -0.5 0.5 0.25
+.END
+"#;
+        let result = parse_netlist(netlist).expect(".STEP MODEL should parse");
+
+        match &result.analyses[0] {
+            AnalysisCommand::Step(cmd) => {
+                assert_eq!(cmd.target, StepTarget::Model);
+                assert_eq!(cmd.name, "NMOS");
+                assert_eq!(cmd.param_name.as_deref(), Some("VTO"));
+                match &cmd.sweep {
+                    StepSweep::Linear { start, stop, step } => {
+                        assert!((*start - -0.5).abs() < 1e-12);
+                        assert!((*stop - 0.5).abs() < 1e-12);
+                        assert!((*step - 0.25).abs() < 1e-12);
+                    }
+                    _ => panic!("Expected Linear sweep"),
+                }
+            }
+            _ => panic!("Expected Step command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_step_temp_linear_without_name() {
+        let netlist = r#"Step Temp Linear
+.STEP TEMP -40 125 55
+.END
+"#;
+        let result = parse_netlist(netlist).expect(".STEP TEMP linear should parse");
+
+        match &result.analyses[0] {
+            AnalysisCommand::Step(cmd) => {
+                assert_eq!(cmd.target, StepTarget::Temp);
+                assert_eq!(cmd.name, "TEMP");
+                match &cmd.sweep {
+                    StepSweep::Linear { start, stop, step } => {
+                        assert!((*start - -40.0).abs() < 1e-10);
+                        assert!((*stop - 125.0).abs() < 1e-10);
+                        assert!((*step - 55.0).abs() < 1e-10);
+                    }
+                    _ => panic!("Expected Linear sweep"),
+                }
+            }
+            _ => panic!("Expected Step command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_step_temp_list_without_name() {
+        let netlist = r#"Step Temp List
+.STEP TEMP LIST -40 27 85 125
+.END
+"#;
+        let result = parse_netlist(netlist).expect(".STEP TEMP LIST should parse");
+
+        match &result.analyses[0] {
+            AnalysisCommand::Step(cmd) => {
+                assert_eq!(cmd.target, StepTarget::Temp);
+                assert_eq!(cmd.name, "TEMP");
+                match &cmd.sweep {
+                    StepSweep::List(values) => {
+                        assert_eq!(values, &vec![-40.0, 27.0, 85.0, 125.0]);
+                    }
+                    _ => panic!("Expected List sweep"),
+                }
+            }
             _ => panic!("Expected Step command"),
         }
     }
@@ -2882,6 +3535,222 @@ R1 1 0 1k
             }
             _ => panic!("Expected Noise command"),
         }
+    }
+
+    #[test]
+    fn test_parse_mc_defaults() {
+        let netlist = r#"Monte Carlo Default
+.MC 128
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+
+        match &result.analyses[0] {
+            AnalysisCommand::MonteCarlo(cmd) => {
+                assert_eq!(cmd.runs, 128);
+                assert_eq!(cmd.seed, None);
+                assert_eq!(cmd.distribution, MonteCarloDistribution::Gaussian);
+                assert!((cmd.relative_spread - 0.01).abs() < 1e-12);
+                assert!(cmd.params.is_empty());
+            }
+            _ => panic!("Expected MonteCarlo command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_mc_with_full_options() {
+        let netlist = r#"Monte Carlo Full
+.MC 200 SEED 77 DIST UNIFORM SPREAD 0.05 PARAMS RVAL CVAL
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+
+        match &result.analyses[0] {
+            AnalysisCommand::MonteCarlo(cmd) => {
+                assert_eq!(cmd.runs, 200);
+                assert_eq!(cmd.seed, Some(77));
+                assert_eq!(cmd.distribution, MonteCarloDistribution::Uniform);
+                assert!((cmd.relative_spread - 0.05).abs() < 1e-12);
+                assert_eq!(cmd.params, vec!["RVAL".to_string(), "CVAL".to_string()]);
+            }
+            _ => panic!("Expected MonteCarlo command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_mc_shorthand_gaussian() {
+        let netlist = r#"Monte Carlo Shorthand
+.MC 64 GAUSS 0.02 PARAMS RVAL
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+
+        match &result.analyses[0] {
+            AnalysisCommand::MonteCarlo(cmd) => {
+                assert_eq!(cmd.runs, 64);
+                assert_eq!(cmd.distribution, MonteCarloDistribution::Gaussian);
+                assert!((cmd.relative_spread - 0.02).abs() < 1e-12);
+                assert_eq!(cmd.params, vec!["RVAL".to_string()]);
+            }
+            _ => panic!("Expected MonteCarlo command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_mc_invalid_distribution() {
+        let netlist = r#"Monte Carlo Invalid Dist
+.MC 16 DIST BAD
+.END
+"#;
+        let err = parse_netlist(netlist).expect_err("expected .MC distribution parse error");
+        assert!(err.to_string().contains("expected GAUSS or UNIFORM"));
+    }
+
+    #[test]
+    fn test_parse_mc_invalid_runs() {
+        let netlist = r#"Monte Carlo Invalid Runs
+.MC 0
+.END
+"#;
+        let err = parse_netlist(netlist).expect_err("expected .MC run count parse error");
+        assert!(err.to_string().contains("positive integer"));
+    }
+
+    #[test]
+    fn test_parse_sens_dc() {
+        let netlist = r#"Sensitivity Test
+.SENS V(out)
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+
+        match &result.analyses[0] {
+            AnalysisCommand::Sensitivity {
+                output_node,
+                reference_node,
+                ac_sweep,
+            } => {
+                assert_eq!(output_node, "OUT");
+                assert!(reference_node.is_none());
+                assert!(ac_sweep.is_none());
+            }
+            _ => panic!("Expected Sensitivity command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_sens_ac_with_reference() {
+        let netlist = r#"Sensitivity AC Test
+.SENS V(out,ref) AC DEC 10 1 1MEG
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+
+        match &result.analyses[0] {
+            AnalysisCommand::Sensitivity {
+                output_node,
+                reference_node,
+                ac_sweep,
+            } => {
+                assert_eq!(output_node, "OUT");
+                assert_eq!(reference_node.as_deref(), Some("REF"));
+                let ac = ac_sweep.expect("expected AC sweep");
+                assert_eq!(ac.variation, FreqVariation::Dec);
+                assert_eq!(ac.points, 10);
+                assert!((ac.start_freq - 1.0).abs() < 1e-12);
+                assert!((ac.stop_freq - 1e6).abs() < 1e-3);
+            }
+            _ => panic!("Expected Sensitivity command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_sens_invalid_mode() {
+        let netlist = r#"Sensitivity Invalid
+.SENS V(out) BAD
+.END
+"#;
+        let err = parse_netlist(netlist).expect_err("expected invalid .SENS mode");
+        assert!(err.to_string().contains("expected AC or end-of-line"));
+    }
+
+    #[test]
+    fn test_parse_sens_invalid_variation() {
+        let netlist = r#"Sensitivity Invalid AC
+.SENS V(out) AC BAD 10 1 1MEG
+.END
+"#;
+        let err = parse_netlist(netlist).expect_err("expected invalid .SENS AC variation");
+        assert!(err.to_string().contains("expected LIN, OCT, or DEC"));
+    }
+
+    #[test]
+    fn test_parse_pz_voltage_pole_zero() {
+        let netlist = r#"PZ Test
+.PZ in 0 out 0 VOL PZ
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+
+        match &result.analyses[0] {
+            AnalysisCommand::PoleZero {
+                input_pos,
+                input_neg,
+                output_pos,
+                output_neg,
+                transfer_type,
+                analysis_type,
+            } => {
+                assert_eq!(input_pos, "IN");
+                assert_eq!(input_neg, "0");
+                assert_eq!(output_pos, "OUT");
+                assert_eq!(output_neg, "0");
+                assert_eq!(*transfer_type, PoleZeroTransferType::Voltage);
+                assert_eq!(*analysis_type, PoleZeroAnalysisType::PoleZero);
+            }
+            _ => panic!("Expected PoleZero command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_pz_current_poles_only() {
+        let netlist = r#"PZ Poles Test
+.PZ 1 0 2 0 CUR POL
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+
+        match &result.analyses[0] {
+            AnalysisCommand::PoleZero {
+                transfer_type,
+                analysis_type,
+                ..
+            } => {
+                assert_eq!(*transfer_type, PoleZeroTransferType::Current);
+                assert_eq!(*analysis_type, PoleZeroAnalysisType::PolesOnly);
+            }
+            _ => panic!("Expected PoleZero command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_pz_invalid_transfer_type() {
+        let netlist = r#"PZ Invalid Transfer
+.PZ in 0 out 0 BAD PZ
+.END
+"#;
+        let err = parse_netlist(netlist).expect_err("expected .PZ transfer type error");
+        assert!(err.to_string().contains("VOL or CUR"));
+    }
+
+    #[test]
+    fn test_parse_pz_invalid_analysis_type() {
+        let netlist = r#"PZ Invalid Type
+.PZ in 0 out 0 VOL BAD
+.END
+"#;
+        let err = parse_netlist(netlist).expect_err("expected .PZ analysis type error");
+        assert!(err.to_string().contains("PZ, POL, or ZER"));
     }
 
     #[test]

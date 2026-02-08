@@ -234,16 +234,20 @@ pub enum ElementKind {
     //-------------------------------------------------------------------------
     // Transmission Lines
     //-------------------------------------------------------------------------
-    /// Lossless transmission line: T1 port1+ port1- port2+ port2- Z0=val TD=val
+    /// Transmission line:
+    /// - Inline form: T1 p1+ p1- p2+ p2- Z0=val TD=val
+    /// - Model form: O1 p1+ p1- p2+ p2- MODELNAME
     TransmissionLine {
-        /// Characteristic impedance (Ohms)
-        z0: Value,
+        /// Characteristic impedance (Ohms), optional when provided by model card
+        z0: Option<Value>,
         /// Propagation delay (seconds) - specify TD or (F, NL)
         td: Option<Value>,
         /// Frequency for NL specification (Hz)
         freq: Option<Value>,
         /// Normalized electrical length at freq (wavelengths)
         nl: Option<Value>,
+        /// Optional model name for O/Y/P-style transmission lines
+        model: Option<String>,
     },
 
     //-------------------------------------------------------------------------
@@ -555,6 +559,23 @@ pub enum AnalysisCommand {
         stop_freq: Value,
     },
 
+    /// Pole-zero analysis: .PZ in+ in- out+ out- VOL|CUR PZ|POL|ZER
+    PoleZero {
+        input_pos: String,
+        input_neg: String,
+        output_pos: String,
+        output_neg: String,
+        transfer_type: PoleZeroTransferType,
+        analysis_type: PoleZeroAnalysisType,
+    },
+
+    /// Sensitivity analysis: .SENS V(out[,ref]) [AC DEC|LIN|OCT np fstart fstop]
+    Sensitivity {
+        output_node: String,
+        reference_node: Option<String>,
+        ac_sweep: Option<SensitivityAcSweep>,
+    },
+
     /// Fourier analysis: .FOUR freq output1 [output2...]
     Four {
         fundamental: Value,
@@ -562,11 +583,53 @@ pub enum AnalysisCommand {
         num_harmonics: usize,
     },
 
+    /// Monte Carlo analysis:
+    /// .MC runs [SEED n] [DIST GAUSS|UNIFORM] [SPREAD rel] [PARAMS p1 p2 ...]
+    MonteCarlo(MonteCarloCommand),
+
     /// Parametric sweep: .STEP PARAM name start stop increment
     Step(StepCommand),
 
     /// Temperature sweep: .TEMP t1 [t2 t3...]
     Temp { temperatures: Vec<Value> },
+}
+
+/// Monte Carlo command configuration
+#[derive(Debug, Clone)]
+pub struct MonteCarloCommand {
+    /// Number of Monte Carlo runs
+    pub runs: usize,
+    /// Optional RNG seed (deterministic when set)
+    pub seed: Option<u64>,
+    /// Statistical distribution used for parameter perturbation
+    pub distribution: MonteCarloDistribution,
+    /// Relative spread:
+    /// - Gaussian: sigma (e.g. 0.01 = 1% sigma)
+    /// - Uniform: half-width tolerance (e.g. 0.05 = +/-5%)
+    pub relative_spread: Value,
+    /// Optional explicit parameter list (empty = all eligible parameters)
+    pub params: Vec<String>,
+}
+
+impl MonteCarloCommand {
+    /// Create a Monte Carlo command with Spectre-like defaults:
+    /// Gaussian 1% variation, no explicit parameter filter.
+    pub fn new(runs: usize) -> Self {
+        Self {
+            runs,
+            seed: None,
+            distribution: MonteCarloDistribution::Gaussian,
+            relative_spread: 0.01,
+            params: Vec::new(),
+        }
+    }
+}
+
+/// Monte Carlo distribution choice
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MonteCarloDistribution {
+    Gaussian,
+    Uniform,
 }
 
 /// Parametric sweep specification
@@ -629,6 +692,35 @@ pub enum FreqVariation {
     Oct,
     /// Decade sweep
     Dec,
+}
+
+/// Transfer type for .PZ analysis
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PoleZeroTransferType {
+    /// Voltage transfer function
+    Voltage,
+    /// Current transfer function
+    Current,
+}
+
+/// Analysis mode for .PZ analysis
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PoleZeroAnalysisType {
+    /// Compute both poles and zeros
+    PoleZero,
+    /// Compute poles only
+    PolesOnly,
+    /// Compute zeros only
+    ZerosOnly,
+}
+
+/// AC sweep configuration for sensitivity analysis
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SensitivityAcSweep {
+    pub variation: FreqVariation,
+    pub points: usize,
+    pub start_freq: Value,
+    pub stop_freq: Value,
 }
 
 //=============================================================================
@@ -840,10 +932,11 @@ mod tests {
         let tl = Element {
             name: "T1".to_string(),
             kind: ElementKind::TransmissionLine {
-                z0: 50.0,
+                z0: Some(50.0),
                 td: Some(1e-9),
                 freq: None,
                 nl: None,
+                model: None,
             },
             nodes: vec![
                 "in".to_string(),
@@ -898,6 +991,73 @@ mod tests {
         };
         if let AnalysisCommand::Noise { points, .. } = noise {
             assert_eq!(points, 10);
+        }
+    }
+
+    #[test]
+    fn test_pole_zero_analysis() {
+        let pz = AnalysisCommand::PoleZero {
+            input_pos: "in".to_string(),
+            input_neg: "0".to_string(),
+            output_pos: "out".to_string(),
+            output_neg: "0".to_string(),
+            transfer_type: PoleZeroTransferType::Voltage,
+            analysis_type: PoleZeroAnalysisType::PoleZero,
+        };
+        if let AnalysisCommand::PoleZero {
+            transfer_type,
+            analysis_type,
+            ..
+        } = pz
+        {
+            assert_eq!(transfer_type, PoleZeroTransferType::Voltage);
+            assert_eq!(analysis_type, PoleZeroAnalysisType::PoleZero);
+        }
+    }
+
+    #[test]
+    fn test_sensitivity_analysis() {
+        let sens = AnalysisCommand::Sensitivity {
+            output_node: "out".to_string(),
+            reference_node: Some("0".to_string()),
+            ac_sweep: Some(SensitivityAcSweep {
+                variation: FreqVariation::Dec,
+                points: 10,
+                start_freq: 1.0,
+                stop_freq: 1e6,
+            }),
+        };
+        if let AnalysisCommand::Sensitivity {
+            output_node,
+            reference_node,
+            ac_sweep,
+        } = sens
+        {
+            assert_eq!(output_node, "out");
+            assert_eq!(reference_node.as_deref(), Some("0"));
+            let ac = ac_sweep.expect("expected AC sweep");
+            assert_eq!(ac.variation, FreqVariation::Dec);
+            assert_eq!(ac.points, 10);
+        }
+    }
+
+    #[test]
+    fn test_monte_carlo_analysis_command() {
+        let mut mc = MonteCarloCommand::new(256);
+        mc.seed = Some(42);
+        mc.distribution = MonteCarloDistribution::Uniform;
+        mc.relative_spread = 0.05;
+        mc.params = vec!["RVAL".to_string(), "CVAL".to_string()];
+
+        let cmd = AnalysisCommand::MonteCarlo(mc.clone());
+        if let AnalysisCommand::MonteCarlo(parsed) = cmd {
+            assert_eq!(parsed.runs, 256);
+            assert_eq!(parsed.seed, Some(42));
+            assert_eq!(parsed.distribution, MonteCarloDistribution::Uniform);
+            assert!((parsed.relative_spread - 0.05).abs() < 1e-12);
+            assert_eq!(parsed.params, vec!["RVAL".to_string(), "CVAL".to_string()]);
+        } else {
+            panic!("expected MonteCarlo command");
         }
     }
 }
