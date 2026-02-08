@@ -312,19 +312,31 @@ impl Bjt {
             voltages[self.node_emitter - 1]
         };
 
-        let vbe = vb - ve;
-        let vbc = vb - vc;
+        // CRITICAL: Use LIMITED junction voltages from update(), not raw!
+        // This is essential for Newton convergence - raw voltages can cause
+        // exponential current blowup if Vbe changes too much between iterations.
+        // Nagel's algorithm limits the change to prevent divergence.
+        let vbe = self.vbe; // Limited in update() via limit_junction_voltage
+        let vbc = self.vbc; // Limited in update() via limit_junction_voltage
 
         // Linearized conductances
+        // Calculate currents FIRST so we can use fresh ic for go (fixes lag issue)
+        let (ic, ib, _ie) = self.calculate_currents(vbe, vbc);
+
         let gm = self.gm(vbe);
-        let go = self.go(self.ic);
+        let go = self.go(ic); // Use fresh ic, not lagged self.ic
         let gbe = self.gbe(vbe);
         let gbc = self.gbc(vbc);
 
-        // Equivalent currents
-        let (ic, ib, _ie) = self.calculate_currents(vbe, vbc);
+        // Equivalent currents (companion model for Newton-Raphson)
         let ic_eq = ic - gm * vbe - go * (vc - ve);
         let ib_eq = ib - gbe * vbe - gbc * vbc;
+
+        // Debug logging for Newton convergence analysis (commented for performance)
+        // log::trace!(
+        //     "BJT {}: Vc={:.3} Vb={:.3} Ve={:.3} | VBE={:.3} VBC={:.3} | Ic={:.2e} Ib={:.2e} | gm={:.2e} go={:.2e} | ic_eq={:.2e} ib_eq={:.2e}",
+        //     self.name, vc, vb, ve, vbe, vbc, ic, ib, gm, go, ic_eq, ib_eq
+        // );
 
         // Stamp matrix using direct indexing
         // Collector row
@@ -352,13 +364,14 @@ impl Bjt {
             matrix.stamp_direct(idx, -go);
         }
         if let Some(idx) = self.indices.eb {
-            matrix.stamp_direct(idx, -gm);
+            matrix.stamp_direct(idx, -gm - gbe);
         }
         if let Some(idx) = self.indices.ee {
-            matrix.stamp_direct(idx, gm + go);
+            matrix.stamp_direct(idx, gm + go + gbe);
         }
 
-        // Stamp RHS
+        // Stamp RHS - current flowing OUT of node is positive in the equation
+        // BJT collector current flows from collector to emitter
         if self.node_collector > 0 {
             rhs[self.node_collector - 1] -= ic_eq;
         }
@@ -379,15 +392,50 @@ impl Bjt {
     }
 
     /// Diode current: I = Is * (exp(V / (n * Vt)) - 1)
+    ///
+    /// SPICE-style voltage limiting:
+    /// - Forward: limit to 80*n*Vt to prevent exp overflow
+    /// - Reverse: for V < -5*n*Vt, use linear extrapolation (negligible current)
     fn diode_current(&self, v: Value, n: Value) -> Value {
-        let v_limited = v.min(80.0 * n * self.vt);
-        self.is * ((v_limited / (n * self.vt)).exp() - 1.0)
+        let nvt = n * self.vt;
+        let v_crit = 80.0 * nvt; // Forward limit
+        let v_rev = -5.0 * nvt; // Reverse limit (around -0.13V at room temp)
+
+        if v > v_crit {
+            // Forward saturation - linear extrapolation
+            let i_crit = self.is * ((v_crit / nvt).exp() - 1.0);
+            let g_crit = (self.is / nvt) * (v_crit / nvt).exp();
+            i_crit + g_crit * (v - v_crit)
+        } else if v < v_rev {
+            // Deep reverse bias - essentially just -Is (negligible)
+            -self.is
+        } else {
+            // Normal operating region
+            self.is * ((v / nvt).exp() - 1.0)
+        }
     }
 
     /// Diode conductance: g = Is / (n * Vt) * exp(V / (n * Vt))
+    ///
+    /// SPICE-style limiting with minimum conductance floor for numerical stability
     fn diode_conductance(&self, v: Value, n: Value) -> Value {
-        let v_limited = v.min(80.0 * n * self.vt);
-        (self.is / (n * self.vt)) * (v_limited / (n * self.vt)).exp()
+        let nvt = n * self.vt;
+        let v_crit = 80.0 * nvt;
+        let v_rev = -5.0 * nvt;
+
+        let g = if v > v_crit {
+            // Forward saturation - constant high conductance
+            (self.is / nvt) * (v_crit / nvt).exp()
+        } else if v < v_rev {
+            // Deep reverse bias - minimum conductance
+            1e-15
+        } else {
+            // Normal region
+            (self.is / nvt) * (v / nvt).exp()
+        };
+
+        // Apply minimum conductance floor
+        g.max(1e-15)
     }
 
     /// Calculate BJT currents using Ebers-Moll with Gummel-Poon enhancements
@@ -405,8 +453,8 @@ impl Bjt {
 
         // High-injection correction (Gummel-Poon)
         // At high currents (If >> IKF), effective beta is reduced
-        let ikf_ratio = if_diode / self.ikf.max(1e-6);
-        let ikr_ratio = ir_diode / self.ikr.max(1e-6);
+        let ikf_ratio = if_diode.max(0.0) / self.ikf.max(1e-6);
+        let ikr_ratio = ir_diode.max(0.0) / self.ikr.max(1e-6);
 
         // Smooth high-injection factor: approaches 1/sqrt(I/IK) at high currents
         let hf_factor = 1.0 / (1.0 + ikf_ratio.sqrt()).max(0.1);
@@ -432,13 +480,14 @@ impl Bjt {
         let if_diode = self.diode_current(vbe_eff, self.nf);
 
         // High-injection correction factor and its derivative
-        let ikf_ratio = if_diode / self.ikf.max(1e-6);
+        let ikf_ratio = if_diode.max(0.0) / self.ikf.max(1e-6);
         let hf = 1.0 / (1.0 + ikf_ratio.sqrt()).max(0.1);
 
         // d(hf)/dVbe approx for smooth behavior (simplified)
         // At low currents: gm ≈ g_diode
         // At high currents: gm ≈ g_diode * hf (reduced)
-        g_diode * hf
+        // Apply minimum conductance floor for numerical stability
+        (g_diode * hf).max(1e-15)
     }
 
     /// Get output conductance go = dIc/dVce (Early effect)
@@ -451,13 +500,64 @@ impl Bjt {
     }
 
     /// Get base-emitter junction conductance
+    /// Includes minimum conductance floor for numerical stability
     fn gbe(&self, vbe: Value) -> Value {
-        self.diode_conductance(self.polarity() * vbe, self.nf) / self.bf
+        let g = self.diode_conductance(self.polarity() * vbe, self.nf) / self.bf;
+        g.max(1e-15) // Minimum floor prevents singular matrix
     }
 
     /// Get base-collector junction conductance
+    /// Includes minimum conductance floor for numerical stability
     fn gbc(&self, vbc: Value) -> Value {
-        self.diode_conductance(self.polarity() * vbc, self.nr) / self.br
+        let g = self.diode_conductance(self.polarity() * vbc, self.nr) / self.br;
+        g.max(1e-15) // Minimum floor prevents singular matrix
+    }
+
+    /// Junction voltage limiting (Nagel's algorithm from SPICE)
+    ///
+    /// This is critical for Newton-Raphson convergence with BJTs. The exponential
+    /// I-V characteristic means that large voltage changes can cause currents to
+    /// blow up, diverging NR. This function limits how much a junction voltage
+    /// can change between iterations.
+    ///
+    /// Algorithm from: L.W. Nagel, "SPICE2: A Computer Program to Simulate
+    /// Semiconductor Circuits", UCB/ERL M520, 1975
+    ///
+    /// Used by commercial simulators: Spectre, HSPICE, PSpice, etc.
+    fn limit_junction_voltage(vnew: Value, vold: Value, vt: Value) -> Value {
+        // Critical voltage: above this, exponential becomes problematic
+        let vcrit = vt * (vt / (core::f64::consts::SQRT_2 * 1e-14)).ln();
+
+        // If new voltage is below critical, accept it (reverse bias is stable)
+        if vnew < vcrit {
+            return vnew;
+        }
+
+        // For forward bias above critical voltage, use logarithmic limiting
+        // This prevents huge jumps that would cause exp() overflow
+        let delta = vnew - vold;
+
+        if delta.abs() <= 2.0 * vt {
+            // Small change - accept as-is
+            vnew
+        } else if vold >= 0.0 {
+            // Forward bias case: limit using logarithmic function
+            // New voltage = old + Vt * (1 + ln((delta/Vt - 1).max(1e-10)))
+            let arg = (delta / vt - 1.0).abs().max(1e-10);
+            if delta > 0.0 {
+                vold + vt * (1.0 + arg.ln())
+            } else {
+                vold - vt * (1.0 + arg.ln())
+            }
+        } else {
+            // Transition from reverse to forward - be conservative
+            // Limit to 2*Vt step toward forward bias
+            if vnew > 0.0 {
+                vt.min(vnew) // Don't exceed Vt on first forward step
+            } else {
+                vnew.max(vold - 2.0 * vt) // Limit reverse-to-less-reverse
+            }
+        }
     }
 }
 
@@ -482,8 +582,15 @@ impl NonlinearDevice for Bjt {
         self.vbe_prev = self.vbe;
         self.vbc_prev = self.vbc;
 
-        self.vbe = vb - ve;
-        self.vbc = vb - vc;
+        // Calculate raw junction voltages
+        let vbe_raw = vb - ve;
+        let vbc_raw = vb - vc;
+
+        // Apply junction voltage limiting (standard SPICE technique)
+        // This is critical for BJT convergence - limits how much Vbe/Vbc can
+        // change per Newton iteration to prevent exponential current blowup
+        self.vbe = Self::limit_junction_voltage(vbe_raw, self.vbe_prev, self.vt);
+        self.vbc = Self::limit_junction_voltage(vbc_raw, self.vbc_prev, self.vt);
 
         let (ic, ib, ie) = self.calculate_currents(self.vbe, self.vbc);
         self.ic = ic;
@@ -502,7 +609,7 @@ impl NonlinearDevice for Bjt {
         } else {
             voltages[self.node_collector - 1]
         };
-        let vb = if self.node_base == 0 {
+        let _vb = if self.node_base == 0 {
             0.0
         } else {
             voltages[self.node_base - 1]
@@ -513,17 +620,24 @@ impl NonlinearDevice for Bjt {
             voltages[self.node_emitter - 1]
         };
 
-        let vbe = vb - ve;
-        let vbc = vb - vc;
+        // CRITICAL: Use LIMITED junction voltages from update(), not raw!
+        // This is essential for Newton convergence - raw voltages can cause
+        // exponential current blowup if Vbe changes too much between iterations.
+        // Nagel's algorithm limits the change to prevent divergence.
+        let vbe = self.vbe; // Limited in update() via limit_junction_voltage
+        let vbc = self.vbc; // Limited in update() via limit_junction_voltage
 
-        // Linearized conductances
+        // Calculate currents FIRST so we can use fresh ic for go (matches stamp_direct)
+        // Using lagged self.ic would cause inconsistent linearization during Newton-Raphson
+        let (ic, ib, _ie) = self.calculate_currents(vbe, vbc);
+
+        // Linearized conductances using fresh values
         let gm = self.gm(vbe);
-        let go = self.go(self.ic);
+        let go = self.go(ic); // Use fresh ic, not lagged self.ic
         let gbe = self.gbe(vbe);
         let gbc = self.gbc(vbc);
 
-        // Equivalent currents for linearization
-        let (ic, ib, _ie) = self.calculate_currents(vbe, vbc);
+        // Equivalent currents for linearization (companion model)
         let ic_eq = ic - gm * vbe - go * (vc - ve);
         let ib_eq = ib - gbe * vbe - gbc * vbc;
 
@@ -540,8 +654,8 @@ impl NonlinearDevice for Bjt {
 
         // Emitter node equation
         matrix.stamp(self.node_emitter, self.node_collector, -go);
-        matrix.stamp(self.node_emitter, self.node_base, -gm);
-        matrix.stamp(self.node_emitter, self.node_emitter, gm + go);
+        matrix.stamp(self.node_emitter, self.node_base, -gm - gbe);
+        matrix.stamp(self.node_emitter, self.node_emitter, gm + go + gbe);
 
         // Stamp equivalent current sources
         matrix.stamp_rhs(self.node_collector, -ic_eq);
@@ -549,16 +663,57 @@ impl NonlinearDevice for Bjt {
         matrix.stamp_rhs(self.node_emitter, ic_eq + ib_eq);
     }
 
+    /// Check Newton-Raphson convergence using SPICE-style voltage criteria.
+    ///
+    /// Uses the standard SPICE convergence test:
+    ///   |delta(V)| < RELTOL * max(|V_new|, |V_old|) + VNTOL
+    ///
+    /// `tolerance` is VNTOL from solver configuration.
     fn is_converged(&self, tolerance: Value) -> bool {
+        // Industry-standard SPICE convergence parameter
+        const RELTOL: Value = 1e-3; // 0.1% relative tolerance
+
         let vbe_diff = (self.vbe - self.vbe_prev).abs();
         let vbc_diff = (self.vbc - self.vbc_prev).abs();
-        vbe_diff < tolerance && vbc_diff < tolerance
+
+        // SPICE criterion: |delta(V)| < RELTOL * max(|V_new|, |V_old|) + VNTOL
+        let vbe_tol = RELTOL * self.vbe.abs().max(self.vbe_prev.abs()) + tolerance;
+        let vbc_tol = RELTOL * self.vbc.abs().max(self.vbc_prev.abs()) + tolerance;
+
+        vbe_diff < vbe_tol && vbc_diff < vbc_tol
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    #[derive(Default)]
+    struct CaptureMatrix {
+        entries: HashMap<(NodeId, NodeId), Value>,
+        rhs: HashMap<NodeId, Value>,
+    }
+
+    impl CaptureMatrix {
+        fn g(&self, row: NodeId, col: NodeId) -> Value {
+            *self.entries.get(&(row, col)).unwrap_or(&0.0)
+        }
+
+        fn i(&self, node: NodeId) -> Value {
+            *self.rhs.get(&node).unwrap_or(&0.0)
+        }
+    }
+
+    impl MatrixStamper for CaptureMatrix {
+        fn stamp(&mut self, row: NodeId, col: NodeId, value: Value) {
+            *self.entries.entry((row, col)).or_insert(0.0) += value;
+        }
+
+        fn stamp_rhs(&mut self, index: NodeId, value: Value) {
+            *self.rhs.entry(index).or_insert(0.0) += value;
+        }
+    }
 
     // =========================================================================
     // Creation and Configuration Tests
@@ -876,9 +1031,47 @@ mod tests {
         q.vbc_prev = -5.001;
 
         // Should be converged within 1mV tolerance
+        // With RELTOL=1e-3: tol_vbe = 0.001*0.7 + 0.01 ≈ 0.0107, Δ=0.0001 < 0.0107 ✓
         assert!(q.is_converged(0.01));
 
-        // Should not be converged with tight tolerance
+        // Even with very tight VNTOL, RELTOL provides adequate tolerance for
+        // junction voltages. This is correct SPICE behavior.
+        // tol_vbe = 0.001*0.7 + 1e-6 ≈ 0.0007, Δ=0.0001 < 0.0007 ✓
+        assert!(q.is_converged(1e-6));
+
+        // To fail convergence, delta must exceed RELTOL*|V| + VNTOL
+        q.vbe_prev = 0.71; // Δ=0.01, tol=0.001*0.71+1e-6≈0.00071, 0.01 > 0.00071
         assert!(!q.is_converged(1e-6));
+    }
+
+    #[test]
+    fn test_bjt_stamp_preserves_kcl_in_jacobian_and_rhs() {
+        // Nodes are 1-based in stamps (0 is ground): C=3, B=2, E=1
+        let mut q = Bjt::new_npn("Q1".to_string(), 3, 2, 1);
+        let voltages = vec![0.2, 0.9, 5.0]; // E, B, C
+        q.update(&voltages);
+
+        let mut matrix = CaptureMatrix::default();
+        let mut rhs = vec![0.0; 3];
+        q.stamp_nonlinear(&voltages, &mut matrix, &mut rhs);
+
+        let cc = matrix.g(3, 3);
+        let cb = matrix.g(3, 2);
+        let ce = matrix.g(3, 1);
+        let bc = matrix.g(2, 3);
+        let bb = matrix.g(2, 2);
+        let be = matrix.g(2, 1);
+        let ec = matrix.g(1, 3);
+        let eb = matrix.g(1, 2);
+        let ee = matrix.g(1, 1);
+
+        // Emitter row must be the negative of collector+base rows (charge conservation)
+        assert!((ec + cc + bc).abs() < 1e-12);
+        assert!((eb + cb + bb).abs() < 1e-12);
+        assert!((ee + ce + be).abs() < 1e-12);
+
+        // Current-source linearization must also satisfy KCL
+        let i_sum = matrix.i(3) + matrix.i(2) + matrix.i(1);
+        assert!(i_sum.abs() < 1e-12);
     }
 }

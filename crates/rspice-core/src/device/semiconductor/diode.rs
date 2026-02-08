@@ -82,6 +82,39 @@ impl Diode {
         self
     }
 
+    /// Set model parameters from a HashMap (for .MODEL statement parsing)
+    pub fn with_model_params(mut self, params: &std::collections::HashMap<String, Value>) -> Self {
+        if let Some(&v) = params.get("IS") {
+            self.is = v;
+        }
+        if let Some(&v) = params.get("N") {
+            self.n = v;
+        }
+        if let Some(&v) = params.get("RS") {
+            self.rs = v;
+        }
+        if let Some(&v) = params.get("CJO") {
+            self.cj0 = v;
+        }
+        if let Some(&v) = params.get("CJ0") {
+            self.cj0 = v;
+        }
+        if let Some(&v) = params.get("VJ") {
+            self.vj = v;
+        }
+        if let Some(&v) = params.get("M") {
+            self.m = v;
+        }
+        if let Some(&v) = params.get("TT") {
+            self.tt = v;
+        }
+        if let Some(&v) = params.get("BV") {
+            // Breakdown voltage (not yet used, but store for future)
+            let _ = v;
+        }
+        self
+    }
+
     /// Set junction capacitance parameters
     pub fn with_capacitance(mut self, cj0: Value, vj: Value, m: Value, tt: Value) -> Self {
         self.cj0 = cj0;
