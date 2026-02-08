@@ -253,6 +253,7 @@ fn build_sim_config(args: &RunArgs, config: &Config) -> SimulationConfig {
     };
     convergence_config.voltage_reltol = reltol;
     convergence_config.voltage_abstol = abstol;
+    convergence_config.current_abstol = abstol;
     sim_config.convergence_config = convergence_config;
 
     sim_config
@@ -2342,6 +2343,10 @@ mod tests {
             sim_config.convergence_config.voltage_abstol,
             config.simulation.abstol
         );
+        assert_eq!(
+            sim_config.convergence_config.current_abstol,
+            config.simulation.abstol
+        );
     }
 
     #[test]
@@ -2359,6 +2364,7 @@ mod tests {
         assert_eq!(sim_config.tolerance, 5e-4);
         assert_eq!(sim_config.convergence_config.voltage_reltol, 5e-4);
         assert_eq!(sim_config.convergence_config.voltage_abstol, 1e-15);
+        assert_eq!(sim_config.convergence_config.current_abstol, 1e-15);
     }
 
     #[test]
@@ -2374,6 +2380,7 @@ mod tests {
             config.simulation.reltol
         );
         assert_eq!(sim_config.convergence_config.voltage_abstol, 2e-14);
+        assert_eq!(sim_config.convergence_config.current_abstol, 2e-14);
     }
 
     #[test]
@@ -2389,6 +2396,7 @@ mod tests {
         assert!(!sim_config.convergence_config.source_stepping);
         assert_eq!(sim_config.convergence_config.voltage_reltol, 8e-4);
         assert_eq!(sim_config.convergence_config.voltage_abstol, 4e-12);
+        assert_eq!(sim_config.convergence_config.current_abstol, 4e-12);
     }
 
     #[test]
