@@ -46,6 +46,53 @@ impl Engine {
         self.nonlinear_iteration_budget(multiplier).max(minimum)
     }
 
+    fn build_descending_schedule(mut start: Value, mut end: Value) -> Vec<Value> {
+        if !start.is_finite() || start <= 0.0 {
+            start = 1e-3;
+        }
+        if !end.is_finite() || end <= 0.0 {
+            end = 1e-12;
+        }
+        if start < end {
+            std::mem::swap(&mut start, &mut end);
+        }
+
+        let mut values = Vec::with_capacity(16);
+        let mut current = start;
+        values.push(current);
+
+        while current > end && values.len() < 64 {
+            let next = (current / 10.0).max(end);
+            if (next - current).abs() < Value::EPSILON {
+                break;
+            }
+            values.push(next);
+            current = next;
+        }
+
+        if values.last().map_or(true, |&v| v > end) {
+            values.push(end);
+        }
+
+        values
+    }
+
+    #[inline]
+    fn gmin_linear_schedule(&self) -> Vec<Value> {
+        let conv = &self.config.convergence_config;
+        let start = conv.gmin_initial.max(1e-2);
+        let end = conv.gmin_target.max(1e-12);
+        Self::build_descending_schedule(start, end)
+    }
+
+    #[inline]
+    fn gmin_nonlinear_schedule(&self) -> Vec<Value> {
+        let conv = &self.config.convergence_config;
+        let start = conv.gmin_initial.max(1e-3);
+        let end = conv.gmin_target.max(1e-12);
+        Self::build_descending_schedule(start, end)
+    }
+
     #[inline]
     fn has_clamped_values(solution: &[Value]) -> bool {
         solution.iter().any(|&v| !v.is_finite() || v.abs() >= 999.0)
@@ -433,12 +480,11 @@ impl Engine {
         circuit: &CircuitData,
         matrix: &mut StaticMatrix,
     ) -> Result<Vec<Value>, SolverError> {
-        // GMIN stepping sequence from large to small
-        const GMIN_VALUES: &[Value] = &[1e-2, 1e-4, 1e-6, 1e-9, 1e-12];
+        let gmin_values = self.gmin_linear_schedule();
 
         let mut solution = None;
 
-        for &gmin in GMIN_VALUES {
+        for (idx, &gmin) in gmin_values.iter().enumerate() {
             match self.try_solve_with_gmin(circuit, matrix, gmin) {
                 Ok(sol) => {
                     solution = Some(sol);
@@ -448,7 +494,7 @@ impl Engine {
                     // Can't solve with smaller GMIN, use the last successful one
                     break;
                 }
-                Err(e) if gmin == GMIN_VALUES[GMIN_VALUES.len() - 1] => {
+                Err(e) if idx == gmin_values.len() - 1 => {
                     // Last GMIN value failed and we have no solution
                     return Err(e);
                 }
@@ -1231,10 +1277,7 @@ impl Engine {
         matrix: &mut StaticMatrix,
         initial_guess: &[Value],
     ) -> Result<Vec<Value>, SimulationError> {
-        // GMIN values from large to small (logarithmic progression)
-        const GMIN_SCALES: &[Value] = &[
-            1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9, 1e-10, 1e-11, 1e-12,
-        ];
+        let gmin_scales = self.gmin_nonlinear_schedule();
 
         let size = circuit.matrix_size();
 
@@ -1257,7 +1300,7 @@ impl Engine {
         let mut damping_state = NewtonDampingState::default();
         let gmin_iterations = self.continuation_iteration_budget(10, 12);
 
-        for (step, &gmin) in GMIN_SCALES.iter().enumerate() {
+        for (step, &gmin) in gmin_scales.iter().enumerate() {
             log::debug!("GMIN stepping: step {} with GMIN = {:.2e}", step + 1, gmin);
 
             // Use more iterations for GMIN stepping to allow convergence
@@ -1305,7 +1348,7 @@ impl Engine {
                             break;
                         }
                     }
-                    Err(e) if step == GMIN_SCALES.len() - 1 => {
+                    Err(e) if step == gmin_scales.len() - 1 => {
                         log::error!("GMIN stepping failed at final step: {:?}", e);
                         return Err(SimulationError::Solver(e));
                     }
@@ -1461,18 +1504,39 @@ mod tests {
         assert!(Engine::check_voltage_convergence(&a, &b, 1e-9));
     }
 
-    /// Test that GMIN values are in decreasing order.
+    /// Test that configured GMIN schedule is in decreasing order.
     #[test]
     fn test_gmin_stepping_values_order() {
-        // The GMIN_VALUES constant should be in decreasing order
-        // for proper stepping from large to small
-        const GMIN_VALUES: &[f64] = &[1e-2, 1e-4, 1e-6, 1e-9, 1e-12];
-        for i in 1..GMIN_VALUES.len() {
+        let engine = Engine::new(crate::engine::SimulationConfig::default());
+        let gmin_values = engine.gmin_linear_schedule();
+        for i in 1..gmin_values.len() {
             assert!(
-                GMIN_VALUES[i] < GMIN_VALUES[i - 1],
+                gmin_values[i] < gmin_values[i - 1],
                 "GMIN values should be decreasing"
             );
         }
+    }
+
+    #[test]
+    fn test_gmin_schedules_respect_custom_config_with_robust_floors() {
+        let mut config = crate::engine::SimulationConfig::default();
+        config.convergence_config.gmin_initial = 1e-1;
+        config.convergence_config.gmin_target = 1e-6;
+        let engine = Engine::new(config);
+
+        let linear = engine.gmin_linear_schedule();
+        let nonlinear = engine.gmin_nonlinear_schedule();
+
+        assert!(linear.first().copied().unwrap_or_default() >= 1e-1);
+        assert!(nonlinear.first().copied().unwrap_or_default() >= 1e-1);
+        assert!(
+            linear.last().copied().unwrap_or_default() <= 1e-6,
+            "linear schedule should descend to configured/floored target"
+        );
+        assert!(
+            nonlinear.last().copied().unwrap_or_default() <= 1e-6,
+            "nonlinear schedule should descend to configured/floored target"
+        );
     }
 
     /// Test that source stepping scales are in increasing order.
