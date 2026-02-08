@@ -2021,14 +2021,23 @@ pub fn run_pnoise_analysis_with_config(
         PnoiseReference::Output => {}
         PnoiseReference::Input => {
             match compute_input_referred_pnoise(
+                &engine,
                 netlist_text,
                 &netlist,
                 &dc_result.node_names,
+                output_idx,
+                output_ref_idx,
                 config,
                 &folded_output_noise,
                 &noise_data.frequencies,
+                sideband_factor,
             ) {
-                Ok(estimate) => input_noise = Some(estimate),
+                Ok((estimate, method_warning)) => {
+                    input_noise = Some(estimate);
+                    if let Some(warning) = method_warning {
+                        warnings.push(warning);
+                    }
+                }
                 Err(error) => {
                     input_noise = Some(output_noise.clone());
                     warnings.push(format!(
@@ -2085,6 +2094,84 @@ pub fn run_pnoise_analysis_with_config(
 }
 
 fn compute_input_referred_pnoise(
+    engine: &Engine,
+    netlist_text: &str,
+    netlist: &rspice_core::Netlist,
+    node_names: &[String],
+    output_idx: usize,
+    output_ref_idx: Option<usize>,
+    config: &PnoiseRunConfig,
+    output_noise: &[Value],
+    frequencies: &[Value],
+    sideband_factor: usize,
+) -> Result<(Vec<Value>, Option<String>), String> {
+    if let Some(source_name) = infer_primary_source_name(netlist) {
+        match engine.run_noise_with_input_source(
+            netlist,
+            output_idx,
+            output_ref_idx,
+            &source_name,
+            frequencies,
+            300.0,
+        ) {
+            Ok(core_results) => {
+                if core_results.len() == output_noise.len() {
+                    let scaled_input_noise: Vec<Value> = core_results
+                        .iter()
+                        .map(|point| point.input_referred_density.max(0.0))
+                        .map(|point| point * sideband_factor as Value)
+                        .collect();
+                    return Ok((scaled_input_noise, None));
+                }
+                let fallback = compute_input_referred_pnoise_from_tf(
+                    netlist_text,
+                    netlist,
+                    node_names,
+                    config,
+                    output_noise,
+                    frequencies,
+                )?;
+                return Ok((
+                    fallback,
+                    Some(format!(
+                        "PNOISE input-referred conversion used TF fallback because core path returned {} points (expected {})",
+                        core_results.len(),
+                        output_noise.len()
+                    )),
+                ));
+            }
+            Err(error) => {
+                let fallback = compute_input_referred_pnoise_from_tf(
+                    netlist_text,
+                    netlist,
+                    node_names,
+                    config,
+                    output_noise,
+                    frequencies,
+                )?;
+                return Ok((
+                    fallback,
+                    Some(format!(
+                        "PNOISE input-referred conversion used TF fallback after core source '{}' path failed: {}",
+                        source_name, error
+                    )),
+                ));
+            }
+        }
+    }
+
+    let fallback =
+        compute_input_referred_pnoise_from_tf(netlist_text, netlist, node_names, config, output_noise, frequencies)?;
+    Ok((
+        fallback,
+        Some(
+            "PNOISE input-referred conversion used TF fallback because no independent input source could be inferred"
+                .to_string(),
+        ),
+    ))
+}
+
+fn compute_input_referred_pnoise_from_tf(
     netlist_text: &str,
     netlist: &rspice_core::Netlist,
     node_names: &[String],
@@ -5687,10 +5774,11 @@ mod tests {
     }
 
     #[test]
-    fn test_run_pnoise_analysis_input_reference_uses_transfer_gain_conversion() {
+    fn test_run_pnoise_analysis_input_reference_matches_core_input_referred_density() {
         let netlist = "* pnoise input\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
         let output_cfg = PnoiseRunConfig {
             output_node: "out".to_string(),
+            output_ref: Some("in".to_string()),
             noise_ref: PnoiseReference::Output,
             start_freq: 10.0,
             stop_freq: 1e7,
@@ -5717,21 +5805,41 @@ mod tests {
         assert!(!input_result
             .warnings
             .iter()
+            .any(|warning| warning.contains("TF fallback")));
+        assert!(!input_result
+            .warnings
+            .iter()
             .any(|warning| warning.contains("unity gain")));
 
-        let input_last = *input_curve
-            .last()
-            .expect("input-referred curve should contain at least one point");
-        let output_last = *output_result
-            .output_noise
-            .last()
-            .expect("output-referred curve should contain at least one point");
-        assert!(
-            input_last > output_last * 1.05,
-            "input-referred PSD {} should exceed output PSD {} at high frequency for RC low-pass gain",
-            input_last,
-            output_last
-        );
+        let parsed = rspice_core::netlist::parse_netlist(netlist).expect("netlist should parse");
+        let mut sim_config = build_engine_config(&parsed, None);
+        sim_config.tolerance = input_cfg.pss_tolerance;
+        let engine = Engine::new(sim_config);
+        let dc = engine.run_dc_op(&parsed).expect("dc op should execute");
+        let out_idx = resolve_node_or_ground_index("out", &dc.node_names).expect("out must resolve");
+        let ref_idx = resolve_node_or_ground_index("in", &dc.node_names).expect("in must resolve");
+        let core_input = engine
+            .run_noise_with_input_source(
+                &parsed,
+                out_idx,
+                Some(ref_idx),
+                "V1",
+                &input_result.frequencies,
+                300.0,
+            )
+            .expect("core input-referred noise run should execute");
+        assert_eq!(core_input.len(), input_curve.len());
+        for (idx, (core_point, ui_point)) in core_input.iter().zip(input_curve.iter()).enumerate() {
+            let tol = 1e-24 + core_point.input_referred_density.abs() * 1e-9;
+            assert!(
+                (core_point.input_referred_density - *ui_point).abs() <= tol,
+                "expected UI input-referred density to match core at idx {} (f={} Hz): core={}, ui={}",
+                idx,
+                core_point.frequency,
+                core_point.input_referred_density,
+                ui_point
+            );
+        }
     }
 
     #[test]
