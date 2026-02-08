@@ -10,7 +10,10 @@ use crate::cli::{CliError, Config, OutputFormat, RunArgs};
 use crate::report::{JUnitReporter, JsonMeasReporter, SimulationReport, TapReporter};
 use indicatif::{ProgressBar, ProgressStyle};
 use rspice_core::netlist::AnalysisCommand;
-use rspice_core::{ConvergenceConfig, Engine, Netlist, SimulationConfig};
+use rspice_core::{
+    ConvergencePreset, Engine, Netlist, SimulationConfig, SimulationConfigOverrides,
+    resolve_simulation_config,
+};
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
@@ -210,71 +213,39 @@ fn load_netlist(path: &Path) -> Result<Netlist, CliError> {
 
 /// Build simulation configuration from args and config
 fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> SimulationConfig {
-    let mut sim_config = SimulationConfig::default();
+    let mut base = SimulationConfig::default();
+    base.temperature = config.simulation.temperature + 273.15;
+    base.max_iterations = config.simulation.max_iterations;
+    base.min_timestep = config.simulation.min_timestep;
+    base.max_timestep = config.simulation.max_timestep;
+    base.tolerance = config.simulation.reltol;
+    base.convergence_config.voltage_reltol = config.simulation.reltol;
+    base.convergence_config.voltage_abstol = config.simulation.abstol;
+    base.convergence_config.current_abstol = config.simulation.abstol;
+    base.convergence_config.residual_reltol = config.simulation.residual_reltol;
 
-    // Temperature (CLI overrides config)
-    if let Some(temp) = args.temp {
-        sim_config.temperature = temp + 273.15; // Convert to Kelvin
-    } else {
-        sim_config.temperature = config.simulation.temperature + 273.15;
-    }
-
-    // Tolerances
-    // Keep legacy `SimulationConfig::tolerance` aligned with RELTOL semantics.
-    let reltol = args
-        .reltol
-        .or(netlist.options.reltol)
-        .unwrap_or(config.simulation.reltol);
-    let voltage_abstol = args
-        .abstol
-        .or(netlist.options.vntol)
-        .or(netlist.options.abstol)
-        .unwrap_or(config.simulation.abstol);
-    let current_abstol = args
-        .abstol
-        .or(netlist.options.iabstol)
-        .or(netlist.options.abstol)
-        .unwrap_or(config.simulation.abstol);
-    let residual_reltol = args
-        .residual_reltol
-        .or(netlist.options.residual_reltol)
-        .or(netlist.options.reltol)
-        .unwrap_or(config.simulation.residual_reltol);
-    sim_config.tolerance = reltol;
-
-    // Iterations
-    if let Some(maxiter) = args.maxiter {
-        sim_config.max_iterations = maxiter;
-    } else {
-        sim_config.max_iterations = config.simulation.max_iterations;
-    }
-
-    // Timestep limits
-    if let Some(min_step) = args.min_step {
-        sim_config.min_timestep = min_step;
-    }
-    if let Some(max_step) = args.max_step {
-        sim_config.max_timestep = max_step;
-    }
-
-    // Convergence mode (CLI > config > default)
     let convergence_mode = args
         .convergence
         .as_deref()
         .unwrap_or(&config.simulation.convergence_mode);
+    let convergence_preset = ConvergencePreset::from_mode_name(convergence_mode);
 
-    let mut convergence_config = match convergence_mode {
-        "fast" => ConvergenceConfig::fast(),
-        "robust" => ConvergenceConfig::robust(),
-        _ => ConvergenceConfig::default(), // "default" or any other
+    let overrides = SimulationConfigOverrides {
+        temperature_kelvin: args.temp.map(|temp_c| temp_c + 273.15),
+        max_iterations: args.maxiter,
+        min_timestep: args.min_step,
+        max_timestep: args.max_step,
+        integration_method: None,
+        convergence_preset,
+        reltol: args.reltol,
+        abstol: args.abstol,
+        voltage_abstol: None,
+        current_abstol: None,
+        residual_reltol: args.residual_reltol,
+        gmin_initial: None,
     };
-    convergence_config.voltage_reltol = reltol;
-    convergence_config.voltage_abstol = voltage_abstol;
-    convergence_config.current_abstol = current_abstol;
-    convergence_config.residual_reltol = residual_reltol;
-    sim_config.convergence_config = convergence_config;
 
-    sim_config
+    resolve_simulation_config(&base, Some(&netlist.options), &overrides)
 }
 
 /// Run a single analysis
@@ -2380,6 +2351,8 @@ mod tests {
             sim_config.convergence_config.residual_reltol,
             config.simulation.residual_reltol
         );
+        assert_eq!(sim_config.min_timestep, config.simulation.min_timestep);
+        assert_eq!(sim_config.max_timestep, config.simulation.max_timestep);
     }
 
     #[test]
@@ -2525,6 +2498,46 @@ mod tests {
 
         assert_eq!(sim_config.convergence_config.voltage_reltol, 6e-4);
         assert_eq!(sim_config.convergence_config.residual_reltol, 6e-4);
+    }
+
+    #[test]
+    fn test_build_sim_config_uses_netlist_temp_itl1_and_method() {
+        let args = make_default_run_args();
+        let config = Config::default();
+        let netlist = Netlist::parse(
+            r#"Test
+.OPTIONS TEMP=85 ITL1=120 METHOD=GEAR
+.END
+"#,
+        )
+        .unwrap();
+        let sim_config = build_sim_config(&args, &config, &netlist);
+
+        assert!((sim_config.temperature - 358.15).abs() < 1e-12);
+        assert_eq!(sim_config.max_iterations, 120);
+        assert_eq!(
+            sim_config.integration_method,
+            rspice_core::analysis::IntegrationMethod::Gear2
+        );
+    }
+
+    #[test]
+    fn test_build_sim_config_cli_overrides_netlist_temp_and_itl1() {
+        let mut args = make_default_run_args();
+        args.temp = Some(27.0);
+        args.maxiter = Some(90);
+        let config = Config::default();
+        let netlist = Netlist::parse(
+            r#"Test
+.OPTIONS TEMP=125 ITL1=120
+.END
+"#,
+        )
+        .unwrap();
+        let sim_config = build_sim_config(&args, &config, &netlist);
+
+        assert!((sim_config.temperature - 300.15).abs() < 1e-12);
+        assert_eq!(sim_config.max_iterations, 90);
     }
 
     #[test]
