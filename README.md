@@ -118,17 +118,6 @@ RSpice is organized as a Rust workspace with six crates:
 
 ---
 
-## RSpice Studio
-
-The visual interface is designed for the modern engineer:
-
-*   **GPU Rendering**: Powered by **egui** with a native **wgpu** backend, rendering massive waveforms and complex schematics at a fluid 60FPS.
-*   **Cross-Probing**: Interactive linking between schematic nodes and waveform traces.
-*   **Virtuoso-Style Hierarchy**: Full **Library/Cell/View (LCV)** commercial registry for hierarchical design management and PDK integration.
-*   **Format Support**: Import/Export standard formats including Touchstone (`.s2p`), CSV, and **LTspice® RAW**.
-
----
-
 ## Installation
 
 ### Prerequisites
