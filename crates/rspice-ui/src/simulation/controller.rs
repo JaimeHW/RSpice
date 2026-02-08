@@ -484,7 +484,7 @@ impl SimulationController {
                     .to_config()
                     .map_err(|e| format!("invalid corner settings: {}", e))?;
                 Ok(SpecExecutionOptions {
-                    corner: Some(Self::corner_run_config_from_dialog(&corner_cfg)),
+                    corner: Some(Self::corner_run_config_from_dialog(state, &corner_cfg)?),
                 })
             }
             _ => Ok(SpecExecutionOptions::default()),
@@ -492,10 +492,13 @@ impl SimulationController {
     }
 
     fn corner_run_config_from_dialog(
+        state: &AppState,
         corner_cfg: &crate::simulation::dialog::corner::CornerConfig,
-    ) -> crate::services::simulation_runner::CornerRunConfig {
-        use crate::services::simulation_runner::{CornerProcess, CornerRunConfig};
-        use crate::simulation::dialog::corner::ProcessCorner;
+    ) -> Result<crate::services::simulation_runner::CornerRunConfig, String> {
+        use crate::services::simulation_runner::{
+            CornerBaseMode, CornerFrequencySweep, CornerProcess, CornerRunConfig,
+        };
+        use crate::simulation::dialog::corner::{CornerBaseAnalysis, ProcessCorner};
 
         let process_corners = corner_cfg
             .process_corners
@@ -515,13 +518,60 @@ impl SimulationController {
             n => Some(corner_cfg.voltages[n / 2]),
         };
 
-        CornerRunConfig {
+        let base_mode = match corner_cfg.base_analysis {
+            CornerBaseAnalysis::Op => CornerBaseMode::Op,
+            CornerBaseAnalysis::Dc => {
+                let source_name = state.dialogs.dc_source.trim();
+                if source_name.is_empty() {
+                    return Err(
+                        "corner DC base analysis requires a non-empty sweep source".to_string()
+                    );
+                }
+                CornerBaseMode::DcSweep {
+                    source_name: source_name.to_string(),
+                    start: parse_spice_value_checked(&state.dialogs.dc_start)
+                        .map_err(|e| format!("invalid corner DC start value: {}", e))?,
+                    stop: parse_spice_value_checked(&state.dialogs.dc_stop)
+                        .map_err(|e| format!("invalid corner DC stop value: {}", e))?,
+                    step: parse_spice_value_checked(&state.dialogs.dc_step)
+                        .map_err(|e| format!("invalid corner DC step value: {}", e))?,
+                }
+            }
+            CornerBaseAnalysis::Transient => CornerBaseMode::Transient {
+                stop_time: parse_spice_value_checked(&state.dialogs.tran_stop)
+                    .map_err(|e| format!("invalid corner transient stop time: {}", e))?,
+                step_time: parse_spice_value_checked(&state.dialogs.tran_step)
+                    .map_err(|e| format!("invalid corner transient step time: {}", e))?,
+            },
+            CornerBaseAnalysis::Ac => {
+                let sweep = match Self::map_frequency_sweep(state.dialogs.ac_sweep_type) {
+                    FrequencySweep::Decade => CornerFrequencySweep::Decade,
+                    FrequencySweep::Octave => CornerFrequencySweep::Octave,
+                    FrequencySweep::Linear => CornerFrequencySweep::Linear,
+                };
+                CornerBaseMode::Ac {
+                    start_freq: parse_spice_value_checked(&state.dialogs.ac_fstart)
+                        .map_err(|e| format!("invalid corner AC start frequency: {}", e))?,
+                    stop_freq: parse_spice_value_checked(&state.dialogs.ac_fstop)
+                        .map_err(|e| format!("invalid corner AC stop frequency: {}", e))?,
+                    points_per_unit: Self::parse_positive_points(
+                        &state.dialogs.ac_points,
+                        "ac_points",
+                    )
+                    .map_err(|e| format!("invalid corner AC points: {}", e))?,
+                    sweep,
+                }
+            }
+        };
+
+        Ok(CornerRunConfig {
             process_corners,
             voltages: corner_cfg.voltages.clone(),
             temperatures_c: corner_cfg.temperatures.clone(),
             full_matrix: corner_cfg.full_matrix,
             nominal_voltage,
-        }
+            base_mode,
+        })
     }
 
     fn build_analysis_spec_for_index(
@@ -747,19 +797,9 @@ impl SimulationController {
     fn build_corner_sweep_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
         let mut corner_state = state.dialogs.corner_state.clone();
         corner_state.ensure_initialized();
-        let corner_cfg = corner_state
+        corner_state
             .to_config()
             .map_err(|e| format!("invalid corner settings: {}", e))?;
-        use crate::simulation::dialog::corner::CornerBaseAnalysis;
-        if !matches!(
-            corner_cfg.base_analysis,
-            CornerBaseAnalysis::Op | CornerBaseAnalysis::Dc
-        ) {
-            return Err(
-                "corner analysis currently supports only OP/DC base analyses in the active controller path"
-                    .to_string(),
-            );
-        }
         Ok(AnalysisSpec::Corner)
     }
 
@@ -2324,7 +2364,155 @@ mod tests {
         assert!(matches!(queue[2].spec, AnalysisSpec::Corner));
         assert!(queue[2].config.is_none());
         assert!(queue[2].spec_options.corner.is_some());
+        assert!(matches!(
+            queue[2]
+                .spec_options
+                .corner
+                .as_ref()
+                .expect("corner options must be present")
+                .base_mode,
+            crate::services::simulation_runner::CornerBaseMode::Op
+        ));
         assert!(queue[2].analysis_line.starts_with(".temp "));
+    }
+
+    #[test]
+    fn test_build_analysis_spec_for_corner_accepts_transient_base_mode() {
+        use crate::simulation::dialog::corner::{CornerBaseAnalysis, CornerConfig};
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.corner_state =
+            crate::simulation::dialog::corner::CornerDialogState::from_config(
+                &CornerConfig::default().with_base_analysis(CornerBaseAnalysis::Transient),
+            );
+
+        let spec = controller
+            .build_analysis_spec_for_index(&state, 18)
+            .expect("corner transient base mode should be accepted");
+        assert!(matches!(spec, AnalysisSpec::Corner));
+    }
+
+    #[test]
+    fn test_build_queue_from_plan_maps_corner_ac_base_mode() {
+        use crate::simulation::dialog::corner::{CornerBaseAnalysis, CornerConfig, ProcessCorner};
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses = [18usize].into_iter().collect();
+        state.dialogs.corner_state =
+            crate::simulation::dialog::corner::CornerDialogState::from_config(
+                &CornerConfig::default()
+                    .with_process_corners(vec![ProcessCorner::TT])
+                    .with_base_analysis(CornerBaseAnalysis::Ac),
+            );
+        state.dialogs.ac_fstart = "1k".to_string();
+        state.dialogs.ac_fstop = "10Meg".to_string();
+        state.dialogs.ac_points = "12".to_string();
+        state.dialogs.ac_sweep_type = 1; // octave
+
+        let plan = controller
+            .build_analysis_plan(&state)
+            .expect("plan should build");
+        let queue = controller
+            .build_queue_from_plan(&state, &plan)
+            .expect("queue should build");
+
+        assert_eq!(queue.len(), 1);
+        let corner = queue[0]
+            .spec_options
+            .corner
+            .as_ref()
+            .expect("corner options must be present");
+        match &corner.base_mode {
+            crate::services::simulation_runner::CornerBaseMode::Ac {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                sweep,
+            } => {
+                assert!((*start_freq - 1e3).abs() < 1e-12);
+                assert!((*stop_freq - 1e7).abs() < 1e-4);
+                assert_eq!(*points_per_unit, 12);
+                assert!(matches!(
+                    sweep,
+                    crate::services::simulation_runner::CornerFrequencySweep::Octave
+                ));
+            }
+            other => panic!("expected AC corner base mode, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_queue_from_plan_maps_corner_dc_base_mode() {
+        use crate::simulation::dialog::corner::{CornerBaseAnalysis, CornerConfig, ProcessCorner};
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses = [18usize].into_iter().collect();
+        state.dialogs.corner_state =
+            crate::simulation::dialog::corner::CornerDialogState::from_config(
+                &CornerConfig::default()
+                    .with_process_corners(vec![ProcessCorner::TT])
+                    .with_base_analysis(CornerBaseAnalysis::Dc),
+            );
+        state.dialogs.dc_source = "VDD".to_string();
+        state.dialogs.dc_start = "0".to_string();
+        state.dialogs.dc_stop = "1.2".to_string();
+        state.dialogs.dc_step = "0.1".to_string();
+
+        let plan = controller
+            .build_analysis_plan(&state)
+            .expect("plan should build");
+        let queue = controller
+            .build_queue_from_plan(&state, &plan)
+            .expect("queue should build");
+
+        assert_eq!(queue.len(), 1);
+        let corner = queue[0]
+            .spec_options
+            .corner
+            .as_ref()
+            .expect("corner options must be present");
+        match &corner.base_mode {
+            crate::services::simulation_runner::CornerBaseMode::DcSweep {
+                source_name,
+                start,
+                stop,
+                step,
+            } => {
+                assert_eq!(source_name, "VDD");
+                assert_eq!(*start, 0.0);
+                assert_eq!(*stop, 1.2);
+                assert_eq!(*step, 0.1);
+            }
+            other => panic!("expected DC corner base mode, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_queue_from_plan_rejects_corner_dc_without_source() {
+        use crate::simulation::dialog::corner::{CornerBaseAnalysis, CornerConfig};
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses = [18usize].into_iter().collect();
+        state.dialogs.corner_state =
+            crate::simulation::dialog::corner::CornerDialogState::from_config(
+                &CornerConfig::default().with_base_analysis(CornerBaseAnalysis::Dc),
+            );
+        state.dialogs.dc_source.clear();
+        state.dialogs.dc_start = "0".to_string();
+        state.dialogs.dc_stop = "1".to_string();
+        state.dialogs.dc_step = "0.1".to_string();
+
+        let plan = controller
+            .build_analysis_plan(&state)
+            .expect("plan should build");
+        let err = controller
+            .build_queue_from_plan(&state, &plan)
+            .expect_err("corner DC base mode should require source");
+        assert!(err.iter().any(|msg| msg.contains("non-empty sweep source")));
     }
 
     #[test]
@@ -2472,8 +2660,8 @@ mod tests {
 
     #[test]
     fn test_convert_dc_op_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::DcOpResult as EngineDcOpResult;
+        use crate::simulation::SimulationResult;
 
         let controller = SimulationController::new();
         let config = AnalysisConfig::DcOp;
@@ -2505,8 +2693,8 @@ mod tests {
 
     #[test]
     fn test_convert_transient_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::WaveformData as EngineWaveformData;
+        use crate::simulation::SimulationResult;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -2543,8 +2731,8 @@ mod tests {
 
     #[test]
     fn test_convert_ac_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::WaveformData as EngineWaveformData;
+        use crate::simulation::SimulationResult;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -2579,8 +2767,8 @@ mod tests {
 
     #[test]
     fn test_convert_dc_sweep_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::WaveformData as EngineWaveformData;
+        use crate::simulation::SimulationResult;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -2620,8 +2808,8 @@ mod tests {
 
     #[test]
     fn test_convert_pole_zero_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::config::{PoleZeroConfig, PzAnalysisType};
+        use crate::simulation::SimulationResult;
 
         let controller = SimulationController::new();
         let config = AnalysisConfig::PoleZero(PoleZeroConfig {
@@ -2646,8 +2834,8 @@ mod tests {
 
     #[test]
     fn test_convert_monte_carlo_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::MonteCarloVariableResult;
+        use crate::simulation::SimulationResult;
 
         let controller = SimulationController::new();
         let sim_result = SimulationResult::MonteCarlo {
@@ -2681,8 +2869,8 @@ mod tests {
 
     #[test]
     fn test_convert_parametric_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::WaveformData as EngineWaveformData;
+        use crate::simulation::SimulationResult;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -2718,8 +2906,8 @@ mod tests {
 
     #[test]
     fn test_convert_corner_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::WaveformData as EngineWaveformData;
+        use crate::simulation::SimulationResult;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
