@@ -188,7 +188,7 @@ impl AnalysisType {
             AnalysisType::MonteCarlo => ("Value", "", "Count", "count"),
             AnalysisType::Parametric => ("Sweep", "", "Voltage", "V"),
             AnalysisType::Corner => ("Temperature", "C", "Voltage", "V"),
-            AnalysisType::HarmonicBalance => ("Harmonic", "", "Magnitude", "V"),
+            AnalysisType::HarmonicBalance => ("Frequency", "Hz", "Magnitude", "V"),
         }
     }
 }
@@ -953,6 +953,18 @@ mod tests {
     fn test_analysis_type_equality() {
         assert_eq!(AnalysisType::Ac, AnalysisType::Ac);
         assert_ne!(AnalysisType::Ac, AnalysisType::Transient);
+    }
+
+    #[test]
+    fn test_analysis_type_axis_info_for_hb_and_pss() {
+        assert_eq!(
+            AnalysisType::HarmonicBalance.axis_info(),
+            ("Frequency", "Hz", "Magnitude", "V")
+        );
+        assert_eq!(
+            AnalysisType::Pss.axis_info(),
+            ("Time", "s", "Voltage", "V")
+        );
     }
 
     // =========================================================================
