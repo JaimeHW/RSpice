@@ -36,7 +36,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     }
 
     // Build simulation configuration
-    let sim_config = build_sim_config(&args, config);
+    let sim_config = build_sim_config(&args, config, &netlist);
     let engine = Engine::new(sim_config);
 
     // Monte Carlo mode
@@ -209,7 +209,7 @@ fn load_netlist(path: &Path) -> Result<Netlist, CliError> {
 }
 
 /// Build simulation configuration from args and config
-fn build_sim_config(args: &RunArgs, config: &Config) -> SimulationConfig {
+fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> SimulationConfig {
     let mut sim_config = SimulationConfig::default();
 
     // Temperature (CLI overrides config)
@@ -221,10 +221,24 @@ fn build_sim_config(args: &RunArgs, config: &Config) -> SimulationConfig {
 
     // Tolerances
     // Keep legacy `SimulationConfig::tolerance` aligned with RELTOL semantics.
-    let reltol = args.reltol.unwrap_or(config.simulation.reltol);
-    let abstol = args.abstol.unwrap_or(config.simulation.abstol);
+    let reltol = args
+        .reltol
+        .or(netlist.options.reltol)
+        .unwrap_or(config.simulation.reltol);
+    let voltage_abstol = args
+        .abstol
+        .or(netlist.options.vntol)
+        .or(netlist.options.abstol)
+        .unwrap_or(config.simulation.abstol);
+    let current_abstol = args
+        .abstol
+        .or(netlist.options.iabstol)
+        .or(netlist.options.abstol)
+        .unwrap_or(config.simulation.abstol);
     let residual_reltol = args
         .residual_reltol
+        .or(netlist.options.residual_reltol)
+        .or(netlist.options.reltol)
         .unwrap_or(config.simulation.residual_reltol);
     sim_config.tolerance = reltol;
 
@@ -255,8 +269,8 @@ fn build_sim_config(args: &RunArgs, config: &Config) -> SimulationConfig {
         _ => ConvergenceConfig::default(), // "default" or any other
     };
     convergence_config.voltage_reltol = reltol;
-    convergence_config.voltage_abstol = abstol;
-    convergence_config.current_abstol = abstol;
+    convergence_config.voltage_abstol = voltage_abstol;
+    convergence_config.current_abstol = current_abstol;
     convergence_config.residual_reltol = residual_reltol;
     sim_config.convergence_config = convergence_config;
 
@@ -2289,6 +2303,15 @@ fn run_temp(
 mod tests {
     use super::*;
 
+    fn make_default_netlist() -> Netlist {
+        Netlist::parse(
+            r#"Test
+.END
+"#,
+        )
+        .expect("default test netlist should parse")
+    }
+
     fn make_default_run_args() -> RunArgs {
         RunArgs {
             input: std::path::PathBuf::from("test.sp"),
@@ -2335,7 +2358,8 @@ mod tests {
     fn test_build_sim_config_defaults() {
         let args = make_default_run_args();
         let config = Config::default();
-        let sim_config = build_sim_config(&args, &config);
+        let netlist = make_default_netlist();
+        let sim_config = build_sim_config(&args, &config, &netlist);
 
         assert_eq!(sim_config.temperature, 300.15); // 27°C in K
         assert_eq!(sim_config.max_iterations, 50);
@@ -2367,7 +2391,8 @@ mod tests {
         args.abstol = Some(1e-15);
         args.residual_reltol = Some(2e-4);
         let config = Config::default();
-        let sim_config = build_sim_config(&args, &config);
+        let netlist = make_default_netlist();
+        let sim_config = build_sim_config(&args, &config, &netlist);
 
         assert_eq!(sim_config.temperature, 358.15); // 85°C in K
         assert_eq!(sim_config.max_iterations, 100);
@@ -2383,7 +2408,8 @@ mod tests {
         let mut args = make_default_run_args();
         args.abstol = Some(2e-14);
         let config = Config::default();
-        let sim_config = build_sim_config(&args, &config);
+        let netlist = make_default_netlist();
+        let sim_config = build_sim_config(&args, &config, &netlist);
 
         assert_eq!(sim_config.tolerance, config.simulation.reltol);
         assert_eq!(
@@ -2406,7 +2432,8 @@ mod tests {
         args.abstol = Some(4e-12);
         args.residual_reltol = Some(3e-4);
         let config = Config::default();
-        let sim_config = build_sim_config(&args, &config);
+        let netlist = make_default_netlist();
+        let sim_config = build_sim_config(&args, &config, &netlist);
 
         assert!(!sim_config.convergence_config.gmin_stepping);
         assert!(!sim_config.convergence_config.source_stepping);
@@ -2422,7 +2449,8 @@ mod tests {
         args.reltol = Some(9e-4);
         args.residual_reltol = Some(5e-5);
         let config = Config::default();
-        let sim_config = build_sim_config(&args, &config);
+        let netlist = make_default_netlist();
+        let sim_config = build_sim_config(&args, &config, &netlist);
 
         assert_eq!(sim_config.convergence_config.voltage_reltol, 9e-4);
         assert_eq!(sim_config.convergence_config.residual_reltol, 5e-5);
@@ -2434,10 +2462,69 @@ mod tests {
         let mut config = Config::default();
         config.simulation.reltol = 1e-3;
         config.simulation.residual_reltol = 2e-4;
-        let sim_config = build_sim_config(&args, &config);
+        let netlist = make_default_netlist();
+        let sim_config = build_sim_config(&args, &config, &netlist);
 
         assert_eq!(sim_config.convergence_config.voltage_reltol, 1e-3);
         assert_eq!(sim_config.convergence_config.residual_reltol, 2e-4);
+    }
+
+    #[test]
+    fn test_build_sim_config_uses_netlist_options_when_cli_unset() {
+        let args = make_default_run_args();
+        let config = Config::default();
+        let netlist = Netlist::parse(
+            r#"Test
+.OPTIONS RELTOL=2e-4 VNTOL=3e-6 IABSTOL=4e-12 RESIDUAL_RELTOL=5e-4
+.END
+"#,
+        )
+        .unwrap();
+        let sim_config = build_sim_config(&args, &config, &netlist);
+
+        assert_eq!(sim_config.convergence_config.voltage_reltol, 2e-4);
+        assert_eq!(sim_config.convergence_config.voltage_abstol, 3e-6);
+        assert_eq!(sim_config.convergence_config.current_abstol, 4e-12);
+        assert_eq!(sim_config.convergence_config.residual_reltol, 5e-4);
+    }
+
+    #[test]
+    fn test_build_sim_config_cli_overrides_netlist_options() {
+        let mut args = make_default_run_args();
+        args.reltol = Some(9e-4);
+        args.abstol = Some(8e-13);
+        args.residual_reltol = Some(7e-4);
+        let config = Config::default();
+        let netlist = Netlist::parse(
+            r#"Test
+.OPTIONS RELTOL=2e-4 VNTOL=3e-6 IABSTOL=4e-12 RESIDUAL_RELTOL=5e-4
+.END
+"#,
+        )
+        .unwrap();
+        let sim_config = build_sim_config(&args, &config, &netlist);
+
+        assert_eq!(sim_config.convergence_config.voltage_reltol, 9e-4);
+        assert_eq!(sim_config.convergence_config.voltage_abstol, 8e-13);
+        assert_eq!(sim_config.convergence_config.current_abstol, 8e-13);
+        assert_eq!(sim_config.convergence_config.residual_reltol, 7e-4);
+    }
+
+    #[test]
+    fn test_build_sim_config_netlist_reltol_backfills_residual_when_unspecified() {
+        let args = make_default_run_args();
+        let config = Config::default();
+        let netlist = Netlist::parse(
+            r#"Test
+.OPTIONS RELTOL=6e-4
+.END
+"#,
+        )
+        .unwrap();
+        let sim_config = build_sim_config(&args, &config, &netlist);
+
+        assert_eq!(sim_config.convergence_config.voltage_reltol, 6e-4);
+        assert_eq!(sim_config.convergence_config.residual_reltol, 6e-4);
     }
 
     #[test]
