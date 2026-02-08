@@ -216,7 +216,7 @@ impl JunctionTempScaling {
         let vt_ratio = temp.vt_nom / temp.vt;
         let t_factor = temp.ratio.powf(self.xti / self.n);
         let eg_factor = (self.eg / (self.n * temp.vt_nom) * (1.0 - vt_ratio)).exp();
-        
+
         is_nom * t_factor * eg_factor
     }
 
@@ -227,7 +227,7 @@ impl JunctionTempScaling {
         let term1 = vj_nom * temp.ratio;
         let term2 = 3.0 * temp.vt * temp.ratio.ln();
         let term3 = eg_tnom * (temp.ratio - 1.0);
-        
+
         term1 - term2 - term3
     }
 }
@@ -248,9 +248,9 @@ pub struct MosfetTempScaling {
 impl Default for MosfetTempScaling {
     fn default() -> Self {
         Self {
-            kt1: -0.002,  // -2mV/°C typical for silicon
+            kt1: -0.002, // -2mV/°C typical for silicon
             kt1l: 0.0,
-            ute: -1.5,    // Mobility ~ T^-1.5
+            ute: -1.5, // Mobility ~ T^-1.5
             at: 3.3e4,
         }
     }
@@ -282,7 +282,7 @@ mod tests {
         let c = 27.0;
         let k = celsius_to_kelvin(c);
         assert!((k - 300.15).abs() < 0.01);
-        
+
         let c2 = kelvin_to_celsius(k);
         assert!((c2 - c).abs() < 0.01);
     }
@@ -297,7 +297,7 @@ mod tests {
     #[test]
     fn test_temperature_context() {
         let ctx = TemperatureContext::from_celsius(27.0, 27.0);
-        
+
         // At Tnom, ratio should be 1
         assert!((ctx.ratio - 1.0).abs() < 0.01);
         assert!((ctx.delta_t).abs() < 1.0);
@@ -306,22 +306,22 @@ mod tests {
     #[test]
     fn test_temperature_elevated() {
         let ctx = TemperatureContext::from_celsius(100.0, 27.0);
-        
+
         // At 100°C, ratio > 1
         assert!(ctx.ratio > 1.0);
         assert!(ctx.delta_t > 0.0);
-        
+
         // Thermal voltage should be higher
         assert!(ctx.vt > ctx.vt_nom);
     }
 
     #[test]
     fn test_resistor_temp_coeffs() {
-        let coeffs = ResistorTempCoeffs::new(0.001, 0.0);  // 1000 ppm/°C
-        let ctx = TemperatureContext::from_celsius(127.0, 27.0);  // 100°C rise
-        
+        let coeffs = ResistorTempCoeffs::new(0.001, 0.0); // 1000 ppm/°C
+        let ctx = TemperatureContext::from_celsius(127.0, 27.0); // 100°C rise
+
         let r_scaled = coeffs.scale_resistance(1000.0, &ctx);
-        
+
         // R should increase by ~10% (100°C * 0.001/°C)
         assert!((r_scaled - 1100.0).abs() < 10.0);
     }
@@ -330,21 +330,21 @@ mod tests {
     fn test_junction_is_scaling() {
         let scaling = JunctionTempScaling::default();
         let ctx = TemperatureContext::from_celsius(85.0, 27.0);
-        
+
         let is_scaled = scaling.scale_is(1e-14, &ctx);
-        
+
         // Is should increase significantly with temperature
         assert!(is_scaled > 1e-14);
-        assert!(is_scaled > 1e-12);  // Usually >100x increase
+        assert!(is_scaled > 1e-12); // Usually >100x increase
     }
 
     #[test]
     fn test_mosfet_vth_scaling() {
         let scaling = MosfetTempScaling::default();
         let ctx = TemperatureContext::from_celsius(85.0, 27.0);
-        
+
         let vth_scaled = scaling.scale_vth(0.7, &ctx);
-        
+
         // Vth should decrease with temperature (negative coefficient)
         assert!(vth_scaled < 0.7);
         // About -2mV * 58°C ≈ -116mV
@@ -355,9 +355,9 @@ mod tests {
     fn test_mosfet_mobility_scaling() {
         let scaling = MosfetTempScaling::default();
         let ctx = TemperatureContext::from_celsius(85.0, 27.0);
-        
+
         let mu_scaled = scaling.scale_mobility(500.0, &ctx);
-        
+
         // Mobility should decrease with temperature
         assert!(mu_scaled < 500.0);
     }
@@ -366,10 +366,10 @@ mod tests {
     fn test_bandgap_silicon() {
         let eg_300 = bandgap_silicon(300.0);
         let eg_400 = bandgap_silicon(400.0);
-        
+
         // Bandgap should be ~1.12 eV at 300K
         assert!((eg_300 - 1.12).abs() < 0.05);
-        
+
         // Bandgap decreases with temperature
         assert!(eg_400 < eg_300);
     }

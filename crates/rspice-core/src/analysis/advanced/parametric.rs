@@ -66,7 +66,7 @@ impl StepType {
                 let mut v = *start;
                 let direction = if stop >= start { 1.0 } else { -1.0 };
                 let step_abs = step.abs() * direction;
-                
+
                 while (direction > 0.0 && v <= *stop + step_abs * 0.5)
                     || (direction < 0.0 && v >= *stop + step_abs * 0.5)
                 {
@@ -75,7 +75,11 @@ impl StepType {
                 }
                 values
             }
-            StepType::LinearPoints { start, stop, points } => {
+            StepType::LinearPoints {
+                start,
+                stop,
+                points,
+            } => {
                 if *points <= 1 {
                     return vec![*start];
                 }
@@ -83,28 +87,40 @@ impl StepType {
                     .map(|i| start + (stop - start) * (i as f64) / ((*points - 1) as f64))
                     .collect()
             }
-            StepType::Decade { start, stop, points_per_decade } => {
+            StepType::Decade {
+                start,
+                stop,
+                points_per_decade,
+            } => {
                 let start_log = start.log10();
                 let stop_log = stop.log10();
                 let num_decades = (stop_log - start_log).abs();
                 let total_points = (num_decades * (*points_per_decade as f64)).ceil() as usize + 1;
-                
+
                 (0..total_points)
                     .map(|i| {
-                        let log_v = start_log + (stop_log - start_log) * (i as f64) / ((total_points - 1).max(1) as f64);
+                        let log_v = start_log
+                            + (stop_log - start_log) * (i as f64)
+                                / ((total_points - 1).max(1) as f64);
                         10.0_f64.powf(log_v)
                     })
                     .collect()
             }
-            StepType::Octave { start, stop, points_per_octave } => {
+            StepType::Octave {
+                start,
+                stop,
+                points_per_octave,
+            } => {
                 let start_log2 = start.log2();
                 let stop_log2 = stop.log2();
                 let num_octaves = (stop_log2 - start_log2).abs();
                 let total_points = (num_octaves * (*points_per_octave as f64)).ceil() as usize + 1;
-                
+
                 (0..total_points)
                     .map(|i| {
-                        let log_v = start_log2 + (stop_log2 - start_log2) * (i as f64) / ((total_points - 1).max(1) as f64);
+                        let log_v = start_log2
+                            + (stop_log2 - start_log2) * (i as f64)
+                                / ((total_points - 1).max(1) as f64);
                         2.0_f64.powf(log_v)
                     })
                     .collect()
@@ -183,7 +199,11 @@ impl StepSpec {
     pub fn decade(target: StepTarget, start: Value, stop: Value, points_per_decade: usize) -> Self {
         Self {
             target,
-            step_type: StepType::Decade { start, stop, points_per_decade },
+            step_type: StepType::Decade {
+                start,
+                stop,
+                points_per_decade,
+            },
         }
     }
 
@@ -223,7 +243,7 @@ impl ParametricSweep {
     pub fn new(steps: Vec<StepSpec>) -> Self {
         let total = steps.iter().map(|s| s.step_type.num_points()).product();
         let current_indices = vec![0; steps.len()];
-        
+
         Self {
             steps,
             current_indices,
@@ -246,7 +266,11 @@ impl ParametricSweep {
     pub fn add_step(&mut self, step: StepSpec) {
         self.steps.push(step);
         self.current_indices.push(0);
-        self.total_combinations = self.steps.iter().map(|s| s.step_type.num_points()).product();
+        self.total_combinations = self
+            .steps
+            .iter()
+            .map(|s| s.step_type.num_points())
+            .product();
     }
 
     /// Get number of step dimensions
@@ -271,7 +295,8 @@ impl ParametricSweep {
 
     /// Get current parameter values as (target, value) pairs
     pub fn current_values(&self) -> Vec<(&StepTarget, Value)> {
-        self.steps.iter()
+        self.steps
+            .iter()
             .zip(self.current_indices.iter())
             .map(|(step, &idx)| {
                 let values = step.values();
@@ -289,7 +314,7 @@ impl ParametricSweep {
         }
 
         self.current_combination += 1;
-        
+
         if self.current_combination >= self.total_combinations {
             return false;
         }
@@ -405,7 +430,7 @@ mod tests {
             stop: 5.0,
             step: 1.0,
         };
-        
+
         let values = step.values();
         assert_eq!(values.len(), 5);
         assert_eq!(values[0], 1.0);
@@ -419,7 +444,7 @@ mod tests {
             stop: 10.0,
             points: 11,
         };
-        
+
         let values = step.values();
         assert_eq!(values.len(), 11);
         assert_eq!(values[0], 0.0);
@@ -434,7 +459,7 @@ mod tests {
             stop: 1000.0,
             points_per_decade: 10,
         };
-        
+
         let values = step.values();
         // 3 decades * 10 points + 1 = 31
         assert!(values.len() >= 30);
@@ -445,7 +470,7 @@ mod tests {
     #[test]
     fn test_list_step() {
         let step = StepType::List(vec![10e-12, 22e-12, 47e-12, 100e-12]);
-        
+
         let values = step.values();
         assert_eq!(values.len(), 4);
         assert_eq!(values[0], 10e-12);
@@ -455,7 +480,7 @@ mod tests {
     #[test]
     fn test_step_spec_param() {
         let spec = StepSpec::param("R1", 1000.0, 10000.0, 1000.0);
-        
+
         assert!(matches!(spec.target, StepTarget::Parameter(ref name) if name == "R1"));
         assert_eq!(spec.values().len(), 10);
     }
@@ -464,50 +489,54 @@ mod tests {
     fn test_parametric_sweep_single() {
         let step = StepSpec::param("R1", 1.0, 5.0, 1.0);
         let mut sweep = ParametricSweep::new(vec![step]);
-        
+
         assert_eq!(sweep.total_combinations(), 5);
         assert!(!sweep.is_complete());
-        
+
         let mut count = 0;
         loop {
             let values = sweep.current_values();
             assert_eq!(values.len(), 1);
             count += 1;
-            if !sweep.advance() { break; }
+            if !sweep.advance() {
+                break;
+            }
         }
-        
+
         assert_eq!(count, 5);
         assert!(sweep.is_complete());
     }
 
     #[test]
     fn test_parametric_sweep_multi() {
-        let step1 = StepSpec::param("R1", 1.0, 3.0, 1.0);  // 3 values
-        let step2 = StepSpec::param("C1", 1.0, 2.0, 1.0);  // 2 values
+        let step1 = StepSpec::param("R1", 1.0, 3.0, 1.0); // 3 values
+        let step2 = StepSpec::param("C1", 1.0, 2.0, 1.0); // 2 values
         let mut sweep = ParametricSweep::new(vec![step1, step2]);
-        
-        assert_eq!(sweep.total_combinations(), 6);  // 3 * 2 = 6
-        
+
+        assert_eq!(sweep.total_combinations(), 6); // 3 * 2 = 6
+
         let mut count = 0;
         loop {
             count += 1;
-            if !sweep.advance() { break; }
+            if !sweep.advance() {
+                break;
+            }
         }
-        
+
         assert_eq!(count, 6);
     }
 
     #[test]
     fn test_sweep_progress() {
-        let step = StepSpec::param("R1", 1.0, 10.0, 1.0);  // 10 values
+        let step = StepSpec::param("R1", 1.0, 10.0, 1.0); // 10 values
         let mut sweep = ParametricSweep::new(vec![step]);
-        
+
         assert_eq!(sweep.progress(), 0.0);
-        
+
         for _ in 0..5 {
             sweep.advance();
         }
-        
+
         assert!((sweep.progress() - 0.5).abs() < 0.01);
     }
 
@@ -515,12 +544,12 @@ mod tests {
     fn test_sweep_reset() {
         let step = StepSpec::param("R1", 1.0, 5.0, 1.0);
         let mut sweep = ParametricSweep::new(vec![step]);
-        
+
         // Advance a few times
         sweep.advance();
         sweep.advance();
         assert_eq!(sweep.current_index(), 2);
-        
+
         // Reset
         sweep.reset();
         assert_eq!(sweep.current_index(), 0);
@@ -530,7 +559,7 @@ mod tests {
     #[test]
     fn test_empty_sweep() {
         let sweep = ParametricSweep::empty();
-        
+
         assert_eq!(sweep.total_combinations(), 1);
         assert_eq!(sweep.num_dimensions(), 0);
     }

@@ -82,11 +82,8 @@ impl TrigSpec {
 pub enum MeasureType {
     /// Delay measurement: time between trigger and target events
     /// .MEAS TRAN name TRIG ... TARG ...
-    Delay {
-        trig: TrigSpec,
-        targ: TrigSpec,
-    },
-    
+    Delay { trig: TrigSpec, targ: TrigSpec },
+
     /// Find value at specific time or when condition is met
     /// .MEAS TRAN name FIND V(out) AT=time
     /// .MEAS TRAN name FIND V(out) WHEN V(in)=0.5
@@ -96,50 +93,50 @@ pub enum MeasureType {
         when_signal: Option<String>,
         when_value: Option<Value>,
     },
-    
+
     /// Minimum value over range
     Min {
         signal: String,
         from: Option<Value>,
         to: Option<Value>,
     },
-    
+
     /// Maximum value over range
     Max {
         signal: String,
         from: Option<Value>,
         to: Option<Value>,
     },
-    
+
     /// Peak-to-peak (max - min) over range
     PeakToPeak {
         signal: String,
         from: Option<Value>,
         to: Option<Value>,
     },
-    
+
     /// Average value over range
     Avg {
         signal: String,
         from: Option<Value>,
         to: Option<Value>,
     },
-    
+
     /// RMS value over range
     Rms {
         signal: String,
         from: Option<Value>,
         to: Option<Value>,
     },
-    
+
     /// Rise time (10% to 90% by default)
     RiseTime {
         signal: String,
-        from_pct: Value,   // e.g., 0.1 for 10%
-        to_pct: Value,     // e.g., 0.9 for 90%
-        number: usize,     // Which transition
+        from_pct: Value, // e.g., 0.1 for 10%
+        to_pct: Value,   // e.g., 0.9 for 90%
+        number: usize,   // Which transition
     },
-    
+
     /// Fall time (90% to 10% by default)
     FallTime {
         signal: String,
@@ -147,7 +144,7 @@ pub enum MeasureType {
         to_pct: Value,
         number: usize,
     },
-    
+
     /// Integral of signal over range
     Integ {
         signal: String,
@@ -262,15 +259,50 @@ impl MeasureEngine {
             MeasureType::Rms { signal, from, to } => {
                 self.eval_rms(&measurement.name, signal, *from, *to, time, signals)
             }
-            MeasureType::RiseTime { signal, from_pct, to_pct, number } => {
-                self.eval_rise_fall(&measurement.name, signal, *from_pct, *to_pct, *number, true, time, signals)
-            }
-            MeasureType::FallTime { signal, from_pct, to_pct, number } => {
-                self.eval_rise_fall(&measurement.name, signal, *from_pct, *to_pct, *number, false, time, signals)
-            }
-            MeasureType::Find { signal, at, when_signal, when_value } => {
-                self.eval_find(&measurement.name, signal, *at, when_signal.as_deref(), *when_value, time, signals)
-            }
+            MeasureType::RiseTime {
+                signal,
+                from_pct,
+                to_pct,
+                number,
+            } => self.eval_rise_fall(
+                &measurement.name,
+                signal,
+                *from_pct,
+                *to_pct,
+                *number,
+                true,
+                time,
+                signals,
+            ),
+            MeasureType::FallTime {
+                signal,
+                from_pct,
+                to_pct,
+                number,
+            } => self.eval_rise_fall(
+                &measurement.name,
+                signal,
+                *from_pct,
+                *to_pct,
+                *number,
+                false,
+                time,
+                signals,
+            ),
+            MeasureType::Find {
+                signal,
+                at,
+                when_signal,
+                when_value,
+            } => self.eval_find(
+                &measurement.name,
+                signal,
+                *at,
+                when_signal.as_deref(),
+                *when_value,
+                time,
+                signals,
+            ),
             MeasureType::Integ { signal, from, to } => {
                 self.eval_integ(&measurement.name, signal, *from, *to, time, signals)
             }
@@ -294,8 +326,10 @@ impl MeasureEngine {
             let crossed = match edge {
                 EdgeType::Rise => prev < threshold && curr >= threshold,
                 EdgeType::Fall => prev > threshold && curr <= threshold,
-                EdgeType::Cross => (prev < threshold && curr >= threshold)
-                    || (prev > threshold && curr <= threshold),
+                EdgeType::Cross => {
+                    (prev < threshold && curr >= threshold)
+                        || (prev > threshold && curr <= threshold)
+                }
             };
 
             if crossed {
@@ -321,11 +355,15 @@ impl MeasureEngine {
     ) -> MeasureResult {
         let trig_sig = match signals.get(&trig.signal) {
             Some(s) => *s,
-            None => return MeasureResult::failed(name, &format!("Signal '{}' not found", trig.signal)),
+            None => {
+                return MeasureResult::failed(name, &format!("Signal '{}' not found", trig.signal));
+            }
         };
         let targ_sig = match signals.get(&targ.signal) {
             Some(s) => *s,
-            None => return MeasureResult::failed(name, &format!("Signal '{}' not found", targ.signal)),
+            None => {
+                return MeasureResult::failed(name, &format!("Signal '{}' not found", targ.signal));
+            }
         };
 
         let t_trig = match self.find_crossing(time, trig_sig, trig.value, trig.edge, trig.number) {
@@ -347,8 +385,11 @@ impl MeasureEngine {
         from: Option<Value>,
         to: Option<Value>,
     ) -> (usize, usize) {
-        let start = from.map(|t| time.iter().position(|&x| x >= t).unwrap_or(0)).unwrap_or(0);
-        let end = to.map(|t| time.iter().rposition(|&x| x <= t).unwrap_or(time.len() - 1))
+        let start = from
+            .map(|t| time.iter().position(|&x| x >= t).unwrap_or(0))
+            .unwrap_or(0);
+        let end = to
+            .map(|t| time.iter().rposition(|&x| x <= t).unwrap_or(time.len() - 1))
             .unwrap_or(time.len() - 1);
         (start, end.max(start))
     }
@@ -365,7 +406,9 @@ impl MeasureEngine {
     ) -> MeasureResult {
         let signal = match signals.get(signal_name) {
             Some(s) => *s,
-            None => return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name)),
+            None => {
+                return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name));
+            }
         };
 
         let (start, end) = self.get_range_indices(time, from, to);
@@ -395,7 +438,9 @@ impl MeasureEngine {
     ) -> MeasureResult {
         let signal = match signals.get(signal_name) {
             Some(s) => *s,
-            None => return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name)),
+            None => {
+                return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name));
+            }
         };
 
         let (start, end) = self.get_range_indices(time, from, to);
@@ -422,11 +467,13 @@ impl MeasureEngine {
     ) -> MeasureResult {
         let signal = match signals.get(signal_name) {
             Some(s) => *s,
-            None => return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name)),
+            None => {
+                return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name));
+            }
         };
 
         let (start, end) = self.get_range_indices(time, from, to);
-        
+
         if start >= end {
             return MeasureResult::failed(name, "Empty range");
         }
@@ -453,11 +500,13 @@ impl MeasureEngine {
     ) -> MeasureResult {
         let signal = match signals.get(signal_name) {
             Some(s) => *s,
-            None => return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name)),
+            None => {
+                return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name));
+            }
         };
 
         let (start, end) = self.get_range_indices(time, from, to);
-        
+
         if start >= end {
             return MeasureResult::failed(name, "Empty range");
         }
@@ -488,7 +537,9 @@ impl MeasureEngine {
     ) -> MeasureResult {
         let signal = match signals.get(signal_name) {
             Some(s) => *s,
-            None => return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name)),
+            None => {
+                return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name));
+            }
         };
 
         // Find min and max to compute thresholds
@@ -502,8 +553,12 @@ impl MeasureEngine {
             (min_val + to_pct * range, min_val + from_pct * range)
         };
 
-        let edge = if is_rise { EdgeType::Rise } else { EdgeType::Fall };
-        
+        let edge = if is_rise {
+            EdgeType::Rise
+        } else {
+            EdgeType::Fall
+        };
+
         let t1 = self.find_crossing(time, signal, th_low, edge, number);
         let t2 = self.find_crossing(time, signal, th_high, edge, number);
 
@@ -525,7 +580,9 @@ impl MeasureEngine {
     ) -> MeasureResult {
         let signal = match signals.get(signal_name) {
             Some(s) => *s,
-            None => return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name)),
+            None => {
+                return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name));
+            }
         };
 
         if let Some(t_at) = at {
@@ -544,10 +601,16 @@ impl MeasureEngine {
             // FIND ... WHEN condition=value
             let when_sig = match signals.get(when_sig_name) {
                 Some(s) => *s,
-                None => return MeasureResult::failed(name, &format!("When signal '{}' not found", when_sig_name)),
+                None => {
+                    return MeasureResult::failed(
+                        name,
+                        &format!("When signal '{}' not found", when_sig_name),
+                    );
+                }
             };
 
-            if let Some(t_when) = self.find_crossing(time, when_sig, threshold, EdgeType::Cross, 1) {
+            if let Some(t_when) = self.find_crossing(time, when_sig, threshold, EdgeType::Cross, 1)
+            {
                 // Interpolate signal at this time
                 for i in 0..time.len() - 1 {
                     if time[i] <= t_when && time[i + 1] > t_when {
@@ -574,11 +637,13 @@ impl MeasureEngine {
     ) -> MeasureResult {
         let signal = match signals.get(signal_name) {
             Some(s) => *s,
-            None => return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name)),
+            None => {
+                return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name));
+            }
         };
 
         let (start, end) = self.get_range_indices(time, from, to);
-        
+
         if start >= end {
             return MeasureResult::failed(name, "Empty range");
         }
@@ -616,13 +681,26 @@ mod tests {
 
     fn make_pulse_data() -> (Vec<Value>, Vec<Value>) {
         let time: Vec<Value> = (0..1001).map(|i| i as f64 / 1000.0).collect();
-        let signal: Vec<Value> = time.iter().map(|&t| {
-            if t < 0.1 { 0.0 }
-            else if t < 0.2 { (t - 0.1) * 10.0 } // Rise from 0 to 1
-            else if t < 0.8 { 1.0 }
-            else if t < 0.9 { 1.0 - (t - 0.8) * 10.0 } // Fall from 1 to 0
-            else { 0.0 }
-        }).collect();
+        let signal: Vec<Value> = time
+            .iter()
+            .map(|&t| {
+                if t < 0.1 {
+                    0.0
+                } else if t < 0.2 {
+                    (t - 0.1) * 10.0
+                }
+                // Rise from 0 to 1
+                else if t < 0.8 {
+                    1.0
+                } else if t < 0.9 {
+                    1.0 - (t - 0.8) * 10.0
+                }
+                // Fall from 1 to 0
+                else {
+                    0.0
+                }
+            })
+            .collect();
         (time, signal)
     }
 
@@ -744,9 +822,15 @@ mod tests {
     fn test_delay_measurement() {
         let (time, _) = make_pulse_data();
         // Input: step at t=0.05
-        let input: Vec<Value> = time.iter().map(|&t| if t < 0.05 { 0.0 } else { 1.0 }).collect();
+        let input: Vec<Value> = time
+            .iter()
+            .map(|&t| if t < 0.05 { 0.0 } else { 1.0 })
+            .collect();
         // Output: delayed step at t=0.15
-        let output: Vec<Value> = time.iter().map(|&t| if t < 0.15 { 0.0 } else { 1.0 }).collect();
+        let output: Vec<Value> = time
+            .iter()
+            .map(|&t| if t < 0.15 { 0.0 } else { 1.0 })
+            .collect();
 
         let mut signals = HashMap::new();
         signals.insert("V(in)".to_string(), input.as_slice());

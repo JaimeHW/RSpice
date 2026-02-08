@@ -77,11 +77,7 @@ impl Complex {
     /// ζ = -Re(p) / |p|
     pub fn damping_factor(&self) -> Value {
         let mag = self.magnitude();
-        if mag > 1e-15 {
-            -self.re / mag
-        } else {
-            0.0
-        }
+        if mag > 1e-15 { -self.re / mag } else { 0.0 }
     }
 
     /// Get time constant (for real pole)
@@ -180,9 +176,7 @@ impl PoleZeroResult {
         self.poles
             .iter()
             .filter(|p| p.re < 0.0) // Only stable poles
-            .min_by(|a, b| {
-                a.re.abs().partial_cmp(&b.re.abs()).unwrap()
-            })
+            .min_by(|a, b| a.re.abs().partial_cmp(&b.re.abs()).unwrap())
     }
 
     /// Check if system is stable (all poles have negative real parts)
@@ -197,16 +191,14 @@ impl PoleZeroResult {
 
     /// Sort poles by magnitude
     pub fn sort_poles_by_magnitude(&mut self) {
-        self.poles.sort_by(|a, b| {
-            a.magnitude().partial_cmp(&b.magnitude()).unwrap()
-        });
+        self.poles
+            .sort_by(|a, b| a.magnitude().partial_cmp(&b.magnitude()).unwrap());
     }
 
     /// Sort zeros by magnitude
     pub fn sort_zeros_by_magnitude(&mut self) {
-        self.zeros.sort_by(|a, b| {
-            a.magnitude().partial_cmp(&b.magnitude()).unwrap()
-        });
+        self.zeros
+            .sort_by(|a, b| a.magnitude().partial_cmp(&b.magnitude()).unwrap());
     }
 }
 
@@ -402,22 +394,290 @@ impl PoleZeroAnalyzer {
             return Vec::new();
         }
 
-        // For larger circuits, use power iteration or QR
-        // This is a simplified implementation
-        self.eigenvalues_power_method(config)
+        if let Some(state_matrix) = self.build_descriptor_state_matrix() {
+            let mut poles = self.qr_eigenvalues(&state_matrix);
+            poles.retain(|p| {
+                p.re.is_finite()
+                    && p.im.is_finite()
+                    && p.magnitude() < config.max_pole_freq * 2.0 * PI
+            });
+            poles.sort_by(|a, b| {
+                a.re.partial_cmp(&b.re)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.im.partial_cmp(&b.im).unwrap_or(std::cmp::Ordering::Equal))
+            });
+            poles.dedup_by(|a, b| (a.re - b.re).abs() < 1e-9 && (a.im - b.im).abs() < 1e-9);
+            return poles;
+        }
+
+        // Fallback for heavily singular descriptors where state extraction fails.
+        self.eigenvalues_diagonal_fallback(config)
     }
 
-    /// Find poles using power iteration (simplified, finds dominant pole)
-    fn eigenvalues_power_method(&self, config: &PoleZeroConfig) -> Vec<Complex> {
+    /// Descriptor-system reduction:
+    /// Cx' + Gx = 0
+    /// Split x into dynamic/algebraic variables and eliminate algebraic states.
+    /// This yields x_d' = A x_d where A is used for pole extraction.
+    fn build_descriptor_state_matrix(&self) -> Option<Matrix> {
+        let n = self.num_nodes;
+        let tol = 1e-15;
+
+        let mut dynamic = Vec::new();
+        for i in 0..n {
+            let row_nonzero = self.c_matrix.data[i].iter().any(|v| v.abs() > tol);
+            let col_nonzero = (0..n).any(|r| self.c_matrix.data[r][i].abs() > tol);
+            if row_nonzero || col_nonzero {
+                dynamic.push(i);
+            }
+        }
+
+        if dynamic.is_empty() {
+            return None;
+        }
+
+        let mut is_dynamic = vec![false; n];
+        for &idx in &dynamic {
+            is_dynamic[idx] = true;
+        }
+        let algebraic: Vec<usize> = (0..n).filter(|i| !is_dynamic[*i]).collect();
+
+        let c_dd = self.extract_submatrix(&self.c_matrix, &dynamic, &dynamic);
+        let g_dd = self.extract_submatrix(&self.g_matrix, &dynamic, &dynamic);
+
+        let g_eff = if algebraic.is_empty() {
+            g_dd
+        } else {
+            let g_da = self.extract_submatrix(&self.g_matrix, &dynamic, &algebraic);
+            let g_ad = self.extract_submatrix(&self.g_matrix, &algebraic, &dynamic);
+            let g_aa = self.extract_submatrix(&self.g_matrix, &algebraic, &algebraic);
+
+            let g_aa_inv_g_ad = self.solve_matrix_columns_regularized(&g_aa, &g_ad)?;
+            let correction = self.matrix_multiply(&g_da, &g_aa_inv_g_ad);
+            self.matrix_subtract(&g_dd, &correction)
+        };
+
+        let c_dd_inv_g_eff = self.solve_matrix_columns_regularized(&c_dd, &g_eff)?;
+        let mut a = c_dd_inv_g_eff;
+        for row in &mut a.data {
+            for value in row {
+                *value = -*value;
+            }
+        }
+
+        Some(a)
+    }
+
+    fn extract_submatrix(&self, m: &Matrix, rows: &[usize], cols: &[usize]) -> Matrix {
+        let mut out = Matrix::zeros(rows.len(), cols.len());
+        for (ri, &src_r) in rows.iter().enumerate() {
+            for (ci, &src_c) in cols.iter().enumerate() {
+                out.data[ri][ci] = m.data[src_r][src_c];
+            }
+        }
+        out
+    }
+
+    fn matrix_subtract(&self, a: &Matrix, b: &Matrix) -> Matrix {
+        assert_eq!(a.rows, b.rows);
+        assert_eq!(a.cols, b.cols);
+        let mut out = Matrix::zeros(a.rows, a.cols);
+        for i in 0..a.rows {
+            for j in 0..a.cols {
+                out.data[i][j] = a.data[i][j] - b.data[i][j];
+            }
+        }
+        out
+    }
+
+    fn matrix_multiply(&self, a: &Matrix, b: &Matrix) -> Matrix {
+        assert_eq!(a.cols, b.rows);
+        let mut out = Matrix::zeros(a.rows, b.cols);
+        for i in 0..a.rows {
+            for j in 0..b.cols {
+                let mut sum = 0.0;
+                for k in 0..a.cols {
+                    sum += a.data[i][k] * b.data[k][j];
+                }
+                out.data[i][j] = sum;
+            }
+        }
+        out
+    }
+
+    fn solve_matrix_columns_regularized(&self, a: &Matrix, b: &Matrix) -> Option<Matrix> {
+        assert_eq!(a.rows, a.cols);
+        assert_eq!(a.rows, b.rows);
+
+        // Try exact solve first, then progressively stronger diagonal regularization.
+        let regularizations = [0.0, 1e-18, 1e-15, 1e-12];
+        for &eps in &regularizations {
+            let mut a_reg = a.clone();
+            if eps > 0.0 {
+                for i in 0..a_reg.rows.min(a_reg.cols) {
+                    a_reg.data[i][i] += eps;
+                }
+            }
+            if let Some(x) = self.solve_matrix_columns(&a_reg, b) {
+                return Some(x);
+            }
+        }
+
+        None
+    }
+
+    fn solve_matrix_columns(&self, a: &Matrix, b: &Matrix) -> Option<Matrix> {
+        assert_eq!(a.rows, a.cols);
+        assert_eq!(a.rows, b.rows);
+
+        let mut out = Matrix::zeros(a.rows, b.cols);
+        for col in 0..b.cols {
+            let rhs: Vec<Value> = (0..b.rows).map(|r| b.data[r][col]).collect();
+            let x = self.solve_linear(a, &rhs)?;
+            for (row, value) in x.into_iter().enumerate() {
+                out.data[row][col] = value;
+            }
+        }
+        Some(out)
+    }
+
+    fn qr_eigenvalues(&self, matrix: &Matrix) -> Vec<Complex> {
+        let n = matrix.rows;
+        if n == 0 {
+            return Vec::new();
+        }
+        if n == 1 {
+            return vec![Complex::real(matrix.data[0][0])];
+        }
+        if n == 2 {
+            return self.eigenvalues_2x2(
+                matrix.data[0][0],
+                matrix.data[0][1],
+                matrix.data[1][0],
+                matrix.data[1][1],
+            );
+        }
+
+        let tol = 1e-10;
+        let max_iter = 2000;
+        let mut a = matrix.data.clone();
+
+        for _ in 0..max_iter {
+            let mut converged = true;
+            for i in 1..n {
+                if a[i][i - 1].abs() > tol {
+                    converged = false;
+                    break;
+                }
+            }
+            if converged {
+                break;
+            }
+
+            // Basic shifted QR iteration.
+            let shift = a[n - 1][n - 1];
+            for (i, row) in a.iter_mut().enumerate().take(n) {
+                row[i] -= shift;
+            }
+
+            let (q, r) = self.qr_decompose(&a);
+            a = self.matrix_multiply_raw(&r, &q);
+
+            for (i, row) in a.iter_mut().enumerate().take(n) {
+                row[i] += shift;
+            }
+        }
+
+        let mut eigenvalues = Vec::with_capacity(n);
+        let mut i = 0;
+        while i < n {
+            if i == n - 1 || a[i + 1][i].abs() < tol {
+                eigenvalues.push(Complex::real(a[i][i]));
+                i += 1;
+            } else {
+                eigenvalues.extend(self.eigenvalues_2x2(
+                    a[i][i],
+                    a[i][i + 1],
+                    a[i + 1][i],
+                    a[i + 1][i + 1],
+                ));
+                i += 2;
+            }
+        }
+
+        eigenvalues
+    }
+
+    fn eigenvalues_2x2(&self, a00: Value, a01: Value, a10: Value, a11: Value) -> Vec<Complex> {
+        let trace = a00 + a11;
+        let det = a00 * a11 - a01 * a10;
+        let discriminant = trace * trace - 4.0 * det;
+
+        if discriminant >= 0.0 {
+            let sqrt_d = discriminant.sqrt();
+            vec![
+                Complex::real((trace + sqrt_d) / 2.0),
+                Complex::real((trace - sqrt_d) / 2.0),
+            ]
+        } else {
+            let sqrt_d = (-discriminant).sqrt() / 2.0;
+            vec![
+                Complex::new(trace / 2.0, sqrt_d),
+                Complex::new(trace / 2.0, -sqrt_d),
+            ]
+        }
+    }
+
+    fn qr_decompose(&self, a: &[Vec<Value>]) -> (Vec<Vec<Value>>, Vec<Vec<Value>>) {
+        let n = a.len();
+        let mut q = vec![vec![0.0; n]; n];
+        let mut r = vec![vec![0.0; n]; n];
+        let cols: Vec<Vec<Value>> = (0..n).map(|j| (0..n).map(|i| a[i][j]).collect()).collect();
+
+        for j in 0..n {
+            let mut v = cols[j].clone();
+            for i in 0..j {
+                let q_col: Vec<Value> = (0..n).map(|k| q[k][i]).collect();
+                let dot: Value = v.iter().zip(&q_col).map(|(x, y)| x * y).sum();
+                r[i][j] = dot;
+                for k in 0..n {
+                    v[k] -= dot * q_col[k];
+                }
+            }
+
+            let norm = v.iter().map(|x| x * x).sum::<Value>().sqrt();
+            r[j][j] = norm;
+            if norm > 1e-15 {
+                for k in 0..n {
+                    q[k][j] = v[k] / norm;
+                }
+            }
+        }
+
+        (q, r)
+    }
+
+    fn matrix_multiply_raw(&self, a: &[Vec<Value>], b: &[Vec<Value>]) -> Vec<Vec<Value>> {
+        let n = a.len();
+        let mut out = vec![vec![0.0; n]; n];
+        for i in 0..n {
+            for j in 0..n {
+                let mut sum = 0.0;
+                for k in 0..n {
+                    sum += a[i][k] * b[k][j];
+                }
+                out[i][j] = sum;
+            }
+        }
+        out
+    }
+
+    /// Fallback pole estimator for highly singular systems.
+    fn eigenvalues_diagonal_fallback(&self, config: &PoleZeroConfig) -> Vec<Complex> {
         let n = self.num_nodes;
         let mut poles = Vec::new();
-
-        // Try to find if C is diagonal-dominant
-        // For simple RC networks, poles are at s = -G_ii/C_ii for each node
         for i in 0..n {
             let g = self.g_matrix.get(i, i);
             let c = self.c_matrix.get(i, i);
-            
             if c.abs() > 1e-15 && g.abs() > 1e-15 {
                 let pole = -g / c;
                 if pole.abs() < config.max_pole_freq * 2.0 * PI {
@@ -425,20 +685,180 @@ impl PoleZeroAnalyzer {
                 }
             }
         }
-
-        // Remove duplicates (within tolerance)
-        poles.sort_by(|a, b| a.re.partial_cmp(&b.re).unwrap());
+        poles.sort_by(|a, b| a.re.partial_cmp(&b.re).unwrap_or(std::cmp::Ordering::Equal));
         poles.dedup_by(|a, b| (a.re - b.re).abs() < 1e-6);
-
         poles
     }
 
-    /// Find zeros (simplified implementation)
-    pub fn find_zeros(&self, _config: &PoleZeroConfig) -> Vec<Complex> {
-        // Zeros require augmenting the matrix with input/output
-        // This is a placeholder - full implementation would use
-        // the nullspace method or matrix pencil
-        Vec::new()
+    fn build_port_vectors(&self, config: &PoleZeroConfig) -> Option<(Vec<Value>, Vec<Value>)> {
+        let n = self.num_nodes;
+        let mut input_vec: Vec<Value> = vec![0.0; n];
+        let mut output_vec: Vec<Value> = vec![0.0; n];
+
+        if config.input_pos >= n || config.output_pos >= n {
+            return None;
+        }
+
+        input_vec[config.input_pos] += 1.0;
+        if let Some(input_neg) = config.input_neg {
+            if input_neg >= n {
+                return None;
+            }
+            input_vec[input_neg] -= 1.0;
+        }
+
+        output_vec[config.output_pos] += 1.0;
+        if let Some(output_neg) = config.output_neg {
+            if output_neg >= n {
+                return None;
+            }
+            output_vec[output_neg] -= 1.0;
+        }
+
+        let input_norm = input_vec.iter().map(|v| v.abs()).sum::<Value>();
+        let output_norm = output_vec.iter().map(|v| v.abs()).sum::<Value>();
+        if input_norm < 1e-15 || output_norm < 1e-15 {
+            return None;
+        }
+
+        Some((input_vec, output_vec))
+    }
+
+    fn is_same_root(a: &Complex, b: &Complex, tol: Value) -> bool {
+        let re_scale = 1.0 + a.re.abs().max(b.re.abs());
+        let im_scale = 1.0 + a.im.abs().max(b.im.abs());
+        (a.re - b.re).abs() <= tol * re_scale && (a.im - b.im).abs() <= tol * im_scale
+    }
+
+    fn dedup_and_sort_roots(&self, roots: &mut Vec<Complex>) {
+        roots.sort_by(|a, b| {
+            a.re.partial_cmp(&b.re)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.im.partial_cmp(&b.im).unwrap_or(std::cmp::Ordering::Equal))
+        });
+        roots.dedup_by(|a, b| Self::is_same_root(a, b, 1e-8));
+    }
+
+    fn numerator_roots_raw(
+        &self,
+        input_vec: &[Value],
+        output_vec: &[Value],
+        config: &PoleZeroConfig,
+    ) -> Vec<Complex> {
+        if self.num_nodes == 0 {
+            return Vec::new();
+        }
+        if self.num_nodes == 1 {
+            return Vec::new();
+        }
+        if self.num_nodes == 2 {
+            if let Some(root) = self.numerator_root_2x2(input_vec, output_vec) {
+                return vec![root];
+            }
+            return Vec::new();
+        }
+
+        let n = self.num_nodes;
+        let mut g_aug = Matrix::zeros(n + 1, n + 1);
+        let mut c_aug = Matrix::zeros(n + 1, n + 1);
+
+        for i in 0..n {
+            for j in 0..n {
+                g_aug.set(i, j, self.g_matrix.get(i, j));
+                c_aug.set(i, j, self.c_matrix.get(i, j));
+            }
+            g_aug.set(i, n, -input_vec[i]);
+            g_aug.set(n, i, output_vec[i]);
+        }
+
+        let zero_analyzer = PoleZeroAnalyzer::new(g_aug, c_aug);
+        let mut zero_config = PoleZeroConfig::poles_only(0, 0);
+        zero_config.max_pole_freq = config.max_pole_freq;
+        let mut roots = zero_analyzer.find_poles(&zero_config);
+        roots.retain(|r| r.re.is_finite() && r.im.is_finite());
+        roots
+    }
+
+    fn numerator_root_2x2(&self, input_vec: &[Value], output_vec: &[Value]) -> Option<Complex> {
+        if input_vec.len() != 2 || output_vec.len() != 2 {
+            return None;
+        }
+
+        let b1 = input_vec[0];
+        let b2 = input_vec[1];
+        let l1 = output_vec[0];
+        let l2 = output_vec[1];
+
+        let g11 = self.g_matrix.get(0, 0);
+        let g12 = self.g_matrix.get(0, 1);
+        let g21 = self.g_matrix.get(1, 0);
+        let g22 = self.g_matrix.get(1, 1);
+        let c11 = self.c_matrix.get(0, 0);
+        let c12 = self.c_matrix.get(0, 1);
+        let c21 = self.c_matrix.get(1, 0);
+        let c22 = self.c_matrix.get(1, 1);
+
+        // N(s) = L^T * adj(G + sC) * B = a + b*s for 2x2 systems.
+        let a = l1 * (g22 * b1 - g12 * b2) + l2 * (-g21 * b1 + g11 * b2);
+        let b = l1 * (c22 * b1 - c12 * b2) + l2 * (-c21 * b1 + c11 * b2);
+        if b.abs() < 1e-15 {
+            return None;
+        }
+
+        let root = -a / b;
+        if root.is_finite() {
+            Some(Complex::real(root))
+        } else {
+            None
+        }
+    }
+
+    fn finite_zero_limit(&self, poles: &[Complex], config: &PoleZeroConfig) -> Value {
+        let pole_scale = poles
+            .iter()
+            .map(|p| p.magnitude())
+            .fold(1.0_f64, |acc, mag| acc.max(mag));
+        (pole_scale * 1e6).min(config.max_pole_freq * 2.0 * PI)
+    }
+
+    /// Find zeros.
+    ///
+    /// Uses the Rosenbrock system matrix for SISO transfer numerator extraction:
+    ///
+    /// det([G + s*C, -B; L^T, 0]) = 0
+    ///
+    /// where B is the input excitation vector and L selects a measured voltage
+    /// (including differential references).
+    pub fn find_zeros(&self, config: &PoleZeroConfig) -> Vec<Complex> {
+        if self.num_nodes == 0 {
+            return Vec::new();
+        }
+
+        let (input_vec, output_vec) = match self.build_port_vectors(config) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
+
+        let poles = self.find_poles(config);
+        let finite_zero_limit = self.finite_zero_limit(&poles, config);
+
+        let mut zeros = self.numerator_roots_raw(&input_vec, &output_vec, config);
+        zeros.retain(|z| z.magnitude() <= finite_zero_limit);
+
+        if config.input_is_current {
+            // Current input transfer: H = L*Y^{-1}B = N(s)/D(s)
+            // Remove N/D cancellations from uncontrollable/unobservable modes.
+            zeros.retain(|z| !poles.iter().any(|p| Self::is_same_root(z, p, 1e-4)));
+        } else {
+            // Voltage input transfer: H = Vout/Vin = Nout(s)/Nin(s)
+            // Remove numerator/denominator cancellations from Vin polynomial roots.
+            let mut vin_roots = self.numerator_roots_raw(&input_vec, &input_vec, config);
+            vin_roots.retain(|z| z.magnitude() <= finite_zero_limit);
+            zeros.retain(|z| !vin_roots.iter().any(|r| Self::is_same_root(z, r, 1e-4)));
+        }
+
+        self.dedup_and_sort_roots(&mut zeros);
+        zeros
     }
 
     /// Compute DC gain H(0)
@@ -460,10 +880,35 @@ impl PoleZeroAnalyzer {
         Some(x[output_node])
     }
 
+    fn dc_gain_from_config(&self, config: &PoleZeroConfig) -> Option<Value> {
+        let (input_vec, output_vec) = self.build_port_vectors(config)?;
+        let x = self.solve_linear(&self.g_matrix, &input_vec)?;
+        let vout = output_vec
+            .iter()
+            .zip(x.iter())
+            .map(|(l, v)| l * v)
+            .sum::<Value>();
+
+        if config.input_is_current {
+            return Some(vout);
+        }
+
+        let vin = input_vec
+            .iter()
+            .zip(x.iter())
+            .map(|(m, v)| m * v)
+            .sum::<Value>();
+        if vin.abs() < 1e-15 {
+            return None;
+        }
+
+        Some(vout / vin)
+    }
+
     /// Solve linear system using Gaussian elimination
     fn solve_linear(&self, a: &Matrix, b: &[Value]) -> Option<Vec<Value>> {
         let n = a.dims().0;
-        
+
         // Augmented matrix
         let mut aug: Vec<Vec<Value>> = (0..n)
             .map(|i| {
@@ -534,7 +979,7 @@ impl PoleZeroAnalyzer {
         }
 
         // Compute DC gain
-        if let Some(gain) = self.dc_gain(config.input_pos, config.output_pos) {
+        if let Some(gain) = self.dc_gain_from_config(config) {
             result.dc_gain = gain;
         }
 
@@ -556,13 +1001,13 @@ mod tests {
     #[test]
     fn test_complex_basics() {
         let p = Complex::new(-1000.0, 2000.0);
-        
+
         assert!(!p.is_real(1e-10));
         assert!((p.magnitude() - 2236.07).abs() < 0.1);
-        
+
         let real_p = Complex::real(-1000.0);
         assert!(real_p.is_real(1e-10));
-        
+
         // Time constant for real pole at -1000 rad/s
         let tau = real_p.time_constant().unwrap();
         assert!((tau - 0.001).abs() < 1e-6);
@@ -598,7 +1043,7 @@ mod tests {
         let result = analyzer.analyze(&config);
 
         assert_eq!(result.poles.len(), 1);
-        
+
         // Pole should be at -1/(RC) = -1000 rad/s
         let expected_pole = -1.0 / (r * c);
         assert!(
@@ -613,14 +1058,14 @@ mod tests {
     #[test]
     fn test_stability_check() {
         let mut result = PoleZeroResult::new("in", "out");
-        
+
         // All stable poles
         result.add_pole(Complex::new(-100.0, 0.0));
         result.add_pole(Complex::new(-50.0, 100.0));
         result.add_pole(Complex::new(-50.0, -100.0));
-        
+
         assert!(result.is_stable());
-        
+
         // Add unstable pole
         result.add_pole(Complex::new(10.0, 0.0));
         assert!(!result.is_stable());
@@ -629,11 +1074,11 @@ mod tests {
     #[test]
     fn test_dominant_pole() {
         let mut result = PoleZeroResult::new("in", "out");
-        
-        result.add_pole(Complex::new(-1000.0, 0.0));  // Fast
-        result.add_pole(Complex::new(-10.0, 0.0));    // Dominant (slowest)
-        result.add_pole(Complex::new(-500.0, 0.0));   // Medium
-        
+
+        result.add_pole(Complex::new(-1000.0, 0.0)); // Fast
+        result.add_pole(Complex::new(-10.0, 0.0)); // Dominant (slowest)
+        result.add_pole(Complex::new(-500.0, 0.0)); // Medium
+
         let dominant = result.dominant_pole().unwrap();
         assert!((dominant.re - (-10.0)).abs() < 1e-10);
     }
@@ -641,13 +1086,13 @@ mod tests {
     #[test]
     fn test_complex_pole_pairs() {
         let mut result = PoleZeroResult::new("in", "out");
-        
-        result.add_pole(Complex::new(-100.0, 0.0));      // Real
-        result.add_pole(Complex::new(-50.0, 200.0));     // Complex
-        result.add_pole(Complex::new(-50.0, -200.0));    // Conjugate
-        result.add_pole(Complex::new(-30.0, 100.0));     // Another pair
+
+        result.add_pole(Complex::new(-100.0, 0.0)); // Real
+        result.add_pole(Complex::new(-50.0, 200.0)); // Complex
+        result.add_pole(Complex::new(-50.0, -200.0)); // Conjugate
+        result.add_pole(Complex::new(-30.0, 100.0)); // Another pair
         result.add_pole(Complex::new(-30.0, -100.0));
-        
+
         let pairs = result.complex_pole_pairs();
         assert_eq!(pairs.len(), 2);
     }
@@ -668,10 +1113,10 @@ mod tests {
         let c_matrix = Matrix::zeros(2, 2);
 
         let analyzer = PoleZeroAnalyzer::new(g_matrix, c_matrix);
-        
+
         // Gain from node 0 to node 1
         let gain = analyzer.dc_gain(0, 1).unwrap();
-        
+
         // With 1A injected at node 0:
         // V0 = I * (R1 || (R2 + ...)) - more complex
         // Simplified: if we inject 1A at node 0, V1 depends on the network
@@ -683,11 +1128,226 @@ mod tests {
         let mut m = Matrix::zeros(2, 2);
         m.set(0, 0, 1.0);
         m.set(1, 1, 2.0);
-        
+
         let v = vec![3.0, 4.0];
         let result = m.mul_vec(&v);
-        
+
         assert!((result[0] - 3.0).abs() < 1e-10);
         assert!((result[1] - 8.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_descriptor_pole_with_branch_state_rl() {
+        // Parallel RL at one node:
+        // KCL: g*v + iL = 0
+        // Inductor: v - sL*iL = 0
+        // Pole: s = -R/L
+        let r = 1e3;
+        let l = 1e-3;
+        let g = 1.0 / r;
+
+        let mut g_matrix = Matrix::zeros(2, 2);
+        g_matrix.set(0, 0, g);
+        g_matrix.set(0, 1, 1.0);
+        g_matrix.set(1, 0, 1.0);
+        g_matrix.set(1, 1, 0.0);
+
+        let mut c_matrix = Matrix::zeros(2, 2);
+        c_matrix.set(1, 1, -l);
+
+        let analyzer = PoleZeroAnalyzer::new(g_matrix, c_matrix);
+        let config = PoleZeroConfig::poles_only(0, 0);
+        let result = analyzer.analyze(&config);
+
+        let expected = -r / l;
+        let closest = result
+            .poles
+            .iter()
+            .min_by(|a, b| {
+                (a.re - expected)
+                    .abs()
+                    .partial_cmp(&(b.re - expected).abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .expect("expected at least one pole");
+        assert!((closest.re - expected).abs() < 1e3);
+        assert!(closest.im.abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_qr_eigenvalues_with_complex_pair() {
+        // A = -G with C = I
+        // A = [ -2  10 ]
+        //     [ -10 -2 ]
+        // poles = -2 ± j10
+        let mut g_matrix = Matrix::zeros(2, 2);
+        g_matrix.set(0, 0, 2.0);
+        g_matrix.set(0, 1, -10.0);
+        g_matrix.set(1, 0, 10.0);
+        g_matrix.set(1, 1, 2.0);
+
+        let c_matrix = Matrix::identity(2);
+
+        let analyzer = PoleZeroAnalyzer::new(g_matrix, c_matrix);
+        let config = PoleZeroConfig::poles_only(0, 0);
+        let result = analyzer.analyze(&config);
+
+        assert_eq!(result.poles.len(), 2);
+        assert!(
+            result
+                .poles
+                .iter()
+                .all(|p| (p.re + 2.0).abs() < 1e-6 && (p.im.abs() - 10.0).abs() < 1e-5)
+        );
+    }
+
+    #[test]
+    fn test_two_by_two_zero_extraction() {
+        // For output=input=0 in 2x2, numerator is cofactor(0,0)=a22+b22*s.
+        // Choose a22=2, b22=4 => zero at s=-0.5.
+        let mut g_matrix = Matrix::zeros(2, 2);
+        g_matrix.set(0, 0, 1.0);
+        g_matrix.set(0, 1, -1.0);
+        g_matrix.set(1, 0, -1.0);
+        g_matrix.set(1, 1, 2.0);
+
+        let mut c_matrix = Matrix::zeros(2, 2);
+        c_matrix.set(1, 1, 4.0);
+
+        let analyzer = PoleZeroAnalyzer::new(g_matrix, c_matrix);
+        let config = PoleZeroConfig::zeros_only(0, 0);
+        let result = analyzer.analyze(&config);
+
+        assert_eq!(result.zeros.len(), 1);
+        assert!((result.zeros[0].re + 0.5).abs() < 1e-10);
+        assert!(result.zeros[0].im.abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_general_zero_extraction_filters_cancelled_modes() {
+        // Diagonal Y(s) with one decoupled dynamic mode:
+        // y1=s+1, y2=s+2, y3=s+3
+        // Differential in/out on nodes 0 and 1 gives:
+        // H(s) = 1/(s+1) + 1/(s+2) = (2s+3)/((s+1)(s+2))
+        // True transfer zero at s=-1.5.
+        let mut g_matrix = Matrix::zeros(3, 3);
+        g_matrix.set(0, 0, 1.0);
+        g_matrix.set(1, 1, 2.0);
+        g_matrix.set(2, 2, 3.0);
+
+        let c_matrix = Matrix::identity(3);
+
+        let analyzer = PoleZeroAnalyzer::new(g_matrix, c_matrix);
+        let mut config = PoleZeroConfig::zeros_only(0, 0);
+        config.input_neg = Some(1);
+        config.output_neg = Some(1);
+
+        let result = analyzer.analyze(&config);
+        assert!(
+            result
+                .zeros
+                .iter()
+                .any(|z| { (z.re + 1.5).abs() < 0.1 && z.im.abs() < 1e-6 }),
+            "expected zero near -1.5, got {:?}",
+            result.zeros
+        );
+        assert!(
+            !result
+                .zeros
+                .iter()
+                .any(|z| (z.re + 3.0).abs() < 1e-3 && z.im.abs() < 1e-3)
+        );
+    }
+
+    #[test]
+    fn test_dc_gain_differential_current_port() {
+        let mut g_matrix = Matrix::zeros(3, 3);
+        g_matrix.set(0, 0, 1.0);
+        g_matrix.set(1, 1, 2.0);
+        g_matrix.set(2, 2, 3.0);
+        let c_matrix = Matrix::identity(3);
+
+        let analyzer = PoleZeroAnalyzer::new(g_matrix, c_matrix);
+        let mut config = PoleZeroConfig::poles_only(0, 0);
+        config.input_neg = Some(1);
+        config.output_neg = Some(1);
+        config.input_is_current = true;
+
+        let result = analyzer.analyze(&config);
+        assert!((result.dc_gain - 1.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_dc_gain_voltage_mode_normalizes_by_input_voltage() {
+        // Resistive divider: R1 between input and output, R2 from output to ground.
+        // Vout/Vin = R2/(R1+R2) = 0.5 for R1=R2.
+        let g1 = 1.0 / 1e3;
+        let g2 = 1.0 / 1e3;
+        let mut g_matrix = Matrix::zeros(2, 2);
+        g_matrix.set(0, 0, g1);
+        g_matrix.set(0, 1, -g1);
+        g_matrix.set(1, 0, -g1);
+        g_matrix.set(1, 1, g1 + g2);
+        let c_matrix = Matrix::zeros(2, 2);
+
+        let analyzer = PoleZeroAnalyzer::new(g_matrix, c_matrix);
+        let mut config = PoleZeroConfig::poles_only(0, 1);
+        config.input_is_current = false;
+
+        let result = analyzer.analyze(&config);
+        assert!((result.dc_gain - 0.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_voltage_mode_highpass_zero_at_origin() {
+        // High-pass network:
+        // C between input/output, R from output to ground.
+        // H(s)=Vout/Vin = sRC/(1+sRC), so zero at s=0.
+        let r = 1e3;
+        let c = 1e-9;
+        let g = 1.0 / r;
+
+        let mut g_matrix = Matrix::zeros(2, 2);
+        g_matrix.set(1, 1, g);
+
+        let mut c_matrix = Matrix::zeros(2, 2);
+        c_matrix.set(0, 0, c);
+        c_matrix.set(0, 1, -c);
+        c_matrix.set(1, 0, -c);
+        c_matrix.set(1, 1, c);
+
+        let analyzer = PoleZeroAnalyzer::new(g_matrix, c_matrix);
+        let mut config = PoleZeroConfig::zeros_only(0, 1);
+        config.input_is_current = false;
+
+        let result = analyzer.analyze(&config);
+        assert!(
+            result.zeros.iter().any(|z| z.magnitude() < 1e-8),
+            "expected zero near origin, got {:?}",
+            result.zeros
+        );
+    }
+
+    #[test]
+    fn test_voltage_mode_unity_transfer_has_no_zeros() {
+        // If output port equals input port, H(s)=Vin/Vin=1 and there are no finite zeros.
+        let mut g_matrix = Matrix::zeros(3, 3);
+        g_matrix.set(0, 0, 1.0);
+        g_matrix.set(1, 1, 2.0);
+        g_matrix.set(2, 2, 3.0);
+        let c_matrix = Matrix::identity(3);
+
+        let analyzer = PoleZeroAnalyzer::new(g_matrix, c_matrix);
+        let mut config = PoleZeroConfig::zeros_only(0, 0);
+        config.input_is_current = false;
+        config.input_neg = Some(1);
+        config.output_neg = Some(1);
+
+        let result = analyzer.analyze(&config);
+        assert!(
+            result.zeros.is_empty(),
+            "expected no zeros for unity transfer, got {:?}",
+            result.zeros
+        );
     }
 }
