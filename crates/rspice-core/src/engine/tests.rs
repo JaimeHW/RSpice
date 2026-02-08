@@ -2609,6 +2609,8 @@ Rload 2 0 50
         assert!(!config.arc_length); // Arc-length is off by default
         assert_eq!(config.damping_strategy, DampingStrategy::VoltageLimiting);
         assert!(config.gmin_initial > config.gmin_target);
+        assert!(config.voltage_reltol > 0.0);
+        assert_eq!(config.voltage_abstol, 0.0);
         assert!(!config.verbose);
     }
 
@@ -2656,6 +2658,15 @@ Rload 2 0 50
 
         let config = ConvergenceConfig::fast().with_damping(DampingStrategy::BankRose);
         assert_eq!(config.damping_strategy, DampingStrategy::BankRose);
+    }
+
+    #[test]
+    fn test_convergence_config_with_voltage_tolerances() {
+        use crate::engine::ConvergenceConfig;
+
+        let config = ConvergenceConfig::default().with_voltage_tolerances(5e-4, 2e-6);
+        assert!((config.voltage_reltol - 5e-4).abs() < 1e-15);
+        assert!((config.voltage_abstol - 2e-6).abs() < 1e-15);
     }
 
     #[test]
