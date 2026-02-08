@@ -118,19 +118,16 @@ impl McConfig {
     }
 
     pub fn to_spice(&self) -> String {
-        let mut cmd = format!(
-            ".mc {} variations={}",
-            self.num_runs,
-            self.distribution.spice_keyword()
-        );
+        let dist = match self.distribution {
+            McDistribution::Gaussian => "GAUSS",
+            McDistribution::Uniform => "UNIFORM",
+            // .MC parser currently supports GAUSS/UNIFORM only.
+            McDistribution::WorstCase => "UNIFORM",
+        };
+        let spread = (self.variation_pct / 100.0).abs();
+        let mut cmd = format!(".mc {} DIST {} SPREAD {:.12e}", self.num_runs, dist, spread);
         if self.seed > 0 {
-            cmd.push_str(&format!(" seed={}", self.seed));
-        }
-        if self.process_variations {
-            cmd.push_str(" process=yes");
-        }
-        if self.mismatch_variations {
-            cmd.push_str(" mismatch=yes");
+            cmd.push_str(&format!(" SEED {}", self.seed));
         }
         cmd
     }
@@ -317,7 +314,7 @@ mod tests {
     #[test]
     fn test_to_spice_seed() {
         let s = McConfig::default().with_seed(99).to_spice();
-        assert!(s.contains("seed=99"));
+        assert!(s.contains("SEED 99"));
     }
     #[test]
     fn test_dist_all() {
