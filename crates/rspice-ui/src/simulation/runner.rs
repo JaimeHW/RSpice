@@ -517,18 +517,17 @@ fn run_spec_request(
                 .into_iter()
                 .map(|(name, spectrum)| {
                     let freqs: Vec<f64> = spectrum.iter().map(|(freq, _, _)| *freq).collect();
-                    let mags: Vec<f64> = spectrum.iter().map(|(_, mag, _)| *mag).collect();
+                    let real: Vec<f64> = spectrum
+                        .iter()
+                        .map(|(_, mag, phase_deg)| *mag * phase_deg.to_radians().cos())
+                        .collect();
+                    let imag: Vec<f64> = spectrum
+                        .iter()
+                        .map(|(_, mag, phase_deg)| *mag * phase_deg.to_radians().sin())
+                        .collect();
                     (
                         name.clone(),
-                        WaveformData {
-                            name,
-                            x_values: freqs,
-                            y_values: mags,
-                            y_unit: "V".to_string(),
-                            x_unit: "Hz".to_string(),
-                            is_complex: false,
-                            y_imag: None,
-                        },
+                        WaveformData::new_complex(name, freqs, real, imag),
                     )
                 })
                 .collect();
@@ -1116,6 +1115,12 @@ C1 out 0 1n
             } => {
                 assert!(!frequencies.is_empty());
                 assert!(!waveforms.is_empty());
+                assert!(
+                    waveforms
+                        .values()
+                        .any(|wf| wf.is_complex && wf.y_imag.is_some()),
+                    "expected at least one complex HB waveform"
+                );
             }
             other => panic!("Expected AC result for HB, got {:?}", other),
         }
