@@ -33,8 +33,6 @@
 - [Quick Start](#quick-start)
 - [Usage](#usage)
 - [CLI Features](#cli-features)
-- [Roadmap](#roadmap)
-- [Community](#community)
 - [License](#license)
 
 ---
@@ -228,24 +226,6 @@ rspice run circuit.sp --monte-carlo 1000 --seed 42
 📖 **For complete CLI documentation, see [CLI Reference](crates/rspice-cli/README.md).**
 
 ---
-
-## Roadmap
-
-We are consistently pushing the boundaries of open-source EDA:
-
-*   [x] **Advanced RF**: Harmonic Balance, PSS, & PNoise.
-*   [x] **Measurement Engine**: Automated extraction of circuit metrics.
-*   [x] **Python Bindings**: PyO3-based scripting interface with NumPy integration.
-*   [ ] **Heterogeneous Simulation**: Mixed-signal co-simulation with external digital solvers.
-
-## Community
-
-Join the revolution in open analog verification:
-
-*   **Discord**: [Join the RSpice Server](https://discord.gg/rspice) — Chat with the developers.
-*   **Discussion**: [GitHub Discussions](https://github.com/JaimeHW/rspice/discussions) — Q&A and feature requests.
-*   **Contribute**: Read our [Contribution Guide](CONTRIBUTING.md) to get started.
-
 
 
 ## License
