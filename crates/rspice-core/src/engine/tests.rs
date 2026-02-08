@@ -5,6 +5,7 @@
 #[cfg(test)]
 mod engine_tests {
     use crate::Netlist;
+    use crate::Value;
     use crate::engine::Engine;
 
     #[test]
@@ -89,6 +90,696 @@ C1 2 0 1u
     }
 
     #[test]
+    fn test_ac_inductor_branch_stamping_matches_rl_transfer() {
+        let netlist_str = r#"
+* AC RL inductor transfer
+V1 1 0 AC 1
+R1 1 2 1k
+L1 2 0 1m
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let results = engine.run_ac(&netlist, &[1.0, 1e6]).unwrap();
+        assert_eq!(results.len(), 2);
+
+        let low = results[0].voltage_magnitude(2);
+        let high = results[1].voltage_magnitude(2);
+
+        assert!(
+            low < 0.02,
+            "low-frequency inductor output should be near 0, got {}",
+            low
+        );
+        assert!(
+            high > 0.95,
+            "high-frequency inductor output should approach input, got {}",
+            high
+        );
+    }
+
+    #[test]
+    fn test_ac_current_source_excitation_stamps_rhs() {
+        let netlist_str = r#"
+* AC current-source excitation
+I1 1 0 AC 1m
+R1 1 0 1k
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let results = engine.run_ac(&netlist, &[10e3]).unwrap();
+        assert_eq!(results.len(), 1);
+
+        let v1 = results[0].voltage_magnitude(1);
+        assert!(
+            (v1 - 1.0).abs() < 1e-3,
+            "expected |V(1)|≈1V from 1mA*1k, got {}",
+            v1
+        );
+    }
+
+    #[test]
+    fn test_ac_vcvs_gain_stamping() {
+        let netlist_str = r#"
+* AC VCVS gain test
+V1 1 0 AC 1
+E1 2 0 1 0 2
+R2 2 0 1k
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let results = engine.run_ac(&netlist, &[1000.0]).unwrap();
+        let v2 = results[0].voltage_magnitude(2);
+        assert!(
+            (v2 - 2.0).abs() < 1e-3,
+            "expected VCVS gain of 2, got |V(2)|={}",
+            v2
+        );
+    }
+
+    #[test]
+    fn test_ac_vccs_transconductance_stamping() {
+        let netlist_str = r#"
+* AC VCCS transconductance
+V1 1 0 AC 1
+G1 2 0 1 0 1m
+R2 2 0 1k
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let results = engine.run_ac(&netlist, &[1000.0]).unwrap();
+        let v2 = results[0].voltage_magnitude(2);
+        assert!(
+            (v2 - 1.0).abs() < 1e-3,
+            "expected |V(2)|≈1V for gm=1m and R=1k, got {}",
+            v2
+        );
+    }
+
+    #[test]
+    fn test_ac_cccs_control_branch_stamping() {
+        let netlist_str = r#"
+* AC CCCS controlled by V1 current
+V1 1 0 AC 1
+R1 1 0 1k
+F1 2 0 V1 2
+R2 2 0 1k
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let results = engine.run_ac(&netlist, &[1000.0]).unwrap();
+        let v2 = results[0].voltage_magnitude(2);
+        assert!(
+            (v2 - 2.0).abs() < 0.05,
+            "expected |V(2)|≈2V for CCCS gain 2, got {}",
+            v2
+        );
+    }
+
+    #[test]
+    fn test_ac_ccvs_control_branch_stamping() {
+        let netlist_str = r#"
+* AC CCVS controlled by V1 current
+V1 1 0 AC 1
+R1 1 0 1k
+H1 2 0 V1 500
+R2 2 0 1k
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let results = engine.run_ac(&netlist, &[1000.0]).unwrap();
+        let v2 = results[0].voltage_magnitude(2);
+        assert!(
+            (v2 - 0.5).abs() < 0.02,
+            "expected |V(2)|≈0.5V for RM=500 and I(V1)=1mA, got {}",
+            v2
+        );
+    }
+
+    #[test]
+    fn test_ac_vswitch_initial_state_controls_transfer_in_hysteresis_window() {
+        let off_netlist = Netlist::parse(
+            r#"
+* AC VSwitch OFF initial state in hysteresis window
+VDD in 0 DC 5 AC 1
+RLOAD out 0 1k
+VCTRL ctrl 0 1.0
+S1 in out ctrl 0 SWMOD OFF
+.MODEL SWMOD SW (RON=1 ROFF=1e9 VT=1.0 VH=0.2 SMOOTH=0.05)
+.end
+"#,
+        )
+        .unwrap();
+        let on_netlist = Netlist::parse(
+            r#"
+* AC VSwitch ON initial state in hysteresis window
+VDD in 0 DC 5 AC 1
+RLOAD out 0 1k
+VCTRL ctrl 0 1.0
+S1 in out ctrl 0 SWMOD ON
+.MODEL SWMOD SW (RON=1 ROFF=1e9 VT=1.0 VH=0.2 SMOOTH=0.05)
+.end
+"#,
+        )
+        .unwrap();
+
+        let engine = Engine::default();
+        let off = engine.run_ac(&off_netlist, &[1e3]).unwrap();
+        let on = engine.run_ac(&on_netlist, &[1e3]).unwrap();
+        let off_mag = off[0].voltage_magnitude(2);
+        let on_mag = on[0].voltage_magnitude(2);
+
+        assert!(
+            off_mag < 1e-3,
+            "OFF-initialized VSwitch should strongly attenuate AC transfer, got {}",
+            off_mag
+        );
+        assert!(
+            on_mag > 0.95,
+            "ON-initialized VSwitch should pass AC transfer, got {}",
+            on_mag
+        );
+        assert!(
+            on_mag > off_mag * 1e4,
+            "hysteresis-state AC separation too small: off={} on={}",
+            off_mag,
+            on_mag
+        );
+    }
+
+    #[test]
+    fn test_ac_iswitch_initial_state_controls_transfer_in_hysteresis_window() {
+        let off_netlist = Netlist::parse(
+            r#"
+* AC ISwitch OFF initial state in hysteresis window
+VDD in 0 DC 5 AC 1
+RLOAD out 0 1k
+IBIAS 0 sense 5m
+VCTRL sense 0 0
+W1 in out VCTRL CSWMOD OFF
+.MODEL CSWMOD CSW (RON=1 ROFF=1e9 IT=5m IH=1m SMOOTH=1e-4)
+.end
+"#,
+        )
+        .unwrap();
+        let on_netlist = Netlist::parse(
+            r#"
+* AC ISwitch ON initial state in hysteresis window
+VDD in 0 DC 5 AC 1
+RLOAD out 0 1k
+IBIAS 0 sense 5m
+VCTRL sense 0 0
+W1 in out VCTRL CSWMOD ON
+.MODEL CSWMOD CSW (RON=1 ROFF=1e9 IT=5m IH=1m SMOOTH=1e-4)
+.end
+"#,
+        )
+        .unwrap();
+
+        let engine = Engine::default();
+        let off = engine.run_ac(&off_netlist, &[1e3]).unwrap();
+        let on = engine.run_ac(&on_netlist, &[1e3]).unwrap();
+        let off_mag = off[0].voltage_magnitude(2);
+        let on_mag = on[0].voltage_magnitude(2);
+
+        assert!(
+            off_mag < 1e-3,
+            "OFF-initialized ISwitch should strongly attenuate AC transfer, got {}",
+            off_mag
+        );
+        assert!(
+            on_mag > 0.95,
+            "ON-initialized ISwitch should pass AC transfer, got {}",
+            on_mag
+        );
+        assert!(
+            on_mag > off_mag * 1e4,
+            "current-switch hysteresis AC separation too small: off={} on={}",
+            off_mag,
+            on_mag
+        );
+    }
+
+    #[test]
+    fn test_ac_vswitch_control_coupling_stamps_small_signal_jacobian() {
+        let baseline = Netlist::parse(
+            r#"
+* Baseline: no AC excitation on VSwitch control terminal
+VDD in 0 0.1
+RBIAS in out 1k
+S1 out 0 ctrl 0 SWMOD
+VCTRL ctrl 0 DC 1.0 AC 0
+.MODEL SWMOD SW (RON=1 ROFF=1e6 VT=1.0 VH=0 SMOOTH=0.2)
+.end
+"#,
+        )
+        .unwrap();
+        let excited = Netlist::parse(
+            r#"
+* Excited: AC perturbation on VSwitch control terminal
+VDD in 0 0.1
+RBIAS in out 1k
+S1 out 0 ctrl 0 SWMOD
+VCTRL ctrl 0 DC 1.0 AC 1
+.MODEL SWMOD SW (RON=1 ROFF=1e6 VT=1.0 VH=0 SMOOTH=0.2)
+.end
+"#,
+        )
+        .unwrap();
+
+        let engine = Engine::default();
+        let base = engine.run_ac(&baseline, &[1e3]).unwrap();
+        let sig = engine.run_ac(&excited, &[1e3]).unwrap();
+        let v_base = base[0].voltage_magnitude(2);
+        let v_sig = sig[0].voltage_magnitude(2);
+
+        assert!(
+            v_base < 1e-12,
+            "without AC excitation baseline should be near zero, got {}",
+            v_base
+        );
+        assert!(
+            v_sig > 1e-3,
+            "VSwitch control coupling should produce measurable AC response, got {}",
+            v_sig
+        );
+        assert!(
+            v_sig > v_base * 1e6 + 1e-3,
+            "VSwitch control-coupling response too small: baseline={} excited={}",
+            v_base,
+            v_sig
+        );
+    }
+
+    #[test]
+    fn test_ac_iswitch_control_branch_coupling_stamps_small_signal_jacobian() {
+        let baseline = Netlist::parse(
+            r#"
+* Baseline: no AC excitation on ISwitch control branch source
+VDD in 0 0.1
+RBIAS in out 1k
+RLOAD out 0 1k
+IBIAS 0 sense 1m
+VCTRL sense 0 DC 0 AC 0
+RCTRL sense 0 1k
+W1 in out VCTRL CSWMOD
+.MODEL CSWMOD CSW (RON=1 ROFF=1e6 IT=1m IH=0 SMOOTH=2m)
+.end
+"#,
+        )
+        .unwrap();
+        let excited = Netlist::parse(
+            r#"
+* Excited: AC perturbation on ISwitch control branch source
+VDD in 0 0.1
+RBIAS in out 1k
+RLOAD out 0 1k
+IBIAS 0 sense 1m
+VCTRL sense 0 DC 0 AC 1
+RCTRL sense 0 1k
+W1 in out VCTRL CSWMOD
+.MODEL CSWMOD CSW (RON=1 ROFF=1e6 IT=1m IH=0 SMOOTH=2m)
+.end
+"#,
+        )
+        .unwrap();
+
+        let engine = Engine::default();
+        let base = engine.run_ac(&baseline, &[1e3]).unwrap();
+        let sig = engine.run_ac(&excited, &[1e3]).unwrap();
+        let v_base = base[0].voltage_magnitude(2);
+        let v_sig = sig[0].voltage_magnitude(2);
+
+        assert!(
+            v_base < 1e-12,
+            "without AC excitation baseline should be near zero, got {}",
+            v_base
+        );
+        assert!(
+            v_sig > 1e-4,
+            "ISwitch control-branch coupling should produce measurable AC response, got {}",
+            v_sig
+        );
+        assert!(
+            v_sig > v_base * 1e6 + 1e-4,
+            "ISwitch control-branch response too small: baseline={} excited={}",
+            v_base,
+            v_sig
+        );
+    }
+
+    #[test]
+    fn test_ac_diode_small_signal_conductance_linearization() {
+        let netlist_str = r#"
+* Diode small-signal conductance test
+V1 in 0 DC 1 AC 1
+R1 in 1 1k
+D1 1 0 DMOD
+.MODEL DMOD D (IS=1e-14 N=1 RS=0 CJO=0 TT=0)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+
+        let dc = engine.run_dc_op(&netlist).unwrap();
+        let ac = engine.run_ac(&netlist, &[1.0]).unwrap();
+        let vac = ac[0].voltage_magnitude(2);
+
+        // Expected transfer with source resistor:
+        // |V(1)| ≈ 1 / (1 + R * gd), with gd from diode operating point.
+        let vd = dc.voltage(2);
+        let is = 1e-14;
+        let n = 1.0;
+        let vt = 0.02585;
+        let gd = (is / (n * vt)) * (vd / (n * vt)).exp();
+        let expected = 1.0 / (1.0 + 1e3 * gd);
+
+        assert!(expected.is_finite() && expected > 0.0);
+        let rel_err = ((vac - expected) / expected).abs();
+        assert!(
+            rel_err < 0.08,
+            "expected |V(1)|≈{}V from diode gd divider, got {}V (rel_err={})",
+            expected,
+            vac,
+            rel_err
+        );
+    }
+
+    #[test]
+    fn test_ac_diode_junction_capacitance_creates_high_frequency_rolloff() {
+        let netlist_str = r#"
+* Diode capacitance roll-off test
+V1 in 0 DC 1 AC 1
+R1 in 1 1k
+D1 1 0 DMOD
+.MODEL DMOD D (IS=1e-14 N=1 RS=0 CJO=1u TT=0)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+
+        let points = engine.run_ac(&netlist, &[1.0, 1e6]).unwrap();
+        let low = points[0].voltage_magnitude(2);
+        let high = points[1].voltage_magnitude(2);
+
+        assert!(
+            low.is_finite() && low > 0.0,
+            "low-frequency response invalid: {}",
+            low
+        );
+        assert!(
+            high < low * 0.02,
+            "expected strong Cj roll-off: low={} high={}",
+            low,
+            high
+        );
+    }
+
+    #[test]
+    fn test_ac_bjt_common_emitter_has_nonlinear_small_signal_gain() {
+        let netlist_str = r#"
+* BJT common-emitter AC gain test
+Vcc 3 0 5
+Vb 1 0 DC 0.6 AC 1m
+Rc 3 2 1k
+Q1 2 1 0 QB
+.MODEL QB NPN (IS=1e-14 BF=200 BR=1 NF=1 NR=1 VAF=1e12 CJE=0 CJC=0 TF=0 TR=0 IKF=1e9 IKR=1e9)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+
+        let dc = engine.run_dc_op(&netlist).unwrap();
+        let ac = engine.run_ac(&netlist, &[1e3]).unwrap();
+        let vout = ac[0].voltage_magnitude(3);
+
+        // Estimate expected gain magnitude using gm ≈ Ic/Vt and ideal source drive.
+        let ic_est = ((5.0 - dc.voltage(3)) / 1e3).max(0.0);
+        let gm_est = ic_est / 0.02585;
+        let expected = gm_est * 1e-3 * 1e3;
+
+        assert!(
+            vout > 5e-4,
+            "expected measurable CE gain, got |Vout|={}",
+            vout
+        );
+        if expected > 1e-4 {
+            let ratio = vout / expected;
+            assert!(
+                (0.2..5.0).contains(&ratio),
+                "unexpected CE gain ratio: measured={} expected={} ratio={}",
+                vout,
+                expected,
+                ratio
+            );
+        }
+    }
+
+    #[test]
+    fn test_ac_mos_common_source_has_nonlinear_small_signal_gain() {
+        let netlist_str = r#"
+* MOS common-source AC gain test
+Vdd 3 0 5
+Vg 1 0 DC 2 AC 1m
+Rd 3 2 1k
+M1 2 1 0 0 MTEST
+.MODEL MTEST NMOS (LEVEL=1 VTO=0.7 KP=100U LAMBDA=0 CGSO=0 CGDO=0 CGBO=0)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+
+        let dc = engine.run_dc_op(&netlist).unwrap();
+        let ac = engine.run_ac(&netlist, &[1e3]).unwrap();
+        let vout = ac[0].voltage_magnitude(3);
+
+        // Estimate expected gain with gm ≈ 2*Id/Vov in saturation.
+        let id_est = ((5.0 - dc.voltage(3)) / 1e3).max(0.0);
+        let vov: Value = (2.0_f64 - 0.7_f64).max(1e-12_f64);
+        let gm_est = 2.0 * id_est / vov;
+        let expected = gm_est * 1e-3 * 1e3;
+
+        assert!(
+            vout > 2e-4,
+            "expected measurable CS gain from MOS small-signal model, got |Vout|={}",
+            vout
+        );
+        if expected > 1e-4 {
+            let ratio = vout / expected;
+            assert!(
+                (0.15..6.0).contains(&ratio),
+                "unexpected MOS gain ratio: measured={} expected={} ratio={}",
+                vout,
+                expected,
+                ratio
+            );
+        }
+    }
+
+    #[test]
+    fn test_jfet_dc_common_source_bias_affects_output() {
+        let netlist_str = r#"
+* JFET DC common-source bias
+Vdd 1 0 10
+Vg 2 0 0
+Rd 1 3 1k
+J1 3 2 0 JMOD
+.MODEL JMOD NJF (VTO=-2 BETA=1m LAMBDA=0)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let result = engine.run_dc_op(&netlist).unwrap();
+        let vout = result.voltage(3);
+
+        assert!(
+            vout < 9.5 && vout > 0.1,
+            "JFET should load drain node in DC; expected 0.1V < V(3) < 9.5V, got {}V",
+            vout
+        );
+    }
+
+    #[test]
+    fn test_jfet_dc_gate_forward_bias_produces_gate_leakage_path() {
+        let forward = Netlist::parse(
+            r#"
+* NJF gate-source forward-bias leakage
+VG 1 0 0.6
+RS 2 0 1k
+RD 3 0 1k
+J1 3 1 2 JLEAK
+.MODEL JLEAK NJF (VTO=-2 BETA=0 LAMBDA=0 IS=1e-14 N=1)
+.end
+"#,
+        )
+        .unwrap();
+        let reverse = Netlist::parse(
+            r#"
+* NJF reverse-biased gate (baseline leakage near zero)
+VG 1 0 -2
+RS 2 0 1k
+RD 3 0 1k
+J1 3 1 2 JLEAK
+.MODEL JLEAK NJF (VTO=-2 BETA=0 LAMBDA=0 IS=1e-14 N=1)
+.end
+"#,
+        )
+        .unwrap();
+
+        let engine = Engine::default();
+        let fwd = engine.run_dc_op(&forward).unwrap();
+        let rev = engine.run_dc_op(&reverse).unwrap();
+        let vs_fwd = fwd.voltage(2);
+        let vs_rev = rev.voltage(2);
+
+        assert!(
+            vs_fwd > 0.02,
+            "forward-biased gate junction should raise source node via leakage, got V(s)={}",
+            vs_fwd
+        );
+        assert!(
+            vs_rev.abs() < 1e-3,
+            "reverse-biased gate junction should have near-zero leakage, got V(s)={}",
+            vs_rev
+        );
+        assert!(
+            vs_fwd > vs_rev + 0.02,
+            "forward leakage should be much larger than reverse leakage: Vsf={} Vsr={}",
+            vs_fwd,
+            vs_rev
+        );
+    }
+
+    #[test]
+    fn test_pjf_dc_gate_leakage_polarity_is_source_to_gate_when_forward_biased() {
+        let forward = Netlist::parse(
+            r#"
+* PJF gate junction forward-biased from source to gate
+VDD 4 0 1
+RBIAS 4 2 1k
+VG 1 0 0
+RD 3 0 1k
+J1 3 1 2 PMOD
+.MODEL PMOD PJF (VTO=-2 BETA=0 LAMBDA=0 IS=1e-14 N=1)
+.end
+"#,
+        )
+        .unwrap();
+        let reverse = Netlist::parse(
+            r#"
+* PJF gate junction reverse-biased baseline
+VDD 4 0 1
+RBIAS 4 2 1k
+VG 1 0 1.5
+RD 3 0 1k
+J1 3 1 2 PMOD
+.MODEL PMOD PJF (VTO=-2 BETA=0 LAMBDA=0 IS=1e-14 N=1)
+.end
+"#,
+        )
+        .unwrap();
+
+        let engine = Engine::default();
+        let fwd = engine.run_dc_op(&forward).unwrap();
+        let rev = engine.run_dc_op(&reverse).unwrap();
+        let vs_fwd = fwd.voltage(2);
+        let vs_rev = rev.voltage(2);
+
+        assert!(
+            vs_fwd < 0.9,
+            "forward-biased PJF gate junction should sink source node, got V(s)={}",
+            vs_fwd
+        );
+        assert!(
+            vs_rev > 0.95,
+            "reverse-biased PJF gate junction should keep source near supply, got V(s)={}",
+            vs_rev
+        );
+        assert!(
+            vs_fwd < vs_rev - 0.1,
+            "PJF forward gate leakage polarity mismatch: Vsf={} Vsr={}",
+            vs_fwd,
+            vs_rev
+        );
+    }
+
+    #[test]
+    fn test_ac_jfet_common_source_has_nonlinear_small_signal_gain() {
+        let netlist_str = r#"
+* JFET common-source AC gain test
+Vdd 1 0 10
+Vg 2 0 DC 0 AC 1m
+Rd 1 3 1k
+J1 3 2 0 JMOD
+.MODEL JMOD NJF (VTO=-2 BETA=1m LAMBDA=0 CGS=0 CGD=0)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+
+        let dc = engine.run_dc_op(&netlist).unwrap();
+        let ac = engine.run_ac(&netlist, &[1e3]).unwrap();
+        let vout = ac[0].voltage_magnitude(3);
+
+        // Saturation estimate: gm ≈ 2*sqrt(beta*Id), gain ≈ gm*Rd*vin.
+        let id_est = ((10.0 - dc.voltage(3)) / 1e3).max(0.0);
+        let gm_est = 2.0 * (1e-3_f64 * id_est).sqrt();
+        let expected = gm_est * 1e3 * 1e-3;
+
+        assert!(
+            vout > 1e-3,
+            "expected measurable JFET common-source gain, got |Vout|={}",
+            vout
+        );
+        if expected > 1e-4 {
+            let ratio = vout / expected;
+            assert!(
+                (0.2..5.0).contains(&ratio),
+                "unexpected JFET gain ratio: measured={} expected={} ratio={}",
+                vout,
+                expected,
+                ratio
+            );
+        }
+    }
+
+    #[test]
+    fn test_ac_jfet_gate_drain_capacitance_creates_high_frequency_rolloff() {
+        let netlist_str = r#"
+* JFET capacitance roll-off test
+Vdd 1 0 10
+Vg 2 0 DC 0 AC 1m
+Rd 1 3 1k
+J1 3 2 0 JCAP
+.MODEL JCAP NJF (VTO=-2 BETA=1m LAMBDA=0 CGS=0 CGD=10n PB=1 FC=0.5)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+
+        let points = engine.run_ac(&netlist, &[1e3, 1e8]).unwrap();
+        let low = points[0].voltage_magnitude(3);
+        let high = points[1].voltage_magnitude(3);
+
+        assert!(
+            low.is_finite() && low > 1e-6,
+            "low-frequency JFET gain invalid: {}",
+            low
+        );
+        assert!(
+            high < low * 0.4,
+            "expected strong JFET Cgd roll-off: low={} high={}",
+            low,
+            high
+        );
+    }
+
+    #[test]
     fn test_bjt_circuit() {
         let netlist_str = r#"
 * BJT Simple Test
@@ -107,6 +798,328 @@ Q1 3 2 0 2N2222
             }
             Err(_) => {} // BJT convergence failure acceptable
         }
+    }
+
+    #[test]
+    fn test_bjt_uses_embedded_model_when_no_model_card_present() {
+        let netlist_str = r#"
+* BJT Embedded Model Fallback Test
+Vcc 1 0 5
+Rb 1 2 10k
+Rc 1 3 1k
+Q1 3 2 0 2N2222
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+
+        assert_eq!(circuit.bjts.devices.len(), 1);
+        let q = &circuit.bjts.devices[0];
+        assert!(
+            (q.bf - 255.9).abs() < 1e-6,
+            "Expected BF from embedded 2N2222 model"
+        );
+        assert!(
+            (q.is - 14.34e-15).abs() < 1e-20,
+            "Expected IS from embedded 2N2222 model"
+        );
+    }
+
+    #[test]
+    fn test_bjt_explicit_model_card_overrides_embedded_fallback() {
+        let netlist_str = r#"
+* BJT Explicit Model Card Precedence Test
+Vcc 1 0 5
+Rb 1 2 10k
+Rc 1 3 1k
+Q1 3 2 0 2N2222
+.MODEL 2N2222 NPN (BF=123 IS=9e-15)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+
+        assert_eq!(circuit.bjts.devices.len(), 1);
+        let q = &circuit.bjts.devices[0];
+        assert!((q.bf - 123.0).abs() < 1e-9);
+        assert!((q.is - 9e-15).abs() < 1e-22);
+    }
+
+    #[test]
+    fn test_bjt_model_card_type_sets_pnp_polarity() {
+        let netlist_str = r#"
+* BJT model card type should define device polarity
+Q1 1 2 0 QMOD
+.MODEL QMOD PNP (BF=80 IS=2e-14)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+
+        assert_eq!(circuit.bjts.devices.len(), 1);
+        assert_eq!(
+            circuit.bjts.devices[0].bjt_type,
+            crate::device::BjtType::Pnp
+        );
+    }
+
+    #[test]
+    fn test_mos_model_card_type_sets_pmos_polarity() {
+        let netlist_str = r#"
+* MOS model card type should define NMOS/PMOS polarity
+M1 2 1 0 0 PMOD
+.MODEL PMOD PMOS (LEVEL=1 VTO=-0.7 KP=100u)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+
+        assert_eq!(circuit.mosfets.devices.len(), 1);
+        assert_eq!(
+            circuit.mosfets.devices[0].mos_type,
+            crate::device::MosType::Pmos
+        );
+    }
+
+    #[test]
+    fn test_jfet_model_card_type_sets_pjf_polarity() {
+        let netlist_str = r#"
+* JFET model card type should define NJF/PJF polarity
+J1 3 2 0 JMOD
+.MODEL JMOD PJF (VTO=-2 BETA=1m)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+
+        assert_eq!(circuit.jfets.len(), 1);
+        assert_eq!(circuit.jfets[0].jfet_type, crate::device::JfetType::PJF);
+    }
+
+    #[test]
+    fn test_mesfet_model_card_type_sets_pmf_polarity() {
+        let netlist_str = r#"
+* MESFET model card type should define NMF/PMF polarity
+Z1 3 2 0 MMOD
+.MODEL MMOD PMF (VTO=-2 BETA=1m)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+
+        assert_eq!(circuit.jfets.len(), 1);
+        assert_eq!(circuit.jfets[0].jfet_type, crate::device::JfetType::PJF);
+    }
+
+    #[test]
+    fn test_diode_incompatible_model_type_errors() {
+        let netlist_str = r#"
+* Diode references incompatible model type
+D1 1 0 DMOD
+.MODEL DMOD NPN (BF=100)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let err = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("diode model type mismatch should fail build");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("incompatible type"),
+            "expected incompatible type error, got {}",
+            msg
+        );
+        assert!(
+            msg.contains("Diode") && msg.contains("expected D or DIODE"),
+            "expected diode model family mismatch details, got {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_bjt_incompatible_model_type_errors() {
+        let netlist_str = r#"
+* BJT references incompatible model type
+Q1 3 2 0 QMOD
+.MODEL QMOD NMOS (VTO=0.7 KP=100u)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let err = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("BJT model type mismatch should fail build");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("incompatible type") && msg.contains("expected NPN or PNP"),
+            "expected BJT model family mismatch details, got {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_mos_incompatible_model_type_errors() {
+        let netlist_str = r#"
+* MOS references incompatible model type
+M1 2 1 0 0 MMOD
+.MODEL MMOD PJF (VTO=-2 BETA=1m)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let err = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("MOS model type mismatch should fail build");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("incompatible type") && msg.contains("expected NMOS or PMOS"),
+            "expected MOS model family mismatch details, got {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_jfet_incompatible_model_type_errors() {
+        let netlist_str = r#"
+* JFET references incompatible model type
+J1 3 2 0 JMOD
+.MODEL JMOD NPN (BF=100)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let err = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("JFET model type mismatch should fail build");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("incompatible type") && msg.contains("expected NJF or PJF"),
+            "expected JFET model family mismatch details, got {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_mesfet_incompatible_model_type_errors() {
+        let netlist_str = r#"
+* MESFET references incompatible model type
+Z1 3 2 0 MMOD
+.MODEL MMOD PMOS (LEVEL=1 VTO=-0.7 KP=100u)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let err = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("MESFET model type mismatch should fail build");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("incompatible type") && msg.contains("expected NMF or PMF"),
+            "expected MESFET model family mismatch details, got {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_transmission_line_incompatible_model_type_errors() {
+        let netlist_str = r#"
+* TLine references incompatible model type
+O1 1 0 2 0 TLMOD
+.MODEL TLMOD NPN (BF=100)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let err = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("transmission line model type mismatch should fail build");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("incompatible type") && msg.contains("expected LTRA or TXL"),
+            "expected transmission-line model family mismatch details, got {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_jfet_model_rd_rs_expand_to_internal_nodes_and_series_resistors() {
+        let netlist_str = r#"
+* JFET RD/RS expansion
+VDD 1 0 10
+VG 2 0 0
+J1 3 2 0 JMOD
+.MODEL JMOD NJF (VTO=-2 BETA=1m RD=120 RS=340)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+
+        assert_eq!(circuit.jfets.len(), 1);
+        assert!(
+            circuit.resistors.names.iter().any(|n| n == "J1.__rd"),
+            "expected generated RD resistor for J1"
+        );
+        assert!(
+            circuit.resistors.names.iter().any(|n| n == "J1.__rs"),
+            "expected generated RS resistor for J1"
+        );
+
+        let node_names = circuit.node_names_sorted();
+        assert!(
+            node_names.iter().any(|n| n == "J1.__dint"),
+            "expected generated internal drain node name"
+        );
+        assert!(
+            node_names.iter().any(|n| n == "J1.__sint"),
+            "expected generated internal source node name"
+        );
+        assert!(
+            circuit.jfets[0].params.rd.abs() < 1e-30 && circuit.jfets[0].params.rs.abs() < 1e-30,
+            "intrinsic JFET should have RD/RS zeroed after externalization"
+        );
+    }
+
+    #[test]
+    fn test_jfet_series_rd_rs_reduce_common_source_drain_loading() {
+        let baseline = Netlist::parse(
+            r#"
+* Baseline JFET without extrinsic RD/RS
+VDD 1 0 10
+VG 2 0 0
+RL 1 3 1k
+J1 3 2 0 JMOD
+.MODEL JMOD NJF (VTO=-2 BETA=1m LAMBDA=0 RD=0 RS=0)
+.end
+"#,
+        )
+        .unwrap();
+        let with_series = Netlist::parse(
+            r#"
+* JFET with large extrinsic RD/RS
+VDD 1 0 10
+VG 2 0 0
+RL 1 3 1k
+J1 3 2 0 JMOD
+.MODEL JMOD NJF (VTO=-2 BETA=1m LAMBDA=0 RD=2k RS=2k)
+.end
+"#,
+        )
+        .unwrap();
+
+        let engine = Engine::default();
+        let base = engine.run_dc_op(&baseline).unwrap();
+        let series = engine.run_dc_op(&with_series).unwrap();
+        let vdrain_base = base.voltage(3);
+        let vdrain_series = series.voltage(3);
+
+        assert!(
+            vdrain_series > vdrain_base + 1.0,
+            "large RD/RS should significantly reduce channel loading: baseline={} with_series={}",
+            vdrain_base,
+            vdrain_series
+        );
     }
 
     #[test]
@@ -179,6 +1192,216 @@ L1 2 0 1m
         let engine = Engine::default();
         let result = engine.run_tran(&netlist, 10e-6, 0.5e-6).unwrap();
         assert!(result.num_points() > 5, "Expected multiple time points");
+    }
+
+    #[test]
+    fn test_transient_jfet_cgs_companion_creates_gate_rc_delay() {
+        let with_cap = Netlist::parse(
+            r#"
+* JFET gate RC loading through Cgs
+VSTEP in 0 PULSE(0 1 0 1n 1n 2m 4m)
+RG in g 1k
+RD d 0 1k
+J1 d g 0 JCAP
+.MODEL JCAP NJF (VTO=-2 BETA=0 CGS=1u CGD=0 PB=1 FC=0.5 IS=0)
+.end
+"#,
+        )
+        .unwrap();
+        let no_cap = Netlist::parse(
+            r#"
+* Baseline: same topology without JFET capacitance
+VSTEP in 0 PULSE(0 1 0 1n 1n 2m 4m)
+RG in g 1k
+RD d 0 1k
+J1 d g 0 JCAP
+.MODEL JCAP NJF (VTO=-2 BETA=0 CGS=0 CGD=0 PB=1 FC=0.5 IS=0)
+.end
+"#,
+        )
+        .unwrap();
+
+        let engine = Engine::default();
+        let with_cap_result = engine.run_tran(&with_cap, 100e-6, 1e-6).unwrap();
+        let no_cap_result = engine.run_tran(&no_cap, 100e-6, 1e-6).unwrap();
+
+        let g_with = with_cap_result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("g"))
+            .expect("gate node g missing in with-cap result");
+        let g_no = no_cap_result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("g"))
+            .expect("gate node g missing in baseline result");
+
+        let idx_with_20us = with_cap_result
+            .time
+            .iter()
+            .position(|&time| time >= 20e-6)
+            .unwrap_or(with_cap_result.time.len() - 1);
+        let idx_no_20us = no_cap_result
+            .time
+            .iter()
+            .position(|&time| time >= 20e-6)
+            .unwrap_or(no_cap_result.time.len() - 1);
+
+        let vg_with_20us = with_cap_result.voltages[g_with][idx_with_20us];
+        let vg_no_20us = no_cap_result.voltages[g_no][idx_no_20us];
+
+        assert!(
+            vg_with_20us < 0.08,
+            "expected heavy Cgs loading at 20us, got Vg={}",
+            vg_with_20us
+        );
+        assert!(
+            vg_no_20us > 0.95,
+            "baseline without Cgs should settle near source quickly, got Vg={}",
+            vg_no_20us
+        );
+    }
+
+    #[test]
+    fn test_transient_jfet_cgd_companion_couples_gate_edge_to_drain() {
+        let with_cgd = Netlist::parse(
+            r#"
+* JFET Cgd feedthrough pulse
+VG g 0 PULSE(0 1 0 1u 1u 40u 80u)
+RLOAD d 0 1k
+J1 d g 0 JCAP
+.MODEL JCAP NJF (VTO=-2 BETA=0 CGS=0 CGD=1n PB=1 FC=0.5 IS=0)
+.end
+"#,
+        )
+        .unwrap();
+        let without_cgd = Netlist::parse(
+            r#"
+* Baseline without Cgd
+VG g 0 PULSE(0 1 0 1u 1u 40u 80u)
+RLOAD d 0 1k
+J1 d g 0 JCAP
+.MODEL JCAP NJF (VTO=-2 BETA=0 CGS=0 CGD=0 PB=1 FC=0.5 IS=0)
+.end
+"#,
+        )
+        .unwrap();
+
+        let engine = Engine::default();
+        let with_cgd_result = engine.run_tran(&with_cgd, 20e-6, 50e-9).unwrap();
+        let without_cgd_result = engine.run_tran(&without_cgd, 20e-6, 50e-9).unwrap();
+
+        let d_with = with_cgd_result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("d"))
+            .expect("drain node d missing in with-cgd result");
+        let d_without = without_cgd_result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("d"))
+            .expect("drain node d missing in baseline result");
+
+        let peak_with = with_cgd_result
+            .time
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| **t <= 3e-6)
+            .map(|(i, _)| with_cgd_result.voltages[d_with][i].abs())
+            .fold(0.0, Value::max);
+        let peak_without = without_cgd_result
+            .time
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| **t <= 3e-6)
+            .map(|(i, _)| without_cgd_result.voltages[d_without][i].abs())
+            .fold(0.0, Value::max);
+        let idx_tail = with_cgd_result
+            .time
+            .iter()
+            .position(|&time| time >= 15e-6)
+            .unwrap_or(with_cgd_result.time.len() - 1);
+        let tail_with = with_cgd_result.voltages[d_with][idx_tail].abs();
+
+        assert!(
+            peak_with > 0.2,
+            "expected strong Cgd feedthrough pulse at drain, peak={}",
+            peak_with
+        );
+        assert!(
+            peak_without < 1e-3 && peak_without < peak_with * 0.05,
+            "baseline without Cgd should have negligible drain pulse, peak_without={} peak_with={}",
+            peak_without,
+            peak_with
+        );
+        assert!(
+            tail_with < peak_with * 0.1,
+            "drain pulse should decay through RLOAD, tail={} peak={}",
+            tail_with,
+            peak_with
+        );
+    }
+
+    #[test]
+    fn test_dc_inductor_behaves_as_short() {
+        let netlist_str = r#"
+* DC inductor short behavior
+V1 1 0 1
+L1 1 2 1m
+R1 2 0 1k
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let result = engine.run_dc_op(&netlist).unwrap();
+        let v2 = result.voltage(2);
+        assert!(
+            (v2 - 1.0).abs() < 1e-6,
+            "expected V(2)=1V with DC-short inductor, got {}",
+            v2
+        );
+    }
+
+    #[test]
+    fn test_dc_cccs_control_branch_stamping() {
+        let netlist_str = r#"
+* CCCS controlled by V1 current
+V1 1 0 1
+R1 1 0 1k
+F1 2 0 V1 2
+R2 2 0 1k
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let result = engine.run_dc_op(&netlist).unwrap();
+        let v2 = result.voltage(2).abs();
+        assert!(
+            (v2 - 2.0).abs() < 0.05,
+            "expected |V(2)|≈2V for CCCS gain 2, got {}",
+            v2
+        );
+    }
+
+    #[test]
+    fn test_dc_ccvs_control_branch_stamping() {
+        let netlist_str = r#"
+* CCVS controlled by V1 current
+V1 1 0 1
+R1 1 0 1k
+H1 2 0 V1 500
+R2 2 0 1k
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let result = engine.run_dc_op(&netlist).unwrap();
+        let v2 = result.voltage(2).abs();
+        assert!(
+            (v2 - 0.5).abs() < 0.02,
+            "expected |V(2)|≈0.5V for RM=500 and I(V1)=1mA, got {}",
+            v2
+        );
     }
 
     #[test]
@@ -348,6 +1571,425 @@ C1 2 0 1u
     }
 
     #[test]
+    fn test_build_vswitch_applies_model_params_and_initial_state() {
+        let netlist_str = r#"
+* Voltage-controlled switch model application
+VDD 1 0 5
+VCTRL 2 0 1
+RLOAD 3 0 1k
+S1 1 3 2 0 SWMOD ON
+.MODEL SWMOD SW (VT=1 VH=0.2 RON=2 ROFF=1e8 SMOOTH=0.05)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+
+        assert_eq!(circuit.vswitches.len(), 1);
+        let sw = &circuit.vswitches[0];
+        assert!((sw.vt - 1.0).abs() < 1e-12);
+        assert!((sw.vh - 0.2).abs() < 1e-12);
+        assert!((sw.ron - 2.0).abs() < 1e-12);
+        assert!((sw.roff - 1e8).abs() < 1e-3);
+        assert!((sw.smooth - 0.05).abs() < 1e-12);
+        assert_eq!(sw.state(), crate::device::SwitchState::On);
+    }
+
+    #[test]
+    fn test_build_iswitch_applies_model_params_and_resolves_control_branch() {
+        let netlist_str = r#"
+* Current-controlled switch model application
+VCTRL 4 0 0
+VDD 1 0 5
+RBIAS 1 4 1k
+RLOAD 2 0 1k
+W1 1 2 VCTRL CSWMOD OFF
+.MODEL CSWMOD CSW (IT=1m IH=0.2m RON=3 ROFF=2e8 SMOOTH=1e-4)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+
+        assert_eq!(circuit.iswitches.len(), 1);
+        let sw = &circuit.iswitches[0];
+        assert!((sw.it - 1e-3).abs() < 1e-15);
+        assert!((sw.ih - 0.2e-3).abs() < 1e-15);
+        assert!((sw.ron - 3.0).abs() < 1e-12);
+        assert!((sw.roff - 2e8).abs() < 1e-3);
+        assert!((sw.smooth - 1e-4).abs() < 1e-15);
+        assert_eq!(sw.state(), crate::device::SwitchState::Off);
+
+        let control_branch = circuit
+            .get_branch_by_name("VCTRL")
+            .expect("control source branch should be registered");
+        let expected_matrix_index = circuit.get_branch_matrix_index(control_branch);
+        assert_eq!(sw.ctrl_branch, Some(expected_matrix_index));
+    }
+
+    #[test]
+    fn test_build_vswitch_unknown_model_errors() {
+        let netlist_str = r#"
+* VSwitch unknown model
+VCTRL 2 0 0
+S1 1 0 2 0 MISSING
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let err = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("unknown VSwitch model should fail build");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Voltage-controlled switch") && msg.contains("unknown model"),
+            "expected unknown switch model error, got {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_build_vswitch_incompatible_model_type_errors() {
+        let netlist_str = r#"
+* VSwitch incompatible model type
+VCTRL 2 0 0
+S1 1 0 2 0 SWMOD
+.MODEL SWMOD NPN (BF=100)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let err = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("incompatible VSwitch model type should fail build");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Voltage-controlled switch") && msg.contains("incompatible type"),
+            "expected incompatible VSwitch model type error, got {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_build_iswitch_unknown_model_errors() {
+        let netlist_str = r#"
+* ISwitch unknown model
+VCTRL 2 0 0
+W1 1 0 VCTRL MISSING
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let err = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("unknown ISwitch model should fail build");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Current-controlled switch") && msg.contains("unknown model"),
+            "expected unknown current switch model error, got {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_build_iswitch_incompatible_model_type_errors() {
+        let netlist_str = r#"
+* ISwitch incompatible model type
+VCTRL 2 0 0
+W1 1 0 VCTRL CSW1
+.MODEL CSW1 PMOS (LEVEL=1 VTO=-0.7 KP=100u)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let err = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("incompatible ISwitch model type should fail build");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Current-controlled switch") && msg.contains("incompatible type"),
+            "expected incompatible ISwitch model type error, got {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_build_iswitch_missing_control_source_errors() {
+        let netlist_str = r#"
+* ISwitch missing control source
+VDD 1 0 5
+RLOAD 2 0 1k
+W1 1 2 VMISSING CSW1
+.MODEL CSW1 CSW (IT=1m IH=0 RON=1 ROFF=1e9)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let err = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("missing ISwitch control source should fail build");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("ISWITCH control element not found"),
+            "expected missing ISwitch control-source error, got {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_vswitch_initial_state_affects_dc_solution_in_hysteresis_window() {
+        let off_netlist = Netlist::parse(
+            r#"
+* VSwitch OFF initial state in hysteresis window
+VDD 1 0 5
+VCTRL 2 0 1.0
+S1 1 3 2 0 SWMOD OFF
+RLOAD 3 0 1k
+.MODEL SWMOD SW (RON=1 ROFF=1e9 VT=1.0 VH=0.2 SMOOTH=0.05)
+.end
+"#,
+        )
+        .unwrap();
+        let on_netlist = Netlist::parse(
+            r#"
+* VSwitch ON initial state in hysteresis window
+VDD 1 0 5
+VCTRL 2 0 1.0
+S1 1 3 2 0 SWMOD ON
+RLOAD 3 0 1k
+.MODEL SWMOD SW (RON=1 ROFF=1e9 VT=1.0 VH=0.2 SMOOTH=0.05)
+.end
+"#,
+        )
+        .unwrap();
+
+        let engine = Engine::default();
+        let off = engine.run_dc_op(&off_netlist).unwrap();
+        let on = engine.run_dc_op(&on_netlist).unwrap();
+        let vout_off = off.voltage(3);
+        let vout_on = on.voltage(3);
+
+        assert!(
+            vout_off < 0.1,
+            "OFF-initialized switch should hold output low in hysteresis window, got {}",
+            vout_off
+        );
+        assert!(
+            vout_on > 4.0,
+            "ON-initialized switch should hold output high in hysteresis window, got {}",
+            vout_on
+        );
+        assert!(
+            vout_on > vout_off + 3.0,
+            "switch initial-state hysteresis effect too small: off={} on={}",
+            vout_off,
+            vout_on
+        );
+    }
+
+    #[test]
+    fn test_iswitch_initial_state_affects_dc_solution_in_hysteresis_window() {
+        let off_netlist = Netlist::parse(
+            r#"
+* ISwitch OFF initial state in hysteresis window
+VDD 1 0 5
+IBIAS 0 4 5m
+VCTRL 4 0 0
+W1 1 2 VCTRL CSWMOD OFF
+RLOAD 2 0 1k
+.MODEL CSWMOD CSW (RON=1 ROFF=1e9 IT=5m IH=1m SMOOTH=1e-4)
+.end
+"#,
+        )
+        .unwrap();
+        let on_netlist = Netlist::parse(
+            r#"
+* ISwitch ON initial state in hysteresis window
+VDD 1 0 5
+IBIAS 0 4 5m
+VCTRL 4 0 0
+W1 1 2 VCTRL CSWMOD ON
+RLOAD 2 0 1k
+.MODEL CSWMOD CSW (RON=1 ROFF=1e9 IT=5m IH=1m SMOOTH=1e-4)
+.end
+"#,
+        )
+        .unwrap();
+
+        let engine = Engine::default();
+        let off = engine.run_dc_op(&off_netlist).unwrap();
+        let on = engine.run_dc_op(&on_netlist).unwrap();
+        let out_node_off = off
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("2"))
+            .expect("output node '2' should exist in OFF result");
+        let out_node_on = on
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("2"))
+            .expect("output node '2' should exist in ON result");
+        let vout_off = off.voltage(out_node_off);
+        let vout_on = on.voltage(out_node_on);
+
+        assert!(
+            vout_off < 0.1,
+            "OFF-initialized current switch should hold output low, got {}",
+            vout_off
+        );
+        assert!(
+            vout_on > 4.0,
+            "ON-initialized current switch should hold output high, got {}",
+            vout_on
+        );
+        assert!(
+            vout_on > vout_off + 3.0,
+            "current-switch initial-state hysteresis effect too small: off={} on={}",
+            vout_off,
+            vout_on
+        );
+    }
+
+    #[test]
+    fn test_matrix_topology_includes_vswitch_control_couplings() {
+        let netlist = Netlist::parse(
+            r#"
+* Matrix topology should include VSwitch control Jacobian columns
+VDD 1 0 5
+VCPLUS 2 0 1.0
+VCMINUS 4 0 0.2
+RLOAD 3 0 1k
+S1 1 3 2 4 SWMOD
+.MODEL SWMOD SW (RON=1 ROFF=1e9 VT=0.8 VH=0.1 SMOOTH=0.05)
+.end
+"#,
+        )
+        .unwrap();
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+        let matrix = engine.build_matrix(&circuit).unwrap();
+
+        let sw = &circuit.vswitches[0];
+        let p = sw.node_pos - 1;
+        let n = sw.node_neg - 1;
+        let cp = sw.ctrl_pos - 1;
+        let cn = sw.ctrl_neg - 1;
+
+        assert!(
+            matrix.get_index(p, cp).is_some(),
+            "missing (p,cp) VSwitch control coupling entry"
+        );
+        assert!(
+            matrix.get_index(p, cn).is_some(),
+            "missing (p,cn) VSwitch control coupling entry"
+        );
+        assert!(
+            matrix.get_index(n, cp).is_some(),
+            "missing (n,cp) VSwitch control coupling entry"
+        );
+        assert!(
+            matrix.get_index(n, cn).is_some(),
+            "missing (n,cn) VSwitch control coupling entry"
+        );
+    }
+
+    #[test]
+    fn test_matrix_topology_includes_iswitch_control_branch_couplings() {
+        let netlist = Netlist::parse(
+            r#"
+* Matrix topology should include ISwitch control-branch Jacobian column
+VCTRL 4 0 0
+VDD 1 0 5
+RBIAS 1 4 1k
+RLOAD 2 0 1k
+W1 1 2 VCTRL CSWMOD
+.MODEL CSWMOD CSW (RON=1 ROFF=1e9 IT=1m IH=0 SMOOTH=1e-4)
+.end
+"#,
+        )
+        .unwrap();
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+        let matrix = engine.build_matrix(&circuit).unwrap();
+
+        let sw = &circuit.iswitches[0];
+        let cb = sw
+            .ctrl_branch
+            .expect("ISwitch control branch should be resolved");
+
+        assert!(
+            matrix.get_index(sw.node_pos - 1, cb - 1).is_some(),
+            "missing ISwitch (p,ctrl_branch) coupling entry"
+        );
+        assert!(
+            matrix.get_index(sw.node_neg - 1, cb - 1).is_some(),
+            "missing ISwitch (n,ctrl_branch) coupling entry"
+        );
+    }
+
+    #[test]
+    fn test_vswitch_initial_state_persists_in_transient_inside_hysteresis_window() {
+        let off_netlist = Netlist::parse(
+            r#"
+* VSwitch OFF initial state should persist when control stays inside hysteresis
+VDD 1 0 5
+VCTRL 2 0 1.0
+S1 1 3 2 0 SWMOD OFF
+RLOAD 3 0 1k
+.MODEL SWMOD SW (RON=1 ROFF=1e9 VT=1.0 VH=0.2 SMOOTH=0.05)
+.end
+"#,
+        )
+        .unwrap();
+        let on_netlist = Netlist::parse(
+            r#"
+* VSwitch ON initial state should persist when control stays inside hysteresis
+VDD 1 0 5
+VCTRL 2 0 1.0
+S1 1 3 2 0 SWMOD ON
+RLOAD 3 0 1k
+.MODEL SWMOD SW (RON=1 ROFF=1e9 VT=1.0 VH=0.2 SMOOTH=0.05)
+.end
+"#,
+        )
+        .unwrap();
+
+        let engine = Engine::default();
+        let off = engine
+            .run_tran(&off_netlist, 2e-6, 20e-9)
+            .expect("OFF-initialized transient should converge");
+        let on = engine
+            .run_tran(&on_netlist, 2e-6, 20e-9)
+            .expect("ON-initialized transient should converge");
+
+        let idx_off = off
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("3"))
+            .expect("node 3 should exist in OFF result");
+        let idx_on = on
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("3"))
+            .expect("node 3 should exist in ON result");
+
+        let off_peak = off.voltages[idx_off]
+            .iter()
+            .copied()
+            .fold(Value::NEG_INFINITY, Value::max);
+        let on_floor = on.voltages[idx_on]
+            .iter()
+            .copied()
+            .fold(Value::INFINITY, Value::min);
+
+        assert!(
+            off_peak < 0.1,
+            "OFF-initialized VSwitch should remain low in transient window, peak={}",
+            off_peak
+        );
+        assert!(
+            on_floor > 4.0,
+            "ON-initialized VSwitch should remain high in transient window, floor={}",
+            on_floor
+        );
+    }
+
+    #[test]
     fn test_transmission_line_unit() {
         use crate::device::TransmissionLine;
 
@@ -363,6 +2005,469 @@ C1 2 0 1u
 
         let delayed = tl.delayed_forward();
         assert!(delayed > 1.5, "Delayed wave should arrive, got {}", delayed);
+    }
+
+    #[test]
+    fn test_build_oline_uses_model_card_for_z0_and_td() {
+        let netlist_str = r#"
+* O-line with model-derived parameters
+O1 1 0 2 0 LLINE
+.MODEL LLINE LTRA R=12.45 G=0 L=8.972e-9 C=0.468e-12 LEN=16
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+
+        assert_eq!(circuit.tlines.len(), 1);
+        let tl = &circuit.tlines[0];
+
+        let expected_z0 = (8.972e-9_f64 / 0.468e-12_f64).sqrt();
+        let expected_td = 16.0 * (8.972e-9_f64 * 0.468e-12_f64).sqrt();
+        assert!(
+            ((tl.z0 - expected_z0) / expected_z0).abs() < 1e-6,
+            "expected Z0≈{}, got {}",
+            expected_z0,
+            tl.z0
+        );
+        assert!(
+            ((tl.td - expected_td) / expected_td).abs() < 1e-6,
+            "expected TD≈{}, got {}",
+            expected_td,
+            tl.td
+        );
+    }
+
+    #[test]
+    fn test_build_yline_inline_values_override_model_card() {
+        let netlist_str = r#"
+* Y-line with explicit override values
+Y1 1 0 2 0 YMOD Z0=75 TD=2n
+.MODEL YMOD TXL R=12.45 G=0 L=8.972e-9 C=0.468e-12 LENGTH=16
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+
+        assert_eq!(circuit.tlines.len(), 1);
+        let tl = &circuit.tlines[0];
+        assert!(
+            (tl.z0 - 75.0).abs() < 1e-12,
+            "expected Z0=75, got {}",
+            tl.z0
+        );
+        assert!(
+            (tl.td - 2e-9).abs() < 1e-18,
+            "expected TD=2ns, got {}",
+            tl.td
+        );
+    }
+
+    #[test]
+    fn test_build_tline_unknown_model_without_z0_errors() {
+        let netlist_str = r#"
+* Unknown transmission-line model
+O1 1 0 2 0 MISSING_MODEL
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+
+        let err = engine
+            .build_circuit(&netlist)
+            .expect_err("unknown O-line model should fail build");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("unknown model"),
+            "expected unknown model error, got {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_build_coupled_p_line_reports_not_supported() {
+        let netlist_str = r#"
+* Coupled/multiconductor transmission line
+P1 1 0 2 0 3 0 PMOD
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+
+        let err = engine
+            .build_circuit(&netlist)
+            .expect_err("P-line should fail clearly until multiconductor runtime is implemented");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("not yet supported"),
+            "expected explicit unsupported P-line error, got {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_build_tline_model_sets_attenuation_from_rlgc() {
+        let netlist_str = r#"
+* O-line with model-derived attenuation
+O1 1 0 2 0 LLOSS
+.MODEL LLOSS LTRA R=500 G=0 L=2.5e-7 C=1e-10 LEN=0.2
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+
+        assert_eq!(circuit.tlines.len(), 1);
+        let tl = &circuit.tlines[0];
+        let expected = (-1.0_f64).exp();
+        assert!(
+            (tl.attenuation() - expected).abs() < 1e-9,
+            "expected attenuation={}, got {}",
+            expected,
+            tl.attenuation()
+        );
+    }
+
+    #[test]
+    fn test_transient_tline_enforces_delay_before_load_rises() {
+        let netlist_str = r#"
+* Matched source/load around a 1ns transmission line
+V1 in 0 PULSE(0 1 0 1p 1p 4n 8n)
+Rsrc in 1 50
+T1 1 0 2 0 Z0=50 TD=1n
+Rload 2 0 50
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let result = engine
+            .run_tran(&netlist, 6e-9, 25e-12)
+            .expect("transient with tline should converge");
+
+        let node2 = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("2"))
+            .expect("node 2 should exist");
+
+        let mut v_before = Value::NEG_INFINITY;
+        let mut v_after = Value::NEG_INFINITY;
+        for (i, &time) in result.time.iter().enumerate() {
+            let v = result.voltages[node2][i];
+            if time <= 0.8e-9 {
+                v_before = v_before.max(v);
+            }
+            if (1.2e-9..=2.5e-9).contains(&time) {
+                v_after = v_after.max(v);
+            }
+        }
+
+        assert!(
+            v_before < 0.05,
+            "load rose too early before delay: v_before={}",
+            v_before
+        );
+        assert!(
+            v_after > 0.2,
+            "load did not rise after expected delay: v_after={}",
+            v_after
+        );
+    }
+
+    #[test]
+    fn test_transient_compressed_tline_enforces_delay_before_load_rises() {
+        let netlist_str = r#"
+* Matched source/load around a 1ns transmission line (compressed path)
+V1 in 0 PULSE(0 1 0 1p 1p 4n 8n)
+Rsrc in 1 50
+T1 1 0 2 0 Z0=50 TD=1n
+Rload 2 0 50
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let result = engine
+            .run_tran_compressed(
+                &netlist,
+                6e-9,
+                25e-12,
+                crate::engine::CompressionConfig::none(),
+            )
+            .expect("compressed transient with tline should converge");
+
+        // Node ordering follows node allocation order:
+        // in -> 1, "1" -> 2, "2" -> 3, so load node index is 2 (0-based).
+        let load_idx = 2;
+        assert!(
+            result.num_nodes > load_idx,
+            "expected load node index {} in compressed result with {} nodes",
+            load_idx,
+            result.num_nodes
+        );
+
+        let mut v_before = Value::NEG_INFINITY;
+        let mut v_after = Value::NEG_INFINITY;
+        for (i, &time) in result.time.iter().enumerate() {
+            let v = result.voltages[load_idx][i];
+            if time <= 0.8e-9 {
+                v_before = v_before.max(v);
+            }
+            if (1.2e-9..=2.5e-9).contains(&time) {
+                v_after = v_after.max(v);
+            }
+        }
+
+        assert!(
+            v_before < 0.05,
+            "compressed load rose too early before delay: v_before={}",
+            v_before
+        );
+        assert!(
+            v_after > 0.2,
+            "compressed load did not rise after expected delay: v_after={}",
+            v_after
+        );
+    }
+
+    #[test]
+    fn test_transient_tline_model_attenuation_reduces_load_peak() {
+        let lossless_netlist = Netlist::parse(
+            r#"
+* Baseline lossless line
+V1 in 0 PULSE(0 1 0 1p 1p 4n 8n)
+Rsrc in 1 50
+T1 1 0 2 0 Z0=50 TD=1n
+Rload 2 0 50
+.end
+"#,
+        )
+        .unwrap();
+
+        let lossy_netlist = Netlist::parse(
+            r#"
+* Lossy model line
+V1 in 0 PULSE(0 1 0 1p 1p 4n 8n)
+Rsrc in 1 50
+Y1 1 0 2 0 LLOSS
+Rload 2 0 50
+.MODEL LLOSS LTRA R=500 G=0 L=2.5e-7 C=1e-10 LEN=0.2
+.end
+"#,
+        )
+        .unwrap();
+
+        let engine = Engine::default();
+        let baseline = engine
+            .run_tran(&lossless_netlist, 6e-9, 25e-12)
+            .expect("baseline transient should converge");
+        let lossy = engine
+            .run_tran(&lossy_netlist, 6e-9, 25e-12)
+            .expect("lossy transient should converge");
+
+        let baseline_node2 = baseline
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("2"))
+            .expect("baseline node 2 should exist");
+        let lossy_node2 = lossy
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("2"))
+            .expect("lossy node 2 should exist");
+
+        let baseline_peak = baseline
+            .time
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| (1.2e-9..=2.5e-9).contains(*t))
+            .map(|(i, _)| baseline.voltages[baseline_node2][i])
+            .fold(Value::NEG_INFINITY, Value::max);
+        let lossy_peak = lossy
+            .time
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| (1.2e-9..=2.5e-9).contains(*t))
+            .map(|(i, _)| lossy.voltages[lossy_node2][i])
+            .fold(Value::NEG_INFINITY, Value::max);
+
+        assert!(
+            baseline_peak > 0.2,
+            "baseline peak should be significant, got {}",
+            baseline_peak
+        );
+        assert!(
+            lossy_peak < baseline_peak * 0.8,
+            "lossy peak should be lower than baseline: lossy={}, baseline={}",
+            lossy_peak,
+            baseline_peak
+        );
+
+        let ratio = lossy_peak / baseline_peak;
+        assert!(
+            (0.2..0.6).contains(&ratio),
+            "unexpected attenuation ratio: {}",
+            ratio
+        );
+    }
+
+    #[test]
+    fn test_dc_with_tline_stamps_matrix_topology_consistently() {
+        let netlist_str = r#"
+* DC solve with transmission line companion ports
+V1 in 0 1
+Rsrc in 1 50
+T1 1 0 2 0 Z0=50 TD=1n
+Rload 2 0 50
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let result = engine
+            .run_dc_op(&netlist)
+            .expect("DC with tline should solve without topology/stamping mismatch");
+
+        let v1 = result.voltage(1);
+        assert!(
+            v1.is_finite(),
+            "node 1 voltage should be finite after DC solve, got {}",
+            v1
+        );
+    }
+
+    #[test]
+    fn test_ac_tline_matched_line_has_expected_magnitude_and_delay() {
+        use std::f64::consts::PI;
+
+        let netlist_str = r#"
+* AC matched line transfer
+V1 in 0 AC 1
+Rsrc in 1 50
+T1 1 0 2 0 Z0=50 TD=1n
+Rload 2 0 50
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+
+        let f1 = 100e6;
+        let f2 = 300e6;
+        let results = engine
+            .run_ac(&netlist, &[f1, f2])
+            .expect("AC with transmission line should converge");
+        assert_eq!(results.len(), 2);
+
+        // Node order: in, 1, 2 => load is node index 3 in SPICE numbering.
+        let vout_mag_f1 = results[0].voltage_magnitude(3);
+        let vout_mag_f2 = results[1].voltage_magnitude(3);
+        assert!(
+            (vout_mag_f1 - 0.5).abs() < 0.06,
+            "expected ~0.5 magnitude at f1, got {}",
+            vout_mag_f1
+        );
+        assert!(
+            (vout_mag_f2 - 0.5).abs() < 0.06,
+            "expected ~0.5 magnitude at f2, got {}",
+            vout_mag_f2
+        );
+
+        let phase_f1 = results[0].voltage_phase(3);
+        let phase_f2 = results[1].voltage_phase(3);
+        let phase_diff = phase_f2 - phase_f1;
+        let expected_diff = -2.0 * PI * (f2 - f1) * 1e-9;
+        let wrapped = (phase_diff - expected_diff + PI).rem_euclid(2.0 * PI) - PI;
+        assert!(
+            wrapped.abs() < 0.15,
+            "unexpected tline phase delay slope: measured diff={}, expected diff={}, wrapped err={}",
+            phase_diff,
+            expected_diff,
+            wrapped
+        );
+    }
+
+    #[test]
+    fn test_ac_tline_model_attenuation_reduces_transfer_magnitude() {
+        let baseline = Netlist::parse(
+            r#"
+* AC baseline lossless line
+V1 in 0 AC 1
+Rsrc in 1 50
+T1 1 0 2 0 Z0=50 TD=1n
+Rload 2 0 50
+.end
+"#,
+        )
+        .unwrap();
+        let lossy = Netlist::parse(
+            r#"
+* AC lossy model line
+V1 in 0 AC 1
+Rsrc in 1 50
+Y1 1 0 2 0 LLOSS
+Rload 2 0 50
+.MODEL LLOSS LTRA R=500 G=0 L=2.5e-7 C=1e-10 LEN=0.2
+.end
+"#,
+        )
+        .unwrap();
+
+        let engine = Engine::default();
+        let freq = 100e6;
+        let baseline_res = engine
+            .run_ac(&baseline, &[freq])
+            .expect("baseline AC should converge");
+        let lossy_res = engine
+            .run_ac(&lossy, &[freq])
+            .expect("lossy AC should converge");
+
+        let baseline_mag = baseline_res[0].voltage_magnitude(3);
+        let lossy_mag = lossy_res[0].voltage_magnitude(3);
+        assert!(
+            baseline_mag > 0.3,
+            "baseline magnitude should be substantial, got {}",
+            baseline_mag
+        );
+        assert!(
+            lossy_mag < baseline_mag * 0.8,
+            "lossy transfer should be smaller: lossy={}, baseline={}",
+            lossy_mag,
+            baseline_mag
+        );
+
+        let ratio = lossy_mag / baseline_mag;
+        assert!(
+            (0.2..0.6).contains(&ratio),
+            "unexpected attenuation ratio in AC: {}",
+            ratio
+        );
+    }
+
+    #[test]
+    fn test_ac_tline_handles_zero_frequency_without_nan() {
+        let netlist_str = r#"
+* AC tline zero-frequency stability
+V1 in 0 AC 1
+Rsrc in 1 50
+T1 1 0 2 0 Z0=50 TD=1n
+Rload 2 0 50
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let results = engine
+            .run_ac(&netlist, &[0.0, 1e6, 10e6])
+            .expect("AC sweep including DC should converge");
+
+        for (idx, point) in results.iter().enumerate() {
+            let v = point.voltage_magnitude(3);
+            assert!(
+                v.is_finite(),
+                "AC magnitude should stay finite at point {} (f={}): {}",
+                idx,
+                point.frequency,
+                v
+            );
+        }
     }
 
     #[test]
@@ -630,6 +2735,36 @@ R1 1 0 1k
     }
 
     #[test]
+    fn test_engine_fast_convergence_reports_failure_when_aids_are_disabled() {
+        use crate::Netlist;
+        use crate::engine::{ConvergenceConfig, Engine, SimulationConfig, SimulationError};
+
+        let netlist_str = r#"
+* Nonlinear diode clamp with low iteration budget
+V1 in 0 5
+R1 in out 1k
+D1 out 0 DMOD
+.MODEL DMOD D (IS=1e-14 N=1 RS=0)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+
+        let mut config = SimulationConfig::default();
+        config.max_iterations = 0; // Force very small direct Newton budget
+        config.convergence_config = ConvergenceConfig::fast(); // No source/GMIN fallback
+
+        let engine = Engine::new(config);
+        let err = engine
+            .run_dc_op(&netlist)
+            .expect_err("fast config should fail on this nonlinear case with no fallback aids");
+        assert!(
+            matches!(err, SimulationError::ConvergenceFailed(_)),
+            "expected convergence-failed error with aids disabled, got {}",
+            err
+        );
+    }
+
+    #[test]
     fn test_engine_with_robust_convergence() {
         use crate::Netlist;
         use crate::engine::{ConvergenceConfig, Engine, SimulationConfig};
@@ -651,6 +2786,60 @@ R1 2 0 1k
 
         // Should converge with robust settings
         assert!(result.voltage(2) > 0.0);
+    }
+
+    #[test]
+    fn test_engine_with_line_search_damping_strategy() {
+        use crate::Netlist;
+        use crate::engine::{ConvergenceConfig, DampingStrategy, Engine, SimulationConfig};
+
+        let netlist_str = r#"
+* Diode clamp circuit
+V1 in 0 5
+R1 in out 1k
+D1 out 0 DMOD
+.MODEL DMOD D (IS=1e-14 N=1 RS=0)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+
+        let mut config = SimulationConfig::default();
+        config.convergence_config =
+            ConvergenceConfig::default().with_damping(DampingStrategy::LineSearch);
+
+        let engine = Engine::new(config);
+        let result = engine.run_dc_op(&netlist).unwrap();
+
+        assert!(result.voltage(2).is_finite());
+        assert!(result.voltage(2) > 0.0);
+        assert!(result.voltage(2) < 5.0);
+    }
+
+    #[test]
+    fn test_engine_with_bank_rose_damping_strategy() {
+        use crate::Netlist;
+        use crate::engine::{ConvergenceConfig, DampingStrategy, Engine, SimulationConfig};
+
+        let netlist_str = r#"
+* Diode clamp circuit
+V1 in 0 5
+R1 in out 1k
+D1 out 0 DMOD
+.MODEL DMOD D (IS=1e-14 N=1 RS=0)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+
+        let mut config = SimulationConfig::default();
+        config.convergence_config =
+            ConvergenceConfig::default().with_damping(DampingStrategy::BankRose);
+
+        let engine = Engine::new(config);
+        let result = engine.run_dc_op(&netlist).unwrap();
+
+        assert!(result.voltage(2).is_finite());
+        assert!(result.voltage(2) > 0.0);
+        assert!(result.voltage(2) < 5.0);
     }
 
     #[test]

@@ -472,3 +472,70 @@ R2 out 0 {Rval}
         );
     }
 }
+
+/// Test BJT amplifier transient - verifies simulation doesn't hang
+/// and produces reasonable operating point values (not -1000V clamped values)
+#[test]
+fn test_bjt_transient() {
+    let netlist_str = r#"
+* BJT Common-Emitter Amplifier Transient
+VCC vcc 0 DC 12
+VIN in 0 SIN(0.6 0.1 1k)
+Q1 collector base emitter 2N2222
+.MODEL 2N2222 NPN(IS=1e-14 BF=100 VAF=100)
+RB vcc base 100k
+Rin in base 10k
+RC vcc collector 1k
+RE emitter 0 100
+.TRAN 1u 2m
+.END
+"#;
+
+    let netlist = parse_netlist(netlist_str);
+    let engine = Engine::new(SimulationConfig::default());
+
+    // Build circuit should succeed
+    let circuit = engine
+        .build_circuit(&netlist)
+        .expect("Failed to build BJT circuit");
+    assert!(
+        circuit.has_nonlinear_devices(),
+        "BJT circuit should be nonlinear"
+    );
+
+    // Run DC operating point first and check it produces reasonable values
+    let dc_result = engine.run_dc_op(&netlist);
+    assert!(dc_result.is_ok(), "BJT DC OP should complete");
+
+    let dc = dc_result.unwrap();
+    // Verify no voltage hit the -1000V / +1000V clamp limit (indicates convergence failure)
+    for (i, &v) in dc.node_voltages.iter().enumerate() {
+        assert!(
+            v.abs() < 900.0,
+            "Node {} voltage {} is near clamp limit - likely convergence failure",
+            i,
+            v
+        );
+    }
+
+    // Run transient - should complete within reasonable time
+    let start = std::time::Instant::now();
+    let result = engine.run_tran(&netlist, 2e-3, 1e-6);
+    let elapsed = start.elapsed();
+
+    // Should complete reasonably fast (not hit 5-minute timeout)
+    assert!(
+        elapsed.as_secs() < 60,
+        "Transient took too long: {:?} - likely convergence issues",
+        elapsed
+    );
+    assert!(result.is_ok(), "BJT transient should complete");
+
+    let tran = result.unwrap();
+    // Verify we have multiple timepoints
+    assert!(
+        tran.time.len() > 10,
+        "Expected multiple time points, got {}",
+        tran.time.len()
+    );
+}
