@@ -115,6 +115,17 @@ impl EngineBridge {
             .map_err(|e| SimulationError::ParseError(e.to_string()))
     }
 
+    /// Build an engine instance with netlist `.OPTIONS` layered on top of
+    /// bridge base configuration.
+    fn engine_for_netlist(&self, netlist: &rspice_core::Netlist) -> rspice_core::Engine {
+        let resolved = rspice_core::resolve_simulation_config(
+            self.engine.config(),
+            Some(&netlist.options),
+            &rspice_core::SimulationConfigOverrides::default(),
+        );
+        rspice_core::Engine::new(resolved)
+    }
+
     //-------------------------------------------------------------------------
     // DC Operating Point
     //-------------------------------------------------------------------------
@@ -124,8 +135,8 @@ impl EngineBridge {
         &self,
         netlist: &rspice_core::Netlist,
     ) -> Result<SimulationResult, SimulationError> {
-        let core_result = self
-            .engine
+        let engine = self.engine_for_netlist(netlist);
+        let core_result = engine
             .run_dc_op(netlist)
             .map_err(|e| self.translate_error(e))?;
 
@@ -169,8 +180,8 @@ impl EngineBridge {
         netlist: &rspice_core::Netlist,
         config: &super::config::DcSweepConfig,
     ) -> Result<SimulationResult, SimulationError> {
-        let sweep_results = self
-            .engine
+        let engine = self.engine_for_netlist(netlist);
+        let sweep_results = engine
             .run_dc_sweep(
                 netlist,
                 &config.source,
@@ -229,9 +240,9 @@ impl EngineBridge {
         netlist: &rspice_core::Netlist,
         config: &super::config::TransientAnalysisConfig,
     ) -> Result<SimulationResult, SimulationError> {
+        let engine = self.engine_for_netlist(netlist);
         let max_step = Self::resolve_transient_max_step(config);
-        let tran_result = self
-            .engine
+        let tran_result = engine
             .run_tran(netlist, config.stop_time, max_step)
             .map_err(|e| self.translate_error(e))?;
 
@@ -267,9 +278,9 @@ impl EngineBridge {
         config: &super::config::TransientAnalysisConfig,
         abort: &dyn rspice_core::abort_signal::AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
+        let engine = self.engine_for_netlist(netlist);
         let max_step = Self::resolve_transient_max_step(config);
-        let tran_result = self
-            .engine
+        let tran_result = engine
             .run_tran_with_abort(netlist, config.stop_time, max_step, abort)
             .map_err(|e| self.translate_error(e))?;
 
@@ -309,6 +320,7 @@ impl EngineBridge {
         netlist: &rspice_core::Netlist,
         config: &super::config::AcAnalysisConfig,
     ) -> Result<SimulationResult, SimulationError> {
+        let engine = self.engine_for_netlist(netlist);
         // Generate frequency points based on sweep configuration
         let frequencies = config.generate_frequencies();
 
@@ -319,8 +331,7 @@ impl EngineBridge {
         }
 
         // Run AC analysis via engine
-        let ac_results = self
-            .engine
+        let ac_results = engine
             .run_ac(netlist, &frequencies)
             .map_err(|e| self.translate_error(e))?;
 
@@ -406,6 +417,7 @@ impl EngineBridge {
         netlist: &rspice_core::Netlist,
         config: &super::config::NoiseAnalysisConfig,
     ) -> Result<SimulationResult, SimulationError> {
+        let engine = self.engine_for_netlist(netlist);
         // Generate frequency points based on sweep configuration
         let frequencies = config.generate_frequencies();
 
@@ -429,8 +441,7 @@ impl EngineBridge {
         let temperature = config.default_temperature();
 
         // Run noise analysis via engine
-        let noise_results = self
-            .engine
+        let noise_results = engine
             .run_noise(netlist, output_node, &frequencies, temperature)
             .map_err(|e| self.translate_error(e))?;
 
@@ -480,7 +491,7 @@ impl EngineBridge {
     /// - Numeric indices: "1", "2", etc.
     /// - Ground: "0", "gnd", "GND"
     /// - Named nodes: assumed sequential assignment by Circuit builder
-    fn resolve_node_index(&self, name: &str, _netlist: &rspice_core::Netlist) -> usize {
+    fn resolve_node_index(&self, name: &str, netlist: &rspice_core::Netlist) -> usize {
         // Handle ground
         let lower = name.to_lowercase();
         if lower == "0" || lower == "gnd" || lower == "ground" {
@@ -493,7 +504,8 @@ impl EngineBridge {
         }
 
         // Resolve symbolic node names via DC result node list.
-        if let Ok(dc) = self.engine.run_dc_op(_netlist) {
+        let engine = self.engine_for_netlist(netlist);
+        if let Ok(dc) = engine.run_dc_op(netlist) {
             let upper = name.to_ascii_uppercase();
             if let Some(idx) = dc
                 .node_names
@@ -520,8 +532,8 @@ impl EngineBridge {
         netlist: &rspice_core::Netlist,
         config: &super::config::PoleZeroConfig,
     ) -> Result<SimulationResult, SimulationError> {
-        let dc = self
-            .engine
+        let engine = self.engine_for_netlist(netlist);
+        let dc = engine
             .run_dc_op(netlist)
             .map_err(|e| self.translate_error(e))?;
         let node_names = &dc.node_names;
@@ -607,8 +619,7 @@ impl EngineBridge {
             super::config::PzAnalysisType::PoleZero => (true, true),
         };
 
-        let pz_result = self
-            .engine
+        let pz_result = engine
             .run_pz_ports(
                 netlist,
                 input_pos,
@@ -646,6 +657,7 @@ impl EngineBridge {
         netlist: &rspice_core::Netlist,
         config: &super::config::SensitivityConfig,
     ) -> Result<SimulationResult, SimulationError> {
+        let engine = self.engine_for_netlist(netlist);
         use std::collections::HashMap;
 
         // Parse output variable to get node index
@@ -659,8 +671,7 @@ impl EngineBridge {
         }
 
         // Get nominal DC operating point
-        let nominal_result = self
-            .engine
+        let nominal_result = engine
             .run_dc_op(netlist)
             .map_err(|e| self.translate_error(e))?;
 
@@ -832,6 +843,64 @@ mod tests {
         let config = rspice_core::SimulationConfig::default();
         let bridge = EngineBridge::with_config(config);
         let _ = bridge;
+    }
+
+    #[test]
+    fn test_engine_for_netlist_applies_netlist_options() {
+        let bridge = EngineBridge::new();
+        let netlist = bridge
+            .parse_netlist(
+                r#"
+* Netlist options mapping
+V1 1 0 1
+R1 1 0 1k
+.OPTIONS TEMP=85 ITL1=120 METHOD=GEAR RELTOL=2e-4 VNTOL=3e-6 IABSTOL=4e-12 GMIN=1e-11
+.END
+"#,
+            )
+            .expect("netlist should parse");
+
+        let engine = bridge.engine_for_netlist(&netlist);
+        let cfg = engine.config();
+
+        assert!((cfg.temperature - 358.15).abs() < 1e-12);
+        assert_eq!(cfg.max_iterations, 120);
+        assert_eq!(
+            cfg.integration_method,
+            rspice_core::analysis::IntegrationMethod::Gear2
+        );
+        assert!((cfg.tolerance - 2e-4).abs() < 1e-15);
+        assert!((cfg.convergence_config.voltage_reltol - 2e-4).abs() < 1e-15);
+        assert!((cfg.convergence_config.residual_reltol - 2e-4).abs() < 1e-15);
+        assert!((cfg.convergence_config.voltage_abstol - 3e-6).abs() < 1e-18);
+        assert!((cfg.convergence_config.current_abstol - 4e-12).abs() < 1e-24);
+        assert!((cfg.convergence_config.gmin_initial - 1e-11).abs() < 1e-24);
+    }
+
+    #[test]
+    fn test_engine_for_netlist_preserves_base_for_unspecified_options() {
+        let mut base = rspice_core::SimulationConfig::default();
+        base.tolerance = 8e-4;
+        base.max_iterations = 88;
+        let bridge = EngineBridge::with_config(base);
+        let netlist = bridge
+            .parse_netlist(
+                r#"
+* Netlist options partial override
+V1 1 0 1
+R1 1 0 1k
+.OPTIONS TEMP=125
+.END
+"#,
+            )
+            .expect("netlist should parse");
+
+        let engine = bridge.engine_for_netlist(&netlist);
+        let cfg = engine.config();
+
+        assert!((cfg.temperature - 398.15).abs() < 1e-12);
+        assert!((cfg.tolerance - 8e-4).abs() < 1e-15);
+        assert_eq!(cfg.max_iterations, 88);
     }
 
     // -------------------------------------------------------------------------
