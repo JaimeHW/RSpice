@@ -530,59 +530,84 @@ impl SimulationOptions {
         self.tnom + 273.15
     }
 
-    /// Convert to rspice_core SimulationConfig for engine use
-    pub fn to_simulation_config(&self) -> rspice_core::engine::SimulationConfig {
-        use rspice_core::engine::{
-            BypassConfig, ConvergenceConfig, DampingStrategy as CoreDamping,
-        };
+    fn core_damping_strategy(&self) -> rspice_core::engine::DampingStrategy {
+        match self.damping {
+            DampingStrategy::None => rspice_core::engine::DampingStrategy::None,
+            DampingStrategy::LineSearch => rspice_core::engine::DampingStrategy::LineSearch,
+            DampingStrategy::VoltageLimiting => {
+                rspice_core::engine::DampingStrategy::VoltageLimiting
+            }
+            DampingStrategy::BankRose => rspice_core::engine::DampingStrategy::BankRose,
+            DampingStrategy::Combined => rspice_core::engine::DampingStrategy::Combined,
+        }
+    }
 
-        // Map UI damping strategy to core damping strategy
-        let core_damping = match self.damping {
-            DampingStrategy::None => CoreDamping::None,
-            DampingStrategy::LineSearch => CoreDamping::LineSearch,
-            DampingStrategy::VoltageLimiting => CoreDamping::VoltageLimiting,
-            DampingStrategy::BankRose => CoreDamping::BankRose,
-            DampingStrategy::Combined => CoreDamping::Combined,
-        };
-
-        // Map UI integration method to core integration method
-        // Core has: BackwardEuler, Trapezoidal, Gear2, TrapGear
-        let core_method = match self.method {
+    fn core_integration_method(&self) -> rspice_core::analysis::IntegrationMethod {
+        match self.method {
             IntegrationMethod::Trap => rspice_core::analysis::IntegrationMethod::Trapezoidal,
             IntegrationMethod::Euler => rspice_core::analysis::IntegrationMethod::BackwardEuler,
             IntegrationMethod::Gear => rspice_core::analysis::IntegrationMethod::Gear2,
             IntegrationMethod::Gear2 => rspice_core::analysis::IntegrationMethod::Gear2,
             IntegrationMethod::TrapGear => rspice_core::analysis::IntegrationMethod::TrapGear,
             IntegrationMethod::Gear2Only => rspice_core::analysis::IntegrationMethod::Gear2,
+        }
+    }
+
+    fn simulation_config_overrides(&self) -> rspice_core::SimulationConfigOverrides {
+        rspice_core::SimulationConfigOverrides {
+            temperature_kelvin: Some(self.temp_kelvin()),
+            max_iterations: Some(self.itl1),
+            min_timestep: Some(self.min_timestep),
+            max_timestep: Some(self.max_timestep),
+            integration_method: Some(self.core_integration_method()),
+            convergence_preset: None,
+            reltol: Some(self.reltol),
+            abstol: Some(self.abstol),
+            voltage_abstol: Some(self.vntol),
+            current_abstol: Some(self.iabstol),
+            residual_reltol: Some(self.residual_reltol),
+            gmin_initial: Some(self.gmin),
+        }
+    }
+
+    /// Resolve to core simulation config using layered precedence:
+    /// core defaults < netlist `.OPTIONS` < UI options.
+    pub fn resolve_simulation_config(
+        &self,
+        netlist_options: Option<&rspice_core::netlist::SimulationOptions>,
+    ) -> rspice_core::engine::SimulationConfig {
+        use rspice_core::engine::{BypassConfig, SimulationConfig};
+
+        let overrides = self.simulation_config_overrides();
+        let mut sim_config = rspice_core::resolve_simulation_config(
+            &SimulationConfig::default(),
+            netlist_options,
+            &overrides,
+        );
+
+        sim_config.bypass_config = BypassConfig {
+            enabled: self.bypass_enabled,
+            reltol: self.bypass_reltol,
+            abstol: self.bypass_abstol,
         };
 
-        rspice_core::engine::SimulationConfig {
-            tolerance: self.reltol,
-            max_iterations: self.itl1,
-            min_timestep: self.min_timestep,
-            max_timestep: self.max_timestep,
-            temperature: self.temp_kelvin(),
-            integration_method: core_method,
-            bypass_config: BypassConfig {
-                enabled: self.bypass_enabled,
-                reltol: self.bypass_reltol,
-                abstol: self.bypass_abstol,
-            },
-            convergence_config: ConvergenceConfig {
-                gmin_stepping: self.gmin_stepping,
-                source_stepping: self.source_stepping,
-                pseudo_transient: self.pseudo_transient,
-                arc_length: self.arc_length,
-                damping_strategy: core_damping,
-                gmin_initial: self.gmin,
-                gmin_target: 1e-15,
-                voltage_reltol: self.reltol,
-                voltage_abstol: self.vntol,
-                current_abstol: self.iabstol,
-                residual_reltol: self.residual_reltol,
-                verbose: self.verbose,
-            },
-        }
+        sim_config.convergence_config.gmin_stepping = self.gmin_stepping;
+        sim_config.convergence_config.source_stepping = self.source_stepping;
+        sim_config.convergence_config.pseudo_transient = self.pseudo_transient;
+        sim_config.convergence_config.arc_length = self.arc_length;
+        sim_config.convergence_config.damping_strategy = self.core_damping_strategy();
+        sim_config.convergence_config.verbose = self.verbose;
+        sim_config.convergence_config.gmin_target = sim_config
+            .convergence_config
+            .gmin_target
+            .min(sim_config.convergence_config.gmin_initial);
+
+        sim_config
+    }
+
+    /// Convert to rspice_core SimulationConfig for engine use
+    pub fn to_simulation_config(&self) -> rspice_core::engine::SimulationConfig {
+        self.resolve_simulation_config(None)
     }
 
     /// Validate all options
@@ -1189,6 +1214,16 @@ mod tests {
         assert!((sim.convergence_config.voltage_abstol - 3e-6).abs() < 1e-15);
         assert!((sim.convergence_config.current_abstol - 4e-12).abs() < 1e-24);
         assert!((sim.convergence_config.gmin_initial - 5e-10).abs() < 1e-21);
+    }
+
+    #[test]
+    fn test_to_simulation_config_clamps_gmin_target_to_initial() {
+        let mut opts = SimulationOptions::default();
+        opts.gmin = 1e-16;
+
+        let sim = opts.to_simulation_config();
+        assert!((sim.convergence_config.gmin_initial - 1e-16).abs() < 1e-28);
+        assert!((sim.convergence_config.gmin_target - 1e-16).abs() < 1e-28);
     }
 
     //=========================================================================
