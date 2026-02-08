@@ -721,6 +721,7 @@ impl EngineBridge {
 
         let mut sensitivities: HashMap<String, f64> = HashMap::new();
         let mut normalized: HashMap<String, f64> = HashMap::new();
+        let mut perturbed_netlist = netlist.clone();
 
         // For each parameter, compute sensitivity using central differences
         for (param_name, param_value) in parameters {
@@ -729,12 +730,13 @@ impl EngineBridge {
             }
 
             let sensitivity = if let Some(freq) = ac_frequency {
-                let mut perturbed = netlist.clone();
-                match finite_difference_derivative(param_value, |candidate| {
-                    perturbed.params.set(&param_name, candidate);
-                    run_ac_output_at_frequency(&engine, &perturbed, &output_spec, freq)
+                let result = finite_difference_derivative(param_value, |candidate| {
+                    perturbed_netlist.params.set(&param_name, candidate);
+                    run_ac_output_at_frequency(&engine, &perturbed_netlist, &output_spec, freq)
                         .map(|value| value.norm())
-                }) {
+                });
+                perturbed_netlist.params.set(&param_name, param_value);
+                match result {
                     Ok(raw) => raw,
                     Err(_) => continue,
                 }
@@ -748,12 +750,15 @@ impl EngineBridge {
                         }
                     }
                     OutputSpec::BranchCurrent { .. } => {
-                        let mut perturbed = netlist.clone();
-                        match finite_difference_derivative(param_value, |candidate| {
-                            perturbed.params.set(&param_name, candidate);
-                            let dc_result = engine.run_dc_op(&perturbed).map_err(|e| e.to_string())?;
+                        let result = finite_difference_derivative(param_value, |candidate| {
+                            perturbed_netlist.params.set(&param_name, candidate);
+                            let dc_result = engine
+                                .run_dc_op(&perturbed_netlist)
+                                .map_err(|e| e.to_string())?;
                             dc_output_value(&dc_result, &output_spec)
-                        }) {
+                        });
+                        perturbed_netlist.params.set(&param_name, param_value);
+                        match result {
                             Ok(raw) => raw,
                             Err(_) => continue,
                         }
@@ -1329,6 +1334,56 @@ R1 in 0 {RVAL}
                     .expect("expected RVAL sensitivity key");
                 assert!(sensitivities[key].is_finite());
                 assert!(normalized[key].is_finite());
+            }
+            _ => panic!("Expected Sensitivity result"),
+        }
+    }
+
+    #[test]
+    fn test_run_sensitivity_current_output_handles_multiple_parameters() {
+        let bridge = EngineBridge::new();
+        let netlist = r#"
+* Sensitivity branch current output with multiple parameters
+.param RA=1k
+.param RB=2k
+V1 in 0 1
+R1 in mid {RA}
+R2 mid 0 {RB}
+.end
+"#;
+
+        let cfg = AnalysisConfig::Sensitivity(super::super::config::SensitivityConfig {
+            output_var: "I(V1)".to_string(),
+            ac_mode: false,
+            frequency: None,
+        });
+
+        let result = bridge
+            .run(&cfg, netlist)
+            .expect("multi-parameter current-output sensitivity run should succeed");
+        match result {
+            SimulationResult::Sensitivity {
+                sensitivities,
+                normalized,
+            } => {
+                let ra = sensitivities
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case("RA"))
+                    .expect("expected RA sensitivity");
+                let rb = sensitivities
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case("RB"))
+                    .expect("expected RB sensitivity");
+                let ra_norm = normalized
+                    .get(ra.0)
+                    .expect("expected normalized RA sensitivity");
+                let rb_norm = normalized
+                    .get(rb.0)
+                    .expect("expected normalized RB sensitivity");
+
+                assert!(ra.1.is_finite() && rb.1.is_finite());
+                assert!(ra_norm.is_finite() && rb_norm.is_finite());
+                assert!((ra.1 - rb.1).abs() < 1e-12);
             }
             _ => panic!("Expected Sensitivity result"),
         }
