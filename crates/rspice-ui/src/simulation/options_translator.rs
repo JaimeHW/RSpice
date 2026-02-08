@@ -175,11 +175,15 @@ impl EngineOptions {
             self.reltol, self.abstol, self.vntol
         ));
         lines.push(format!(
-            ".OPTIONS GMIN={} ITL1={} ITL2={}",
-            self.gmin, self.itl1, self.itl2
+            ".OPTIONS GMIN={} ITL1={} ITL2={} ITL4={}",
+            self.gmin, self.itl1, self.itl2, self.itl4
         ));
-        lines.push(format!(".OPTIONS METHOD={}", self.method.to_spice()));
-        lines.push(format!(".TEMP {}", self.temp));
+        lines.push(format!(
+            ".OPTIONS METHOD={} TEMP={} TNOM={}",
+            self.method.to_spice(),
+            self.temp,
+            self.tnom
+        ));
 
         lines.join("\n")
     }
@@ -351,7 +355,19 @@ mod tests {
         let opts = EngineOptions::spectre_defaults();
         let s = opts.to_spice_options();
         assert!(s.contains(".OPTIONS"));
-        assert!(s.contains(".TEMP"));
+        assert!(s.contains("TEMP="));
+        assert!(s.contains("TNOM="));
+        assert!(s.contains("ITL4="));
+        assert!(!s.contains("\n.TEMP "));
+    }
+
+    #[test]
+    fn test_to_spice_options_temperature_is_read_as_netlist_option() {
+        let opts = EngineOptions::spectre_defaults().with_temp(85.0);
+        let netlist = format!("* opts\nR1 in 0 1k\n{}\n.end\n", opts.to_spice_options());
+        let parsed = rspice_core::netlist::parse_netlist(&netlist)
+            .expect("options-augmented netlist should parse");
+        assert_eq!(parsed.options.temp, Some(85.0));
     }
 
     #[test]
