@@ -1936,6 +1936,18 @@ pub fn run_pnoise_analysis_with_config(
 ) -> Result<PnoiseData, String> {
     config.validate()?;
 
+    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
+        .map_err(|e| format!("Parse error: {}", e))?;
+    if config.noise_ref == PnoiseReference::Input {
+        let source_name = config.input_source.trim();
+        if !netlist_has_independent_source_named(&netlist, source_name) {
+            return Err(format!(
+                "PNOISE input source '{}' is not an independent voltage/current source in the netlist",
+                source_name
+            ));
+        }
+    }
+
     // PNOISE requires a periodic operating point. We run PSS first and reuse
     // its carrier for phase-noise normalization.
     let pss_data = run_pss_analysis(
@@ -1945,8 +1957,6 @@ pub fn run_pnoise_analysis_with_config(
         config.pss_tolerance,
     )?;
 
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
     let mut sim_config = build_engine_config(&netlist, None);
     sim_config.tolerance = config.pss_tolerance;
     let noise_temperature = sim_config.temperature;
@@ -3729,6 +3739,15 @@ fn infer_primary_source_name(netlist: &rspice_core::Netlist) -> Option<String> {
             }
             _ => None,
         })
+}
+
+fn netlist_has_independent_source_named(netlist: &rspice_core::Netlist, source_name: &str) -> bool {
+    netlist.elements.iter().any(|element| {
+        (matches!(
+            &element.kind,
+            ElementKind::VoltageSource(_) | ElementKind::CurrentSource(_)
+        )) && element.name.eq_ignore_ascii_case(source_name)
+    })
 }
 
 fn infer_primary_output_node(node_names: &[String]) -> Option<String> {
@@ -5796,6 +5815,21 @@ mod tests {
     }
 
     #[test]
+    fn test_netlist_has_independent_source_named_matches_case_insensitive() {
+        let netlist = rspice_core::netlist::parse_netlist(
+            "* source lookup\nV1 in 0 1\nI_BIAS out 0 1m\nE1 x 0 in out 10\n.end\n",
+        )
+        .expect("netlist should parse");
+        assert!(netlist_has_independent_source_named(&netlist, "v1"));
+        assert!(netlist_has_independent_source_named(&netlist, "I_BIAS"));
+        assert!(!netlist_has_independent_source_named(&netlist, "E1"));
+        assert!(!netlist_has_independent_source_named(
+            &netlist,
+            "NOT_PRESENT"
+        ));
+    }
+
+    #[test]
     fn test_run_pnoise_analysis_with_config_executes_output_referred() {
         let netlist = "* pnoise\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
         let cfg = PnoiseRunConfig {
@@ -5971,7 +6005,7 @@ mod tests {
         let err = run_pnoise_analysis_with_config(netlist, &cfg)
             .expect_err("input-referred PNOISE should reject unknown explicit input source");
         assert!(err.contains("V_NOT_PRESENT"));
-        assert!(err.contains("input source"));
+        assert!(err.contains("independent"));
     }
 
     #[test]
