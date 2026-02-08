@@ -9,8 +9,9 @@ use rspice_core::engine::{Engine, SimulationConfig, TransientResult};
 use rspice_core::netlist::AnalysisCommand;
 use rspice_core::{resolve_simulation_config, SimulationConfigOverrides, Value};
 use crate::output_spec::{
-    dc_output_value, parse_output_spec, resolve_node_or_ground_index, run_ac_output_at_frequency,
-    run_dc_output_sensitivity, OutputSpec, OutputVoltageSpec,
+    collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
+    normalized_sensitivity, parse_output_spec, resolve_node_or_ground_index,
+    run_ac_output_at_frequency, run_dc_output_sensitivity, OutputSpec, OutputVoltageSpec,
 };
 
 // =============================================================================
@@ -745,34 +746,29 @@ pub fn run_sensitivity_analysis(
         }
 
         let raw = if let Some(freq) = ac_frequency {
-            run_ac_output_sensitivity_finite_difference(
-                &engine,
-                &netlist,
-                &output_spec,
-                &name,
-                value,
-                freq,
-            )
+            let mut perturbed = netlist.clone();
+            finite_difference_derivative(value, |candidate| {
+                perturbed.params.set(&name, candidate);
+                run_ac_output_at_frequency(&engine, &perturbed, &output_spec, freq)
+                    .map(|value| value.norm())
+            })
             .map_err(|e| format!("Sensitivity error for parameter '{}': {}", name, e))?
         } else if let OutputSpec::Voltage(vspec) = &output_spec {
             run_dc_output_sensitivity(&engine, &netlist, *vspec, &name, value)
                 .map_err(|e| format!("Sensitivity error for parameter '{}': {}", name, e))?
         } else {
-            run_dc_output_sensitivity_finite_difference(
-                &engine,
-                &netlist,
-                &output_spec,
-                &name,
-                value,
-            )
+            let mut perturbed = netlist.clone();
+            finite_difference_derivative(value, |candidate| {
+                perturbed.params.set(&name, candidate);
+                let dc_result = engine
+                    .run_dc_op(&perturbed)
+                    .map_err(|e| format!("DC OP error (perturbation): {}", e))?;
+                dc_output_value(&dc_result, &output_spec)
+            })
             .map_err(|e| format!("Sensitivity error for parameter '{}': {}", name, e))?
         };
 
-        let normalized = if nominal_output.abs() > 1e-15 {
-            (value / nominal_output) * raw
-        } else {
-            0.0
-        };
+        let normalized = normalized_sensitivity(raw, value, nominal_output);
         sensitivities.push((name, raw, normalized));
     }
 
@@ -1217,66 +1213,6 @@ fn canonicalize_pz_port(pos: usize, neg: usize) -> Result<(usize, Option<usize>,
 
     // Canonicalize V(0, n) or I(0, n) to -(V(n,0) / I(n,0)).
     Ok((neg, None, -1.0))
-}
-
-fn collect_sensitivity_parameters(netlist: &rspice_core::Netlist) -> Vec<(String, Value)> {
-    let mut params: Vec<(String, Value)> = netlist
-        .params
-        .all_params()
-        .into_iter()
-        .filter(|(name, value)| {
-            value.is_finite() && !name.starts_with("IC_") && !name.starts_with("NODESET_")
-        })
-        .collect();
-    params.sort_by(|a, b| a.0.cmp(&b.0));
-    params
-}
-
-fn run_ac_output_sensitivity_finite_difference(
-    engine: &Engine,
-    netlist: &rspice_core::Netlist,
-    output_spec: &OutputSpec,
-    param_name: &str,
-    param_value: Value,
-    frequency: Value,
-) -> Result<Value, String> {
-    let delta = (param_value.abs() * 0.01).max(1e-12);
-
-    let mut netlist_plus = netlist.clone();
-    netlist_plus.params.set(param_name, param_value + delta);
-    let plus = run_ac_output_at_frequency(engine, &netlist_plus, output_spec, frequency)?;
-
-    let mut netlist_minus = netlist.clone();
-    netlist_minus.params.set(param_name, param_value - delta);
-    let minus = run_ac_output_at_frequency(engine, &netlist_minus, output_spec, frequency)?;
-
-    Ok((plus.norm() - minus.norm()) / (2.0 * delta))
-}
-
-fn run_dc_output_sensitivity_finite_difference(
-    engine: &Engine,
-    netlist: &rspice_core::Netlist,
-    output_spec: &OutputSpec,
-    param_name: &str,
-    param_value: Value,
-) -> Result<Value, String> {
-    let delta = (param_value.abs() * 0.01).max(1e-12);
-
-    let mut netlist_plus = netlist.clone();
-    netlist_plus.params.set(param_name, param_value + delta);
-    let plus_result = engine
-        .run_dc_op(&netlist_plus)
-        .map_err(|e| format!("DC OP error (plus perturbation): {}", e))?;
-    let plus = dc_output_value(&plus_result, output_spec)?;
-
-    let mut netlist_minus = netlist.clone();
-    netlist_minus.params.set(param_name, param_value - delta);
-    let minus_result = engine
-        .run_dc_op(&netlist_minus)
-        .map_err(|e| format!("DC OP error (minus perturbation): {}", e))?;
-    let minus = dc_output_value(&minus_result, output_spec)?;
-
-    Ok((plus - minus) / (2.0 * delta))
 }
 
 /// Generate frequency sweep points
