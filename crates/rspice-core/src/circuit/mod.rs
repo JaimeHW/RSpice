@@ -11,8 +11,8 @@ use crate::device::behavioral::BehavioralSources;
 use crate::device::{Bjt, Cccs, Ccvs, Diode, MatrixStamper, Mosfet, Vccs, Vcvs};
 use crate::solver::{CscIndex, StaticMatrix, TripletMatrix};
 use crate::xspice::{CodeModelRegistry, XspiceInstance};
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, OnceLock, RwLock};
 use thiserror::Error;
 
 /// Node identifier (0 = ground, always)
@@ -417,6 +417,46 @@ pub struct VoltageSources {
     csc_indices: Vec<[Option<CscIndex>; 4]>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct PwlCacheKey {
+    path: String,
+    time_scale_bits: u64,
+    value_scale_bits: u64,
+    time_offset_bits: u64,
+    value_offset_bits: u64,
+}
+
+impl PwlCacheKey {
+    fn new(
+        path: &str,
+        time_scale: Value,
+        value_scale: Value,
+        time_offset: Value,
+        value_offset: Value,
+    ) -> Self {
+        Self {
+            path: path.to_string(),
+            time_scale_bits: time_scale.to_bits(),
+            value_scale_bits: value_scale.to_bits(),
+            time_offset_bits: time_offset.to_bits(),
+            value_offset_bits: value_offset.to_bits(),
+        }
+    }
+}
+
+fn pwl_waveform_cache()
+-> &'static RwLock<HashMap<PwlCacheKey, Arc<crate::device::pwl_file::PwlWaveform>>> {
+    static CACHE: OnceLock<
+        RwLock<HashMap<PwlCacheKey, Arc<crate::device::pwl_file::PwlWaveform>>>,
+    > = OnceLock::new();
+    CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+fn pwl_error_log_cache() -> &'static RwLock<HashSet<PwlCacheKey>> {
+    static CACHE: OnceLock<RwLock<HashSet<PwlCacheKey>>> = OnceLock::new();
+    CACHE.get_or_init(|| RwLock::new(HashSet::new()))
+}
+
 impl VoltageSources {
     pub fn new() -> Self {
         Self::default()
@@ -612,6 +652,44 @@ impl VoltageSources {
             .fold(0.0, Value::max)
     }
 
+    fn load_pwl_waveform_cached(
+        path: &str,
+        time_scale: Value,
+        value_scale: Value,
+        time_offset: Value,
+        value_offset: Value,
+    ) -> Result<Arc<crate::device::pwl_file::PwlWaveform>, String> {
+        let key = PwlCacheKey::new(path, time_scale, value_scale, time_offset, value_offset);
+
+        if let Ok(cache) = pwl_waveform_cache().read() {
+            if let Some(wf) = cache.get(&key) {
+                return Ok(Arc::clone(wf));
+            }
+        }
+
+        let waveform = crate::device::pwl_file::load_pwl_file(path)
+            .map_err(|e| format!("failed to load PWL file '{}': {}", path, e))?
+            .with_scaling(time_scale, value_scale, time_offset, value_offset);
+        let waveform = Arc::new(waveform);
+
+        if let Ok(mut cache) = pwl_waveform_cache().write() {
+            let entry = cache.entry(key).or_insert_with(|| Arc::clone(&waveform));
+            return Ok(Arc::clone(entry));
+        }
+
+        Ok(waveform)
+    }
+
+    fn log_pwl_error_once(key: PwlCacheKey, msg: &str) {
+        if let Ok(mut logged) = pwl_error_log_cache().write() {
+            if logged.insert(key) {
+                log::warn!("{}", msg);
+            }
+            return;
+        }
+        log::warn!("{}", msg);
+    }
+
     /// Evaluate source specification at given time
     fn evaluate_source_at_time(spec: &crate::netlist::SourceSpec, time: Value) -> Value {
         use crate::netlist::SourceSpec;
@@ -682,7 +760,29 @@ impl VoltageSources {
                 }
                 0.0
             }
-            SourceSpec::PwlFile { value_offset, .. } => *value_offset, // TODO: file loading
+            SourceSpec::PwlFile {
+                path,
+                time_scale,
+                value_scale,
+                time_offset,
+                value_offset,
+            } => {
+                let key =
+                    PwlCacheKey::new(path, *time_scale, *value_scale, *time_offset, *value_offset);
+                match Self::load_pwl_waveform_cached(
+                    path,
+                    *time_scale,
+                    *value_scale,
+                    *time_offset,
+                    *value_offset,
+                ) {
+                    Ok(waveform) => waveform.value_at(time),
+                    Err(err) => {
+                        Self::log_pwl_error_once(key, &err);
+                        *value_offset
+                    }
+                }
+            }
             SourceSpec::Exp {
                 v1,
                 v2,
@@ -2139,6 +2239,22 @@ pub type Circuit = CircuitData;
 mod tests {
     use super::*;
     use crate::netlist::SourceSpec;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_file_path(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "rspice_{}_{}_{}.csv",
+            name,
+            std::process::id(),
+            stamp
+        ))
+    }
 
     #[test]
     fn test_circuit_creation() {
@@ -2218,5 +2334,67 @@ mod tests {
 
         let delta = vs.max_expected_delta(0.0, 1e-3);
         assert_eq!(delta, 0.0);
+    }
+
+    #[test]
+    fn test_voltage_sources_evaluate_pwl_file_with_scaling() {
+        let file_path = temp_file_path("pwl_scaled");
+        fs::write(&file_path, "0,0\n1,1\n2,0\n").expect("should write PWL CSV");
+
+        let mut vs = VoltageSources::new();
+        vs.add_with_ac_and_spec(
+            "VPWL".to_string(),
+            1,
+            0,
+            1,
+            0.0,
+            0.0,
+            0.0,
+            Some(SourceSpec::PwlFile {
+                path: file_path.to_string_lossy().to_string(),
+                time_scale: 1e-3,
+                value_scale: 2.0,
+                time_offset: 1e-3,
+                value_offset: 0.5,
+            }),
+        );
+
+        let mut rhs = vec![0.0; 2];
+        vs.update_transient_rhs(&mut rhs, 2e-3, |br_ordinal| 1 + br_ordinal);
+
+        // (t - toffset) / tscale = (2e-3 - 1e-3)/1e-3 = 1.0 -> base value 1.0
+        // scaled and offset => 1.0 * 2.0 + 0.5 = 2.5
+        assert!((rhs[1] - 2.5).abs() < 1e-12, "expected scaled PWL value");
+
+        fs::remove_file(file_path).expect("should remove temp PWL CSV");
+    }
+
+    #[test]
+    fn test_voltage_sources_pwl_file_missing_falls_back_to_value_offset() {
+        let missing_path = temp_file_path("pwl_missing");
+        let mut vs = VoltageSources::new();
+        vs.add_with_ac_and_spec(
+            "VPWL".to_string(),
+            1,
+            0,
+            1,
+            0.0,
+            0.0,
+            0.0,
+            Some(SourceSpec::PwlFile {
+                path: missing_path.to_string_lossy().to_string(),
+                time_scale: 1.0,
+                value_scale: 1.0,
+                time_offset: 0.0,
+                value_offset: -0.75,
+            }),
+        );
+
+        let mut rhs = vec![0.0; 2];
+        vs.update_transient_rhs(&mut rhs, 10e-6, |br_ordinal| 1 + br_ordinal);
+        assert!(
+            (rhs[1] + 0.75).abs() < 1e-12,
+            "missing PWL file should fall back to value_offset"
+        );
     }
 }
