@@ -179,7 +179,7 @@ impl SimulationController {
             &state.schematic,
             &analysis_lines,
         );
-        let netlist = result.netlist.clone();
+        let mut netlist = result.netlist.clone();
 
         if !result.errors.is_empty() {
             for err in result.errors {
@@ -193,6 +193,11 @@ impl SimulationController {
                 .console_messages
                 .push(ConsoleMessage::warning(warning));
         }
+
+        netlist = Self::apply_simulation_options_to_netlist(
+            &netlist,
+            &state.dialogs.simulation_options_config,
+        );
 
         log::info!(
             "Generated netlist ({} bytes):\n{}",
@@ -601,6 +606,7 @@ impl SimulationController {
 
         let output_ref =
             (!pac_cfg.output_ref.trim().is_empty()).then(|| pac_cfg.output_ref.clone());
+        let (reltol, abstol) = Self::periodic_solver_tolerances(state);
 
         Ok(PacRunConfig {
             pss_fundamental_freq: pss_cfg.fund_freq,
@@ -616,8 +622,8 @@ impl SimulationController {
             output_ref,
             pac_magnitude: pac_cfg.pac_magnitude,
             include_dc: pac_cfg.include_dc,
-            reltol: 1e-3,
-            abstol: 1e-12,
+            reltol,
+            abstol,
         })
     }
 
@@ -695,6 +701,7 @@ impl SimulationController {
 
         let output_ref =
             (!pnoise_cfg.output_ref.trim().is_empty()).then(|| pnoise_cfg.output_ref.clone());
+        let (reltol, abstol) = Self::periodic_solver_tolerances(state);
 
         Ok(PnoiseRunConfig {
             pss_fundamental_freq: pss_cfg.fund_freq,
@@ -711,8 +718,8 @@ impl SimulationController {
             noise_ref,
             integrated_noise: pnoise_cfg.integrated_noise,
             noise_summary: pnoise_cfg.noise_summary,
-            reltol: 1e-3,
-            abstol: 1e-18,
+            reltol,
+            abstol,
         })
     }
 
@@ -741,6 +748,7 @@ impl SimulationController {
 
         let output_ref =
             (!pxf_cfg.output_ref.trim().is_empty()).then(|| pxf_cfg.output_ref.clone());
+        let (reltol, abstol) = Self::periodic_solver_tolerances(state);
 
         Ok(PxfRunConfig {
             pss_fundamental_freq: pss_cfg.fund_freq,
@@ -756,8 +764,8 @@ impl SimulationController {
             output_ref,
             output_sideband: pxf_cfg.output_sideband,
             max_sideband: pxf_cfg.max_sideband,
-            reltol: 1e-3,
-            abstol: 1e-12,
+            reltol,
+            abstol,
         })
     }
 
@@ -1429,6 +1437,39 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid transfer-function settings: {}", e))?;
         Ok(xf_cfg.to_spice())
+    }
+
+    fn periodic_solver_tolerances(state: &AppState) -> (f64, f64) {
+        let opts = &state.dialogs.simulation_options_config;
+        (opts.reltol, opts.abstol)
+    }
+
+    fn apply_simulation_options_to_netlist(
+        netlist: &str,
+        options: &crate::simulation::dialog::SimulationOptions,
+    ) -> String {
+        let options_block = options.to_spice_options();
+        let option_lines: Vec<&str> = options_block.lines().collect();
+        if option_lines.len() <= 1 {
+            return netlist.to_string();
+        }
+
+        let mut lines: Vec<String> = netlist.lines().map(|line| line.to_string()).collect();
+        let insertion_idx = lines
+            .iter()
+            .position(|line| line.trim_start().to_ascii_lowercase().starts_with(".end"))
+            .unwrap_or(lines.len());
+        let injected_lines = option_lines
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<String>>();
+        lines.splice(insertion_idx..insertion_idx, injected_lines);
+
+        let mut merged = lines.join("\n");
+        if netlist.ends_with('\n') {
+            merged.push('\n');
+        }
+        merged
     }
 
     fn build_pole_zero_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
@@ -2692,6 +2733,33 @@ mod tests {
     }
 
     #[test]
+    fn test_apply_simulation_options_to_netlist_skips_default_options_block() {
+        let netlist = "* test\nV1 in 0 dc 1\n.op\n.end\n";
+        let opts = crate::simulation::dialog::SimulationOptions::default();
+        let merged = SimulationController::apply_simulation_options_to_netlist(netlist, &opts);
+        assert_eq!(merged, netlist);
+    }
+
+    #[test]
+    fn test_apply_simulation_options_to_netlist_inserts_options_before_end() {
+        let netlist = "* test\nV1 in 0 dc 1\n.op\n.end\n";
+        let mut opts = crate::simulation::dialog::SimulationOptions::default();
+        opts.reltol = 2e-4;
+        opts.temp = 85.0;
+
+        let merged = SimulationController::apply_simulation_options_to_netlist(netlist, &opts);
+        assert!(merged.contains(".OPTIONS"));
+        assert!(merged.contains("RELTOL=2.00e-4"));
+        assert!(merged.contains("TEMP=85.00"));
+
+        let options_pos = merged
+            .find(".OPTIONS")
+            .expect("options block should be present");
+        let end_pos = merged.rfind(".end").expect(".end should still be present");
+        assert!(options_pos < end_pos, "options block must precede .end");
+    }
+
+    #[test]
     fn test_build_transient_config_uses_output_step_without_forcing_internal_max_step() {
         let controller = SimulationController::new();
         let mut state = AppState::default();
@@ -3200,6 +3268,8 @@ mod tests {
                 .with_output("OUT")
                 .with_sidebands(2),
         );
+        state.dialogs.simulation_options_config.reltol = 2e-4;
+        state.dialogs.simulation_options_config.abstol = 3e-11;
 
         let plan = controller
             .build_analysis_plan(&state)
@@ -3233,6 +3303,13 @@ mod tests {
                 .sweep,
             crate::services::simulation_runner::PacFrequencySweep::Decade
         ));
+        let pac_cfg = queue[2]
+            .spec_options
+            .pac
+            .as_ref()
+            .expect("PAC options should be present");
+        assert!((pac_cfg.reltol - 2e-4).abs() < 1e-18);
+        assert!((pac_cfg.abstol - 3e-11).abs() < 1e-22);
     }
 
     #[test]
@@ -3281,6 +3358,8 @@ mod tests {
                 .with_output("OUT", 1)
                 .with_sidebands(3),
         );
+        state.dialogs.simulation_options_config.reltol = 7e-4;
+        state.dialogs.simulation_options_config.abstol = 4e-12;
 
         let plan = controller
             .build_analysis_plan(&state)
@@ -3305,6 +3384,8 @@ mod tests {
             pxf_cfg.sweep,
             crate::services::simulation_runner::PxfFrequencySweep::Decade
         ));
+        assert!((pxf_cfg.reltol - 7e-4).abs() < 1e-18);
+        assert!((pxf_cfg.abstol - 4e-12).abs() < 1e-24);
     }
 
     #[test]
@@ -3366,6 +3447,8 @@ mod tests {
                     .with_sidebands(2)
                     .with_noise_ref(NoiseReferenceType::Phase),
             );
+        state.dialogs.simulation_options_config.reltol = 9e-4;
+        state.dialogs.simulation_options_config.abstol = 6e-13;
 
         let mut xf_cfg = XfConfig::new(1e3, 1e8, 8)
             .with_input("V1")
@@ -3398,6 +3481,8 @@ mod tests {
             crate::services::simulation_runner::PnoiseReference::Phase
         ));
         assert_eq!(pnoise_cfg.input_source, "V1");
+        assert!((pnoise_cfg.reltol - 9e-4).abs() < 1e-18);
+        assert!((pnoise_cfg.abstol - 6e-13).abs() < 1e-25);
 
         assert!(matches!(queue[1].spec, AnalysisSpec::Tf));
         assert!(queue[1].config.is_none());
