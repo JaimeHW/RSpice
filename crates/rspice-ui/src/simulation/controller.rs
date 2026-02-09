@@ -16,14 +16,15 @@
 use std::collections::VecDeque;
 
 use crate::common::app::{AppState, ConsoleMessage};
-use crate::services::safety::SoAManager;
 use crate::services::yield_manager::YieldAnalysisManager;
 use crate::simulation::config::{
     AcAnalysisConfig, AcSweepType, DcSweepConfig, NoiseAnalysisConfig, PoleZeroConfig,
     PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
 };
-use crate::simulation::multi_run::{AnalysisPlan, AnalysisRunType, AnalysisSpec, FrequencySweep};
-use crate::simulation::reliability_engine::ReliabilityEngine;
+use crate::simulation::multi_run::{
+    AnalysisPlan, AnalysisRunType, AnalysisSpec, FrequencySweep, OptimizationAlgorithm,
+    OptimizationGoal, OptimizationVariable,
+};
 use crate::simulation::runner::SpecExecutionOptions;
 use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
 use crate::state::{AnalysisResult, AnalysisType, DcOpResult, OperatingPointValue};
@@ -50,10 +51,6 @@ pub struct SimulationController {
     runner: SimulationRunner,
     /// Manager for yield analysis (Monte Carlo)
     yield_manager: YieldAnalysisManager,
-    /// Manager for safety checking (SOA)
-    soa_manager: SoAManager,
-    /// Engine for reliability analysis (Aging)
-    reliability_engine: ReliabilityEngine,
     /// Current analysis config (stored for result processing when polling completes)
     current_config: Option<AnalysisConfig>,
     /// Current strongly-typed analysis spec (always set while running)
@@ -84,8 +81,6 @@ impl SimulationController {
         Self {
             runner: SimulationRunner::new(),
             yield_manager: YieldAnalysisManager::new(),
-            soa_manager: SoAManager::new(),
-            reliability_engine: ReliabilityEngine::new(),
             current_config: None,
             current_spec: None,
             pending_analyses: VecDeque::new(),
@@ -232,6 +227,8 @@ impl SimulationController {
 
         // Create new run in Results Browser
         state.simulation.start_run();
+        state.simulation.reliability_results.clear();
+        state.simulation.soa_violations.clear();
         log::info!("Created new simulation run");
 
         // Log summary to console
@@ -353,7 +350,7 @@ impl SimulationController {
         let mut indices: Vec<usize> = state.dialogs.enabled_analyses.iter().copied().collect();
         indices.sort_unstable();
         if indices.is_empty() {
-            indices.push(0);
+            indices.push(state.dialogs.sim_active_tab.min(23));
         }
         indices
     }
@@ -483,6 +480,12 @@ impl SimulationController {
                 | AnalysisSpec::Pss { .. }
                 | AnalysisSpec::HarmonicBalance { .. }
                 | AnalysisSpec::Pac
+                | AnalysisSpec::SParameter { .. }
+                | AnalysisSpec::Envelope { .. }
+                | AnalysisSpec::Fourier { .. }
+                | AnalysisSpec::Reliability { .. }
+                | AnalysisSpec::Optimization { .. }
+                | AnalysisSpec::Soa { .. }
         )
     }
 
@@ -1038,12 +1041,18 @@ impl SimulationController {
             9 => self.build_stb_spec(state),
             10 => self.build_temperature_sweep_spec(state),
             11 => self.build_harmonic_balance_spec(state),
+            12 => self.build_sp_spec(state),
             13 => self.build_pac_spec(state),
             14 => self.build_pnoise_spec(state),
             15 => self.build_pxf_spec(state),
             16 => self.build_pstb_spec(state),
             17 => self.build_tf_spec(state),
             18 => self.build_corner_sweep_spec(state),
+            19 => self.build_envelope_spec(state),
+            20 => self.build_fourier_spec(state),
+            21 => self.build_reliability_spec(state),
+            22 => self.build_optimization_spec(state),
+            23 => self.build_soa_spec(state),
             _ => Err(
                 "analysis is not implemented in the current UI simulation controller".to_string(),
             ),
@@ -1179,6 +1188,12 @@ impl SimulationController {
             AnalysisSpec::Pss { .. } => self.build_pss_command(state),
             AnalysisSpec::Stb { .. } => self.build_stb_command(state),
             AnalysisSpec::HarmonicBalance { .. } => self.build_harmonic_balance_command(state),
+            AnalysisSpec::SParameter { .. } => self.build_sp_command(state),
+            AnalysisSpec::Envelope { .. } => self.build_envelope_command(state),
+            AnalysisSpec::Fourier { .. } => self.build_fourier_command(state),
+            AnalysisSpec::Reliability { .. } => self.build_reliability_command(state),
+            AnalysisSpec::Optimization { .. } => self.build_optimization_command(state),
+            AnalysisSpec::Soa { .. } => self.build_soa_command(state),
             AnalysisSpec::Pac => self.build_pac_command(state),
             AnalysisSpec::Pnoise => self.build_pnoise_command(state),
             AnalysisSpec::Pxf => self.build_pxf_command(state),
@@ -1256,6 +1271,154 @@ impl SimulationController {
             tone1_harmonics: hb_cfg.num_harmonics as usize,
             tone2_freq: tone2.map(|tone| tone.frequency),
             tone2_harmonics: tone2.map(|tone| tone.harmonics as usize).unwrap_or(0),
+        })
+    }
+
+    fn build_sp_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
+        let mut sp_state = state.dialogs.sp_state.clone();
+        sp_state.ensure_initialized();
+        let sp_cfg = sp_state
+            .to_config()
+            .map_err(|e| format!("invalid S-parameter settings: {}", e))?;
+        if sp_cfg.ports.len() != 2 {
+            return Err(
+                "S-parameter runner currently supports exactly two ports (port1 and port2)"
+                    .to_string(),
+            );
+        }
+        let port1 = &sp_cfg.ports[0];
+        let port2 = &sp_cfg.ports[1];
+        Ok(AnalysisSpec::SParameter {
+            start_freq: sp_cfg.start_freq,
+            stop_freq: sp_cfg.stop_freq,
+            points_per_unit: sp_cfg.num_points as usize,
+            sweep: match sp_cfg.sweep_type {
+                crate::simulation::dialog::sp::SpSweepType::Decade => FrequencySweep::Decade,
+                crate::simulation::dialog::sp::SpSweepType::Octave => FrequencySweep::Octave,
+                crate::simulation::dialog::sp::SpSweepType::Linear => FrequencySweep::Linear,
+            },
+            z0: sp_cfg.z0,
+            port1_pos: port1.node_pos.clone(),
+            port1_neg: port1.node_neg.clone(),
+            port2_pos: port2.node_pos.clone(),
+            port2_neg: port2.node_neg.clone(),
+        })
+    }
+
+    fn build_envelope_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
+        let mut envelope_state = state.dialogs.envelope_state.clone();
+        envelope_state.ensure_initialized();
+        let envelope_cfg = envelope_state
+            .to_config()
+            .map_err(|e| format!("invalid envelope settings: {}", e))?;
+        let max_step = (envelope_cfg.max_step > 0.0).then_some(envelope_cfg.max_step);
+        Ok(AnalysisSpec::Envelope {
+            fundamental_freq: envelope_cfg.fundamental_freq,
+            stop_time: envelope_cfg.stop_time,
+            num_harmonics: envelope_cfg.num_harmonics as usize,
+            max_step,
+        })
+    }
+
+    fn build_fourier_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
+        let mut fourier_state = state.dialogs.fourier_state.clone();
+        fourier_state.ensure_initialized();
+        let fourier_cfg = fourier_state
+            .to_config()
+            .map_err(|e| format!("invalid Fourier settings: {}", e))?;
+        Ok(AnalysisSpec::Fourier {
+            fundamental_freq: fourier_cfg.fundamental_freq,
+            num_harmonics: fourier_cfg.num_harmonics as usize,
+            output_node: fourier_cfg.output_node.clone(),
+            output_ref: fourier_cfg.output_ref.clone(),
+            start_time: fourier_cfg.start_time,
+            stop_time: fourier_cfg.stop_time,
+        })
+    }
+
+    fn build_reliability_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
+        let mut reliability_state = state.dialogs.reliability_state.clone();
+        reliability_state.ensure_initialized();
+        let reliability_cfg = reliability_state
+            .to_config()
+            .map_err(|e| format!("invalid reliability settings: {}", e))?;
+        Ok(AnalysisSpec::Reliability {
+            target_years: reliability_cfg.target_years,
+            enable_hci: reliability_cfg.enable_hci,
+            enable_nbti: reliability_cfg.enable_nbti,
+            enable_em: reliability_cfg.enable_em,
+            min_stress_voltage: reliability_cfg.min_stress_voltage,
+        })
+    }
+
+    fn build_optimization_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
+        let mut optimization_state = state.dialogs.optimization_state.clone();
+        optimization_state.ensure_initialized();
+        let cfg = optimization_state
+            .to_config()
+            .map_err(|e| format!("invalid optimization settings: {}", e))?;
+
+        Ok(AnalysisSpec::Optimization {
+            variables: cfg
+                .variables
+                .into_iter()
+                .map(|var| OptimizationVariable {
+                    name: var.name,
+                    min: var.min,
+                    max: var.max,
+                    initial: var.initial,
+                })
+                .collect(),
+            objective_node: cfg.objective_node,
+            objective_ref: cfg.objective_ref,
+            goal: match cfg.goal_mode {
+                crate::simulation::dialog::optimization::OptimizationGoalMode::Minimize => {
+                    OptimizationGoal::Minimize
+                }
+                crate::simulation::dialog::optimization::OptimizationGoalMode::Maximize => {
+                    OptimizationGoal::Maximize
+                }
+                crate::simulation::dialog::optimization::OptimizationGoalMode::Target => {
+                    OptimizationGoal::Target
+                }
+            },
+            target: cfg.target_value,
+            algorithm: match cfg.algorithm {
+                crate::simulation::dialog::optimization::OptimizationAlgorithmMode::GradientDescent => {
+                    OptimizationAlgorithm::GradientDescent
+                }
+                crate::simulation::dialog::optimization::OptimizationAlgorithmMode::PatternSearch => {
+                    OptimizationAlgorithm::PatternSearch
+                }
+                crate::simulation::dialog::optimization::OptimizationAlgorithmMode::SimulatedAnnealing => {
+                    OptimizationAlgorithm::SimulatedAnnealing
+                }
+            },
+            max_iterations: cfg.max_iterations,
+            cost_tolerance: cfg.cost_tolerance,
+            fd_step: cfg.fd_step,
+            initial_step: cfg.initial_step,
+            min_step: cfg.min_step,
+        })
+    }
+
+    fn build_soa_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
+        let mut soa_state = state.dialogs.soa_state.clone();
+        soa_state.ensure_initialized();
+        let cfg = soa_state
+            .to_config()
+            .map_err(|e| format!("invalid SOA settings: {}", e))?;
+        Ok(AnalysisSpec::Soa {
+            stop_time: cfg.stop_time,
+            step_time: cfg.step_time,
+            check_vgs_max: cfg.check_vgs_max,
+            max_vgs: cfg.max_vgs,
+            check_vds_max: cfg.check_vds_max,
+            max_vds: cfg.max_vds,
+            check_vbe_max: cfg.check_vbe_max,
+            max_vbe: cfg.max_vbe,
+            check_vce_max: cfg.check_vce_max,
+            max_vce: cfg.max_vce,
         })
     }
 
@@ -1392,6 +1555,60 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid harmonic balance settings: {}", e))?;
         Ok(hb_cfg.to_spice())
+    }
+
+    fn build_sp_command(&self, state: &AppState) -> Result<String, String> {
+        let mut sp_state = state.dialogs.sp_state.clone();
+        sp_state.ensure_initialized();
+        let sp_cfg = sp_state
+            .to_config()
+            .map_err(|e| format!("invalid S-parameter settings: {}", e))?;
+        Ok(sp_cfg.to_spice())
+    }
+
+    fn build_envelope_command(&self, state: &AppState) -> Result<String, String> {
+        let mut envelope_state = state.dialogs.envelope_state.clone();
+        envelope_state.ensure_initialized();
+        let envelope_cfg = envelope_state
+            .to_config()
+            .map_err(|e| format!("invalid envelope settings: {}", e))?;
+        Ok(envelope_cfg.to_spice())
+    }
+
+    fn build_fourier_command(&self, state: &AppState) -> Result<String, String> {
+        let mut fourier_state = state.dialogs.fourier_state.clone();
+        fourier_state.ensure_initialized();
+        let fourier_cfg = fourier_state
+            .to_config()
+            .map_err(|e| format!("invalid Fourier settings: {}", e))?;
+        Ok(fourier_cfg.to_spice())
+    }
+
+    fn build_reliability_command(&self, state: &AppState) -> Result<String, String> {
+        let mut reliability_state = state.dialogs.reliability_state.clone();
+        reliability_state.ensure_initialized();
+        let reliability_cfg = reliability_state
+            .to_config()
+            .map_err(|e| format!("invalid reliability settings: {}", e))?;
+        Ok(reliability_cfg.to_spice())
+    }
+
+    fn build_optimization_command(&self, state: &AppState) -> Result<String, String> {
+        let mut optimization_state = state.dialogs.optimization_state.clone();
+        optimization_state.ensure_initialized();
+        let optimization_cfg = optimization_state
+            .to_config()
+            .map_err(|e| format!("invalid optimization settings: {}", e))?;
+        Ok(format!("* {}", optimization_cfg.to_spice()))
+    }
+
+    fn build_soa_command(&self, state: &AppState) -> Result<String, String> {
+        let mut soa_state = state.dialogs.soa_state.clone();
+        soa_state.ensure_initialized();
+        let soa_cfg = soa_state
+            .to_config()
+            .map_err(|e| format!("invalid SOA settings: {}", e))?;
+        Ok(format!("* {}", soa_cfg.to_spice()))
     }
 
     fn build_pac_command(&self, state: &AppState) -> Result<String, String> {
@@ -1653,6 +1870,12 @@ impl SimulationController {
             AnalysisRunType::MonteCarlo => AnalysisType::MonteCarlo,
             AnalysisRunType::Parametric => AnalysisType::Parametric,
             AnalysisRunType::Corner => AnalysisType::Corner,
+            AnalysisRunType::Reliability => AnalysisType::Parametric,
+            AnalysisRunType::Optimization => AnalysisType::Parametric,
+            AnalysisRunType::Soa => AnalysisType::Transient,
+            AnalysisRunType::SParameter => AnalysisType::Ac,
+            AnalysisRunType::Envelope => AnalysisType::Transient,
+            AnalysisRunType::Fourier => AnalysisType::Ac,
         }
     }
 
@@ -1853,6 +2076,62 @@ impl SimulationController {
                 AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
             }
 
+            SimulationResult::Reliability {
+                years, waveforms, ..
+            } => {
+                let wf_data: Vec<WaveformData> = waveforms
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, (name, wf))| {
+                        WaveformData::new(
+                            name.clone(),
+                            years.clone(),
+                            wf.y_values.clone(),
+                            Self::color_for_index(idx),
+                        )
+                    })
+                    .collect();
+                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
+            }
+
+            SimulationResult::Optimization {
+                iterations,
+                waveforms,
+                ..
+            } => {
+                let wf_data: Vec<WaveformData> = waveforms
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, (name, wf))| {
+                        WaveformData::new(
+                            name.clone(),
+                            iterations.clone(),
+                            wf.y_values.clone(),
+                            Self::color_for_index(idx),
+                        )
+                    })
+                    .collect();
+                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
+            }
+
+            SimulationResult::Soa {
+                time, waveforms, ..
+            } => {
+                let wf_data: Vec<WaveformData> = waveforms
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, (name, wf))| {
+                        WaveformData::new(
+                            name.clone(),
+                            time.clone(),
+                            wf.y_values.clone(),
+                            Self::color_for_index(idx),
+                        )
+                    })
+                    .collect();
+                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
+            }
+
             SimulationResult::Empty { .. } => {
                 AnalysisResult::new(1, analysis_type, label.to_string())
             }
@@ -1977,15 +2256,17 @@ impl SimulationController {
                         .cloned()
                         .collect();
 
-                    // Run SOA Checking
-                    self.soa_manager.clear_violations();
-                    state.simulation.soa_violations = self.soa_manager.violations().to_vec();
-
-                    // Run Reliability Analysis
-                    let stress_data = std::collections::HashMap::new();
-                    state.simulation.reliability_results = self
-                        .reliability_engine
-                        .analyze_circuit(&stress_data, &[1.0, 5.0, 10.0]);
+                    // Reliability results are populated by dedicated reliability analysis runs.
+                    if let crate::simulation::SimulationResult::Reliability {
+                        device_results, ..
+                    } = &sim_result
+                    {
+                        state.simulation.reliability_results = device_results.clone();
+                    }
+                    if let crate::simulation::SimulationResult::Soa { violations, .. } = &sim_result
+                    {
+                        state.simulation.soa_violations = violations.clone();
+                    }
 
                     // =========================================================
                     // Multi-analysis chaining: start next or finish batch
@@ -2468,6 +2749,99 @@ impl SimulationController {
                 state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
             }
 
+            SimulationResult::Reliability {
+                years,
+                waveforms,
+                device_results,
+            } => {
+                for (idx, (name, wf_data)) in waveforms.iter().enumerate() {
+                    let waveform = WaveformData::new(
+                        name.clone(),
+                        years.clone(),
+                        wf_data.y_values.clone(),
+                        COLORS[idx % COLORS.len()].to_string(),
+                    );
+                    state.simulation.waveforms.push(waveform);
+                }
+
+                state.simulation.reliability_results = device_results.clone();
+                state
+                    .console_messages
+                    .push(crate::common::app::ConsoleMessage::info(format!(
+                        "Reliability: {} lifetime points, {} devices analyzed",
+                        years.len(),
+                        device_results.len()
+                    )));
+
+                state.panels.bottom_panel = true;
+                state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
+            }
+
+            SimulationResult::Optimization {
+                iterations,
+                waveforms,
+                best_cost,
+                best_variables,
+                converged,
+            } => {
+                for (idx, (name, wf_data)) in waveforms.iter().enumerate() {
+                    let waveform = WaveformData::new(
+                        name.clone(),
+                        iterations.clone(),
+                        wf_data.y_values.clone(),
+                        COLORS[idx % COLORS.len()].to_string(),
+                    );
+                    state.simulation.waveforms.push(waveform);
+                }
+
+                state
+                    .console_messages
+                    .push(crate::common::app::ConsoleMessage::info(format!(
+                        "Optimization: {} iterations, best cost {:.6e}, converged={}",
+                        iterations.len(),
+                        best_cost,
+                        converged
+                    )));
+                for (name, value) in best_variables.iter().take(8) {
+                    state
+                        .console_messages
+                        .push(crate::common::app::ConsoleMessage::info(format!(
+                            "  {} = {:.6e}",
+                            name, value
+                        )));
+                }
+
+                state.panels.bottom_panel = true;
+                state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
+            }
+
+            SimulationResult::Soa {
+                time,
+                waveforms,
+                violations,
+            } => {
+                for (idx, (name, wf_data)) in waveforms.iter().enumerate() {
+                    let waveform = WaveformData::new(
+                        name.clone(),
+                        time.clone(),
+                        wf_data.y_values.clone(),
+                        COLORS[idx % COLORS.len()].to_string(),
+                    );
+                    state.simulation.waveforms.push(waveform);
+                }
+                state.simulation.soa_violations = violations.clone();
+                state
+                    .console_messages
+                    .push(crate::common::app::ConsoleMessage::info(format!(
+                        "SOA: {} sampled points, {} violations",
+                        time.len(),
+                        violations.len()
+                    )));
+
+                state.panels.bottom_panel = true;
+                state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
+            }
+
             SimulationResult::Empty { .. } => {
                 state
                     .console_messages
@@ -2791,15 +3165,23 @@ mod tests {
     }
 
     #[test]
+    fn test_enabled_analysis_indices_defaults_to_active_tab_when_none_enabled() {
+        let mut state = AppState::default();
+        state.dialogs.sim_active_tab = 2;
+        let indices = SimulationController::enabled_analysis_indices(&state);
+        assert_eq!(indices, vec![2]);
+    }
+
+    #[test]
     fn test_build_analysis_plan_rejects_unimplemented_analysis_tab() {
         let controller = SimulationController::new();
         let mut state = AppState::default();
-        state.dialogs.enabled_analyses.insert(19); // Envelope (not yet implemented in controller)
+        state.dialogs.enabled_analyses.insert(99);
 
         let errors = controller
             .build_analysis_plan(&state)
             .expect_err("unsupported analysis should fail planning");
-        assert!(errors.iter().any(|e| e.contains("Envelope")));
+        assert!(errors.iter().any(|e| e.contains("Unknown")));
     }
 
     #[test]
@@ -3120,6 +3502,262 @@ mod tests {
                 assert_eq!(tone2_harmonics, 5);
             }
             other => panic!("expected harmonic balance spec, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_analysis_spec_for_sparameter_uses_dialog_configuration() {
+        use crate::simulation::dialog::sp::{SpConfig, SpPortConfig};
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.sp_state = crate::simulation::dialog::sp::SpDialogState::from_config(
+            &SpConfig::decade(1e6, 2e9, 20)
+                .with_z0(75.0)
+                .with_ports(vec![
+                    SpPortConfig::single_ended(1, "rf_in"),
+                    SpPortConfig::single_ended(2, "rf_out"),
+                ]),
+        );
+
+        let spec = controller
+            .build_analysis_spec_for_index(&state, 12)
+            .expect("S-parameter spec should build");
+        match spec {
+            AnalysisSpec::SParameter {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                sweep,
+                z0,
+                port1_pos,
+                port1_neg,
+                port2_pos,
+                port2_neg,
+            } => {
+                assert!((start_freq - 1e6).abs() < 1e-6);
+                assert!((stop_freq - 2e9).abs() < 1e-3);
+                assert_eq!(points_per_unit, 20);
+                assert!(matches!(sweep, FrequencySweep::Decade));
+                assert!((z0 - 75.0).abs() < 1e-9);
+                assert_eq!(port1_pos, "RF_IN");
+                assert_eq!(port1_neg, "0");
+                assert_eq!(port2_pos, "RF_OUT");
+                assert_eq!(port2_neg, "0");
+            }
+            other => panic!("expected S-parameter spec, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_analysis_spec_for_envelope_uses_dialog_configuration() {
+        use crate::simulation::dialog::envelope::EnvelopeConfig;
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.envelope_state =
+            crate::simulation::dialog::envelope::EnvelopeDialogState::from_config(
+                &EnvelopeConfig::new(5e9, 2e-6).with_harmonics(13),
+            );
+
+        let spec = controller
+            .build_analysis_spec_for_index(&state, 19)
+            .expect("Envelope spec should build");
+        match spec {
+            AnalysisSpec::Envelope {
+                fundamental_freq,
+                stop_time,
+                num_harmonics,
+                max_step,
+            } => {
+                assert!((fundamental_freq - 5e9).abs() < 1e-3);
+                assert!((stop_time - 2e-6).abs() < 1e-15);
+                assert_eq!(num_harmonics, 13);
+                assert_eq!(max_step, None);
+            }
+            other => panic!("expected Envelope spec, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_analysis_spec_for_fourier_uses_dialog_configuration() {
+        use crate::simulation::dialog::fourier::FourierConfig;
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.fourier_state =
+            crate::simulation::dialog::fourier::FourierDialogState::from_config(
+                &FourierConfig::new(2e6, 15)
+                    .with_output("outp")
+                    .with_window(1e-6, 11e-6),
+            );
+
+        let spec = controller
+            .build_analysis_spec_for_index(&state, 20)
+            .expect("Fourier spec should build");
+        match spec {
+            AnalysisSpec::Fourier {
+                fundamental_freq,
+                num_harmonics,
+                output_node,
+                output_ref,
+                start_time,
+                stop_time,
+            } => {
+                assert!((fundamental_freq - 2e6).abs() < 1e-6);
+                assert_eq!(num_harmonics, 15);
+                assert_eq!(output_node, "OUTP");
+                assert_eq!(output_ref, "");
+                assert!((start_time - 1e-6).abs() < 1e-15);
+                assert!((stop_time - 11e-6).abs() < 1e-15);
+            }
+            other => panic!("expected Fourier spec, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_analysis_spec_for_reliability_uses_dialog_configuration() {
+        use crate::simulation::dialog::reliability::ReliabilityConfig;
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.reliability_state =
+            crate::simulation::dialog::reliability::ReliabilityDialogState::from_config(
+                &ReliabilityConfig {
+                    target_years: vec![2.0, 7.0, 15.0],
+                    enable_hci: true,
+                    enable_nbti: false,
+                    enable_em: true,
+                    min_stress_voltage: 0.2,
+                },
+            );
+
+        let spec = controller
+            .build_analysis_spec_for_index(&state, 21)
+            .expect("Reliability spec should build");
+        match spec {
+            AnalysisSpec::Reliability {
+                target_years,
+                enable_hci,
+                enable_nbti,
+                enable_em,
+                min_stress_voltage,
+            } => {
+                assert_eq!(target_years, vec![2.0, 7.0, 15.0]);
+                assert!(enable_hci);
+                assert!(!enable_nbti);
+                assert!(enable_em);
+                assert!((min_stress_voltage - 0.2).abs() < 1e-12);
+            }
+            other => panic!("expected Reliability spec, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_analysis_spec_for_optimization_uses_dialog_configuration() {
+        use crate::simulation::dialog::optimization::{
+            OptimizationAlgorithmMode, OptimizationConfig, OptimizationGoalMode,
+            OptimizationVariableConfig,
+        };
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.optimization_state =
+            crate::simulation::dialog::optimization::OptimizationDialogState::from_config(
+                &OptimizationConfig {
+                    variables: vec![OptimizationVariableConfig {
+                        name: "RLOAD".to_string(),
+                        min: 500.0,
+                        max: 5_000.0,
+                        initial: 1_000.0,
+                    }],
+                    objective_node: "out".to_string(),
+                    objective_ref: "0".to_string(),
+                    goal_mode: OptimizationGoalMode::Target,
+                    target_value: Some(1.1),
+                    algorithm: OptimizationAlgorithmMode::PatternSearch,
+                    max_iterations: 80,
+                    cost_tolerance: 1e-9,
+                    fd_step: 1e-4,
+                    initial_step: 0.2,
+                    min_step: 1e-8,
+                },
+            );
+
+        let spec = controller
+            .build_analysis_spec_for_index(&state, 22)
+            .expect("Optimization spec should build");
+        match spec {
+            AnalysisSpec::Optimization {
+                variables,
+                objective_node,
+                objective_ref,
+                goal,
+                target,
+                algorithm,
+                max_iterations,
+                cost_tolerance,
+                ..
+            } => {
+                assert_eq!(variables.len(), 1);
+                assert_eq!(variables[0].name, "RLOAD");
+                assert_eq!(objective_node, "out");
+                assert_eq!(objective_ref, "0");
+                assert!(matches!(goal, OptimizationGoal::Target));
+                assert_eq!(target, Some(1.1));
+                assert!(matches!(algorithm, OptimizationAlgorithm::PatternSearch));
+                assert_eq!(max_iterations, 80);
+                assert!((cost_tolerance - 1e-9).abs() < 1e-18);
+            }
+            other => panic!("expected Optimization spec, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_analysis_spec_for_soa_uses_dialog_configuration() {
+        use crate::simulation::dialog::soa::SoaConfig;
+
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.soa_state =
+            crate::simulation::dialog::soa::SoaDialogState::from_config(&SoaConfig {
+                stop_time: 2e-6,
+                step_time: 5e-9,
+                check_vgs_max: true,
+                max_vgs: 1.6,
+                check_vds_max: false,
+                max_vds: 3.3,
+                check_vbe_max: true,
+                max_vbe: 0.8,
+                check_vce_max: false,
+                max_vce: 5.0,
+            });
+
+        let spec = controller
+            .build_analysis_spec_for_index(&state, 23)
+            .expect("SOA spec should build");
+        match spec {
+            AnalysisSpec::Soa {
+                stop_time,
+                step_time,
+                check_vgs_max,
+                max_vgs,
+                check_vds_max,
+                check_vbe_max,
+                max_vbe,
+                check_vce_max,
+                ..
+            } => {
+                assert!((stop_time - 2e-6).abs() < 1e-15);
+                assert!((step_time - 5e-9).abs() < 1e-18);
+                assert!(check_vgs_max);
+                assert!((max_vgs - 1.6).abs() < 1e-12);
+                assert!(!check_vds_max);
+                assert!(check_vbe_max);
+                assert!((max_vbe - 0.8).abs() < 1e-12);
+                assert!(!check_vce_max);
+            }
+            other => panic!("expected SOA spec, got {:?}", other),
         }
     }
 

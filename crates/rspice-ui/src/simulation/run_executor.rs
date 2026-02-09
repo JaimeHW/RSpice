@@ -985,6 +985,169 @@ impl RunExecutor {
                     Err(e) => Err(e),
                 }
             }
+            AnalysisSpec::SParameter {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                sweep,
+                z0,
+                port1_pos,
+                port1_neg,
+                port2_pos,
+                port2_neg,
+            } => {
+                let sweep = match sweep {
+                    super::multi_run::FrequencySweep::Decade => {
+                        simulation_runner::SParameterSweep::Decade
+                    }
+                    super::multi_run::FrequencySweep::Octave => {
+                        simulation_runner::SParameterSweep::Octave
+                    }
+                    super::multi_run::FrequencySweep::Linear => {
+                        simulation_runner::SParameterSweep::Linear
+                    }
+                };
+                let cfg = simulation_runner::SParameterRunConfig {
+                    start_freq: *start_freq,
+                    stop_freq: *stop_freq,
+                    points_per_unit: *points_per_unit,
+                    sweep,
+                    z0: *z0,
+                    ports: [
+                        simulation_runner::SParameterPort {
+                            node_pos: port1_pos.clone(),
+                            node_neg: port1_neg.clone(),
+                        },
+                        simulation_runner::SParameterPort {
+                            node_pos: port2_pos.clone(),
+                            node_neg: port2_neg.clone(),
+                        },
+                    ],
+                };
+                let sp_result = simulation_runner::run_sparameter_analysis(netlist, &cfg);
+                match sp_result {
+                    Ok(data) => {
+                        let freq = data.frequencies.clone();
+                        let waveforms = vec![
+                            MappedWaveform::complex_ac(
+                                "S11",
+                                freq.clone(),
+                                data.s11.iter().map(|v| v.re).collect(),
+                                data.s11.iter().map(|v| v.im).collect(),
+                            ),
+                            MappedWaveform::complex_ac(
+                                "S21",
+                                freq.clone(),
+                                data.s21.iter().map(|v| v.re).collect(),
+                                data.s21.iter().map(|v| v.im).collect(),
+                            ),
+                            MappedWaveform::complex_ac(
+                                "S12",
+                                freq.clone(),
+                                data.s12.iter().map(|v| v.re).collect(),
+                                data.s12.iter().map(|v| v.im).collect(),
+                            ),
+                            MappedWaveform::complex_ac(
+                                "S22",
+                                freq,
+                                data.s22.iter().map(|v| v.re).collect(),
+                                data.s22.iter().map(|v| v.im).collect(),
+                            ),
+                        ];
+
+                        Ok(MappedResult {
+                            analysis_type: MappedAnalysisType::SParameter,
+                            status: ResultStatus::Success,
+                            waveforms,
+                            ..Default::default()
+                        })
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            AnalysisSpec::Envelope {
+                fundamental_freq,
+                stop_time,
+                num_harmonics,
+                max_step,
+            } => {
+                let cfg = simulation_runner::EnvelopeRunConfig {
+                    fundamental_freq: *fundamental_freq,
+                    stop_time: *stop_time,
+                    num_harmonics: *num_harmonics,
+                    max_step: *max_step,
+                };
+                let env_result = simulation_runner::run_envelope_analysis(netlist, &cfg);
+                match env_result {
+                    Ok(data) => {
+                        let waveforms = data
+                            .waveforms
+                            .into_iter()
+                            .map(|(name, values)| {
+                                MappedWaveform::time_domain(name, data.time.clone(), values)
+                            })
+                            .collect();
+
+                        Ok(MappedResult {
+                            analysis_type: MappedAnalysisType::Transient,
+                            status: ResultStatus::Success,
+                            waveforms,
+                            ..Default::default()
+                        })
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            AnalysisSpec::Fourier {
+                fundamental_freq,
+                num_harmonics,
+                output_node,
+                output_ref,
+                start_time,
+                stop_time,
+            } => {
+                let cfg = simulation_runner::FourierRunConfig {
+                    fundamental_freq: *fundamental_freq,
+                    num_harmonics: *num_harmonics,
+                    output_node: output_node.clone(),
+                    output_ref: (!output_ref.trim().is_empty()).then_some(output_ref.clone()),
+                    start_time: *start_time,
+                    stop_time: *stop_time,
+                };
+                let fourier_result = simulation_runner::run_fourier_analysis(netlist, &cfg);
+                match fourier_result {
+                    Ok(data) => {
+                        let waveforms = vec![
+                            MappedWaveform::complex_ac(
+                                format!("{} Spectrum", data.output_label),
+                                data.frequencies.clone(),
+                                data.response.iter().map(|v| v.re).collect(),
+                                data.response.iter().map(|v| v.im).collect(),
+                            ),
+                            MappedWaveform::frequency_domain(
+                                "THD(%)",
+                                vec![*fundamental_freq],
+                                vec![data.thd_percent],
+                                "THD",
+                            ),
+                            MappedWaveform::frequency_domain(
+                                "DC",
+                                vec![0.0],
+                                vec![data.dc_component],
+                                "DC",
+                            ),
+                        ];
+
+                        Ok(MappedResult {
+                            analysis_type: MappedAnalysisType::Ac,
+                            status: ResultStatus::Success,
+                            waveforms,
+                            ..Default::default()
+                        })
+                    }
+                    Err(e) => Err(e),
+                }
+            }
             AnalysisSpec::MonteCarlo => {
                 let mc_result = simulation_runner::run_monte_carlo_analysis(netlist);
                 match mc_result {
@@ -1244,6 +1407,295 @@ impl RunExecutor {
                                 },
                             ],
                             warnings,
+                            ..Default::default()
+                        })
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            AnalysisSpec::Reliability {
+                target_years,
+                enable_hci,
+                enable_nbti,
+                enable_em,
+                min_stress_voltage,
+            } => {
+                let cfg = simulation_runner::ReliabilityRunConfig {
+                    target_years: target_years.clone(),
+                    enable_hci: *enable_hci,
+                    enable_nbti: *enable_nbti,
+                    enable_em: *enable_em,
+                    min_stress_voltage: *min_stress_voltage,
+                };
+                let reliability_result =
+                    simulation_runner::run_reliability_analysis_with_config(netlist, &cfg);
+                match reliability_result {
+                    Ok(data) => {
+                        let mut waveforms = Vec::new();
+                        for device in &data.device_results {
+                            let mut x_years = Vec::with_capacity(data.years.len());
+                            let mut vth = Vec::with_capacity(data.years.len());
+                            let mut mobility = Vec::with_capacity(data.years.len());
+                            let mut rds = Vec::with_capacity(data.years.len());
+
+                            for years in &data.years {
+                                let key = format!("{}y", years);
+                                let shift = device.shifts.get(&key).cloned().unwrap_or_default();
+                                x_years.push(*years);
+                                vth.push(shift.vth_shift);
+                                mobility.push(shift.mobility_shift);
+                                rds.push(shift.rds_shift);
+                            }
+
+                            waveforms.push(MappedWaveform {
+                                name: format!("DVTH({})", device.device_id),
+                                x: x_years.clone(),
+                                y: vth,
+                                x_label: "Lifetime".to_string(),
+                                y_label: "Delta Vth".to_string(),
+                                x_unit: "year".to_string(),
+                                y_unit: "V".to_string(),
+                                is_complex: false,
+                                y_imag: None,
+                            });
+                            waveforms.push(MappedWaveform {
+                                name: format!("DMU({})", device.device_id),
+                                x: x_years.clone(),
+                                y: mobility,
+                                x_label: "Lifetime".to_string(),
+                                y_label: "Delta Mobility".to_string(),
+                                x_unit: "year".to_string(),
+                                y_unit: "ratio".to_string(),
+                                is_complex: false,
+                                y_imag: None,
+                            });
+                            waveforms.push(MappedWaveform {
+                                name: format!("DRDS({})", device.device_id),
+                                x: x_years,
+                                y: rds,
+                                x_label: "Lifetime".to_string(),
+                                y_label: "Delta Rds".to_string(),
+                                x_unit: "year".to_string(),
+                                y_unit: "ratio".to_string(),
+                                is_complex: false,
+                                y_imag: None,
+                            });
+                        }
+
+                        Ok(MappedResult {
+                            analysis_type: MappedAnalysisType::Parametric,
+                            status: ResultStatus::Success,
+                            waveforms,
+                            measurements: vec![
+                                MappedMeasurement {
+                                    name: "devices_analyzed".to_string(),
+                                    meas_type: MeasurementType::Custom,
+                                    value: data.device_results.len() as f64,
+                                    unit: "count".to_string(),
+                                    signal: "reliability".to_string(),
+                                    status: MeasurementStatus::Success,
+                                },
+                                MappedMeasurement {
+                                    name: "lifetime_points".to_string(),
+                                    meas_type: MeasurementType::Custom,
+                                    value: data.years.len() as f64,
+                                    unit: "count".to_string(),
+                                    signal: "reliability".to_string(),
+                                    status: MeasurementStatus::Success,
+                                },
+                            ],
+                            ..Default::default()
+                        })
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            AnalysisSpec::Optimization {
+                variables,
+                objective_node,
+                objective_ref,
+                goal,
+                target,
+                algorithm,
+                max_iterations,
+                cost_tolerance,
+                fd_step,
+                initial_step,
+                min_step,
+            } => {
+                let cfg = simulation_runner::OptimizationRunConfig {
+                    variables: variables
+                        .iter()
+                        .map(|var| simulation_runner::OptimizationVariable {
+                            name: var.name.clone(),
+                            min: var.min,
+                            max: var.max,
+                            initial: var.initial,
+                        })
+                        .collect(),
+                    objective_node: objective_node.clone(),
+                    objective_ref: objective_ref.clone(),
+                    goal: match goal {
+                        super::multi_run::OptimizationGoal::Minimize => {
+                            simulation_runner::OptimizationGoalMode::Minimize
+                        }
+                        super::multi_run::OptimizationGoal::Maximize => {
+                            simulation_runner::OptimizationGoalMode::Maximize
+                        }
+                        super::multi_run::OptimizationGoal::Target => {
+                            simulation_runner::OptimizationGoalMode::Target
+                        }
+                    },
+                    target: *target,
+                    algorithm: match algorithm {
+                        super::multi_run::OptimizationAlgorithm::GradientDescent => {
+                            simulation_runner::OptimizationAlgorithmMode::GradientDescent
+                        }
+                        super::multi_run::OptimizationAlgorithm::PatternSearch => {
+                            simulation_runner::OptimizationAlgorithmMode::PatternSearch
+                        }
+                        super::multi_run::OptimizationAlgorithm::SimulatedAnnealing => {
+                            simulation_runner::OptimizationAlgorithmMode::SimulatedAnnealing
+                        }
+                    },
+                    max_iterations: *max_iterations,
+                    cost_tolerance: *cost_tolerance,
+                    fd_step: *fd_step,
+                    initial_step: *initial_step,
+                    min_step: *min_step,
+                };
+
+                match simulation_runner::run_optimization_analysis_with_config(netlist, &cfg) {
+                    Ok(data) => {
+                        let mut waveforms = vec![MappedWaveform {
+                            name: "Optimization Cost".to_string(),
+                            x: data.iterations.clone(),
+                            y: data.costs.clone(),
+                            x_label: "Iteration".to_string(),
+                            y_label: "Cost".to_string(),
+                            x_unit: "iter".to_string(),
+                            y_unit: "cost".to_string(),
+                            is_complex: false,
+                            y_imag: None,
+                        }];
+                        for (name, values) in &data.variable_traces {
+                            waveforms.push(MappedWaveform {
+                                name: format!("Var({})", name),
+                                x: data.iterations.clone(),
+                                y: values.clone(),
+                                x_label: "Iteration".to_string(),
+                                y_label: "Value".to_string(),
+                                x_unit: "iter".to_string(),
+                                y_unit: "".to_string(),
+                                is_complex: false,
+                                y_imag: None,
+                            });
+                        }
+
+                        let mut measurements = vec![
+                            MappedMeasurement {
+                                name: "best_cost".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: data.best_cost,
+                                unit: "cost".to_string(),
+                                signal: "optimization".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                            MappedMeasurement {
+                                name: "converged".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: if data.converged { 1.0 } else { 0.0 },
+                                unit: "bool".to_string(),
+                                signal: "optimization".to_string(),
+                                status: MeasurementStatus::Success,
+                            },
+                        ];
+                        for (name, value) in &data.best_variables {
+                            measurements.push(MappedMeasurement {
+                                name: format!("best_{}", name),
+                                meas_type: MeasurementType::Custom,
+                                value: *value,
+                                unit: "".to_string(),
+                                signal: name.clone(),
+                                status: MeasurementStatus::Success,
+                            });
+                        }
+
+                        Ok(MappedResult {
+                            analysis_type: MappedAnalysisType::Parametric,
+                            status: ResultStatus::Success,
+                            waveforms,
+                            measurements,
+                            ..Default::default()
+                        })
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            AnalysisSpec::Soa {
+                stop_time,
+                step_time,
+                check_vgs_max,
+                max_vgs,
+                check_vds_max,
+                max_vds,
+                check_vbe_max,
+                max_vbe,
+                check_vce_max,
+                max_vce,
+            } => {
+                let cfg = simulation_runner::SoaRunConfig {
+                    stop_time: *stop_time,
+                    step_time: *step_time,
+                    check_vgs_max: *check_vgs_max,
+                    max_vgs: *max_vgs,
+                    check_vds_max: *check_vds_max,
+                    max_vds: *max_vds,
+                    check_vbe_max: *check_vbe_max,
+                    max_vbe: *max_vbe,
+                    check_vce_max: *check_vce_max,
+                    max_vce: *max_vce,
+                };
+                match simulation_runner::run_soa_analysis_with_config(netlist, &cfg) {
+                    Ok(data) => {
+                        let mut measurements = vec![MappedMeasurement {
+                            name: "num_violations".to_string(),
+                            meas_type: MeasurementType::Custom,
+                            value: data.violations.len() as f64,
+                            unit: "count".to_string(),
+                            signal: "soa".to_string(),
+                            status: MeasurementStatus::Success,
+                        }];
+                        if let Some(first) = data.violations.first() {
+                            measurements.push(MappedMeasurement {
+                                name: "first_violation_time".to_string(),
+                                meas_type: MeasurementType::Custom,
+                                value: first.time,
+                                unit: "s".to_string(),
+                                signal: "soa".to_string(),
+                                status: MeasurementStatus::Success,
+                            });
+                        }
+
+                        Ok(MappedResult {
+                            analysis_type: MappedAnalysisType::Transient,
+                            status: if data.violations.is_empty() {
+                                ResultStatus::Success
+                            } else {
+                                ResultStatus::Warning
+                            },
+                            waveforms: vec![MappedWaveform {
+                                name: "SOA Violation Count".to_string(),
+                                x: data.time,
+                                y: data.violation_count,
+                                x_label: "Time".to_string(),
+                                y_label: "Violation Count".to_string(),
+                                x_unit: "s".to_string(),
+                                y_unit: "count".to_string(),
+                                is_complex: false,
+                                y_imag: None,
+                            }],
+                            measurements,
                             ..Default::default()
                         })
                     }
@@ -1865,6 +2317,12 @@ impl RunExecutor {
             AnalysisRunType::MonteCarlo => MappedAnalysisType::MonteCarlo,
             AnalysisRunType::Parametric => MappedAnalysisType::Parametric,
             AnalysisRunType::Corner => MappedAnalysisType::Corner,
+            AnalysisRunType::Reliability => MappedAnalysisType::Parametric,
+            AnalysisRunType::Optimization => MappedAnalysisType::Parametric,
+            AnalysisRunType::Soa => MappedAnalysisType::Transient,
+            AnalysisRunType::SParameter => MappedAnalysisType::SParameter,
+            AnalysisRunType::Envelope => MappedAnalysisType::Transient,
+            AnalysisRunType::Fourier => MappedAnalysisType::Ac,
         }
     }
 
@@ -2155,6 +2613,12 @@ mod tests {
             (AnalysisRunType::Pxf, MappedAnalysisType::Pxf),
             (AnalysisRunType::Pstb, MappedAnalysisType::Pstb),
             (AnalysisRunType::Stb, MappedAnalysisType::Stb),
+            (AnalysisRunType::Reliability, MappedAnalysisType::Parametric),
+            (
+                AnalysisRunType::Optimization,
+                MappedAnalysisType::Parametric,
+            ),
+            (AnalysisRunType::Soa, MappedAnalysisType::Transient),
         ];
 
         for (run_type, expected) in mappings {
@@ -2724,6 +3188,137 @@ mod tests {
         let results = executor.execute_corners(&base_queue, &corners);
         assert_eq!(results.len(), 1);
         assert!(results.contains_key("tt"));
+    }
+
+    #[test]
+    fn test_reliability_analysis_with_spec_is_executed() {
+        let executor = RunExecutor::new();
+        let mut queue = RunQueue::new().with_netlist(
+            "* reliability\nVDD vdd 0 1.8\nVG g 0 1.2\nR1 vdd d 1k\nM1 d g 0 0 NM W=10u L=1u\n.model NM NMOS VTO=0.7 KP=200u LAMBDA=0.02\n.end\n",
+        );
+        queue.add_analysis(AnalysisSpec::Reliability {
+            target_years: vec![1.0, 5.0, 10.0],
+            enable_hci: true,
+            enable_nbti: true,
+            enable_em: false,
+            min_stress_voltage: 0.05,
+        });
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.total_runs, 1);
+        assert!(
+            result.errors.is_empty(),
+            "expected reliability run to succeed, got errors: {:?}",
+            result.errors
+        );
+
+        let mapped = result
+            .results
+            .values()
+            .next()
+            .expect("expected mapped reliability result");
+        assert_eq!(mapped.analysis_type, MappedAnalysisType::Parametric);
+        assert!(
+            !mapped.waveforms.is_empty(),
+            "expected reliability waveforms"
+        );
+        assert!(mapped
+            .waveforms
+            .iter()
+            .any(|wf| wf.name.starts_with("DVTH(") || wf.name.starts_with("DRDS(")));
+        assert!(mapped
+            .measurements
+            .iter()
+            .any(|m| m.name == "devices_analyzed"));
+    }
+
+    #[test]
+    fn test_optimization_analysis_with_spec_is_executed() {
+        let executor = RunExecutor::new();
+        let mut queue = RunQueue::new().with_netlist(
+            "* optimization\n.param RTOP=1k\n.param RBOT=1k\nV1 in 0 2\nR1 in out {RTOP}\nR2 out 0 {RBOT}\n.end\n",
+        );
+        queue.add_analysis(AnalysisSpec::Optimization {
+            variables: vec![super::super::multi_run::OptimizationVariable {
+                name: "RBOT".to_string(),
+                min: 500.0,
+                max: 3000.0,
+                initial: 1000.0,
+            }],
+            objective_node: "out".to_string(),
+            objective_ref: "0".to_string(),
+            goal: super::super::multi_run::OptimizationGoal::Target,
+            target: Some(1.2),
+            algorithm: super::super::multi_run::OptimizationAlgorithm::PatternSearch,
+            max_iterations: 48,
+            cost_tolerance: 1e-8,
+            fd_step: 1e-4,
+            initial_step: 0.2,
+            min_step: 1e-8,
+        });
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.total_runs, 1);
+        assert!(
+            result.errors.is_empty(),
+            "expected optimization run to succeed, got errors: {:?}",
+            result.errors
+        );
+
+        let mapped = result
+            .results
+            .values()
+            .next()
+            .expect("expected mapped optimization result");
+        assert_eq!(mapped.analysis_type, MappedAnalysisType::Parametric);
+        assert!(mapped
+            .waveforms
+            .iter()
+            .any(|wf| wf.name == "Optimization Cost"));
+        assert!(mapped.measurements.iter().any(|m| m.name == "best_cost"));
+    }
+
+    #[test]
+    fn test_soa_analysis_with_spec_is_executed() {
+        let executor = RunExecutor::new();
+        let mut queue = RunQueue::new().with_netlist(
+            "* soa\nVDD d 0 3.3\nVG g 0 PULSE(0 2.5 0 1n 1n 8n 16n)\nM1 d g 0 0 NM W=10u L=1u\n.model NM NMOS VTO=0.7 KP=200u LAMBDA=0.02\n.end\n",
+        );
+        queue.add_analysis(AnalysisSpec::Soa {
+            stop_time: 32e-9,
+            step_time: 1e-9,
+            check_vgs_max: true,
+            max_vgs: 1.2,
+            check_vds_max: true,
+            max_vds: 3.0,
+            check_vbe_max: false,
+            max_vbe: 0.9,
+            check_vce_max: false,
+            max_vce: 5.0,
+        });
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.total_runs, 1);
+        assert!(
+            result.errors.is_empty(),
+            "expected SOA run to succeed, got errors: {:?}",
+            result.errors
+        );
+
+        let mapped = result
+            .results
+            .values()
+            .next()
+            .expect("expected mapped SOA result");
+        assert_eq!(mapped.analysis_type, MappedAnalysisType::Transient);
+        assert!(mapped
+            .waveforms
+            .iter()
+            .any(|wf| wf.name == "SOA Violation Count"));
+        assert!(mapped
+            .measurements
+            .iter()
+            .any(|m| m.name == "num_violations"));
     }
 
     #[test]

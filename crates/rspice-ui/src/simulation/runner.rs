@@ -371,6 +371,28 @@ fn run_simulation_thread(
                         });
                     }
                 }
+                AnalysisSpec::SParameter {
+                    start_freq,
+                    stop_freq,
+                    ..
+                } => p.update_status(SimulationStatus::AcAnalysis {
+                    freq: *start_freq,
+                    stop_freq: *stop_freq,
+                }),
+                AnalysisSpec::Envelope { stop_time, .. } => {
+                    p.update_status(SimulationStatus::Transient {
+                        time: 0.0,
+                        stop_time: *stop_time,
+                    })
+                }
+                AnalysisSpec::Fourier {
+                    fundamental_freq,
+                    num_harmonics,
+                    ..
+                } => p.update_status(SimulationStatus::AcAnalysis {
+                    freq: *fundamental_freq,
+                    stop_freq: *fundamental_freq * (*num_harmonics).max(1) as f64,
+                }),
                 AnalysisSpec::MonteCarlo => p.update_status(SimulationStatus::PostProcessing),
                 AnalysisSpec::Parametric => p.update_status(SimulationStatus::DcSweep {
                     source: "STEP".to_string(),
@@ -380,6 +402,18 @@ fn run_simulation_thread(
                     source: "TEMP".to_string(),
                     progress: 0.0,
                 }),
+                AnalysisSpec::Reliability { .. } => {
+                    p.update_status(SimulationStatus::PostProcessing)
+                }
+                AnalysisSpec::Optimization { .. } => {
+                    p.update_status(SimulationStatus::PostProcessing)
+                }
+                AnalysisSpec::Soa { stop_time, .. } => {
+                    p.update_status(SimulationStatus::Transient {
+                        time: 0.0,
+                        stop_time: *stop_time,
+                    })
+                }
                 AnalysisSpec::PoleZero { .. } => p.update_status(SimulationStatus::PoleZero),
                 AnalysisSpec::Sensitivity { .. } => p.update_status(SimulationStatus::Sensitivity),
                 _ => p.update_status(SimulationStatus::PostProcessing),
@@ -526,6 +560,228 @@ fn run_spec_request(
                 num_failures: data.num_failures,
             })
         }
+        AnalysisSpec::Reliability {
+            target_years,
+            enable_hci,
+            enable_nbti,
+            enable_em,
+            min_stress_voltage,
+        } => {
+            let cfg = svc_runner::ReliabilityRunConfig {
+                target_years,
+                enable_hci,
+                enable_nbti,
+                enable_em,
+                min_stress_voltage,
+            };
+            let data = svc_runner::run_reliability_analysis_with_config(netlist, &cfg)
+                .map_err(SimulationError::InvalidConfig)?;
+
+            let mut waveforms = std::collections::HashMap::new();
+            for device in &data.device_results {
+                let mut years = Vec::with_capacity(data.years.len());
+                let mut vth = Vec::with_capacity(data.years.len());
+                let mut mobility = Vec::with_capacity(data.years.len());
+                let mut rds = Vec::with_capacity(data.years.len());
+
+                for years_key in &data.years {
+                    let key = format!("{}y", years_key);
+                    let shift = device.shifts.get(&key).cloned().unwrap_or_default();
+                    years.push(*years_key);
+                    vth.push(shift.vth_shift);
+                    mobility.push(shift.mobility_shift);
+                    rds.push(shift.rds_shift);
+                }
+
+                let vth_name = format!("DVTH({})", device.device_id);
+                waveforms.insert(
+                    vth_name.clone(),
+                    WaveformData {
+                        name: vth_name,
+                        x_values: years.clone(),
+                        y_values: vth,
+                        y_unit: "V".to_string(),
+                        x_unit: "year".to_string(),
+                        is_complex: false,
+                        y_imag: None,
+                    },
+                );
+
+                let mobility_name = format!("DMU({})", device.device_id);
+                waveforms.insert(
+                    mobility_name.clone(),
+                    WaveformData {
+                        name: mobility_name,
+                        x_values: years.clone(),
+                        y_values: mobility,
+                        y_unit: "ratio".to_string(),
+                        x_unit: "year".to_string(),
+                        is_complex: false,
+                        y_imag: None,
+                    },
+                );
+
+                let rds_name = format!("DRDS({})", device.device_id);
+                waveforms.insert(
+                    rds_name.clone(),
+                    WaveformData {
+                        name: rds_name,
+                        x_values: years,
+                        y_values: rds,
+                        y_unit: "ratio".to_string(),
+                        x_unit: "year".to_string(),
+                        is_complex: false,
+                        y_imag: None,
+                    },
+                );
+            }
+
+            Ok(SimulationResult::Reliability {
+                years: data.years,
+                waveforms,
+                device_results: data.device_results,
+            })
+        }
+        AnalysisSpec::Optimization {
+            variables,
+            objective_node,
+            objective_ref,
+            goal,
+            target,
+            algorithm,
+            max_iterations,
+            cost_tolerance,
+            fd_step,
+            initial_step,
+            min_step,
+        } => {
+            let cfg = svc_runner::OptimizationRunConfig {
+                variables: variables
+                    .into_iter()
+                    .map(|var| svc_runner::OptimizationVariable {
+                        name: var.name,
+                        min: var.min,
+                        max: var.max,
+                        initial: var.initial,
+                    })
+                    .collect(),
+                objective_node,
+                objective_ref,
+                goal: match goal {
+                    crate::simulation::multi_run::OptimizationGoal::Minimize => {
+                        svc_runner::OptimizationGoalMode::Minimize
+                    }
+                    crate::simulation::multi_run::OptimizationGoal::Maximize => {
+                        svc_runner::OptimizationGoalMode::Maximize
+                    }
+                    crate::simulation::multi_run::OptimizationGoal::Target => {
+                        svc_runner::OptimizationGoalMode::Target
+                    }
+                },
+                target,
+                algorithm: match algorithm {
+                    crate::simulation::multi_run::OptimizationAlgorithm::GradientDescent => {
+                        svc_runner::OptimizationAlgorithmMode::GradientDescent
+                    }
+                    crate::simulation::multi_run::OptimizationAlgorithm::PatternSearch => {
+                        svc_runner::OptimizationAlgorithmMode::PatternSearch
+                    }
+                    crate::simulation::multi_run::OptimizationAlgorithm::SimulatedAnnealing => {
+                        svc_runner::OptimizationAlgorithmMode::SimulatedAnnealing
+                    }
+                },
+                max_iterations,
+                cost_tolerance,
+                fd_step,
+                initial_step,
+                min_step,
+            };
+
+            let data = svc_runner::run_optimization_analysis_with_config(netlist, &cfg)
+                .map_err(SimulationError::InvalidConfig)?;
+
+            let mut waveforms = std::collections::HashMap::new();
+            waveforms.insert(
+                "OPT_COST".to_string(),
+                WaveformData {
+                    name: "OPT_COST".to_string(),
+                    x_values: data.iterations.clone(),
+                    y_values: data.costs.clone(),
+                    y_unit: "cost".to_string(),
+                    x_unit: "iter".to_string(),
+                    is_complex: false,
+                    y_imag: None,
+                },
+            );
+            for (name, values) in &data.variable_traces {
+                let wf_name = format!("OPT_{}", name);
+                waveforms.insert(
+                    wf_name.clone(),
+                    WaveformData {
+                        name: wf_name,
+                        x_values: data.iterations.clone(),
+                        y_values: values.clone(),
+                        y_unit: "value".to_string(),
+                        x_unit: "iter".to_string(),
+                        is_complex: false,
+                        y_imag: None,
+                    },
+                );
+            }
+
+            Ok(SimulationResult::Optimization {
+                iterations: data.iterations,
+                waveforms,
+                best_cost: data.best_cost,
+                best_variables: data.best_variables,
+                converged: data.converged,
+            })
+        }
+        AnalysisSpec::Soa {
+            stop_time,
+            step_time,
+            check_vgs_max,
+            max_vgs,
+            check_vds_max,
+            max_vds,
+            check_vbe_max,
+            max_vbe,
+            check_vce_max,
+            max_vce,
+        } => {
+            let cfg = svc_runner::SoaRunConfig {
+                stop_time,
+                step_time,
+                check_vgs_max,
+                max_vgs,
+                check_vds_max,
+                max_vds,
+                check_vbe_max,
+                max_vbe,
+                check_vce_max,
+                max_vce,
+            };
+            let data = svc_runner::run_soa_analysis_with_config(netlist, &cfg)
+                .map_err(SimulationError::InvalidConfig)?;
+            let mut waveforms = std::collections::HashMap::new();
+            waveforms.insert(
+                "SOA_VIOLATION_COUNT".to_string(),
+                WaveformData {
+                    name: "SOA_VIOLATION_COUNT".to_string(),
+                    x_values: data.time.clone(),
+                    y_values: data.violation_count.clone(),
+                    y_unit: "count".to_string(),
+                    x_unit: "s".to_string(),
+                    is_complex: false,
+                    y_imag: None,
+                },
+            );
+            Ok(SimulationResult::Soa {
+                time: data.time,
+                waveforms,
+                violations: data.violations,
+            })
+        }
         AnalysisSpec::Pss {
             fundamental_freq,
             num_harmonics,
@@ -591,6 +847,177 @@ fn run_spec_request(
 
             Ok(SimulationResult::Ac {
                 frequencies,
+                waveforms,
+            })
+        }
+        AnalysisSpec::SParameter {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+            z0,
+            port1_pos,
+            port1_neg,
+            port2_pos,
+            port2_neg,
+        } => {
+            let sweep = match sweep {
+                crate::simulation::multi_run::FrequencySweep::Decade => {
+                    svc_runner::SParameterSweep::Decade
+                }
+                crate::simulation::multi_run::FrequencySweep::Octave => {
+                    svc_runner::SParameterSweep::Octave
+                }
+                crate::simulation::multi_run::FrequencySweep::Linear => {
+                    svc_runner::SParameterSweep::Linear
+                }
+            };
+            let cfg = svc_runner::SParameterRunConfig {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                sweep,
+                z0,
+                ports: [
+                    svc_runner::SParameterPort {
+                        node_pos: port1_pos,
+                        node_neg: port1_neg,
+                    },
+                    svc_runner::SParameterPort {
+                        node_pos: port2_pos,
+                        node_neg: port2_neg,
+                    },
+                ],
+            };
+            let data = svc_runner::run_sparameter_analysis(netlist, &cfg)
+                .map_err(SimulationError::InvalidConfig)?;
+            let mut waveforms = std::collections::HashMap::new();
+            waveforms.insert(
+                "S11".to_string(),
+                WaveformData::new_complex(
+                    "S11".to_string(),
+                    data.frequencies.clone(),
+                    data.s11.iter().map(|value| value.re).collect(),
+                    data.s11.iter().map(|value| value.im).collect(),
+                ),
+            );
+            waveforms.insert(
+                "S21".to_string(),
+                WaveformData::new_complex(
+                    "S21".to_string(),
+                    data.frequencies.clone(),
+                    data.s21.iter().map(|value| value.re).collect(),
+                    data.s21.iter().map(|value| value.im).collect(),
+                ),
+            );
+            waveforms.insert(
+                "S12".to_string(),
+                WaveformData::new_complex(
+                    "S12".to_string(),
+                    data.frequencies.clone(),
+                    data.s12.iter().map(|value| value.re).collect(),
+                    data.s12.iter().map(|value| value.im).collect(),
+                ),
+            );
+            waveforms.insert(
+                "S22".to_string(),
+                WaveformData::new_complex(
+                    "S22".to_string(),
+                    data.frequencies.clone(),
+                    data.s22.iter().map(|value| value.re).collect(),
+                    data.s22.iter().map(|value| value.im).collect(),
+                ),
+            );
+
+            Ok(SimulationResult::Ac {
+                frequencies: data.frequencies,
+                waveforms,
+            })
+        }
+        AnalysisSpec::Envelope {
+            fundamental_freq,
+            stop_time,
+            num_harmonics,
+            max_step,
+        } => {
+            let cfg = svc_runner::EnvelopeRunConfig {
+                fundamental_freq,
+                stop_time,
+                num_harmonics,
+                max_step,
+            };
+            let data = svc_runner::run_envelope_analysis(netlist, &cfg)
+                .map_err(SimulationError::InvalidConfig)?;
+            let waveforms: std::collections::HashMap<String, WaveformData> = data
+                .waveforms
+                .into_iter()
+                .map(|(name, values)| {
+                    (
+                        name.clone(),
+                        WaveformData::new_time_domain(name, data.time.clone(), values),
+                    )
+                })
+                .collect();
+            Ok(SimulationResult::Transient {
+                time: data.time,
+                waveforms,
+            })
+        }
+        AnalysisSpec::Fourier {
+            fundamental_freq,
+            num_harmonics,
+            output_node,
+            output_ref,
+            start_time,
+            stop_time,
+        } => {
+            let output_ref = (!output_ref.trim().is_empty()).then_some(output_ref);
+            let cfg = svc_runner::FourierRunConfig {
+                fundamental_freq,
+                num_harmonics,
+                output_node,
+                output_ref,
+                start_time,
+                stop_time,
+            };
+            let data = svc_runner::run_fourier_analysis(netlist, &cfg)
+                .map_err(SimulationError::InvalidConfig)?;
+            let mut waveforms = std::collections::HashMap::new();
+            waveforms.insert(
+                format!("{} Spectrum", data.output_label),
+                WaveformData::new_complex(
+                    format!("{} Spectrum", data.output_label),
+                    data.frequencies.clone(),
+                    data.response.iter().map(|value| value.re).collect(),
+                    data.response.iter().map(|value| value.im).collect(),
+                ),
+            );
+            waveforms.insert(
+                "THD(%)".to_string(),
+                WaveformData {
+                    name: "THD(%)".to_string(),
+                    x_values: vec![fundamental_freq],
+                    y_values: vec![data.thd_percent],
+                    y_unit: "%".to_string(),
+                    x_unit: "Hz".to_string(),
+                    is_complex: false,
+                    y_imag: None,
+                },
+            );
+            waveforms.insert(
+                "DC".to_string(),
+                WaveformData {
+                    name: "DC".to_string(),
+                    x_values: vec![0.0],
+                    y_values: vec![data.dc_component],
+                    y_unit: "V".to_string(),
+                    x_unit: "Hz".to_string(),
+                    is_complex: false,
+                    y_imag: None,
+                },
+            );
+            Ok(SimulationResult::Ac {
+                frequencies: data.frequencies,
                 waveforms,
             })
         }
@@ -1487,6 +1914,288 @@ C1 out 0 1n
                 );
             }
             other => panic!("Expected AC result for HB, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_sparameter() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* S-parameter smoke
+R1 in 0 50
+R2 out 0 50
+.end
+"#
+        .to_string();
+
+        runner
+            .start_spec(
+                AnalysisSpec::SParameter {
+                    start_freq: 1e3,
+                    stop_freq: 1e6,
+                    points_per_unit: 5,
+                    sweep: crate::simulation::multi_run::FrequencySweep::Decade,
+                    z0: 50.0,
+                    port1_pos: "in".to_string(),
+                    port1_neg: "0".to_string(),
+                    port2_pos: "out".to_string(),
+                    port2_neg: "0".to_string(),
+                },
+                netlist,
+            )
+            .expect("S-parameter spec should start");
+
+        let result = wait_for_result(&mut runner, Duration::from_secs(5));
+        assert!(result.is_some(), "Expected S-parameter result");
+        let result = result.unwrap().expect("S-parameter should succeed");
+        match result {
+            SimulationResult::Ac {
+                frequencies,
+                waveforms,
+            } => {
+                assert!(!frequencies.is_empty());
+                assert!(waveforms.contains_key("S11"));
+                assert!(waveforms.contains_key("S21"));
+                assert!(waveforms.contains_key("S12"));
+                assert!(waveforms.contains_key("S22"));
+                assert!(waveforms
+                    .values()
+                    .all(|wf| wf.is_complex && wf.y_imag.as_ref().is_some()));
+            }
+            other => panic!("Expected AC result for S-parameter, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_envelope() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* Envelope smoke
+V1 out 0 SIN(0 1 1Meg 0 0 0)
+R1 out 0 1k
+.end
+"#
+        .to_string();
+
+        runner
+            .start_spec(
+                AnalysisSpec::Envelope {
+                    fundamental_freq: 1e6,
+                    stop_time: 2e-6,
+                    num_harmonics: 9,
+                    max_step: None,
+                },
+                netlist,
+            )
+            .expect("Envelope spec should start");
+
+        let result = wait_for_result(&mut runner, Duration::from_secs(20));
+        assert!(result.is_some(), "Expected envelope result");
+        let result = result.unwrap().expect("Envelope should succeed");
+        match result {
+            SimulationResult::Transient { time, waveforms } => {
+                assert!(!time.is_empty());
+                assert!(!waveforms.is_empty());
+                assert!(waveforms.keys().all(|name| name.starts_with("ENV(")));
+            }
+            other => panic!("Expected Transient result for envelope, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_fourier() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* Fourier smoke
+V1 out 0 SIN(0 1 1k 0 0 0)
+R1 out 0 1k
+.end
+"#
+        .to_string();
+
+        runner
+            .start_spec(
+                AnalysisSpec::Fourier {
+                    fundamental_freq: 1e3,
+                    num_harmonics: 8,
+                    output_node: "out".to_string(),
+                    output_ref: "".to_string(),
+                    start_time: 0.0,
+                    stop_time: 10e-3,
+                },
+                netlist,
+            )
+            .expect("Fourier spec should start");
+
+        let result = wait_for_result(&mut runner, Duration::from_secs(20));
+        assert!(result.is_some(), "Expected Fourier result");
+        let result = result.unwrap().expect("Fourier should succeed");
+        match result {
+            SimulationResult::Ac {
+                frequencies,
+                waveforms,
+            } => {
+                assert!(!frequencies.is_empty());
+                assert!(
+                    waveforms.keys().any(|name| name.contains("Spectrum")),
+                    "expected Fourier spectrum waveform"
+                );
+                assert!(waveforms.contains_key("THD(%)"));
+                assert!(waveforms.contains_key("DC"));
+            }
+            other => panic!("Expected AC result for Fourier, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_reliability() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* Reliability smoke
+VDD vdd 0 1.8
+VG g 0 1.2
+R1 vdd d 1k
+M1 d g 0 0 NM W=10u L=1u
+.model NM NMOS VTO=0.7 KP=200u LAMBDA=0.02
+.end
+"#
+        .to_string();
+
+        runner
+            .start_spec(
+                AnalysisSpec::Reliability {
+                    target_years: vec![1.0, 5.0, 10.0],
+                    enable_hci: true,
+                    enable_nbti: true,
+                    enable_em: false,
+                    min_stress_voltage: 0.05,
+                },
+                netlist,
+            )
+            .expect("Reliability spec should start");
+
+        let result = wait_for_result(&mut runner, Duration::from_secs(10));
+        assert!(result.is_some(), "Expected reliability result");
+        let result = result.unwrap().expect("Reliability should succeed");
+        match result {
+            SimulationResult::Reliability {
+                years,
+                waveforms,
+                device_results,
+            } => {
+                assert_eq!(years, vec![1.0, 5.0, 10.0]);
+                assert!(!device_results.is_empty());
+                assert!(!waveforms.is_empty());
+                assert!(waveforms
+                    .keys()
+                    .any(|name| name.starts_with("DVTH(") || name.starts_with("DRDS(")));
+            }
+            other => panic!("Expected Reliability result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_optimization() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* Optimization smoke
+.param RTOP=1k
+.param RBOT=1k
+V1 in 0 2
+R1 in out {RTOP}
+R2 out 0 {RBOT}
+.end
+"#
+        .to_string();
+
+        runner
+            .start_spec(
+                AnalysisSpec::Optimization {
+                    variables: vec![crate::simulation::multi_run::OptimizationVariable {
+                        name: "RBOT".to_string(),
+                        min: 500.0,
+                        max: 3000.0,
+                        initial: 1000.0,
+                    }],
+                    objective_node: "out".to_string(),
+                    objective_ref: "0".to_string(),
+                    goal: crate::simulation::multi_run::OptimizationGoal::Target,
+                    target: Some(1.2),
+                    algorithm: crate::simulation::multi_run::OptimizationAlgorithm::PatternSearch,
+                    max_iterations: 48,
+                    cost_tolerance: 1e-8,
+                    fd_step: 1e-4,
+                    initial_step: 0.2,
+                    min_step: 1e-8,
+                },
+                netlist,
+            )
+            .expect("Optimization spec should start");
+
+        let result = wait_for_result(&mut runner, Duration::from_secs(10));
+        assert!(result.is_some(), "Expected optimization result");
+        let result = result.unwrap().expect("Optimization should succeed");
+        match result {
+            SimulationResult::Optimization {
+                iterations,
+                waveforms,
+                best_cost,
+                ..
+            } => {
+                assert!(!iterations.is_empty());
+                assert!(!waveforms.is_empty());
+                assert!(waveforms.contains_key("OPT_COST"));
+                assert!(best_cost.is_finite());
+            }
+            other => panic!("Expected Optimization result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_soa() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* SOA smoke
+VDD d 0 3.3
+VG g 0 PULSE(0 2.5 0 1n 1n 8n 16n)
+M1 d g 0 0 NM W=10u L=1u
+.model NM NMOS VTO=0.7 KP=200u LAMBDA=0.02
+.end
+"#
+        .to_string();
+
+        runner
+            .start_spec(
+                AnalysisSpec::Soa {
+                    stop_time: 32e-9,
+                    step_time: 1e-9,
+                    check_vgs_max: true,
+                    max_vgs: 1.2,
+                    check_vds_max: true,
+                    max_vds: 3.0,
+                    check_vbe_max: false,
+                    max_vbe: 0.9,
+                    check_vce_max: false,
+                    max_vce: 5.0,
+                },
+                netlist,
+            )
+            .expect("SOA spec should start");
+
+        let result = wait_for_result(&mut runner, Duration::from_secs(10));
+        assert!(result.is_some(), "Expected SOA result");
+        let result = result.unwrap().expect("SOA should succeed");
+        match result {
+            SimulationResult::Soa {
+                time,
+                waveforms,
+                violations,
+            } => {
+                assert!(!time.is_empty());
+                assert!(waveforms.contains_key("SOA_VIOLATION_COUNT"));
+                assert!(!violations.is_empty());
+            }
+            other => panic!("Expected SOA result, got {:?}", other),
         }
     }
 

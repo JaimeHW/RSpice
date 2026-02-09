@@ -385,6 +385,12 @@ pub struct DialogState {
     pub envelope_state: crate::simulation::dialog::envelope::EnvelopeDialogState,
     // --- Fourier ---
     pub fourier_state: crate::simulation::dialog::fourier::FourierDialogState,
+    // --- Reliability ---
+    pub reliability_state: crate::simulation::dialog::reliability::ReliabilityDialogState,
+    // --- Optimization ---
+    pub optimization_state: crate::simulation::dialog::optimization::OptimizationDialogState,
+    // --- Safety (SOA) ---
+    pub soa_state: crate::simulation::dialog::soa::SoaDialogState,
     // --- DC Operating Point ---
     pub op_state: crate::simulation::dialog::op::OpDialogState,
     // --- Pole-Zero ---
@@ -1507,59 +1513,13 @@ impl RSpiceApp {
                 self.state.dialogs.fourier_state.render(ui);
             }
             21 => {
-                ui.heading("Reliability Analysis (Aging)");
-                ui.add_space(5.0);
-                ui.label(
-                    RichText::new(
-                        "Analyze long-term circuit degradation due to HCI and NBTI effects.",
-                    )
-                    .weak(),
-                );
-                ui.add_space(15.0);
-                ui.group(|ui| {
-                    ui.label(RichText::new("Aging Parameters").strong());
-                    ui.checkbox(&mut true, "Enable HCI (Hot Carrier Injection)");
-                    ui.checkbox(
-                        &mut true,
-                        "Enable NBTI (Negative Bias Temperature Instability)",
-                    );
-                    ui.horizontal(|ui| {
-                        ui.label("Simulation Lifetime:");
-                        ui.add(egui::DragValue::new(&mut 10.0));
-                        ui.label("Years");
-                    });
-                });
+                self.state.dialogs.reliability_state.render(ui);
             }
             22 => {
-                ui.heading("Optimization Engine");
-                ui.add_space(5.0);
-                ui.label(RichText::new("Automated parameter tuning to meet design goals.").weak());
-                ui.add_space(15.0);
-                ui.group(|ui| {
-                    ui.label(RichText::new("Optimizer Strategy").strong());
-                    ui.horizontal(|ui| {
-                        ui.label("Goal:");
-                        ui.label(
-                            RichText::new("Minimize Power").color(Color32::from_rgb(100, 200, 255)),
-                        );
-                    });
-                    ui.label("Iterations: 100");
-                });
+                self.state.dialogs.optimization_state.render(ui);
             }
             23 => {
-                ui.heading("Safety Checking (SOA)");
-                ui.add_space(5.0);
-                ui.label(
-                    RichText::new("Monitor Safe Operating Area violations during simulation.")
-                        .weak(),
-                );
-                ui.add_space(15.0);
-                ui.group(|ui| {
-                    ui.label(RichText::new("SOA Rules").strong());
-                    ui.checkbox(&mut true, "Check Vgs Max");
-                    ui.checkbox(&mut true, "Check Vds Max");
-                    ui.checkbox(&mut true, "Check Id Max");
-                });
+                self.state.dialogs.soa_state.render(ui);
             }
             _ => {}
         }

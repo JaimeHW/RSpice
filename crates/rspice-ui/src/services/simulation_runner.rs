@@ -8,14 +8,22 @@ use crate::output_spec::{
     resolve_sensitivity_ac_frequency, run_ac_output_at_frequency, run_dc_output_sensitivity,
     validate_sensitivity_output_spec, OutputSpec, OutputVoltageSpec,
 };
+use crate::services::safety::{SoADefinition, SoALimit, SoAManager, SoAParameter, SoAViolation};
+use crate::simulation::optimizer::{
+    DesignVar, OptimizationGoal, OptimizerAlgo, OptimizerConfig, OptimizerEngine,
+};
+use crate::simulation::reliability_engine::{
+    ParamShift, ReliabilityEngine, ReliabilityResult, StressMetrics,
+};
 use num_complex::Complex64;
 use rspice_core::analysis::ac::AcResult;
 use rspice_core::analysis::monte_carlo::Distribution;
 use rspice_core::analysis::noise::NoiseResult;
+use rspice_core::analysis::{FourierAnalysis, FourierConfig};
 use rspice_core::engine::{Engine, SimulationConfig, TransientResult};
 use rspice_core::netlist::{
-    AnalysisCommand, ElementKind, MonteCarloDistribution, SourceSpec, StepCommand, StepSweep,
-    StepTarget,
+    AnalysisCommand, Element, ElementKind, MonteCarloDistribution, SourceSpec, StepCommand,
+    StepSweep, StepTarget,
 };
 use rspice_core::solver::SimulationResult as CoreSimulationResult;
 use rspice_core::{resolve_simulation_config, SimulationConfigOverrides, Value};
@@ -384,6 +392,579 @@ pub fn run_ac_analysis(
         .map_err(|e| format!("AC analysis error: {}", e))?;
 
     Ok(AcData::from_results(results, &node_names))
+}
+
+// =============================================================================
+// S-Parameter Analysis
+// =============================================================================
+
+/// Sweep type for S-parameter analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SParameterSweep {
+    Decade,
+    Octave,
+    Linear,
+}
+
+impl SParameterSweep {
+    fn keyword(self) -> &'static str {
+        match self {
+            Self::Decade => "dec",
+            Self::Octave => "oct",
+            Self::Linear => "lin",
+        }
+    }
+}
+
+/// Port definition for S-parameter analysis.
+#[derive(Debug, Clone)]
+pub struct SParameterPort {
+    pub node_pos: String,
+    pub node_neg: String,
+}
+
+impl SParameterPort {
+    pub fn single_ended(node_pos: impl Into<String>) -> Self {
+        Self {
+            node_pos: node_pos.into(),
+            node_neg: "0".to_string(),
+        }
+    }
+}
+
+/// Explicit configuration for S-parameter execution.
+#[derive(Debug, Clone)]
+pub struct SParameterRunConfig {
+    pub start_freq: Value,
+    pub stop_freq: Value,
+    pub points_per_unit: usize,
+    pub sweep: SParameterSweep,
+    pub z0: Value,
+    pub ports: [SParameterPort; 2],
+}
+
+impl SParameterRunConfig {
+    fn validate(&self) -> Result<(), String> {
+        if !self.start_freq.is_finite() || self.start_freq <= 0.0 {
+            return Err("S-parameter start frequency must be positive".to_string());
+        }
+        if !self.stop_freq.is_finite() || self.stop_freq <= self.start_freq {
+            return Err(
+                "S-parameter stop frequency must be greater than start frequency".to_string(),
+            );
+        }
+        if self.points_per_unit == 0 {
+            return Err("S-parameter points per unit must be greater than zero".to_string());
+        }
+        if !self.z0.is_finite() || self.z0 <= 0.0 {
+            return Err("S-parameter reference impedance must be positive".to_string());
+        }
+        for (idx, port) in self.ports.iter().enumerate() {
+            if port.node_pos.trim().is_empty() {
+                return Err(format!(
+                    "S-parameter port{} positive node is required",
+                    idx + 1
+                ));
+            }
+            if port.node_neg.trim().is_empty() {
+                return Err(format!(
+                    "S-parameter port{} negative node is required",
+                    idx + 1
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// 2-port S-parameter analysis output.
+#[derive(Debug, Clone)]
+pub struct SParameterData {
+    pub frequencies: Vec<Value>,
+    pub s11: Vec<Complex64>,
+    pub s21: Vec<Complex64>,
+    pub s12: Vec<Complex64>,
+    pub s22: Vec<Complex64>,
+    pub z0: Value,
+}
+
+/// Run 2-port S-parameter analysis by solving Y-parameters from AC source injections.
+pub fn run_sparameter_analysis(
+    netlist_text: &str,
+    config: &SParameterRunConfig,
+) -> Result<SParameterData, String> {
+    config.validate()?;
+
+    let parsed_netlist = rspice_core::netlist::parse_netlist(netlist_text)
+        .map_err(|e| format!("Parse error: {}", e))?;
+
+    let frequencies = generate_freq_points(
+        config.start_freq,
+        config.stop_freq,
+        config.points_per_unit,
+        config.sweep.keyword(),
+    );
+    if frequencies.is_empty() {
+        return Err("S-parameter sweep generated no frequency points".to_string());
+    }
+
+    let mut y11 = vec![Complex64::new(0.0, 0.0); frequencies.len()];
+    let mut y12 = vec![Complex64::new(0.0, 0.0); frequencies.len()];
+    let mut y21 = vec![Complex64::new(0.0, 0.0); frequencies.len()];
+    let mut y22 = vec![Complex64::new(0.0, 0.0); frequencies.len()];
+
+    for excite_port in 0..2 {
+        let mut excited_netlist = parsed_netlist.clone();
+        let (port1_src, port2_src) =
+            inject_sparameter_port_sources(&mut excited_netlist, config, excite_port)?;
+        let engine = Engine::new(build_engine_config(&excited_netlist, None));
+        let circuit = engine
+            .build_circuit(&excited_netlist)
+            .map_err(|e| format!("S-parameter circuit build error: {}", e))?;
+        let port1_branch = circuit
+            .get_branch_by_name(&port1_src)
+            .ok_or_else(|| format!("S-parameter source '{}' branch not found", port1_src))?
+            as usize;
+        let port2_branch = circuit
+            .get_branch_by_name(&port2_src)
+            .ok_or_else(|| format!("S-parameter source '{}' branch not found", port2_src))?
+            as usize;
+
+        let ac_points = engine
+            .run_ac(&excited_netlist, &frequencies)
+            .map_err(|e| format!("S-parameter AC analysis error: {}", e))?;
+        if ac_points.len() != frequencies.len() {
+            return Err(format!(
+                "S-parameter AC returned {} points for {} requested frequencies",
+                ac_points.len(),
+                frequencies.len()
+            ));
+        }
+
+        for (idx, point) in ac_points.iter().enumerate() {
+            // AC source branch current sign is opposite to port-current-into-network.
+            let i1 = -branch_current_from_ac(point, port1_branch).ok_or_else(|| {
+                format!(
+                    "S-parameter missing branch current for {} at point {}",
+                    port1_src, idx
+                )
+            })?;
+            let i2 = -branch_current_from_ac(point, port2_branch).ok_or_else(|| {
+                format!(
+                    "S-parameter missing branch current for {} at point {}",
+                    port2_src, idx
+                )
+            })?;
+
+            if excite_port == 0 {
+                y11[idx] = i1;
+                y21[idx] = i2;
+            } else {
+                y12[idx] = i1;
+                y22[idx] = i2;
+            }
+        }
+    }
+
+    let mut s11 = Vec::with_capacity(frequencies.len());
+    let mut s21 = Vec::with_capacity(frequencies.len());
+    let mut s12 = Vec::with_capacity(frequencies.len());
+    let mut s22 = Vec::with_capacity(frequencies.len());
+
+    for idx in 0..frequencies.len() {
+        let [[sp11, sp12], [sp21, sp22]] =
+            compute_s_from_y(y11[idx], y12[idx], y21[idx], y22[idx], config.z0);
+        s11.push(sp11);
+        s12.push(sp12);
+        s21.push(sp21);
+        s22.push(sp22);
+    }
+
+    Ok(SParameterData {
+        frequencies,
+        s11,
+        s21,
+        s12,
+        s22,
+        z0: config.z0,
+    })
+}
+
+fn inject_sparameter_port_sources(
+    netlist: &mut rspice_core::Netlist,
+    config: &SParameterRunConfig,
+    excite_port: usize,
+) -> Result<(String, String), String> {
+    if excite_port > 1 {
+        return Err("S-parameter excite_port must be 0 or 1".to_string());
+    }
+
+    let name1 = unique_aux_element_name(netlist, "__RSPICE_SP_PORT1");
+    let name2 = unique_aux_element_name(netlist, "__RSPICE_SP_PORT2");
+    let mag1 = if excite_port == 0 { 1.0 } else { 0.0 };
+    let mag2 = if excite_port == 1 { 1.0 } else { 0.0 };
+
+    netlist.elements.push(Element {
+        name: name1.clone(),
+        nodes: vec![
+            config.ports[0].node_pos.clone(),
+            config.ports[0].node_neg.clone(),
+        ],
+        kind: ElementKind::VoltageSource(SourceSpec::DcAc {
+            dc_value: 0.0,
+            ac_magnitude: mag1,
+            ac_phase: 0.0,
+        }),
+    });
+    netlist.elements.push(Element {
+        name: name2.clone(),
+        nodes: vec![
+            config.ports[1].node_pos.clone(),
+            config.ports[1].node_neg.clone(),
+        ],
+        kind: ElementKind::VoltageSource(SourceSpec::DcAc {
+            dc_value: 0.0,
+            ac_magnitude: mag2,
+            ac_phase: 0.0,
+        }),
+    });
+
+    Ok((name1, name2))
+}
+
+fn unique_aux_element_name(netlist: &rspice_core::Netlist, base: &str) -> String {
+    let name_exists = |candidate: &str| {
+        netlist
+            .elements
+            .iter()
+            .any(|elem| elem.name.eq_ignore_ascii_case(candidate))
+    };
+
+    if !name_exists(base) {
+        return base.to_string();
+    }
+
+    for idx in 1.. {
+        let candidate = format!("{}_{}", base, idx);
+        if !name_exists(&candidate) {
+            return candidate;
+        }
+    }
+    unreachable!("unbounded iterator should always find a unique name");
+}
+
+fn branch_current_from_ac(point: &AcResult, branch_ordinal: usize) -> Option<Complex64> {
+    let branch_index = branch_ordinal.checked_sub(1)?;
+    point.currents.get(branch_index).copied()
+}
+
+fn compute_s_from_y(
+    y11: Complex64,
+    y12: Complex64,
+    y21: Complex64,
+    y22: Complex64,
+    z0: Value,
+) -> [[Complex64; 2]; 2] {
+    let z = Complex64::new(z0, 0.0);
+    let one = Complex64::new(1.0, 0.0);
+    let a11 = one + z * y11;
+    let a12 = z * y12;
+    let a21 = z * y21;
+    let a22 = one + z * y22;
+    let b11 = one - z * y11;
+    let b12 = -z * y12;
+    let b21 = -z * y21;
+    let b22 = one - z * y22;
+    let det_a = a11 * a22 - a12 * a21;
+    if det_a.norm() <= 1e-30 {
+        return [[Complex64::new(0.0, 0.0); 2]; 2];
+    }
+    let inv_a11 = a22 / det_a;
+    let inv_a12 = -a12 / det_a;
+    let inv_a21 = -a21 / det_a;
+    let inv_a22 = a11 / det_a;
+    [
+        [b11 * inv_a11 + b12 * inv_a21, b11 * inv_a12 + b12 * inv_a22],
+        [b21 * inv_a11 + b22 * inv_a21, b21 * inv_a12 + b22 * inv_a22],
+    ]
+}
+
+// =============================================================================
+// Envelope/Fourier Analysis
+// =============================================================================
+
+/// Configuration for envelope analysis.
+#[derive(Debug, Clone)]
+pub struct EnvelopeRunConfig {
+    pub fundamental_freq: Value,
+    pub stop_time: Value,
+    pub num_harmonics: usize,
+    pub max_step: Option<Value>,
+}
+
+impl EnvelopeRunConfig {
+    fn validate(&self) -> Result<(), String> {
+        if !self.fundamental_freq.is_finite() || self.fundamental_freq <= 0.0 {
+            return Err("Envelope fundamental frequency must be positive".to_string());
+        }
+        if !self.stop_time.is_finite() || self.stop_time <= 0.0 {
+            return Err("Envelope stop_time must be positive".to_string());
+        }
+        if self.num_harmonics == 0 {
+            return Err("Envelope num_harmonics must be > 0".to_string());
+        }
+        if let Some(step) = self.max_step {
+            if !step.is_finite() || step <= 0.0 {
+                return Err("Envelope max_step must be positive when provided".to_string());
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Envelope analysis output.
+#[derive(Debug, Clone)]
+pub struct EnvelopeData {
+    pub time: Vec<Value>,
+    pub waveforms: Vec<(String, Vec<Value>)>,
+}
+
+/// Run envelope analysis by post-processing transient data with a sliding RMS demodulation.
+pub fn run_envelope_analysis(
+    netlist_text: &str,
+    config: &EnvelopeRunConfig,
+) -> Result<EnvelopeData, String> {
+    config.validate()?;
+
+    let samples_per_cycle = (config.num_harmonics.max(1) as f64 * 16.0).max(32.0);
+    let carrier_step = 1.0 / (config.fundamental_freq * samples_per_cycle);
+    let coarse_step = config.stop_time / 1200.0;
+    let fine_floor = config.stop_time / 100_000.0;
+    let mut step_time = config
+        .max_step
+        .unwrap_or_else(|| carrier_step.min(coarse_step).max(fine_floor));
+    step_time = step_time.clamp(fine_floor, config.stop_time);
+
+    let transient = run_transient_analysis(netlist_text, config.stop_time, step_time)?;
+    if transient.time.is_empty() {
+        return Err("Envelope analysis produced no transient samples".to_string());
+    }
+    if transient.voltages.is_empty() {
+        return Err("Envelope analysis found no non-ground node waveforms".to_string());
+    }
+
+    let cycle_window = (1.0 / config.fundamental_freq / step_time).round().max(3.0) as usize;
+    let mut waveforms = Vec::with_capacity(transient.voltages.len());
+    for (name, values) in transient.voltages {
+        if values.is_empty() {
+            continue;
+        }
+        let env = compute_envelope_rms(&values, cycle_window);
+        waveforms.push((format!("ENV({})", name), env));
+    }
+    if waveforms.is_empty() {
+        return Err("Envelope analysis produced no envelope traces".to_string());
+    }
+
+    Ok(EnvelopeData {
+        time: transient.time,
+        waveforms,
+    })
+}
+
+fn compute_envelope_rms(values: &[Value], window: usize) -> Vec<Value> {
+    if values.is_empty() {
+        return Vec::new();
+    }
+    let window = window.max(3).min(values.len());
+    let half = window / 2;
+    let mut prefix_sq = Vec::with_capacity(values.len() + 1);
+    prefix_sq.push(0.0);
+    for &sample in values {
+        let next = prefix_sq.last().copied().unwrap_or(0.0) + sample * sample;
+        prefix_sq.push(next);
+    }
+
+    let mut envelope = Vec::with_capacity(values.len());
+    for idx in 0..values.len() {
+        let start = idx.saturating_sub(half);
+        let end = (idx + half + 1).min(values.len());
+        let denom = (end - start).max(1) as Value;
+        let mean_sq = (prefix_sq[end] - prefix_sq[start]) / denom;
+        envelope.push((2.0 * mean_sq).sqrt());
+    }
+    envelope
+}
+
+/// Configuration for Fourier analysis.
+#[derive(Debug, Clone)]
+pub struct FourierRunConfig {
+    pub fundamental_freq: Value,
+    pub num_harmonics: usize,
+    pub output_node: String,
+    pub output_ref: Option<String>,
+    pub start_time: Value,
+    pub stop_time: Value,
+}
+
+impl FourierRunConfig {
+    fn validate(&self) -> Result<(), String> {
+        if !self.fundamental_freq.is_finite() || self.fundamental_freq <= 0.0 {
+            return Err("Fourier fundamental frequency must be positive".to_string());
+        }
+        if self.num_harmonics == 0 {
+            return Err("Fourier num_harmonics must be greater than zero".to_string());
+        }
+        if self.output_node.trim().is_empty() {
+            return Err("Fourier output node must be specified".to_string());
+        }
+        if !self.start_time.is_finite() || self.start_time < 0.0 {
+            return Err("Fourier start_time must be >= 0".to_string());
+        }
+        if !self.stop_time.is_finite() || self.stop_time <= self.start_time {
+            return Err("Fourier stop_time must be greater than start_time".to_string());
+        }
+        Ok(())
+    }
+}
+
+/// Fourier analysis output.
+#[derive(Debug, Clone)]
+pub struct FourierData {
+    pub frequencies: Vec<Value>,
+    pub response: Vec<Complex64>,
+    pub thd_percent: Value,
+    pub dc_component: Value,
+    pub output_label: String,
+}
+
+/// Run Fourier analysis by executing transient and computing harmonic decomposition.
+pub fn run_fourier_analysis(
+    netlist_text: &str,
+    config: &FourierRunConfig,
+) -> Result<FourierData, String> {
+    config.validate()?;
+
+    let window = config.stop_time - config.start_time;
+    let max_harmonic_freq = config.fundamental_freq * (config.num_harmonics as f64 + 1.0);
+    let nyquist_oversample = 8.0;
+    let fine_step = 1.0 / (max_harmonic_freq * nyquist_oversample);
+    let coarse_step = window / 1500.0;
+    let floor_step = window / 200_000.0;
+    let step_time = fine_step
+        .min(coarse_step)
+        .max(floor_step)
+        .min(config.stop_time);
+
+    let transient = run_transient_analysis(netlist_text, config.stop_time, step_time)?;
+    if transient.time.len() < 3 {
+        return Err("Fourier analysis requires at least 3 transient samples".to_string());
+    }
+
+    let signal = extract_transient_signal(
+        &transient,
+        &config.output_node,
+        config.output_ref.as_deref(),
+    )?;
+    let mut window_time = Vec::new();
+    let mut window_values = Vec::new();
+    for (&time, &value) in transient.time.iter().zip(signal.iter()) {
+        if time >= config.start_time && time <= config.stop_time {
+            window_time.push(time);
+            window_values.push(value);
+        }
+    }
+    if window_time.len() < 3 {
+        return Err("Fourier analysis window has insufficient samples".to_string());
+    }
+
+    let analysis = FourierAnalysis::new(
+        FourierConfig::new(config.fundamental_freq).with_harmonics(config.num_harmonics),
+    );
+    let result = analysis.analyze(&window_time, &window_values);
+
+    let frequencies: Vec<Value> = result.harmonics.iter().map(|h| h.frequency).collect();
+    let response: Vec<Complex64> = result
+        .harmonics
+        .iter()
+        .map(|h| Complex64::from_polar(h.magnitude, h.phase.to_radians()))
+        .collect();
+    let output_label = if let Some(ref_node) = config.output_ref.as_deref() {
+        if ref_node.trim().is_empty() || ref_node.eq_ignore_ascii_case("0") {
+            format!("V({})", config.output_node.trim())
+        } else {
+            format!("V({}, {})", config.output_node.trim(), ref_node.trim())
+        }
+    } else {
+        format!("V({})", config.output_node.trim())
+    };
+
+    Ok(FourierData {
+        frequencies,
+        response,
+        thd_percent: result.thd,
+        dc_component: result.dc_component,
+        output_label,
+    })
+}
+
+fn extract_transient_signal(
+    transient: &TransientData,
+    output_node: &str,
+    output_ref: Option<&str>,
+) -> Result<Vec<Value>, String> {
+    let node = output_node.trim();
+    if node.is_empty() {
+        return Err("Fourier output node is empty".to_string());
+    }
+
+    let node_waveform = find_transient_waveform(transient, node)
+        .ok_or_else(|| format!("Fourier output node '{}' not found in transient data", node))?;
+
+    if let Some(ref_name) = output_ref {
+        let ref_name = ref_name.trim();
+        if ref_name.is_empty() || ref_name.eq_ignore_ascii_case("0") {
+            return Ok(node_waveform.to_vec());
+        }
+        let ref_waveform = find_transient_waveform(transient, ref_name).ok_or_else(|| {
+            format!(
+                "Fourier output reference node '{}' not found in transient data",
+                ref_name
+            )
+        })?;
+        if ref_waveform.len() != node_waveform.len() {
+            return Err("Fourier node/reference waveform length mismatch".to_string());
+        }
+        return Ok(node_waveform
+            .iter()
+            .zip(ref_waveform.iter())
+            .map(|(v, r)| v - r)
+            .collect());
+    }
+
+    Ok(node_waveform.to_vec())
+}
+
+fn find_transient_waveform<'a>(
+    transient: &'a TransientData,
+    node_name: &str,
+) -> Option<&'a [Value]> {
+    let target = normalize_waveform_node_name(node_name);
+    transient.voltages.iter().find_map(|(name, values)| {
+        let wf_node = normalize_waveform_node_name(name);
+        (wf_node == target).then_some(values.as_slice())
+    })
+}
+
+fn normalize_waveform_node_name(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.len() >= 3
+        && (trimmed.starts_with("V(") || trimmed.starts_with("v("))
+        && trimmed.ends_with(')')
+    {
+        return trimmed[2..trimmed.len() - 1].trim().to_ascii_uppercase();
+    }
+    trimmed.to_ascii_uppercase()
 }
 
 // =============================================================================
@@ -2533,6 +3114,1079 @@ fn compute_fft_harmonics(
     }
 
     harmonics
+}
+
+// =============================================================================
+// Optimization Analysis
+// =============================================================================
+
+/// Optimization objective strategy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OptimizationGoalMode {
+    /// Minimize objective value.
+    Minimize,
+    /// Maximize objective value.
+    Maximize,
+    /// Reach target value.
+    Target,
+}
+
+/// Optimization algorithm mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OptimizationAlgorithmMode {
+    /// Gradient-descent algorithm.
+    GradientDescent,
+    /// Pattern-search algorithm.
+    PatternSearch,
+    /// Simulated-annealing algorithm.
+    SimulatedAnnealing,
+}
+
+/// Single optimization variable.
+#[derive(Debug, Clone)]
+pub struct OptimizationVariable {
+    /// Parameter name (`.param <name>=...`).
+    pub name: String,
+    /// Lower bound.
+    pub min: Value,
+    /// Upper bound.
+    pub max: Value,
+    /// Initial value.
+    pub initial: Value,
+}
+
+/// Optimization run configuration.
+#[derive(Debug, Clone)]
+pub struct OptimizationRunConfig {
+    /// Optimization variables.
+    pub variables: Vec<OptimizationVariable>,
+    /// Objective node.
+    pub objective_node: String,
+    /// Objective reference node.
+    pub objective_ref: String,
+    /// Goal mode.
+    pub goal: OptimizationGoalMode,
+    /// Optional goal target value.
+    pub target: Option<Value>,
+    /// Algorithm selection.
+    pub algorithm: OptimizationAlgorithmMode,
+    /// Maximum iterations.
+    pub max_iterations: usize,
+    /// Cost tolerance.
+    pub cost_tolerance: Value,
+    /// Finite difference relative step.
+    pub fd_step: Value,
+    /// Initial step size.
+    pub initial_step: Value,
+    /// Minimum step size.
+    pub min_step: Value,
+}
+
+impl Default for OptimizationRunConfig {
+    fn default() -> Self {
+        Self {
+            variables: vec![OptimizationVariable {
+                name: "RLOAD".to_string(),
+                min: 500.0,
+                max: 5000.0,
+                initial: 1000.0,
+            }],
+            objective_node: "out".to_string(),
+            objective_ref: "0".to_string(),
+            goal: OptimizationGoalMode::Target,
+            target: Some(1.2),
+            algorithm: OptimizationAlgorithmMode::PatternSearch,
+            max_iterations: 120,
+            cost_tolerance: 1e-8,
+            fd_step: 1e-4,
+            initial_step: 0.1,
+            min_step: 1e-8,
+        }
+    }
+}
+
+impl OptimizationRunConfig {
+    fn validate(&self) -> Result<(), String> {
+        if self.variables.is_empty() {
+            return Err("Optimization requires at least one variable".to_string());
+        }
+        if self.objective_node.trim().is_empty() {
+            return Err("Optimization objective_node must not be empty".to_string());
+        }
+        if self.objective_ref.trim().is_empty() {
+            return Err("Optimization objective_ref must not be empty".to_string());
+        }
+        if self
+            .objective_node
+            .eq_ignore_ascii_case(&self.objective_ref)
+        {
+            return Err("Optimization objective_node and objective_ref must differ".to_string());
+        }
+        if self.max_iterations == 0 {
+            return Err("Optimization max_iterations must be > 0".to_string());
+        }
+        if !self.cost_tolerance.is_finite() || self.cost_tolerance <= 0.0 {
+            return Err("Optimization cost_tolerance must be finite and > 0".to_string());
+        }
+        if !self.fd_step.is_finite() || self.fd_step <= 0.0 {
+            return Err("Optimization fd_step must be finite and > 0".to_string());
+        }
+        if !self.initial_step.is_finite() || self.initial_step <= 0.0 {
+            return Err("Optimization initial_step must be finite and > 0".to_string());
+        }
+        if !self.min_step.is_finite() || self.min_step <= 0.0 {
+            return Err("Optimization min_step must be finite and > 0".to_string());
+        }
+        if self.min_step > self.initial_step {
+            return Err("Optimization min_step must be <= initial_step".to_string());
+        }
+        if self.goal == OptimizationGoalMode::Target {
+            if self.target.is_none() || self.target.is_some_and(|v| !v.is_finite()) {
+                return Err("Optimization target goal requires a finite target value".to_string());
+            }
+        } else if self.target.is_some_and(|v| !v.is_finite()) {
+            return Err("Optimization target must be finite when provided".to_string());
+        }
+
+        let mut seen = std::collections::HashSet::new();
+        for var in &self.variables {
+            if !is_valid_param_identifier(&var.name) {
+                return Err(format!(
+                    "Invalid optimization variable name '{}': expected [A-Za-z_][A-Za-z0-9_]*",
+                    var.name
+                ));
+            }
+            if !var.min.is_finite() || !var.max.is_finite() || !var.initial.is_finite() {
+                return Err(format!(
+                    "Optimization variable '{}' bounds/initial must be finite",
+                    var.name
+                ));
+            }
+            if var.max <= var.min {
+                return Err(format!(
+                    "Optimization variable '{}' requires max > min",
+                    var.name
+                ));
+            }
+            if var.initial < var.min || var.initial > var.max {
+                return Err(format!(
+                    "Optimization variable '{}' initial must be within [{}, {}]",
+                    var.name, var.min, var.max
+                ));
+            }
+            if !seen.insert(var.name.to_ascii_uppercase()) {
+                return Err(format!(
+                    "Optimization variable '{}' is defined more than once",
+                    var.name
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Optimization output data.
+#[derive(Debug, Clone)]
+pub struct OptimizationData {
+    /// Iteration axis points.
+    pub iterations: Vec<Value>,
+    /// Cost history.
+    pub costs: Vec<Value>,
+    /// Variable traces by name.
+    pub variable_traces: std::collections::HashMap<String, Vec<Value>>,
+    /// Best cost reached.
+    pub best_cost: Value,
+    /// Best variable values.
+    pub best_variables: std::collections::HashMap<String, Value>,
+    /// Whether convergence criterion was met.
+    pub converged: bool,
+}
+
+/// Run optimization analysis with default configuration.
+pub fn run_optimization_analysis(netlist_text: &str) -> Result<OptimizationData, String> {
+    run_optimization_analysis_with_config(netlist_text, &OptimizationRunConfig::default())
+}
+
+/// Run optimization analysis with explicit configuration.
+pub fn run_optimization_analysis_with_config(
+    netlist_text: &str,
+    config: &OptimizationRunConfig,
+) -> Result<OptimizationData, String> {
+    config.validate()?;
+
+    let mut optimizer_config = OptimizerConfig::default();
+    optimizer_config.algorithm = match config.algorithm {
+        OptimizationAlgorithmMode::GradientDescent => OptimizerAlgo::GradientDescent,
+        OptimizationAlgorithmMode::PatternSearch => OptimizerAlgo::PatternSearch,
+        OptimizationAlgorithmMode::SimulatedAnnealing => OptimizerAlgo::SimulatedAnnealing,
+    };
+    optimizer_config.max_iterations = config.max_iterations;
+    optimizer_config.cost_tolerance = config.cost_tolerance;
+    optimizer_config.fd_step = config.fd_step;
+    optimizer_config.initial_step = config.initial_step;
+    optimizer_config.min_step = config.min_step;
+
+    let mut optimizer = OptimizerEngine::with_config(optimizer_config);
+    for var in &config.variables {
+        optimizer.add_var(DesignVar::new(
+            var.name.clone(),
+            var.initial,
+            var.min,
+            var.max,
+        ));
+    }
+    let mut synthetic_goal = match config.goal {
+        OptimizationGoalMode::Minimize => OptimizationGoal::minimize("__objective"),
+        OptimizationGoalMode::Maximize => OptimizationGoal::maximize("__objective"),
+        OptimizationGoalMode::Target => {
+            OptimizationGoal::hit_target("__objective", config.target.unwrap_or_default())
+        }
+    };
+    synthetic_goal.weight = 1.0;
+    optimizer.add_goal(synthetic_goal);
+
+    let mut variable_traces: std::collections::HashMap<String, Vec<Value>> =
+        std::collections::HashMap::new();
+    for var in &config.variables {
+        variable_traces.insert(
+            var.name.clone(),
+            Vec::with_capacity(config.max_iterations + 1),
+        );
+    }
+    let mut iterations = Vec::with_capacity(config.max_iterations + 1);
+    let mut costs = Vec::with_capacity(config.max_iterations + 1);
+
+    let mut eval_error: Option<String> = None;
+    let mut successful_evals: usize = 0;
+    let mut cost_fn = |vars: &std::collections::HashMap<String, Value>| -> Value {
+        match evaluate_optimization_objective(netlist_text, vars, config) {
+            Ok(value) => {
+                successful_evals += 1;
+                objective_to_cost(value, config.goal, config.target)
+            }
+            Err(err) => {
+                if eval_error.is_none() {
+                    eval_error = Some(err);
+                }
+                1e30
+            }
+        }
+    };
+
+    let mut record_state =
+        |iter: Value, vars: &std::collections::HashMap<String, Value>, cost: Value| {
+            iterations.push(iter);
+            costs.push(cost);
+            for (name, trace) in &mut variable_traces {
+                trace.push(vars.get(name).copied().unwrap_or(0.0));
+            }
+        };
+
+    let initial_vars = optimizer.current_vars();
+    let initial_cost = cost_fn(&initial_vars);
+    record_state(0.0, &initial_vars, initial_cost);
+
+    while optimizer.current_iteration() < config.max_iterations {
+        optimizer.step(&mut cost_fn);
+        let vars = optimizer.current_vars();
+        let cost = cost_fn(&vars);
+        record_state(optimizer.current_iteration() as Value, &vars, cost);
+        if optimizer.is_converged() {
+            break;
+        }
+    }
+
+    if successful_evals == 0 {
+        return Err(eval_error.unwrap_or_else(|| {
+            "Optimization failed: objective evaluation returned no valid samples".to_string()
+        }));
+    }
+
+    let (best_vars, best_cost) = optimizer.best_result();
+    Ok(OptimizationData {
+        iterations,
+        costs,
+        variable_traces,
+        best_cost,
+        best_variables: best_vars.clone(),
+        converged: optimizer.is_converged(),
+    })
+}
+
+fn objective_to_cost(objective: Value, goal: OptimizationGoalMode, target: Option<Value>) -> Value {
+    match goal {
+        OptimizationGoalMode::Minimize => objective.abs(),
+        OptimizationGoalMode::Maximize => {
+            if objective > 0.0 {
+                1.0 / objective
+            } else {
+                1e30
+            }
+        }
+        OptimizationGoalMode::Target => {
+            let t = target.unwrap_or_default();
+            (objective - t).powi(2)
+        }
+    }
+}
+
+fn evaluate_optimization_objective(
+    netlist_text: &str,
+    vars: &std::collections::HashMap<String, Value>,
+    config: &OptimizationRunConfig,
+) -> Result<Value, String> {
+    let overridden = inject_param_overrides(netlist_text, vars);
+    let netlist = rspice_core::netlist::parse_netlist(&overridden)
+        .map_err(|e| format!("Parse error during optimization: {}", e))?;
+    let engine = Engine::new(build_engine_config(&netlist, None));
+    let dc = engine
+        .run_dc_op(&netlist)
+        .map_err(|e| format!("DC operating point failed during optimization: {}", e))?;
+
+    let node_idx = resolve_node_index_case_insensitive(&dc.node_names, &config.objective_node)
+        .ok_or_else(|| {
+            format!(
+                "Optimization objective node '{}' not found",
+                config.objective_node
+            )
+        })?;
+    let ref_idx = if is_ground_like(&config.objective_ref) {
+        Some(0usize)
+    } else {
+        resolve_node_index_case_insensitive(&dc.node_names, &config.objective_ref)
+    }
+    .ok_or_else(|| {
+        format!(
+            "Optimization objective reference node '{}' not found",
+            config.objective_ref
+        )
+    })?;
+
+    let node_v = *dc
+        .node_voltages
+        .get(node_idx)
+        .ok_or_else(|| "Optimization node voltage index out of bounds".to_string())?;
+    let ref_v = *dc
+        .node_voltages
+        .get(ref_idx)
+        .ok_or_else(|| "Optimization reference voltage index out of bounds".to_string())?;
+    Ok(node_v - ref_v)
+}
+
+fn inject_param_overrides(
+    netlist_text: &str,
+    vars: &std::collections::HashMap<String, Value>,
+) -> String {
+    if vars.is_empty() {
+        return netlist_text.to_string();
+    }
+
+    let mut entries: Vec<(String, String, Value)> = vars
+        .iter()
+        .filter_map(|(name, value)| {
+            if is_valid_param_identifier(name) {
+                Some((name.to_ascii_uppercase(), name.clone(), *value))
+            } else {
+                None
+            }
+        })
+        .collect();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    if entries.is_empty() {
+        return netlist_text.to_string();
+    }
+
+    let mut lines: Vec<String> = netlist_text.lines().map(str::to_string).collect();
+    if lines.is_empty() {
+        let mut line = ".param".to_string();
+        for (_, name, value) in &entries {
+            line.push(' ');
+            line.push_str(name);
+            line.push('=');
+            line.push_str(&format_param_override_value(*value));
+        }
+        return format!("{}\n", line);
+    }
+
+    let mut overrides_found: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for line in lines.iter_mut().skip(1) {
+        if !is_param_directive_line(line) {
+            continue;
+        }
+
+        let assigned = collect_param_assignment_names(line);
+        let mut append_parts = Vec::new();
+        for (upper, name, value) in &entries {
+            if assigned.contains(upper) {
+                overrides_found.insert(upper.clone());
+                append_parts.push(format!("{}={}", name, format_param_override_value(*value)));
+            }
+        }
+
+        if !append_parts.is_empty() {
+            let suffix = append_parts.join(" ");
+            if let Some(comment_idx) = line.find(';') {
+                let (head, comment) = line.split_at(comment_idx);
+                let mut rebuilt = head.trim_end().to_string();
+                rebuilt.push(' ');
+                rebuilt.push_str(&suffix);
+                rebuilt.push(' ');
+                rebuilt.push_str(comment.trim_start());
+                *line = rebuilt;
+            } else {
+                line.push(' ');
+                line.push_str(&suffix);
+            }
+        }
+    }
+
+    let missing: Vec<(String, Value)> = entries
+        .iter()
+        .filter(|(upper, _, _)| !overrides_found.contains(upper))
+        .map(|(_, name, value)| (name.clone(), *value))
+        .collect();
+
+    if !missing.is_empty() {
+        let mut line = ".param".to_string();
+        for (name, value) in &missing {
+            line.push(' ');
+            line.push_str(name);
+            line.push('=');
+            line.push_str(&format_param_override_value(*value));
+        }
+        lines.insert(1, line);
+    }
+
+    let mut out = lines.join("\n");
+    if netlist_text.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+fn format_param_override_value(value: Value) -> String {
+    let raw = format!("{:.16e}", value);
+    let Some(exp_pos) = raw.find('e') else {
+        return raw;
+    };
+    let mantissa = &raw[..exp_pos];
+    let exponent = &raw[exp_pos + 1..];
+    match exponent.parse::<i32>() {
+        Ok(exp) => format!("{}e{:+03}", mantissa, exp),
+        Err(_) => raw,
+    }
+}
+
+fn is_param_directive_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    if !trimmed
+        .get(..6)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(".param"))
+    {
+        return false;
+    }
+    trimmed
+        .as_bytes()
+        .get(6)
+        .is_none_or(|ch| ch.is_ascii_whitespace())
+}
+
+fn collect_param_assignment_names(line: &str) -> std::collections::HashSet<String> {
+    let mut names = std::collections::HashSet::new();
+    let trimmed = line.trim_start();
+    if !trimmed
+        .get(..6)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(".param"))
+    {
+        return names;
+    }
+    let rest = trimmed[6..].split(';').next().unwrap_or("").trim();
+    let bytes = rest.as_bytes();
+    let len = bytes.len();
+    let mut i = 0usize;
+
+    while i < len {
+        while i < len && (bytes[i].is_ascii_whitespace() || bytes[i] == b',') {
+            i += 1;
+        }
+        if i >= len {
+            break;
+        }
+
+        let start = i;
+        let first = bytes[i];
+        if !(first.is_ascii_alphabetic() || first == b'_') {
+            i += 1;
+            continue;
+        }
+        i += 1;
+        while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+            i += 1;
+        }
+        let name = &rest[start..i];
+
+        while i < len && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i < len && bytes[i] == b'=' {
+            names.insert(name.to_ascii_uppercase());
+        }
+    }
+
+    names
+}
+
+fn resolve_node_index_case_insensitive(node_names: &[String], target: &str) -> Option<usize> {
+    let trimmed = target.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(trimmed))
+}
+
+fn is_valid_param_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return false;
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+// =============================================================================
+// Safety / SOA Analysis
+// =============================================================================
+
+/// Configuration for SOA analysis.
+#[derive(Debug, Clone)]
+pub struct SoaRunConfig {
+    /// Transient stop time.
+    pub stop_time: Value,
+    /// Transient step time.
+    pub step_time: Value,
+    /// Enable Vgs limit checks.
+    pub check_vgs_max: bool,
+    /// Maximum allowed Vgs magnitude.
+    pub max_vgs: Value,
+    /// Enable Vds limit checks.
+    pub check_vds_max: bool,
+    /// Maximum allowed Vds magnitude.
+    pub max_vds: Value,
+    /// Enable Vbe limit checks.
+    pub check_vbe_max: bool,
+    /// Maximum allowed Vbe magnitude.
+    pub max_vbe: Value,
+    /// Enable Vce limit checks.
+    pub check_vce_max: bool,
+    /// Maximum allowed Vce magnitude.
+    pub max_vce: Value,
+}
+
+impl Default for SoaRunConfig {
+    fn default() -> Self {
+        Self {
+            stop_time: 1e-6,
+            step_time: 1e-9,
+            check_vgs_max: true,
+            max_vgs: 1.8,
+            check_vds_max: true,
+            max_vds: 3.3,
+            check_vbe_max: true,
+            max_vbe: 0.9,
+            check_vce_max: true,
+            max_vce: 5.0,
+        }
+    }
+}
+
+impl SoaRunConfig {
+    fn validate(&self) -> Result<(), String> {
+        if !self.stop_time.is_finite() || self.stop_time <= 0.0 {
+            return Err("SOA stop_time must be finite and > 0".to_string());
+        }
+        if !self.step_time.is_finite() || self.step_time <= 0.0 {
+            return Err("SOA step_time must be finite and > 0".to_string());
+        }
+        if self.step_time > self.stop_time {
+            return Err("SOA step_time must be <= stop_time".to_string());
+        }
+        if !self.check_vgs_max && !self.check_vds_max && !self.check_vbe_max && !self.check_vce_max
+        {
+            return Err("SOA requires at least one enabled check".to_string());
+        }
+        if self.check_vgs_max && (!self.max_vgs.is_finite() || self.max_vgs <= 0.0) {
+            return Err("SOA max_vgs must be finite and > 0 when enabled".to_string());
+        }
+        if self.check_vds_max && (!self.max_vds.is_finite() || self.max_vds <= 0.0) {
+            return Err("SOA max_vds must be finite and > 0 when enabled".to_string());
+        }
+        if self.check_vbe_max && (!self.max_vbe.is_finite() || self.max_vbe <= 0.0) {
+            return Err("SOA max_vbe must be finite and > 0 when enabled".to_string());
+        }
+        if self.check_vce_max && (!self.max_vce.is_finite() || self.max_vce <= 0.0) {
+            return Err("SOA max_vce must be finite and > 0 when enabled".to_string());
+        }
+        Ok(())
+    }
+}
+
+/// SOA analysis output.
+#[derive(Debug, Clone)]
+pub struct SoaData {
+    /// Transient time vector.
+    pub time: Vec<Value>,
+    /// Cumulative violation count over time.
+    pub violation_count: Vec<Value>,
+    /// Collected violations.
+    pub violations: Vec<SoAViolation>,
+}
+
+/// Run SOA analysis using default configuration.
+pub fn run_soa_analysis(netlist_text: &str) -> Result<SoaData, String> {
+    run_soa_analysis_with_config(netlist_text, &SoaRunConfig::default())
+}
+
+/// Run SOA analysis using explicit configuration.
+pub fn run_soa_analysis_with_config(
+    netlist_text: &str,
+    config: &SoaRunConfig,
+) -> Result<SoaData, String> {
+    config.validate()?;
+
+    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
+        .map_err(|e| format!("Parse error: {}", e))?;
+    let transient = run_transient_analysis(netlist_text, config.stop_time, config.step_time)?;
+
+    let mut manager = SoAManager::new();
+    register_soa_limits_for_netlist(&mut manager, &netlist.elements, config);
+    if manager.violations().is_empty() && netlist.elements.is_empty() {
+        return Err("SOA analysis received an empty netlist".to_string());
+    }
+
+    let mut active_devices = 0usize;
+    for element in &netlist.elements {
+        if is_soa_supported_element(&element.kind) {
+            active_devices += 1;
+        }
+    }
+    if active_devices == 0 {
+        return Err("SOA analysis found no supported semiconductor devices".to_string());
+    }
+
+    let node_waveforms = build_transient_node_lookup(&transient.voltages);
+    let mut violation_count = Vec::with_capacity(transient.time.len());
+
+    for (idx, &time) in transient.time.iter().enumerate() {
+        let mut values: std::collections::HashMap<
+            String,
+            std::collections::HashMap<SoAParameter, Value>,
+        > = std::collections::HashMap::new();
+
+        for element in &netlist.elements {
+            match &element.kind {
+                ElementKind::Mosfet { .. }
+                | ElementKind::Jfet { .. }
+                | ElementKind::Mesfet { .. } => {
+                    if element.nodes.len() < 3 {
+                        continue;
+                    }
+                    let vd = sample_node_waveform(&node_waveforms, &element.nodes[0], idx);
+                    let vg = sample_node_waveform(&node_waveforms, &element.nodes[1], idx);
+                    let vs = sample_node_waveform(&node_waveforms, &element.nodes[2], idx);
+                    let mut device_values = std::collections::HashMap::new();
+                    if config.check_vgs_max {
+                        device_values.insert(SoAParameter::Vgs, (vg - vs).abs());
+                    }
+                    if config.check_vds_max {
+                        device_values.insert(SoAParameter::Vds, (vd - vs).abs());
+                    }
+                    if !device_values.is_empty() {
+                        values.insert(element.name.clone(), device_values);
+                    }
+                }
+                ElementKind::Bjt { .. } => {
+                    if element.nodes.len() < 3 {
+                        continue;
+                    }
+                    let vc = sample_node_waveform(&node_waveforms, &element.nodes[0], idx);
+                    let vb = sample_node_waveform(&node_waveforms, &element.nodes[1], idx);
+                    let ve = sample_node_waveform(&node_waveforms, &element.nodes[2], idx);
+                    let mut device_values = std::collections::HashMap::new();
+                    if config.check_vbe_max {
+                        device_values.insert(SoAParameter::Vbe, (vb - ve).abs());
+                    }
+                    if config.check_vce_max {
+                        device_values.insert(SoAParameter::Vce, (vc - ve).abs());
+                    }
+                    if !device_values.is_empty() {
+                        values.insert(element.name.clone(), device_values);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        manager.check_point(time, &values);
+        violation_count.push(manager.violations().len() as Value);
+    }
+
+    Ok(SoaData {
+        time: transient.time,
+        violation_count,
+        violations: manager.violations().to_vec(),
+    })
+}
+
+fn is_soa_supported_element(kind: &ElementKind) -> bool {
+    matches!(
+        kind,
+        ElementKind::Mosfet { .. }
+            | ElementKind::Jfet { .. }
+            | ElementKind::Mesfet { .. }
+            | ElementKind::Bjt { .. }
+    )
+}
+
+fn register_soa_limits_for_netlist(
+    manager: &mut SoAManager,
+    elements: &[Element],
+    config: &SoaRunConfig,
+) {
+    for element in elements {
+        let mut def = SoADefinition::new();
+        match &element.kind {
+            ElementKind::Mosfet { .. } | ElementKind::Jfet { .. } | ElementKind::Mesfet { .. } => {
+                if config.check_vgs_max {
+                    def.add_limit(SoALimit {
+                        parameter: SoAParameter::Vgs,
+                        max_value: config.max_vgs,
+                        min_value: None,
+                        max_duration: None,
+                        unit: "V".to_string(),
+                        description: "Maximum gate-source voltage".to_string(),
+                    });
+                }
+                if config.check_vds_max {
+                    def.add_limit(SoALimit {
+                        parameter: SoAParameter::Vds,
+                        max_value: config.max_vds,
+                        min_value: None,
+                        max_duration: None,
+                        unit: "V".to_string(),
+                        description: "Maximum drain-source voltage".to_string(),
+                    });
+                }
+            }
+            ElementKind::Bjt { .. } => {
+                if config.check_vbe_max {
+                    def.add_limit(SoALimit {
+                        parameter: SoAParameter::Vbe,
+                        max_value: config.max_vbe,
+                        min_value: None,
+                        max_duration: None,
+                        unit: "V".to_string(),
+                        description: "Maximum base-emitter voltage".to_string(),
+                    });
+                }
+                if config.check_vce_max {
+                    def.add_limit(SoALimit {
+                        parameter: SoAParameter::Vce,
+                        max_value: config.max_vce,
+                        min_value: None,
+                        max_duration: None,
+                        unit: "V".to_string(),
+                        description: "Maximum collector-emitter voltage".to_string(),
+                    });
+                }
+            }
+            _ => continue,
+        }
+        if !def.limits.is_empty() {
+            manager.register_device(element.name.clone(), def);
+        }
+    }
+}
+
+fn build_transient_node_lookup(
+    voltages: &[(String, Vec<Value>)],
+) -> std::collections::HashMap<String, Vec<Value>> {
+    let mut map = std::collections::HashMap::with_capacity(voltages.len() + 2);
+    for (name, values) in voltages {
+        map.insert(normalize_voltage_signal_name(name), values.clone());
+    }
+    map.insert("0".to_string(), Vec::new());
+    map.insert("GND".to_string(), Vec::new());
+    map
+}
+
+fn sample_node_waveform(
+    waveforms: &std::collections::HashMap<String, Vec<Value>>,
+    node_name: &str,
+    idx: usize,
+) -> Value {
+    if is_ground_like(node_name) {
+        return 0.0;
+    }
+    let key = node_name.trim().to_ascii_uppercase();
+    waveforms
+        .get(&key)
+        .and_then(|values| values.get(idx).copied())
+        .unwrap_or(0.0)
+}
+
+// =============================================================================
+// Reliability (Aging) Analysis
+// =============================================================================
+
+/// Explicit configuration for reliability analysis.
+#[derive(Debug, Clone)]
+pub struct ReliabilityRunConfig {
+    /// Lifetime checkpoints to evaluate (years).
+    pub target_years: Vec<Value>,
+    /// Enable HCI contribution.
+    pub enable_hci: bool,
+    /// Enable NBTI contribution.
+    pub enable_nbti: bool,
+    /// Enable electromigration contribution.
+    pub enable_em: bool,
+    /// Minimum stress magnitude to include a device.
+    pub min_stress_voltage: Value,
+}
+
+impl Default for ReliabilityRunConfig {
+    fn default() -> Self {
+        Self {
+            target_years: vec![1.0, 5.0, 10.0],
+            enable_hci: true,
+            enable_nbti: true,
+            enable_em: false,
+            min_stress_voltage: 0.1,
+        }
+    }
+}
+
+impl ReliabilityRunConfig {
+    fn validate(&self) -> Result<(), String> {
+        if self.target_years.is_empty() {
+            return Err("Reliability target years must not be empty".to_string());
+        }
+        if self
+            .target_years
+            .iter()
+            .any(|years| !years.is_finite() || *years <= 0.0)
+        {
+            return Err("Reliability target years must be finite and > 0".to_string());
+        }
+        if !self.enable_hci && !self.enable_nbti && !self.enable_em {
+            return Err("Reliability requires at least one enabled mechanism".to_string());
+        }
+        if !self.min_stress_voltage.is_finite() || self.min_stress_voltage < 0.0 {
+            return Err("Reliability min stress voltage must be finite and >= 0".to_string());
+        }
+        Ok(())
+    }
+}
+
+/// Reliability analysis output.
+#[derive(Debug, Clone)]
+pub struct ReliabilityData {
+    /// Evaluated lifetime checkpoints (years).
+    pub years: Vec<Value>,
+    /// Per-device reliability results.
+    pub device_results: Vec<ReliabilityResult>,
+}
+
+/// Run reliability analysis with default configuration.
+pub fn run_reliability_analysis(netlist_text: &str) -> Result<ReliabilityData, String> {
+    run_reliability_analysis_with_config(netlist_text, &ReliabilityRunConfig::default())
+}
+
+/// Run reliability analysis using explicit configuration.
+pub fn run_reliability_analysis_with_config(
+    netlist_text: &str,
+    config: &ReliabilityRunConfig,
+) -> Result<ReliabilityData, String> {
+    config.validate()?;
+
+    let mut years = config.target_years.clone();
+    years.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    years.dedup_by(|a, b| (*a - *b).abs() <= 1e-12);
+
+    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
+        .map_err(|e| format!("Parse error: {}", e))?;
+    let sim_config = build_engine_config(&netlist, None);
+    let temperature_k = sim_config.temperature;
+    let engine = Engine::new(sim_config);
+    let dc_result = engine
+        .run_dc_op(&netlist)
+        .map_err(|e| format!("DC operating point error: {}", e))?;
+
+    let node_voltages = build_node_voltage_lookup(&dc_result);
+    let stress_data = extract_reliability_stress_data(
+        &netlist.elements,
+        &node_voltages,
+        temperature_k,
+        config.min_stress_voltage,
+    );
+    if stress_data.is_empty() {
+        return Err(
+            "Reliability analysis found no stressed semiconductor devices in the circuit"
+                .to_string(),
+        );
+    }
+
+    let reliability_engine = ReliabilityEngine::new();
+    let mut device_results = reliability_engine.analyze_circuit(&stress_data, &years);
+    apply_reliability_mechanism_scaling(&mut device_results, config);
+    device_results.sort_by_cached_key(|result| result.device_id.to_ascii_uppercase());
+
+    Ok(ReliabilityData {
+        years,
+        device_results,
+    })
+}
+
+fn build_node_voltage_lookup(
+    dc_result: &CoreSimulationResult,
+) -> std::collections::HashMap<String, Value> {
+    let mut lookup = std::collections::HashMap::new();
+    for (idx, node_name) in dc_result.node_names.iter().enumerate() {
+        if let Some(voltage) = dc_result.node_voltages.get(idx) {
+            lookup.insert(node_name.clone(), *voltage);
+            lookup.insert(node_name.to_ascii_uppercase(), *voltage);
+        }
+    }
+    lookup.insert("0".to_string(), 0.0);
+    lookup.insert("GND".to_string(), 0.0);
+    lookup
+}
+
+fn resolve_node_voltage(
+    node_voltages: &std::collections::HashMap<String, Value>,
+    node_name: &str,
+) -> Value {
+    let trimmed = node_name.trim();
+    if trimmed.is_empty() {
+        return 0.0;
+    }
+    if trimmed == "0" || trimmed.eq_ignore_ascii_case("gnd") {
+        return 0.0;
+    }
+    node_voltages
+        .get(trimmed)
+        .copied()
+        .or_else(|| node_voltages.get(&trimmed.to_ascii_uppercase()).copied())
+        .unwrap_or(0.0)
+}
+
+fn extract_reliability_stress_data(
+    elements: &[Element],
+    node_voltages: &std::collections::HashMap<String, Value>,
+    temperature_k: Value,
+    min_stress_voltage: Value,
+) -> std::collections::HashMap<String, StressMetrics> {
+    let mut stress_data = std::collections::HashMap::new();
+    let min_stress = min_stress_voltage.max(0.0);
+
+    for element in elements {
+        let stress_pair = match &element.kind {
+            ElementKind::Mosfet { .. } | ElementKind::Jfet { .. } | ElementKind::Mesfet { .. } => {
+                if element.nodes.len() < 3 {
+                    None
+                } else {
+                    let vd = resolve_node_voltage(node_voltages, &element.nodes[0]);
+                    let vg = resolve_node_voltage(node_voltages, &element.nodes[1]);
+                    let vs = resolve_node_voltage(node_voltages, &element.nodes[2]);
+                    Some(((vg - vs).abs(), (vd - vs).abs()))
+                }
+            }
+            ElementKind::Bjt { .. } => {
+                if element.nodes.len() < 3 {
+                    None
+                } else {
+                    let vc = resolve_node_voltage(node_voltages, &element.nodes[0]);
+                    let vb = resolve_node_voltage(node_voltages, &element.nodes[1]);
+                    let ve = resolve_node_voltage(node_voltages, &element.nodes[2]);
+                    Some(((vb - ve).abs(), (vc - ve).abs()))
+                }
+            }
+            ElementKind::Diode { .. } => {
+                if element.nodes.len() < 2 {
+                    None
+                } else {
+                    let va = resolve_node_voltage(node_voltages, &element.nodes[0]);
+                    let vk = resolve_node_voltage(node_voltages, &element.nodes[1]);
+                    let vak = (va - vk).abs();
+                    Some((vak, vak))
+                }
+            }
+            _ => None,
+        };
+
+        let Some((avg_vgs_stress, avg_vds_stress)) = stress_pair else {
+            continue;
+        };
+        if avg_vgs_stress.max(avg_vds_stress) < min_stress {
+            continue;
+        }
+
+        stress_data.insert(
+            element.name.clone(),
+            StressMetrics {
+                avg_vgs_stress,
+                avg_vds_stress,
+                avg_temp: temperature_k,
+                duration: 3600.0,
+            },
+        );
+    }
+
+    stress_data
+}
+
+fn apply_reliability_mechanism_scaling(
+    results: &mut [ReliabilityResult],
+    config: &ReliabilityRunConfig,
+) {
+    let mut vth_factor = 0.0;
+    let mut mobility_factor = 0.0;
+    let mut rds_factor = 0.0;
+
+    if config.enable_hci {
+        vth_factor += 1.0;
+        mobility_factor += 1.0;
+        rds_factor += 0.8;
+    }
+    if config.enable_nbti {
+        vth_factor += 0.85;
+        mobility_factor += 0.65;
+        rds_factor += 0.4;
+    }
+    if config.enable_em {
+        rds_factor += 2.2;
+    }
+
+    for result in results {
+        for shift in result.shifts.values_mut() {
+            apply_shift_factors(shift, vth_factor, mobility_factor, rds_factor);
+        }
+    }
+}
+
+fn apply_shift_factors(
+    shift: &mut ParamShift,
+    vth_factor: Value,
+    mobility_factor: Value,
+    rds_factor: Value,
+) {
+    shift.vth_shift *= vth_factor;
+    shift.mobility_shift *= mobility_factor;
+    shift.rds_shift *= rds_factor;
 }
 
 // =============================================================================
@@ -6597,5 +8251,412 @@ mod tests {
         assert_eq!(result.mode_indices.len(), result.multiplier_magnitude.len());
         assert!(result.stability_classification.len() >= 4);
         assert_eq!(result.probe_instance, "LPROBE");
+    }
+
+    #[test]
+    fn test_run_sparameter_analysis_returns_expected_shapes_for_decoupled_matched_ports() {
+        let netlist = "* S-parameter decoupled matched ports\nR1 in 0 50\nR2 out 0 50\n.end\n";
+        let cfg = SParameterRunConfig {
+            start_freq: 1e3,
+            stop_freq: 1e6,
+            points_per_unit: 5,
+            sweep: SParameterSweep::Decade,
+            z0: 50.0,
+            ports: [
+                SParameterPort::single_ended("in"),
+                SParameterPort::single_ended("out"),
+            ],
+        };
+
+        let result = run_sparameter_analysis(netlist, &cfg)
+            .expect("S-parameter analysis should execute for simple two-port");
+        assert!(!result.frequencies.is_empty());
+        assert_eq!(result.frequencies.len(), result.s11.len());
+        assert_eq!(result.frequencies.len(), result.s21.len());
+        assert_eq!(result.frequencies.len(), result.s12.len());
+        assert_eq!(result.frequencies.len(), result.s22.len());
+        for idx in 0..result.frequencies.len() {
+            assert!(
+                result.s21[idx].norm() < 1e-8,
+                "S21 should be near 0 for decoupled ports"
+            );
+            assert!(
+                result.s12[idx].norm() < 1e-8,
+                "S12 should be near 0 for decoupled ports"
+            );
+            assert!(
+                (result.s11[idx] - result.s22[idx]).norm() < 1e-9,
+                "symmetric ports should have matching reflections"
+            );
+            assert!(result.s11[idx].norm().is_finite() && result.s11[idx].norm() <= 1.0 + 1e-6);
+            assert!(result.s22[idx].norm().is_finite() && result.s22[idx].norm() <= 1.0 + 1e-6);
+        }
+    }
+
+    #[test]
+    fn test_run_envelope_analysis_produces_envelope_traces() {
+        let netlist = "* Envelope sine\nV1 out 0 SIN(0 1 1Meg 0 0 0)\nR1 out 0 1k\n.end\n";
+        let cfg = EnvelopeRunConfig {
+            fundamental_freq: 1e6,
+            stop_time: 10e-6,
+            num_harmonics: 9,
+            max_step: None,
+        };
+
+        let result = run_envelope_analysis(netlist, &cfg)
+            .expect("Envelope analysis should run for simple sinusoid");
+        assert!(!result.time.is_empty());
+        assert!(!result.waveforms.is_empty());
+        for (name, values) in &result.waveforms {
+            assert!(name.starts_with("ENV("));
+            assert_eq!(values.len(), result.time.len());
+            assert!(values.iter().all(|v| v.is_finite() && *v >= 0.0));
+            let max_env = values.iter().copied().fold(0.0, Value::max);
+            assert!(
+                max_env > 1e-4,
+                "envelope should contain non-trivial amplitude"
+            );
+        }
+    }
+
+    #[test]
+    fn test_run_fourier_analysis_detects_fundamental_and_low_thd_for_sine() {
+        let netlist = "* Fourier sine\nV1 out 0 SIN(0 1 1k 0 0 0)\nR1 out 0 1k\n.end\n";
+        let cfg = FourierRunConfig {
+            fundamental_freq: 1e3,
+            num_harmonics: 8,
+            output_node: "out".to_string(),
+            output_ref: None,
+            start_time: 0.0,
+            stop_time: 20e-3,
+        };
+
+        let result =
+            run_fourier_analysis(netlist, &cfg).expect("Fourier analysis should run for sine");
+        assert_eq!(result.frequencies.len(), result.response.len());
+        assert_eq!(result.frequencies.len(), cfg.num_harmonics + 1);
+        assert!(!result.response.is_empty());
+        let fundamental = result
+            .response
+            .get(1)
+            .expect("fundamental component should exist");
+        assert!(
+            fundamental.norm() > 0.7 && fundamental.norm() < 1.3,
+            "fundamental magnitude should be near 1V, got {}",
+            fundamental.norm()
+        );
+        assert!(
+            result.thd_percent < 1.0,
+            "pure sine THD should be low, got {}%",
+            result.thd_percent
+        );
+    }
+
+    #[test]
+    fn test_extract_reliability_stress_data_maps_transistor_biases() {
+        let elements = vec![
+            Element {
+                name: "M1".to_string(),
+                kind: ElementKind::Mosfet {
+                    model: "NM".to_string(),
+                    mos_type: rspice_core::netlist::MosType::Nmos,
+                },
+                nodes: vec![
+                    "d".to_string(),
+                    "g".to_string(),
+                    "s".to_string(),
+                    "0".to_string(),
+                ],
+            },
+            Element {
+                name: "Q1".to_string(),
+                kind: ElementKind::Bjt {
+                    model: "NPN".to_string(),
+                    bjt_type: rspice_core::netlist::BjtType::Npn,
+                },
+                nodes: vec!["c".to_string(), "b".to_string(), "e".to_string()],
+            },
+        ];
+        let node_voltages = std::collections::HashMap::from([
+            ("D".to_string(), 1.8),
+            ("G".to_string(), 1.1),
+            ("S".to_string(), 0.2),
+            ("C".to_string(), 2.5),
+            ("B".to_string(), 0.9),
+            ("E".to_string(), 0.0),
+        ]);
+
+        let stress = extract_reliability_stress_data(&elements, &node_voltages, 300.0, 0.05);
+        let m1 = stress.get("M1").expect("M1 stress should be extracted");
+        assert!((m1.avg_vgs_stress - 0.9).abs() < 1e-12);
+        assert!((m1.avg_vds_stress - 1.6).abs() < 1e-12);
+
+        let q1 = stress.get("Q1").expect("Q1 stress should be extracted");
+        assert!((q1.avg_vgs_stress - 0.9).abs() < 1e-12);
+        assert!((q1.avg_vds_stress - 2.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_run_reliability_analysis_with_config_produces_device_results() {
+        let netlist = r#"
+* Reliability smoke
+VDD vdd 0 1.8
+VG g 0 1.2
+R1 vdd d 1k
+M1 d g 0 0 NM W=10u L=1u
+.model NM NMOS VTO=0.7 KP=200u LAMBDA=0.02
+.end
+"#;
+        let cfg = ReliabilityRunConfig {
+            target_years: vec![1.0, 5.0, 10.0],
+            enable_hci: true,
+            enable_nbti: true,
+            enable_em: false,
+            min_stress_voltage: 0.05,
+        };
+
+        let data = run_reliability_analysis_with_config(netlist, &cfg)
+            .expect("reliability analysis should execute for stressed MOSFET");
+        assert_eq!(data.years, vec![1.0, 5.0, 10.0]);
+        assert!(!data.device_results.is_empty());
+        let m1 = data
+            .device_results
+            .iter()
+            .find(|result| result.device_id.eq_ignore_ascii_case("M1"))
+            .expect("M1 should be present in reliability results");
+        assert!(m1.shifts.contains_key("1y"));
+        assert!(m1.shifts.contains_key("10y"));
+        assert!(m1.shifts["10y"].vth_shift > m1.shifts["1y"].vth_shift);
+    }
+
+    #[test]
+    fn test_run_reliability_analysis_with_config_rejects_if_no_stressed_devices() {
+        let netlist = r#"
+* No stressed semiconductor devices
+V1 in 0 1
+R1 in out 1k
+R2 out 0 1k
+.end
+"#;
+        let cfg = ReliabilityRunConfig {
+            target_years: vec![1.0, 5.0],
+            enable_hci: true,
+            enable_nbti: false,
+            enable_em: false,
+            min_stress_voltage: 0.1,
+        };
+        let err = run_reliability_analysis_with_config(netlist, &cfg)
+            .expect_err("reliability should fail when no qualifying devices exist");
+        assert!(err.contains("no stressed semiconductor devices"));
+    }
+
+    #[test]
+    fn test_apply_reliability_mechanism_scaling_em_only_suppresses_vth_mobility_shift() {
+        let mut results = vec![ReliabilityResult {
+            device_id: "M1".to_string(),
+            stress: StressMetrics {
+                avg_vgs_stress: 1.0,
+                avg_vds_stress: 1.0,
+                avg_temp: 300.0,
+                duration: 3600.0,
+            },
+            shifts: std::collections::HashMap::from([(
+                "1y".to_string(),
+                ParamShift {
+                    vth_shift: 1.0,
+                    mobility_shift: -1.0,
+                    rds_shift: 0.5,
+                },
+            )]),
+        }];
+        let cfg = ReliabilityRunConfig {
+            target_years: vec![1.0],
+            enable_hci: false,
+            enable_nbti: false,
+            enable_em: true,
+            min_stress_voltage: 0.0,
+        };
+
+        apply_reliability_mechanism_scaling(&mut results, &cfg);
+        let shift = results[0]
+            .shifts
+            .get("1y")
+            .expect("scaled shift should still be present");
+        assert!((shift.vth_shift - 0.0).abs() < 1e-12);
+        assert!((shift.mobility_shift - 0.0).abs() < 1e-12);
+        assert!(shift.rds_shift > 1.0, "EM scaling should amplify Rds shift");
+    }
+
+    #[test]
+    fn test_run_optimization_analysis_with_config_targets_resistive_divider_voltage() {
+        let netlist = r#"
+* optimization smoke
+.param RTOP=1k
+.param RBOT=1k
+V1 in 0 2
+R1 in out {RTOP}
+R2 out 0 {RBOT}
+.end
+"#;
+        let cfg = OptimizationRunConfig {
+            variables: vec![OptimizationVariable {
+                name: "RBOT".to_string(),
+                min: 500.0,
+                max: 3000.0,
+                initial: 1000.0,
+            }],
+            objective_node: "out".to_string(),
+            objective_ref: "0".to_string(),
+            goal: OptimizationGoalMode::Target,
+            target: Some(1.2),
+            algorithm: OptimizationAlgorithmMode::PatternSearch,
+            max_iterations: 80,
+            cost_tolerance: 1e-8,
+            fd_step: 1e-4,
+            initial_step: 0.2,
+            min_step: 1e-8,
+        };
+
+        let data = run_optimization_analysis_with_config(netlist, &cfg)
+            .expect("optimization should run for divider netlist");
+        assert!(!data.iterations.is_empty());
+        assert_eq!(data.iterations.len(), data.costs.len());
+        let rbot_trace = data
+            .variable_traces
+            .get("RBOT")
+            .expect("RBOT trace should exist");
+        assert_eq!(rbot_trace.len(), data.iterations.len());
+        assert!(data.best_cost.is_finite());
+        let best_rbot = data
+            .best_variables
+            .get("RBOT")
+            .copied()
+            .expect("best RBOT should be present");
+        assert!(
+            (best_rbot - 1500.0).abs() < 250.0,
+            "expected optimizer to approach ideal RBOT ~1500 ohm, got {}",
+            best_rbot
+        );
+    }
+
+    #[test]
+    fn test_run_optimization_analysis_rejects_invalid_variable_name() {
+        let cfg = OptimizationRunConfig {
+            variables: vec![OptimizationVariable {
+                name: "1BAD".to_string(),
+                min: 1.0,
+                max: 2.0,
+                initial: 1.5,
+            }],
+            ..OptimizationRunConfig::default()
+        };
+        let err = run_optimization_analysis_with_config("* invalid\nR1 in 0 1k\n.end\n", &cfg)
+            .expect_err("invalid variable name must be rejected");
+        assert!(err.contains("Invalid optimization variable name"));
+    }
+
+    #[test]
+    fn test_inject_param_overrides_inserts_before_last_end() {
+        let netlist = "* test\n.param A=1\nR1 in 0 {A}\n.end\n";
+        let vars = std::collections::HashMap::from([("A".to_string(), 2.5)]);
+        let overridden = inject_param_overrides(netlist, &vars);
+        let lowered = overridden.to_ascii_lowercase();
+        let end_pos = lowered
+            .rfind(".end")
+            .expect("overridden netlist should include .end");
+        let param_pos = lowered
+            .rfind("a=2.5000000000000000e+00")
+            .expect("override assignment should be present");
+        assert!(param_pos < end_pos);
+    }
+
+    #[test]
+    fn test_inject_param_overrides_rewrites_existing_param_lines_in_place() {
+        let netlist = "* opt\n.param A=1 B=2\n.param A=3\nR1 out 0 {A}\n.end\n";
+        let vars = std::collections::HashMap::from([("A".to_string(), 4.25)]);
+        let overridden = inject_param_overrides(netlist, &vars);
+        let lowered = overridden.to_ascii_lowercase();
+        let expected = ".param a=1 b=2 a=4.2500000000000000e+00";
+        assert!(
+            lowered.contains(expected),
+            "first .param line should include override assignment: {}",
+            overridden
+        );
+        assert!(
+            lowered.contains(".param a=3 a=4.2500000000000000e+00"),
+            "every matching .param line should include override assignment"
+        );
+    }
+
+    #[test]
+    fn test_inject_param_overrides_inserts_missing_params_after_title_line() {
+        let netlist = "optimization deck\nR1 out 0 {A}\n.end\n";
+        let vars = std::collections::HashMap::from([("A".to_string(), 1.75)]);
+        let overridden = inject_param_overrides(netlist, &vars);
+        let lines: Vec<&str> = overridden.lines().collect();
+        assert_eq!(lines[0], "optimization deck");
+        assert!(
+            lines[1]
+                .to_ascii_lowercase()
+                .contains(".param a=1.7500000000000000e+00"),
+            "missing overrides should be inserted directly after title line"
+        );
+    }
+
+    #[test]
+    fn test_format_param_override_value_uses_explicit_signed_exponent() {
+        assert_eq!(
+            format_param_override_value(2.5),
+            "2.5000000000000000e+00".to_string()
+        );
+        assert_eq!(
+            format_param_override_value(1e-9),
+            "1.0000000000000001e-09".to_string()
+        );
+    }
+
+    #[test]
+    fn test_run_soa_analysis_with_config_detects_mos_voltage_violation() {
+        let netlist = r#"
+* soa smoke
+VDD d 0 3.3
+VG g 0 PULSE(0 2.5 0 1n 1n 8n 16n)
+M1 d g 0 0 NM W=10u L=1u
+.model NM NMOS VTO=0.7 KP=200u LAMBDA=0.02
+.end
+"#;
+        let cfg = SoaRunConfig {
+            stop_time: 32e-9,
+            step_time: 1e-9,
+            check_vgs_max: true,
+            max_vgs: 1.2,
+            check_vds_max: true,
+            max_vds: 3.0,
+            check_vbe_max: false,
+            max_vbe: 1.0,
+            check_vce_max: false,
+            max_vce: 5.0,
+        };
+        let data = run_soa_analysis_with_config(netlist, &cfg)
+            .expect("SOA should execute for MOS transient netlist");
+        assert!(!data.time.is_empty());
+        assert_eq!(data.time.len(), data.violation_count.len());
+        assert!(
+            !data.violations.is_empty(),
+            "expected SOA voltage violations with aggressive limits"
+        );
+        let last = *data
+            .violation_count
+            .last()
+            .expect("violation count trace should have data");
+        assert!(last >= 1.0);
+    }
+
+    #[test]
+    fn test_run_soa_analysis_rejects_netlist_without_supported_devices() {
+        let netlist = "* soa none\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.end\n";
+        let err = run_soa_analysis(netlist)
+            .expect_err("SOA should fail when no supported semiconductor devices exist");
+        assert!(err.contains("supported semiconductor devices"));
     }
 }

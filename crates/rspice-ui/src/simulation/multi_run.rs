@@ -56,6 +56,18 @@ pub enum AnalysisRunType {
     Parametric,
     /// Corner analysis
     Corner,
+    /// Reliability aging analysis
+    Reliability,
+    /// Optimization analysis
+    Optimization,
+    /// Safety/SOA analysis
+    Soa,
+    /// S-parameter analysis
+    SParameter,
+    /// Envelope transient analysis
+    Envelope,
+    /// Fourier analysis
+    Fourier,
 }
 
 impl AnalysisRunType {
@@ -80,6 +92,12 @@ impl AnalysisRunType {
             AnalysisRunType::MonteCarlo => "Monte Carlo",
             AnalysisRunType::Parametric => "Parametric",
             AnalysisRunType::Corner => "Corner",
+            AnalysisRunType::Reliability => "Reliability",
+            AnalysisRunType::Optimization => "Optimization",
+            AnalysisRunType::Soa => "Safety (SOA)",
+            AnalysisRunType::SParameter => "S-Parameter",
+            AnalysisRunType::Envelope => "Envelope",
+            AnalysisRunType::Fourier => "Fourier",
         }
     }
 
@@ -93,6 +111,7 @@ impl AnalysisRunType {
                 | AnalysisRunType::Sensitivity
                 | AnalysisRunType::PoleZero
                 | AnalysisRunType::Stb
+                | AnalysisRunType::Reliability
         )
     }
 
@@ -128,6 +147,12 @@ impl AnalysisRunType {
             AnalysisRunType::MonteCarlo => 50,
             AnalysisRunType::Parametric => 30,
             AnalysisRunType::Corner => 25,
+            AnalysisRunType::Reliability => 12,
+            AnalysisRunType::Optimization => 45,
+            AnalysisRunType::Soa => 14,
+            AnalysisRunType::SParameter => 6,
+            AnalysisRunType::Envelope => 12,
+            AnalysisRunType::Fourier => 7,
         }
     }
 }
@@ -157,6 +182,41 @@ impl FrequencySweep {
             FrequencySweep::Linear => "lin",
         }
     }
+}
+
+/// Optimization goal strategy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum OptimizationGoal {
+    /// Minimize objective value.
+    Minimize,
+    /// Maximize objective value.
+    Maximize,
+    /// Reach target objective value.
+    Target,
+}
+
+/// Optimization algorithm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum OptimizationAlgorithm {
+    /// Gradient descent with line search.
+    GradientDescent,
+    /// Pattern search.
+    PatternSearch,
+    /// Simulated annealing.
+    SimulatedAnnealing,
+}
+
+/// Optimization variable bounds and initial value.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OptimizationVariable {
+    /// Parameter name from netlist `.param`.
+    pub name: String,
+    /// Lower bound.
+    pub min: f64,
+    /// Upper bound.
+    pub max: f64,
+    /// Initial value.
+    pub initial: f64,
 }
 
 /// Strongly-typed analysis request used by queue execution.
@@ -245,6 +305,69 @@ pub enum AnalysisSpec {
     Parametric,
     /// Corner analysis
     Corner,
+    /// Reliability aging analysis
+    Reliability {
+        target_years: Vec<f64>,
+        enable_hci: bool,
+        enable_nbti: bool,
+        enable_em: bool,
+        min_stress_voltage: f64,
+    },
+    /// Optimization analysis.
+    Optimization {
+        variables: Vec<OptimizationVariable>,
+        objective_node: String,
+        objective_ref: String,
+        goal: OptimizationGoal,
+        target: Option<f64>,
+        algorithm: OptimizationAlgorithm,
+        max_iterations: usize,
+        cost_tolerance: f64,
+        fd_step: f64,
+        initial_step: f64,
+        min_step: f64,
+    },
+    /// Safety / SOA analysis.
+    Soa {
+        stop_time: f64,
+        step_time: f64,
+        check_vgs_max: bool,
+        max_vgs: f64,
+        check_vds_max: bool,
+        max_vds: f64,
+        check_vbe_max: bool,
+        max_vbe: f64,
+        check_vce_max: bool,
+        max_vce: f64,
+    },
+    /// S-parameter analysis
+    SParameter {
+        start_freq: f64,
+        stop_freq: f64,
+        points_per_unit: usize,
+        sweep: FrequencySweep,
+        z0: f64,
+        port1_pos: String,
+        port1_neg: String,
+        port2_pos: String,
+        port2_neg: String,
+    },
+    /// Envelope transient analysis
+    Envelope {
+        fundamental_freq: f64,
+        stop_time: f64,
+        num_harmonics: usize,
+        max_step: Option<f64>,
+    },
+    /// Fourier analysis
+    Fourier {
+        fundamental_freq: f64,
+        num_harmonics: usize,
+        output_node: String,
+        output_ref: String,
+        start_time: f64,
+        stop_time: f64,
+    },
 }
 
 impl AnalysisSpec {
@@ -269,6 +392,12 @@ impl AnalysisSpec {
             AnalysisSpec::MonteCarlo => AnalysisRunType::MonteCarlo,
             AnalysisSpec::Parametric => AnalysisRunType::Parametric,
             AnalysisSpec::Corner => AnalysisRunType::Corner,
+            AnalysisSpec::Reliability { .. } => AnalysisRunType::Reliability,
+            AnalysisSpec::Optimization { .. } => AnalysisRunType::Optimization,
+            AnalysisSpec::Soa { .. } => AnalysisRunType::Soa,
+            AnalysisSpec::SParameter { .. } => AnalysisRunType::SParameter,
+            AnalysisSpec::Envelope { .. } => AnalysisRunType::Envelope,
+            AnalysisSpec::Fourier { .. } => AnalysisRunType::Fourier,
         }
     }
 
@@ -489,6 +618,235 @@ impl AnalysisSpec {
                 }
                 if *points_per_decade == 0 {
                     return Err("STB points_per_decade must be > 0".to_string());
+                }
+                Ok(())
+            }
+            AnalysisSpec::SParameter {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                z0,
+                port1_pos,
+                port1_neg,
+                port2_pos,
+                port2_neg,
+                ..
+            } => {
+                if *start_freq <= 0.0 {
+                    return Err("S-parameter start_freq must be > 0".to_string());
+                }
+                if *stop_freq <= 0.0 {
+                    return Err("S-parameter stop_freq must be > 0".to_string());
+                }
+                if *stop_freq <= *start_freq {
+                    return Err("S-parameter stop_freq must be > start_freq".to_string());
+                }
+                if *points_per_unit == 0 {
+                    return Err("S-parameter points_per_unit must be > 0".to_string());
+                }
+                if *z0 <= 0.0 {
+                    return Err("S-parameter z0 must be > 0".to_string());
+                }
+                if port1_pos.trim().is_empty() || port2_pos.trim().is_empty() {
+                    return Err("S-parameter port positive nodes are required".to_string());
+                }
+                if port1_neg.trim().is_empty() || port2_neg.trim().is_empty() {
+                    return Err("S-parameter port negative nodes are required".to_string());
+                }
+                Ok(())
+            }
+            AnalysisSpec::Envelope {
+                fundamental_freq,
+                stop_time,
+                num_harmonics,
+                max_step,
+            } => {
+                if *fundamental_freq <= 0.0 {
+                    return Err("Envelope fundamental_freq must be > 0".to_string());
+                }
+                if *stop_time <= 0.0 {
+                    return Err("Envelope stop_time must be > 0".to_string());
+                }
+                if *num_harmonics == 0 {
+                    return Err("Envelope num_harmonics must be > 0".to_string());
+                }
+                if let Some(step) = max_step {
+                    if *step <= 0.0 {
+                        return Err("Envelope max_step must be > 0 when set".to_string());
+                    }
+                }
+                Ok(())
+            }
+            AnalysisSpec::Fourier {
+                fundamental_freq,
+                num_harmonics,
+                output_node,
+                output_ref: _,
+                start_time,
+                stop_time,
+            } => {
+                if *fundamental_freq <= 0.0 {
+                    return Err("Fourier fundamental_freq must be > 0".to_string());
+                }
+                if *num_harmonics == 0 {
+                    return Err("Fourier num_harmonics must be > 0".to_string());
+                }
+                if output_node.trim().is_empty() {
+                    return Err("Fourier output_node is required".to_string());
+                }
+                if *stop_time <= *start_time {
+                    return Err("Fourier stop_time must be greater than start_time".to_string());
+                }
+                Ok(())
+            }
+            AnalysisSpec::Reliability {
+                target_years,
+                enable_hci,
+                enable_nbti,
+                enable_em,
+                min_stress_voltage,
+            } => {
+                if target_years.is_empty() {
+                    return Err("Reliability target_years must not be empty".to_string());
+                }
+                if target_years
+                    .iter()
+                    .any(|years| !years.is_finite() || *years <= 0.0)
+                {
+                    return Err("Reliability target_years must be finite and > 0".to_string());
+                }
+                if !enable_hci && !enable_nbti && !enable_em {
+                    return Err("Reliability requires at least one enabled mechanism".to_string());
+                }
+                if !min_stress_voltage.is_finite() || *min_stress_voltage < 0.0 {
+                    return Err(
+                        "Reliability min_stress_voltage must be finite and >= 0".to_string()
+                    );
+                }
+                Ok(())
+            }
+            AnalysisSpec::Optimization {
+                variables,
+                objective_node,
+                objective_ref,
+                goal,
+                target,
+                max_iterations,
+                cost_tolerance,
+                fd_step,
+                initial_step,
+                min_step,
+                ..
+            } => {
+                if variables.is_empty() {
+                    return Err("Optimization variables must not be empty".to_string());
+                }
+                if objective_node.trim().is_empty() {
+                    return Err("Optimization objective_node is required".to_string());
+                }
+                if objective_ref.trim().is_empty() {
+                    return Err("Optimization objective_ref is required".to_string());
+                }
+                if objective_node.eq_ignore_ascii_case(objective_ref) {
+                    return Err(
+                        "Optimization objective_node and objective_ref must differ".to_string()
+                    );
+                }
+                if *max_iterations == 0 {
+                    return Err("Optimization max_iterations must be > 0".to_string());
+                }
+                if !cost_tolerance.is_finite() || *cost_tolerance <= 0.0 {
+                    return Err("Optimization cost_tolerance must be finite and > 0".to_string());
+                }
+                if !fd_step.is_finite() || *fd_step <= 0.0 {
+                    return Err("Optimization fd_step must be finite and > 0".to_string());
+                }
+                if !initial_step.is_finite() || *initial_step <= 0.0 {
+                    return Err("Optimization initial_step must be finite and > 0".to_string());
+                }
+                if !min_step.is_finite() || *min_step <= 0.0 {
+                    return Err("Optimization min_step must be finite and > 0".to_string());
+                }
+                if min_step > initial_step {
+                    return Err("Optimization min_step must be <= initial_step".to_string());
+                }
+                if *goal == OptimizationGoal::Target {
+                    if target.is_none() || target.is_some_and(|v| !v.is_finite()) {
+                        return Err(
+                            "Optimization target goal requires a finite target value".to_string()
+                        );
+                    }
+                } else if target.is_some_and(|v| !v.is_finite()) {
+                    return Err("Optimization target must be finite when provided".to_string());
+                }
+
+                let mut seen = std::collections::HashSet::new();
+                for var in variables {
+                    if var.name.trim().is_empty() {
+                        return Err("Optimization variable name must not be empty".to_string());
+                    }
+                    if !var.min.is_finite() || !var.max.is_finite() || !var.initial.is_finite() {
+                        return Err(format!(
+                            "Optimization variable '{}' bounds/initial must be finite",
+                            var.name
+                        ));
+                    }
+                    if var.max <= var.min {
+                        return Err(format!(
+                            "Optimization variable '{}' requires max > min",
+                            var.name
+                        ));
+                    }
+                    if var.initial < var.min || var.initial > var.max {
+                        return Err(format!(
+                            "Optimization variable '{}' initial must be within [{}, {}]",
+                            var.name, var.min, var.max
+                        ));
+                    }
+                    if !seen.insert(var.name.to_ascii_uppercase()) {
+                        return Err(format!(
+                            "Optimization variable '{}' is defined more than once",
+                            var.name
+                        ));
+                    }
+                }
+                Ok(())
+            }
+            AnalysisSpec::Soa {
+                stop_time,
+                step_time,
+                check_vgs_max,
+                max_vgs,
+                check_vds_max,
+                max_vds,
+                check_vbe_max,
+                max_vbe,
+                check_vce_max,
+                max_vce,
+            } => {
+                if !stop_time.is_finite() || *stop_time <= 0.0 {
+                    return Err("SOA stop_time must be finite and > 0".to_string());
+                }
+                if !step_time.is_finite() || *step_time <= 0.0 {
+                    return Err("SOA step_time must be finite and > 0".to_string());
+                }
+                if step_time > stop_time {
+                    return Err("SOA step_time must be <= stop_time".to_string());
+                }
+                if !check_vgs_max && !check_vds_max && !check_vbe_max && !check_vce_max {
+                    return Err("SOA requires at least one enabled check".to_string());
+                }
+                if *check_vgs_max && (!max_vgs.is_finite() || *max_vgs <= 0.0) {
+                    return Err("SOA max_vgs must be finite and > 0 when enabled".to_string());
+                }
+                if *check_vds_max && (!max_vds.is_finite() || *max_vds <= 0.0) {
+                    return Err("SOA max_vds must be finite and > 0 when enabled".to_string());
+                }
+                if *check_vbe_max && (!max_vbe.is_finite() || *max_vbe <= 0.0) {
+                    return Err("SOA max_vbe must be finite and > 0 when enabled".to_string());
+                }
+                if *check_vce_max && (!max_vce.is_finite() || *max_vce <= 0.0) {
+                    return Err("SOA max_vce must be finite and > 0 when enabled".to_string());
                 }
                 Ok(())
             }
@@ -1090,6 +1448,9 @@ mod tests {
         assert_eq!(AnalysisRunType::Stb.display_name(), "STB");
         assert_eq!(AnalysisRunType::Pxf.display_name(), "PXF");
         assert_eq!(AnalysisRunType::Pstb.display_name(), "PSTB");
+        assert_eq!(AnalysisRunType::Reliability.display_name(), "Reliability");
+        assert_eq!(AnalysisRunType::Optimization.display_name(), "Optimization");
+        assert_eq!(AnalysisRunType::Soa.display_name(), "Safety (SOA)");
     }
 
     #[test]
@@ -1097,6 +1458,9 @@ mod tests {
         assert!(AnalysisRunType::Ac.requires_dc_op());
         assert!(AnalysisRunType::Noise.requires_dc_op());
         assert!(AnalysisRunType::Stb.requires_dc_op());
+        assert!(AnalysisRunType::Reliability.requires_dc_op());
+        assert!(!AnalysisRunType::Optimization.requires_dc_op());
+        assert!(!AnalysisRunType::Soa.requires_dc_op());
         assert!(!AnalysisRunType::Transient.requires_dc_op());
         assert!(!AnalysisRunType::DcOp.requires_dc_op());
     }
@@ -1125,6 +1489,104 @@ mod tests {
         let spec = AnalysisSpec::Pstb;
         assert!(spec.validate().is_ok());
         assert_eq!(spec.run_type(), AnalysisRunType::Pstb);
+    }
+
+    #[test]
+    fn test_analysis_spec_reliability_validation() {
+        let valid = AnalysisSpec::Reliability {
+            target_years: vec![1.0, 5.0, 10.0],
+            enable_hci: true,
+            enable_nbti: false,
+            enable_em: true,
+            min_stress_voltage: 0.05,
+        };
+        assert!(valid.validate().is_ok());
+        assert_eq!(valid.run_type(), AnalysisRunType::Reliability);
+
+        let invalid = AnalysisSpec::Reliability {
+            target_years: vec![0.0],
+            enable_hci: false,
+            enable_nbti: false,
+            enable_em: false,
+            min_stress_voltage: -1.0,
+        };
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn test_analysis_spec_optimization_validation() {
+        let valid = AnalysisSpec::Optimization {
+            variables: vec![OptimizationVariable {
+                name: "RLOAD".to_string(),
+                min: 1e3,
+                max: 10e3,
+                initial: 2e3,
+            }],
+            objective_node: "out".to_string(),
+            objective_ref: "0".to_string(),
+            goal: OptimizationGoal::Target,
+            target: Some(1.2),
+            algorithm: OptimizationAlgorithm::PatternSearch,
+            max_iterations: 64,
+            cost_tolerance: 1e-8,
+            fd_step: 1e-4,
+            initial_step: 0.1,
+            min_step: 1e-8,
+        };
+        assert!(valid.validate().is_ok());
+        assert_eq!(valid.run_type(), AnalysisRunType::Optimization);
+
+        let invalid = AnalysisSpec::Optimization {
+            variables: vec![OptimizationVariable {
+                name: "RLOAD".to_string(),
+                min: 10e3,
+                max: 1e3,
+                initial: 2e3,
+            }],
+            objective_node: "out".to_string(),
+            objective_ref: "out".to_string(),
+            goal: OptimizationGoal::Target,
+            target: None,
+            algorithm: OptimizationAlgorithm::PatternSearch,
+            max_iterations: 0,
+            cost_tolerance: -1.0,
+            fd_step: 0.0,
+            initial_step: 0.0,
+            min_step: 1.0,
+        };
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn test_analysis_spec_soa_validation() {
+        let valid = AnalysisSpec::Soa {
+            stop_time: 1e-6,
+            step_time: 1e-9,
+            check_vgs_max: true,
+            max_vgs: 1.8,
+            check_vds_max: true,
+            max_vds: 3.3,
+            check_vbe_max: false,
+            max_vbe: 0.9,
+            check_vce_max: false,
+            max_vce: 5.0,
+        };
+        assert!(valid.validate().is_ok());
+        assert_eq!(valid.run_type(), AnalysisRunType::Soa);
+
+        let invalid = AnalysisSpec::Soa {
+            stop_time: 1e-9,
+            step_time: 1e-6,
+            check_vgs_max: false,
+            max_vgs: 0.0,
+            check_vds_max: false,
+            max_vds: 0.0,
+            check_vbe_max: false,
+            max_vbe: 0.0,
+            check_vce_max: false,
+            max_vce: 0.0,
+        };
+        assert!(invalid.validate().is_err());
     }
 
     #[test]

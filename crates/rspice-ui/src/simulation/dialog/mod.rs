@@ -51,6 +51,9 @@ pub mod temp;
 // Envelope/Fourier
 pub mod envelope;
 pub mod fourier;
+pub mod optimization;
+pub mod reliability;
+pub mod soa;
 
 // Framework
 pub mod framework;
@@ -94,6 +97,12 @@ pub use temp::{TempBaseAnalysis, TempConfig, TempDialogState};
 // Re-exports - Envelope/Fourier
 pub use envelope::{EnvelopeConfig, EnvelopeDialogState, ModulationType};
 pub use fourier::{FourierConfig, FourierDialogState};
+pub use optimization::{
+    OptimizationAlgorithmMode, OptimizationConfig, OptimizationDialogState, OptimizationGoalMode,
+    OptimizationVariableConfig,
+};
+pub use reliability::{ReliabilityConfig, ReliabilityDialogState};
+pub use soa::{SoaConfig, SoaDialogState};
 
 // Re-exports - Framework
 pub use framework::{DialogResult, DialogTab, SimulationDialog};
@@ -162,7 +171,13 @@ mod tests {
     }
     #[test]
     fn test_envelope_fourier_exports() {
-        let _ = (EnvelopeConfig::default(), FourierConfig::default());
+        let _ = (
+            EnvelopeConfig::default(),
+            FourierConfig::default(),
+            OptimizationConfig::default(),
+            ReliabilityConfig::default(),
+            SoaConfig::default(),
+        );
     }
 
     #[test]
@@ -176,6 +191,9 @@ mod tests {
         assert!(CornerConfig::default().validate().is_ok());
         assert!(EnvelopeConfig::default().validate().is_ok());
         assert!(FourierConfig::default().validate().is_ok());
+        assert!(OptimizationConfig::default().validate().is_ok());
+        assert!(ReliabilityConfig::default().validate().is_ok());
+        assert!(SoaConfig::default().validate().is_ok());
         assert!(XfConfig::default().validate().is_ok());
         assert!(OpConfig::default().validate().is_ok());
         assert!(PzConfig::default().validate().is_ok());

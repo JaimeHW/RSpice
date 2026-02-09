@@ -3,6 +3,8 @@
 //! Containers for simulation results that bridge rspice-core outputs
 //! to the waveform viewer and other UI components.
 
+use crate::services::safety::SoAViolation;
+use crate::simulation::reliability_engine::ReliabilityResult;
 use std::collections::HashMap;
 
 //=============================================================================
@@ -331,6 +333,40 @@ pub enum SimulationResult {
         num_failures: usize,
     },
 
+    /// Reliability aging analysis result.
+    Reliability {
+        /// Lifetime checkpoints in years.
+        years: Vec<f64>,
+        /// Waveforms indexed by signal name.
+        waveforms: HashMap<String, WaveformData>,
+        /// Structured per-device reliability outputs.
+        device_results: Vec<ReliabilityResult>,
+    },
+
+    /// Optimization analysis result.
+    Optimization {
+        /// Iteration axis values.
+        iterations: Vec<f64>,
+        /// Waveforms indexed by signal name.
+        waveforms: HashMap<String, WaveformData>,
+        /// Best cost reached.
+        best_cost: f64,
+        /// Best variable values.
+        best_variables: HashMap<String, f64>,
+        /// Whether convergence criterion was met.
+        converged: bool,
+    },
+
+    /// Safety / SOA analysis result.
+    Soa {
+        /// Time axis for SOA checks.
+        time: Vec<f64>,
+        /// Waveforms indexed by signal name.
+        waveforms: HashMap<String, WaveformData>,
+        /// Collected SOA violations.
+        violations: Vec<SoAViolation>,
+    },
+
     /// Empty placeholder result (for unimplemented analyses)
     Empty {
         /// Associated measurements
@@ -375,6 +411,15 @@ impl SimulationResult {
             SimulationResult::Corner { waveforms, .. } => {
                 waveforms.keys().map(|s| s.as_str()).collect()
             }
+            SimulationResult::Reliability { waveforms, .. } => {
+                waveforms.keys().map(|s| s.as_str()).collect()
+            }
+            SimulationResult::Optimization { waveforms, .. } => {
+                waveforms.keys().map(|s| s.as_str()).collect()
+            }
+            SimulationResult::Soa { waveforms, .. } => {
+                waveforms.keys().map(|s| s.as_str()).collect()
+            }
             SimulationResult::MonteCarlo { variables, .. } => {
                 variables.iter().map(|v| v.name.as_str()).collect()
             }
@@ -390,6 +435,9 @@ impl SimulationResult {
             SimulationResult::Ac { waveforms, .. } => waveforms.get(name),
             SimulationResult::Parametric { waveforms, .. } => waveforms.get(name),
             SimulationResult::Corner { waveforms, .. } => waveforms.get(name),
+            SimulationResult::Reliability { waveforms, .. } => waveforms.get(name),
+            SimulationResult::Optimization { waveforms, .. } => waveforms.get(name),
+            SimulationResult::Soa { waveforms, .. } => waveforms.get(name),
             _ => None,
         }
     }
@@ -413,6 +461,17 @@ impl SimulationResult {
             } => *runs_completed > 0 || !variables.is_empty(),
             SimulationResult::Parametric { sweep_values, .. } => !sweep_values.is_empty(),
             SimulationResult::Corner { x_values, .. } => !x_values.is_empty(),
+            SimulationResult::Reliability {
+                years, waveforms, ..
+            } => !years.is_empty() && !waveforms.is_empty(),
+            SimulationResult::Optimization {
+                iterations,
+                waveforms,
+                ..
+            } => !iterations.is_empty() && !waveforms.is_empty(),
+            SimulationResult::Soa {
+                time, waveforms, ..
+            } => !time.is_empty() && !waveforms.is_empty(),
             SimulationResult::Empty { .. } => false,
         }
     }
@@ -430,6 +489,9 @@ impl SimulationResult {
             SimulationResult::MonteCarlo { .. } => "Monte Carlo",
             SimulationResult::Parametric { .. } => "Parametric",
             SimulationResult::Corner { .. } => "Corner",
+            SimulationResult::Reliability { .. } => "Reliability",
+            SimulationResult::Optimization { .. } => "Optimization",
+            SimulationResult::Soa { .. } => "Safety (SOA)",
             SimulationResult::Empty { .. } => "Empty",
         }
     }
@@ -630,5 +692,78 @@ mod tests {
         assert!(result.has_data());
         assert_eq!(result.type_name(), "Corner");
         assert!(result.get_waveform("V(out)").is_some());
+    }
+
+    #[test]
+    fn test_simulation_result_reliability_waveforms() {
+        let mut waveforms = HashMap::new();
+        waveforms.insert(
+            "DVTH(M1)".to_string(),
+            WaveformData::new_time_domain("DVTH(M1)", vec![1.0, 5.0, 10.0], vec![1e-3, 2e-3, 3e-3]),
+        );
+        let result = SimulationResult::Reliability {
+            years: vec![1.0, 5.0, 10.0],
+            waveforms,
+            device_results: Vec::new(),
+        };
+        assert!(result.has_data());
+        assert_eq!(result.type_name(), "Reliability");
+        assert!(result.get_waveform("DVTH(M1)").is_some());
+    }
+
+    #[test]
+    fn test_simulation_result_optimization_waveforms() {
+        let mut waveforms = HashMap::new();
+        waveforms.insert(
+            "OPT_COST".to_string(),
+            WaveformData::new_time_domain("OPT_COST", vec![0.0, 1.0, 2.0], vec![2.0, 0.5, 0.1]),
+        );
+        waveforms.insert(
+            "OPT_RLOAD".to_string(),
+            WaveformData::new_time_domain(
+                "OPT_RLOAD",
+                vec![0.0, 1.0, 2.0],
+                vec![1000.0, 1400.0, 1500.0],
+            ),
+        );
+        let result = SimulationResult::Optimization {
+            iterations: vec![0.0, 1.0, 2.0],
+            waveforms,
+            best_cost: 0.1,
+            best_variables: HashMap::from([("RLOAD".to_string(), 1500.0)]),
+            converged: true,
+        };
+        assert!(result.has_data());
+        assert_eq!(result.type_name(), "Optimization");
+        assert!(result.get_waveform("OPT_COST").is_some());
+        assert_eq!(result.waveform_names().len(), 2);
+    }
+
+    #[test]
+    fn test_simulation_result_soa_waveforms() {
+        let mut waveforms = HashMap::new();
+        waveforms.insert(
+            "SOA_VIOLATION_COUNT".to_string(),
+            WaveformData::new_time_domain(
+                "SOA_VIOLATION_COUNT",
+                vec![0.0, 1e-9, 2e-9],
+                vec![0.0, 1.0, 2.0],
+            ),
+        );
+        let result = SimulationResult::Soa {
+            time: vec![0.0, 1e-9, 2e-9],
+            waveforms,
+            violations: vec![crate::services::safety::SoAViolation {
+                device_id: "M1".to_string(),
+                parameter: crate::services::safety::SoAParameter::Vgs,
+                limit_value: 1.8,
+                actual_value: 2.0,
+                time: 1e-9,
+                severity: crate::services::safety::ViolationSeverity::Violation,
+            }],
+        };
+        assert!(result.has_data());
+        assert_eq!(result.type_name(), "Safety (SOA)");
+        assert!(result.get_waveform("SOA_VIOLATION_COUNT").is_some());
     }
 }
