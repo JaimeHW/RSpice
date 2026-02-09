@@ -114,9 +114,7 @@ impl SimulationController {
             self.current_config = None;
             self.current_spec = None;
             state.simulation.status = "Aborted".to_string();
-            state
-                .console_messages
-                .push(crate::common::app::ConsoleMessage::warning(
+            state.push_sim_message(crate::common::app::ConsoleMessage::warning(
                     "Simulation aborted by user",
                 ));
         }
@@ -140,7 +138,7 @@ impl SimulationController {
             Ok(plan) => plan,
             Err(errors) => {
                 for err in errors {
-                    state.console_messages.push(ConsoleMessage::error(err));
+                    state.push_sim_message(ConsoleMessage::error(err));
                 }
                 state.simulation.status = "Configuration error".to_string();
                 return;
@@ -151,7 +149,7 @@ impl SimulationController {
             Ok(queue) => queue,
             Err(errors) => {
                 for err in errors {
-                    state.console_messages.push(ConsoleMessage::error(err));
+                    state.push_sim_message(ConsoleMessage::error(err));
                 }
                 state.simulation.status = "Configuration error".to_string();
                 return;
@@ -160,7 +158,7 @@ impl SimulationController {
 
         self.total_analyses = queued.len();
         if self.total_analyses == 0 {
-            state.console_messages.push(ConsoleMessage::error(
+            state.push_sim_message(ConsoleMessage::error(
                 "No runnable analyses were selected".to_string(),
             ));
             state.simulation.status = "Configuration error".to_string();
@@ -180,15 +178,13 @@ impl SimulationController {
 
         if !result.errors.is_empty() {
             for err in result.errors {
-                state.console_messages.push(ConsoleMessage::error(err));
+                state.push_sim_message(ConsoleMessage::error(err));
             }
             state.simulation.status = "Netlist error".to_string();
             return;
         }
         for warning in result.warnings {
-            state
-                .console_messages
-                .push(ConsoleMessage::warning(warning));
+            state.push_sim_message(ConsoleMessage::warning(warning));
         }
 
         netlist = Self::apply_simulation_options_to_netlist(
@@ -235,7 +231,7 @@ impl SimulationController {
 
         // Log summary to console
         if self.total_analyses > 1 {
-            state.console_messages.push(ConsoleMessage::info(format!(
+            state.push_sim_message(ConsoleMessage::info(format!(
                 "Starting simulation batch: {} analyses",
                 self.total_analyses
             )));
@@ -280,7 +276,7 @@ impl SimulationController {
         state.simulation.status = status_msg.clone();
 
         // Log to console
-        state.console_messages.push(ConsoleMessage::info(format!(
+        state.push_sim_message(ConsoleMessage::info(format!(
             "Starting {}...",
             if self.total_analyses > 1 {
                 format!(
@@ -313,7 +309,7 @@ impl SimulationController {
             ),
             Err(e) => {
                 log::error!("Failed to start simulation: {}", e);
-                state.console_messages.push(ConsoleMessage::error(format!(
+                state.push_sim_message(ConsoleMessage::error(format!(
                     "Failed to start simulation: {}",
                     e
                 )));
@@ -1672,7 +1668,7 @@ impl SimulationController {
         let sp_cfg = match sp_state.to_config() {
             Ok(cfg) => cfg,
             Err(e) => {
-                state.console_messages.push(ConsoleMessage::warning(format!(
+                state.push_sim_message(ConsoleMessage::warning(format!(
                     "Skipping Touchstone export: invalid S-parameter settings ({})",
                     e
                 )));
@@ -1693,7 +1689,7 @@ impl SimulationController {
         ) {
             Ok(dataset) => dataset,
             Err(e) => {
-                state.console_messages.push(ConsoleMessage::warning(format!(
+                state.push_sim_message(ConsoleMessage::warning(format!(
                     "Touchstone export skipped: {}",
                     e
                 )));
@@ -1710,11 +1706,11 @@ impl SimulationController {
 
         let writer = WaveformWriter::new(WaveformFormat::Touchstone);
         match writer.write(&dataset, &path) {
-            Ok(()) => state.console_messages.push(ConsoleMessage::info(format!(
+            Ok(()) => state.push_sim_message(ConsoleMessage::info(format!(
                 "Exported Touchstone: {}",
                 path.display()
             ))),
-            Err(e) => state.console_messages.push(ConsoleMessage::warning(format!(
+            Err(e) => state.push_sim_message(ConsoleMessage::warning(format!(
                 "Touchstone export failed: {}",
                 e
             ))),
@@ -2479,9 +2475,7 @@ impl SimulationController {
                     } else {
                         "Simulation completed successfully".to_string()
                     };
-                    state
-                        .console_messages
-                        .push(ConsoleMessage::info(completion_msg));
+                    state.push_sim_message(ConsoleMessage::info(completion_msg));
 
                     // Convert SimulationResult to AnalysisResult and add to run
                     let analysis_type = self
@@ -2524,6 +2518,7 @@ impl SimulationController {
                     state.waveform_viewer.x_axis_unit = x_unit.to_string();
                     state.waveform_viewer.y_axis_label = y_label.to_string();
                     state.waveform_viewer.y_axis_unit = y_unit.to_string();
+                    state.active_viewer = Self::preferred_viewer_for_analysis(analysis_type);
 
                     // --- Phase 10-11-12 Integration Glue (run once per analysis) ---
 
@@ -2559,7 +2554,7 @@ impl SimulationController {
                     } else {
                         // All analyses complete - finalize the batch
                         if self.total_analyses > 1 {
-                            state.console_messages.push(ConsoleMessage::info(format!(
+                            state.push_sim_message(ConsoleMessage::info(format!(
                                 "All {} analyses completed successfully",
                                 self.total_analyses
                             )));
@@ -2568,9 +2563,7 @@ impl SimulationController {
                     }
                 }
                 Err(e) => {
-                    state
-                        .console_messages
-                        .push(ConsoleMessage::error(format!("Analysis failed: {}", e)));
+                    state.push_sim_message(ConsoleMessage::error(format!("Analysis failed: {}", e)));
 
                     // Mark run as partially failed and add failed analysis entry
                     let failed_label = self
@@ -2657,17 +2650,13 @@ impl SimulationController {
                 );
                 for (node, voltage) in &dc_result.node_voltages {
                     log::info!("  V({}) = {:.6} V", node, voltage);
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::info(format!(
+                    state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                             "V({}) = {:.6} V",
                             node, voltage
                         )));
                 }
 
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                         "DC OP: {} node voltages computed",
                         dc_result.node_voltages.len()
                     )));
@@ -2691,10 +2680,9 @@ impl SimulationController {
                     );
                     state.simulation.waveforms.push(waveform);
                 }
+                self.populate_transient_post_views(state, time, waveforms);
 
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                         "Transient: {} points, {} waveforms",
                         time.len(),
                         waveforms.len()
@@ -2724,10 +2712,9 @@ impl SimulationController {
                     let waveform = WaveformData::new(mag_name, freq_vec.clone(), magnitude, color);
                     state.simulation.waveforms.push(waveform);
                 }
+                self.populate_ac_post_views(state, frequencies, waveforms);
 
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                         "AC: {} points, {} waveforms",
                         frequencies.len(),
                         waveforms.len()
@@ -2756,9 +2743,7 @@ impl SimulationController {
                     state.simulation.waveforms.push(waveform);
                 }
 
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                         "DC Sweep ({}): {} points, {} waveforms",
                         sweep_var,
                         sweep_values.len(),
@@ -2816,9 +2801,7 @@ impl SimulationController {
 
                 // Calculate integrated noise
                 let integrated: f64 = output_noise.iter().sum::<f64>().sqrt();
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                         "Noise: {} points, integrated output: {:.3e} V/√Hz",
                         frequencies.len(),
                         integrated
@@ -2829,10 +2812,9 @@ impl SimulationController {
             }
 
             SimulationResult::PoleZero { poles, zeros, gain } => {
+                self.populate_pole_zero_view(state, poles, zeros, *gain);
                 // Pole-Zero: Display in console (and optionally s-plane plot)
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                         "Pole-Zero Analysis: DC gain = {:.4}",
                         gain
                     )));
@@ -2841,9 +2823,7 @@ impl SimulationController {
                     if im.abs() < 1e-10 {
                         // Real pole
                         let freq = re.abs() / (2.0 * std::f64::consts::PI);
-                        state
-                            .console_messages
-                            .push(crate::common::app::ConsoleMessage::info(format!(
+                        state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                                 "  Pole {}: {:.3e} rad/s ({:.3e} Hz)",
                                 i + 1,
                                 re,
@@ -2851,9 +2831,7 @@ impl SimulationController {
                             )));
                     } else {
                         // Complex pole
-                        state
-                            .console_messages
-                            .push(crate::common::app::ConsoleMessage::info(format!(
+                        state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                                 "  Pole {}: {:.3e} ± j{:.3e} rad/s",
                                 i + 1,
                                 re,
@@ -2864,17 +2842,13 @@ impl SimulationController {
 
                 for (i, (re, im)) in zeros.iter().enumerate() {
                     if im.abs() < 1e-10 {
-                        state
-                            .console_messages
-                            .push(crate::common::app::ConsoleMessage::info(format!(
+                        state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                                 "  Zero {}: {:.3e} rad/s",
                                 i + 1,
                                 re
                             )));
                     } else {
-                        state
-                            .console_messages
-                            .push(crate::common::app::ConsoleMessage::info(format!(
+                        state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                                 "  Zero {}: {:.3e} ± j{:.3e} rad/s",
                                 i + 1,
                                 re,
@@ -2889,9 +2863,7 @@ impl SimulationController {
                 normalized,
             } => {
                 // Sensitivity: Display in console as table
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                         "Sensitivity Analysis: {} parameters",
                         sensitivities.len()
                     )));
@@ -2906,9 +2878,7 @@ impl SimulationController {
 
                 for (param, norm_sens) in sorted.iter().take(10) {
                     if let Some(sens) = sensitivities.get(*param) {
-                        state
-                            .console_messages
-                            .push(crate::common::app::ConsoleMessage::info(format!(
+                        state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                                 "  {}: dV/d{} = {:.3e}, norm = {:.2}%",
                                 param,
                                 param,
@@ -2926,6 +2896,7 @@ impl SimulationController {
                 all_converged,
                 variables,
             } => {
+                self.populate_monte_carlo_histograms(state, variables);
                 for (idx, var) in variables.iter().enumerate() {
                     if var.histogram.is_empty() || var.bin_edges.len() < 2 {
                         continue;
@@ -2945,17 +2916,13 @@ impl SimulationController {
                     state.simulation.waveforms.push(waveform);
                 }
 
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                         "Monte Carlo: {}/{} runs converged ({} failed), all_converged={}",
                         runs_completed, runs_requested, num_failures, all_converged
                     )));
 
                 for var in variables.iter().take(8) {
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::info(format!(
+                    state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                             "  {}: mean={:.6e}, sigma={:.6e}, min={:.6e}, max={:.6e}",
                             var.name, var.mean, var.std_dev, var.min, var.max
                         )));
@@ -2985,9 +2952,7 @@ impl SimulationController {
                     state.simulation.waveforms.push(waveform);
                 }
 
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                         "Parametric ({}): {} points, {} waveforms, {} failed points",
                         target,
                         sweep_values.len(),
@@ -3015,9 +2980,7 @@ impl SimulationController {
                     state.simulation.waveforms.push(waveform);
                 }
 
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                         "Corner sweep: {} points, {} waveforms, {} failed corners",
                         x_values.len(),
                         waveforms.len(),
@@ -3044,9 +3007,7 @@ impl SimulationController {
                 }
 
                 state.simulation.reliability_results = device_results.clone();
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                         "Reliability: {} lifetime points, {} devices analyzed",
                         years.len(),
                         device_results.len()
@@ -3073,18 +3034,14 @@ impl SimulationController {
                     state.simulation.waveforms.push(waveform);
                 }
 
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                         "Optimization: {} iterations, best cost {:.6e}, converged={}",
                         iterations.len(),
                         best_cost,
                         converged
                     )));
                 for (name, value) in best_variables.iter().take(8) {
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::info(format!(
+                    state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                             "  {} = {:.6e}",
                             name, value
                         )));
@@ -3109,9 +3066,7 @@ impl SimulationController {
                     state.simulation.waveforms.push(waveform);
                 }
                 state.simulation.soa_violations = violations.clone();
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(format!(
+                state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                         "SOA: {} sampled points, {} violations",
                         time.len(),
                         violations.len()
@@ -3122,9 +3077,7 @@ impl SimulationController {
             }
 
             SimulationResult::Empty { .. } => {
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(
+                state.push_sim_message(crate::common::app::ConsoleMessage::info(
                         "Analysis complete (no waveform data)".to_string(),
                     ));
             }
@@ -3137,6 +3090,320 @@ impl SimulationController {
                 .simulation
                 .node_to_waveform
                 .insert(wf.name.clone(), idx);
+        }
+    }
+
+    fn populate_transient_post_views(
+        &self,
+        state: &mut AppState,
+        time: &[f64],
+        waveforms: &std::collections::HashMap<String, crate::simulation::WaveformData>,
+    ) {
+        let Some((_name, waveform)) = Self::primary_waveform(waveforms, time.len()) else {
+            return;
+        };
+
+        if let Some(bit_period) = Self::estimate_ui_period(time, &waveform.y_values) {
+            let eye_data = crate::analysis::eye_diagram::data::EyeDataBuilder::new()
+                .bit_period(bit_period)
+                .ui_count(2)
+                .skip_initial(2)
+                .build(time, &waveform.y_values);
+            if eye_data.trace_count() > 0 {
+                state.eye_diagram_state.load_data(eye_data);
+            }
+        }
+
+        if let Some((samples, sample_rate)) =
+            Self::downsample_for_fft(time, &waveform.y_values, 4096)
+        {
+            let fft_data = crate::analysis::fft::FftData::from_time_domain(
+                &format!("FFT({})", waveform.name),
+                &samples,
+                sample_rate,
+                state.fft_state.window,
+            );
+            if !fft_data.is_empty() {
+                state.fft_state.load_data(fft_data);
+            }
+        }
+    }
+
+    fn populate_ac_post_views(
+        &self,
+        state: &mut AppState,
+        frequencies: &[f64],
+        waveforms: &std::collections::HashMap<String, crate::simulation::WaveformData>,
+    ) {
+        let mut bode_data = crate::analysis::bode::BodeData::new();
+        state.nyquist_state.clear();
+        state.smith_chart_state.clear_traces();
+
+        let mut names: Vec<_> = waveforms.keys().cloned().collect();
+        names.sort();
+        let mut loaded_nyquist = false;
+        for name in names {
+            let Some(waveform) = waveforms.get(&name) else {
+                continue;
+            };
+            let Some(imag) = waveform.y_imag.as_ref() else {
+                continue;
+            };
+            if waveform.y_values.len() != frequencies.len() || imag.len() != frequencies.len() {
+                continue;
+            }
+
+            let response = crate::analysis::bode::data::FrequencyResponse::from_complex_arrays(
+                &name,
+                frequencies,
+                &waveform.y_values,
+                imag,
+            );
+            bode_data.add_response(response);
+
+            let nyquist_curve =
+                crate::analysis::nyquist::data::NyquistData::from_arrays(
+                    &name,
+                    frequencies,
+                    &waveform.y_values,
+                    imag,
+                );
+            if loaded_nyquist {
+                state.nyquist_state.add_curve(nyquist_curve);
+            } else {
+                state.nyquist_state.load_data(nyquist_curve);
+                loaded_nyquist = true;
+            }
+
+            if Self::is_sparameter_trace_name(&name) {
+                state.smith_chart_state.load_sparam_data(
+                    &name,
+                    frequencies,
+                    &waveform.y_values,
+                    imag,
+                );
+            }
+        }
+
+        if bode_data.response_count() > 0 {
+            bode_data.calculate_margins();
+            state.bode_plot_state.load_data(bode_data);
+        } else {
+            state.bode_plot_state
+                .load_data(crate::analysis::bode::BodeData::new());
+        }
+    }
+
+    fn populate_pole_zero_view(
+        &self,
+        state: &mut AppState,
+        poles: &[(f64, f64)],
+        zeros: &[(f64, f64)],
+        gain: f64,
+    ) {
+        let mut data = crate::analysis::pole_zero::data::PoleZeroData::new("Pole-Zero");
+        data.gain = gain;
+        for &(re, im) in poles {
+            data.roots
+                .push(crate::analysis::pole_zero::data::ComplexRoot::pole(re, im));
+        }
+        for &(re, im) in zeros {
+            data.roots
+                .push(crate::analysis::pole_zero::data::ComplexRoot::zero(re, im));
+        }
+        state.pole_zero_state.load_data(data);
+    }
+
+    fn populate_monte_carlo_histograms(
+        &self,
+        state: &mut AppState,
+        variables: &[crate::simulation::results::MonteCarloVariableResult],
+    ) {
+        state.histogram_state.clear();
+
+        for variable in variables {
+            if variable.histogram.is_empty() || variable.bin_edges.len() != variable.histogram.len() + 1
+            {
+                continue;
+            }
+
+            let mut bins = Vec::with_capacity(variable.histogram.len());
+            for (idx, count) in variable.histogram.iter().enumerate() {
+                bins.push(crate::analysis::histogram::data::HistogramBin {
+                    lower: variable.bin_edges[idx],
+                    upper: variable.bin_edges[idx + 1],
+                    count: *count,
+                    weight: *count as f64,
+                });
+            }
+            let total_count: usize = variable.histogram.iter().sum();
+            let histogram = crate::analysis::histogram::data::Histogram {
+                name: variable.name.clone(),
+                bins,
+                total_count,
+                total_weight: total_count as f64,
+                underflow: 0,
+                overflow: 0,
+                data_min: *variable.bin_edges.first().unwrap_or(&0.0),
+                data_max: *variable.bin_edges.last().unwrap_or(&0.0),
+            };
+
+            if state.histogram_state.is_empty() {
+                state.histogram_state.load_histogram(histogram);
+            } else {
+                state.histogram_state.add_histogram(histogram);
+            }
+        }
+    }
+
+    fn primary_waveform<'a>(
+        waveforms: &'a std::collections::HashMap<String, crate::simulation::WaveformData>,
+        expected_len: usize,
+    ) -> Option<(&'a str, &'a crate::simulation::WaveformData)> {
+        let mut names: Vec<_> = waveforms.keys().cloned().collect();
+        names.sort();
+        for name in names {
+            let Some(waveform) = waveforms.get(&name) else {
+                continue;
+            };
+            if waveform.y_values.len() == expected_len {
+                return Some((waveform.name.as_str(), waveform));
+            }
+        }
+        None
+    }
+
+    fn estimate_ui_period(time: &[f64], signal: &[f64]) -> Option<f64> {
+        let n = time.len().min(signal.len());
+        if n < 8 {
+            return None;
+        }
+
+        let mut v_min = f64::INFINITY;
+        let mut v_max = f64::NEG_INFINITY;
+        for &v in signal.iter().take(n) {
+            if v.is_finite() {
+                v_min = v_min.min(v);
+                v_max = v_max.max(v);
+            }
+        }
+        if !v_min.is_finite() || !v_max.is_finite() || (v_max - v_min) <= 0.0 {
+            return None;
+        }
+
+        let threshold = (v_min + v_max) * 0.5;
+        let edges = crate::analysis::eye_diagram::data::find_edges(&time[..n], &signal[..n], threshold);
+        if edges.len() < 3 {
+            return None;
+        }
+
+        let mut rising_times: Vec<f64> = edges
+            .iter()
+            .filter(|edge| edge.rising)
+            .map(|edge| edge.time)
+            .collect();
+        rising_times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+        let edge_times: Vec<f64> = if rising_times.len() >= 3 {
+            rising_times
+        } else {
+            let mut all: Vec<f64> = edges.iter().map(|edge| edge.time).collect();
+            all.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            all
+        };
+        if edge_times.len() < 3 {
+            return None;
+        }
+
+        let mut intervals = Vec::with_capacity(edge_times.len().saturating_sub(1));
+        for pair in edge_times.windows(2) {
+            let dt = pair[1] - pair[0];
+            if dt.is_finite() && dt > 0.0 {
+                intervals.push(dt);
+            }
+        }
+        if intervals.is_empty() {
+            return None;
+        }
+        intervals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let median = intervals[intervals.len() / 2];
+        (median.is_finite() && median > 0.0).then_some(median)
+    }
+
+    fn downsample_for_fft(
+        time: &[f64],
+        signal: &[f64],
+        max_points: usize,
+    ) -> Option<(Vec<f64>, f64)> {
+        let n = time.len().min(signal.len());
+        if n < 16 || max_points < 16 {
+            return None;
+        }
+        let step = (n / max_points).max(1);
+
+        let mut values = Vec::with_capacity((n / step) + 1);
+        let mut times = Vec::with_capacity((n / step) + 1);
+        for idx in (0..n).step_by(step) {
+            let t = time[idx];
+            let y = signal[idx];
+            if t.is_finite() && y.is_finite() {
+                times.push(t);
+                values.push(y);
+            }
+        }
+        if values.len() < 16 {
+            return None;
+        }
+
+        let duration = times[times.len() - 1] - times[0];
+        if !duration.is_finite() || duration <= 0.0 {
+            return None;
+        }
+        let sample_rate = (values.len().saturating_sub(1) as f64) / duration;
+        if !sample_rate.is_finite() || sample_rate <= 0.0 {
+            return None;
+        }
+        Some((values, sample_rate))
+    }
+
+    fn is_sparameter_trace_name(name: &str) -> bool {
+        let normalized = name.trim_matches('|').to_ascii_uppercase();
+        if !normalized.starts_with('S') {
+            return false;
+        }
+        normalized[1..]
+            .chars()
+            .filter(|ch| ch.is_ascii_digit())
+            .count()
+            >= 2
+    }
+
+    fn preferred_viewer_for_analysis(
+        analysis_type: AnalysisType,
+    ) -> crate::viewers::ActiveViewer {
+        match analysis_type {
+            AnalysisType::DcOp => crate::viewers::ActiveViewer::Waveform,
+            AnalysisType::DcSweep | AnalysisType::Transient | AnalysisType::Envelope => {
+                crate::viewers::ActiveViewer::Waveform
+            }
+            AnalysisType::Ac | AnalysisType::Tf | AnalysisType::Pac | AnalysisType::Pxf => {
+                crate::viewers::ActiveViewer::BodePlot
+            }
+            AnalysisType::Noise | AnalysisType::Pnoise => crate::viewers::ActiveViewer::BodePlot,
+            AnalysisType::PoleZero => crate::viewers::ActiveViewer::PoleZero,
+            AnalysisType::Sensitivity => crate::viewers::ActiveViewer::Waveform,
+            AnalysisType::Pstb | AnalysisType::Stb => crate::viewers::ActiveViewer::Nyquist,
+            AnalysisType::MonteCarlo | AnalysisType::Corner | AnalysisType::Parametric => {
+                crate::viewers::ActiveViewer::Histogram
+            }
+            AnalysisType::Reliability | AnalysisType::Optimization | AnalysisType::Soa => {
+                crate::viewers::ActiveViewer::Waveform
+            }
+            AnalysisType::SParameter => crate::viewers::ActiveViewer::SmithChart,
+            AnalysisType::Fourier => crate::viewers::ActiveViewer::Fft,
+            AnalysisType::HarmonicBalance | AnalysisType::Pss => {
+                crate::viewers::ActiveViewer::Waveform
+            }
         }
     }
 

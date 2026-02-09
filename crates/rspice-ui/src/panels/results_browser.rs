@@ -17,6 +17,7 @@ use egui::{CollapsingHeader, RichText, Ui};
 
 use crate::common::app::{AppState, BottomPanelTab};
 use crate::state::AnalysisType;
+use crate::viewers::ActiveViewer;
 
 // =============================================================================
 // Public API
@@ -130,6 +131,7 @@ pub fn render_results_browser(ui: &mut Ui, state: &mut AppState) {
                     // Switch to appropriate viewer tab
                     state.panels.bottom_panel = true;
                     state.panels.active_bottom_tab = analysis_type_to_tab(analysis_type);
+                    state.active_viewer = analysis_type_to_viewer(analysis_type);
                 }
             }
         });
@@ -373,6 +375,31 @@ fn analysis_type_to_tab(analysis_type: AnalysisType) -> BottomPanelTab {
     }
 }
 
+fn analysis_type_to_viewer(analysis_type: AnalysisType) -> ActiveViewer {
+    match analysis_type {
+        AnalysisType::DcOp => ActiveViewer::Waveform,
+        AnalysisType::DcSweep | AnalysisType::Transient | AnalysisType::Envelope => {
+            ActiveViewer::Waveform
+        }
+        AnalysisType::Ac | AnalysisType::Tf | AnalysisType::Pac | AnalysisType::Pxf => {
+            ActiveViewer::BodePlot
+        }
+        AnalysisType::Noise | AnalysisType::Pnoise => ActiveViewer::BodePlot,
+        AnalysisType::PoleZero => ActiveViewer::PoleZero,
+        AnalysisType::Sensitivity => ActiveViewer::Waveform,
+        AnalysisType::Pstb | AnalysisType::Stb => ActiveViewer::Nyquist,
+        AnalysisType::MonteCarlo | AnalysisType::Corner | AnalysisType::Parametric => {
+            ActiveViewer::Histogram
+        }
+        AnalysisType::Reliability | AnalysisType::Optimization | AnalysisType::Soa => {
+            ActiveViewer::Waveform
+        }
+        AnalysisType::SParameter => ActiveViewer::SmithChart,
+        AnalysisType::Fourier => ActiveViewer::Fft,
+        AnalysisType::HarmonicBalance | AnalysisType::Pss => ActiveViewer::Waveform,
+    }
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -458,6 +485,30 @@ mod tests {
         assert_eq!(
             analysis_type_to_tab(AnalysisType::DcOp),
             BottomPanelTab::Log
+        );
+    }
+
+    #[test]
+    fn test_analysis_type_to_viewer_routes_specialized_views() {
+        assert_eq!(
+            analysis_type_to_viewer(AnalysisType::Ac),
+            ActiveViewer::BodePlot
+        );
+        assert_eq!(
+            analysis_type_to_viewer(AnalysisType::SParameter),
+            ActiveViewer::SmithChart
+        );
+        assert_eq!(
+            analysis_type_to_viewer(AnalysisType::Fourier),
+            ActiveViewer::Fft
+        );
+        assert_eq!(
+            analysis_type_to_viewer(AnalysisType::PoleZero),
+            ActiveViewer::PoleZero
+        );
+        assert_eq!(
+            analysis_type_to_viewer(AnalysisType::MonteCarlo),
+            ActiveViewer::Histogram
         );
     }
 }

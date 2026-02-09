@@ -87,17 +87,13 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
                         .unwrap_or("action")
                         .to_string();
                     if state.schematic.undo() {
-                        state
-                            .console_messages
-                            .push(crate::common::app::ConsoleMessage::info(format!(
+                        state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
                                 "Undo: {}",
                                 desc
                             )));
                     }
                 } else {
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::info("Nothing to undo"));
+                    state.push_user_message(crate::common::app::ConsoleMessage::info("Nothing to undo"));
                 }
                 ui.close_menu();
             }
@@ -109,17 +105,13 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
                         .unwrap_or("action")
                         .to_string();
                     if state.schematic.redo() {
-                        state
-                            .console_messages
-                            .push(crate::common::app::ConsoleMessage::info(format!(
+                        state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
                                 "Redo: {}",
                                 desc
                             )));
                     }
                 } else {
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::info("Nothing to redo"));
+                    state.push_user_message(crate::common::app::ConsoleMessage::info("Nothing to redo"));
                 }
                 ui.close_menu();
             }
@@ -287,9 +279,9 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
 
                     if ui.button(&label).clicked() {
                         state.active_viewer = *viewer;
-                        state
-                            .console_messages
-                            .push(crate::common::app::ConsoleMessage::info(format!(
+                        state.panels.bottom_panel = true;
+                        state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
+                        state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
                                 "Switched to {} viewer",
                                 viewer.name()
                             )));
@@ -310,17 +302,13 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
                     state.schematic.components.len()
                 );
                 if state.schematic.components.is_empty() {
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::warning(
+                    state.push_user_message(crate::common::app::ConsoleMessage::warning(
                             "No circuit to simulate. Add components first.",
                         ));
                 } else {
                     log::info!("Setting trigger_simulation = true");
                     state.simulation.trigger_simulation = true;
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::info(
+                    state.push_user_message(crate::common::app::ConsoleMessage::info(
                             "Simulation started...",
                         ));
                 }
@@ -347,15 +335,13 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
                     if ui.button(name).clicked() {
                         state.dialogs.sim_active_tab = tab;
                         if state.schematic.components.is_empty() {
-                            state.console_messages.push(
+                            state.push_user_message(
                                 crate::common::app::ConsoleMessage::warning(
                                     "No circuit to simulate. Add components first.",
                                 ),
                             );
                         } else {
-                            state
-                                .console_messages
-                                .push(crate::common::app::ConsoleMessage::info(format!(
+                            state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
                                     "Starting {} analysis...",
                                     name
                                 )));
@@ -368,9 +354,7 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
 
             if ui.button("⏹ Stop Simulation").clicked() {
                 state.simulation.is_running = false;
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::warning(
+                state.push_user_message(crate::common::app::ConsoleMessage::warning(
                         "Simulation stopped",
                     ));
                 ui.close_menu();
@@ -514,9 +498,7 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
                         summary.total, summary.errors, summary.critical
                     )
                 };
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(&msg));
+                state.push_user_message(crate::common::app::ConsoleMessage::info(&msg));
                 state.dialogs.drc_results = Some(result);
                 state.dialogs.drc_dialog = true;
                 ui.close_menu();
@@ -530,18 +512,14 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
                 } else {
                     format!("ERC found {} violations", result.total_count())
                 };
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(&msg));
+                state.push_user_message(crate::common::app::ConsoleMessage::info(&msg));
                 state.dialogs.drc_results = Some(result);
                 state.dialogs.drc_dialog = true;
                 ui.close_menu();
             }
 
             if ui.button("LVS Check").clicked() {
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(
+                state.push_user_message(crate::common::app::ConsoleMessage::info(
                         "LVS: Requires layout data (not available in schematic-only mode)",
                     ));
                 ui.close_menu();
@@ -561,9 +539,7 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
                 }
                 if ui.button("Cross-Probe").clicked() {
                     state.panels.signal_browser = true;
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::info(
+                    state.push_user_message(crate::common::app::ConsoleMessage::info(
                             "Cross-probe enabled",
                         ));
                     ui.close_menu();
@@ -584,9 +560,7 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
                     .clicked()
                 {
                     load_example(example.name, &mut state.schematic);
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::info(format!(
+                    state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
                             "Loaded example: {} ({})",
                             example.name, example.category
                         )));
@@ -609,33 +583,25 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
             // Documentation submenu
             ui.menu_button("Documentation", |ui| {
                 if ui.button("User Guide").clicked() {
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::info(
+                    state.push_user_message(crate::common::app::ConsoleMessage::info(
                             "User Guide: See docs/user_guide.md",
                         ));
                     ui.close_menu();
                 }
                 if ui.button("SPICE Reference").clicked() {
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::info(
+                    state.push_user_message(crate::common::app::ConsoleMessage::info(
                             "SPICE Reference: See docs/spice_reference.md",
                         ));
                     ui.close_menu();
                 }
                 if ui.button("Analysis Guide").clicked() {
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::info(
+                    state.push_user_message(crate::common::app::ConsoleMessage::info(
                             "Analysis Guide: See docs/analysis_guide.md",
                         ));
                     ui.close_menu();
                 }
                 if ui.button("Model Library").clicked() {
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::info(
+                    state.push_user_message(crate::common::app::ConsoleMessage::info(
                             "Model Library: See docs/models.md",
                         ));
                     ui.close_menu();
@@ -645,33 +611,25 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
             // Examples submenu
             ui.menu_button("Examples", |ui| {
                 if ui.button("RC Low-Pass Filter").clicked() {
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::info(
+                    state.push_user_message(crate::common::app::ConsoleMessage::info(
                             "Loading RC filter example...",
                         ));
                     ui.close_menu();
                 }
                 if ui.button("Inverter Chain").clicked() {
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::info(
+                    state.push_user_message(crate::common::app::ConsoleMessage::info(
                             "Loading inverter chain example...",
                         ));
                     ui.close_menu();
                 }
                 if ui.button("Operational Amplifier").clicked() {
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::info(
+                    state.push_user_message(crate::common::app::ConsoleMessage::info(
                             "Loading op-amp example...",
                         ));
                     ui.close_menu();
                 }
                 if ui.button("PLL Circuit").clicked() {
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::info(
+                    state.push_user_message(crate::common::app::ConsoleMessage::info(
                             "Loading PLL example...",
                         ));
                     ui.close_menu();
@@ -681,18 +639,14 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
             ui.separator();
 
             if ui.button("Check for Updates...").clicked() {
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(
+                state.push_user_message(crate::common::app::ConsoleMessage::info(
                         "You are running the latest version",
                     ));
                 ui.close_menu();
             }
 
             if ui.button("Report Issue...").clicked() {
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(
+                state.push_user_message(crate::common::app::ConsoleMessage::info(
                         "Please report issues at: github.com/rspice/issues",
                     ));
                 ui.close_menu();
@@ -717,9 +671,7 @@ fn action_file_new(state: &mut AppState) {
         log::warn!("New schematic requested but current has unsaved changes");
     }
     state.schematic = crate::state::SchematicState::default();
-    state
-        .console_messages
-        .push(crate::common::app::ConsoleMessage::info(
+    state.push_user_message(crate::common::app::ConsoleMessage::info(
             "Created new schematic",
         ));
 }
@@ -731,17 +683,13 @@ fn action_file_open(state: &mut AppState) {
         Ok(path) => match load_schematic(&path) {
             Ok(schematic) => {
                 state.schematic = schematic;
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(format!(
+                state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
                         "Opened: {}",
                         path.display()
                     )));
             }
             Err(e) => {
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::error(format!(
+                state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
                         "Failed to open: {}",
                         e
                     )));
@@ -751,9 +699,7 @@ fn action_file_open(state: &mut AppState) {
             // User cancelled - no message needed
         }
         Err(e) => {
-            state
-                .console_messages
-                .push(crate::common::app::ConsoleMessage::error(format!(
+            state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
                     "Open failed: {}",
                     e
                 )));
@@ -770,17 +716,13 @@ fn action_file_save(state: &mut AppState) {
         match save_schematic(&state.schematic, path) {
             Ok(()) => {
                 state.schematic.is_dirty = false;
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(format!(
+                state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
                         "Saved: {}",
                         path.display()
                     )));
             }
             Err(e) => {
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::error(format!(
+                state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
                         "Save failed: {}",
                         e
                     )));
@@ -808,17 +750,13 @@ fn action_file_save_as(state: &mut AppState) {
             Ok(()) => {
                 state.schematic.current_file = Some(path.clone());
                 state.schematic.is_dirty = false;
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(format!(
+                state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
                         "Saved: {}",
                         path.display()
                     )));
             }
             Err(e) => {
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::error(format!(
+                state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
                         "Save failed: {}",
                         e
                     )));
@@ -828,9 +766,7 @@ fn action_file_save_as(state: &mut AppState) {
             // User cancelled - no message needed
         }
         Err(e) => {
-            state
-                .console_messages
-                .push(crate::common::app::ConsoleMessage::error(format!(
+            state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
                     "Save As failed: {}",
                     e
                 )));
@@ -869,17 +805,13 @@ fn action_export_svg(state: &mut AppState) {
 
             match std::fs::write(&path, &svg_content) {
                 Ok(()) => {
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::info(format!(
+                    state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
                             "Exported SVG: {}",
                             path.display()
                         )));
                 }
                 Err(e) => {
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::error(format!(
+                    state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
                             "SVG export failed: {}",
                             e
                         )));
@@ -897,9 +829,7 @@ fn action_export_csv(state: &mut AppState) {
 
     // Check if we have simulation results to export
     if state.simulation.waveforms.is_empty() {
-        state
-            .console_messages
-            .push(crate::common::app::ConsoleMessage::warning(
+        state.push_user_message(crate::common::app::ConsoleMessage::warning(
                 "No simulation results to export. Run a simulation first.",
             ));
         return;
@@ -950,9 +880,7 @@ fn action_export_csv(state: &mut AppState) {
             let writer = WaveformWriter::new(WaveformFormat::Csv);
             match writer.write(&dataset, &path) {
                 Ok(()) => {
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::info(format!(
+                    state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
                             "Exported CSV: {} ({} signals, {} points)",
                             path.display(),
                             dataset.signal_count(),
@@ -960,9 +888,7 @@ fn action_export_csv(state: &mut AppState) {
                         )));
                 }
                 Err(e) => {
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::error(format!(
+                    state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
                             "CSV export failed: {}",
                             e
                         )));
@@ -978,9 +904,7 @@ fn action_export_csv(state: &mut AppState) {
 fn action_export_netlist(state: &mut AppState, format: crate::io::NetlistFormat) {
     // Check if we have a schematic to export
     if state.schematic.components.is_empty() {
-        state
-            .console_messages
-            .push(crate::common::app::ConsoleMessage::warning(
+        state.push_user_message(crate::common::app::ConsoleMessage::warning(
                 "No circuit to export. Add components first.",
             ));
         return;
@@ -1022,18 +946,14 @@ fn action_export_netlist(state: &mut AppState, format: crate::io::NetlistFormat)
 
             match std::fs::write(&path, &netlist_content) {
                 Ok(()) => {
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::info(format!(
+                    state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
                             "Exported {}: {}",
                             filter_name,
                             path.display()
                         )));
                 }
                 Err(e) => {
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::error(format!(
+                    state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
                             "Netlist export failed: {}",
                             e
                         )));
@@ -1049,9 +969,7 @@ fn action_export_netlist(state: &mut AppState, format: crate::io::NetlistFormat)
 fn action_view_netlist(state: &mut AppState) {
     // Check if we have a schematic to view
     if state.schematic.components.is_empty() {
-        state
-            .console_messages
-            .push(crate::common::app::ConsoleMessage::warning(
+        state.push_user_message(crate::common::app::ConsoleMessage::warning(
                 "No circuit to generate netlist. Add components first.",
             ));
         return;
@@ -1069,9 +987,7 @@ fn action_view_netlist(state: &mut AppState) {
     let preview = preview_lines.join("\n");
     let total_lines = netlist_content.lines().count();
 
-    state
-        .console_messages
-        .push(crate::common::app::ConsoleMessage::info(format!(
+    state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
             "Generated netlist ({} lines):\n{}{}",
             total_lines,
             preview,
@@ -1085,17 +1001,13 @@ fn build_menu_netlist(state: &mut AppState, format: crate::io::NetlistFormat) ->
 
     if !generation.errors.is_empty() {
         for err in generation.errors {
-            state
-                .console_messages
-                .push(crate::common::app::ConsoleMessage::error(err));
+            state.push_user_message(crate::common::app::ConsoleMessage::error(err));
         }
         return None;
     }
 
     for warning in generation.warnings {
-        state
-            .console_messages
-            .push(crate::common::app::ConsoleMessage::warning(warning));
+        state.push_user_message(crate::common::app::ConsoleMessage::warning(warning));
     }
 
     let spice_netlist = generation.netlist;
@@ -1194,9 +1106,7 @@ fn format_cache_bytes(bytes: u64) -> String {
 fn action_veriloga_cache_status(state: &mut AppState) {
     match rspice_core::veriloga_cache_stats() {
         Ok(stats) => {
-            state
-                .console_messages
-                .push(crate::common::app::ConsoleMessage::info(format!(
+            state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
                     "Verilog-A compile cache: {} entries, {} used (limits: {} entries, {}) at {}",
                     stats.entry_count,
                     format_cache_bytes(stats.total_bytes),
@@ -1206,9 +1116,7 @@ fn action_veriloga_cache_status(state: &mut AppState) {
                 )));
         }
         Err(err) => {
-            state
-                .console_messages
-                .push(crate::common::app::ConsoleMessage::error(format!(
+            state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
                     "Failed to inspect Verilog-A compile cache: {}",
                     err
                 )));
@@ -1220,25 +1128,19 @@ fn action_veriloga_cache_list_entries(state: &mut AppState) {
     match rspice_core::veriloga_cache_entries() {
         Ok(entries) => {
             if entries.is_empty() {
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(
+                state.push_user_message(crate::common::app::ConsoleMessage::info(
                         "Verilog-A compile cache is empty",
                     ));
                 return;
             }
 
-            state
-                .console_messages
-                .push(crate::common::app::ConsoleMessage::info(format!(
+            state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
                     "Verilog-A compile cache entries: {}",
                     entries.len()
                 )));
             let max_lines = 64_usize;
             for entry in entries.iter().take(max_lines) {
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(format!(
+                state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
                         "  {} -> {} (deps: {}, size: {})",
                         entry.source_path.display(),
                         entry.cache_path.display(),
@@ -1246,18 +1148,14 @@ fn action_veriloga_cache_list_entries(state: &mut AppState) {
                         format_cache_bytes(entry.size_bytes)
                     )));
                 for dep in &entry.dependencies {
-                    state
-                        .console_messages
-                        .push(crate::common::app::ConsoleMessage::info(format!(
+                    state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
                             "    dep: {}",
                             dep.display()
                         )));
                 }
             }
             if entries.len() > max_lines {
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::warning(format!(
+                state.push_user_message(crate::common::app::ConsoleMessage::warning(format!(
                         "Listing truncated to first {} entries ({} total)",
                         max_lines,
                         entries.len()
@@ -1265,9 +1163,7 @@ fn action_veriloga_cache_list_entries(state: &mut AppState) {
             }
         }
         Err(err) => {
-            state
-                .console_messages
-                .push(crate::common::app::ConsoleMessage::error(format!(
+            state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
                     "Failed to list Verilog-A compile cache entries: {}",
                     err
                 )));
@@ -1278,9 +1174,7 @@ fn action_veriloga_cache_list_entries(state: &mut AppState) {
 fn action_veriloga_cache_prune(state: &mut AppState) {
     match rspice_core::prune_veriloga_cache() {
         Ok(report) => {
-            state
-                .console_messages
-                .push(crate::common::app::ConsoleMessage::info(format!(
+            state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
                     "Pruned Verilog-A compile cache: removed {} entries, reclaimed {} (now {} entries, {})",
                     report.removed_entries,
                     format_cache_bytes(report.reclaimed_bytes),
@@ -1289,9 +1183,7 @@ fn action_veriloga_cache_prune(state: &mut AppState) {
                 )));
         }
         Err(err) => {
-            state
-                .console_messages
-                .push(crate::common::app::ConsoleMessage::error(format!(
+            state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
                     "Failed to prune Verilog-A compile cache: {}",
                     err
                 )));
@@ -1302,18 +1194,14 @@ fn action_veriloga_cache_prune(state: &mut AppState) {
 fn action_veriloga_cache_clear(state: &mut AppState) {
     match rspice_core::clear_veriloga_cache() {
         Ok(report) => {
-            state
-                .console_messages
-                .push(crate::common::app::ConsoleMessage::info(format!(
+            state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
                     "Cleared Verilog-A compile cache: removed {} entries, reclaimed {}",
                     report.removed_entries,
                     format_cache_bytes(report.reclaimed_bytes)
                 )));
         }
         Err(err) => {
-            state
-                .console_messages
-                .push(crate::common::app::ConsoleMessage::error(format!(
+            state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
                     "Failed to clear Verilog-A compile cache: {}",
                     err
                 )));
@@ -1331,9 +1219,7 @@ fn action_veriloga_recompile_library(state: &mut AppState) {
     }
 
     let Some(lib) = state.library_manager.get_library("veriloga") else {
-        state
-            .console_messages
-            .push(crate::common::app::ConsoleMessage::warning(
+        state.push_user_message(crate::common::app::ConsoleMessage::warning(
                 "No global 'veriloga' library found",
             ));
         return;
@@ -1381,15 +1267,11 @@ fn action_veriloga_recompile_library(state: &mut AppState) {
     };
 
     for warning in discovery_warnings {
-        state
-            .console_messages
-            .push(crate::common::app::ConsoleMessage::warning(warning));
+        state.push_user_message(crate::common::app::ConsoleMessage::warning(warning));
     }
 
     if candidates.is_empty() {
-        state
-            .console_messages
-            .push(crate::common::app::ConsoleMessage::warning(
+        state.push_user_message(crate::common::app::ConsoleMessage::warning(
                 "No Verilog-A views found in global library",
             ));
         return;
@@ -1398,9 +1280,7 @@ fn action_veriloga_recompile_library(state: &mut AppState) {
     let compiler = rspice_veriloga::VerilogACompiler::default();
     let mut ok_count = 0_usize;
     let mut fail_count = 0_usize;
-    state
-        .console_messages
-        .push(crate::common::app::ConsoleMessage::info(format!(
+    state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
             "Recompiling {} Verilog-A model(s) from global library...",
             candidates.len()
         )));
@@ -1416,9 +1296,7 @@ fn action_veriloga_recompile_library(state: &mut AppState) {
                 ) {
                     Ok(()) => {
                         ok_count += 1;
-                        state
-                            .console_messages
-                            .push(crate::common::app::ConsoleMessage::info(format!(
+                        state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
                                 "Recompiled {}/{}/{} -> '{}' ({} deps)",
                                 candidate.library,
                                 candidate.cell,
@@ -1429,9 +1307,7 @@ fn action_veriloga_recompile_library(state: &mut AppState) {
                     }
                     Err(err) => {
                         fail_count += 1;
-                        state
-                            .console_messages
-                            .push(crate::common::app::ConsoleMessage::error(format!(
+                        state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
                                 "Cache registration failed for {}/{}/{} ({}): {}",
                                 candidate.library,
                                 candidate.cell,
@@ -1444,9 +1320,7 @@ fn action_veriloga_recompile_library(state: &mut AppState) {
             }
             Err(err) => {
                 fail_count += 1;
-                state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::error(format!(
+                state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
                         "Compile failed for {}/{}/{} ({}): {}",
                         candidate.library,
                         candidate.cell,
@@ -1458,9 +1332,7 @@ fn action_veriloga_recompile_library(state: &mut AppState) {
         }
     }
 
-    state
-        .console_messages
-        .push(crate::common::app::ConsoleMessage::info(format!(
+    state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
             "Verilog-A recompile complete: {} succeeded, {} failed",
             ok_count, fail_count
         )));

@@ -53,15 +53,18 @@ fn axis_color() -> Color32 {
 
 /// Render the Bode plot viewer panel
 pub fn render_bode_viewer(ui: &mut Ui, app_state: &mut AppState) {
-    let mut state = BodePlotState::new();
-    load_demo_data(&mut state);
-
     let available_rect = ui.available_rect_before_wrap();
-    let layout = calculate_layout(available_rect, &state);
-
-    render_header(ui, &layout, &mut state, app_state);
-    render_plots(ui, &layout, &state);
-    render_info_panel(ui, &layout, &state);
+    let close_requested = {
+        let state = &mut app_state.bode_plot_state;
+        let layout = calculate_layout(available_rect, state);
+        let close_requested = render_header(ui, &layout, state);
+        render_plots(ui, &layout, state);
+        render_info_panel(ui, &layout, state);
+        close_requested
+    };
+    if close_requested {
+        app_state.active_viewer = crate::viewers::ActiveViewer::Waveform;
+    }
 }
 
 /// Public render function for external use
@@ -164,9 +167,9 @@ fn render_header(
     ui: &mut Ui,
     layout: &BodeLayout,
     state: &mut BodePlotState,
-    _app_state: &mut AppState,
-) {
+) -> bool {
     let painter = ui.painter();
+    let mut close_requested = false;
 
     painter.rect_filled(layout.header, Rounding::ZERO, Color32::from_rgb(30, 33, 40));
 
@@ -229,11 +232,12 @@ fn render_header(
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(8.0);
                 if ui.small_button("✕").clicked() {
-                    // Would close panel
+                    close_requested = true;
                 }
             });
         });
     });
+    close_requested
 }
 
 // =============================================================================

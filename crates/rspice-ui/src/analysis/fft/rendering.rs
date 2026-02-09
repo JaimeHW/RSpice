@@ -47,16 +47,14 @@ fn text_color() -> Color32 {
 // =============================================================================
 
 /// Render the FFT viewer panel
-pub fn render_fft_viewer(ui: &mut Ui, _app_state: &mut AppState) {
-    let mut state = FftState::new();
-    load_demo_data(&mut state);
-
+pub fn render_fft_viewer(ui: &mut Ui, app_state: &mut AppState) {
     let available_rect = ui.available_rect_before_wrap();
+    let state = &mut app_state.fft_state;
     let layout = calculate_layout(available_rect);
 
-    render_header(ui, &layout, &mut state);
-    render_spectrum(ui, &layout, &state);
-    render_info_panel(ui, &layout, &state);
+    render_header(ui, &layout, state);
+    render_spectrum(ui, &layout, state);
+    render_info_panel(ui, &layout, state);
 }
 
 /// Public render function

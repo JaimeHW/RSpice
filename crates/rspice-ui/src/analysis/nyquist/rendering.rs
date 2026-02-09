@@ -54,16 +54,14 @@ fn axis_color() -> Color32 {
 // =============================================================================
 
 /// Render the Nyquist plot viewer panel
-pub fn render_nyquist_viewer(ui: &mut Ui, _app_state: &mut AppState) {
-    let mut state = NyquistState::new();
-    load_demo_data(&mut state);
-
+pub fn render_nyquist_viewer(ui: &mut Ui, app_state: &mut AppState) {
     let available_rect = ui.available_rect_before_wrap();
+    let state = &mut app_state.nyquist_state;
     let layout = calculate_layout(available_rect);
 
-    render_header(ui, &layout, &mut state);
-    render_plot(ui, &layout, &state);
-    render_info_panel(ui, &layout, &state);
+    render_header(ui, &layout, state);
+    render_plot(ui, &layout, state);
+    render_info_panel(ui, &layout, state);
 }
 
 /// Public render function

@@ -59,18 +59,20 @@ fn highlight_color() -> Color32 {
 
 /// Render the eye diagram viewer panel
 pub fn render_eye_diagram_viewer(ui: &mut Ui, app_state: &mut AppState) {
-    // Get or create state - for now use demo data
-    let mut state = EyeDiagramState::new();
-    load_demo_data(&mut state);
-
     // Calculate layout
     let available_rect = ui.available_rect_before_wrap();
     let layout = calculate_layout(available_rect);
 
-    // Render sections
-    render_header(ui, &layout, &mut state, app_state);
-    render_chart_area(ui, &layout, &state);
-    render_measurements_panel(ui, &layout, &state);
+    let close_requested = {
+        let state = &mut app_state.eye_diagram_state;
+        let close_requested = render_header(ui, &layout, state);
+        render_chart_area(ui, &layout, state);
+        render_measurements_panel(ui, &layout, state);
+        close_requested
+    };
+    if close_requested {
+        app_state.active_viewer = crate::viewers::ActiveViewer::Waveform;
+    }
 }
 
 /// Public render function for external use
@@ -131,9 +133,9 @@ fn render_header(
     ui: &mut Ui,
     layout: &EyeLayout,
     state: &mut EyeDiagramState,
-    app_state: &mut AppState,
-) {
+)-> bool {
     let painter = ui.painter();
+    let mut close_requested = false;
 
     painter.rect_filled(layout.header, Rounding::ZERO, Color32::from_rgb(30, 33, 40));
 
@@ -192,11 +194,12 @@ fn render_header(
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(8.0);
                 if ui.small_button("✕").clicked() {
-                    app_state.panels.smith_chart = false; // Would be eye_diagram
+                    close_requested = true;
                 }
             });
         });
     });
+    close_requested
 }
 
 // =============================================================================

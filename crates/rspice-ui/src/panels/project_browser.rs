@@ -179,7 +179,7 @@ fn render_user_library_cells(ui: &mut Ui, lib_name: &str, filter: &str, state: &
                                         state.schematic.tool =
                                             Tool::Place(ComponentType::CellInstance);
                                         state.schematic.pending_library_cell = Some(instance);
-                                        state.console_messages.push(
+                                        state.push_user_message(
                                             crate::common::app::ConsoleMessage::info(format!(
                                                 "Click on schematic to place {}/{}/{}",
                                                 lib_name, cell_name, view_name
@@ -313,9 +313,7 @@ fn render_library_cell(
         // Set tool to place this component
         state.schematic.tool = Tool::Place(component_type);
         state.schematic.pending_library_cell = None;
-        state
-            .console_messages
-            .push(crate::common::app::ConsoleMessage::info(format!(
+        state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
                 "Click on schematic to place {} (R to rotate, Esc to cancel)",
                 cell_name
             )));

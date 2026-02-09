@@ -356,7 +356,7 @@ pub fn render_schematic_view(
                                 .add_library_cell_component(grid_pos, library_cell);
                             log::info!("Placed library cell instance at {:?}", grid_pos);
                         } else {
-                            state.console_messages.push(
+                            state.push_user_message(
                                 crate::common::app::ConsoleMessage::warning(
                                     "No library cell selected for placement".to_string(),
                                 ),
@@ -442,7 +442,7 @@ pub fn render_schematic_view(
                             // Check if this is ground
                             if net_name == "0" {
                                 log::info!("Probe: ground net (0V reference)");
-                                state.console_messages.push(
+                                state.push_user_message(
                                     crate::common::app::ConsoleMessage::info(
                                         "Ground node: 0V reference".to_string(),
                                     ),
@@ -454,7 +454,7 @@ pub fn render_schematic_view(
 
                                 if toggled {
                                     log::info!("Probe: toggled waveform for net '{}'", net_name);
-                                    state.console_messages.push(
+                                    state.push_user_message(
                                         crate::common::app::ConsoleMessage::info(format!(
                                             "Toggled waveform: V({})",
                                             net_name
@@ -466,7 +466,7 @@ pub fn render_schematic_view(
                                         "Probe: no waveform found for net '{}' (run simulation first?)",
                                         net_name
                                     );
-                                    state.console_messages.push(
+                                    state.push_user_message(
                                         crate::common::app::ConsoleMessage::warning(format!(
                                             "No waveform for {}: run simulation first",
                                             net_name
@@ -490,7 +490,7 @@ pub fn render_schematic_view(
                                 "Probe: wire at {:?} not in netlist (regenerate netlist?)",
                                 grid_pos
                             );
-                            state.console_messages.push(
+                            state.push_user_message(
                                 crate::common::app::ConsoleMessage::warning(
                                     "Wire not in netlist. Run simulation to update.".to_string(),
                                 ),
@@ -531,14 +531,14 @@ pub fn render_schematic_view(
 
                             let toggled = state.simulation.toggle_waveform_visibility(&probe_name);
                             if toggled {
-                                state.console_messages.push(
+                                state.push_user_message(
                                     crate::common::app::ConsoleMessage::info(format!(
                                         "Toggled waveform: {}",
                                         probe_name
                                     )),
                                 );
                             } else {
-                                state.console_messages.push(
+                                state.push_user_message(
                                     crate::common::app::ConsoleMessage::warning(format!(
                                         "No waveform for {}",
                                         probe_name

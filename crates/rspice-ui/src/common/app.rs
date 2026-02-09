@@ -495,8 +495,6 @@ pub struct AppState {
     pub log_buffer: crate::panels::LogBuffer,
     /// UI state for the structured log panel.
     pub log_panel_state: crate::panels::LogPanelState,
-    /// Number of console messages already mirrored into `log_buffer`.
-    pub log_sync_cursor: usize,
     /// Component property editor state
     pub property_editor: crate::properties::dialog::PropertyEditorState,
     /// Scripting/Automation console state
@@ -531,8 +529,14 @@ pub struct AppState {
     pub exit_requested: bool,
     /// Pole-Zero viewer state
     pub pole_zero_state: crate::analysis::pole_zero::PoleZeroState,
+    /// Bode viewer state
+    pub bode_plot_state: crate::analysis::bode::BodePlotState,
+    /// Nyquist viewer state
+    pub nyquist_state: crate::analysis::nyquist::NyquistState,
     /// Eye diagram viewer state
     pub eye_diagram_state: crate::analysis::eye_diagram::EyeDiagramState,
+    /// FFT viewer state
+    pub fft_state: crate::analysis::fft::FftState,
     /// Smith chart viewer state
     pub smith_chart_state: crate::analysis::smith_chart::SmithChartState,
     /// Histogram viewer state
@@ -551,7 +555,6 @@ impl Default for AppState {
             console_messages: Vec::new(),
             log_buffer: crate::panels::LogBuffer::default(),
             log_panel_state: crate::panels::LogPanelState::default(),
-            log_sync_cursor: 0,
             property_editor: crate::properties::dialog::PropertyEditorState::default(),
             script_console: crate::panels::ScriptConsoleState::default(),
             active_viewer: crate::viewers::ActiveViewer::default(),
@@ -573,10 +576,53 @@ impl Default for AppState {
             model_browser_state: crate::properties::model_browser::ModelBrowserState::default(),
             exit_requested: false,
             pole_zero_state: crate::analysis::pole_zero::PoleZeroState::default(),
+            bode_plot_state: crate::analysis::bode::BodePlotState::default(),
+            nyquist_state: crate::analysis::nyquist::NyquistState::default(),
             eye_diagram_state: crate::analysis::eye_diagram::EyeDiagramState::default(),
+            fft_state: crate::analysis::fft::FftState::default(),
             smith_chart_state: crate::analysis::smith_chart::SmithChartState::default(),
             histogram_state: crate::analysis::histogram::HistogramState::default(),
         }
+    }
+}
+
+impl AppState {
+    fn log_severity_for_console(level: ConsoleLevel) -> crate::panels::LogSeverity {
+        match level {
+            ConsoleLevel::Info => crate::panels::LogSeverity::Info,
+            ConsoleLevel::Warning => crate::panels::LogSeverity::Warning,
+            ConsoleLevel::Error => crate::panels::LogSeverity::Error,
+        }
+    }
+
+    /// Push a legacy console message and mirror it into the structured log.
+    pub fn push_console_message(&mut self, message: ConsoleMessage) {
+        self.push_console_message_with_source(crate::panels::LogSource::System, message);
+    }
+
+    /// Push a console message with an explicit structured-log source.
+    pub fn push_console_message_with_source(
+        &mut self,
+        source: crate::panels::LogSource,
+        message: ConsoleMessage,
+    ) {
+        let severity = Self::log_severity_for_console(message.level);
+        self.log_buffer
+            .log(severity, source, message.message.clone(), None);
+        self.console_messages.push(message);
+    }
+
+    pub fn push_user_message(&mut self, message: ConsoleMessage) {
+        self.push_console_message_with_source(crate::panels::LogSource::User, message);
+    }
+
+    pub fn push_sim_message(&mut self, message: ConsoleMessage) {
+        self.push_console_message_with_source(crate::panels::LogSource::Simulation, message);
+    }
+
+    pub fn clear_primary_log(&mut self) {
+        self.console_messages.clear();
+        self.log_buffer.clear();
     }
 }
 
@@ -973,9 +1019,7 @@ impl RSpiceApp {
     /// Internal: Actually create a new schematic (after confirmation)
     fn do_file_new(&mut self) {
         self.state.schematic = SchematicState::default();
-        self.state
-            .console_messages
-            .push(ConsoleMessage::info("Created new schematic"));
+        self.state.push_user_message(ConsoleMessage::info("Created new schematic"));
     }
 
     /// Request to open a schematic (prompts to save if dirty)
@@ -999,23 +1043,17 @@ impl RSpiceApp {
             Ok(path) => match load_schematic(&path) {
                 Ok(schematic) => {
                     self.state.schematic = schematic;
-                    self.state
-                        .console_messages
-                        .push(ConsoleMessage::info(format!("Opened: {}", path.display())));
+                    self.state.push_user_message(ConsoleMessage::info(format!("Opened: {}", path.display())));
                 }
                 Err(e) => {
-                    self.state
-                        .console_messages
-                        .push(ConsoleMessage::error(format!("Failed to open: {}", e)));
+                    self.state.push_user_message(ConsoleMessage::error(format!("Failed to open: {}", e)));
                 }
             },
             Err(SchematicIoError::Cancelled) => {
                 // User cancelled - no message needed
             }
             Err(e) => {
-                self.state
-                    .console_messages
-                    .push(ConsoleMessage::error(format!("Open failed: {}", e)));
+                self.state.push_user_message(ConsoleMessage::error(format!("Open failed: {}", e)));
             }
         }
     }
@@ -1072,14 +1110,10 @@ impl RSpiceApp {
             match save_schematic(&self.state.schematic, path) {
                 Ok(()) => {
                     self.state.schematic.is_dirty = false;
-                    self.state
-                        .console_messages
-                        .push(ConsoleMessage::info(format!("Saved: {}", path.display())));
+                    self.state.push_user_message(ConsoleMessage::info(format!("Saved: {}", path.display())));
                 }
                 Err(e) => {
-                    self.state
-                        .console_messages
-                        .push(ConsoleMessage::error(format!("Save failed: {}", e)));
+                    self.state.push_user_message(ConsoleMessage::error(format!("Save failed: {}", e)));
                 }
             }
         } else {
@@ -1105,23 +1139,17 @@ impl RSpiceApp {
                 Ok(()) => {
                     self.state.schematic.current_file = Some(path.clone());
                     self.state.schematic.is_dirty = false;
-                    self.state
-                        .console_messages
-                        .push(ConsoleMessage::info(format!("Saved: {}", path.display())));
+                    self.state.push_user_message(ConsoleMessage::info(format!("Saved: {}", path.display())));
                 }
                 Err(e) => {
-                    self.state
-                        .console_messages
-                        .push(ConsoleMessage::error(format!("Save failed: {}", e)));
+                    self.state.push_user_message(ConsoleMessage::error(format!("Save failed: {}", e)));
                 }
             },
             Err(SchematicIoError::Cancelled) => {
                 // User cancelled - no message needed
             }
             Err(e) => {
-                self.state
-                    .console_messages
-                    .push(ConsoleMessage::error(format!("Save As failed: {}", e)));
+                self.state.push_user_message(ConsoleMessage::error(format!("Save As failed: {}", e)));
             }
         }
     }
@@ -1135,14 +1163,10 @@ impl RSpiceApp {
                 .map(|s| s.to_string())
                 .unwrap_or_default();
             if self.state.schematic.undo() {
-                self.state
-                    .console_messages
-                    .push(ConsoleMessage::info(format!("Undo: {}", desc)));
+                self.state.push_user_message(ConsoleMessage::info(format!("Undo: {}", desc)));
             }
         } else {
-            self.state
-                .console_messages
-                .push(ConsoleMessage::info("Nothing to undo"));
+            self.state.push_user_message(ConsoleMessage::info("Nothing to undo"));
         }
     }
 
@@ -1155,14 +1179,10 @@ impl RSpiceApp {
                 .map(|s| s.to_string())
                 .unwrap_or_default();
             if self.state.schematic.redo() {
-                self.state
-                    .console_messages
-                    .push(ConsoleMessage::info(format!("Redo: {}", desc)));
+                self.state.push_user_message(ConsoleMessage::info(format!("Redo: {}", desc)));
             }
         } else {
-            self.state
-                .console_messages
-                .push(ConsoleMessage::info("Nothing to redo"));
+            self.state.push_user_message(ConsoleMessage::info("Nothing to redo"));
         }
     }
 
@@ -1972,9 +1992,7 @@ impl RSpiceApp {
                                         &opts,
                                     );
                                 self.state.dialogs.simulation_options_errors.clear();
-                                self.state
-                                    .console_messages
-                                    .push(ConsoleMessage::info("Simulation options updated"));
+                                self.state.push_user_message(ConsoleMessage::info("Simulation options updated"));
                                 if ok_clicked {
                                     close_requested = true;
                                 }
@@ -2601,9 +2619,7 @@ impl eframe::App for RSpiceApp {
                 }
 
                 if !add_ok {
-                    self.state
-                        .console_messages
-                        .push(ConsoleMessage::error(format!(
+                    self.state.push_user_message(ConsoleMessage::error(format!(
                             "Failed to add Verilog-A model '{}' to library '{}'",
                             module.name, VERILOGA_LIBRARY_NAME
                         )));
@@ -2614,9 +2630,7 @@ impl eframe::App for RSpiceApp {
                         module.ports.len(),
                         module.parameters.len()
                     );
-                    self.state
-                        .console_messages
-                        .push(ConsoleMessage::info(format!(
+                    self.state.push_user_message(ConsoleMessage::info(format!(
                             "Verilog-A model '{}' added to library with terminals: {}",
                             module.name,
                             module.ports.join(", ")
@@ -2630,25 +2644,21 @@ impl eframe::App for RSpiceApp {
                         compiled_model,
                     ) {
                         Ok(()) => {
-                            self.state
-                                .console_messages
-                                .push(ConsoleMessage::info(format!(
+                            self.state.push_user_message(ConsoleMessage::info(format!(
                                     "Registered Verilog-A compile cache for '{}' ({} dependency file(s))",
                                     module.name,
                                     compiled_dependencies.len()
                                 )));
                         }
                         Err(err) => {
-                            self.state
-                                .console_messages
-                                .push(ConsoleMessage::warning(format!(
+                            self.state.push_user_message(ConsoleMessage::warning(format!(
                                     "Verilog-A compile cache registration failed for '{}': {}",
                                     module.name, err
                                 )));
                         }
                     }
                 } else {
-                    self.state.console_messages.push(ConsoleMessage::warning(format!(
+                    self.state.push_user_message(ConsoleMessage::warning(format!(
                         "No compiled Verilog-A artifact available for '{}'; simulation will recompile if needed",
                         module.name
                     )));
@@ -2656,15 +2666,13 @@ impl eframe::App for RSpiceApp {
 
                 if let Err(err) = save_global_veriloga_library(&self.state.library_manager) {
                     log::warn!("Failed to persist global Verilog-A library: {}", err);
-                    self.state
-                        .console_messages
-                        .push(ConsoleMessage::warning(format!(
+                    self.state.push_user_message(ConsoleMessage::warning(format!(
                             "Failed to persist Verilog-A library: {}",
                             err
                         )));
                 }
             } else {
-                self.state.console_messages.push(ConsoleMessage::warning(
+                self.state.push_user_message(ConsoleMessage::warning(
                     "No compiled Verilog-A module available to add".to_string(),
                 ));
             }
@@ -2688,9 +2696,7 @@ impl eframe::App for RSpiceApp {
                         Ok(count) => {
                             self.state.pdk_config = config;
                             let _ = self.state.pdk_config.save();
-                            self.state
-                                .console_messages
-                                .push(ConsoleMessage::info(format!(
+                            self.state.push_user_message(ConsoleMessage::info(format!(
                                     "PDK settings applied: {} libraries loaded",
                                     count
                                 )));
@@ -2698,14 +2704,12 @@ impl eframe::App for RSpiceApp {
                         Err(errors) => {
                             self.state.pdk_config = config;
                             let _ = self.state.pdk_config.save();
-                            self.state
-                                .console_messages
-                                .push(ConsoleMessage::warning(format!(
+                            self.state.push_user_message(ConsoleMessage::warning(format!(
                                     "PDK settings applied with {} errors",
                                     errors.len()
                                 )));
                             for err in errors {
-                                self.state.console_messages.push(ConsoleMessage::error(err));
+                                self.state.push_user_message(ConsoleMessage::error(err));
                             }
                         }
                     }
@@ -2722,9 +2726,7 @@ impl eframe::App for RSpiceApp {
                             self.state.pdk_config.add_recent_file(&path);
                             let _ = self.state.pdk_config.save();
 
-                            self.state
-                                .console_messages
-                                .push(ConsoleMessage::info(format!(
+                            self.state.push_user_message(ConsoleMessage::info(format!(
                                     "Loaded library '{}' from {}",
                                     lib_name,
                                     path.display()
@@ -2734,9 +2736,7 @@ impl eframe::App for RSpiceApp {
                             if let Some(lib) =
                                 self.state.model_library_manager.get_library(&lib_name)
                             {
-                                self.state
-                                    .console_messages
-                                    .push(ConsoleMessage::info(format!(
+                                self.state.push_user_message(ConsoleMessage::info(format!(
                                         "  {} models, {} corners available",
                                         lib.model_count(),
                                         lib.corner_count()
@@ -2744,9 +2744,7 @@ impl eframe::App for RSpiceApp {
                             }
                         }
                         Err(err) => {
-                            self.state
-                                .console_messages
-                                .push(ConsoleMessage::error(format!(
+                            self.state.push_user_message(ConsoleMessage::error(format!(
                                     "Failed to load {}: {}",
                                     path.display(),
                                     err
@@ -3363,9 +3361,7 @@ impl eframe::App for RSpiceApp {
                     // Add cell to library
                     if let Some(lib) = self.state.library_manager.get_library_mut(&library) {
                         lib.add_cell(cell);
-                        self.state
-                            .console_messages
-                            .push(ConsoleMessage::info(format!(
+                        self.state.push_user_message(ConsoleMessage::info(format!(
                                 "Created cell '{}' in library '{}'",
                                 name, library
                             )));
@@ -3381,9 +3377,7 @@ impl eframe::App for RSpiceApp {
             if persist_global_veriloga {
                 if let Err(err) = save_global_veriloga_library(&self.state.library_manager) {
                     log::warn!("Failed to persist global Verilog-A library: {}", err);
-                    self.state
-                        .console_messages
-                        .push(ConsoleMessage::warning(format!(
+                    self.state.push_user_message(ConsoleMessage::warning(format!(
                             "Failed to persist Verilog-A library: {}",
                             err
                         )));
@@ -3520,9 +3514,7 @@ impl eframe::App for RSpiceApp {
                                     view_name,
                                     self.state.dialogs.new_view_type,
                                 ));
-                                self.state
-                                    .console_messages
-                                    .push(ConsoleMessage::info(format!(
+                                self.state.push_user_message(ConsoleMessage::info(format!(
                                         "Created view '{}' in cell '{}'",
                                         view_name, cell
                                     )));
@@ -3537,9 +3529,7 @@ impl eframe::App for RSpiceApp {
             if persist_global_veriloga {
                 if let Err(err) = save_global_veriloga_library(&self.state.library_manager) {
                     log::warn!("Failed to persist global Verilog-A library: {}", err);
-                    self.state
-                        .console_messages
-                        .push(ConsoleMessage::warning(format!(
+                    self.state.push_user_message(ConsoleMessage::warning(format!(
                             "Failed to persist Verilog-A library: {}",
                             err
                         )));
@@ -3559,9 +3549,7 @@ impl eframe::App for RSpiceApp {
             if let Some(lib) = self.state.library_manager.get_library_mut(&lib_name) {
                 deleted = lib.remove_cell(&cell_name);
                 if deleted {
-                    self.state
-                        .console_messages
-                        .push(ConsoleMessage::info(format!(
+                    self.state.push_user_message(ConsoleMessage::info(format!(
                             "Deleted cell '{}' from library '{}'",
                             cell_name, lib_name
                         )));
@@ -3570,9 +3558,7 @@ impl eframe::App for RSpiceApp {
             if deleted && lib_name == VERILOGA_LIBRARY_NAME {
                 if let Err(err) = save_global_veriloga_library(&self.state.library_manager) {
                     log::warn!("Failed to persist global Verilog-A library: {}", err);
-                    self.state
-                        .console_messages
-                        .push(ConsoleMessage::warning(format!(
+                    self.state.push_user_message(ConsoleMessage::warning(format!(
                             "Failed to persist Verilog-A library: {}",
                             err
                         )));
@@ -3587,9 +3573,7 @@ impl eframe::App for RSpiceApp {
                 if let Some(cell) = lib.get_cell_mut(&cell_name) {
                     deleted = cell.remove_view(&view_name);
                     if deleted {
-                        self.state
-                            .console_messages
-                            .push(ConsoleMessage::info(format!(
+                        self.state.push_user_message(ConsoleMessage::info(format!(
                                 "Deleted view '{}' from cell '{}'",
                                 view_name, cell_name
                             )));
@@ -3599,9 +3583,7 @@ impl eframe::App for RSpiceApp {
             if deleted && lib_name == VERILOGA_LIBRARY_NAME {
                 if let Err(err) = save_global_veriloga_library(&self.state.library_manager) {
                     log::warn!("Failed to persist global Verilog-A library: {}", err);
-                    self.state
-                        .console_messages
-                        .push(ConsoleMessage::warning(format!(
+                    self.state.push_user_message(ConsoleMessage::warning(format!(
                             "Failed to persist Verilog-A library: {}",
                             err
                         )));
@@ -3819,48 +3801,29 @@ impl RSpiceApp {
 
     /// Render the waveform panel
     fn render_waveform_panel(&mut self, ui: &mut Ui) {
-        // Use the new commercial-grade waveform viewer
-        crate::waveform::render_waveform_panel(ui, &mut self.state);
-    }
+        use crate::viewers::ActiveViewer;
 
-    fn sync_console_messages_into_log_buffer(&mut self) {
-        if self.state.log_sync_cursor > self.state.console_messages.len() {
-            self.state.log_sync_cursor = self.state.console_messages.len();
+        match self.state.active_viewer {
+            ActiveViewer::Waveform => crate::waveform::render_waveform_panel(ui, &mut self.state),
+            ActiveViewer::SmithChart => self.render_smith_panel(ui),
+            ActiveViewer::EyeDiagram => self.render_eye_panel(ui),
+            ActiveViewer::Histogram => self.render_histogram_panel(ui),
+            ActiveViewer::BodePlot => self.render_bode_panel(ui),
+            ActiveViewer::Nyquist => self.render_nyquist_panel(ui),
+            ActiveViewer::Fft => self.render_fft_panel(ui),
+            ActiveViewer::PoleZero => self.render_polezero_panel(ui),
         }
-
-        for message in self
-            .state
-            .console_messages
-            .iter()
-            .skip(self.state.log_sync_cursor)
-        {
-            let severity = match message.level {
-                ConsoleLevel::Info => crate::panels::LogSeverity::Info,
-                ConsoleLevel::Warning => crate::panels::LogSeverity::Warning,
-                ConsoleLevel::Error => crate::panels::LogSeverity::Error,
-            };
-            self.state.log_buffer.log(
-                severity,
-                crate::panels::LogSource::System,
-                message.message.clone(),
-                None,
-            );
-        }
-
-        self.state.log_sync_cursor = self.state.console_messages.len();
     }
 
     /// Render the structured log panel.
     fn render_log_panel(&mut self, ui: &mut Ui) {
-        self.sync_console_messages_into_log_buffer();
         let cleared = crate::panels::render_log_panel(
             ui,
             &mut self.state.log_buffer,
             &mut self.state.log_panel_state,
         );
         if cleared {
-            self.state.console_messages.clear();
-            self.state.log_sync_cursor = 0;
+            self.state.clear_primary_log();
         }
     }
 
@@ -3884,9 +3847,19 @@ impl RSpiceApp {
         crate::analysis::pole_zero::render_pz_plot(ui, &mut self.state.pole_zero_state);
     }
 
+    /// Render the Nyquist panel.
+    fn render_nyquist_panel(&mut self, ui: &mut Ui) {
+        crate::analysis::nyquist::render_nyquist_panel(ui, &mut self.state);
+    }
+
+    /// Render the FFT panel.
+    fn render_fft_panel(&mut self, ui: &mut Ui) {
+        crate::analysis::fft::render_fft_panel(ui, &mut self.state);
+    }
+
     /// Render the Eye diagram panel
     fn render_eye_panel(&mut self, ui: &mut Ui) {
-        crate::analysis::eye_diagram::render_eye_diagram(ui, &mut self.state.eye_diagram_state);
+        crate::analysis::eye_diagram::render_eye_diagram_panel(ui, &mut self.state);
     }
 
     /// Render the Smith chart panel
@@ -3896,7 +3869,7 @@ impl RSpiceApp {
 
     /// Render the Histogram panel (Monte Carlo/corners)
     fn render_histogram_panel(&mut self, ui: &mut Ui) {
-        crate::analysis::histogram::render_histogram(ui, &self.state.histogram_state);
+        crate::analysis::histogram::render_histogram_panel(ui, &mut self.state);
     }
 }
 
