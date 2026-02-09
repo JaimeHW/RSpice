@@ -1185,20 +1185,15 @@ impl WaveformReader {
             }
         }
 
-        if matrix_format != TouchstoneMatrixFormat::Full {
-            return Err(
-                "Touchstone import currently supports only [Matrix Format] FULL".to_string(),
-            );
-        }
-
         let num_ports = declared_ports
-            .or_else(|| Self::infer_touchstone_ports_from_tokens(&numeric_tokens))
+            .or_else(|| Self::infer_touchstone_ports_from_tokens(&numeric_tokens, matrix_format))
             .ok_or_else(|| "Unable to determine Touchstone port count".to_string())?;
         if num_ports == 0 {
             return Err("Touchstone [Number of Ports] must be >= 1".to_string());
         }
 
-        let values_per_freq = 1 + 2 * num_ports * num_ports;
+        let values_per_freq = Self::touchstone_values_per_frequency(num_ports, matrix_format)
+            .ok_or_else(|| "Touchstone matrix dimensions overflow".to_string())?;
         if numeric_tokens.len() % values_per_freq != 0 {
             return Err(format!(
                 "Touchstone numeric data length {} is not divisible by record width {}",
@@ -1243,14 +1238,60 @@ impl WaveformReader {
 
             // Touchstone matrix order: S11 S21 ... SN1 S12 S22 ... SN2 ... SNN.
             for col in 0..num_ports {
-                for row in 0..num_ports {
-                    let first = numeric_tokens[offset];
-                    let second = numeric_tokens[offset + 1];
-                    offset += 2;
-                    let (re, im) =
-                        Self::touchstone_pair_to_complex(first, second, options.data_format);
-                    matrix_re[row][col][freq_idx] = re;
-                    matrix_im[row][col][freq_idx] = im;
+                match matrix_format {
+                    TouchstoneMatrixFormat::Full => {
+                        for row in 0..num_ports {
+                            let first = numeric_tokens[offset];
+                            let second = numeric_tokens[offset + 1];
+                            offset += 2;
+                            let (re, im) =
+                                Self::touchstone_pair_to_complex(first, second, options.data_format);
+                            matrix_re[row][col][freq_idx] = re;
+                            matrix_im[row][col][freq_idx] = im;
+                        }
+                    }
+                    TouchstoneMatrixFormat::Lower => {
+                        for row in col..num_ports {
+                            let first = numeric_tokens[offset];
+                            let second = numeric_tokens[offset + 1];
+                            offset += 2;
+                            let (re, im) =
+                                Self::touchstone_pair_to_complex(first, second, options.data_format);
+                            matrix_re[row][col][freq_idx] = re;
+                            matrix_im[row][col][freq_idx] = im;
+                        }
+                    }
+                    TouchstoneMatrixFormat::Upper => {
+                        for row in 0..=col {
+                            let first = numeric_tokens[offset];
+                            let second = numeric_tokens[offset + 1];
+                            offset += 2;
+                            let (re, im) =
+                                Self::touchstone_pair_to_complex(first, second, options.data_format);
+                            matrix_re[row][col][freq_idx] = re;
+                            matrix_im[row][col][freq_idx] = im;
+                        }
+                    }
+                }
+            }
+
+            match matrix_format {
+                TouchstoneMatrixFormat::Full => {}
+                TouchstoneMatrixFormat::Lower => {
+                    for col in 0..num_ports {
+                        for row in 0..col {
+                            matrix_re[row][col][freq_idx] = matrix_re[col][row][freq_idx];
+                            matrix_im[row][col][freq_idx] = matrix_im[col][row][freq_idx];
+                        }
+                    }
+                }
+                TouchstoneMatrixFormat::Upper => {
+                    for col in 0..num_ports {
+                        for row in (col + 1)..num_ports {
+                            matrix_re[row][col][freq_idx] = matrix_re[col][row][freq_idx];
+                            matrix_im[row][col][freq_idx] = matrix_im[col][row][freq_idx];
+                        }
+                    }
                 }
             }
         }
@@ -1270,6 +1311,15 @@ impl WaveformReader {
         dataset
             .metadata
             .insert("num_ports".to_string(), num_ports.to_string());
+        dataset.metadata.insert(
+            "touchstone_matrix_format".to_string(),
+            match matrix_format {
+                TouchstoneMatrixFormat::Full => "full",
+                TouchstoneMatrixFormat::Lower => "lower",
+                TouchstoneMatrixFormat::Upper => "upper",
+            }
+            .to_string(),
+        );
         dataset
             .metadata
             .insert("z0".to_string(), z0_by_port[0].to_string());
@@ -1321,12 +1371,31 @@ impl WaveformReader {
         None
     }
 
-    fn infer_touchstone_ports_from_tokens(tokens: &[f64]) -> Option<usize> {
+    fn touchstone_values_per_frequency(
+        num_ports: usize,
+        matrix_format: TouchstoneMatrixFormat,
+    ) -> Option<usize> {
+        let matrix_points = match matrix_format {
+            TouchstoneMatrixFormat::Full => num_ports.checked_mul(num_ports)?,
+            TouchstoneMatrixFormat::Lower | TouchstoneMatrixFormat::Upper => {
+                num_ports.checked_mul(num_ports.checked_add(1)?)?.checked_div(2)?
+            }
+        };
+        matrix_points.checked_mul(2)?.checked_add(1)
+    }
+
+    fn infer_touchstone_ports_from_tokens(
+        tokens: &[f64],
+        matrix_format: TouchstoneMatrixFormat,
+    ) -> Option<usize> {
         // Guard against unrealistic matrices while still supporting large N.
         const MAX_PORTS_TO_INFER: usize = 64;
         let mut best_match = None;
         for ports in 1..=MAX_PORTS_TO_INFER {
-            let record_width = 1 + 2 * ports * ports;
+            let Some(record_width) = Self::touchstone_values_per_frequency(ports, matrix_format)
+            else {
+                continue;
+            };
             if tokens.len() < record_width || !tokens.len().is_multiple_of(record_width) {
                 continue;
             }
@@ -1870,7 +1939,8 @@ impl WaveformWriter {
 #[cfg(test)]
 mod tests {
     use super::super::cadence_psf::test_helpers::{
-        build_non_windowed_complex_psf, build_non_windowed_real_psf,
+        build_non_windowed_complex_psf, build_non_windowed_int32_psf, build_non_windowed_int8_psf,
+        build_non_windowed_real_psf,
     };
     use super::*;
     use crate::io::binary_io::{PsfHeader, PsfWriter};
@@ -2372,6 +2442,92 @@ mod tests {
     }
 
     #[test]
+    fn test_read_touchstone_v2_lower_matrix_two_port_mirrors_upper_half() {
+        let mut temp = Builder::new()
+            .suffix(".s2p")
+            .tempfile()
+            .expect("temp touchstone");
+        writeln!(temp, "[Version] 2.0").expect("write");
+        writeln!(temp, "[Number of Ports] 2").expect("write");
+        writeln!(temp, "[Matrix Format] Lower").expect("write");
+        writeln!(temp, "# Hz S RI R 50").expect("write");
+        writeln!(temp, "[Network Data]").expect("write");
+        // Lower triangular entries in column-major order: S11, S21, S22.
+        writeln!(temp, "1.0e6 0.1 0.01 0.8 -0.2 0.3 0.04").expect("write");
+        writeln!(temp, "[End]").expect("write");
+
+        let dataset = WaveformReader::new(WaveformFormat::Touchstone)
+            .read(temp.path())
+            .expect("touchstone read");
+        assert_eq!(
+            dataset
+                .metadata
+                .get("touchstone_matrix_format")
+                .map(String::as_str),
+            Some("lower")
+        );
+        let s12_re = dataset
+            .get_signal("S12_RE")
+            .and_then(|sig| sig.get(0))
+            .unwrap_or_default();
+        let s21_re = dataset
+            .get_signal("S21_RE")
+            .and_then(|sig| sig.get(0))
+            .unwrap_or_default();
+        assert!((s12_re - s21_re).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_read_touchstone_v2_upper_matrix_three_port_mirrors_lower_half() {
+        let mut temp = Builder::new()
+            .suffix(".s3p")
+            .tempfile()
+            .expect("temp touchstone");
+        writeln!(temp, "[Version] 2.0").expect("write");
+        writeln!(temp, "[Number of Ports] 3").expect("write");
+        writeln!(temp, "[Matrix Format] Upper").expect("write");
+        writeln!(temp, "# Hz S RI R 50").expect("write");
+        writeln!(temp, "[Network Data]").expect("write");
+        // Upper triangular entries in column-major order: S11, S12,S22, S13,S23,S33.
+        writeln!(
+            temp,
+            "2.0e6 0.1 0.0 0.2 0.0 0.3 0.0 0.4 0.0 0.5 0.0 0.6 0.0"
+        )
+        .expect("write");
+        writeln!(temp, "[End]").expect("write");
+
+        let dataset = WaveformReader::new(WaveformFormat::Touchstone)
+            .read(temp.path())
+            .expect("touchstone read");
+        assert_eq!(
+            dataset
+                .metadata
+                .get("touchstone_matrix_format")
+                .map(String::as_str),
+            Some("upper")
+        );
+
+        let s13_re = dataset
+            .get_signal("S13_RE")
+            .and_then(|sig| sig.get(0))
+            .unwrap_or_default();
+        let s31_re = dataset
+            .get_signal("S31_RE")
+            .and_then(|sig| sig.get(0))
+            .unwrap_or_default();
+        let s23_re = dataset
+            .get_signal("S23_RE")
+            .and_then(|sig| sig.get(0))
+            .unwrap_or_default();
+        let s32_re = dataset
+            .get_signal("S32_RE")
+            .and_then(|sig| sig.get(0))
+            .unwrap_or_default();
+        assert!((s13_re - s31_re).abs() < 1e-15);
+        assert!((s23_re - s32_re).abs() < 1e-15);
+    }
+
+    #[test]
     fn test_read_touchstone_rejects_non_s_parameter_data() {
         let mut temp = NamedTempFile::new().expect("temp touchstone");
         writeln!(temp, "# Hz Y RI R 50").expect("write");
@@ -2491,6 +2647,64 @@ mod tests {
                 .expect("imag trace exists")
                 .data,
             vec![0.5, -0.25]
+        );
+    }
+
+    #[test]
+    fn test_read_cadence_psf_binary_int8_trace() {
+        let temp = Builder::new().suffix(".psf").tempfile().expect("temp psf");
+        std::fs::write(temp.path(), build_non_windowed_int8_psf()).expect("write cadence psf");
+
+        let dataset = WaveformReader::new(WaveformFormat::Psf)
+            .read(temp.path())
+            .expect("cadence psf binary read should work");
+
+        assert_eq!(
+            dataset.metadata.get("format").map(String::as_str),
+            Some("psf-binary-cadence")
+        );
+        assert_eq!(
+            dataset
+                .x_signal
+                .as_ref()
+                .expect("x axis exists")
+                .data
+                .as_slice(),
+            &[0.0, 1.0]
+        );
+        assert_eq!(dataset.signal_count(), 1);
+        assert_eq!(
+            dataset.get_signal("V(out)").expect("trace exists").data,
+            vec![7.0, 255.0]
+        );
+    }
+
+    #[test]
+    fn test_read_cadence_psf_binary_int32_trace() {
+        let temp = Builder::new().suffix(".psf").tempfile().expect("temp psf");
+        std::fs::write(temp.path(), build_non_windowed_int32_psf()).expect("write cadence psf");
+
+        let dataset = WaveformReader::new(WaveformFormat::Psf)
+            .read(temp.path())
+            .expect("cadence psf binary read should work");
+
+        assert_eq!(
+            dataset.metadata.get("format").map(String::as_str),
+            Some("psf-binary-cadence")
+        );
+        assert_eq!(
+            dataset
+                .x_signal
+                .as_ref()
+                .expect("x axis exists")
+                .data
+                .as_slice(),
+            &[0.0, 1.0]
+        );
+        assert_eq!(dataset.signal_count(), 1);
+        assert_eq!(
+            dataset.get_signal("V(out)").expect("trace exists").data,
+            vec![1024.0, -2.0]
         );
     }
 

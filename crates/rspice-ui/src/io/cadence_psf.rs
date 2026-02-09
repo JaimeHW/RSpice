@@ -101,17 +101,40 @@ impl Toc {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DataType {
+    Int8,
+    Int32,
     Real,
     Complex,
+    String,
+    Array,
+    Struct,
     Other(u32),
 }
 
 impl DataType {
     fn from_u32(value: u32) -> Self {
         match value {
+            1 => Self::Int8,
+            2 => Self::String,
+            3 => Self::Array,
+            5 => Self::Int32,
             11 => Self::Real,
             12 => Self::Complex,
+            16 => Self::Struct,
             other => Self::Other(other),
+        }
+    }
+
+    fn to_u32(self) -> u32 {
+        match self {
+            Self::Int8 => 1,
+            Self::String => 2,
+            Self::Array => 3,
+            Self::Int32 => 5,
+            Self::Real => 11,
+            Self::Complex => 12,
+            Self::Struct => 16,
+            Self::Other(v) => v,
         }
     }
 }
@@ -405,16 +428,17 @@ fn parse_values(
             .copied()
             .ok_or_else(|| CadencePsfError::new(format!("missing type {}", signal.type_id)))?;
         match dtype {
-            DataType::Real => {
+            DataType::Int8 | DataType::Int32 | DataType::Real => {
                 values.insert(signal.id, SignalValues::Real(Vec::new()));
             }
             DataType::Complex => {
                 values.insert(signal.id, SignalValues::Complex(Vec::new()));
             }
-            DataType::Other(other) => {
+            DataType::String | DataType::Array | DataType::Struct | DataType::Other(_) => {
                 return Err(CadencePsfError::new(format!(
                     "unsupported PSF signal data type {} for '{}'",
-                    other, signal.name
+                    dtype.to_u32(),
+                    signal.name
                 )));
             }
         }
@@ -464,11 +488,19 @@ fn parse_non_windowed_values(
 
         for signal in flat_traces {
             let _unused = read_f64(&mut cursor)?;
-            match types
+            let dtype = types
                 .get(&signal.type_id)
                 .copied()
-                .unwrap_or(DataType::Other(0))
-            {
+                .unwrap_or(DataType::Other(0));
+            match dtype {
+                DataType::Int8 => {
+                    let sample = read_u8_padded(&mut cursor)? as f64;
+                    push_real(values, signal.id, sample)?;
+                }
+                DataType::Int32 => {
+                    let sample = read_i32(&mut cursor)? as f64;
+                    push_real(values, signal.id, sample)?;
+                }
                 DataType::Real => {
                     let sample = read_f64(&mut cursor)?;
                     push_real(values, signal.id, sample)?;
@@ -478,10 +510,10 @@ fn parse_non_windowed_values(
                     let im = read_f64(&mut cursor)?;
                     push_complex(values, signal.id, (re, im))?;
                 }
-                DataType::Other(other) => {
+                DataType::String | DataType::Array | DataType::Struct | DataType::Other(_) => {
                     return Err(CadencePsfError::new(format!(
                         "unsupported non-windowed signal data type {}",
-                        other
+                        dtype.to_u32()
                     )));
                 }
             }
@@ -553,11 +585,25 @@ fn parse_windowed_values(
         let block = &cursor[..block_len];
 
         for signal in flat_traces {
+            let dtype = types
+                .get(&signal.type_id)
+                .copied()
+                .unwrap_or(DataType::Other(0));
+            let sample_width = match dtype {
+                DataType::Complex => 16usize,
+                DataType::Int8 | DataType::Int32 | DataType::Real => 8usize,
+                DataType::String | DataType::Array | DataType::Struct | DataType::Other(_) => {
+                    return Err(CadencePsfError::new(format!(
+                        "unsupported windowed signal data type {}",
+                        dtype.to_u32()
+                    )));
+                }
+            };
             let offset = *offsets
                 .get(&signal.id)
                 .ok_or_else(|| CadencePsfError::new("missing signal offset in windowed parser"))?;
             let data_len = window_count
-                .checked_mul(8)
+                .checked_mul(sample_width)
                 .ok_or_else(|| CadencePsfError::new("windowed PSF data length overflow"))?;
             let idx = if data_len > window_size {
                 offset
@@ -571,12 +617,8 @@ fn parse_windowed_values(
             }
             let mut trace_cursor = &block[idx..];
 
-            match types
-                .get(&signal.type_id)
-                .copied()
-                .unwrap_or(DataType::Other(0))
-            {
-                DataType::Real => {
+            match dtype {
+                DataType::Int8 | DataType::Int32 | DataType::Real => {
                     for _ in 0..window_count {
                         push_real(values, signal.id, read_f64(&mut trace_cursor)?)?;
                     }
@@ -588,11 +630,8 @@ fn parse_windowed_values(
                         push_complex(values, signal.id, (re, im))?;
                     }
                 }
-                DataType::Other(other) => {
-                    return Err(CadencePsfError::new(format!(
-                        "unsupported windowed signal data type {}",
-                        other
-                    )));
+                DataType::String | DataType::Array | DataType::Struct | DataType::Other(_) => {
+                    unreachable!("unsupported windowed types are rejected before decode")
                 }
             }
         }
@@ -769,6 +808,30 @@ fn read_u32(cursor: &mut &[u8]) -> Result<u32, CadencePsfError> {
     ))
 }
 
+fn read_i32(cursor: &mut &[u8]) -> Result<i32, CadencePsfError> {
+    if cursor.len() < 4 {
+        return Err(CadencePsfError::new(
+            "unexpected end of PSF data while reading i32",
+        ));
+    }
+    let (head, tail) = cursor.split_at(4);
+    *cursor = tail;
+    Ok(i32::from_be_bytes(
+        head.try_into().expect("slice length checked"),
+    ))
+}
+
+fn read_u8_padded(cursor: &mut &[u8]) -> Result<u8, CadencePsfError> {
+    if cursor.len() < 4 {
+        return Err(CadencePsfError::new(
+            "unexpected end of PSF data while reading padded u8",
+        ));
+    }
+    let (head, tail) = cursor.split_at(4);
+    *cursor = tail;
+    Ok(head[0])
+}
+
 fn read_f64(cursor: &mut &[u8]) -> Result<f64, CadencePsfError> {
     if cursor.len() < 8 {
         return Err(CadencePsfError::new(
@@ -790,15 +853,42 @@ fn peek_u32(data: &[u8]) -> u32 {
 pub(crate) mod test_helpers {
     use super::*;
 
+    #[derive(Clone, Copy)]
+    enum SampleEncoding {
+        Real,
+        Complex,
+        Int8,
+        Int32,
+    }
+
+    impl SampleEncoding {
+        fn type_code(self) -> u32 {
+            match self {
+                Self::Real => 11,
+                Self::Complex => 12,
+                Self::Int8 => 1,
+                Self::Int32 => 5,
+            }
+        }
+    }
+
     pub(crate) fn build_non_windowed_real_psf() -> Vec<u8> {
-        build_simple_non_windowed_psf(false)
+        build_simple_non_windowed_psf(SampleEncoding::Real)
     }
 
     pub(crate) fn build_non_windowed_complex_psf() -> Vec<u8> {
-        build_simple_non_windowed_psf(true)
+        build_simple_non_windowed_psf(SampleEncoding::Complex)
     }
 
-    fn build_simple_non_windowed_psf(complex: bool) -> Vec<u8> {
+    pub(crate) fn build_non_windowed_int8_psf() -> Vec<u8> {
+        build_simple_non_windowed_psf(SampleEncoding::Int8)
+    }
+
+    pub(crate) fn build_non_windowed_int32_psf() -> Vec<u8> {
+        build_simple_non_windowed_psf(SampleEncoding::Int32)
+    }
+
+    fn build_simple_non_windowed_psf(sample_encoding: SampleEncoding) -> Vec<u8> {
         let mut bytes = Vec::new();
 
         let header_start = bytes.len();
@@ -819,7 +909,7 @@ pub(crate) mod test_helpers {
         push_u32(&mut bytes, 1);
         push_string(&mut bytes, "sigtype");
         push_u32(&mut bytes, 0);
-        push_u32(&mut bytes, if complex { 12 } else { 11 });
+        push_u32(&mut bytes, sample_encoding.type_code());
         let types_end = bytes.len() as u32;
         patch_u32(&mut bytes, types_eofs_pos, types_end);
 
@@ -852,23 +942,13 @@ pub(crate) mod test_helpers {
         push_u32(&mut bytes, 0);
         push_f64(&mut bytes, 0.0);
         push_f64(&mut bytes, 0.0);
-        if complex {
-            push_f64(&mut bytes, 1.0);
-            push_f64(&mut bytes, 0.5);
-        } else {
-            push_f64(&mut bytes, 1.0);
-        }
+        push_sample(&mut bytes, sample_encoding, 0);
 
         push_u32(&mut bytes, 1);
         push_u32(&mut bytes, 0);
         push_f64(&mut bytes, 1.0);
         push_f64(&mut bytes, 0.0);
-        if complex {
-            push_f64(&mut bytes, 2.0);
-            push_f64(&mut bytes, -0.25);
-        } else {
-            push_f64(&mut bytes, 2.0);
-        }
+        push_sample(&mut bytes, sample_encoding, 1);
 
         let value_end = bytes.len() as u32;
         patch_u32(&mut bytes, value_eofs_pos, value_end);
@@ -888,6 +968,37 @@ pub(crate) mod test_helpers {
         push_u32(&mut bytes, toc_offset as u32);
 
         bytes
+    }
+
+    fn push_sample(bytes: &mut Vec<u8>, sample_encoding: SampleEncoding, sample_idx: usize) {
+        match sample_encoding {
+            SampleEncoding::Real => match sample_idx {
+                0 => push_f64(bytes, 1.0),
+                1 => push_f64(bytes, 2.0),
+                _ => unreachable!("test helper has exactly two samples"),
+            },
+            SampleEncoding::Complex => match sample_idx {
+                0 => {
+                    push_f64(bytes, 1.0);
+                    push_f64(bytes, 0.5);
+                }
+                1 => {
+                    push_f64(bytes, 2.0);
+                    push_f64(bytes, -0.25);
+                }
+                _ => unreachable!("test helper has exactly two samples"),
+            },
+            SampleEncoding::Int8 => match sample_idx {
+                0 => push_u8_padded(bytes, 7),
+                1 => push_u8_padded(bytes, 255),
+                _ => unreachable!("test helper has exactly two samples"),
+            },
+            SampleEncoding::Int32 => match sample_idx {
+                0 => push_i32(bytes, 1024),
+                1 => push_i32(bytes, -2),
+                _ => unreachable!("test helper has exactly two samples"),
+            },
+        }
     }
 
     fn push_signal_ref(bytes: &mut Vec<u8>, id: u32, name: &str, type_id: u32) {
@@ -917,6 +1028,15 @@ pub(crate) mod test_helpers {
         bytes.extend_from_slice(&value.to_be_bytes());
     }
 
+    fn push_i32(bytes: &mut Vec<u8>, value: i32) {
+        bytes.extend_from_slice(&value.to_be_bytes());
+    }
+
+    fn push_u8_padded(bytes: &mut Vec<u8>, value: u8) {
+        bytes.push(value);
+        bytes.extend_from_slice(&[0u8; 3]);
+    }
+
     fn patch_u32(bytes: &mut [u8], offset: usize, value: u32) {
         bytes[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
     }
@@ -924,7 +1044,10 @@ pub(crate) mod test_helpers {
 
 #[cfg(test)]
 mod tests {
-    use super::test_helpers::{build_non_windowed_complex_psf, build_non_windowed_real_psf};
+    use super::test_helpers::{
+        build_non_windowed_complex_psf, build_non_windowed_int32_psf, build_non_windowed_int8_psf,
+        build_non_windowed_real_psf,
+    };
     use super::*;
 
     #[test]
@@ -957,6 +1080,32 @@ mod tests {
             parsed.complex_signals[0].values,
             vec![(1.0, 0.5), (2.0, -0.25)]
         );
+    }
+
+    #[test]
+    fn test_parse_non_windowed_int8_psf_binary() {
+        let bytes = build_non_windowed_int8_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.sweeps[0].values, vec![0.0, 1.0]);
+        assert!(parsed.complex_signals.is_empty());
+        assert_eq!(parsed.real_signals.len(), 1);
+        assert_eq!(parsed.real_signals[0].name, "V(out)");
+        assert_eq!(parsed.real_signals[0].values, vec![7.0, 255.0]);
+    }
+
+    #[test]
+    fn test_parse_non_windowed_int32_psf_binary() {
+        let bytes = build_non_windowed_int32_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.sweeps[0].values, vec![0.0, 1.0]);
+        assert!(parsed.complex_signals.is_empty());
+        assert_eq!(parsed.real_signals.len(), 1);
+        assert_eq!(parsed.real_signals[0].name, "V(out)");
+        assert_eq!(parsed.real_signals[0].values, vec![1024.0, -2.0]);
     }
 
     #[test]
