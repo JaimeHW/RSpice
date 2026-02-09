@@ -10,6 +10,8 @@ use super::config::HbConfig;
 use super::fft::HbFft;
 use super::result::{HbResult, SpectralVoltage};
 use crate::Value;
+#[cfg(feature = "veriloga")]
+use crate::device::veriloga::VerilogADevice;
 use crate::solver::convergence::{PseudoTransient, SourceStepper};
 use crate::solver::limit_pn_voltage;
 
@@ -229,6 +231,30 @@ pub struct HbSolver {
 
     /// Registered nonlinear devices for Newton iteration
     nonlinear_devices: Vec<NonlinearDeviceInstance>,
+    /// Registered Verilog-A devices for Newton iteration.
+    #[cfg(feature = "veriloga")]
+    veriloga_nonlinear_devices: Vec<HbVerilogADevice>,
+}
+
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone)]
+struct HbVerilogADevice {
+    device: VerilogADevice,
+    rhs_rows: Vec<Vec<(usize, Value)>>,
+    jacobian_locs: Vec<Vec<(Option<usize>, Option<usize>)>>,
+}
+
+#[cfg(feature = "veriloga")]
+impl HbVerilogADevice {
+    fn new(device: VerilogADevice) -> Self {
+        let rhs_rows = device.mapped_rhs_rows();
+        let jacobian_locs = device.mapped_jacobian_locations();
+        Self {
+            device,
+            rhs_rows,
+            jacobian_locs,
+        }
+    }
 }
 
 /// Runtime representation of a nonlinear device for HB Newton iteration
@@ -1129,6 +1155,8 @@ impl HbSolver {
             node_names: (0..num_nodes).map(|i| format!("n{}", i)).collect(),
             source_spectra: vec![vec![Complex64::new(0.0, 0.0); num_harmonics + 1]; num_nodes],
             nonlinear_devices: Vec::new(),
+            #[cfg(feature = "veriloga")]
+            veriloga_nonlinear_devices: Vec::new(),
         }
     }
 
@@ -1767,9 +1795,25 @@ impl HbSolver {
         ));
     }
 
+    /// Add a Verilog-A nonlinear device for Newton iteration.
+    #[cfg(feature = "veriloga")]
+    pub fn add_veriloga_device(&mut self, device: VerilogADevice) {
+        self.veriloga_nonlinear_devices
+            .push(HbVerilogADevice::new(device));
+    }
+
     /// Check if circuit has nonlinear devices
     pub fn has_nonlinear_devices(&self) -> bool {
-        !self.nonlinear_devices.is_empty()
+        if !self.nonlinear_devices.is_empty() {
+            return true;
+        }
+        #[cfg(feature = "veriloga")]
+        {
+            if !self.veriloga_nonlinear_devices.is_empty() {
+                return true;
+            }
+        }
+        false
     }
 
     // =========================================================================
@@ -1808,7 +1852,7 @@ impl HbSolver {
         let dc_max_iter = self.config.max_iterations.max(150);
 
         // For linear circuits, DC is just a linear solve at k=0
-        if self.nonlinear_devices.is_empty() {
+        if !self.has_nonlinear_devices() {
             self.solve_dc_linear(state)?;
             return Ok(self.extract_dc_solution(state));
         }
@@ -2558,7 +2602,7 @@ impl HbSolver {
         let abstol = self.config.abstol;
 
         // For linear circuits, use direct solve
-        if self.nonlinear_devices.is_empty() {
+        if !self.has_nonlinear_devices() {
             return self.solve_linear(state);
         }
 
@@ -2815,7 +2859,7 @@ impl HbSolver {
 
         // Subtract nonlinear device currents (evaluated in time domain via FFT)
         // Note: add_nonlinear_residual adds currents with correct sign already
-        if !self.nonlinear_devices.is_empty() {
+        if self.has_nonlinear_devices() {
             self.add_nonlinear_residual(state);
         }
     }
@@ -2931,7 +2975,7 @@ impl HbSolver {
         self.compute_linear_residual(state);
 
         // Add nonlinear device currents (evaluated in time domain via FFT)
-        if !self.nonlinear_devices.is_empty() {
+        if self.has_nonlinear_devices() {
             self.add_nonlinear_residual(state);
         }
     }
@@ -2948,15 +2992,41 @@ impl HbSolver {
         // Accumulate nonlinear currents at each time point
         let mut i_time = vec![vec![0.0; n_time]; self.num_nodes];
 
-        for device in &self.nonlinear_devices {
+        if !self.nonlinear_devices.is_empty() {
+            let mut node_voltages = vec![0.0; self.num_nodes];
             for t in 0..n_time {
-                // Build voltage vector at this time point
-                let node_voltages: Vec<Value> = v_time.iter().map(|v| v[t]).collect();
+                for node in 0..self.num_nodes {
+                    node_voltages[node] = v_time[node][t];
+                }
+                for device in &self.nonlinear_devices {
+                    for (node, current) in device.evaluate(&node_voltages) {
+                        if node < i_time.len() {
+                            i_time[node][t] += current;
+                        }
+                    }
+                }
+            }
+        }
 
-                // Evaluate device currents
-                for (node, current) in device.evaluate(&node_voltages) {
-                    if node < i_time.len() {
-                        i_time[node][t] += current;
+        #[cfg(feature = "veriloga")]
+        if !self.veriloga_nonlinear_devices.is_empty() {
+            let mut circuit_voltages = vec![0.0; self.num_nodes];
+            for t in 0..n_time {
+                for node in 0..self.num_nodes {
+                    circuit_voltages[node] = v_time[node][t];
+                }
+                for device in &mut self.veriloga_nonlinear_devices {
+                    device.device.update_all_voltages(&circuit_voltages);
+                    let values = device.device.evaluate();
+                    for (program_idx, value) in values.iter().enumerate() {
+                        let Some(rows) = device.rhs_rows.get(program_idx) else {
+                            continue;
+                        };
+                        for &(row, sign) in rows {
+                            if row < self.num_nodes {
+                                i_time[row][t] += sign * *value;
+                            }
+                        }
                     }
                 }
             }
@@ -3032,7 +3102,7 @@ impl HbSolver {
         }
 
         // --- Nonlinear part: requires FFT-based evaluation ---
-        if !self.nonlinear_devices.is_empty() {
+        if self.has_nonlinear_devices() {
             self.add_nonlinear_jacobian(&mut jac, state);
         }
 
@@ -3059,14 +3129,44 @@ impl HbSolver {
         // Accumulate conductance stamps in time domain for each node pair
         let mut g_time = vec![vec![vec![0.0; n_time]; n]; n]; // [i][j][t]
 
-        for device in &self.nonlinear_devices {
+        if !self.nonlinear_devices.is_empty() {
+            let mut node_voltages = vec![0.0; n];
             for t in 0..n_time {
-                let node_voltages: Vec<Value> = v_time.iter().map(|v| v[t]).collect();
+                for node in 0..n {
+                    node_voltages[node] = v_time[node][t];
+                }
+                for device in &self.nonlinear_devices {
+                    for ((i, j), g) in device.jacobian(&node_voltages) {
+                        if i < n && j < n {
+                            g_time[i][j][t] += g;
+                        }
+                    }
+                }
+            }
+        }
 
-                // Get Jacobian stamps from device
-                for ((i, j), g) in device.jacobian(&node_voltages) {
-                    if i < n && j < n {
-                        g_time[i][j][t] += g;
+        #[cfg(feature = "veriloga")]
+        if !self.veriloga_nonlinear_devices.is_empty() {
+            let mut circuit_voltages = vec![0.0; n];
+            for t in 0..n_time {
+                for node in 0..n {
+                    circuit_voltages[node] = v_time[node][t];
+                }
+                for device in &mut self.veriloga_nonlinear_devices {
+                    device.device.update_all_voltages(&circuit_voltages);
+                    let jac_entries = device.device.compute_jacobian();
+                    for entry in jac_entries {
+                        let Some(prog_locs) = device.jacobian_locs.get(entry.program_idx) else {
+                            continue;
+                        };
+                        let Some(&(row, col)) = prog_locs.get(entry.jacobian_idx) else {
+                            continue;
+                        };
+                        if let (Some(i), Some(j)) = (row, col) {
+                            if i < n && j < n {
+                                g_time[i][j][t] += entry.value;
+                            }
+                        }
                     }
                 }
             }
@@ -3380,6 +3480,93 @@ impl HbSolver {
 #[cfg(test)]
 mod solver_tests {
     use super::*;
+    #[cfg(feature = "veriloga")]
+    use crate::device::veriloga::VerilogADevice;
+    #[cfg(feature = "veriloga")]
+    use rspice_veriloga::codegen::{
+        BytecodeProgram, CompiledModel, CompiledParameter, Instruction,
+        JacobianEntry as VaJacobianEntry, StampIndex, StampLocation, StampProgram,
+    };
+
+    #[cfg(feature = "veriloga")]
+    fn create_veriloga_resistor_model() -> CompiledModel {
+        let value_program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushParam(0),      // g
+                Instruction::PushVoltage(0, 1), // V(p, n)
+                Instruction::Mul,
+            ],
+        };
+        let g_pos = BytecodeProgram {
+            instructions: vec![Instruction::PushParam(0)],
+        };
+        let g_neg = BytecodeProgram {
+            instructions: vec![Instruction::PushParam(0), Instruction::Neg],
+        };
+
+        CompiledModel {
+            name: "hb_va_resistor".into(),
+            num_terminals: 2,
+            terminal_names: vec!["p".into(), "n".into()],
+            parameters: vec![CompiledParameter {
+                name: "g".into(),
+                default: 1e-3,
+                min: Some(0.0),
+                max: None,
+            }],
+            num_variables: 0,
+            assignment_programs: vec![],
+            stamp_programs: vec![StampProgram {
+                stamp_locations: vec![
+                    StampLocation {
+                        row: StampIndex::Terminal(0),
+                        col: StampIndex::Ground,
+                        sign: -1.0,
+                    },
+                    StampLocation {
+                        row: StampIndex::Terminal(1),
+                        col: StampIndex::Ground,
+                        sign: 1.0,
+                    },
+                ],
+                value_program,
+                jacobian_programs: vec![
+                    VaJacobianEntry {
+                        row: StampIndex::Terminal(0),
+                        col: StampIndex::Terminal(0),
+                        program: g_pos.clone(),
+                    },
+                    VaJacobianEntry {
+                        row: StampIndex::Terminal(0),
+                        col: StampIndex::Terminal(1),
+                        program: g_neg.clone(),
+                    },
+                    VaJacobianEntry {
+                        row: StampIndex::Terminal(1),
+                        col: StampIndex::Terminal(0),
+                        program: g_neg,
+                    },
+                    VaJacobianEntry {
+                        row: StampIndex::Terminal(1),
+                        col: StampIndex::Terminal(1),
+                        program: g_pos,
+                    },
+                ],
+            }],
+            lookup_tables: vec![],
+            internal_nodes: 0,
+            branch_currents: 0,
+            laplace_filters: vec![],
+        }
+    }
+
+    #[cfg(feature = "veriloga")]
+    fn create_veriloga_resistor_device(name: &str, nodes: &[usize], g: f64) -> VerilogADevice {
+        let mut device = VerilogADevice::new(name, create_veriloga_resistor_model(), nodes);
+        let ok = device.set_parameter("g", g);
+        assert!(ok, "expected parameter g to exist");
+        device
+    }
 
     #[test]
     fn test_hb_solver_creation() {
@@ -3874,6 +4061,81 @@ mod solver_tests {
 
         solver.add_npn_bjt(1, 2, 0, 1e-15, 100.0);
         assert_eq!(solver.nonlinear_devices.len(), 2);
+    }
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn test_newton_solver_veriloga_device_registration() {
+        let config = HbConfig::new(1e6).with_harmonics(1);
+        let mut solver = HbSolver::new(config, 2);
+        assert!(!solver.has_nonlinear_devices());
+
+        let device = create_veriloga_resistor_device("RVA1", &[1, 2], 1e-3);
+        solver.add_veriloga_device(device);
+        assert!(solver.has_nonlinear_devices());
+    }
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn test_veriloga_residual_and_jacobian_consistency() {
+        let config = HbConfig::new(1e6).with_harmonics(1);
+        let mut solver = HbSolver::new(config, 2);
+        solver.add_veriloga_device(create_veriloga_resistor_device("RVA1", &[1, 2], 2e-3));
+
+        let mut state = HbSolverState::new(2, 1);
+        state.x[0][0] = Complex64::new(1.25, 0.0);
+        state.x[1][0] = Complex64::new(0.25, 0.0);
+
+        solver.compute_full_residual_with_gmin(&mut state, 0.0);
+        assert!(
+            (state.residual[0][0].re + 2e-3).abs() < 1e-9,
+            "expected node-0 residual to match -g*(v0-v1)"
+        );
+        assert!(
+            (state.residual[1][0].re - 2e-3).abs() < 1e-9,
+            "expected node-1 residual to match +g*(v0-v1)"
+        );
+
+        let jac = solver.build_full_jacobian_with_gmin(&state, 0.0);
+        let h = solver.num_harmonics + 1;
+        let d00 = jac[0][0].re;
+        let d01 = jac[0][h].re;
+        let d10 = jac[h][0].re;
+        let d11 = jac[h][h].re;
+
+        assert!((d00 + 2e-3).abs() < 1e-9, "dR0/dV0 should be -g");
+        assert!((d01 - 2e-3).abs() < 1e-9, "dR0/dV1 should be +g");
+        assert!((d10 - 2e-3).abs() < 1e-9, "dR1/dV0 should be +g");
+        assert!((d11 + 2e-3).abs() < 1e-9, "dR1/dV1 should be -g");
+
+        let mut perturbed = HbSolverState::new(2, 1);
+        perturbed.x = state.x.clone();
+        let eps = 1e-6;
+        perturbed.x[0][0].re += eps;
+        solver.compute_full_residual_with_gmin(&mut perturbed, 0.0);
+        let fd = (perturbed.residual[0][0].re - state.residual[0][0].re) / eps;
+        assert!(
+            (fd - d00).abs() < 1e-6,
+            "finite-difference Jacobian should match analytical"
+        );
+    }
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn test_newton_solver_converges_with_veriloga_resistor() {
+        let config = HbConfig::new(1e6).with_harmonics(1).with_max_iterations(30);
+        let mut solver = HbSolver::new(config, 1);
+        solver.add_capacitance(0, 0, 1e-12);
+        solver.set_dc_source(0, 1e-3);
+        solver.add_veriloga_device(create_veriloga_resistor_device("RVA1", &[1, 0], 1e-3));
+
+        let mut state = HbSolverState::new(1, 1);
+        let result = solver.solve_newton(&mut state);
+        assert!(result.is_ok(), "Verilog-A Newton solve should converge");
+        assert!(
+            (state.x[0][0].re - 1.0).abs() < 1e-6,
+            "1mA into 1k equivalent should settle near 1V"
+        );
     }
 
     #[test]
