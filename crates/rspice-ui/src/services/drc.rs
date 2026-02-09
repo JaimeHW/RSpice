@@ -472,10 +472,7 @@ impl DrcChecker {
         id
     }
 
-    /// Run all DRC checks on the schematic
-    ///
-    /// This is a simplified version that works with basic component and wire data.
-    /// The full implementation would integrate with SchematicState.
+    /// Run all DRC checks on the schematic.
     pub fn check_connectivity(
         &mut self,
         components: &[ComponentInfo],
@@ -513,7 +510,10 @@ impl DrcChecker {
         result
     }
 
-    /// Build a map of net names to connection counts
+    /// Build a connectivity-derived map of net names and electrical attributes.
+    ///
+    /// This combines explicit net names with geometric connectivity from wire
+    /// segments, component pin coordinates, and net label coordinates.
     fn build_net_map(
         &self,
         components: &[ComponentInfo],
@@ -521,60 +521,138 @@ impl DrcChecker {
         net_labels: &[NetLabelInfo],
     ) -> HashMap<String, NetInfo> {
         let mut net_map: HashMap<String, NetInfo> = HashMap::new();
+        let mut point_ids: HashMap<PointKey, usize> = HashMap::new();
+        let mut points_by_id: Vec<PointKey> = Vec::new();
+        let mut dsu = DisjointSet::default();
+        let mut segments: Vec<(PointKey, PointKey)> = Vec::with_capacity(wires.len());
 
-        // Count component pin connections
+        for wire in wires {
+            let start = PointKey::from_f64(wire.start_x, wire.start_y);
+            let end = PointKey::from_f64(wire.end_x, wire.end_y);
+            let start_id = ensure_point_id(start, &mut point_ids, &mut points_by_id, &mut dsu);
+            let end_id = ensure_point_id(end, &mut point_ids, &mut points_by_id, &mut dsu);
+            dsu.union(start_id, end_id);
+            segments.push((start, end));
+        }
+
+        // Merge touching/crossing segments so T-junctions and wire intersections
+        // become a single electrical net.
+        for i in 0..segments.len() {
+            for j in (i + 1)..segments.len() {
+                if let Some(intersection) = segment_intersection_point(segments[i], segments[j]) {
+                    let p_id =
+                        ensure_point_id(intersection, &mut point_ids, &mut points_by_id, &mut dsu);
+                    let (a0, a1) = segments[i];
+                    let (b0, b1) = segments[j];
+                    let a0_id = point_ids[&a0];
+                    let a1_id = point_ids[&a1];
+                    let b0_id = point_ids[&b0];
+                    let b1_id = point_ids[&b1];
+                    dsu.union(a0_id, p_id);
+                    dsu.union(a1_id, p_id);
+                    dsu.union(b0_id, p_id);
+                    dsu.union(b1_id, p_id);
+                }
+            }
+        }
+
+        // Attach component pins to any segment they lie on.
         for comp in components {
             for pin in &comp.pins {
-                let net = net_map
-                    .entry(pin.net_name.clone())
-                    .or_insert_with(|| NetInfo {
-                        name: pin.net_name.clone(),
-                        connection_count: 0,
-                        has_voltage_source: false,
-                        has_current_source: false,
-                        is_ground: false,
-                        connected_components: Vec::new(),
-                    });
-                net.connection_count += 1;
-                net.connected_components.push(comp.name.clone());
-
-                // Track voltage sources
-                if comp.is_voltage_source {
-                    net.has_voltage_source = true;
-                }
-                if comp.is_current_source {
-                    net.has_current_source = true;
+                let (Some(x), Some(y)) = (pin.x, pin.y) else {
+                    continue;
+                };
+                let point = PointKey::from_f64(x, y);
+                let point_id = ensure_point_id(point, &mut point_ids, &mut points_by_id, &mut dsu);
+                for &(start, end) in &segments {
+                    if point_on_segment(point, start, end) {
+                        dsu.union(point_id, point_ids[&start]);
+                        dsu.union(point_id, point_ids[&end]);
+                    }
                 }
             }
         }
 
-        // Add/mark nets from labels (including standalone ground symbols).
+        // Attach labels to any segment they touch.
         for label in net_labels {
-            let net = net_map
-                .entry(label.name.clone())
-                .or_insert_with(|| NetInfo {
-                    name: label.name.clone(),
-                    ..NetInfo::default()
-                });
-
-            if label.name == "0" || label.name.eq_ignore_ascii_case("gnd") {
-                net.is_ground = true;
+            let point = PointKey::from_f64(label.x, label.y);
+            let point_id = ensure_point_id(point, &mut point_ids, &mut points_by_id, &mut dsu);
+            for &(start, end) in &segments {
+                if point_on_segment(point, start, end) {
+                    dsu.union(point_id, point_ids[&start]);
+                    dsu.union(point_id, point_ids[&end]);
+                }
             }
         }
 
-        // Add wire connections (simplified - just count unique endpoints)
-        for wire in wires {
-            let start_key = format!("{}_{}", wire.start_x, wire.start_y);
-            let end_key = format!("{}_{}", wire.end_x, wire.end_y);
+        let mut cluster_accumulators: HashMap<usize, NetAccumulator> = HashMap::new();
+        let mut name_only_accumulators: HashMap<String, NetAccumulator> = HashMap::new();
 
-            // This is simplified; real implementation would trace connectivity
-            let net = net_map
-                .entry(start_key)
-                .or_insert_with(|| NetInfo::default());
-            net.connection_count += 1;
+        // Count component pin connections, preferring geometry-aware clusters
+        // when coordinates are available and falling back to net name grouping.
+        for comp in components {
+            for pin in &comp.pins {
+                let update_acc = |acc: &mut NetAccumulator| {
+                    acc.connection_count += 1;
+                    acc.connected_components.insert(comp.name.clone());
+                    if !pin.net_name.trim().is_empty() {
+                        acc.names.insert(pin.net_name.clone());
+                    }
+                    if comp.is_voltage_source {
+                        acc.has_voltage_source = true;
+                    }
+                    if comp.is_current_source {
+                        acc.has_current_source = true;
+                    }
+                };
 
-            let net = net_map.entry(end_key).or_insert_with(|| NetInfo::default());
-            net.connection_count += 1;
+                if let (Some(x), Some(y)) = (pin.x, pin.y) {
+                    let point = PointKey::from_f64(x, y);
+                    let point_id =
+                        ensure_point_id(point, &mut point_ids, &mut points_by_id, &mut dsu);
+                    let root = dsu.find(point_id);
+                    update_acc(cluster_accumulators.entry(root).or_default());
+                } else {
+                    update_acc(
+                        name_only_accumulators
+                            .entry(pin.net_name.clone())
+                            .or_default(),
+                    );
+                }
+            }
+        }
+
+        // Fold label names into geometry clusters.
+        for label in net_labels {
+            let point = PointKey::from_f64(label.x, label.y);
+            let point_id = ensure_point_id(point, &mut point_ids, &mut points_by_id, &mut dsu);
+            let root = dsu.find(point_id);
+            let acc = cluster_accumulators.entry(root).or_default();
+            if !label.name.trim().is_empty() {
+                acc.names.insert(label.name.clone());
+            }
+        }
+
+        let mut representative_by_root: HashMap<usize, PointKey> = HashMap::new();
+        for point in points_by_id.iter().copied() {
+            if let Some(&id) = point_ids.get(&point) {
+                let root = dsu.find(id);
+                representative_by_root.entry(root).or_insert(point);
+            }
+        }
+
+        for (root, acc) in cluster_accumulators {
+            let fallback = representative_by_root.get(&root).copied();
+            merge_net_accumulator(&mut net_map, acc, fallback);
+        }
+
+        for (_, acc) in name_only_accumulators {
+            merge_net_accumulator(&mut net_map, acc, None);
+        }
+
+        for net in net_map.values_mut() {
+            net.connected_components.sort();
+            net.connected_components.dedup();
         }
 
         net_map
@@ -630,11 +708,12 @@ impl DrcChecker {
     /// Check for floating nodes
     fn check_floating_nodes(&mut self, net_map: &HashMap<String, NetInfo>, result: &mut DrcResult) {
         for (name, net) in net_map {
+            if net.connection_count == 0 {
+                continue;
+            }
             if net.connection_count < self.config.min_connections && !net.is_ground {
                 // Skip auto-generated net names from wire coordinates
-                if name.contains('_')
-                    && name.chars().all(|c| c.is_numeric() || c == '_' || c == '-')
-                {
+                if is_auto_generated_net_name(name) {
                     continue;
                 }
 
@@ -733,6 +812,10 @@ pub struct PinInfo {
     pub name: String,
     pub net_name: String,
     pub is_output: bool,
+    /// Optional pin x-coordinate in schematic space.
+    pub x: Option<f64>,
+    /// Optional pin y-coordinate in schematic space.
+    pub y: Option<f64>,
 }
 
 /// Simplified wire info.
@@ -762,6 +845,249 @@ struct NetInfo {
     has_current_source: bool,
     is_ground: bool,
     connected_components: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct PointKey {
+    x: i64,
+    y: i64,
+}
+
+impl PointKey {
+    fn from_f64(x: f64, y: f64) -> Self {
+        Self {
+            x: x.round() as i64,
+            y: y.round() as i64,
+        }
+    }
+
+    fn as_auto_name(self) -> String {
+        format!("net_{}_{}", self.x, self.y)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct NetAccumulator {
+    names: HashSet<String>,
+    connection_count: usize,
+    has_voltage_source: bool,
+    has_current_source: bool,
+    connected_components: HashSet<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct DisjointSet {
+    parent: Vec<usize>,
+    rank: Vec<u8>,
+}
+
+impl DisjointSet {
+    fn make_set(&mut self) -> usize {
+        let id = self.parent.len();
+        self.parent.push(id);
+        self.rank.push(0);
+        id
+    }
+
+    fn find(&mut self, x: usize) -> usize {
+        if self.parent[x] != x {
+            let root = self.find(self.parent[x]);
+            self.parent[x] = root;
+        }
+        self.parent[x]
+    }
+
+    fn union(&mut self, a: usize, b: usize) {
+        let root_a = self.find(a);
+        let root_b = self.find(b);
+        if root_a == root_b {
+            return;
+        }
+
+        let rank_a = self.rank[root_a];
+        let rank_b = self.rank[root_b];
+        if rank_a < rank_b {
+            self.parent[root_a] = root_b;
+        } else if rank_a > rank_b {
+            self.parent[root_b] = root_a;
+        } else {
+            self.parent[root_b] = root_a;
+            self.rank[root_a] = self.rank[root_a].saturating_add(1);
+        }
+    }
+}
+
+fn ensure_point_id(
+    point: PointKey,
+    point_ids: &mut HashMap<PointKey, usize>,
+    points_by_id: &mut Vec<PointKey>,
+    dsu: &mut DisjointSet,
+) -> usize {
+    if let Some(&id) = point_ids.get(&point) {
+        return id;
+    }
+    let id = dsu.make_set();
+    point_ids.insert(point, id);
+    points_by_id.push(point);
+    id
+}
+
+fn point_on_segment(point: PointKey, seg_start: PointKey, seg_end: PointKey) -> bool {
+    let min_x = seg_start.x.min(seg_end.x);
+    let max_x = seg_start.x.max(seg_end.x);
+    let min_y = seg_start.y.min(seg_end.y);
+    let max_y = seg_start.y.max(seg_end.y);
+
+    if seg_start.x == seg_end.x {
+        point.x == seg_start.x && point.y >= min_y && point.y <= max_y
+    } else if seg_start.y == seg_end.y {
+        point.y == seg_start.y && point.x >= min_x && point.x <= max_x
+    } else {
+        // Fallback for non-Manhattan segments.
+        let dx1 = point.x - seg_start.x;
+        let dy1 = point.y - seg_start.y;
+        let dx2 = seg_end.x - seg_start.x;
+        let dy2 = seg_end.y - seg_start.y;
+        let cross = dx1 * dy2 - dy1 * dx2;
+        if cross != 0 {
+            return false;
+        }
+        point.x >= min_x && point.x <= max_x && point.y >= min_y && point.y <= max_y
+    }
+}
+
+fn segment_intersection_point(
+    a: (PointKey, PointKey),
+    b: (PointKey, PointKey),
+) -> Option<PointKey> {
+    let (a0, a1) = a;
+    let (b0, b1) = b;
+    let a_vertical = a0.x == a1.x;
+    let b_vertical = b0.x == b1.x;
+
+    match (a_vertical, b_vertical) {
+        (true, false) => {
+            let y = b0.y;
+            let x = a0.x;
+            let point = PointKey { x, y };
+            (point_on_segment(point, a0, a1) && point_on_segment(point, b0, b1)).then_some(point)
+        }
+        (false, true) => {
+            let y = a0.y;
+            let x = b0.x;
+            let point = PointKey { x, y };
+            (point_on_segment(point, a0, a1) && point_on_segment(point, b0, b1)).then_some(point)
+        }
+        (true, true) => {
+            if a0.x != b0.x {
+                return None;
+            }
+            let a_min_y = a0.y.min(a1.y);
+            let a_max_y = a0.y.max(a1.y);
+            let b_min_y = b0.y.min(b1.y);
+            let b_max_y = b0.y.max(b1.y);
+            let overlap_start = a_min_y.max(b_min_y);
+            let overlap_end = a_max_y.min(b_max_y);
+            if overlap_start <= overlap_end {
+                Some(PointKey {
+                    x: a0.x,
+                    y: overlap_start,
+                })
+            } else {
+                None
+            }
+        }
+        (false, false) => {
+            if a0.y != b0.y {
+                return None;
+            }
+            let a_min_x = a0.x.min(a1.x);
+            let a_max_x = a0.x.max(a1.x);
+            let b_min_x = b0.x.min(b1.x);
+            let b_max_x = b0.x.max(b1.x);
+            let overlap_start = a_min_x.max(b_min_x);
+            let overlap_end = a_max_x.min(b_max_x);
+            if overlap_start <= overlap_end {
+                Some(PointKey {
+                    x: overlap_start,
+                    y: a0.y,
+                })
+            } else {
+                None
+            }
+        }
+    }
+}
+
+fn merge_net_accumulator(
+    net_map: &mut HashMap<String, NetInfo>,
+    acc: NetAccumulator,
+    fallback_point: Option<PointKey>,
+) {
+    let canonical_name = canonical_net_name(&acc.names, fallback_point);
+    let entry = net_map
+        .entry(canonical_name.clone())
+        .or_insert_with(|| NetInfo {
+            name: canonical_name.clone(),
+            ..NetInfo::default()
+        });
+
+    entry.connection_count += acc.connection_count;
+    entry.has_voltage_source |= acc.has_voltage_source;
+    entry.has_current_source |= acc.has_current_source;
+    entry.is_ground |= canonical_name.eq_ignore_ascii_case("0")
+        || canonical_name.eq_ignore_ascii_case("gnd")
+        || canonical_name.eq_ignore_ascii_case("ground")
+        || acc.names.iter().any(|name| is_ground_like(name));
+
+    for component in acc.connected_components {
+        if !entry
+            .connected_components
+            .iter()
+            .any(|existing| existing == &component)
+        {
+            entry.connected_components.push(component);
+        }
+    }
+}
+
+fn canonical_net_name(names: &HashSet<String>, fallback_point: Option<PointKey>) -> String {
+    let mut candidates: Vec<String> = names
+        .iter()
+        .filter_map(|name| {
+            let trimmed = name.trim();
+            (!trimmed.is_empty()).then_some(trimmed.to_string())
+        })
+        .collect();
+    candidates.sort_by(|a, b| {
+        is_auto_generated_net_name(a)
+            .cmp(&is_auto_generated_net_name(b))
+            .then_with(|| a.cmp(b))
+    });
+
+    if let Some(name) = candidates.into_iter().next() {
+        name
+    } else if let Some(point) = fallback_point {
+        point.as_auto_name()
+    } else {
+        "net_unassigned".to_string()
+    }
+}
+
+fn is_ground_like(name: &str) -> bool {
+    name.eq_ignore_ascii_case("0")
+        || name.eq_ignore_ascii_case("gnd")
+        || name.eq_ignore_ascii_case("ground")
+}
+
+fn is_auto_generated_net_name(name: &str) -> bool {
+    if name.starts_with("net_") {
+        return true;
+    }
+    name.contains('_')
+        && name
+            .chars()
+            .all(|c| c.is_numeric() || c == '_' || c == '-' || c == '.')
 }
 
 //=============================================================================
@@ -823,6 +1149,8 @@ pub fn extract_drc_data(
                 name: pin_name.to_string(),
                 net_name,
                 is_output,
+                x: Some(pin_pos.x as f64),
+                y: Some(pin_pos.y as f64),
             });
         }
 
@@ -948,11 +1276,15 @@ mod tests {
                     name: "1".to_string(),
                     net_name: net1.to_string(),
                     is_output: false,
+                    x: None,
+                    y: None,
                 },
                 PinInfo {
                     name: "2".to_string(),
                     net_name: net2.to_string(),
                     is_output: false,
+                    x: None,
+                    y: None,
                 },
             ],
             is_voltage_source: false,
@@ -970,11 +1302,15 @@ mod tests {
                     name: "+".to_string(),
                     net_name: pos.to_string(),
                     is_output: true,
+                    x: None,
+                    y: None,
                 },
                 PinInfo {
                     name: "-".to_string(),
                     net_name: neg.to_string(),
                     is_output: false,
+                    x: None,
+                    y: None,
                 },
             ],
             is_voltage_source: true,
@@ -987,6 +1323,16 @@ mod tests {
             name: "0".to_string(),
             x: 0.0,
             y: 0.0,
+        }
+    }
+
+    fn make_pin(name: &str, net_name: &str, is_output: bool, x: f64, y: f64) -> PinInfo {
+        PinInfo {
+            name: name.to_string(),
+            net_name: net_name.to_string(),
+            is_output,
+            x: Some(x),
+            y: Some(y),
         }
     }
 
@@ -1421,5 +1767,117 @@ mod tests {
         assert!(result.completed);
         assert!(result.passed()); // Should pass with all checks disabled
         assert_eq!(result.total_count(), 0);
+    }
+
+    #[test]
+    fn test_wire_topology_merges_pins_connected_by_segment() {
+        let mut checker = DrcChecker::new();
+        let components = vec![
+            ComponentInfo {
+                id: 0,
+                name: "V1".to_string(),
+                component_type: "V".to_string(),
+                pins: vec![
+                    make_pin("+", "net_0_0", true, 0.0, 0.0),
+                    make_pin("-", "0", false, 0.0, -10.0),
+                ],
+                is_voltage_source: true,
+                is_current_source: false,
+            },
+            ComponentInfo {
+                id: 1,
+                name: "R1".to_string(),
+                component_type: "R".to_string(),
+                pins: vec![
+                    make_pin("1", "net_10_0", false, 10.0, 0.0),
+                    make_pin("2", "0", false, 10.0, -10.0),
+                ],
+                is_voltage_source: false,
+                is_current_source: false,
+            },
+        ];
+        let wires = vec![WireInfo {
+            id: 1,
+            start_x: 0.0,
+            start_y: 0.0,
+            end_x: 10.0,
+            end_y: 0.0,
+        }];
+        let labels = vec![NetLabelInfo {
+            name: "0".to_string(),
+            x: 0.0,
+            y: -10.0,
+        }];
+
+        let result = checker.check_connectivity(&components, &wires, &labels);
+        let has_floating = result
+            .violations()
+            .iter()
+            .any(|v| v.violation_type == DrcViolationType::FloatingNode);
+        assert!(
+            !has_floating,
+            "wire-connected pins should not be reported as floating"
+        );
+    }
+
+    #[test]
+    fn test_net_label_renames_wire_connected_cluster() {
+        let checker = DrcChecker::new();
+        let components = vec![ComponentInfo {
+            id: 0,
+            name: "R1".to_string(),
+            component_type: "R".to_string(),
+            pins: vec![
+                make_pin("1", "net_0_0", false, 0.0, 0.0),
+                make_pin("2", "net_10_0", false, 10.0, 0.0),
+            ],
+            is_voltage_source: false,
+            is_current_source: false,
+        }];
+        let wires = vec![WireInfo {
+            id: 7,
+            start_x: 0.0,
+            start_y: 0.0,
+            end_x: 10.0,
+            end_y: 0.0,
+        }];
+        let labels = vec![NetLabelInfo {
+            name: "VDD".to_string(),
+            x: 5.0,
+            y: 0.0,
+        }];
+
+        let net_map = checker.build_net_map(&components, &wires, &labels);
+        assert!(
+            net_map.contains_key("VDD"),
+            "expected label to define canonical net name, nets: {:?}",
+            net_map.keys().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_wire_only_clusters_do_not_trigger_floating_nodes() {
+        let config = DrcConfig {
+            check_missing_ground: false,
+            ..Default::default()
+        };
+        let mut checker = DrcChecker::with_config(config);
+        let wires = vec![WireInfo {
+            id: 1,
+            start_x: 0.0,
+            start_y: 0.0,
+            end_x: 10.0,
+            end_y: 0.0,
+        }];
+
+        let result = checker.check_connectivity(&[], &wires, &[]);
+        let has_floating = result
+            .violations()
+            .iter()
+            .any(|v| v.violation_type == DrcViolationType::FloatingNode);
+        assert!(
+            !has_floating,
+            "wire-only topology should not be treated as floating electrical nodes"
+        );
     }
 }
