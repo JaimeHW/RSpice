@@ -384,6 +384,11 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
             }
 
             if ui.button("Options...").clicked() {
+                state.dialogs.simulation_options_state =
+                    crate::simulation::dialog::OptionsDialogState::from_options(
+                        &state.dialogs.simulation_options_config,
+                    );
+                state.dialogs.simulation_options_errors.clear();
                 state.dialogs.simulation_options = true;
                 ui.close_menu();
             }
