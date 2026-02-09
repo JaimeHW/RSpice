@@ -25,6 +25,96 @@ R2 2 0 1k
     }
 
     #[test]
+    fn test_model_based_resistor_uses_rsh_and_geometry() {
+        let netlist_str = r#"
+* Model-based resistor with geometry
+V1 in 0 1
+R1 in out RMOD L=10u W=2u
+R2 out 0 1k
+.MODEL RMOD R (RSH=100)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let result = engine.run_dc_op(&netlist).unwrap();
+        let vout = result.voltage(2);
+
+        // R1 = RSH * (L/W) = 100 * (10u/2u) = 500 ohms
+        // Divider: Vout = 1k / (500 + 1k) = 2/3
+        assert!(
+            (vout - (2.0 / 3.0)).abs() < 1e-3,
+            "Expected ~0.6667V, got {}V",
+            vout
+        );
+    }
+
+    #[test]
+    fn test_model_based_resistor_respects_multiplicity() {
+        let netlist_str = r#"
+* Model-based resistor multiplicity
+V1 in 0 1
+R1 in out RMOD L=10u W=2u M=2
+R2 out 0 1k
+.MODEL RMOD R (RSH=100)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let result = engine.run_dc_op(&netlist).unwrap();
+        let vout = result.voltage(2);
+
+        // Base R = 500 ohms, M=2 -> effective 250 ohms
+        // Divider: 1k / (250 + 1k) = 0.8
+        assert!((vout - 0.8).abs() < 1e-3, "Expected ~0.8V, got {}V", vout);
+    }
+
+    #[test]
+    fn test_model_based_resistor_explicit_r_overrides_geometry() {
+        let netlist_str = r#"
+* Model-based resistor explicit override
+V1 in 0 1
+R1 in out RMOD R=2k L=10u W=2u
+R2 out 0 1k
+.MODEL RMOD R (RSH=100)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let result = engine.run_dc_op(&netlist).unwrap();
+        let vout = result.voltage(2);
+
+        // Explicit R=2k overrides geometry-derived value.
+        // Divider: 1k / (2k + 1k) = 1/3
+        assert!(
+            (vout - (1.0 / 3.0)).abs() < 1e-3,
+            "Expected ~0.3333V, got {}V",
+            vout
+        );
+    }
+
+    #[test]
+    fn test_model_based_resistor_missing_model_errors() {
+        let netlist_str = r#"
+* Missing model for model-based resistor
+V1 in 0 1
+R1 in out RMOD L=10u W=2u
+R2 out 0 1k
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let err = engine
+            .run_dc_op(&netlist)
+            .expect_err("missing model should fail");
+        let msg = format!("{}", err);
+        assert!(
+            msg.contains("unknown model 'RMOD'"),
+            "unexpected error: {}",
+            msg
+        );
+    }
+
+    #[test]
     fn test_current_source() {
         let netlist_str = r#"
 * Current source test

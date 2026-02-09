@@ -1355,13 +1355,27 @@ impl Engine {
         };
 
         match kind {
-            ElementKind::Resistor { value: r } => {
+            ElementKind::Resistor {
+                value: r,
+                model,
+                instance_params,
+            } => {
                 if !matches_param(&["R", "VALUE"]) {
                     return Err(SimulationError::Circuit(
                         "Unsupported resistor step parameter; use R or VALUE".to_string(),
                     ));
                 }
                 *r = value;
+                if model.is_some() {
+                    if let Some((_, existing)) = instance_params
+                        .iter_mut()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("R"))
+                    {
+                        *existing = value;
+                    } else {
+                        instance_params.push(("R".to_string(), value));
+                    }
+                }
                 Ok(())
             }
             ElementKind::Capacitor { value: c, .. } => {
@@ -1683,7 +1697,7 @@ mod tests {
         let mut r1 = None;
         let mut r2 = None;
         for element in &perturbed.elements {
-            if let crate::netlist::ElementKind::Resistor { value } = element.kind {
+            if let crate::netlist::ElementKind::Resistor { value, .. } = element.kind {
                 if element.name.eq_ignore_ascii_case("R1") {
                     r1 = Some(value);
                 } else if element.name.eq_ignore_ascii_case("R2") {
@@ -1862,6 +1876,38 @@ mod tests {
         assert_eq!(results.len(), values.len());
         for ((stepped, result), r1) in results.iter().zip(values.iter()) {
             assert!((*stepped - *r1).abs() < 1e-12);
+            let expected = 1e3 / (r1 + 1e3);
+            assert!((result.voltage(2) - expected).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn test_run_step_command_device_model_resistor_value_override() {
+        let netlist = crate::netlist::parse_netlist(
+            "* Step device model-based resistor\n\
+             V1 in 0 1\n\
+             R1 in out RMOD L=10u W=2u\n\
+             R2 out 0 1k\n\
+             .MODEL RMOD R (RSH=100)\n\
+             .END\n",
+        )
+        .expect("netlist should parse");
+        let engine = Engine::default();
+        let values = vec![500.0, 1000.0];
+        let step_cmd = StepCommand {
+            target: StepTarget::Device,
+            name: "R1".to_string(),
+            param_name: Some("VALUE".to_string()),
+            sweep: crate::netlist::StepSweep::List(values.clone()),
+        };
+
+        let results = engine
+            .run_step_command(&netlist, &step_cmd, &values)
+            .expect("device step should succeed");
+
+        assert_eq!(results.len(), values.len());
+        for ((stepped, result), r1) in results.iter().zip(values.iter()) {
+            assert!((*stepped - *r1).abs() < 1e-9);
             let expected = 1e3 / (r1 + 1e3);
             assert!((result.voltage(2) - expected).abs() < 1e-6);
         }

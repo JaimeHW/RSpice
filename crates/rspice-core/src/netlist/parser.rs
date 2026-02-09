@@ -866,92 +866,117 @@ fn parse_resistor(
     // Skip optional parameter names (R=)
     skip_optional_param_name(stream, "R");
 
-    // Try to parse as a value first. If next token is an identifier
-    // that isn't a parameter, it's a model name.
-    let value = match &stream.peek().kind {
-        TokenKind::Number(v) => {
-            let v = *v;
-            stream.advance();
-            v
-        }
-        TokenKind::Ident(s) => {
-            // Check if it's a parameter reference
-            if let Some(v) = params.get(s) {
-                stream.advance();
-                v
-            } else {
-                // It's a model name - skip it and remaining parameters
-                // For model-based resistors, use a placeholder value
-                // Real value comes from .MODEL and geometry (L, W)
-                stream.advance(); // Skip model name
+    let mut value: Option<Value> = None;
+    let mut model: Option<String> = None;
+    let mut instance_params: Vec<(String, Value)> = Vec::new();
 
-                // Skip any geometry/additional params (L=, W=, AC=, etc.)
-                while !stream.is_eof()
-                    && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
-                {
-                    skip_commas(stream);
-                    // Skip parameter assignments like L=11u
-                    if let TokenKind::Ident(_) = &stream.peek().kind {
-                        stream.advance();
-                        if stream.consume(&TokenKind::Equals) {
-                            // Consume the value
-                            if let TokenKind::Number(_) = &stream.peek().kind {
-                                stream.advance();
-                            } else if let TokenKind::Ident(_) = &stream.peek().kind {
-                                stream.advance();
-                            }
-                        } else {
-                            break;
-                        }
-                    } else {
-                        break;
-                    }
-                }
+    skip_commas(stream);
 
-                // Use a default 1k value for model-based resistors
-                // The actual simulation would need to look up the model
-                1000.0
+    // First token after nodes can be:
+    // 1) Explicit value (numeric/expression/param ref)
+    // 2) Model name
+    // 3) First named parameter (e.g. R=, VALUE=, MODEL=, L=, W=...)
+    if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        match &stream.peek().kind {
+            TokenKind::Number(_)
+            | TokenKind::Expression(_)
+            | TokenKind::Plus
+            | TokenKind::Minus => {
+                value = Some(expect_value(stream, line_num, params)?);
             }
-        }
-        TokenKind::Plus | TokenKind::Minus => {
-            // Handle signed values
-            let sign = if matches!(stream.peek().kind, TokenKind::Minus) {
-                -1.0
-            } else {
-                1.0
-            };
-            stream.advance();
-            if let TokenKind::Number(v) = &stream.peek().kind {
-                let v = *v * sign;
-                stream.advance();
-                v
-            } else {
+            TokenKind::Ident(s) => {
+                if let Some(v) = params.get(s) {
+                    stream.advance();
+                    value = Some(v);
+                } else if !matches!(stream.peek_n(1).kind, TokenKind::Equals) {
+                    model = Some(s.clone());
+                    stream.advance();
+                }
+            }
+            _ => {
                 return Err(ParseError::Syntax {
                     line: line_num,
-                    message: "Expected value after sign".to_string(),
+                    message: format!(
+                        "Expected resistor value, model name, or parameter assignment, found {:?}",
+                        stream.peek().kind
+                    ),
                 });
             }
         }
-        TokenKind::Expression(expr) => {
-            // Handle expression values like {R}
-            let expr = expr.clone();
-            stream.advance();
-            eval_expression(&expr, params).map_err(|e| ParseError::InvalidValue(e.to_string()))?
+    }
+
+    // Parse remaining instance parameters.
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        skip_commas(stream);
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
         }
-        _ => {
-            return Err(ParseError::Syntax {
-                line: line_num,
-                message: format!(
-                    "Expected resistor value or model, found {:?}",
-                    stream.peek().kind
-                ),
-            });
+
+        match &stream.peek().kind {
+            TokenKind::Ident(name) => {
+                let raw_name = name.clone();
+                let name_upper = raw_name.to_ascii_uppercase();
+                stream.advance();
+
+                if stream.consume(&TokenKind::Equals) {
+                    if name_upper == "MODEL" {
+                        let model_name = expect_ident(stream, line_num)?;
+                        model = Some(model_name);
+                        continue;
+                    }
+
+                    let param_value =
+                        try_value(stream, params).ok_or_else(|| ParseError::Syntax {
+                            line: line_num,
+                            message: format!(
+                                "Expected value for resistor parameter '{}'",
+                                raw_name
+                            ),
+                        })?;
+
+                    if name_upper == "R" || name_upper == "VALUE" {
+                        value = Some(param_value);
+                    }
+                    instance_params.push((name_upper, param_value));
+                } else if model.is_none() {
+                    // Bare identifier after value-less prefix: treat as model name.
+                    model = Some(raw_name);
+                }
+            }
+            TokenKind::Number(_)
+            | TokenKind::Expression(_)
+            | TokenKind::Plus
+            | TokenKind::Minus => {
+                // Allow trailing unnamed numeric value as explicit resistance override.
+                value = Some(expect_value(stream, line_num, params)?);
+            }
+            _ => {
+                stream.advance();
+            }
         }
-    };
+    }
+
+    if value.is_none() {
+        value = instance_params
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("R") || k.eq_ignore_ascii_case("VALUE"))
+            .map(|(_, v)| *v);
+    }
+
+    if value.is_none() && model.is_none() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "Resistor requires either a value or a model".to_string(),
+        });
+    }
 
     elements.push(Element {
         name,
-        kind: ElementKind::Resistor { value },
+        kind: ElementKind::Resistor {
+            value: value.unwrap_or(Value::NAN),
+            model,
+            instance_params,
+        },
         nodes: vec![node_pos, node_neg],
     });
 
@@ -3145,10 +3170,67 @@ R1 1 0 1k, temp=27
         let result = parse_netlist(netlist).unwrap();
         assert_eq!(result.elements.len(), 1);
         match &result.elements[0].kind {
-            ElementKind::Resistor { value } => {
+            ElementKind::Resistor { value, .. } => {
                 assert!((value - 1000.0).abs() < 1e-10);
             }
             _ => panic!("Expected Resistor"),
+        }
+    }
+
+    #[test]
+    fn test_parse_model_based_resistor_preserves_model_and_instance_params() {
+        let netlist = r#"Model-based Resistor
+R1 in out RMOD L=10u W=2u M=2
+.MODEL RMOD R (RSH=120)
+.END
+"#;
+        let result = parse_netlist(netlist).expect("netlist should parse");
+        match &result.elements[0].kind {
+            ElementKind::Resistor {
+                value,
+                model,
+                instance_params,
+            } => {
+                assert!(
+                    value.is_nan(),
+                    "model-based resistor should not use placeholder value"
+                );
+                assert_eq!(model.as_deref(), Some("RMOD"));
+
+                let params: std::collections::HashMap<String, Value> =
+                    instance_params.iter().cloned().collect();
+                assert!((params["L"] - 10e-6).abs() < 1e-18);
+                assert!((params["W"] - 2e-6).abs() < 1e-18);
+                assert!((params["M"] - 2.0).abs() < 1e-12);
+            }
+            other => panic!("Expected resistor, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_model_based_resistor_with_explicit_r_param_sets_value() {
+        let netlist = r#"Model-based Resistor with explicit R
+R1 in out RMOD R=2k L=10u W=2u
+.MODEL RMOD R (RSH=120)
+.END
+"#;
+        let result = parse_netlist(netlist).expect("netlist should parse");
+        match &result.elements[0].kind {
+            ElementKind::Resistor {
+                value,
+                model,
+                instance_params,
+            } => {
+                assert_eq!(model.as_deref(), Some("RMOD"));
+                assert!((value - 2000.0).abs() < 1e-12);
+
+                let params: std::collections::HashMap<String, Value> =
+                    instance_params.iter().cloned().collect();
+                assert!((params["R"] - 2000.0).abs() < 1e-12);
+                assert!((params["L"] - 10e-6).abs() < 1e-18);
+                assert!((params["W"] - 2e-6).abs() < 1e-18);
+            }
+            other => panic!("Expected resistor, got {:?}", other),
         }
     }
 
@@ -3267,7 +3349,7 @@ R1 1 0 {R}
         assert!((result.params.get("R").unwrap() - 1000.0).abs() < 1e-10);
 
         match &result.elements[0].kind {
-            ElementKind::Resistor { value } => {
+            ElementKind::Resistor { value, .. } => {
                 assert!((value - 1000.0).abs() < 1e-10);
             }
             _ => panic!("Expected Resistor"),
@@ -3392,7 +3474,7 @@ R1 1 0 1k ; load resistor
         let result = parse_netlist(netlist).unwrap();
         assert_eq!(result.elements.len(), 2);
         match &result.elements[1].kind {
-            ElementKind::Resistor { value } => assert!((*value - 1000.0).abs() < 1e-10),
+            ElementKind::Resistor { value, .. } => assert!((*value - 1000.0).abs() < 1e-10),
             _ => panic!("Expected resistor"),
         }
     }

@@ -114,8 +114,18 @@ pub enum ElementKind {
     //-------------------------------------------------------------------------
     // Passive Components
     //-------------------------------------------------------------------------
-    /// Resistor: value in Ohms
-    Resistor { value: Value },
+    /// Resistor.
+    ///
+    /// Supports both numeric-value form (`R1 n+ n- 1k`) and model-based form
+    /// (`R1 n+ n- RMOD L=10u W=2u`).
+    Resistor {
+        /// Explicit resistance value in Ohms when provided directly.
+        value: Value,
+        /// Optional model name for model-based resistor instances.
+        model: Option<String>,
+        /// Optional instance parameters (e.g., `L`, `W`, `M`, `R`).
+        instance_params: Vec<(String, Value)>,
+    },
 
     /// Capacitor: value in Farads
     Capacitor {
@@ -917,7 +927,11 @@ mod tests {
     fn test_element_creation() {
         let r = Element {
             name: "R1".to_string(),
-            kind: ElementKind::Resistor { value: 1000.0 },
+            kind: ElementKind::Resistor {
+                value: 1000.0,
+                model: None,
+                instance_params: Vec::new(),
+            },
             nodes: vec!["1".to_string(), "0".to_string()],
         };
         assert_eq!(r.name, "R1");

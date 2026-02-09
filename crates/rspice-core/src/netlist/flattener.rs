@@ -407,7 +407,15 @@ impl<'a> Flattener<'a> {
     fn substitute_params(&self, element: &Element, param_map: &HashMap<&str, Value>) -> Element {
         let new_kind = match &element.kind {
             // Passive components
-            ElementKind::Resistor { value } => ElementKind::Resistor { value: *value },
+            ElementKind::Resistor {
+                value,
+                model,
+                instance_params,
+            } => ElementKind::Resistor {
+                value: *value,
+                model: model.clone(),
+                instance_params: instance_params.clone(),
+            },
             ElementKind::Capacitor {
                 value,
                 initial_voltage,

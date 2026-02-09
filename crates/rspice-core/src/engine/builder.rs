@@ -900,6 +900,148 @@ fn model_param(params: &[(String, f64)], names: &[&str]) -> Option<f64> {
     })
 }
 
+fn instance_param(params: &[(String, f64)], names: &[&str]) -> Option<f64> {
+    params.iter().find_map(|(name, value)| {
+        if names
+            .iter()
+            .any(|candidate| name.eq_ignore_ascii_case(candidate))
+        {
+            Some(*value)
+        } else {
+            None
+        }
+    })
+}
+
+fn resolve_resistor_instance_value(
+    netlist: &Netlist,
+    element_name: &str,
+    value: f64,
+    model_name: Option<&str>,
+    instance_params: &[(String, f64)],
+) -> Result<f64, SimulationError> {
+    let mut resistance = instance_param(instance_params, &["R", "VALUE"]);
+    if resistance.is_none() && value.is_finite() && value > 0.0 {
+        resistance = Some(value);
+    }
+
+    if let Some(model_name) = model_name {
+        let model_def = find_model_def(netlist, model_name).ok_or_else(|| {
+            SimulationError::Circuit(format!(
+                "Resistor '{}' references unknown model '{}'",
+                element_name, model_name
+            ))
+        })?;
+        ensure_model_type(
+            "Resistor",
+            element_name,
+            model_name,
+            model_def,
+            &["R", "RES", "RESISTOR"],
+        )?;
+
+        if resistance.is_none() {
+            resistance = model_param(&model_def.params, &["R", "RES", "R0", "VALUE"]);
+        }
+
+        if resistance.is_none() {
+            let rsh = model_param(&model_def.params, &["RSH", "SHEETRES", "SHEETR"]).ok_or_else(
+                || {
+                    SimulationError::Circuit(format!(
+                        "Resistor '{}' model '{}' requires R/RES or RSH with geometry",
+                        element_name, model_name
+                    ))
+                },
+            )?;
+
+            if !rsh.is_finite() || rsh <= 0.0 {
+                return Err(SimulationError::Circuit(format!(
+                    "Resistor '{}' model '{}' has invalid RSH={} (must be finite and > 0)",
+                    element_name, model_name, rsh
+                )));
+            }
+
+            let squares = if let Some(nsq) =
+                instance_param(instance_params, &["NRS", "NRSQ", "NSQ", "SQUARES"])
+            {
+                nsq
+            } else if let Some(nsq) =
+                model_param(&model_def.params, &["NRS", "NRSQ", "NSQ", "SQUARES"])
+            {
+                nsq
+            } else {
+                let l = instance_param(instance_params, &["L", "LENGTH"])
+                    .or_else(|| model_param(&model_def.params, &["L", "LENGTH"]))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "Resistor '{}' model '{}' requires L/LENGTH when using RSH",
+                            element_name, model_name
+                        ))
+                    })?;
+                let w = instance_param(instance_params, &["W", "WIDTH"])
+                    .or_else(|| model_param(&model_def.params, &["W", "WIDTH", "DEFW"]))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "Resistor '{}' model '{}' requires W/WIDTH (or DEFW) when using RSH",
+                            element_name, model_name
+                        ))
+                    })?;
+                let narrow = model_param(&model_def.params, &["NARROW"]).unwrap_or(0.0);
+                let l_eff = l - narrow;
+                let w_eff = w - narrow;
+                if !l_eff.is_finite() || !w_eff.is_finite() || l_eff <= 0.0 || w_eff <= 0.0 {
+                    return Err(SimulationError::Circuit(format!(
+                        "Resistor '{}' has invalid effective geometry (L={}, W={}, NARROW={})",
+                        element_name, l, w, narrow
+                    )));
+                }
+                l_eff / w_eff
+            };
+
+            if !squares.is_finite() || squares <= 0.0 {
+                return Err(SimulationError::Circuit(format!(
+                    "Resistor '{}' has invalid number of squares {}",
+                    element_name, squares
+                )));
+            }
+            resistance = Some(rsh * squares);
+        }
+    }
+
+    let mut resolved = resistance.ok_or_else(|| {
+        if model_name.is_some() {
+            SimulationError::Circuit(format!(
+                "Resistor '{}' model-based value could not be resolved",
+                element_name
+            ))
+        } else {
+            SimulationError::Circuit(format!(
+                "Resistor '{}' has no valid resistance value",
+                element_name
+            ))
+        }
+    })?;
+
+    if let Some(mult) = instance_param(instance_params, &["M", "MULT"]) {
+        if !mult.is_finite() || mult <= 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Resistor '{}' has invalid multiplicity M={} (must be finite and > 0)",
+                element_name, mult
+            )));
+        }
+        resolved /= mult;
+    }
+
+    if !resolved.is_finite() || resolved <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "Resistor '{}' resolved to invalid resistance {}",
+            element_name, resolved
+        )));
+    }
+
+    Ok(resolved)
+}
+
 fn resolve_tline_model_params(
     netlist: &Netlist,
     model_name: &str,
@@ -1234,10 +1376,23 @@ impl Engine {
 
         for element in &flat_elements {
             match &element.kind {
-                ElementKind::Resistor { value } => {
+                ElementKind::Resistor {
+                    value,
+                    model,
+                    instance_params,
+                } => {
+                    let resistance = resolve_resistor_instance_value(
+                        netlist,
+                        &element.name,
+                        *value,
+                        model.as_deref(),
+                        instance_params,
+                    )?;
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
-                    circuit.resistors.add(element.name.clone(), np, nn, *value);
+                    circuit
+                        .resistors
+                        .add(element.name.clone(), np, nn, resistance);
                 }
                 ElementKind::Capacitor { value, .. } => {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
