@@ -14,8 +14,10 @@
 //! Call `SimulationController::update()` once per frame in the app update loop.
 
 use std::collections::VecDeque;
+use std::path::PathBuf;
 
 use crate::common::app::{AppState, ConsoleMessage};
+use crate::io::{SignalType, WaveformDataset, WaveformFormat, WaveformSignal, WaveformWriter};
 use crate::services::yield_manager::YieldAnalysisManager;
 use crate::simulation::config::{
     AcAnalysisConfig, AcSweepType, DcSweepConfig, NoiseAnalysisConfig, PoleZeroConfig,
@@ -1656,6 +1658,183 @@ impl SimulationController {
         Ok(xf_cfg.to_spice())
     }
 
+    fn maybe_export_touchstone(
+        &self,
+        state: &mut AppState,
+        result: &crate::simulation::SimulationResult,
+    ) {
+        let Some(crate::simulation::multi_run::AnalysisSpec::SParameter { z0, .. }) =
+            self.current_spec.as_ref()
+        else {
+            return;
+        };
+
+        let mut sp_state = state.dialogs.sp_state.clone();
+        sp_state.ensure_initialized();
+        let sp_cfg = match sp_state.to_config() {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                state.console_messages.push(ConsoleMessage::warning(format!(
+                    "Skipping Touchstone export: invalid S-parameter settings ({})",
+                    e
+                )));
+                return;
+            }
+        };
+        if !sp_cfg.touchstone_export {
+            return;
+        }
+
+        let run_id = state.simulation.active_run().map(|run| run.id).unwrap_or(0);
+        let path = Self::touchstone_export_path(state, run_id, self.current_analysis_idx);
+        let dataset =
+            match Self::build_touchstone_dataset(result, *z0, sp_cfg.touchstone_version as usize) {
+                Ok(dataset) => dataset,
+                Err(e) => {
+                    state.console_messages.push(ConsoleMessage::warning(format!(
+                        "Touchstone export skipped: {}",
+                        e
+                    )));
+                    return;
+                }
+            };
+
+        let writer = WaveformWriter::new(WaveformFormat::Touchstone);
+        match writer.write(&dataset, &path) {
+            Ok(()) => state.console_messages.push(ConsoleMessage::info(format!(
+                "Exported Touchstone: {}",
+                path.display()
+            ))),
+            Err(e) => state.console_messages.push(ConsoleMessage::warning(format!(
+                "Touchstone export failed: {}",
+                e
+            ))),
+        }
+    }
+
+    fn build_touchstone_dataset(
+        result: &crate::simulation::SimulationResult,
+        z0: f64,
+        touchstone_version: usize,
+    ) -> Result<WaveformDataset, String> {
+        let (frequencies, waveforms) = match result {
+            crate::simulation::SimulationResult::Ac {
+                frequencies,
+                waveforms,
+            } => (frequencies, waveforms),
+            _ => return Err("result is not frequency-domain S-parameter data".to_string()),
+        };
+        if frequencies.is_empty() {
+            return Err("frequency vector is empty".to_string());
+        }
+
+        let s11 = Self::extract_complex_waveform(waveforms, "S11")?;
+        let s21 = Self::extract_complex_waveform(waveforms, "S21")?;
+        let s12 = Self::extract_complex_waveform(waveforms, "S12")?;
+        let s22 = Self::extract_complex_waveform(waveforms, "S22")?;
+
+        for (name, wf) in [("S11", s11), ("S21", s21), ("S12", s12), ("S22", s22)] {
+            let imag = wf
+                .y_imag
+                .as_ref()
+                .ok_or_else(|| format!("{} waveform is missing imaginary component", name))?;
+            if wf.y_values.len() != frequencies.len() || imag.len() != frequencies.len() {
+                return Err(format!(
+                    "{} waveform length mismatch (freq={}, re={}, im={})",
+                    name,
+                    frequencies.len(),
+                    wf.y_values.len(),
+                    imag.len()
+                ));
+            }
+        }
+
+        let mut dataset = WaveformDataset::new("S-Parameters");
+        dataset.analysis = "S-Parameter".to_string();
+        dataset.metadata.insert("z0".to_string(), format!("{}", z0));
+        dataset.metadata.insert(
+            "touchstone_version".to_string(),
+            touchstone_version.to_string(),
+        );
+
+        let mut x = WaveformSignal::new("frequency", SignalType::Frequency);
+        x.data = frequencies.clone();
+        dataset.set_x(x);
+
+        Self::push_complex_signal_pair(&mut dataset, "S11", s11)?;
+        Self::push_complex_signal_pair(&mut dataset, "S21", s21)?;
+        Self::push_complex_signal_pair(&mut dataset, "S12", s12)?;
+        Self::push_complex_signal_pair(&mut dataset, "S22", s22)?;
+
+        Ok(dataset)
+    }
+
+    fn push_complex_signal_pair(
+        dataset: &mut WaveformDataset,
+        name: &str,
+        waveform: &crate::simulation::results::WaveformData,
+    ) -> Result<(), String> {
+        let imag = waveform
+            .y_imag
+            .as_ref()
+            .ok_or_else(|| format!("{} waveform is missing imaginary component", name))?;
+
+        let mut real_signal = WaveformSignal::new(format!("{}_RE", name), SignalType::SParameter);
+        real_signal.data = waveform.y_values.clone();
+        dataset.add_signal(real_signal);
+
+        let mut imag_signal = WaveformSignal::new(format!("{}_IM", name), SignalType::SParameter);
+        imag_signal.data = imag.clone();
+        dataset.add_signal(imag_signal);
+
+        Ok(())
+    }
+
+    fn extract_complex_waveform<'a>(
+        waveforms: &'a std::collections::HashMap<String, crate::simulation::results::WaveformData>,
+        target: &str,
+    ) -> Result<&'a crate::simulation::results::WaveformData, String> {
+        waveforms
+            .iter()
+            .find(|(name, wf)| {
+                name.eq_ignore_ascii_case(target) || wf.name.eq_ignore_ascii_case(target)
+            })
+            .map(|(_, wf)| wf)
+            .ok_or_else(|| format!("missing {} waveform", target))
+    }
+
+    fn touchstone_export_path(state: &AppState, run_id: u64, analysis_idx: usize) -> PathBuf {
+        let source_path = state
+            .schematic
+            .current_file
+            .as_ref()
+            .or(state.simulation.current_file.as_ref());
+        let (base_dir, stem) = if let Some(path) = source_path {
+            let dir = path
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("untitled");
+            (dir, stem.to_string())
+        } else {
+            (
+                std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+                "untitled".to_string(),
+            )
+        };
+
+        base_dir.join(format!(
+            "{}_run{:04}_sp{:02}.s2p",
+            stem,
+            run_id,
+            analysis_idx.max(1)
+        ))
+    }
+
     fn periodic_solver_tolerances(state: &AppState) -> (f64, f64) {
         let opts = &state.dialogs.simulation_options_config;
         (opts.reltol, opts.abstol)
@@ -2238,6 +2417,9 @@ impl SimulationController {
 
                     // Update waveform data (legacy compatibility)
                     self.update_waveforms(state, &sim_result);
+
+                    // Optional Touchstone export for S-parameter analyses.
+                    self.maybe_export_touchstone(state, &sim_result);
 
                     // Set axis labels based on current analysis type
                     let (x_label, x_unit, y_label, y_unit) = analysis_type.axis_info();
@@ -4903,5 +5085,108 @@ mod tests {
         let controller = SimulationController::new();
         assert!(controller.current_config.is_none());
         assert!(controller.current_spec.is_none());
+    }
+
+    #[test]
+    fn test_build_touchstone_dataset_from_sparameter_ac_result() {
+        use crate::simulation::results::WaveformData as EngineWaveformData;
+        use crate::simulation::SimulationResult;
+        use std::collections::HashMap;
+
+        let freqs = vec![1e6, 2e6];
+        let mut waveforms = HashMap::new();
+        waveforms.insert(
+            "S11".to_string(),
+            EngineWaveformData::new_complex("S11", freqs.clone(), vec![0.1, 0.2], vec![0.01, 0.02]),
+        );
+        waveforms.insert(
+            "S21".to_string(),
+            EngineWaveformData::new_complex("S21", freqs.clone(), vec![0.9, 0.8], vec![0.0, -0.1]),
+        );
+        waveforms.insert(
+            "S12".to_string(),
+            EngineWaveformData::new_complex("S12", freqs.clone(), vec![0.02, 0.03], vec![0.0, 0.0]),
+        );
+        waveforms.insert(
+            "S22".to_string(),
+            EngineWaveformData::new_complex(
+                "S22",
+                freqs.clone(),
+                vec![0.2, 0.3],
+                vec![-0.01, -0.02],
+            ),
+        );
+
+        let result = SimulationResult::Ac {
+            frequencies: freqs.clone(),
+            waveforms,
+        };
+        let dataset = SimulationController::build_touchstone_dataset(&result, 50.0, 2)
+            .expect("touchstone dataset should build");
+
+        assert_eq!(dataset.point_count(), 2);
+        assert_eq!(dataset.signal_count(), 8);
+        assert_eq!(
+            dataset
+                .metadata
+                .get("touchstone_version")
+                .cloned()
+                .unwrap_or_default(),
+            "2"
+        );
+    }
+
+    #[test]
+    fn test_build_touchstone_dataset_requires_complex_components() {
+        use crate::simulation::results::WaveformData as EngineWaveformData;
+        use crate::simulation::SimulationResult;
+        use std::collections::HashMap;
+
+        let freqs = vec![1e6, 2e6];
+        let mut waveforms = HashMap::new();
+        // Real-only S11 should fail conversion.
+        waveforms.insert(
+            "S11".to_string(),
+            EngineWaveformData::new_freq_domain("S11", freqs.clone(), vec![0.1, 0.2]),
+        );
+        waveforms.insert(
+            "S21".to_string(),
+            EngineWaveformData::new_complex("S21", freqs.clone(), vec![0.9, 0.8], vec![0.0, 0.0]),
+        );
+        waveforms.insert(
+            "S12".to_string(),
+            EngineWaveformData::new_complex("S12", freqs.clone(), vec![0.02, 0.03], vec![0.0, 0.0]),
+        );
+        waveforms.insert(
+            "S22".to_string(),
+            EngineWaveformData::new_complex(
+                "S22",
+                freqs.clone(),
+                vec![0.2, 0.3],
+                vec![-0.01, -0.02],
+            ),
+        );
+
+        let result = SimulationResult::Ac {
+            frequencies: freqs,
+            waveforms,
+        };
+        let err = SimulationController::build_touchstone_dataset(&result, 50.0, 1)
+            .expect_err("missing imag should fail");
+        assert!(err.contains("missing imaginary component"));
+    }
+
+    #[test]
+    fn test_touchstone_export_path_uses_schematic_file_directory() {
+        let mut state = AppState::default();
+        state.schematic.current_file = Some(PathBuf::from("C:\\proj\\rf\\amp_top.rsch"));
+
+        let path = SimulationController::touchstone_export_path(&state, 7, 2);
+        let normalized = path.to_string_lossy().replace('\\', "/");
+        assert!(
+            normalized.ends_with("C:/proj/rf/amp_top_run0007_sp02.s2p"),
+            "unexpected export path: {}",
+            normalized
+        );
     }
 }
