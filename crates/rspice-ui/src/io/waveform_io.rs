@@ -8,17 +8,18 @@
 //! - NUTMEG (SPICE3/ngspice raw format) for import
 //! - CSV and TSV for import/export
 //! - PSF-Lite binary waveform format (`PSFL`) for import
+//! - PSF ASCII waveform exports (`psfascii`) for import
 //! - Touchstone S-parameter format (`.sNp`) for import/export
 //!
 //! # Planned Formats
 //!
-//! - Cadence PSF native database import
+//! - Full Cadence PSF native binary database import
 
 use super::binary_io::PsfReader;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 
@@ -327,9 +328,41 @@ impl WaveformReader {
 
     /// Read PSF-Lite binary waveform format (`PSFL`).
     ///
-    /// This currently supports rspice's PSF-Lite container and does not yet parse
-    /// Cadence native PSF directory databases.
+    /// Supports both:
+    /// - `PSFL` binary files emitted by rspice (`psf-lite`)
+    /// - Cadence-style PSF ASCII exports (`psfascii`) from file or directory targets
     fn read_psf(&self, path: &Path) -> Result<WaveformDataset, String> {
+        if path.is_dir() {
+            return self.read_psf_directory(path);
+        }
+        if !path.is_file() {
+            return Err(format!(
+                "PSF path '{}' is neither a file nor a directory",
+                path.display()
+            ));
+        }
+
+        // First try rspice PSF-Lite binary.
+        match self.read_psf_lite_file(path) {
+            Ok(dataset) => return Ok(dataset),
+            Err(psf_lite_err) => {
+                // Fall back to PSF ASCII text parsing for Cadence-style exports.
+                match self.read_psf_ascii_file(path) {
+                    Ok(dataset) => return Ok(dataset),
+                    Err(psf_ascii_err) => {
+                        return Err(format!(
+                            "Failed to read PSF '{}': {} ; fallback PSF ASCII parse failed: {}",
+                            path.display(),
+                            psf_lite_err,
+                            psf_ascii_err
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    fn read_psf_lite_file(&self, path: &Path) -> Result<WaveformDataset, String> {
         let mut reader = PsfReader::open(path)
             .map_err(|e| format!("Failed to open PSF-Lite file '{}': {}", path.display(), e))?;
 
@@ -370,6 +403,292 @@ impl WaveformReader {
         }
 
         Ok(dataset)
+    }
+
+    fn read_psf_directory(&self, path: &Path) -> Result<WaveformDataset, String> {
+        let mut candidates = Vec::new();
+
+        // Prefer explicitly referenced run objects from logFile when available.
+        let log_file = path.join("logFile");
+        if log_file.is_file() {
+            let file = File::open(&log_file).map_err(|e| {
+                format!("Failed to open PSF logFile '{}': {}", log_file.display(), e)
+            })?;
+            for line in BufReader::new(file).lines() {
+                let line =
+                    line.map_err(|e| format!("Failed to read '{}': {}", log_file.display(), e))?;
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                for token in trimmed.split_whitespace() {
+                    let token = token.trim_matches(|c| c == '"' || c == '\'');
+                    if token.ends_with(".psfascii")
+                        || token.ends_with(".ascii")
+                        || token.ends_with(".txt")
+                        || token.ends_with(".psf")
+                    {
+                        let candidate = path.join(token);
+                        if candidate.is_file() {
+                            candidates.push(candidate);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Also scan direct children for common waveform payload files.
+        let entries = fs::read_dir(path)
+            .map_err(|e| format!("Failed to scan PSF directory '{}': {}", path.display(), e))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+            let child_path = entry.path();
+            if !child_path.is_file() {
+                continue;
+            }
+            let Some(name) = child_path.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let lower = name.to_ascii_lowercase();
+            let likely_payload = lower.ends_with(".psfascii")
+                || lower.ends_with(".ascii")
+                || lower.ends_with(".psf")
+                || lower.contains("tran")
+                || lower.contains("ac")
+                || lower.contains("dc");
+            if likely_payload {
+                candidates.push(child_path);
+            }
+        }
+
+        candidates.sort();
+        candidates.dedup();
+
+        let mut errors = Vec::new();
+        for candidate in candidates {
+            if let Ok(dataset) = self.read_psf_ascii_file(&candidate) {
+                return Ok(dataset);
+            }
+            match self.read_psf_lite_file(&candidate) {
+                Ok(dataset) => return Ok(dataset),
+                Err(err) => errors.push(format!("{}: {}", candidate.display(), err)),
+            }
+        }
+
+        Err(format!(
+            "No readable PSF waveform payload found in '{}'. Tried: {}",
+            path.display(),
+            if errors.is_empty() {
+                "none".to_string()
+            } else {
+                errors.join(" | ")
+            }
+        ))
+    }
+
+    fn read_psf_ascii_file(&self, path: &Path) -> Result<WaveformDataset, String> {
+        let file = File::open(path)
+            .map_err(|e| format!("Failed to open PSF ASCII file '{}': {}", path.display(), e))?;
+        let reader = BufReader::new(file);
+
+        let mut traces: HashMap<String, Vec<f64>> = HashMap::new();
+        let mut vector_name: Option<String> = None;
+        let mut vector_values: Vec<f64> = Vec::new();
+
+        for line in reader.lines() {
+            let line = line.map_err(|e| format!("Read error in '{}': {}", path.display(), e))?;
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("//") {
+                continue;
+            }
+
+            if let Some(active_name) = vector_name.as_deref() {
+                if trimmed.starts_with(')') {
+                    Self::commit_psf_ascii_sample(&mut traces, active_name, &vector_values);
+                    vector_name = None;
+                    vector_values.clear();
+                    continue;
+                }
+                vector_values.extend(Self::parse_psf_ascii_numbers(trimmed));
+                if trimmed.ends_with(')') {
+                    Self::commit_psf_ascii_sample(&mut traces, active_name, &vector_values);
+                    vector_name = None;
+                    vector_values.clear();
+                }
+                continue;
+            }
+
+            let Some((name, rhs)) = Self::parse_psf_ascii_assignment(trimmed) else {
+                continue;
+            };
+            if name.is_empty() {
+                continue;
+            }
+
+            if rhs.starts_with('(') {
+                let mut values = Self::parse_psf_ascii_numbers(rhs);
+                if rhs.ends_with(')') {
+                    Self::commit_psf_ascii_sample(&mut traces, &name, &values);
+                } else {
+                    vector_name = Some(name);
+                    vector_values.append(&mut values);
+                }
+            } else {
+                let values = Self::parse_psf_ascii_numbers(rhs);
+                Self::commit_psf_ascii_sample(&mut traces, &name, &values);
+            }
+        }
+
+        if let Some(active_name) = vector_name {
+            if !vector_values.is_empty() {
+                Self::commit_psf_ascii_sample(&mut traces, &active_name, &vector_values);
+            }
+        }
+
+        if traces.is_empty() {
+            return Err(format!(
+                "PSF ASCII file '{}' contained no waveform assignments",
+                path.display()
+            ));
+        }
+
+        let mut x_name = None;
+        for candidate in ["time", "freq", "frequency", "sweep", "sweepparam"] {
+            if let Some((name, values)) = traces
+                .iter()
+                .find(|(name, values)| name.eq_ignore_ascii_case(candidate) && values.len() >= 2)
+            {
+                x_name = Some((name.clone(), values.clone()));
+                break;
+            }
+        }
+        if x_name.is_none() {
+            x_name = traces
+                .iter()
+                .max_by_key(|(_, values)| values.len())
+                .map(|(name, values)| (name.clone(), values.clone()));
+        }
+
+        let (x_name, x_values) = x_name.ok_or_else(|| {
+            format!(
+                "PSF ASCII file '{}' did not expose a usable independent variable",
+                path.display()
+            )
+        })?;
+        let x_len = x_values.len();
+        if x_len == 0 {
+            return Err(format!(
+                "PSF ASCII file '{}' has empty independent variable '{}'",
+                path.display(),
+                x_name
+            ));
+        }
+
+        let mut dataset =
+            WaveformDataset::new(path.file_stem().and_then(|s| s.to_str()).unwrap_or("psf"));
+        dataset.analysis = if x_name.eq_ignore_ascii_case("time") {
+            "Transient".to_string()
+        } else {
+            "PSF-ASCII".to_string()
+        };
+        dataset
+            .metadata
+            .insert("format".to_string(), "psf-ascii".to_string());
+        dataset
+            .metadata
+            .insert("source_path".to_string(), path.display().to_string());
+
+        let mut x_signal = WaveformSignal::new(
+            x_name.clone(),
+            if x_name.eq_ignore_ascii_case("time") {
+                SignalType::Time
+            } else {
+                SignalType::Frequency
+            },
+        );
+        x_signal.data = x_values;
+        dataset.set_x(x_signal);
+
+        let mut signal_names: Vec<_> = traces.keys().cloned().collect();
+        signal_names.sort();
+
+        for signal_name in signal_names {
+            if signal_name == x_name {
+                continue;
+            }
+            let Some(values) = traces.get(&signal_name) else {
+                continue;
+            };
+            if values.len() != x_len {
+                // Keep strict x/y alignment for plotting correctness.
+                continue;
+            }
+            let signal_type = if signal_name.to_ascii_lowercase().starts_with("v(") {
+                SignalType::Voltage
+            } else if signal_name.to_ascii_lowercase().starts_with("i(") {
+                SignalType::Current
+            } else {
+                SignalType::Unknown
+            };
+            let mut signal = WaveformSignal::new(signal_name, signal_type);
+            signal.data = values.clone();
+            dataset.add_signal(signal);
+        }
+
+        if dataset.signals.is_empty() {
+            return Err(format!(
+                "PSF ASCII file '{}' had no signals aligned to independent variable '{}'",
+                path.display(),
+                x_name
+            ));
+        }
+
+        Ok(dataset)
+    }
+
+    fn parse_psf_ascii_assignment(line: &str) -> Option<(String, &str)> {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with('"') {
+            return None;
+        }
+        let mut chars = trimmed.char_indices();
+        chars.next()?; // opening quote
+        let end_quote = chars.find_map(|(idx, ch)| (ch == '"').then_some(idx))?;
+        let name = trimmed[1..end_quote].trim().to_string();
+        let rhs = trimmed[end_quote + 1..].trim_start();
+        let rhs = rhs.strip_prefix('=').map(str::trim_start).unwrap_or(rhs);
+        Some((name, rhs))
+    }
+
+    fn parse_psf_ascii_numbers(text: &str) -> Vec<f64> {
+        text.split(|c: char| c.is_ascii_whitespace() || matches!(c, ',' | '(' | ')' | ';'))
+            .filter_map(|token| {
+                let token = token.trim();
+                if token.is_empty() {
+                    return None;
+                }
+                token.parse::<f64>().ok()
+            })
+            .collect()
+    }
+
+    fn commit_psf_ascii_sample(traces: &mut HashMap<String, Vec<f64>>, name: &str, values: &[f64]) {
+        match values {
+            [] => {}
+            [value] => {
+                traces.entry(name.to_string()).or_default().push(*value);
+            }
+            [re, im] => {
+                traces.entry(format!("{}_RE", name)).or_default().push(*re);
+                traces.entry(format!("{}_IM", name)).or_default().push(*im);
+            }
+            _ => {
+                traces
+                    .entry(name.to_string())
+                    .or_default()
+                    .extend_from_slice(values);
+            }
+        }
     }
 
     /// Read CSV file
@@ -1857,5 +2176,93 @@ mod tests {
             2.0
         );
         assert_eq!(dataset.signals[0].data[0], 0.1);
+    }
+
+    #[test]
+    fn test_read_psf_ascii_file_transient_records() {
+        let mut temp = Builder::new()
+            .suffix(".psfascii")
+            .tempfile()
+            .expect("temp psf ascii");
+        writeln!(temp, "\"time\" 0.0").expect("write");
+        writeln!(temp, "\"V(out)\" 0.0").expect("write");
+        writeln!(temp, "\"time\" 1e-9").expect("write");
+        writeln!(temp, "\"V(out)\" 0.5").expect("write");
+        writeln!(temp, "\"time\" 2e-9").expect("write");
+        writeln!(temp, "\"V(out)\" 1.0").expect("write");
+
+        let dataset = WaveformReader::new(WaveformFormat::Psf)
+            .read(temp.path())
+            .expect("psf ascii read should work");
+        assert_eq!(dataset.point_count(), 3);
+        assert_eq!(dataset.signal_count(), 1);
+        assert_eq!(dataset.analysis, "Transient");
+        assert_eq!(
+            dataset.x_signal.as_ref().expect("x").data,
+            vec![0.0, 1e-9, 2e-9]
+        );
+        assert_eq!(
+            dataset.get_signal("V(out)").expect("v(out)").data,
+            vec![0.0, 0.5, 1.0]
+        );
+    }
+
+    #[test]
+    fn test_read_psf_ascii_directory_from_log_file_reference() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let dataset_file = dir.path().join("tran.psfascii");
+        std::fs::write(
+            &dataset_file,
+            "\"time\" 0\n\"V(out)\" 0\n\"time\" 1\n\"V(out)\" 2\n",
+        )
+        .expect("write dataset");
+        std::fs::write(dir.path().join("logFile"), "\"tran.psfascii\"\n").expect("write logFile");
+
+        let dataset = WaveformReader::new(WaveformFormat::Psf)
+            .read(dir.path())
+            .expect("directory psf read should work");
+        assert_eq!(dataset.point_count(), 2);
+        assert_eq!(dataset.signal_count(), 1);
+        assert_eq!(
+            dataset.metadata.get("format").map(String::as_str),
+            Some("psf-ascii")
+        );
+        assert_eq!(
+            dataset.get_signal("V(out)").expect("v(out) present").data,
+            vec![0.0, 2.0]
+        );
+    }
+
+    #[test]
+    fn test_read_psf_ascii_complex_pair_expands_real_imag() {
+        let mut temp = Builder::new()
+            .suffix(".psfascii")
+            .tempfile()
+            .expect("temp psf ascii");
+        writeln!(temp, "\"freq\" 1e3").expect("write");
+        writeln!(temp, "\"S11\" (0.1 -0.2)").expect("write");
+        writeln!(temp, "\"freq\" 2e3").expect("write");
+        writeln!(temp, "\"S11\" (0.3 -0.4)").expect("write");
+
+        let dataset = WaveformReader::new(WaveformFormat::Psf)
+            .read(temp.path())
+            .expect("psf ascii read should work");
+        assert_eq!(dataset.point_count(), 2);
+        assert!(
+            dataset.get_signal("S11_RE").is_some(),
+            "complex tuple should emit real trace"
+        );
+        assert!(
+            dataset.get_signal("S11_IM").is_some(),
+            "complex tuple should emit imag trace"
+        );
+        assert_eq!(
+            dataset.get_signal("S11_RE").expect("re").data,
+            vec![0.1, 0.3]
+        );
+        assert_eq!(
+            dataset.get_signal("S11_IM").expect("im").data,
+            vec![-0.2, -0.4]
+        );
     }
 }
