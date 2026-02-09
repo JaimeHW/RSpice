@@ -433,7 +433,6 @@ Q1 3 2 0 2N2222
     }
 
     #[test]
-    #[ignore = "Parser does not yet support .global directive"]
     fn test_global_node() {
         let content = r#"
 .global VDD GND

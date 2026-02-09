@@ -37,6 +37,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
     let mut models = Vec::new();
     let mut subcircuits = Vec::new();
     let mut params = ParamContext::new();
+    let mut global_nodes = std::collections::HashSet::new();
     let mut veriloga_includes = Vec::new();
     let mut measurements = Vec::new();
     let mut options = super::SimulationOptions::default();
@@ -79,6 +80,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
                 &mut in_subcircuit,
                 &mut current_subckt,
                 &mut params,
+                &mut global_nodes,
                 &mut measurements,
                 &mut options,
             )?;
@@ -113,6 +115,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
             &mut in_subcircuit,
             &mut current_subckt,
             &mut params,
+            &mut global_nodes,
             &mut measurements,
             &mut options,
         )?;
@@ -137,7 +140,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
         subcircuits,
         params,
         initial_conditions,
-        global_nodes: std::collections::HashSet::new(),
+        global_nodes,
         measurements,
         options,
         veriloga_includes,
@@ -226,6 +229,7 @@ fn process_line(
     in_subcircuit: &mut bool,
     current_subckt: &mut Option<SubcircuitDef>,
     params: &mut ParamContext,
+    global_nodes: &mut std::collections::HashSet<String>,
     measurements: &mut Vec<crate::analysis::MeasureStatement>,
     options: &mut super::SimulationOptions,
 ) -> Result<(), ParseError> {
@@ -269,6 +273,7 @@ fn process_line(
                 analyses,
                 models,
                 &mut subckt_params,
+                global_nodes,
                 &mut dummy_measurements,
                 options,
             )?;
@@ -285,6 +290,7 @@ fn process_line(
         analyses,
         models,
         params,
+        global_nodes,
         measurements,
         options,
     )
@@ -297,6 +303,7 @@ fn parse_line(
     analyses: &mut Vec<AnalysisCommand>,
     models: &mut Vec<ModelDef>,
     params: &mut ParamContext,
+    global_nodes: &mut std::collections::HashSet<String>,
     measurements: &mut Vec<crate::analysis::MeasureStatement>,
     options: &mut super::SimulationOptions,
 ) -> Result<(), ParseError> {
@@ -330,6 +337,7 @@ fn parse_line(
             analyses,
             models,
             params,
+            global_nodes,
             measurements,
             options,
         ),
@@ -381,6 +389,7 @@ fn parse_command(
     analyses: &mut Vec<AnalysisCommand>,
     models: &mut Vec<ModelDef>,
     params: &mut ParamContext,
+    global_nodes: &mut std::collections::HashSet<String>,
     measurements: &mut Vec<crate::analysis::MeasureStatement>,
     options: &mut super::SimulationOptions,
 ) -> Result<(), ParseError> {
@@ -502,6 +511,9 @@ fn parse_command(
             // Library directives are handled in a preprocessing pass
             log::debug!("Library directive found: line {}", line_num);
         }
+        ".GLOBAL" => {
+            parse_global_command(stream, line_num, global_nodes)?;
+        }
         ".FUNC" => {
             // Parse user-defined function: .FUNC name(arg1, arg2, ...) = expression
             parse_func_statement(stream, line_num, params)?;
@@ -587,6 +599,36 @@ fn parse_options_command(
     }
 
     Ok(())
+}
+
+fn parse_global_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+    global_nodes: &mut std::collections::HashSet<String>,
+) -> Result<(), ParseError> {
+    let mut parsed_any = false;
+
+    while !stream.is_eof() {
+        skip_commas(stream);
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
+        }
+
+        let node = expect_node(stream, line_num)?;
+        if !node.trim().is_empty() {
+            global_nodes.insert(node.to_ascii_uppercase());
+            parsed_any = true;
+        }
+    }
+
+    if parsed_any {
+        Ok(())
+    } else {
+        Err(ParseError::Syntax {
+            line: line_num,
+            message: ".GLOBAL requires at least one node name".to_string(),
+        })
+    }
 }
 
 fn parse_usize_option(name: &str, value: Value, line_num: usize) -> Result<usize, ParseError> {
@@ -4359,5 +4401,37 @@ R1 1 0 1k
             "pdk/models/va mos.va"
         );
         assert!(result.veriloga_includes[0].model_name.is_none());
+    }
+
+    #[test]
+    fn test_parse_global_directive_collects_nodes() {
+        let netlist = r#"Global Node Test
+.GLOBAL VDD gnd 17
+V1 VDD 0 1.8
+R1 VDD gnd 1k
+.END
+"#;
+        let result = parse_netlist(netlist).expect("netlist should parse");
+
+        assert!(result.is_global("VDD"));
+        assert!(result.is_global("gnd"));
+        assert!(result.is_global("17"));
+        assert_eq!(result.global_nodes.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_global_directive_requires_nodes() {
+        let netlist = r#"Global Empty Test
+.GLOBAL
+.END
+"#;
+
+        let err = parse_netlist(netlist).expect_err("empty .GLOBAL should fail");
+        let message = err.to_string();
+        assert!(
+            message.contains(".GLOBAL requires at least one node name"),
+            "unexpected error: {}",
+            message
+        );
     }
 }
