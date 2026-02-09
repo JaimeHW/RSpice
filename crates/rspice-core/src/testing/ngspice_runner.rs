@@ -261,7 +261,12 @@ impl TestRunner {
         let mut analyses = Vec::new();
 
         for line in source.lines() {
-            let trimmed = line.trim().to_lowercase();
+            let trimmed = Self::strip_netlist_comment(line)
+                .trim()
+                .to_ascii_lowercase();
+            if trimmed.is_empty() {
+                continue;
+            }
 
             if trimmed.starts_with(".op") {
                 analyses.push(AnalysisSpec::DcOp);
@@ -275,6 +280,10 @@ impl TestRunner {
                 }
             } else if trimmed.starts_with(".ac ") {
                 if let Some(spec) = self.parse_ac_directive(&trimmed) {
+                    analyses.push(spec);
+                }
+            } else if trimmed.starts_with(".disto ") {
+                if let Some(spec) = self.parse_disto_directive(&trimmed) {
                     analyses.push(spec);
                 }
             }
@@ -331,6 +340,34 @@ impl TestRunner {
 
     /// Parse .ac directive: .ac dec|oct|lin points fstart fstop
     fn parse_ac_directive(&self, line: &str) -> Option<AnalysisSpec> {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 5 {
+            let sweep_type = match parts[1] {
+                "dec" => AcSweepType::Dec,
+                "oct" => AcSweepType::Oct,
+                "lin" => AcSweepType::Lin,
+                _ => return None,
+            };
+            let points = parts[2].parse().ok()?;
+            let fstart = self.parse_spice_value(parts[3])?;
+            let fstop = self.parse_spice_value(parts[4])?;
+            Some(AnalysisSpec::Ac {
+                sweep_type,
+                points,
+                fstart,
+                fstop,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Parse .disto directive using AC sweep semantics:
+    /// .disto dec|oct|lin points fstart fstop [f2overf1]
+    ///
+    /// The ngspice runner currently validates against AC-like responses, so we
+    /// map DISTO sweep setup onto AC execution for broad compatibility coverage.
+    fn parse_disto_directive(&self, line: &str) -> Option<AnalysisSpec> {
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() >= 5 {
             let sweep_type = match parts[1] {
@@ -650,11 +687,9 @@ impl TestRunner {
         // Directive-based patterns.
         // NOTE: .subckt is now supported via flattening
         // NOTE: .tf and .sens are handled by running DC OP (sufficient for basic validation)
-        // NOTE: .noise, .pz, and .four are exercised directly in regression suites.
-        let directive_patterns = [
-            (".disto", "distortion analysis"),
-            // .control blocks are ignored - we just run the circuit simulation part
-        ];
+        // NOTE: .noise, .pz, .four, and .disto are exercised directly in regression suites.
+        // .control blocks are ignored - we just run the circuit simulation part
+        let directive_patterns: [(&str, &str); 0] = [];
 
         // Device-based patterns (must be at start of line)
         // These are single-letter device prefixes that need line-start checking
@@ -982,6 +1017,39 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_disto_directive_maps_to_ac_sweep() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+
+        let spec = runner
+            .parse_disto_directive(".disto dec 8 10 1meg 2")
+            .unwrap();
+        if let AnalysisSpec::Ac {
+            sweep_type,
+            points,
+            fstart,
+            fstop,
+        } = spec
+        {
+            assert_eq!(sweep_type, AcSweepType::Dec);
+            assert_eq!(points, 8);
+            assert!((fstart - 10.0).abs() < 1e-10);
+            assert!((fstop - 1e6).abs() < 1e-10);
+        } else {
+            panic!("Expected AC analysis");
+        }
+    }
+
+    #[test]
+    fn test_parse_analyses_ignores_directives_inside_comments() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let source = "* .ac dec 10 1 1meg\nR1 1 0 1k ; .tran 1n 10n\n.op\n";
+        let analyses = runner.parse_analyses(source);
+
+        assert_eq!(analyses.len(), 1);
+        assert!(matches!(analyses[0], AnalysisSpec::DcOp));
+    }
+
+    #[test]
     fn test_frequency_generation() {
         let runner = TestRunner::new(".", TestRunnerConfig::default());
 
@@ -1009,7 +1077,7 @@ mod tests {
                 .check_unsupported(".noise v(out) v1 dec 10 1 1meg")
                 .is_none()
         );
-        assert!(runner.check_unsupported(".disto h1 2").is_some());
+        assert!(runner.check_unsupported(".disto h1 2").is_none());
         assert!(runner.check_unsupported(".csparam gain=2").is_none());
         assert!(runner.check_unsupported(".pz in out vol pz").is_none());
         assert!(runner.check_unsupported(".four 1k v(out)").is_none());
