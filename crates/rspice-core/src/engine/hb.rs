@@ -21,6 +21,7 @@
 use super::{Engine, SimulationError};
 use crate::analysis::{HbConfig, HbResult, HbSolver, HbSolverState};
 use crate::circuit::CircuitData;
+use crate::netlist::SourceSpec;
 use crate::{Netlist, Value};
 use num_complex::Complex64;
 
@@ -88,6 +89,15 @@ pub struct HbAnalysisResult {
     pub converged: bool,
 }
 
+const HB_NORTON_G: Value = 1e6; // Rs = 1 uOhm for stiff source conversion in nonlinear HB.
+const HB_ZERO_SENSE_TOL: Value = 1e-12;
+
+#[derive(Debug, Clone, Copy)]
+struct HbCurrentSwitchControl {
+    ctrl_pos: usize,
+    ctrl_neg: usize,
+}
+
 impl Engine {
     /// Run Harmonic Balance analysis
     ///
@@ -144,10 +154,10 @@ impl Engine {
         if !has_reactive {
             return Err(HbError::NoReactiveElements.into());
         }
-        if let Some(summary) = Self::hb_unsupported_nonlinear_device_summary(&circuit) {
+        if let Some(summary) = Self::hb_unsupported_nonlinear_device_summary(&circuit, num_nodes) {
             return Err(HbError::UnsupportedNonlinearDevices(summary).into());
         }
-        let has_supported_nonlinear = Self::hb_has_supported_nonlinear_devices(&circuit);
+        let has_supported_nonlinear = Self::hb_has_supported_nonlinear_devices(&circuit, num_nodes);
 
         // Create solver
         let mut solver = HbSolver::new(config.clone(), num_nodes);
@@ -225,19 +235,34 @@ impl Engine {
         node_names
     }
 
-    fn hb_has_supported_nonlinear_devices(circuit: &CircuitData) -> bool {
+    fn hb_has_supported_nonlinear_devices(circuit: &CircuitData, num_nodes: usize) -> bool {
         !circuit.diodes.is_empty()
             || !circuit.bjts.is_empty()
             || !circuit.mosfets.is_empty()
             || !circuit.jfets.is_empty()
             || !circuit.vswitches.is_empty()
+            || circuit
+                .iswitches
+                .iter()
+                .any(|sw| Self::hb_resolve_iswitch_control(circuit, sw, num_nodes).is_ok())
     }
 
-    fn hb_unsupported_nonlinear_device_summary(circuit: &CircuitData) -> Option<String> {
+    fn hb_unsupported_nonlinear_device_summary(
+        circuit: &CircuitData,
+        num_nodes: usize,
+    ) -> Option<String> {
         let mut kinds: Vec<String> = Vec::new();
 
-        if !circuit.iswitches.is_empty() {
-            kinds.push(format!("{} current switch(es)", circuit.iswitches.len()));
+        let unsupported_iswitch = circuit
+            .iswitches
+            .iter()
+            .filter(|sw| Self::hb_resolve_iswitch_control(circuit, sw, num_nodes).is_err())
+            .count();
+        if unsupported_iswitch > 0 {
+            kinds.push(format!(
+                "{} current switch(es) (requires control via static 0 V sensing source in HB)",
+                unsupported_iswitch
+            ));
         }
         #[cfg(feature = "veriloga")]
         if !circuit.veriloga_devices.is_empty() {
@@ -254,13 +279,74 @@ impl Engine {
         }
     }
 
+    fn hb_source_spec_is_static_zero(spec: Option<&SourceSpec>) -> bool {
+        match spec {
+            None => true,
+            Some(SourceSpec::Dc(v)) => v.abs() <= HB_ZERO_SENSE_TOL,
+            Some(SourceSpec::DcAc {
+                dc_value,
+                ac_magnitude,
+                ..
+            }) => dc_value.abs() <= HB_ZERO_SENSE_TOL && ac_magnitude.abs() <= HB_ZERO_SENSE_TOL,
+            _ => false,
+        }
+    }
+
+    fn hb_resolve_iswitch_control(
+        circuit: &CircuitData,
+        sw: &crate::device::CurrentSwitch,
+        num_nodes: usize,
+    ) -> Result<HbCurrentSwitchControl, ()> {
+        let Some(ctrl_branch_matrix_idx) = sw.ctrl_branch else {
+            return Err(());
+        };
+        if ctrl_branch_matrix_idx <= num_nodes {
+            return Err(());
+        }
+        let ctrl_branch_ordinal = ctrl_branch_matrix_idx - num_nodes;
+        let Some(vsrc_idx) = circuit
+            .voltage_sources
+            .branch_indices
+            .iter()
+            .position(|&ordinal| ordinal == ctrl_branch_ordinal)
+        else {
+            return Err(());
+        };
+
+        let dc = circuit
+            .voltage_sources
+            .dc_values
+            .get(vsrc_idx)
+            .copied()
+            .unwrap_or(0.0);
+        let ac_mag = circuit
+            .voltage_sources
+            .ac_magnitudes
+            .get(vsrc_idx)
+            .copied()
+            .unwrap_or(0.0);
+        let spec = circuit
+            .voltage_sources
+            .source_specs
+            .get(vsrc_idx)
+            .and_then(|s| s.as_ref());
+        if dc.abs() > HB_ZERO_SENSE_TOL
+            || ac_mag.abs() > HB_ZERO_SENSE_TOL
+            || !Self::hb_source_spec_is_static_zero(spec)
+        {
+            return Err(());
+        }
+
+        let ctrl_pos =
+            Self::hb_node_to_solver_index(circuit.voltage_sources.node_pos[vsrc_idx], num_nodes);
+        let ctrl_neg =
+            Self::hb_node_to_solver_index(circuit.voltage_sources.node_neg[vsrc_idx], num_nodes);
+        Ok(HbCurrentSwitchControl { ctrl_pos, ctrl_neg })
+    }
+
     #[inline]
     fn hb_node_to_solver_index(node: usize, num_nodes: usize) -> usize {
-        if node == 0 {
-            num_nodes
-        } else {
-            node - 1
-        }
+        if node == 0 { num_nodes } else { node - 1 }
     }
 
     fn hb_stamp_supported_nonlinear_devices(
@@ -341,6 +427,26 @@ impl Engine {
             let ctrl_neg = Self::hb_node_to_solver_index(sw.ctrl_neg, num_nodes);
             solver.add_voltage_switch(
                 node_pos, node_neg, ctrl_pos, ctrl_neg, sw.vt, sw.vh, sw.ron, sw.roff, sw.smooth,
+            );
+        }
+
+        for sw in &circuit.iswitches {
+            let Ok(ctrl) = Self::hb_resolve_iswitch_control(circuit, sw, num_nodes) else {
+                continue;
+            };
+            let node_pos = Self::hb_node_to_solver_index(sw.node_pos, num_nodes);
+            let node_neg = Self::hb_node_to_solver_index(sw.node_neg, num_nodes);
+            solver.add_current_switch(
+                node_pos,
+                node_neg,
+                ctrl.ctrl_pos,
+                ctrl.ctrl_neg,
+                sw.it,
+                sw.ih,
+                sw.ron,
+                sw.roff,
+                sw.smooth,
+                HB_NORTON_G,
             );
         }
     }
@@ -436,8 +542,6 @@ impl Engine {
     /// ideal voltage sources to Norton form avoids branch-current unknowns while
     /// preserving source waveforms with a very small equivalent source resistance.
     fn hb_stamp_voltage_sources_norton(&self, circuit: &CircuitData, solver: &mut HbSolver) {
-        const NORTON_G: Value = 1e6; // Rs = 1 uOhm
-
         for i in 0..circuit.voltage_sources.len() {
             let np = circuit.voltage_sources.node_pos[i];
             let nn = circuit.voltage_sources.node_neg[i];
@@ -455,9 +559,9 @@ impl Engine {
                 .copied()
                 .unwrap_or(0.0);
 
-            self.hb_stamp_admittance(solver, np, nn, NORTON_G, true);
+            self.hb_stamp_admittance(solver, np, nn, HB_NORTON_G, true);
 
-            let i_dc = dc * NORTON_G;
+            let i_dc = dc * HB_NORTON_G;
             if np > 0 {
                 solver.add_dc_source(np - 1, -i_dc);
             }
@@ -465,7 +569,7 @@ impl Engine {
                 solver.add_dc_source(nn - 1, i_dc);
             }
 
-            let i_ac = ac_mag * NORTON_G;
+            let i_ac = ac_mag * HB_NORTON_G;
             if i_ac.abs() > 1e-30 {
                 if np > 0 {
                     solver.add_ac_source(np - 1, -i_ac, ac_phase);
@@ -800,13 +904,42 @@ mod tests {
     }
 
     #[test]
-    fn test_run_hb_rejects_unsupported_nonlinear_device_classes() {
+    fn test_run_hb_solves_current_switch_nonlinear_devices() {
         use crate::Netlist;
 
         let netlist_str = r#"
-            * ISwitch remains unsupported in HB nonlinear runtime
+            * Current-controlled switch nonlinear HB support (0V sensing source)
+            IBIAS 0 in DC 1m
+            VSENSE in out DC 0
+            RLOAD out 0 2k
+            C1 out 0 1n
+            W1 out 0 VSENSE SMOD
+            .MODEL SMOD ISWITCH (IT=0.5m IH=0 RON=10 ROFF=1e9)
+            .END
+        "#;
+
+        let netlist = Netlist::parse(netlist_str).expect("Parse failed");
+        let engine = Engine::default();
+        let config = HbConfig::new(1e6).with_harmonics(3);
+
+        let result = engine.run_hb(&netlist, config);
+        assert!(
+            result.is_ok(),
+            "ISwitch nonlinear HB should succeed for 0V sensing control source: {:?}",
+            result.err()
+        );
+        let hb = result.expect("ISwitch nonlinear HB should succeed");
+        assert!(hb.result.is_valid());
+    }
+
+    #[test]
+    fn test_run_hb_rejects_unsupported_iswitch_control_source() {
+        use crate::Netlist;
+
+        let netlist_str = r#"
+            * ISwitch control source must be static 0V sensing source in HB
             VCTRL ctrl 0 DC 0
-            VSENSE nsense 0 DC 0
+            VSENSE nsense 0 DC 1
             IBIAS 0 out DC 1m
             RLOAD out 0 1k
             C1 out 0 1n
@@ -820,7 +953,10 @@ mod tests {
         let config = HbConfig::new(1e6).with_harmonics(3);
 
         let result = engine.run_hb(&netlist, config);
-        assert!(result.is_err(), "unsupported HB device classes should fail");
+        assert!(
+            result.is_err(),
+            "unsupported ISwitch control source should fail"
+        );
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
         assert!(
             msg.contains("does not yet support"),
@@ -1032,26 +1168,30 @@ mod tests {
         );
 
         let hb = result.expect("HB run should succeed");
-        assert!(hb
-            .result
-            .node_names
-            .iter()
-            .any(|name| name.eq_ignore_ascii_case("vin")));
-        assert!(hb
-            .result
-            .node_names
-            .iter()
-            .any(|name| name.eq_ignore_ascii_case("vout")));
-        assert!(hb
-            .result
-            .spectral_voltages
-            .iter()
-            .any(|spectrum| spectrum.node_name.eq_ignore_ascii_case("vin")));
-        assert!(hb
-            .result
-            .spectral_voltages
-            .iter()
-            .any(|spectrum| spectrum.node_name.eq_ignore_ascii_case("vout")));
+        assert!(
+            hb.result
+                .node_names
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case("vin"))
+        );
+        assert!(
+            hb.result
+                .node_names
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case("vout"))
+        );
+        assert!(
+            hb.result
+                .spectral_voltages
+                .iter()
+                .any(|spectrum| spectrum.node_name.eq_ignore_ascii_case("vin"))
+        );
+        assert!(
+            hb.result
+                .spectral_voltages
+                .iter()
+                .any(|spectrum| spectrum.node_name.eq_ignore_ascii_case("vout"))
+        );
     }
 
     #[test]
@@ -2129,8 +2269,8 @@ mod tests {
     fn test_dcac_parsing_and_circuit_building() {
         // Comprehensive test to verify DC AC combined syntax parsing
         // and propagation through circuit building to HB solver
-        use crate::netlist::{ElementKind, SourceSpec};
         use crate::Netlist;
+        use crate::netlist::{ElementKind, SourceSpec};
 
         let netlist_str = r#"
             * Test DC AC combined source
@@ -2219,7 +2359,7 @@ mod tests {
         let r: f64 = 100.0;
         let l: f64 = 1e-3; // 1mH
         let c: f64 = 10e-9; // 10nF
-                            // Resonant frequency = 1/(2π√(1e-3 * 10e-9)) ≈ 50.33 kHz
+        // Resonant frequency = 1/(2π√(1e-3 * 10e-9)) ≈ 50.33 kHz
         let f0 = 1.0 / (2.0 * PI * (l * c).sqrt());
 
         // Test at resonance

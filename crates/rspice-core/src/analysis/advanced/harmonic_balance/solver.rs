@@ -9,9 +9,9 @@ use std::f64::consts::PI;
 use super::config::HbConfig;
 use super::fft::HbFft;
 use super::result::{HbResult, SpectralVoltage};
+use crate::Value;
 use crate::solver::convergence::{PseudoTransient, SourceStepper};
 use crate::solver::limit_pn_voltage;
-use crate::Value;
 
 /// Error types specific to Harmonic Balance solver
 #[derive(Debug, Clone)]
@@ -264,6 +264,9 @@ pub enum NonlinearDeviceType {
     Pjfet,
     /// Four-terminal voltage-controlled switch (p, n, cp, cn)
     VoltageSwitch,
+    /// Four-terminal current-controlled switch with sensed control voltage
+    /// converted to current (p, n, cp, cn)
+    CurrentSwitch,
 }
 
 /// Device parameters for nonlinear devices
@@ -295,6 +298,8 @@ pub struct NonlinearDeviceParams {
     pub vh: Value,
     /// Switch transition smoothness
     pub smooth: Value,
+    /// Control conversion gain (e.g. sense conductance A/V)
+    pub control_gain: Value,
 }
 
 impl Default for NonlinearDeviceParams {
@@ -313,6 +318,7 @@ impl Default for NonlinearDeviceParams {
             roff: 1e6,
             vh: 0.0,
             smooth: 0.1,
+            control_gain: 1.0,
         }
     }
 }
@@ -366,6 +372,26 @@ impl NonlinearDeviceParams {
             ron: ron.max(1e-6),
             roff: roff.max(1e-6),
             smooth: smooth.max(1e-9),
+            ..Default::default()
+        }
+    }
+
+    /// Create current-controlled switch parameters.
+    pub fn current_switch(
+        it: Value,
+        ih: Value,
+        ron: Value,
+        roff: Value,
+        smooth: Value,
+        control_gain: Value,
+    ) -> Self {
+        Self {
+            vth: it,
+            vh: ih.abs(),
+            ron: ron.max(1e-6),
+            roff: roff.max(1e-6),
+            smooth: smooth.max(1e-12),
+            control_gain: control_gain.max(1e-18),
             ..Default::default()
         }
     }
@@ -482,6 +508,26 @@ impl NonlinearDeviceInstance {
         }
     }
 
+    /// Create a current-controlled switch instance.
+    pub fn current_switch(
+        node_pos: usize,
+        node_neg: usize,
+        ctrl_pos: usize,
+        ctrl_neg: usize,
+        it: Value,
+        ih: Value,
+        ron: Value,
+        roff: Value,
+        smooth: Value,
+        control_gain: Value,
+    ) -> Self {
+        Self {
+            device_type: NonlinearDeviceType::CurrentSwitch,
+            terminals: vec![node_pos, node_neg, ctrl_pos, ctrl_neg],
+            params: NonlinearDeviceParams::current_switch(it, ih, ron, roff, smooth, control_gain),
+        }
+    }
+
     /// Evaluate device current given terminal voltages
     /// Returns Vec of (node_index, current) pairs - current flowing INTO each node
     pub fn evaluate(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
@@ -494,6 +540,7 @@ impl NonlinearDeviceInstance {
             NonlinearDeviceType::Njfet => self.eval_njfet(node_voltages),
             NonlinearDeviceType::Pjfet => self.eval_pjfet(node_voltages),
             NonlinearDeviceType::VoltageSwitch => self.eval_voltage_switch(node_voltages),
+            NonlinearDeviceType::CurrentSwitch => self.eval_current_switch(node_voltages),
         }
     }
 
@@ -509,6 +556,7 @@ impl NonlinearDeviceInstance {
             NonlinearDeviceType::Njfet => self.jac_njfet(node_voltages),
             NonlinearDeviceType::Pjfet => self.jac_pjfet(node_voltages),
             NonlinearDeviceType::VoltageSwitch => self.jac_voltage_switch(node_voltages),
+            NonlinearDeviceType::CurrentSwitch => self.jac_current_switch(node_voltages),
         }
     }
 
@@ -1004,6 +1052,45 @@ impl NonlinearDeviceInstance {
         let vmain = vp - vn;
         let (g, dg_dvctrl) = self.switch_conductance_and_derivative(vctrl);
         let g_ctrl = dg_dvctrl * vmain;
+
+        let p = self.terminals[0];
+        let n = self.terminals[1];
+        let cp = self.terminals[2];
+        let cn = self.terminals[3];
+
+        vec![
+            ((p, p), g),
+            ((p, n), -g),
+            ((n, p), -g),
+            ((n, n), g),
+            ((p, cp), g_ctrl),
+            ((p, cn), -g_ctrl),
+            ((n, cp), -g_ctrl),
+            ((n, cn), g_ctrl),
+        ]
+    }
+
+    fn eval_current_switch(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
+        let vp = self.get_terminal_voltage(node_voltages, 0);
+        let vn = self.get_terminal_voltage(node_voltages, 1);
+        let vcp = self.get_terminal_voltage(node_voltages, 2);
+        let vcn = self.get_terminal_voltage(node_voltages, 3);
+        let vmain = vp - vn;
+        let ictrl = self.params.control_gain * (vcp - vcn);
+        let (g, _) = self.switch_conductance_and_derivative(ictrl);
+        let i = g * vmain;
+        vec![(self.terminals[0], -i), (self.terminals[1], i)]
+    }
+
+    fn jac_current_switch(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
+        let vp = self.get_terminal_voltage(node_voltages, 0);
+        let vn = self.get_terminal_voltage(node_voltages, 1);
+        let vcp = self.get_terminal_voltage(node_voltages, 2);
+        let vcn = self.get_terminal_voltage(node_voltages, 3);
+        let vmain = vp - vn;
+        let ictrl = self.params.control_gain * (vcp - vcn);
+        let (g, dg_dictrl) = self.switch_conductance_and_derivative(ictrl);
+        let g_ctrl = dg_dictrl * self.params.control_gain * vmain;
 
         let p = self.terminals[0];
         let n = self.terminals[1];
@@ -1649,6 +1736,34 @@ impl HbSolver {
     ) {
         self.add_nonlinear_device(NonlinearDeviceInstance::voltage_switch(
             node_pos, node_neg, ctrl_pos, ctrl_neg, vt, vh, ron, roff, smooth,
+        ));
+    }
+
+    /// Add a current-controlled switch for Newton iteration.
+    pub fn add_current_switch(
+        &mut self,
+        node_pos: usize,
+        node_neg: usize,
+        ctrl_pos: usize,
+        ctrl_neg: usize,
+        it: Value,
+        ih: Value,
+        ron: Value,
+        roff: Value,
+        smooth: Value,
+        control_gain: Value,
+    ) {
+        self.add_nonlinear_device(NonlinearDeviceInstance::current_switch(
+            node_pos,
+            node_neg,
+            ctrl_pos,
+            ctrl_neg,
+            it,
+            ih,
+            ron,
+            roff,
+            smooth,
+            control_gain,
         ));
     }
 
@@ -3480,6 +3595,13 @@ mod solver_tests {
         assert!((vsw.params.vth - 0.5).abs() < 1e-12);
         assert!((vsw.params.ron - 1.0).abs() < 1e-12);
         assert!((vsw.params.roff - 1e9).abs() < 1.0);
+
+        let isw =
+            NonlinearDeviceInstance::current_switch(0, 1, 2, 3, 1e-3, 0.0, 2.0, 1e9, 1e-4, 1e6);
+        assert_eq!(isw.device_type, NonlinearDeviceType::CurrentSwitch);
+        assert_eq!(isw.terminals, vec![0, 1, 2, 3]);
+        assert!((isw.params.vth - 1e-3).abs() < 1e-15);
+        assert!((isw.params.control_gain - 1e6).abs() < 1e-6);
     }
 
     #[test]
@@ -3553,6 +3675,39 @@ mod solver_tests {
             jac.iter()
                 .any(|((r, c), v)| *r == 0 && *c == 3 && v.abs() > 0.0),
             "switch Jacobian should include control-negative coupling"
+        );
+    }
+
+    #[test]
+    fn test_current_switch_evaluate_and_control_jacobian() {
+        let isw =
+            NonlinearDeviceInstance::current_switch(0, 1, 2, 3, 1e-3, 0.0, 1.0, 1e9, 1e-4, 1e6);
+        // vp=1.0, vn=0.0, vcp=1e-9, vcn=0 => ictrl = 1mA at threshold
+        let voltages = vec![1.0, 0.0, 1e-9, 0.0];
+        let currents = isw.evaluate(&voltages);
+        let i_pos = currents
+            .iter()
+            .find(|(n, _)| *n == 0)
+            .map(|(_, i)| *i)
+            .unwrap_or(0.0);
+        let i_neg = currents
+            .iter()
+            .find(|(n, _)| *n == 1)
+            .map(|(_, i)| *i)
+            .unwrap_or(0.0);
+        assert!(i_pos < 0.0 && i_neg > 0.0);
+        assert!((i_pos + i_neg).abs() < 1e-12);
+
+        let jac = isw.jacobian(&voltages);
+        assert!(
+            jac.iter()
+                .any(|((r, c), v)| *r == 0 && *c == 2 && v.abs() > 0.0),
+            "current switch Jacobian should include control-positive coupling"
+        );
+        assert!(
+            jac.iter()
+                .any(|((r, c), v)| *r == 0 && *c == 3 && v.abs() > 0.0),
+            "current switch Jacobian should include control-negative coupling"
         );
     }
 
@@ -3731,7 +3886,7 @@ mod solver_tests {
         solver.add_conductance(0, 0, 0.01);
         // 1k resistor between nodes 0 and 1 (full MNA stamp)
         solver.add_resistor(0, 1, 1000.0); // G = 0.001
-                                           // 1pF capacitor at node 1
+        // 1pF capacitor at node 1
         solver.add_capacitance(1, 1, 1e-12);
 
         let state = HbSolverState::new(2, 2);
@@ -4273,11 +4428,7 @@ mod solver_tests {
                 // Use absolute tolerance for near-zero values, relative for larger
                 let rel_diff = if scale < abs_tol {
                     // Both values are near zero - check absolute difference
-                    if diff < abs_tol {
-                        0.0
-                    } else {
-                        diff / abs_tol
-                    }
+                    if diff < abs_tol { 0.0 } else { diff / abs_tol }
                 } else {
                     diff / scale
                 };
@@ -4594,7 +4745,7 @@ mod solver_tests {
         solver.set_dc_source(2, 1e-3); // Current into drain
         solver.add_conductance(1, 1, 1.0); // Gate conductance to ground (G=1S)
         solver.add_conductance(3, 3, 1.0); // Source grounded
-                                           // NMOS: drain=2, gate=1, source=3, bulk=3, kp=200µA/V², vth=0.5V
+        // NMOS: drain=2, gate=1, source=3, bulk=3, kp=200µA/V², vth=0.5V
         solver.add_nmos(2, 1, 3, 3, 2e-4, 0.5);
         for n in 0..4 {
             solver.add_conductance(n, n, 1e-9);
@@ -4631,7 +4782,7 @@ mod solver_tests {
 
         // Use add_resistor for proper MNA stamp: 100 ohm base resistor to ground
         solver.add_resistor(1, 3, 100.0); // Base to ground: G = 0.01S
-                                          // 100 ohm collector resistor to ground
+        // 100 ohm collector resistor to ground
         solver.add_resistor(2, 3, 100.0); // Collector to ground: G = 0.01S
 
         // Ground node (large conductance to clamp)
