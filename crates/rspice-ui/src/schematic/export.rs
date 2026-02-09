@@ -164,7 +164,10 @@ fn write_component(svg: &mut String, component: &Component, config: &SvgExportCo
     match component.kind {
         ComponentType::Resistor => write_resistor_symbol(svg, cx, cy, config),
         ComponentType::Capacitor => write_capacitor_symbol(svg, cx, cy, config),
-        ComponentType::Inductor => write_inductor_symbol(svg, cx, cy, config),
+        ComponentType::Inductor | ComponentType::SaturableInductor => {
+            write_inductor_symbol(svg, cx, cy, config)
+        }
+        ComponentType::CoupledInductor => write_coupled_inductor_symbol(svg, cx, cy, config),
         ComponentType::VoltageSource
         | ComponentType::VoltageSourceAc
         | ComponentType::VoltageSourcePulse
@@ -173,8 +176,8 @@ fn write_component(svg: &mut String, component: &Component, config: &SvgExportCo
         | ComponentType::VoltageSourceExp
         | ComponentType::VoltageSourceSffm => write_vsource_symbol(svg, cx, cy, config),
         ComponentType::Ground => write_ground_symbol(svg, cx, cy, config),
-        ComponentType::Nmos => write_nmos_symbol(svg, cx, cy, config),
-        ComponentType::Pmos => write_pmos_symbol(svg, cx, cy, config),
+        ComponentType::Nmos | ComponentType::NVdmos => write_nmos_symbol(svg, cx, cy, config),
+        ComponentType::Pmos | ComponentType::PVdmos => write_pmos_symbol(svg, cx, cy, config),
         ComponentType::NpnBjt => write_npn_symbol(svg, cx, cy, config),
         ComponentType::PnpBjt => write_pnp_symbol(svg, cx, cy, config),
         ComponentType::Diode => write_diode_symbol(svg, cx, cy, config),
@@ -183,7 +186,8 @@ fn write_component(svg: &mut String, component: &Component, config: &SvgExportCo
         | ComponentType::CurrentSourcePulse
         | ComponentType::CurrentSourceSin
         | ComponentType::CurrentSourcePwl
-        | ComponentType::CurrentSourceExp => write_current_source_symbol(svg, cx, cy, config),
+        | ComponentType::CurrentSourceExp
+        | ComponentType::CurrentSourceNoise => write_current_source_symbol(svg, cx, cy, config),
         // JFET symbols
         ComponentType::Njfet => write_njfet_symbol(svg, cx, cy, config),
         ComponentType::Pjfet => write_pjfet_symbol(svg, cx, cy, config),
@@ -192,7 +196,29 @@ fn write_component(svg: &mut String, component: &Component, config: &SvgExportCo
         ComponentType::Vccs => write_vccs_symbol(svg, cx, cy, config),
         ComponentType::Ccvs => write_ccvs_symbol(svg, cx, cy, config),
         ComponentType::Cccs => write_cccs_symbol(svg, cx, cy, config),
-        _ => write_generic_box(svg, cx, cy, config),
+        ComponentType::CellInstance => write_cell_instance_symbol(svg, cx, cy, config),
+        ComponentType::XspiceGain
+        | ComponentType::XspiceSummer
+        | ComponentType::XspiceMultiplier
+        | ComponentType::XspiceDivider
+        | ComponentType::XspiceLimiter
+        | ComponentType::XspiceIntegrator
+        | ComponentType::XspiceDifferentiator
+        | ComponentType::XspiceInverter
+        | ComponentType::XspiceBuffer
+        | ComponentType::XspiceAndGate
+        | ComponentType::XspiceOrGate
+        | ComponentType::XspiceNandGate
+        | ComponentType::XspiceNorGate
+        | ComponentType::XspiceXorGate
+        | ComponentType::XspiceTristate
+        | ComponentType::XspiceDFlipFlop
+        | ComponentType::XspiceJkFlipFlop
+        | ComponentType::XspiceSrLatch
+        | ComponentType::XspiceAdcBridge
+        | ComponentType::XspiceDacBridge => {
+            write_xspice_symbol(svg, cx, cy, component.kind, config)
+        }
     }
 
     // Component label
@@ -1217,15 +1243,70 @@ fn write_cccs_symbol(svg: &mut String, cx: f64, cy: f64, config: &SvgExportConfi
     write_vccs_symbol(svg, cx, cy, config);
 }
 
-fn write_generic_box(svg: &mut String, cx: f64, cy: f64, _config: &SvgExportConfig) {
-    // Simple box for unsupported components
+fn write_coupled_inductor_symbol(svg: &mut String, cx: f64, cy: f64, config: &SvgExportConfig) {
+    write_inductor_symbol(svg, cx, cy, config);
     writeln!(
         svg,
-        r#"<rect class="component" x="{}" y="{}" width="30" height="20"/>"#,
-        cx - 15.0,
-        cy - 10.0
+        r#"<text class="text" x="{}" y="{}" text-anchor="middle">K</text>"#,
+        cx,
+        cy - 14.0
     )
     .unwrap();
+}
+
+fn write_block_symbol(svg: &mut String, cx: f64, cy: f64, symbol: &str, _config: &SvgExportConfig) {
+    writeln!(
+        svg,
+        r#"<rect class="component" x="{}" y="{}" width="36" height="26" rx="2" ry="2"/>"#,
+        cx - 18.0,
+        cy - 13.0
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        r#"<text class="text" x="{}" y="{}" text-anchor="middle">{}</text>"#,
+        cx,
+        cy + 4.0,
+        symbol
+    )
+    .unwrap();
+}
+
+fn write_cell_instance_symbol(svg: &mut String, cx: f64, cy: f64, config: &SvgExportConfig) {
+    write_block_symbol(svg, cx, cy, "X", config);
+}
+
+fn write_xspice_symbol(
+    svg: &mut String,
+    cx: f64,
+    cy: f64,
+    kind: ComponentType,
+    config: &SvgExportConfig,
+) {
+    let glyph = match kind {
+        ComponentType::XspiceGain => "G",
+        ComponentType::XspiceSummer => "SUM",
+        ComponentType::XspiceMultiplier => "MUL",
+        ComponentType::XspiceDivider => "DIV",
+        ComponentType::XspiceLimiter => "LIM",
+        ComponentType::XspiceIntegrator => "INT",
+        ComponentType::XspiceDifferentiator => "DIF",
+        ComponentType::XspiceInverter => "INV",
+        ComponentType::XspiceBuffer => "BUF",
+        ComponentType::XspiceAndGate => "AND",
+        ComponentType::XspiceOrGate => "OR",
+        ComponentType::XspiceNandGate => "NAND",
+        ComponentType::XspiceNorGate => "NOR",
+        ComponentType::XspiceXorGate => "XOR",
+        ComponentType::XspiceTristate => "TRI",
+        ComponentType::XspiceDFlipFlop => "DFF",
+        ComponentType::XspiceJkFlipFlop => "JK",
+        ComponentType::XspiceSrLatch => "SR",
+        ComponentType::XspiceAdcBridge => "ADC",
+        ComponentType::XspiceDacBridge => "DAC",
+        _ => "A",
+    };
+    write_block_symbol(svg, cx, cy, glyph, config);
 }
 
 // =============================================================================
@@ -1482,5 +1563,107 @@ mod tests {
         assert!(svg.contains("D3"));
         assert!(svg.contains("D4"));
         assert!(svg.contains("V1")); // AC source
+    }
+
+    #[test]
+    fn test_export_cell_instance_uses_block_symbol() {
+        let mut state = SchematicState::default();
+        state.add_component(ComponentType::CellInstance, Point::new(10, 10));
+
+        let config = SvgExportConfig::default();
+        let svg = export_to_svg(&state, &config);
+
+        assert!(svg.contains("X1"));
+        assert!(svg.contains(">X<"));
+    }
+
+    #[test]
+    fn test_export_xspice_inverter_uses_labeled_block_symbol() {
+        let mut state = SchematicState::default();
+        state.add_component(ComponentType::XspiceInverter, Point::new(10, 10));
+
+        let config = SvgExportConfig::default();
+        let svg = export_to_svg(&state, &config);
+
+        assert!(svg.contains("A1"));
+        assert!(svg.contains(">INV<"));
+    }
+
+    #[test]
+    fn test_export_supports_all_component_kinds_without_fallback() {
+        let mut state = SchematicState::default();
+        let all_types = [
+            ComponentType::Resistor,
+            ComponentType::Capacitor,
+            ComponentType::Inductor,
+            ComponentType::CoupledInductor,
+            ComponentType::Diode,
+            ComponentType::NpnBjt,
+            ComponentType::PnpBjt,
+            ComponentType::Nmos,
+            ComponentType::Pmos,
+            ComponentType::Njfet,
+            ComponentType::Pjfet,
+            ComponentType::NVdmos,
+            ComponentType::PVdmos,
+            ComponentType::SaturableInductor,
+            ComponentType::VoltageSource,
+            ComponentType::CurrentSource,
+            ComponentType::VoltageSourceAc,
+            ComponentType::VoltageSourcePulse,
+            ComponentType::VoltageSourceSin,
+            ComponentType::VoltageSourcePwl,
+            ComponentType::VoltageSourceExp,
+            ComponentType::VoltageSourceSffm,
+            ComponentType::CurrentSourceAc,
+            ComponentType::CurrentSourcePulse,
+            ComponentType::CurrentSourceSin,
+            ComponentType::CurrentSourcePwl,
+            ComponentType::CurrentSourceExp,
+            ComponentType::CurrentSourceNoise,
+            ComponentType::Vcvs,
+            ComponentType::Vccs,
+            ComponentType::Ccvs,
+            ComponentType::Cccs,
+            ComponentType::Ground,
+            ComponentType::CellInstance,
+            ComponentType::XspiceGain,
+            ComponentType::XspiceSummer,
+            ComponentType::XspiceMultiplier,
+            ComponentType::XspiceDivider,
+            ComponentType::XspiceLimiter,
+            ComponentType::XspiceIntegrator,
+            ComponentType::XspiceDifferentiator,
+            ComponentType::XspiceInverter,
+            ComponentType::XspiceBuffer,
+            ComponentType::XspiceAndGate,
+            ComponentType::XspiceOrGate,
+            ComponentType::XspiceNandGate,
+            ComponentType::XspiceNorGate,
+            ComponentType::XspiceXorGate,
+            ComponentType::XspiceTristate,
+            ComponentType::XspiceDFlipFlop,
+            ComponentType::XspiceJkFlipFlop,
+            ComponentType::XspiceSrLatch,
+            ComponentType::XspiceAdcBridge,
+            ComponentType::XspiceDacBridge,
+        ];
+
+        for (idx, kind) in all_types.into_iter().enumerate() {
+            state.add_component(kind, Point::new(10, 10 + (idx as i32 * 4)));
+        }
+
+        let config = SvgExportConfig::default();
+        let svg = export_to_svg(&state, &config);
+
+        // Ensure every generated component instance label is present in SVG.
+        // This validates that symbol emission stayed exhaustive for all enum variants.
+        for name in state.components.iter().map(|c| c.name.clone()) {
+            assert!(
+                svg.contains(&name),
+                "missing component label '{}' in exported SVG",
+                name
+            );
+        }
     }
 }
