@@ -8,11 +8,11 @@
 //! - NUTMEG (SPICE3/ngspice raw format) for import
 //! - CSV and TSV for import/export
 //! - PSF-Lite binary waveform format (`PSFL`) for import
+//! - Touchstone S-parameter format (`.sNp`) for import/export
 //!
 //! # Planned Formats
 //!
 //! - Cadence PSF native database import
-//! - Touchstone S-parameter format
 
 use super::binary_io::PsfReader;
 
@@ -88,6 +88,7 @@ impl WaveformFormat {
                 | WaveformFormat::Tsv
                 | WaveformFormat::Nutmeg
                 | WaveformFormat::AsciiRaw
+                | WaveformFormat::Touchstone
         )
     }
 
@@ -273,6 +274,27 @@ impl WaveformDataset {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TouchstoneDataFormat {
+    Ri,
+    Ma,
+    Db,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TouchstoneMatrixFormat {
+    Full,
+    Lower,
+    Upper,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TouchstoneOptions {
+    freq_scale_hz: f64,
+    data_format: TouchstoneDataFormat,
+    reference_ohms: f64,
+}
+
 // =============================================================================
 // Waveform Reader
 // =============================================================================
@@ -295,8 +317,9 @@ impl WaveformReader {
             WaveformFormat::Csv => self.read_csv(path),
             WaveformFormat::Tsv => self.read_tsv(path),
             WaveformFormat::Nutmeg | WaveformFormat::AsciiRaw => self.read_nutmeg(path),
+            WaveformFormat::Touchstone => self.read_touchstone(path),
             _ => Err(format!(
-                "Format {:?} read is not implemented (supported: PSF-Lite, Csv, Tsv, Nutmeg/AsciiRaw)",
+                "Format {:?} read is not implemented (supported: PSF-Lite, Csv, Tsv, Nutmeg/AsciiRaw, Touchstone)",
                 self.format
             )),
         }
@@ -488,6 +511,466 @@ impl WaveformReader {
 
         Ok(dataset)
     }
+
+    /// Read Touchstone (`.sNp`) S-parameter file.
+    ///
+    /// Supports Touchstone v1 and v2 with S-parameter data in `RI`, `MA`, and `DB` formats.
+    fn read_touchstone(&self, path: &Path) -> Result<WaveformDataset, String> {
+        let file = File::open(path).map_err(|e| format!("Failed to open: {}", e))?;
+        let reader = BufReader::new(file);
+
+        // Touchstone v1 defaults when no option line is provided.
+        let mut options = TouchstoneOptions {
+            freq_scale_hz: 1.0e9,
+            data_format: TouchstoneDataFormat::Ma,
+            reference_ohms: 50.0,
+        };
+        let mut version = 1u32;
+        let mut matrix_format = TouchstoneMatrixFormat::Full;
+        let mut declared_ports = Self::touchstone_ports_from_extension(path);
+        let mut declared_freqs: Option<usize> = None;
+        let mut reference_values: Option<Vec<f64>> = None;
+        let mut numeric_tokens: Vec<f64> = Vec::new();
+
+        for (line_idx, line_result) in reader.lines().enumerate() {
+            let line_no = line_idx + 1;
+            let mut line = line_result.map_err(|e| format!("Read error: {}", e))?;
+            if let Some((before_comment, _)) = line.split_once('!') {
+                line = before_comment.to_string();
+            }
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            if trimmed.starts_with('#') {
+                options = Self::parse_touchstone_option_line(trimmed, line_no)?;
+                continue;
+            }
+
+            if trimmed.starts_with('[') {
+                let (section, value) = Self::parse_touchstone_section_line(trimmed, line_no)?;
+                match section.as_str() {
+                    "version" => {
+                        let parsed = value.parse::<f64>().map_err(|_| {
+                            format!("Touchstone line {}: invalid [Version] '{}'", line_no, value)
+                        })?;
+                        if !parsed.is_finite() || parsed < 1.0 {
+                            return Err(format!(
+                                "Touchstone line {}: invalid [Version] '{}'",
+                                line_no, value
+                            ));
+                        }
+                        version = parsed.floor() as u32;
+                    }
+                    "number of ports" => {
+                        declared_ports = Some(value.parse::<usize>().map_err(|_| {
+                            format!(
+                                "Touchstone line {}: invalid [Number of Ports] '{}'",
+                                line_no, value
+                            )
+                        })?);
+                    }
+                    "number of frequencies" => {
+                        declared_freqs = Some(value.parse::<usize>().map_err(|_| {
+                            format!(
+                                "Touchstone line {}: invalid [Number of Frequencies] '{}'",
+                                line_no, value
+                            )
+                        })?);
+                    }
+                    "matrix format" => {
+                        matrix_format = match value.to_ascii_lowercase().as_str() {
+                            "full" => TouchstoneMatrixFormat::Full,
+                            "lower" => TouchstoneMatrixFormat::Lower,
+                            "upper" => TouchstoneMatrixFormat::Upper,
+                            _ => {
+                                return Err(format!(
+                                    "Touchstone line {}: unsupported [Matrix Format] '{}'",
+                                    line_no, value
+                                ));
+                            }
+                        };
+                    }
+                    "reference" => {
+                        reference_values =
+                            Some(Self::parse_touchstone_numeric_values(value, line_no)?);
+                    }
+                    // Section present for clarity in v2 files; data parser is token-stream based.
+                    "network data" | "end" => {}
+                    _ => {}
+                }
+                continue;
+            }
+
+            for token in trimmed.split_whitespace() {
+                if token == "+" {
+                    continue;
+                }
+                let value = Self::parse_touchstone_numeric_token(token).ok_or_else(|| {
+                    format!(
+                        "Touchstone line {}: expected numeric token, got '{}'",
+                        line_no, token
+                    )
+                })?;
+                numeric_tokens.push(value);
+            }
+        }
+
+        if matrix_format != TouchstoneMatrixFormat::Full {
+            return Err(
+                "Touchstone import currently supports only [Matrix Format] FULL".to_string(),
+            );
+        }
+
+        let num_ports = declared_ports
+            .or_else(|| Self::infer_touchstone_ports_from_tokens(&numeric_tokens))
+            .ok_or_else(|| "Unable to determine Touchstone port count".to_string())?;
+        if num_ports == 0 {
+            return Err("Touchstone [Number of Ports] must be >= 1".to_string());
+        }
+
+        let values_per_freq = 1 + 2 * num_ports * num_ports;
+        if numeric_tokens.len() % values_per_freq != 0 {
+            return Err(format!(
+                "Touchstone numeric data length {} is not divisible by record width {}",
+                numeric_tokens.len(),
+                values_per_freq
+            ));
+        }
+        let num_freqs = numeric_tokens.len() / values_per_freq;
+        if num_freqs == 0 {
+            return Err("Touchstone file contains no network data points".to_string());
+        }
+        if let Some(expected_freqs) = declared_freqs {
+            if expected_freqs != num_freqs {
+                return Err(format!(
+                    "Touchstone [Number of Frequencies]={} but parsed {} records",
+                    expected_freqs, num_freqs
+                ));
+            }
+        }
+
+        let z0_by_port = Self::resolve_touchstone_reference_values(
+            num_ports,
+            options.reference_ohms,
+            reference_values.as_deref(),
+        )?;
+
+        let mut frequencies = Vec::with_capacity(num_freqs);
+        let mut matrix_re = vec![vec![vec![0.0; num_freqs]; num_ports]; num_ports];
+        let mut matrix_im = vec![vec![vec![0.0; num_freqs]; num_ports]; num_ports];
+
+        let mut offset = 0usize;
+        for freq_idx in 0..num_freqs {
+            let freq_hz = numeric_tokens[offset] * options.freq_scale_hz;
+            offset += 1;
+            if !freq_hz.is_finite() || freq_hz <= 0.0 {
+                return Err(format!(
+                    "Touchstone frequency point {} is invalid ({})",
+                    freq_idx, freq_hz
+                ));
+            }
+            frequencies.push(freq_hz);
+
+            // Touchstone matrix order: S11 S21 ... SN1 S12 S22 ... SN2 ... SNN.
+            for col in 0..num_ports {
+                for row in 0..num_ports {
+                    let first = numeric_tokens[offset];
+                    let second = numeric_tokens[offset + 1];
+                    offset += 2;
+                    let (re, im) =
+                        Self::touchstone_pair_to_complex(first, second, options.data_format);
+                    matrix_re[row][col][freq_idx] = re;
+                    matrix_im[row][col][freq_idx] = im;
+                }
+            }
+        }
+
+        let mut dataset = WaveformDataset::new(
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("touchstone"),
+        );
+        dataset.analysis = "S-Parameter".to_string();
+        dataset
+            .metadata
+            .insert("format".to_string(), "touchstone".to_string());
+        dataset
+            .metadata
+            .insert("touchstone_version".to_string(), version.to_string());
+        dataset
+            .metadata
+            .insert("num_ports".to_string(), num_ports.to_string());
+        dataset
+            .metadata
+            .insert("z0".to_string(), z0_by_port[0].to_string());
+        dataset.metadata.insert(
+            "z0_ports".to_string(),
+            z0_by_port
+                .iter()
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+
+        let mut x_signal = WaveformSignal::new("frequency", SignalType::Frequency);
+        x_signal.data = frequencies;
+        dataset.set_x(x_signal);
+
+        for row in 1..=num_ports {
+            for col in 1..=num_ports {
+                let base = if num_ports <= 9 {
+                    format!("S{}{}", row, col)
+                } else {
+                    format!("S{}_{}", row, col)
+                };
+
+                let mut re_signal =
+                    WaveformSignal::new(format!("{}_RE", base), SignalType::SParameter);
+                re_signal.data = matrix_re[row - 1][col - 1].clone();
+                dataset.add_signal(re_signal);
+
+                let mut im_signal =
+                    WaveformSignal::new(format!("{}_IM", base), SignalType::SParameter);
+                im_signal.data = matrix_im[row - 1][col - 1].clone();
+                dataset.add_signal(im_signal);
+            }
+        }
+
+        Ok(dataset)
+    }
+
+    fn touchstone_ports_from_extension(path: &Path) -> Option<usize> {
+        let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+        if ext.len() >= 3
+            && ext.starts_with('s')
+            && ext.ends_with('p')
+            && ext[1..ext.len() - 1].chars().all(|ch| ch.is_ascii_digit())
+        {
+            return ext[1..ext.len() - 1].parse::<usize>().ok();
+        }
+        None
+    }
+
+    fn infer_touchstone_ports_from_tokens(tokens: &[f64]) -> Option<usize> {
+        // Guard against unrealistic matrices while still supporting large N.
+        const MAX_PORTS_TO_INFER: usize = 64;
+        let mut best_match = None;
+        for ports in 1..=MAX_PORTS_TO_INFER {
+            let record_width = 1 + 2 * ports * ports;
+            if tokens.len() < record_width || !tokens.len().is_multiple_of(record_width) {
+                continue;
+            }
+            let num_freqs = tokens.len() / record_width;
+            let freqs_valid = (0..num_freqs).all(|idx| {
+                let freq = tokens[idx * record_width];
+                freq.is_finite() && freq > 0.0
+            });
+            if freqs_valid {
+                best_match = Some(ports);
+            }
+        }
+        best_match
+    }
+
+    fn parse_touchstone_option_line(
+        line: &str,
+        line_no: usize,
+    ) -> Result<TouchstoneOptions, String> {
+        let fields: Vec<&str> = line[1..].split_whitespace().collect();
+        if fields.is_empty() {
+            return Err(format!("Touchstone line {}: empty option line", line_no));
+        }
+
+        let mut idx = 0usize;
+
+        let freq_scale_hz = match fields[idx].to_ascii_lowercase().as_str() {
+            "hz" => 1.0,
+            "khz" => 1.0e3,
+            "mhz" => 1.0e6,
+            "ghz" => 1.0e9,
+            other => {
+                return Err(format!(
+                    "Touchstone line {}: unsupported frequency unit '{}'",
+                    line_no, other
+                ));
+            }
+        };
+        idx += 1;
+
+        if idx >= fields.len() {
+            return Err(format!(
+                "Touchstone line {}: option line missing parameter type",
+                line_no
+            ));
+        }
+        if !fields[idx].eq_ignore_ascii_case("s") {
+            return Err(format!(
+                "Touchstone line {}: only S-parameter files are supported (found '{}')",
+                line_no, fields[idx]
+            ));
+        }
+        idx += 1;
+
+        if idx >= fields.len() {
+            return Err(format!(
+                "Touchstone line {}: option line missing data format",
+                line_no
+            ));
+        }
+        let data_format = match fields[idx].to_ascii_lowercase().as_str() {
+            "ri" => TouchstoneDataFormat::Ri,
+            "ma" => TouchstoneDataFormat::Ma,
+            "db" => TouchstoneDataFormat::Db,
+            other => {
+                return Err(format!(
+                    "Touchstone line {}: unsupported data format '{}'",
+                    line_no, other
+                ));
+            }
+        };
+        idx += 1;
+
+        let mut reference_ohms = 50.0;
+        if idx < fields.len() {
+            if !fields[idx].eq_ignore_ascii_case("r") {
+                return Err(format!(
+                    "Touchstone line {}: expected 'R <reference>', found '{}'",
+                    line_no, fields[idx]
+                ));
+            }
+            idx += 1;
+            if idx >= fields.len() {
+                return Err(format!(
+                    "Touchstone line {}: missing numeric value after 'R'",
+                    line_no
+                ));
+            }
+            reference_ohms =
+                Self::parse_touchstone_numeric_token(fields[idx]).ok_or_else(|| {
+                    format!(
+                        "Touchstone line {}: invalid reference impedance '{}'",
+                        line_no, fields[idx]
+                    )
+                })?;
+            idx += 1;
+        }
+
+        if idx != fields.len() {
+            return Err(format!(
+                "Touchstone line {}: unexpected tokens in option line",
+                line_no
+            ));
+        }
+        if !reference_ohms.is_finite() || reference_ohms <= 0.0 {
+            return Err(format!(
+                "Touchstone line {}: reference impedance must be positive",
+                line_no
+            ));
+        }
+
+        Ok(TouchstoneOptions {
+            freq_scale_hz,
+            data_format,
+            reference_ohms,
+        })
+    }
+
+    fn parse_touchstone_section_line(line: &str, line_no: usize) -> Result<(String, &str), String> {
+        let Some(end_bracket) = line.find(']') else {
+            return Err(format!(
+                "Touchstone line {}: malformed section header '{}'",
+                line_no, line
+            ));
+        };
+        if !line.starts_with('[') {
+            return Err(format!(
+                "Touchstone line {}: malformed section header '{}'",
+                line_no, line
+            ));
+        }
+        let section = line[1..end_bracket].trim().to_ascii_lowercase();
+        if section.is_empty() {
+            return Err(format!("Touchstone line {}: empty section header", line_no));
+        }
+        Ok((section, line[end_bracket + 1..].trim()))
+    }
+
+    fn parse_touchstone_numeric_values(value: &str, line_no: usize) -> Result<Vec<f64>, String> {
+        let mut out = Vec::new();
+        for token in value.split(|ch: char| ch.is_whitespace() || ch == ',') {
+            let token = token.trim();
+            if token.is_empty() {
+                continue;
+            }
+            let parsed = Self::parse_touchstone_numeric_token(token).ok_or_else(|| {
+                format!(
+                    "Touchstone line {}: invalid numeric value '{}'",
+                    line_no, token
+                )
+            })?;
+            out.push(parsed);
+        }
+        if out.is_empty() {
+            return Err(format!(
+                "Touchstone line {}: section requires at least one numeric value",
+                line_no
+            ));
+        }
+        Ok(out)
+    }
+
+    fn parse_touchstone_numeric_token(token: &str) -> Option<f64> {
+        token.replace(['D', 'd'], "e").parse::<f64>().ok()
+    }
+
+    fn resolve_touchstone_reference_values(
+        num_ports: usize,
+        default_reference: f64,
+        override_values: Option<&[f64]>,
+    ) -> Result<Vec<f64>, String> {
+        let values: Vec<f64> = match override_values {
+            Some(values) if values.len() == 1 => vec![values[0]; num_ports],
+            Some(values) if values.len() == num_ports => values.to_vec(),
+            Some(values) => {
+                return Err(format!(
+                    "Touchstone [Reference] count {} does not match port count {}",
+                    values.len(),
+                    num_ports
+                ));
+            }
+            None => vec![default_reference; num_ports],
+        };
+        for (idx, value) in values.iter().enumerate() {
+            if !value.is_finite() || *value <= 0.0 {
+                return Err(format!(
+                    "Touchstone reference impedance for port {} must be positive",
+                    idx + 1
+                ));
+            }
+        }
+        Ok(values)
+    }
+
+    fn touchstone_pair_to_complex(
+        first: f64,
+        second: f64,
+        format: TouchstoneDataFormat,
+    ) -> (f64, f64) {
+        match format {
+            TouchstoneDataFormat::Ri => (first, second),
+            TouchstoneDataFormat::Ma => {
+                let angle = second.to_radians();
+                (first * angle.cos(), first * angle.sin())
+            }
+            TouchstoneDataFormat::Db => {
+                let magnitude = 10.0_f64.powf(first / 20.0);
+                let angle = second.to_radians();
+                (magnitude * angle.cos(), magnitude * angle.sin())
+            }
+        }
+    }
 }
 
 // =============================================================================
@@ -532,17 +1015,20 @@ impl WaveformWriter {
     fn write_touchstone(&self, dataset: &WaveformDataset, path: &Path) -> Result<(), String> {
         let (frequencies, matrix) = Self::extract_touchstone_matrix(dataset)?;
         let num_ports = matrix.len();
-        let z0 = dataset
-            .metadata
-            .get("z0")
-            .and_then(|v| v.parse::<f64>().ok())
-            .filter(|v| *v > 0.0)
-            .unwrap_or(50.0);
+        let z0_by_port = Self::touchstone_reference_values_for_write(dataset, num_ports)?;
+        let z0 = z0_by_port[0];
+        let uniform_reference = z0_by_port.iter().all(|value| (*value - z0).abs() <= 1e-18);
         let version = dataset
             .metadata
             .get("touchstone_version")
             .and_then(|v| v.parse::<u32>().ok())
             .unwrap_or(1);
+        if version < 2 && !uniform_reference {
+            return Err(
+                "Touchstone v1 does not support per-port reference impedance; use version 2"
+                    .to_string(),
+            );
+        }
 
         let file = File::create(path).map_err(|e| format!("Failed to create: {}", e))?;
         let mut writer = BufWriter::new(file);
@@ -555,6 +1041,18 @@ impl WaveformWriter {
             writeln!(writer, "[Number of Frequencies] {}", frequencies.len())
                 .map_err(|e| format!("Write error: {}", e))?;
             writeln!(writer, "# Hz S RI R {}", z0).map_err(|e| format!("Write error: {}", e))?;
+            if !uniform_reference {
+                writeln!(
+                    writer,
+                    "[Reference] {}",
+                    z0_by_port
+                        .iter()
+                        .map(|value| format!("{:.12e}", value))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                )
+                .map_err(|e| format!("Write error: {}", e))?;
+            }
             writeln!(writer, "[Network Data]").map_err(|e| format!("Write error: {}", e))?;
         } else {
             writeln!(writer, "# Hz S RI R {}", z0).map_err(|e| format!("Write error: {}", e))?;
@@ -579,6 +1077,57 @@ impl WaveformWriter {
         }
 
         writer.flush().map_err(|e| format!("Flush error: {}", e))
+    }
+
+    fn touchstone_reference_values_for_write(
+        dataset: &WaveformDataset,
+        num_ports: usize,
+    ) -> Result<Vec<f64>, String> {
+        let default_z0 = dataset
+            .metadata
+            .get("z0")
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .unwrap_or(50.0);
+
+        let values = match dataset.metadata.get("z0_ports") {
+            Some(raw) => {
+                let parsed: Vec<f64> = raw
+                    .split(|ch: char| ch == ',' || ch.is_whitespace())
+                    .filter(|token| !token.trim().is_empty())
+                    .map(|token| {
+                        token.trim().parse::<f64>().map_err(|_| {
+                            format!("Invalid Touchstone z0_ports entry '{}'", token.trim())
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                if parsed.is_empty() {
+                    vec![default_z0; num_ports]
+                } else if parsed.len() == 1 {
+                    vec![parsed[0]; num_ports]
+                } else if parsed.len() == num_ports {
+                    parsed
+                } else {
+                    return Err(format!(
+                        "Touchstone z0_ports count {} does not match {} ports",
+                        parsed.len(),
+                        num_ports
+                    ));
+                }
+            }
+            None => vec![default_z0; num_ports],
+        };
+
+        for (idx, value) in values.iter().enumerate() {
+            if !value.is_finite() || *value <= 0.0 {
+                return Err(format!(
+                    "Touchstone reference impedance for port {} must be positive",
+                    idx + 1
+                ));
+            }
+        }
+
+        Ok(values)
     }
 
     fn extract_touchstone_matrix(
@@ -755,7 +1304,7 @@ mod tests {
     use super::*;
     use crate::io::binary_io::{PsfHeader, PsfWriter};
     use std::io::Write;
-    use tempfile::NamedTempFile;
+    use tempfile::{Builder, NamedTempFile};
 
     // =========================================================================
     // WaveformFormat Tests
@@ -789,6 +1338,7 @@ mod tests {
         assert!(WaveformFormat::Nutmeg.can_read());
         assert!(!WaveformFormat::Nutmeg.can_write());
         assert!(WaveformFormat::Psf.can_read());
+        assert!(WaveformFormat::Touchstone.can_read());
         assert!(WaveformFormat::Touchstone.can_write());
     }
 
@@ -991,16 +1541,12 @@ mod tests {
 
         let content = std::fs::read_to_string(temp.path()).expect("read touchstone");
         assert!(content.contains("# Hz S RI R 75"));
-        assert!(
-            content
-                .lines()
-                .any(|line| line.contains("1.000000000000e6"))
-        );
-        assert!(
-            content
-                .lines()
-                .any(|line| line.contains("2.000000000000e6"))
-        );
+        assert!(content
+            .lines()
+            .any(|line| line.contains("1.000000000000e6")));
+        assert!(content
+            .lines()
+            .any(|line| line.contains("2.000000000000e6")));
         assert!(!content.contains("[Version] 2.0"));
     }
 
@@ -1072,11 +1618,9 @@ mod tests {
 
         let content = std::fs::read_to_string(temp.path()).expect("read touchstone");
         assert!(content.contains("[Number of Ports] 3"));
-        assert!(
-            content
-                .lines()
-                .any(|line| line.starts_with("1.000000000000e6 "))
-        );
+        assert!(content
+            .lines()
+            .any(|line| line.starts_with("1.000000000000e6 ")));
     }
 
     #[test]
@@ -1108,6 +1652,181 @@ mod tests {
             .write(&dataset, Path::new("dummy.s2p"))
             .expect_err("missing matrix components should fail");
         assert!(err.contains("Missing Touchstone imag component for S11"));
+    }
+
+    #[test]
+    fn test_write_touchstone_v2_writes_reference_block_for_per_port_z0() {
+        let mut dataset = WaveformDataset::new("sp_ref");
+        dataset
+            .metadata
+            .insert("touchstone_version".to_string(), "2".to_string());
+        dataset
+            .metadata
+            .insert("z0_ports".to_string(), "50,75".to_string());
+
+        let mut freq = WaveformSignal::new("frequency", SignalType::Frequency);
+        freq.data = vec![1.0e6];
+        dataset.set_x(freq);
+
+        for (name, value) in [
+            ("S11_RE", 0.1),
+            ("S11_IM", 0.0),
+            ("S21_RE", 0.8),
+            ("S21_IM", -0.1),
+            ("S12_RE", 0.02),
+            ("S12_IM", 0.0),
+            ("S22_RE", 0.2),
+            ("S22_IM", 0.01),
+        ] {
+            let mut signal = WaveformSignal::new(name, SignalType::SParameter);
+            signal.data = vec![value];
+            dataset.add_signal(signal);
+        }
+
+        let temp = NamedTempFile::new().expect("temp touchstone");
+        WaveformWriter::new(WaveformFormat::Touchstone)
+            .write(&dataset, temp.path())
+            .expect("touchstone write should succeed");
+        let content = std::fs::read_to_string(temp.path()).expect("read touchstone");
+
+        assert!(content.contains("[Reference]"));
+        assert!(content.contains("5.000000000000e1"));
+        assert!(content.contains("7.500000000000e1"));
+    }
+
+    #[test]
+    fn test_write_touchstone_v1_rejects_nonuniform_per_port_z0() {
+        let mut dataset = WaveformDataset::new("sp_ref_v1");
+        dataset
+            .metadata
+            .insert("touchstone_version".to_string(), "1".to_string());
+        dataset
+            .metadata
+            .insert("z0_ports".to_string(), "50,75".to_string());
+
+        let mut freq = WaveformSignal::new("frequency", SignalType::Frequency);
+        freq.data = vec![1.0e6];
+        dataset.set_x(freq);
+
+        for (name, value) in [
+            ("S11_RE", 0.1),
+            ("S11_IM", 0.0),
+            ("S21_RE", 0.8),
+            ("S21_IM", -0.1),
+            ("S12_RE", 0.02),
+            ("S12_IM", 0.0),
+            ("S22_RE", 0.2),
+            ("S22_IM", 0.01),
+        ] {
+            let mut signal = WaveformSignal::new(name, SignalType::SParameter);
+            signal.data = vec![value];
+            dataset.add_signal(signal);
+        }
+
+        let err = WaveformWriter::new(WaveformFormat::Touchstone)
+            .write(&dataset, Path::new("dummy.s2p"))
+            .expect_err("touchstone v1 must reject non-uniform per-port z0");
+        assert!(err.contains("v1 does not support per-port reference impedance"));
+    }
+
+    #[test]
+    fn test_read_touchstone_v1_two_port_ri() {
+        let mut temp = Builder::new()
+            .suffix(".s2p")
+            .tempfile()
+            .expect("temp touchstone");
+        writeln!(temp, "! touchstone v1").expect("write");
+        writeln!(temp, "# Hz S RI R 75").expect("write");
+        writeln!(temp, "1.0e6 0.1 0.01 0.9 0.0 0.02 0.0 0.2 -0.01").expect("write");
+        writeln!(temp, "2.0e6 0.2 0.02 0.8 -0.1 0.03 0.0 0.3 -0.02").expect("write");
+
+        let dataset = WaveformReader::new(WaveformFormat::Touchstone)
+            .read(temp.path())
+            .expect("touchstone read");
+
+        assert_eq!(dataset.analysis, "S-Parameter");
+        assert_eq!(dataset.point_count(), 2);
+        assert_eq!(dataset.signal_count(), 8);
+        assert_eq!(
+            dataset.metadata.get("z0_ports").map(String::as_str),
+            Some("75,75")
+        );
+        assert_eq!(
+            dataset
+                .get_signal("S21_RE")
+                .and_then(|sig| sig.get(0))
+                .unwrap_or_default(),
+            0.9
+        );
+    }
+
+    #[test]
+    fn test_read_touchstone_v2_db_three_port_with_reference() {
+        let mut temp = Builder::new()
+            .suffix(".s3p")
+            .tempfile()
+            .expect("temp touchstone");
+        writeln!(temp, "[Version] 2.0").expect("write");
+        writeln!(temp, "[Number of Ports] 3").expect("write");
+        writeln!(temp, "[Number of Frequencies] 1").expect("write");
+        writeln!(temp, "[Reference] 50 60 70").expect("write");
+        writeln!(temp, "# GHz S DB R 50").expect("write");
+        writeln!(temp, "[Network Data]").expect("write");
+        writeln!(
+            temp,
+            "1.0 -6 0 -20 0 -30 0 -40 0 -6 0 -20 0 -40 0 -30 0 -6 0"
+        )
+        .expect("write");
+        writeln!(temp, "[End]").expect("write");
+
+        let dataset = WaveformReader::new(WaveformFormat::Touchstone)
+            .read(temp.path())
+            .expect("touchstone read");
+        assert_eq!(
+            dataset
+                .metadata
+                .get("touchstone_version")
+                .map(String::as_str),
+            Some("2")
+        );
+        assert_eq!(
+            dataset.metadata.get("z0_ports").map(String::as_str),
+            Some("50,60,70")
+        );
+        let s11_re = dataset
+            .get_signal("S11_RE")
+            .and_then(|sig| sig.get(0))
+            .unwrap_or_default();
+        assert!((s11_re - 0.501_187_233_627_272_2).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_read_touchstone_rejects_non_s_parameter_data() {
+        let mut temp = NamedTempFile::new().expect("temp touchstone");
+        writeln!(temp, "# Hz Y RI R 50").expect("write");
+        writeln!(temp, "1.0e6 0.0 0.0 0.0 0.0").expect("write");
+
+        let err = WaveformReader::new(WaveformFormat::Touchstone)
+            .read(temp.path())
+            .expect_err("non-S touchstone should fail");
+        assert!(err.contains("only S-parameter files are supported"));
+    }
+
+    #[test]
+    fn test_read_touchstone_rejects_malformed_numeric_record_count() {
+        let mut temp = Builder::new()
+            .suffix(".s2p")
+            .tempfile()
+            .expect("temp touchstone");
+        writeln!(temp, "# Hz S RI R 50").expect("write");
+        // s2p requires 9 numeric values per frequency line (1 + 8),
+        // this record is missing one value.
+        writeln!(temp, "1.0e6 0.1 0.0 0.8 0.0 0.02 0.0 0.2").expect("write");
+
+        let err = WaveformReader::new(WaveformFormat::Touchstone)
+            .read(temp.path())
+            .expect_err("malformed touchstone should fail");
+        assert!(err.contains("not divisible by record width"));
     }
 
     #[test]

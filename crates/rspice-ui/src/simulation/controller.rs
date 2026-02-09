@@ -1288,6 +1288,7 @@ impl SimulationController {
             .map(|port| SpPort {
                 node_pos: port.node_pos.clone(),
                 node_neg: port.node_neg.clone(),
+                z0: port.z0,
             })
             .collect();
         Ok(AnalysisSpec::SParameter {
@@ -1660,7 +1661,7 @@ impl SimulationController {
         state: &mut AppState,
         result: &crate::simulation::SimulationResult,
     ) {
-        let Some(crate::simulation::multi_run::AnalysisSpec::SParameter { z0, .. }) =
+        let Some(crate::simulation::multi_run::AnalysisSpec::SParameter { z0, ports, .. }) =
             self.current_spec.as_ref()
         else {
             return;
@@ -1683,17 +1684,22 @@ impl SimulationController {
         }
 
         let run_id = state.simulation.active_run().map(|run| run.id).unwrap_or(0);
-        let dataset =
-            match Self::build_touchstone_dataset(result, *z0, sp_cfg.touchstone_version as usize) {
-                Ok(dataset) => dataset,
-                Err(e) => {
-                    state.console_messages.push(ConsoleMessage::warning(format!(
-                        "Touchstone export skipped: {}",
-                        e
-                    )));
-                    return;
-                }
-            };
+        let z0_by_port: Vec<f64> = ports.iter().map(|port| port.z0.unwrap_or(*z0)).collect();
+        let dataset = match Self::build_touchstone_dataset(
+            result,
+            *z0,
+            &z0_by_port,
+            sp_cfg.touchstone_version as usize,
+        ) {
+            Ok(dataset) => dataset,
+            Err(e) => {
+                state.console_messages.push(ConsoleMessage::warning(format!(
+                    "Touchstone export skipped: {}",
+                    e
+                )));
+                return;
+            }
+        };
         let num_ports = dataset
             .metadata
             .get("num_ports")
@@ -1718,6 +1724,7 @@ impl SimulationController {
     fn build_touchstone_dataset(
         result: &crate::simulation::SimulationResult,
         z0: f64,
+        z0_by_port: &[f64],
         touchstone_version: usize,
     ) -> Result<WaveformDataset, String> {
         let (frequencies, waveforms) = match result {
@@ -1753,10 +1760,47 @@ impl SimulationController {
         if max_port < 2 {
             return Err("no complete S-parameter matrix waveforms found".to_string());
         }
+        let port_references = if z0_by_port.is_empty() {
+            vec![z0; max_port]
+        } else if z0_by_port.len() == max_port {
+            z0_by_port.to_vec()
+        } else {
+            return Err(format!(
+                "expected {} per-port reference values, got {}",
+                max_port,
+                z0_by_port.len()
+            ));
+        };
+        for (idx, value) in port_references.iter().enumerate() {
+            if !value.is_finite() || *value <= 0.0 {
+                return Err(format!(
+                    "invalid Touchstone reference impedance for port {}",
+                    idx + 1
+                ));
+            }
+        }
+        let has_non_uniform_reference = port_references
+            .iter()
+            .any(|value| (*value - port_references[0]).abs() > 1e-18);
+        if touchstone_version < 2 && has_non_uniform_reference {
+            return Err(
+                "Touchstone v1 export does not support per-port reference impedance".to_string(),
+            );
+        }
 
         let mut dataset = WaveformDataset::new("S-Parameters");
         dataset.analysis = "S-Parameter".to_string();
-        dataset.metadata.insert("z0".to_string(), format!("{}", z0));
+        dataset
+            .metadata
+            .insert("z0".to_string(), format!("{}", port_references[0]));
+        dataset.metadata.insert(
+            "z0_ports".to_string(),
+            port_references
+                .iter()
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
+        );
         dataset
             .metadata
             .insert("num_ports".to_string(), max_port.to_string());
@@ -4895,10 +4939,12 @@ mod tests {
                         SpPort {
                             node_pos: "in".to_string(),
                             node_neg: "0".to_string(),
+                            z0: None,
                         },
                         SpPort {
                             node_pos: "out".to_string(),
                             node_neg: "0".to_string(),
+                            z0: Some(60.0),
                         },
                     ],
                 },
@@ -4942,8 +4988,8 @@ mod tests {
 
     #[test]
     fn test_convert_dc_op_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::DcOpResult as EngineDcOpResult;
+        use crate::simulation::SimulationResult;
 
         let controller = SimulationController::new();
         let config = AnalysisConfig::DcOp;
@@ -4975,8 +5021,8 @@ mod tests {
 
     #[test]
     fn test_convert_transient_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::WaveformData as EngineWaveformData;
+        use crate::simulation::SimulationResult;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -5013,8 +5059,8 @@ mod tests {
 
     #[test]
     fn test_convert_ac_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::WaveformData as EngineWaveformData;
+        use crate::simulation::SimulationResult;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -5049,8 +5095,8 @@ mod tests {
 
     #[test]
     fn test_convert_dc_sweep_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::WaveformData as EngineWaveformData;
+        use crate::simulation::SimulationResult;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -5090,8 +5136,8 @@ mod tests {
 
     #[test]
     fn test_convert_pole_zero_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::config::{PoleZeroConfig, PzAnalysisType};
+        use crate::simulation::SimulationResult;
 
         let controller = SimulationController::new();
         let config = AnalysisConfig::PoleZero(PoleZeroConfig {
@@ -5116,8 +5162,8 @@ mod tests {
 
     #[test]
     fn test_convert_monte_carlo_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::MonteCarloVariableResult;
+        use crate::simulation::SimulationResult;
 
         let controller = SimulationController::new();
         let sim_result = SimulationResult::MonteCarlo {
@@ -5151,8 +5197,8 @@ mod tests {
 
     #[test]
     fn test_convert_parametric_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::WaveformData as EngineWaveformData;
+        use crate::simulation::SimulationResult;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -5188,8 +5234,8 @@ mod tests {
 
     #[test]
     fn test_convert_corner_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::WaveformData as EngineWaveformData;
+        use crate::simulation::SimulationResult;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -5256,8 +5302,8 @@ mod tests {
 
     #[test]
     fn test_build_touchstone_dataset_from_sparameter_ac_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::WaveformData as EngineWaveformData;
+        use crate::simulation::SimulationResult;
         use std::collections::HashMap;
 
         let freqs = vec![1e6, 2e6];
@@ -5288,8 +5334,9 @@ mod tests {
             frequencies: freqs.clone(),
             waveforms,
         };
-        let dataset = SimulationController::build_touchstone_dataset(&result, 50.0, 2)
-            .expect("touchstone dataset should build");
+        let dataset =
+            SimulationController::build_touchstone_dataset(&result, 50.0, &[50.0, 50.0], 2)
+                .expect("touchstone dataset should build");
 
         assert_eq!(dataset.point_count(), 2);
         assert_eq!(dataset.signal_count(), 8);
@@ -5312,9 +5359,81 @@ mod tests {
     }
 
     #[test]
-    fn test_build_touchstone_dataset_requires_complex_components() {
-        use crate::simulation::SimulationResult;
+    fn test_build_touchstone_dataset_records_per_port_reference_metadata() {
         use crate::simulation::results::WaveformData as EngineWaveformData;
+        use crate::simulation::SimulationResult;
+        use std::collections::HashMap;
+
+        let freqs = vec![1e6];
+        let mut waveforms = HashMap::new();
+        waveforms.insert(
+            "S11".to_string(),
+            EngineWaveformData::new_complex("S11", freqs.clone(), vec![0.1], vec![0.0]),
+        );
+        waveforms.insert(
+            "S21".to_string(),
+            EngineWaveformData::new_complex("S21", freqs.clone(), vec![0.9], vec![0.0]),
+        );
+        waveforms.insert(
+            "S12".to_string(),
+            EngineWaveformData::new_complex("S12", freqs.clone(), vec![0.02], vec![0.0]),
+        );
+        waveforms.insert(
+            "S22".to_string(),
+            EngineWaveformData::new_complex("S22", freqs.clone(), vec![0.2], vec![0.0]),
+        );
+
+        let result = SimulationResult::Ac {
+            frequencies: freqs,
+            waveforms,
+        };
+        let dataset =
+            SimulationController::build_touchstone_dataset(&result, 50.0, &[50.0, 75.0], 2)
+                .expect("touchstone dataset should include per-port z0");
+        assert_eq!(
+            dataset.metadata.get("z0_ports").map(String::as_str),
+            Some("50,75")
+        );
+    }
+
+    #[test]
+    fn test_build_touchstone_dataset_rejects_non_uniform_reference_for_v1() {
+        use crate::simulation::results::WaveformData as EngineWaveformData;
+        use crate::simulation::SimulationResult;
+        use std::collections::HashMap;
+
+        let freqs = vec![1e6];
+        let mut waveforms = HashMap::new();
+        waveforms.insert(
+            "S11".to_string(),
+            EngineWaveformData::new_complex("S11", freqs.clone(), vec![0.1], vec![0.0]),
+        );
+        waveforms.insert(
+            "S21".to_string(),
+            EngineWaveformData::new_complex("S21", freqs.clone(), vec![0.9], vec![0.0]),
+        );
+        waveforms.insert(
+            "S12".to_string(),
+            EngineWaveformData::new_complex("S12", freqs.clone(), vec![0.02], vec![0.0]),
+        );
+        waveforms.insert(
+            "S22".to_string(),
+            EngineWaveformData::new_complex("S22", freqs.clone(), vec![0.2], vec![0.0]),
+        );
+
+        let result = SimulationResult::Ac {
+            frequencies: freqs,
+            waveforms,
+        };
+        let err = SimulationController::build_touchstone_dataset(&result, 50.0, &[50.0, 75.0], 1)
+            .expect_err("touchstone v1 must reject non-uniform z0");
+        assert!(err.contains("v1 export does not support per-port reference impedance"));
+    }
+
+    #[test]
+    fn test_build_touchstone_dataset_requires_complex_components() {
+        use crate::simulation::results::WaveformData as EngineWaveformData;
+        use crate::simulation::SimulationResult;
         use std::collections::HashMap;
 
         let freqs = vec![1e6, 2e6];
@@ -5346,15 +5465,15 @@ mod tests {
             frequencies: freqs,
             waveforms,
         };
-        let err = SimulationController::build_touchstone_dataset(&result, 50.0, 1)
+        let err = SimulationController::build_touchstone_dataset(&result, 50.0, &[50.0, 50.0], 1)
             .expect_err("missing imag should fail");
         assert!(err.contains("missing imaginary component"));
     }
 
     #[test]
     fn test_build_touchstone_dataset_from_three_port_result() {
-        use crate::simulation::SimulationResult;
         use crate::simulation::results::WaveformData as EngineWaveformData;
+        use crate::simulation::SimulationResult;
         use std::collections::HashMap;
 
         let freqs = vec![1e6, 2e6];
@@ -5378,8 +5497,9 @@ mod tests {
             frequencies: freqs.clone(),
             waveforms,
         };
-        let dataset = SimulationController::build_touchstone_dataset(&result, 50.0, 2)
-            .expect("touchstone dataset should build for three ports");
+        let dataset =
+            SimulationController::build_touchstone_dataset(&result, 50.0, &[50.0, 60.0, 50.0], 2)
+                .expect("touchstone dataset should build for three ports");
 
         assert_eq!(dataset.point_count(), 2);
         assert_eq!(dataset.signal_count(), 18);

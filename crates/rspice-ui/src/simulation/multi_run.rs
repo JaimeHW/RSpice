@@ -220,12 +220,14 @@ pub struct OptimizationVariable {
 }
 
 /// S-parameter port definition.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpPort {
     /// Positive node.
     pub node_pos: String,
     /// Negative/reference node.
     pub node_neg: String,
+    /// Optional per-port reference impedance override.
+    pub z0: Option<f64>,
 }
 
 /// Strongly-typed analysis request used by queue execution.
@@ -665,6 +667,11 @@ impl AnalysisSpec {
                             "S-parameter port{} negative node is required",
                             idx + 1
                         ));
+                    }
+                    if let Some(port_z0) = port.z0 {
+                        if !port_z0.is_finite() || port_z0 <= 0.0 {
+                            return Err(format!("S-parameter port{} z0 must be > 0", idx + 1));
+                        }
                     }
                 }
                 Ok(())
@@ -1615,14 +1622,17 @@ mod tests {
                 SpPort {
                     node_pos: "in".to_string(),
                     node_neg: "0".to_string(),
+                    z0: None,
                 },
                 SpPort {
                     node_pos: "out".to_string(),
                     node_neg: "0".to_string(),
+                    z0: Some(60.0),
                 },
                 SpPort {
                     node_pos: "aux".to_string(),
                     node_neg: "0".to_string(),
+                    z0: None,
                 },
             ],
         };
@@ -1641,7 +1651,32 @@ mod tests {
             ports: vec![SpPort {
                 node_pos: "in".to_string(),
                 node_neg: "0".to_string(),
+                z0: None,
             }],
+        };
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn test_analysis_spec_sparameter_validation_rejects_invalid_port_z0() {
+        let invalid = AnalysisSpec::SParameter {
+            start_freq: 1e3,
+            stop_freq: 1e9,
+            points_per_unit: 10,
+            sweep: FrequencySweep::Decade,
+            z0: 50.0,
+            ports: vec![
+                SpPort {
+                    node_pos: "in".to_string(),
+                    node_neg: "0".to_string(),
+                    z0: Some(0.0),
+                },
+                SpPort {
+                    node_pos: "out".to_string(),
+                    node_neg: "0".to_string(),
+                    z0: None,
+                },
+            ],
         };
         assert!(invalid.validate().is_err());
     }

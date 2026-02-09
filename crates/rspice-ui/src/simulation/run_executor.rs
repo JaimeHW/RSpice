@@ -14,8 +14,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{
-    Arc,
     atomic::{AtomicBool, AtomicUsize, Ordering},
+    Arc,
 };
 use std::thread;
 use std::time::Instant;
@@ -1015,6 +1015,7 @@ impl RunExecutor {
                         .map(|port| simulation_runner::SParameterPort {
                             node_pos: port.node_pos.clone(),
                             node_neg: port.node_neg.clone(),
+                            z0: port.z0,
                         })
                         .collect(),
                 };
@@ -2823,12 +2824,10 @@ mod tests {
         assert_eq!(result.state.failed_runs, 3);
         assert_eq!(result.state.completed_runs, 3);
         assert_eq!(result.errors.len(), 3);
-        assert!(
-            result
-                .errors
-                .values()
-                .all(|err| err.contains("No netlist configured for queue"))
-        );
+        assert!(result
+            .errors
+            .values()
+            .all(|err| err.contains("No netlist configured for queue")));
     }
 
     #[test]
@@ -3213,18 +3212,14 @@ mod tests {
             !mapped.waveforms.is_empty(),
             "expected reliability waveforms"
         );
-        assert!(
-            mapped
-                .waveforms
-                .iter()
-                .any(|wf| wf.name.starts_with("DVTH(") || wf.name.starts_with("DRDS("))
-        );
-        assert!(
-            mapped
-                .measurements
-                .iter()
-                .any(|m| m.name == "devices_analyzed")
-        );
+        assert!(mapped
+            .waveforms
+            .iter()
+            .any(|wf| wf.name.starts_with("DVTH(") || wf.name.starts_with("DRDS(")));
+        assert!(mapped
+            .measurements
+            .iter()
+            .any(|m| m.name == "devices_analyzed"));
     }
 
     #[test]
@@ -3266,12 +3261,10 @@ mod tests {
             .next()
             .expect("expected mapped optimization result");
         assert_eq!(mapped.analysis_type, MappedAnalysisType::Optimization);
-        assert!(
-            mapped
-                .waveforms
-                .iter()
-                .any(|wf| wf.name == "Optimization Cost")
-        );
+        assert!(mapped
+            .waveforms
+            .iter()
+            .any(|wf| wf.name == "Optimization Cost"));
         assert!(mapped.measurements.iter().any(|m| m.name == "best_cost"));
     }
 
@@ -3308,18 +3301,14 @@ mod tests {
             .next()
             .expect("expected mapped SOA result");
         assert_eq!(mapped.analysis_type, MappedAnalysisType::Soa);
-        assert!(
-            mapped
-                .waveforms
-                .iter()
-                .any(|wf| wf.name == "SOA Violation Count")
-        );
-        assert!(
-            mapped
-                .measurements
-                .iter()
-                .any(|m| m.name == "num_violations")
-        );
+        assert!(mapped
+            .waveforms
+            .iter()
+            .any(|wf| wf.name == "SOA Violation Count"));
+        assert!(mapped
+            .measurements
+            .iter()
+            .any(|m| m.name == "num_violations"));
     }
 
     #[test]
@@ -3503,18 +3492,14 @@ mod tests {
             .expect("expected mapped STB result");
         assert_eq!(mapped.analysis_type, MappedAnalysisType::Stb);
         assert_eq!(mapped.waveforms.len(), 2);
-        assert!(
-            mapped
-                .waveforms
-                .iter()
-                .any(|wf| wf.name == "Loop Gain (dB)")
-        );
-        assert!(
-            mapped
-                .waveforms
-                .iter()
-                .any(|wf| wf.name == "Loop Phase (deg)")
-        );
+        assert!(mapped
+            .waveforms
+            .iter()
+            .any(|wf| wf.name == "Loop Gain (dB)"));
+        assert!(mapped
+            .waveforms
+            .iter()
+            .any(|wf| wf.name == "Loop Phase (deg)"));
         assert!(mapped.measurements.iter().any(|m| m.name == "phase_margin"));
     }
 
@@ -3541,47 +3526,33 @@ mod tests {
             .expect("expected mapped PSTB result");
         assert_eq!(mapped.analysis_type, MappedAnalysisType::Pstb);
         assert_eq!(mapped.waveforms.len(), 4);
-        assert!(
-            mapped
-                .waveforms
-                .iter()
-                .any(|wf| wf.name == "Floquet |lambda|")
-        );
-        assert!(
-            mapped
-                .waveforms
-                .iter()
-                .any(|wf| wf.name == "Stability Margin (dB)")
-        );
-        assert!(
-            mapped
-                .waveforms
-                .iter()
-                .any(|wf| wf.name == "Probe Mode Participation")
-        );
-        assert!(
-            mapped
-                .measurements
-                .iter()
-                .any(|m| m.name == "dominant_multiplier")
-        );
-        assert!(
-            mapped
-                .measurements
-                .iter()
-                .any(|m| m.name == "probe_state_index")
-        );
-        assert!(
-            mapped
-                .measurements
-                .iter()
-                .any(|m| m.name == "probe_state_persistence_db")
-        );
-        assert!(
-            mapped
-                .measurements
-                .iter()
-                .any(|m| m.name == "dominant_probe_mode_participation")
-        );
+        assert!(mapped
+            .waveforms
+            .iter()
+            .any(|wf| wf.name == "Floquet |lambda|"));
+        assert!(mapped
+            .waveforms
+            .iter()
+            .any(|wf| wf.name == "Stability Margin (dB)"));
+        assert!(mapped
+            .waveforms
+            .iter()
+            .any(|wf| wf.name == "Probe Mode Participation"));
+        assert!(mapped
+            .measurements
+            .iter()
+            .any(|m| m.name == "dominant_multiplier"));
+        assert!(mapped
+            .measurements
+            .iter()
+            .any(|m| m.name == "probe_state_index"));
+        assert!(mapped
+            .measurements
+            .iter()
+            .any(|m| m.name == "probe_state_persistence_db"));
+        assert!(mapped
+            .measurements
+            .iter()
+            .any(|m| m.name == "dominant_probe_mode_participation"));
     }
 }

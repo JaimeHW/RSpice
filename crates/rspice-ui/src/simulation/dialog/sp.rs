@@ -364,6 +364,10 @@ pub struct SpPortDialogState {
     pub differential: bool,
     /// Negative node name for differential mode.
     pub node_neg: String,
+    /// Port-specific reference impedance override enabled.
+    pub z0_override: bool,
+    /// Port-specific reference impedance text buffer.
+    pub z0: String,
 }
 
 impl SpPortDialogState {
@@ -372,6 +376,8 @@ impl SpPortDialogState {
             node_pos: node_pos.into(),
             differential: false,
             node_neg: "0".to_string(),
+            z0_override: false,
+            z0: String::new(),
         }
     }
 
@@ -380,15 +386,23 @@ impl SpPortDialogState {
             node_pos: port.node_pos.clone(),
             differential: port.is_differential(),
             node_neg: port.node_neg.clone(),
+            z0_override: port.z0.is_some(),
+            z0: port.z0.map(|value| value.to_string()).unwrap_or_default(),
         }
     }
 
-    fn to_port_config(&self, number: u32) -> SpPortConfig {
-        if self.differential {
+    fn to_port_config(&self, number: u32) -> Result<SpPortConfig, String> {
+        let mut port = if self.differential {
             SpPortConfig::differential(number, &self.node_pos, &self.node_neg)
         } else {
             SpPortConfig::single_ended(number, &self.node_pos)
+        };
+        if self.z0_override {
+            let z0 = parse_si_value(&self.z0)
+                .map_err(|e| format!("Invalid Port {} Z0: {}", number, e))?;
+            port.z0 = Some(z0);
         }
+        Ok(port)
     }
 }
 
@@ -411,6 +425,8 @@ pub struct SpDialogState {
     pub do_noise: bool,
     /// Enable Touchstone export
     pub touchstone_export: bool,
+    /// Touchstone format version (1 or 2).
+    pub touchstone_version: u32,
     /// Initialized flag
     pub initialized: bool,
 }
@@ -461,6 +477,7 @@ impl SpDialogState {
             ports: port_states,
             do_noise: config.do_noise,
             touchstone_export: config.touchstone_export,
+            touchstone_version: config.touchstone_version.clamp(1, 2),
             initialized: true,
         }
     }
@@ -488,7 +505,7 @@ impl SpDialogState {
             .iter()
             .enumerate()
             .map(|(idx, port)| port.to_port_config((idx + 1) as u32))
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
 
         let config = SpConfig {
             start_freq: start,
@@ -499,7 +516,7 @@ impl SpDialogState {
             ports,
             do_noise: self.do_noise,
             touchstone_export: self.touchstone_export,
-            touchstone_version: 2,
+            touchstone_version: self.touchstone_version.clamp(1, 2),
             save_all: false,
         };
 
@@ -611,6 +628,15 @@ impl SpDialogState {
                             .hint_text(hint.as_str()),
                     );
                     ui.checkbox(&mut port.differential, "Differential");
+                    ui.checkbox(&mut port.z0_override, "Z0");
+                    if port.z0_override {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut port.z0)
+                                .desired_width(70.0)
+                                .hint_text("50"),
+                        );
+                        ui.label("ohm");
+                    }
                     if idx >= 2 && ui.small_button("Remove").clicked() {
                         remove_index = Some(idx);
                     }
@@ -647,6 +673,27 @@ impl SpDialogState {
 
             ui.checkbox(&mut self.do_noise, "Include Noise Analysis (NF)");
             ui.checkbox(&mut self.touchstone_export, "Export Touchstone (.sNp)");
+            if self.touchstone_export {
+                ui.horizontal(|ui| {
+                    ui.label("Touchstone version:");
+                    egui::ComboBox::from_id_salt("sp_touchstone_version")
+                        .selected_text(format!("v{}", self.touchstone_version.clamp(1, 2)))
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_label(self.touchstone_version == 1, "v1")
+                                .clicked()
+                            {
+                                self.touchstone_version = 1;
+                            }
+                            if ui
+                                .selectable_label(self.touchstone_version != 1, "v2")
+                                .clicked()
+                            {
+                                self.touchstone_version = 2;
+                            }
+                        });
+                });
+            }
         });
 
         // Info footer
@@ -999,12 +1046,15 @@ mod tests {
 
     #[test]
     fn test_dialog_state_from_config() {
-        let cfg = SpConfig::decade(1e6, 10e9, 20).with_z0(75.0);
+        let cfg = SpConfig::decade(1e6, 10e9, 20)
+            .with_z0(75.0)
+            .with_touchstone(true, 1);
         let state = SpDialogState::from_config(&cfg);
 
         assert!(state.initialized);
         assert_eq!(state.z0, "75");
         assert_eq!(state.sweep_type_idx, 0);
+        assert_eq!(state.touchstone_version, 1);
     }
 
     #[test]
@@ -1021,6 +1071,7 @@ mod tests {
         assert_eq!(cfg.ports.len(), 3);
         assert_eq!(cfg.ports[2].number, 3);
         assert_eq!(cfg.ports[2].node_pos, "AUX");
+        assert_eq!(cfg.touchstone_version, 2);
     }
 
     #[test]
@@ -1043,6 +1094,36 @@ mod tests {
 
         let cfg = result.unwrap();
         assert!(cfg.ports[0].is_differential());
+    }
+
+    #[test]
+    fn test_dialog_state_port_specific_z0_roundtrip() {
+        let mut state = SpDialogState::from_config(&SpConfig::default());
+        state.ports[1].z0_override = true;
+        state.ports[1].z0 = "75".to_string();
+
+        let cfg = state.to_config().expect("port z0 should parse");
+        assert_eq!(cfg.ports[1].z0, Some(75.0));
+    }
+
+    #[test]
+    fn test_dialog_state_port_specific_z0_validation() {
+        let mut state = SpDialogState::from_config(&SpConfig::default());
+        state.ports[0].z0_override = true;
+        state.ports[0].z0 = "bad".to_string();
+
+        let err = state
+            .to_config()
+            .expect_err("invalid per-port z0 must fail");
+        assert!(err.contains("Invalid Port 1 Z0"));
+    }
+
+    #[test]
+    fn test_dialog_state_touchstone_version_roundtrip() {
+        let mut state = SpDialogState::from_config(&SpConfig::default());
+        state.touchstone_version = 1;
+        let cfg = state.to_config().expect("config should build");
+        assert_eq!(cfg.touchstone_version, 1);
     }
 
     #[test]

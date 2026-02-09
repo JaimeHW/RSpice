@@ -3,10 +3,10 @@
 //! Async wrapper around rspice-core for running simulations from the GUI.
 
 use crate::output_spec::{
-    OutputSpec, OutputVoltageSpec, ac_output_value, collect_sensitivity_parameters,
-    dc_output_value, finite_difference_derivative, normalized_sensitivity, parse_output_spec,
-    resolve_node_or_ground_index, resolve_sensitivity_ac_frequency, run_ac_output_at_frequency,
-    run_dc_output_sensitivity, validate_sensitivity_output_spec,
+    ac_output_value, collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
+    normalized_sensitivity, parse_output_spec, resolve_node_or_ground_index,
+    resolve_sensitivity_ac_frequency, run_ac_output_at_frequency, run_dc_output_sensitivity,
+    validate_sensitivity_output_spec, OutputSpec, OutputVoltageSpec,
 };
 use crate::services::safety::{SoADefinition, SoALimit, SoAManager, SoAParameter, SoAViolation};
 use crate::simulation::optimizer::{
@@ -26,7 +26,7 @@ use rspice_core::netlist::{
     StepSweep, StepTarget,
 };
 use rspice_core::solver::SimulationResult as CoreSimulationResult;
-use rspice_core::{SimulationConfigOverrides, Value, resolve_simulation_config};
+use rspice_core::{resolve_simulation_config, SimulationConfigOverrides, Value};
 
 // =============================================================================
 // Platform-agnostic timing utilities
@@ -421,6 +421,7 @@ impl SParameterSweep {
 pub struct SParameterPort {
     pub node_pos: String,
     pub node_neg: String,
+    pub z0: Option<Value>,
 }
 
 impl SParameterPort {
@@ -428,6 +429,7 @@ impl SParameterPort {
         Self {
             node_pos: node_pos.into(),
             node_neg: "0".to_string(),
+            z0: None,
         }
     }
 }
@@ -475,6 +477,11 @@ impl SParameterRunConfig {
                     idx + 1
                 ));
             }
+            if let Some(port_z0) = port.z0 {
+                if !port_z0.is_finite() || port_z0 <= 0.0 {
+                    return Err(format!("S-parameter port{} z0 must be positive", idx + 1));
+                }
+            }
         }
         Ok(())
     }
@@ -488,7 +495,8 @@ pub struct SParameterData {
     pub num_ports: usize,
     /// S-parameter matrix traces indexed as [row][col][frequency_index], 0-based.
     pub s: Vec<Vec<Vec<Complex64>>>,
-    pub z0: Value,
+    /// Per-port reference impedances (ohms).
+    pub z0: Vec<Value>,
 }
 
 /// Run N-port S-parameter analysis by solving Y-parameters from AC source injections.
@@ -513,6 +521,11 @@ pub fn run_sparameter_analysis(
 
     let num_ports = config.ports.len();
     let num_freqs = frequencies.len();
+    let z0_by_port: Vec<Value> = config
+        .ports
+        .iter()
+        .map(|port| port.z0.unwrap_or(config.z0))
+        .collect();
     let mut y = vec![vec![vec![Complex64::new(0.0, 0.0); num_freqs]; num_ports]; num_ports];
 
     for excite_port in 0..num_ports {
@@ -567,7 +580,7 @@ pub fn run_sparameter_analysis(
                 y_matrix[row][col] = y[row][col][freq_idx];
             }
         }
-        let s_matrix = compute_s_from_y_matrix(&y_matrix, config.z0);
+        let s_matrix = compute_s_from_y_matrix(&y_matrix, &z0_by_port);
         for row in 0..num_ports {
             for col in 0..num_ports {
                 s[row][col][freq_idx] = s_matrix[row][col];
@@ -579,7 +592,7 @@ pub fn run_sparameter_analysis(
         frequencies,
         num_ports,
         s,
-        z0: config.z0,
+        z0: z0_by_port,
     })
 }
 
@@ -641,18 +654,21 @@ fn branch_current_from_ac(point: &AcResult, branch_ordinal: usize) -> Option<Com
     point.currents.get(branch_index).copied()
 }
 
-fn compute_s_from_y_matrix(y: &[Vec<Complex64>], z0: Value) -> Vec<Vec<Complex64>> {
+fn compute_s_from_y_matrix(y: &[Vec<Complex64>], z0_by_port: &[Value]) -> Vec<Vec<Complex64>> {
     let n = y.len();
     if n == 0 || y.iter().any(|row| row.len() != n) {
         return Vec::new();
     }
+    if z0_by_port.len() != n {
+        return vec![vec![Complex64::new(0.0, 0.0); n]; n];
+    }
 
-    let z = Complex64::new(z0, 0.0);
     let mut a = identity_complex_matrix(n);
     let mut b = identity_complex_matrix(n);
     for row in 0..n {
+        let z0 = Complex64::new(z0_by_port[row], 0.0);
         for col in 0..n {
-            let zy = z * y[row][col];
+            let zy = z0 * y[row][col];
             a[row][col] += zy;
             b[row][col] -= zy;
         }
@@ -661,7 +677,16 @@ fn compute_s_from_y_matrix(y: &[Vec<Complex64>], z0: Value) -> Vec<Vec<Complex64
     let Some(inv_a) = invert_complex_matrix(&a) else {
         return vec![vec![Complex64::new(0.0, 0.0); n]; n];
     };
-    multiply_complex_matrix(&b, &inv_a)
+    let mut s = multiply_complex_matrix(&b, &inv_a);
+    // General multi-port normalization for non-uniform real reference impedances:
+    // S = D^(-1) * (I - ZY) * (I + ZY)^(-1) * D, where D = diag(sqrt(Z0_i)).
+    for row in 0..n {
+        for col in 0..n {
+            let scale = (z0_by_port[col] / z0_by_port[row]).sqrt();
+            s[row][col] *= Complex64::new(scale, 0.0);
+        }
+    }
+    s
 }
 
 fn identity_complex_matrix(size: usize) -> Vec<Vec<Complex64>> {
@@ -1944,8 +1969,8 @@ fn run_pac_internal(
     netlist: &rspice_core::Netlist,
     config: &PacRunConfig,
 ) -> Result<PacInternalResult, String> {
-    use rspice_core::analysis::PssConfig;
     use rspice_core::analysis::advanced::pac::{PacAnalyzer, PacConfig};
+    use rspice_core::analysis::PssConfig;
 
     config.validate()?;
 
@@ -4752,7 +4777,11 @@ fn sanitize_nonnegative(value: Value) -> Value {
 }
 
 fn sanitize_finite(value: Value) -> Value {
-    if value.is_finite() { value } else { 0.0 }
+    if value.is_finite() {
+        value
+    } else {
+        0.0
+    }
 }
 
 fn normalized_probe_participation(
@@ -4782,8 +4811,8 @@ pub fn run_pstb_analysis_with_config(
     netlist_text: &str,
     config: &PstbRunConfig,
 ) -> Result<PstbData, String> {
-    use rspice_core::analysis::PssConfig;
     use rspice_core::analysis::advanced::pstb::{PstbAnalyzer, PstbConfig};
+    use rspice_core::analysis::PssConfig;
 
     config.validate()?;
 
@@ -6873,12 +6902,10 @@ mod tests {
             .expect("sensitivity run should succeed");
         assert_eq!(result.output_var, "V(out)");
         assert!(!result.sensitivities.is_empty());
-        assert!(
-            result
-                .sensitivities
-                .iter()
-                .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL"))
-        );
+        assert!(result
+            .sensitivities
+            .iter()
+            .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL")));
     }
 
     #[test]
@@ -6888,18 +6915,14 @@ mod tests {
         let result = run_sensitivity_analysis(netlist, "V(out)", false, None)
             .expect("sensitivity run should succeed");
 
-        assert!(
-            result
-                .sensitivities
-                .iter()
-                .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL"))
-        );
-        assert!(
-            result
-                .sensitivities
-                .iter()
-                .all(|(name, _, _)| !name.starts_with("IC_") && !name.starts_with("NODESET_"))
-        );
+        assert!(result
+            .sensitivities
+            .iter()
+            .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL")));
+        assert!(result
+            .sensitivities
+            .iter()
+            .all(|(name, _, _)| !name.starts_with("IC_") && !name.starts_with("NODESET_")));
     }
 
     #[test]
@@ -6925,12 +6948,10 @@ mod tests {
         let result = run_sensitivity_analysis(netlist, "V(out,in)", false, None)
             .expect("differential sensitivity run should succeed");
         assert!(!result.sensitivities.is_empty());
-        assert!(
-            result
-                .sensitivities
-                .iter()
-                .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite())
-        );
+        assert!(result
+            .sensitivities
+            .iter()
+            .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite()));
     }
 
     #[test]
@@ -6958,12 +6979,10 @@ mod tests {
             .expect("current-output ac sensitivity should succeed");
         assert_eq!(result.output_var, "I(V1)");
         assert!(!result.sensitivities.is_empty());
-        assert!(
-            result
-                .sensitivities
-                .iter()
-                .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite())
-        );
+        assert!(result
+            .sensitivities
+            .iter()
+            .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite()));
     }
 
     #[test]
@@ -7062,12 +7081,10 @@ mod tests {
         assert_eq!(result.target, "PARAM RVAL");
         assert_eq!(result.sweep_values.len(), 4);
         assert_eq!(result.num_points, 4);
-        assert!(
-            result
-                .voltages
-                .iter()
-                .any(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
-        );
+        assert!(result
+            .voltages
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("V(out)")));
     }
 
     #[test]
@@ -7148,14 +7165,12 @@ mod tests {
             .expect("temperature sweep AC base mode should execute");
         assert_eq!(result.target, "TEMP");
         assert_eq!(result.num_points, 3);
-        assert!(
-            result
-                .voltages
-                .iter()
-                .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
-                    && values.len() == 3
-                    && values.iter().all(|v| v.is_finite() && *v >= 0.0))
-        );
+        assert!(result
+            .voltages
+            .iter()
+            .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
+                && values.len() == 3
+                && values.iter().all(|v| v.is_finite() && *v >= 0.0)));
     }
 
     #[test]
@@ -7176,12 +7191,10 @@ mod tests {
         assert_eq!(result.corner_labels.len(), 3);
         assert!(result.corner_labels[0].starts_with("TT_1.000000V_"));
         assert_eq!(result.num_points, 3);
-        assert!(
-            result
-                .voltages
-                .iter()
-                .any(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
-        );
+        assert!(result
+            .voltages
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("V(out)")));
     }
 
     #[test]
@@ -7215,12 +7228,10 @@ mod tests {
         assert_eq!(result.temperatures_c.len(), 8);
         assert_eq!(result.corner_labels.len(), 8);
         assert_eq!(result.num_failures, 0);
-        assert!(
-            result
-                .corner_labels
-                .iter()
-                .any(|label| label.contains("FF_1.100000V_125.000000C"))
-        );
+        assert!(result
+            .corner_labels
+            .iter()
+            .any(|label| label.contains("FF_1.100000V_125.000000C")));
     }
 
     #[test]
@@ -7310,14 +7321,12 @@ mod tests {
         assert_eq!(result.x_label, "Temperature");
         assert_eq!(result.x_unit, "C");
         assert_eq!(result.x_values, vec![-40.0, 25.0, 125.0]);
-        assert!(
-            result
-                .voltages
-                .iter()
-                .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
-                    && values.len() == 3
-                    && values.iter().all(|v| v.is_finite() && *v >= 0.0))
-        );
+        assert!(result
+            .voltages
+            .iter()
+            .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
+                && values.len() == 3
+                && values.iter().all(|v| v.is_finite() && *v >= 0.0)));
     }
 
     #[test]
@@ -7515,12 +7524,10 @@ mod tests {
         assert_eq!(result.input_sideband, 1);
         assert_eq!(result.output_sideband, 1);
         assert!(result.output_label.starts_with("V("));
-        assert!(
-            result
-                .transfer
-                .iter()
-                .all(|value| value.re.is_finite() && value.im.is_finite())
-        );
+        assert!(result
+            .transfer
+            .iter()
+            .all(|value| value.re.is_finite() && value.im.is_finite()));
         assert!(result.magnitude_db.iter().all(|value| value.is_finite()));
         assert!(result.phase_deg.iter().all(|value| value.is_finite()));
     }
@@ -7605,30 +7612,22 @@ mod tests {
         assert_eq!(result.transfer.len(), result.frequencies.len());
         assert_eq!(result.magnitude_db.len(), result.frequencies.len());
         assert_eq!(result.phase_deg.len(), result.frequencies.len());
-        assert!(
-            result
-                .transfer
-                .iter()
-                .all(|value| value.re.is_finite() && value.im.is_finite())
-        );
-        assert!(
-            result
-                .group_delay
-                .as_ref()
-                .is_some_and(|curve| !curve.is_empty())
-        );
-        assert!(
-            result
-                .input_impedance
-                .as_ref()
-                .is_some_and(|curve| curve.iter().all(|value| value.re.is_finite()))
-        );
-        assert!(
-            result
-                .output_impedance
-                .as_ref()
-                .is_some_and(|curve| curve.iter().all(|value| value.re.is_finite()))
-        );
+        assert!(result
+            .transfer
+            .iter()
+            .all(|value| value.re.is_finite() && value.im.is_finite()));
+        assert!(result
+            .group_delay
+            .as_ref()
+            .is_some_and(|curve| !curve.is_empty()));
+        assert!(result
+            .input_impedance
+            .as_ref()
+            .is_some_and(|curve| curve.iter().all(|value| value.re.is_finite())));
+        assert!(result
+            .output_impedance
+            .as_ref()
+            .is_some_and(|curve| curve.iter().all(|value| value.re.is_finite())));
     }
 
     #[test]
@@ -7697,11 +7696,9 @@ mod tests {
         assert_eq!(result.output_noise.len(), result.frequencies.len());
         assert_eq!(result.reference, PnoiseReference::Output);
         assert_eq!(result.sideband_factor, 7);
-        assert!(
-            result
-                .total_output_noise
-                .is_some_and(|value| value.is_finite() && value >= 0.0)
-        );
+        assert!(result
+            .total_output_noise
+            .is_some_and(|value| value.is_finite() && value >= 0.0));
     }
 
     #[test]
@@ -7788,18 +7785,14 @@ mod tests {
             .as_ref()
             .expect("input-referred mode should return an input-noise vector");
         assert_eq!(input_curve.len(), output_result.output_noise.len());
-        assert!(
-            !input_result
-                .warnings
-                .iter()
-                .any(|warning| warning.contains("TF fallback"))
-        );
-        assert!(
-            !input_result
-                .warnings
-                .iter()
-                .any(|warning| warning.contains("unity gain"))
-        );
+        assert!(!input_result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("TF fallback")));
+        assert!(!input_result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("unity gain")));
 
         let parsed = rspice_core::netlist::parse_netlist(netlist).expect("netlist should parse");
         let mut sim_config = build_engine_config(&parsed, None);
@@ -7919,12 +7912,10 @@ mod tests {
         };
         let result = run_pnoise_analysis_with_config(netlist, &cfg)
             .expect("sideband PNOISE input run should execute");
-        assert!(
-            !result
-                .warnings
-                .iter()
-                .any(|warning| warning.contains("TF fallback"))
-        );
+        assert!(!result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("TF fallback")));
 
         let input_curve = result
             .input_noise
@@ -8065,18 +8056,14 @@ mod tests {
             .expect("differential PNOISE output should execute");
         assert_eq!(result.output_noise.len(), result.frequencies.len());
         assert!(!result.contributors.is_empty());
-        assert!(
-            result
-                .contributors
-                .iter()
-                .all(|(_, percentage)| percentage.is_finite() && *percentage >= 0.0)
-        );
-        assert!(
-            !result
-                .warnings
-                .iter()
-                .any(|warning| warning.contains("uncorrelated PSD summation"))
-        );
+        assert!(result
+            .contributors
+            .iter()
+            .all(|(_, percentage)| percentage.is_finite() && *percentage >= 0.0));
+        assert!(!result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("uncorrelated PSD summation")));
     }
 
     #[test]
@@ -8216,37 +8203,27 @@ mod tests {
         assert_eq!(result.mode_indices.len(), result.mode_damping.len());
         assert_eq!(result.mode_indices.len(), result.mode_frequency_hz.len());
         assert_eq!(result.mode_indices.len(), result.stability_margin_db.len());
-        assert!(
-            result
-                .probe_mode_participation
-                .iter()
-                .all(|value| value.is_finite() && *value >= 0.0 && *value <= 1.0)
-        );
-        assert!(
-            result
-                .multiplier_magnitude
-                .iter()
-                .all(|value| value.is_finite() && *value >= 0.0)
-        );
-        assert!(
-            result
-                .multiplier_phase_deg
-                .iter()
-                .all(|value| value.is_finite())
-        );
+        assert!(result
+            .probe_mode_participation
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0 && *value <= 1.0));
+        assert!(result
+            .multiplier_magnitude
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0));
+        assert!(result
+            .multiplier_phase_deg
+            .iter()
+            .all(|value| value.is_finite()));
         assert!(result.mode_damping.iter().all(|value| value.is_finite()));
-        assert!(
-            result
-                .mode_frequency_hz
-                .iter()
-                .all(|value| value.is_finite() && *value >= 0.0)
-        );
-        assert!(
-            result
-                .stability_margin_db
-                .iter()
-                .all(|value| value.is_finite())
-        );
+        assert!(result
+            .mode_frequency_hz
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0));
+        assert!(result
+            .stability_margin_db
+            .iter()
+            .all(|value| value.is_finite()));
         assert!(result.dominant_multiplier_magnitude.is_finite());
         assert!(result.min_stability_margin_db.is_finite());
         assert!(
@@ -8405,6 +8382,73 @@ mod tests {
                 result.s[1][1][idx].norm().is_finite() && result.s[1][1][idx].norm() <= 1.0 + 1e-6
             );
         }
+    }
+
+    #[test]
+    fn test_compute_s_from_y_matrix_applies_nonuniform_reference_normalization() {
+        let y = vec![
+            vec![Complex64::new(0.0, 0.0), Complex64::new(5e-3, 0.0)],
+            vec![Complex64::new(5e-3, 0.0), Complex64::new(0.0, 0.0)],
+        ];
+        let z0 = vec![50.0, 200.0];
+
+        let mut a = identity_complex_matrix(2);
+        let mut b = identity_complex_matrix(2);
+        for row in 0..2 {
+            let zref = Complex64::new(z0[row], 0.0);
+            for col in 0..2 {
+                let zy = zref * y[row][col];
+                a[row][col] += zy;
+                b[row][col] -= zy;
+            }
+        }
+        let inv_a = invert_complex_matrix(&a).expect("matrix should be invertible");
+        let raw = multiply_complex_matrix(&b, &inv_a);
+        let mut expected = raw.clone();
+        for row in 0..2 {
+            for col in 0..2 {
+                let scale = (z0[col] / z0[row]).sqrt();
+                expected[row][col] *= Complex64::new(scale, 0.0);
+            }
+        }
+
+        let actual = compute_s_from_y_matrix(&y, &z0);
+        for row in 0..2 {
+            for col in 0..2 {
+                assert!(
+                    (actual[row][col] - expected[row][col]).norm() < 1e-12,
+                    "S{}{} mismatch: actual={}, expected={}",
+                    row + 1,
+                    col + 1,
+                    actual[row][col],
+                    expected[row][col]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_run_sparameter_analysis_preserves_per_port_reference_impedance_overrides() {
+        let netlist = "* S-parameter decoupled matched ports\nR1 in 0 50\nR2 out 0 50\n.end\n";
+        let cfg = SParameterRunConfig {
+            start_freq: 1e3,
+            stop_freq: 1e6,
+            points_per_unit: 5,
+            sweep: SParameterSweep::Decade,
+            z0: 50.0,
+            ports: vec![
+                SParameterPort::single_ended("in"),
+                SParameterPort {
+                    node_pos: "out".to_string(),
+                    node_neg: "0".to_string(),
+                    z0: Some(75.0),
+                },
+            ],
+        };
+
+        let result = run_sparameter_analysis(netlist, &cfg)
+            .expect("S-parameter analysis should execute with per-port z0");
+        assert_eq!(result.z0, vec![50.0, 75.0]);
     }
 
     #[test]
