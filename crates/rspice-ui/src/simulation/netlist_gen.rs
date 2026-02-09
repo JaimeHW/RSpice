@@ -233,8 +233,8 @@ impl<'a> NetlistGenerator<'a> {
         // Phase 3: Generate header
         self.generate_header();
 
-        // Phase 4: Generate Verilog-A include directives for library-bound instances
-        self.generate_veriloga_includes();
+        // Phase 4: Generate include directives for library-bound instances
+        self.generate_library_view_includes();
 
         // Phase 5: Generate component instances
         self.generate_instances();
@@ -446,38 +446,45 @@ impl<'a> NetlistGenerator<'a> {
         self.lines.push(String::new());
     }
 
-    /// Emit `.VERILOGA` include directives for placed library cell instances.
-    fn generate_veriloga_includes(&mut self) {
+    /// Emit include directives for placed library cell instances.
+    ///
+    /// - Verilog-A bindings emit `.VERILOGA "path" [module]`
+    /// - Other source-backed bindings emit `.include "path"`
+    fn generate_library_view_includes(&mut self) {
         let mut includes = std::collections::BTreeMap::<String, Option<String>>::new();
+        let mut generic_includes = std::collections::BTreeSet::<String>::new();
 
         for component in &self.schematic.components {
             let Some(binding) = component.library_cell.as_ref() else {
                 continue;
             };
 
-            // Explicit Verilog-A view binding or explicit source path qualifies.
-            let is_veriloga_view = binding.view.eq_ignore_ascii_case("veriloga");
             let Some(source_path) = binding.source_path.as_ref() else {
                 continue;
             };
-            if !is_veriloga_view {
-                continue;
-            }
 
             let key = source_path.to_string_lossy().to_string();
-            let model = binding
-                .module_name
-                .as_ref()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty());
-            includes.entry(key).or_insert(model);
+            if binding.view.eq_ignore_ascii_case("veriloga") {
+                let model = binding
+                    .module_name
+                    .as_ref()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
+                includes.entry(key).or_insert(model);
+            } else {
+                generic_includes.insert(key);
+            }
         }
 
-        if includes.is_empty() {
+        if includes.is_empty() && generic_includes.is_empty() {
             return;
         }
 
-        self.lines.push("* Verilog-A includes".to_string());
+        self.lines.push("* Library includes".to_string());
+        for path in generic_includes {
+            let quoted_path = Self::quote_path_for_netlist(&path);
+            self.lines.push(format!(".include {}", quoted_path));
+        }
         for (path, model) in includes {
             let quoted_path = Self::quote_path_for_netlist(&path);
             if let Some(model_name) = model {
@@ -642,8 +649,8 @@ impl<'a> NetlistGenerator<'a> {
             ComponentType::Ground => None,
 
             // Generic library/cell/view instance.
-            // For Verilog-A views, this emits a standard X-instance referring to the
-            // compiled module name (or cell name fallback).
+            // Emits a standard X-instance referring to the bound master name
+            // (Verilog-A module or subcircuit/cell fallback).
             ComponentType::CellInstance => {
                 let Some(binding) = component.library_cell.as_ref() else {
                     return None;
@@ -1405,6 +1412,48 @@ mod tests {
         assert!(netlist.contains(".VERILOGA \"models/my resistor.va\" my_resistor"));
         assert!(netlist.contains("X1"));
         assert!(netlist.contains("my_resistor g=2m"));
+    }
+
+    #[test]
+    fn test_generate_generic_include_for_spice_bound_cell_instance() {
+        let mut schematic = SchematicState::default();
+        let mut binding = LibraryCellInstance::new("user_lib", "lp_filter", "spice");
+        binding.source_path = Some(std::path::PathBuf::from("models/lp_filter.sp"));
+        binding.module_name = Some("lp_filter_subckt".to_string());
+        binding.terminal_order = vec!["in".to_string(), "out".to_string(), "vss".to_string()];
+
+        let mut comp = Component::new(1, ComponentType::CellInstance, Point::new(0, 0))
+            .with_name_value("lp1", "");
+        comp.library_cell = Some(binding);
+        schematic.components.push(comp);
+
+        let mut gen = NetlistGenerator::new(&schematic);
+        let netlist = gen.generate();
+
+        assert!(netlist.contains(".include \"models/lp_filter.sp\""));
+        assert!(netlist.contains("Xlp1 "));
+        assert!(netlist.contains(" lp_filter_subckt"));
+    }
+
+    #[test]
+    fn test_generate_deduplicates_generic_library_includes() {
+        let mut schematic = SchematicState::default();
+
+        for (id, name) in [(1_u64, "x1"), (2_u64, "x2")] {
+            let mut binding = LibraryCellInstance::new("user_lib", "amp", "spice");
+            binding.source_path = Some(std::path::PathBuf::from("models/amp.sp"));
+            binding.module_name = Some("amp".to_string());
+
+            let mut comp = Component::new(id, ComponentType::CellInstance, Point::new(0, 0))
+                .with_name_value(name, "");
+            comp.library_cell = Some(binding);
+            schematic.components.push(comp);
+        }
+
+        let mut gen = NetlistGenerator::new(&schematic);
+        let netlist = gen.generate();
+        let include_count = netlist.matches(".include \"models/amp.sp\"").count();
+        assert_eq!(include_count, 1, "generic include should be emitted once");
     }
 
     #[test]

@@ -2541,6 +2541,13 @@ impl eframe::App for RSpiceApp {
             if let Some(module) = self.state.dialogs.veriloga_dialog.compiled_module.clone() {
                 let compiled_artifact =
                     self.state.dialogs.veriloga_dialog.compiled_artifact.clone();
+                let compiled_dependencies = self
+                    .state
+                    .dialogs
+                    .veriloga_dialog
+                    .compiled_dependencies
+                    .clone()
+                    .unwrap_or_default();
                 let source_path_text = module.source_path.to_string_lossy().to_string();
                 let serialized_ports =
                     serde_json::to_string(&module.ports).unwrap_or_else(|_| module.ports.join(","));
@@ -2632,10 +2639,13 @@ impl eframe::App for RSpiceApp {
                 }
 
                 if let Some(compiled_model) = compiled_artifact {
-                    if let Err(err) = rspice_core::register_precompiled_veriloga_model(
-                        &module.source_path,
-                        compiled_model,
-                    ) {
+                    if let Err(err) =
+                        rspice_core::register_precompiled_veriloga_model_with_dependencies(
+                            &module.source_path,
+                            &compiled_dependencies,
+                            compiled_model,
+                        )
+                    {
                         self.state
                             .console_messages
                             .push(ConsoleMessage::warning(format!(

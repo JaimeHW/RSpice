@@ -27,7 +27,8 @@ pub struct LibraryCellInstance {
     /// Optional Verilog-A source file path for netlisting.
     #[serde(default)]
     pub source_path: Option<PathBuf>,
-    /// Optional module name override for Verilog-A-backed instances.
+    /// Optional master name override used during netlisting
+    /// (for example: Verilog-A module or subcircuit name).
     #[serde(default)]
     pub module_name: Option<String>,
     /// Terminal order used for schematic connectivity and netlist emission.

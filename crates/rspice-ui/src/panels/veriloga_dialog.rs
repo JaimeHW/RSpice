@@ -33,6 +33,8 @@ pub struct VerilogALoadDialogState {
     pub compiled_module: Option<CompiledModuleInfo>,
     /// Successfully compiled model artifact for simulation cache registration
     pub compiled_artifact: Option<rspice_veriloga::CompiledModel>,
+    /// Canonical source/include dependencies captured during compilation
+    pub compiled_dependencies: Option<Vec<PathBuf>>,
     /// Whether to show advanced options
     pub show_advanced_options: bool,
     /// Background compilation task receiver
@@ -50,6 +52,7 @@ impl Default for VerilogALoadDialogState {
             errors: Vec::new(),
             compiled_module: None,
             compiled_artifact: None,
+            compiled_dependencies: None,
             show_advanced_options: false,
             compile_task_receiver: None,
         }
@@ -67,6 +70,7 @@ impl Clone for VerilogALoadDialogState {
             errors: self.errors.clone(),
             compiled_module: self.compiled_module.clone(),
             compiled_artifact: self.compiled_artifact.clone(),
+            compiled_dependencies: self.compiled_dependencies.clone(),
             show_advanced_options: self.show_advanced_options,
             // Clone the Arc, not the receiver itself
             compile_task_receiver: self.compile_task_receiver.clone(),
@@ -89,6 +93,10 @@ impl std::fmt::Debug for VerilogALoadDialogState {
             .field(
                 "compiled_artifact",
                 &self.compiled_artifact.as_ref().map(|m| &m.name),
+            )
+            .field(
+                "compiled_dependencies",
+                &self.compiled_dependencies.as_ref().map(|d| d.len()),
             )
             .field("show_advanced_options", &self.show_advanced_options)
             .field(
@@ -130,6 +138,7 @@ impl VerilogALoadDialogState {
         self.errors.clear();
         self.compiled_module = None;
         self.compiled_artifact = None;
+        self.compiled_dependencies = None;
         self.compilation_state = CompilationState::Idle;
     }
 
@@ -417,6 +426,7 @@ pub enum CompileTaskResult {
     Success {
         module_info: CompiledModuleInfo,
         compiled_model: rspice_veriloga::CompiledModel,
+        dependencies: Vec<PathBuf>,
     },
     /// Compilation failed with errors
     Failure(Vec<CompileErrorDisplay>),
@@ -838,10 +848,11 @@ fn start_compile(state: &mut VerilogALoadDialogState) {
         log::info!("Starting Verilog-A compilation: {}", source_path.display());
 
         let compiler = rspice_veriloga::VerilogACompiler::new(options);
-        let result = compiler.compile_file(&source_path);
+        let result = compiler.compile_file_with_metadata(&source_path);
 
         let task_result = match result {
-            Ok(model) => {
+            Ok(compiled) => {
+                let model = compiled.model;
                 log::info!("Verilog-A compilation succeeded: module '{}'", model.name);
                 CompileTaskResult::Success {
                     module_info: CompiledModuleInfo {
@@ -863,6 +874,7 @@ fn start_compile(state: &mut VerilogALoadDialogState) {
                         num_variables: model.num_variables,
                     },
                     compiled_model: model,
+                    dependencies: compiled.dependencies,
                 }
             }
             Err(e) => {
@@ -881,6 +893,7 @@ fn start_compile(state: &mut VerilogALoadDialogState) {
     state.errors.clear();
     state.compiled_module = None;
     state.compiled_artifact = None;
+    state.compiled_dependencies = None;
 }
 
 /// Poll for compilation result (non-blocking)
@@ -914,14 +927,17 @@ fn poll_compile(state: &mut VerilogALoadDialogState) {
             CompileTaskResult::Success {
                 module_info,
                 compiled_model,
+                dependencies,
             } => {
                 state.compiled_module = Some(module_info);
                 state.compiled_artifact = Some(compiled_model);
+                state.compiled_dependencies = Some(dependencies);
                 state.compilation_state = CompilationState::Success;
             }
             CompileTaskResult::Failure(errors) => {
                 state.errors = errors;
                 state.compiled_artifact = None;
+                state.compiled_dependencies = None;
                 state.compilation_state = CompilationState::Failed;
             }
         }
@@ -944,6 +960,7 @@ mod tests {
         assert!(state.file_path.is_none());
         assert!(state.errors.is_empty());
         assert!(state.compiled_module.is_none());
+        assert!(state.compiled_dependencies.is_none());
         assert_eq!(state.compilation_state, CompilationState::Idle);
     }
 

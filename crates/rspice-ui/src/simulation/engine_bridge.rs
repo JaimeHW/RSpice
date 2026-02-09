@@ -117,7 +117,8 @@ impl EngineBridge {
 
     /// Parse netlist string into core Netlist object
     fn parse_netlist(&self, netlist_str: &str) -> Result<rspice_core::Netlist, SimulationError> {
-        rspice_core::Netlist::parse(netlist_str)
+        let parse_base = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        rspice_core::Netlist::parse_with_path(netlist_str, &parse_base)
             .map_err(|e| SimulationError::ParseError(e.to_string()))
     }
 
@@ -1015,6 +1016,44 @@ R1 1 0 1k
         let result = bridge.run(&AnalysisConfig::DcOp, "not valid spice");
         // Invalid should fail
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_netlist_expands_include_directives() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be monotonic")
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rspice_ui_engine_bridge_include_{}_{}",
+            std::process::id(),
+            nanos
+        ));
+        fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+
+        let include_file = temp_dir.join("included.sp");
+        fs::write(&include_file, "RINC 1 0 1k\n").expect("failed to write include file");
+
+        let bridge = EngineBridge::new();
+        let netlist = bridge
+            .parse_netlist(&format!(
+                "V1 1 0 DC 1\n.include \"{}\"\n.end\n",
+                include_file.display()
+            ))
+            .expect("netlist should parse with include expansion");
+
+        assert!(
+            netlist
+                .elements
+                .iter()
+                .any(|element| element.name.eq_ignore_ascii_case("RINC")),
+            "included element should be present after preprocessing"
+        );
+
+        let _ = fs::remove_dir_all(temp_dir);
     }
 
     // -------------------------------------------------------------------------

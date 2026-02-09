@@ -328,14 +328,40 @@ fn build_placeable_instance(
     cell: &Cell,
     view: &View,
 ) -> Option<LibraryCellInstance> {
-    if view.view_type != ViewType::VerilogA {
+    if !is_netlistable_view(view.view_type) {
         return None;
     }
 
-    let source_path = view
-        .file_path
-        .clone()
+    let source_path = resolve_view_source_path(cell, view);
+
+    let mut instance = LibraryCellInstance::new(lib_name, &cell.name, &view.name);
+    instance.source_path = source_path;
+    instance.module_name = resolve_master_name(cell, view);
+    instance.terminal_order = resolve_terminal_order(cell, view);
+
+    if instance.source_path.is_none() {
+        return None;
+    }
+
+    Some(instance)
+}
+
+fn is_netlistable_view(view_type: ViewType) -> bool {
+    !matches!(
+        view_type,
+        ViewType::Layout | ViewType::Document | ViewType::Abstract | ViewType::Config
+    )
+}
+
+fn resolve_view_source_path(cell: &Cell, view: &View) -> Option<std::path::PathBuf> {
+    if let Some(path) = &view.file_path {
+        return Some(path.clone());
+    }
+
+    metadata_source_path(&view.metadata, view)
+        .or_else(|| metadata_source_path(&cell.metadata, view))
         .or_else(|| {
+            // Backward-compatible Verilog-A metadata keys.
             view.metadata
                 .get("veriloga.source_path")
                 .map(std::path::PathBuf::from)
@@ -344,30 +370,84 @@ fn build_placeable_instance(
             cell.metadata
                 .get("veriloga.source_path")
                 .map(std::path::PathBuf::from)
-        });
+        })
+}
 
-    let mut instance = LibraryCellInstance::new(lib_name, &cell.name, &view.name);
-    instance.source_path = source_path;
-    instance.module_name = view
-        .metadata
-        .get("veriloga.module")
-        .cloned()
-        .or_else(|| cell.metadata.get("veriloga.module").cloned())
-        .or_else(|| Some(cell.name.clone()));
+fn metadata_source_path(
+    metadata: &std::collections::HashMap<String, String>,
+    view: &View,
+) -> Option<std::path::PathBuf> {
+    let view_key = view.name.to_ascii_lowercase();
+    let keys = [
+        "netlist.source_path".to_string(),
+        "source_path".to_string(),
+        format!("{}.source_path", view_key),
+    ];
+    for key in keys {
+        if let Some(value) = metadata.get(&key) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(std::path::PathBuf::from(trimmed));
+            }
+        }
+    }
+    None
+}
 
+fn resolve_master_name(cell: &Cell, view: &View) -> Option<String> {
+    if view.view_type == ViewType::VerilogA {
+        return view
+            .metadata
+            .get("veriloga.module")
+            .cloned()
+            .or_else(|| cell.metadata.get("veriloga.module").cloned())
+            .or_else(|| Some(cell.name.clone()));
+    }
+
+    metadata_master_name(&view.metadata, view)
+        .or_else(|| metadata_master_name(&cell.metadata, view))
+        .or_else(|| Some(cell.name.clone()))
+}
+
+fn metadata_master_name(
+    metadata: &std::collections::HashMap<String, String>,
+    view: &View,
+) -> Option<String> {
+    let view_key = view.name.to_ascii_lowercase();
+    let keys = [
+        "netlist.master".to_string(),
+        "master".to_string(),
+        "module".to_string(),
+        format!("{}.master", view_key),
+    ];
+    for key in keys {
+        if let Some(value) = metadata.get(&key) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn resolve_terminal_order(cell: &Cell, view: &View) -> Vec<String> {
     if let Some(raw_ports) = view
         .metadata
-        .get("veriloga.ports")
-        .or_else(|| cell.metadata.get("veriloga.ports"))
+        .get("netlist.ports")
+        .or_else(|| view.metadata.get("netlist.terminals"))
+        .or_else(|| cell.metadata.get("netlist.ports"))
+        .or_else(|| cell.metadata.get("netlist.terminals"))
+        .or_else(|| {
+            // Backward-compatible Verilog-A metadata keys.
+            view.metadata
+                .get("veriloga.ports")
+                .or_else(|| cell.metadata.get("veriloga.ports"))
+        })
     {
-        instance.terminal_order = parse_terminal_order(raw_ports);
+        return parse_terminal_order(raw_ports);
     }
-
-    if instance.source_path.is_none() {
-        return None;
-    }
-
-    Some(instance)
+    Vec::new()
 }
 
 fn parse_terminal_order(raw: &str) -> Vec<String> {
@@ -543,11 +623,31 @@ mod tests {
     }
 
     #[test]
-    fn test_build_placeable_instance_rejects_non_veriloga_view() {
-        let cell = Cell::new("res_mod");
-        let mut view = View::new("symbol", ViewType::Symbol);
-        view.file_path = Some(PathBuf::from("models/res_mod.va"));
-        assert!(build_placeable_instance("veriloga", &cell, &view).is_none());
+    fn test_build_placeable_instance_accepts_source_backed_spice_view() {
+        let mut cell = Cell::new("lp_filter");
+        cell.metadata
+            .insert("netlist.master".to_string(), "lp_filter_subckt".to_string());
+        let mut view = View::new("spice", ViewType::Spice);
+        view.file_path = Some(PathBuf::from("models/lp_filter.sp"));
+
+        let instance =
+            build_placeable_instance("user_lib", &cell, &view).expect("spice view is placeable");
+        assert_eq!(instance.library, "user_lib");
+        assert_eq!(instance.cell, "lp_filter");
+        assert_eq!(instance.view, "spice");
+        assert_eq!(
+            instance.source_path,
+            Some(PathBuf::from("models/lp_filter.sp"))
+        );
+        assert_eq!(instance.module_name.as_deref(), Some("lp_filter_subckt"));
+    }
+
+    #[test]
+    fn test_build_placeable_instance_rejects_non_netlistable_view_type() {
+        let cell = Cell::new("layout_cell");
+        let mut view = View::new("layout", ViewType::Layout);
+        view.file_path = Some(PathBuf::from("cells/layout.gds"));
+        assert!(build_placeable_instance("user_lib", &cell, &view).is_none());
     }
 
     // =========================================================================
