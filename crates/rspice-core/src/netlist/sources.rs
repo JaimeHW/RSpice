@@ -43,7 +43,8 @@ pub fn parse_source_spec(
                         if next.to_uppercase() == "AC" {
                             stream.advance();
                             let ac_magnitude = expect_value(stream, line_num, params)?;
-                            let ac_phase = try_value(stream, params).unwrap_or(0.0);
+                            // SPICE AC phase is specified in degrees; store radians internally.
+                            let ac_phase = try_value(stream, params).unwrap_or(0.0).to_radians();
                             return Ok(SourceSpec::DcAc {
                                 dc_value,
                                 ac_magnitude,
@@ -56,7 +57,8 @@ pub fn parse_source_spec(
                 "AC" => {
                     stream.advance();
                     let magnitude = expect_value(stream, line_num, params)?;
-                    let phase = try_value(stream, params).unwrap_or(0.0);
+                    // SPICE AC phase is specified in degrees; store radians internally.
+                    let phase = try_value(stream, params).unwrap_or(0.0).to_radians();
                     return Ok(SourceSpec::Ac { magnitude, phase });
                 }
                 "PULSE" => {
@@ -129,7 +131,8 @@ fn parse_sin_spec(
     let frequency = expect_value_default(stream, params, 1e3);
     let delay = expect_value_default(stream, params, 0.0);
     let damping = expect_value_default(stream, params, 0.0);
-    let phase = expect_value_default(stream, params, 0.0);
+    // SPICE SIN phase is specified in degrees; store radians internally.
+    let phase = expect_value_default(stream, params, 0.0).to_radians();
 
     if has_paren {
         stream.consume(&TokenKind::RParen);

@@ -1577,7 +1577,8 @@ fn parse_source_spec(
                         if next.to_uppercase() == "AC" {
                             stream.advance();
                             let ac_magnitude = try_value(stream, params).unwrap_or(1.0);
-                            let ac_phase = try_value(stream, params).unwrap_or(0.0);
+                            // SPICE AC phase is specified in degrees; store radians internally.
+                            let ac_phase = try_value(stream, params).unwrap_or(0.0).to_radians();
                             return Ok(SourceSpec::DcAc {
                                 dc_value,
                                 ac_magnitude,
@@ -1591,7 +1592,8 @@ fn parse_source_spec(
                     stream.advance();
                     // AC magnitude is optional - defaults to 1.0 if not specified
                     let magnitude = try_value(stream, params).unwrap_or(1.0);
-                    let phase = try_value(stream, params).unwrap_or(0.0);
+                    // SPICE AC phase is specified in degrees; store radians internally.
+                    let phase = try_value(stream, params).unwrap_or(0.0).to_radians();
                     return Ok(SourceSpec::Ac { magnitude, phase });
                 }
                 "PULSE" => {
@@ -1664,7 +1666,8 @@ fn parse_sin_spec(
     let frequency = expect_value_default(stream, params, 1e3);
     let delay = expect_value_default(stream, params, 0.0);
     let damping = expect_value_default(stream, params, 0.0);
-    let phase = expect_value_default(stream, params, 0.0);
+    // SPICE SIN phase is specified in degrees; store radians internally.
+    let phase = expect_value_default(stream, params, 0.0).to_radians();
 
     if has_paren {
         stream.consume(&TokenKind::RParen);
@@ -1682,10 +1685,69 @@ fn parse_sin_spec(
 
 fn parse_pwl_spec(
     stream: &mut TokenStream,
-    _line_num: usize,
+    line_num: usize,
     params: &ParamContext,
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
+
+    // PWL FILE="path" [TSCALE=..] [VSCALE=..] [TOFFSET=..] [VOFFSET=..]
+    if let TokenKind::Ident(s) = &stream.peek().kind {
+        if s.eq_ignore_ascii_case("FILE") {
+            stream.advance();
+            stream.consume(&TokenKind::Equals);
+
+            let path = match &stream.peek().kind {
+                TokenKind::StringLit(s) => {
+                    let p = s.clone();
+                    stream.advance();
+                    p
+                }
+                TokenKind::Ident(s) => {
+                    let p = s.clone();
+                    stream.advance();
+                    p
+                }
+                _ => {
+                    return Err(ParseError::MissingParameter(format!(
+                        "PWL filename at line {}",
+                        line_num
+                    )));
+                }
+            };
+
+            let mut time_scale = 1.0;
+            let mut value_scale = 1.0;
+            let mut time_offset = 0.0;
+            let mut value_offset = 0.0;
+
+            while let TokenKind::Ident(key) = &stream.peek().kind {
+                let key_upper = key.to_uppercase();
+                stream.advance();
+                stream.consume(&TokenKind::Equals);
+
+                let value = try_value(stream, params).unwrap_or(1.0);
+                match key_upper.as_str() {
+                    "TSCALE" | "TIMESCALE" => time_scale = value,
+                    "VSCALE" | "VALUESCALE" | "SCALE" => value_scale = value,
+                    "TOFFSET" | "TIMEOFFSET" | "TD" => time_offset = value,
+                    "VOFFSET" | "VALUEOFFSET" | "DC" => value_offset = value,
+                    _ => break,
+                }
+            }
+
+            if has_paren {
+                stream.consume(&TokenKind::RParen);
+            }
+
+            return Ok(SourceSpec::PwlFile {
+                path,
+                time_scale,
+                value_scale,
+                time_offset,
+                value_offset,
+            });
+        }
+    }
 
     let mut points = Vec::new();
     while !stream.is_eof() {
@@ -3088,6 +3150,58 @@ V1 1 0 SIN(0 1 1k)
     }
 
     #[test]
+    fn test_parse_ac_phase_is_degrees_converted_to_radians() {
+        let netlist = r#"AC Phase Test
+V1 1 0 AC 1 90
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+        match &result.elements[0].kind {
+            ElementKind::VoltageSource(SourceSpec::Ac { magnitude, phase }) => {
+                assert!((*magnitude - 1.0).abs() < 1e-12);
+                assert!((*phase - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+            }
+            _ => panic!("Expected AC source"),
+        }
+    }
+
+    #[test]
+    fn test_parse_dcac_phase_is_degrees_converted_to_radians() {
+        let netlist = r#"DC AC Phase Test
+I1 1 0 DC 1m AC 2 180
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+        match &result.elements[0].kind {
+            ElementKind::CurrentSource(SourceSpec::DcAc {
+                dc_value,
+                ac_magnitude,
+                ac_phase,
+            }) => {
+                assert!((*dc_value - 1e-3).abs() < 1e-15);
+                assert!((*ac_magnitude - 2.0).abs() < 1e-12);
+                assert!((*ac_phase - std::f64::consts::PI).abs() < 1e-12);
+            }
+            _ => panic!("Expected DC+AC source"),
+        }
+    }
+
+    #[test]
+    fn test_parse_sin_phase_is_degrees_converted_to_radians() {
+        let netlist = r#"Sin Phase Test
+V1 1 0 SIN(0 1 1k 0 0 90)
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+        match &result.elements[0].kind {
+            ElementKind::VoltageSource(SourceSpec::Sin { phase, .. }) => {
+                assert!((*phase - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+            }
+            _ => panic!("Expected Sin source"),
+        }
+    }
+
+    #[test]
     fn test_parse_param() {
         let netlist = r#"Param Test
 .PARAM R=1k
@@ -3245,6 +3359,56 @@ V1 1 0 PWL(0 0 1u 5 2u 0)
                 assert!((points[1].1 - 5.0).abs() < 1e-10);
             }
             _ => panic!("Expected PWL source"),
+        }
+    }
+
+    #[test]
+    fn test_parse_pwl_file_source() {
+        let netlist = r#"PWL FILE Test
+V1 1 0 PWL FILE="stimulus.csv" TSCALE=1e-3 VSCALE=2 TOFFSET=1u VOFFSET=0.25
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+        match &result.elements[0].kind {
+            ElementKind::VoltageSource(SourceSpec::PwlFile {
+                path,
+                time_scale,
+                value_scale,
+                time_offset,
+                value_offset,
+            }) => {
+                assert_eq!(path, "stimulus.csv");
+                assert!((*time_scale - 1e-3).abs() < 1e-15);
+                assert!((*value_scale - 2.0).abs() < 1e-12);
+                assert!((*time_offset - 1e-6).abs() < 1e-15);
+                assert!((*value_offset - 0.25).abs() < 1e-12);
+            }
+            _ => panic!("Expected PWL file source"),
+        }
+    }
+
+    #[test]
+    fn test_parse_pwl_file_source_defaults() {
+        let netlist = r#"PWL FILE Defaults Test
+I1 1 0 PWL(FILE="wave.csv")
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+        match &result.elements[0].kind {
+            ElementKind::CurrentSource(SourceSpec::PwlFile {
+                path,
+                time_scale,
+                value_scale,
+                time_offset,
+                value_offset,
+            }) => {
+                assert_eq!(path, "wave.csv");
+                assert!((*time_scale - 1.0).abs() < 1e-12);
+                assert!((*value_scale - 1.0).abs() < 1e-12);
+                assert!((*time_offset - 0.0).abs() < 1e-12);
+                assert!((*value_offset - 0.0).abs() < 1e-12);
+            }
+            _ => panic!("Expected PWL file source"),
         }
     }
 
