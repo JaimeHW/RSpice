@@ -9,9 +9,9 @@ use std::f64::consts::PI;
 use super::config::HbConfig;
 use super::fft::HbFft;
 use super::result::{HbResult, SpectralVoltage};
-use crate::Value;
 use crate::solver::convergence::{PseudoTransient, SourceStepper};
 use crate::solver::limit_pn_voltage;
+use crate::Value;
 
 /// Error types specific to Harmonic Balance solver
 #[derive(Debug, Clone)]
@@ -258,6 +258,12 @@ pub enum NonlinearDeviceType {
     Nmos,
     /// Four-terminal PMOS (drain, gate, source, bulk)
     Pmos,
+    /// Three-terminal N-channel JFET (drain, gate, source)
+    Njfet,
+    /// Three-terminal P-channel JFET (drain, gate, source)
+    Pjfet,
+    /// Four-terminal voltage-controlled switch (p, n, cp, cn)
+    VoltageSwitch,
 }
 
 /// Device parameters for nonlinear devices
@@ -281,6 +287,14 @@ pub struct NonlinearDeviceParams {
     pub lambda: Value,
     /// Early voltage (BJT)
     pub vaf: Value,
+    /// Switch ON resistance
+    pub ron: Value,
+    /// Switch OFF resistance
+    pub roff: Value,
+    /// Switch hysteresis voltage parameter (stored, currently not stateful in HB)
+    pub vh: Value,
+    /// Switch transition smoothness
+    pub smooth: Value,
 }
 
 impl Default for NonlinearDeviceParams {
@@ -295,6 +309,10 @@ impl Default for NonlinearDeviceParams {
             kp: 2e-5,
             lambda: 0.0,
             vaf: f64::INFINITY,
+            ron: 1.0,
+            roff: 1e6,
+            vh: 0.0,
+            smooth: 0.1,
         }
     }
 }
@@ -326,6 +344,28 @@ impl NonlinearDeviceParams {
             vth,
             kp,
             lambda,
+            ..Default::default()
+        }
+    }
+
+    /// Create JFET parameters
+    pub fn jfet(vto: Value, beta: Value, lambda: Value) -> Self {
+        Self {
+            vth: vto,
+            kp: beta,
+            lambda,
+            ..Default::default()
+        }
+    }
+
+    /// Create voltage-controlled switch parameters
+    pub fn voltage_switch(vt: Value, vh: Value, ron: Value, roff: Value, smooth: Value) -> Self {
+        Self {
+            vth: vt,
+            vh: vh.abs(),
+            ron: ron.max(1e-6),
+            roff: roff.max(1e-6),
+            smooth: smooth.max(1e-9),
             ..Default::default()
         }
     }
@@ -391,6 +431,57 @@ impl NonlinearDeviceInstance {
         }
     }
 
+    /// Create an N-channel JFET instance
+    pub fn njfet(
+        drain: usize,
+        gate: usize,
+        source: usize,
+        vto: Value,
+        beta: Value,
+        lambda: Value,
+    ) -> Self {
+        Self {
+            device_type: NonlinearDeviceType::Njfet,
+            terminals: vec![drain, gate, source],
+            params: NonlinearDeviceParams::jfet(vto, beta, lambda),
+        }
+    }
+
+    /// Create a P-channel JFET instance
+    pub fn pjfet(
+        drain: usize,
+        gate: usize,
+        source: usize,
+        vto: Value,
+        beta: Value,
+        lambda: Value,
+    ) -> Self {
+        Self {
+            device_type: NonlinearDeviceType::Pjfet,
+            terminals: vec![drain, gate, source],
+            params: NonlinearDeviceParams::jfet(vto, beta, lambda),
+        }
+    }
+
+    /// Create a voltage-controlled switch instance
+    pub fn voltage_switch(
+        node_pos: usize,
+        node_neg: usize,
+        ctrl_pos: usize,
+        ctrl_neg: usize,
+        vt: Value,
+        vh: Value,
+        ron: Value,
+        roff: Value,
+        smooth: Value,
+    ) -> Self {
+        Self {
+            device_type: NonlinearDeviceType::VoltageSwitch,
+            terminals: vec![node_pos, node_neg, ctrl_pos, ctrl_neg],
+            params: NonlinearDeviceParams::voltage_switch(vt, vh, ron, roff, smooth),
+        }
+    }
+
     /// Evaluate device current given terminal voltages
     /// Returns Vec of (node_index, current) pairs - current flowing INTO each node
     pub fn evaluate(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
@@ -400,6 +491,9 @@ impl NonlinearDeviceInstance {
             NonlinearDeviceType::PnpBjt => self.eval_pnp_bjt(node_voltages),
             NonlinearDeviceType::Nmos => self.eval_nmos(node_voltages),
             NonlinearDeviceType::Pmos => self.eval_pmos(node_voltages),
+            NonlinearDeviceType::Njfet => self.eval_njfet(node_voltages),
+            NonlinearDeviceType::Pjfet => self.eval_pjfet(node_voltages),
+            NonlinearDeviceType::VoltageSwitch => self.eval_voltage_switch(node_voltages),
         }
     }
 
@@ -412,6 +506,9 @@ impl NonlinearDeviceInstance {
             NonlinearDeviceType::PnpBjt => self.jac_pnp_bjt(node_voltages),
             NonlinearDeviceType::Nmos => self.jac_nmos(node_voltages),
             NonlinearDeviceType::Pmos => self.jac_pmos(node_voltages),
+            NonlinearDeviceType::Njfet => self.jac_njfet(node_voltages),
+            NonlinearDeviceType::Pjfet => self.jac_pjfet(node_voltages),
+            NonlinearDeviceType::VoltageSwitch => self.jac_voltage_switch(node_voltages),
         }
     }
 
@@ -759,6 +856,169 @@ impl NonlinearDeviceInstance {
             ((eff_d, eff_d), gsd),
             // gm: transconductance (S controlled by Vg for PMOS)
             ((eff_s, g), -gm), // PMOS: current decreases with increasing Vg
+        ]
+    }
+
+    fn jfet_ids_gm_gds(&self, node_voltages: &[Value], polarity: Value) -> (Value, Value, Value) {
+        let v_d = self.get_terminal_voltage(node_voltages, 0);
+        let v_g = self.get_terminal_voltage(node_voltages, 1);
+        let v_s = self.get_terminal_voltage(node_voltages, 2);
+
+        let vgs = v_g - v_s;
+        let vds = v_d - v_s;
+        let vgs_int = polarity * vgs;
+        let vds_int = polarity * vds;
+        let vto = self.params.vth;
+        let beta = self.params.kp.max(1e-18);
+        let lambda = self.params.lambda.max(0.0);
+        let vgst = vgs_int - vto;
+
+        let (ids_int, gm, gds) = if vgst <= 0.0 {
+            (0.0, 0.0, 0.0)
+        } else if vds_int < 0.0 {
+            // Reverse operation: swap effective drain/source orientation.
+            let vds_rev = -vds_int;
+            let vgs_rev = vgs_int - vds_int;
+            let vgst_rev = vgs_rev - vto;
+
+            if vgst_rev <= 0.0 {
+                (0.0, 0.0, 0.0)
+            } else if vds_rev <= vgst_rev {
+                let ids_fwd = beta
+                    * (2.0 * vgst_rev * vds_rev - vds_rev * vds_rev)
+                    * (1.0 + lambda * vds_rev);
+                let gm_fwd = 2.0 * beta * vds_rev * (1.0 + lambda * vds_rev);
+                let gds_fwd = beta * 2.0 * (vgst_rev - vds_rev) * (1.0 + lambda * vds_rev)
+                    + beta * (2.0 * vgst_rev * vds_rev - vds_rev * vds_rev) * lambda;
+                (-ids_fwd, -gm_fwd, gm_fwd + gds_fwd)
+            } else {
+                let ids_fwd = beta * vgst_rev * vgst_rev * (1.0 + lambda * vds_rev);
+                let gm_fwd = 2.0 * beta * vgst_rev * (1.0 + lambda * vds_rev);
+                let gds_fwd = beta * vgst_rev * vgst_rev * lambda;
+                (-ids_fwd, -gm_fwd, gm_fwd + gds_fwd)
+            }
+        } else if vds_int <= vgst {
+            let ids = beta * (2.0 * vgst * vds_int - vds_int * vds_int) * (1.0 + lambda * vds_int);
+            let gm = 2.0 * beta * vds_int * (1.0 + lambda * vds_int);
+            let gds = beta * 2.0 * (vgst - vds_int) * (1.0 + lambda * vds_int)
+                + beta * (2.0 * vgst * vds_int - vds_int * vds_int) * lambda;
+            (ids, gm, gds)
+        } else {
+            let ids = beta * vgst * vgst * (1.0 + lambda * vds_int);
+            let gm = 2.0 * beta * vgst * (1.0 + lambda * vds_int);
+            let gds = beta * vgst * vgst * lambda;
+            (ids, gm, gds)
+        };
+
+        (polarity * ids_int, gm, gds.max(1e-12))
+    }
+
+    fn eval_njfet(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
+        let (id, _, _) = self.jfet_ids_gm_gds(node_voltages, 1.0);
+        vec![
+            (self.terminals[0], -id), // Drain current leaving
+            (self.terminals[2], id),  // Source current entering
+        ]
+    }
+
+    fn jac_njfet(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
+        let (_, gm, gds) = self.jfet_ids_gm_gds(node_voltages, 1.0);
+        let d = self.terminals[0];
+        let g = self.terminals[1];
+        let s = self.terminals[2];
+        vec![
+            ((d, d), gds),
+            ((d, s), -(gds + gm)),
+            ((s, d), -gds),
+            ((s, s), gds),
+            ((d, g), gm),
+            ((s, g), -gm),
+        ]
+    }
+
+    fn eval_pjfet(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
+        let (id, _, _) = self.jfet_ids_gm_gds(node_voltages, -1.0);
+        vec![
+            (self.terminals[0], -id), // Drain current leaving
+            (self.terminals[2], id),  // Source current entering
+        ]
+    }
+
+    fn jac_pjfet(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
+        let (_, gm, gds) = self.jfet_ids_gm_gds(node_voltages, -1.0);
+        let d = self.terminals[0];
+        let g = self.terminals[1];
+        let s = self.terminals[2];
+        vec![
+            ((d, d), gds),
+            ((d, s), -(gds + gm)),
+            ((s, d), -gds),
+            ((s, s), gds),
+            ((d, g), gm),
+            ((s, g), -gm),
+        ]
+    }
+
+    fn switch_conductance_and_derivative(&self, vctrl: Value) -> (Value, Value) {
+        // HB uses a memoryless smooth switch characteristic. Hysteresis parameter
+        // is retained in params for compatibility with shared model cards.
+        let smooth = self.params.smooth.max(1e-9);
+        let x = (vctrl - self.params.vth) / smooth;
+        let tanh_x = x.tanh();
+        let f = 0.5 * (1.0 - tanh_x);
+
+        let ron = self.params.ron.max(1e-6);
+        let roff = self.params.roff.max(ron);
+        let log_ron = ron.ln();
+        let log_roff = roff.ln();
+        let dlog_r = log_roff - log_ron;
+        let log_r = log_ron + dlog_r * f;
+        let g = (-log_r).exp();
+
+        let sech2 = 1.0 - tanh_x * tanh_x;
+        let df_dvctrl = -0.5 * sech2 / smooth;
+        let dlogr_dvctrl = dlog_r * df_dvctrl;
+        let dg_dvctrl = -g * dlogr_dvctrl;
+
+        (g.max(1e-12), dg_dvctrl)
+    }
+
+    fn eval_voltage_switch(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
+        let vp = self.get_terminal_voltage(node_voltages, 0);
+        let vn = self.get_terminal_voltage(node_voltages, 1);
+        let vcp = self.get_terminal_voltage(node_voltages, 2);
+        let vcn = self.get_terminal_voltage(node_voltages, 3);
+        let vctrl = vcp - vcn;
+        let vmain = vp - vn;
+        let (g, _) = self.switch_conductance_and_derivative(vctrl);
+        let i = g * vmain;
+        vec![(self.terminals[0], -i), (self.terminals[1], i)]
+    }
+
+    fn jac_voltage_switch(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
+        let vp = self.get_terminal_voltage(node_voltages, 0);
+        let vn = self.get_terminal_voltage(node_voltages, 1);
+        let vcp = self.get_terminal_voltage(node_voltages, 2);
+        let vcn = self.get_terminal_voltage(node_voltages, 3);
+        let vctrl = vcp - vcn;
+        let vmain = vp - vn;
+        let (g, dg_dvctrl) = self.switch_conductance_and_derivative(vctrl);
+        let g_ctrl = dg_dvctrl * vmain;
+
+        let p = self.terminals[0];
+        let n = self.terminals[1];
+        let cp = self.terminals[2];
+        let cn = self.terminals[3];
+
+        vec![
+            ((p, p), g),
+            ((p, n), -g),
+            ((n, p), -g),
+            ((n, n), g),
+            ((p, cp), g_ctrl),
+            ((p, cn), -g_ctrl),
+            ((n, cp), -g_ctrl),
+            ((n, cn), g_ctrl),
         ]
     }
 }
@@ -1341,6 +1601,54 @@ impl HbSolver {
     ) {
         self.add_nonlinear_device(NonlinearDeviceInstance::pmos(
             drain, gate, source, bulk, vth, kp,
+        ));
+    }
+
+    /// Add an N-channel JFET for Newton iteration
+    pub fn add_njfet(
+        &mut self,
+        drain: usize,
+        gate: usize,
+        source: usize,
+        vto: Value,
+        beta: Value,
+        lambda: Value,
+    ) {
+        self.add_nonlinear_device(NonlinearDeviceInstance::njfet(
+            drain, gate, source, vto, beta, lambda,
+        ));
+    }
+
+    /// Add a P-channel JFET for Newton iteration
+    pub fn add_pjfet(
+        &mut self,
+        drain: usize,
+        gate: usize,
+        source: usize,
+        vto: Value,
+        beta: Value,
+        lambda: Value,
+    ) {
+        self.add_nonlinear_device(NonlinearDeviceInstance::pjfet(
+            drain, gate, source, vto, beta, lambda,
+        ));
+    }
+
+    /// Add a voltage-controlled switch for Newton iteration
+    pub fn add_voltage_switch(
+        &mut self,
+        node_pos: usize,
+        node_neg: usize,
+        ctrl_pos: usize,
+        ctrl_neg: usize,
+        vt: Value,
+        vh: Value,
+        ron: Value,
+        roff: Value,
+        smooth: Value,
+    ) {
+        self.add_nonlinear_device(NonlinearDeviceInstance::voltage_switch(
+            node_pos, node_neg, ctrl_pos, ctrl_neg, vt, vh, ron, roff, smooth,
         ));
     }
 
@@ -3159,6 +3467,96 @@ mod solver_tests {
     }
 
     #[test]
+    fn test_nonlinear_device_instance_jfet_and_switch_creation() {
+        let njfet = NonlinearDeviceInstance::njfet(0, 1, 2, -2.0, 1e-3, 0.02);
+        assert_eq!(njfet.device_type, NonlinearDeviceType::Njfet);
+        assert_eq!(njfet.terminals, vec![0, 1, 2]);
+        assert!((njfet.params.vth + 2.0).abs() < 1e-12);
+        assert!((njfet.params.kp - 1e-3).abs() < 1e-15);
+
+        let vsw = NonlinearDeviceInstance::voltage_switch(0, 1, 2, 3, 0.5, 0.0, 1.0, 1e9, 0.05);
+        assert_eq!(vsw.device_type, NonlinearDeviceType::VoltageSwitch);
+        assert_eq!(vsw.terminals, vec![0, 1, 2, 3]);
+        assert!((vsw.params.vth - 0.5).abs() < 1e-12);
+        assert!((vsw.params.ron - 1.0).abs() < 1e-12);
+        assert!((vsw.params.roff - 1e9).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_jfet_evaluate_and_jacobian_kcl() {
+        let jfet = NonlinearDeviceInstance::njfet(0, 1, 2, -2.0, 1e-3, 0.01);
+        // vd=2.0V, vg=-0.5V, vs=0V => conductive region for NJF depletion device
+        let voltages = vec![2.0, -0.5, 0.0];
+        let currents = jfet.evaluate(&voltages);
+
+        let sum: Value = currents.iter().map(|(_, i)| i).sum();
+        assert!(sum.abs() < 1e-12, "JFET current KCL must close: {}", sum);
+
+        let i_d = currents
+            .iter()
+            .find(|(n, _)| *n == 0)
+            .map(|(_, i)| *i)
+            .unwrap_or(0.0);
+        let i_s = currents
+            .iter()
+            .find(|(n, _)| *n == 2)
+            .map(|(_, i)| *i)
+            .unwrap_or(0.0);
+        assert!(i_d < 0.0, "drain current should leave drain node");
+        assert!(i_s > 0.0, "source current should enter source node");
+
+        let jac = jfet.jacobian(&voltages);
+        assert!(
+            jac.iter()
+                .any(|((r, c), v)| *r == 0 && *c == 1 && v.abs() > 0.0),
+            "JFET Jacobian should include drain-gate transconductance"
+        );
+        assert!(
+            jac.iter()
+                .any(|((r, c), v)| *r == 2 && *c == 1 && v.abs() > 0.0),
+            "JFET Jacobian should include source-gate coupling"
+        );
+    }
+
+    #[test]
+    fn test_voltage_switch_evaluate_and_control_jacobian() {
+        let vsw = NonlinearDeviceInstance::voltage_switch(0, 1, 2, 3, 1.0, 0.0, 1.0, 1e9, 0.05);
+        // vp=1.0, vn=0.0, vcp=1.0, vcn=0.0 => threshold region (max control sensitivity)
+        let voltages = vec![1.0, 0.0, 1.0, 0.0];
+        let currents = vsw.evaluate(&voltages);
+        let i_pos = currents
+            .iter()
+            .find(|(n, _)| *n == 0)
+            .map(|(_, i)| *i)
+            .unwrap_or(0.0);
+        let i_neg = currents
+            .iter()
+            .find(|(n, _)| *n == 1)
+            .map(|(_, i)| *i)
+            .unwrap_or(0.0);
+        assert!(
+            i_pos < 0.0 && i_neg > 0.0,
+            "switch branch current direction"
+        );
+        assert!(
+            (i_pos + i_neg).abs() < 1e-12,
+            "switch branch current must satisfy KCL"
+        );
+
+        let jac = vsw.jacobian(&voltages);
+        assert!(
+            jac.iter()
+                .any(|((r, c), v)| *r == 0 && *c == 2 && v.abs() > 0.0),
+            "switch Jacobian should include control-positive coupling"
+        );
+        assert!(
+            jac.iter()
+                .any(|((r, c), v)| *r == 0 && *c == 3 && v.abs() > 0.0),
+            "switch Jacobian should include control-negative coupling"
+        );
+    }
+
+    #[test]
     fn test_diode_evaluate_forward_bias() {
         let diode = NonlinearDeviceInstance::diode(0, 1, 1e-14, 1.0);
         let vt: f64 = 0.02585;
@@ -3333,7 +3731,7 @@ mod solver_tests {
         solver.add_conductance(0, 0, 0.01);
         // 1k resistor between nodes 0 and 1 (full MNA stamp)
         solver.add_resistor(0, 1, 1000.0); // G = 0.001
-        // 1pF capacitor at node 1
+                                           // 1pF capacitor at node 1
         solver.add_capacitance(1, 1, 1e-12);
 
         let state = HbSolverState::new(2, 2);
@@ -3875,7 +4273,11 @@ mod solver_tests {
                 // Use absolute tolerance for near-zero values, relative for larger
                 let rel_diff = if scale < abs_tol {
                     // Both values are near zero - check absolute difference
-                    if diff < abs_tol { 0.0 } else { diff / abs_tol }
+                    if diff < abs_tol {
+                        0.0
+                    } else {
+                        diff / abs_tol
+                    }
                 } else {
                     diff / scale
                 };
@@ -4192,7 +4594,7 @@ mod solver_tests {
         solver.set_dc_source(2, 1e-3); // Current into drain
         solver.add_conductance(1, 1, 1.0); // Gate conductance to ground (G=1S)
         solver.add_conductance(3, 3, 1.0); // Source grounded
-        // NMOS: drain=2, gate=1, source=3, bulk=3, kp=200µA/V², vth=0.5V
+                                           // NMOS: drain=2, gate=1, source=3, bulk=3, kp=200µA/V², vth=0.5V
         solver.add_nmos(2, 1, 3, 3, 2e-4, 0.5);
         for n in 0..4 {
             solver.add_conductance(n, n, 1e-9);
@@ -4229,7 +4631,7 @@ mod solver_tests {
 
         // Use add_resistor for proper MNA stamp: 100 ohm base resistor to ground
         solver.add_resistor(1, 3, 100.0); // Base to ground: G = 0.01S
-        // 100 ohm collector resistor to ground
+                                          // 100 ohm collector resistor to ground
         solver.add_resistor(2, 3, 100.0); // Collector to ground: G = 0.01S
 
         // Ground node (large conductance to clamp)

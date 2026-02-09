@@ -226,26 +226,18 @@ impl Engine {
     }
 
     fn hb_has_supported_nonlinear_devices(circuit: &CircuitData) -> bool {
-        !circuit.diodes.is_empty() || !circuit.bjts.is_empty() || !circuit.mosfets.is_empty()
+        !circuit.diodes.is_empty()
+            || !circuit.bjts.is_empty()
+            || !circuit.mosfets.is_empty()
+            || !circuit.jfets.is_empty()
+            || !circuit.vswitches.is_empty()
     }
 
     fn hb_unsupported_nonlinear_device_summary(circuit: &CircuitData) -> Option<String> {
         let mut kinds: Vec<String> = Vec::new();
 
-        if !circuit.jfets.is_empty() {
-            kinds.push(format!("{} JFET(s)", circuit.jfets.len()));
-        }
-        if !circuit.vswitches.is_empty() {
-            kinds.push(format!("{} voltage switch(es)", circuit.vswitches.len()));
-        }
         if !circuit.iswitches.is_empty() {
             kinds.push(format!("{} current switch(es)", circuit.iswitches.len()));
-        }
-        if !circuit.jiles_atherton_inductors.is_empty() {
-            kinds.push(format!(
-                "{} Jiles-Atherton inductor(s)",
-                circuit.jiles_atherton_inductors.len()
-            ));
         }
         #[cfg(feature = "veriloga")]
         if !circuit.veriloga_devices.is_empty() {
@@ -264,7 +256,11 @@ impl Engine {
 
     #[inline]
     fn hb_node_to_solver_index(node: usize, num_nodes: usize) -> usize {
-        if node == 0 { num_nodes } else { node - 1 }
+        if node == 0 {
+            num_nodes
+        } else {
+            node - 1
+        }
     }
 
     fn hb_stamp_supported_nonlinear_devices(
@@ -307,6 +303,45 @@ impl Engine {
                     solver.add_pmos(drain, gate, source, bulk, kp, mos.vto.abs());
                 }
             }
+        }
+
+        for jfet in &circuit.jfets {
+            let drain = Self::hb_node_to_solver_index(jfet.drain, num_nodes);
+            let gate = Self::hb_node_to_solver_index(jfet.gate, num_nodes);
+            let source = Self::hb_node_to_solver_index(jfet.source, num_nodes);
+            let beta = jfet.params.beta.max(1e-18);
+            match jfet.jfet_type {
+                crate::device::JfetType::NJF => {
+                    solver.add_njfet(
+                        drain,
+                        gate,
+                        source,
+                        jfet.params.vto,
+                        beta,
+                        jfet.params.lambda,
+                    );
+                }
+                crate::device::JfetType::PJF => {
+                    solver.add_pjfet(
+                        drain,
+                        gate,
+                        source,
+                        jfet.params.vto,
+                        beta,
+                        jfet.params.lambda,
+                    );
+                }
+            }
+        }
+
+        for sw in &circuit.vswitches {
+            let node_pos = Self::hb_node_to_solver_index(sw.node_pos, num_nodes);
+            let node_neg = Self::hb_node_to_solver_index(sw.node_neg, num_nodes);
+            let ctrl_pos = Self::hb_node_to_solver_index(sw.ctrl_pos, num_nodes);
+            let ctrl_neg = Self::hb_node_to_solver_index(sw.ctrl_neg, num_nodes);
+            solver.add_voltage_switch(
+                node_pos, node_neg, ctrl_pos, ctrl_neg, sw.vt, sw.vh, sw.ron, sw.roff, sw.smooth,
+            );
         }
     }
 
@@ -707,17 +742,76 @@ mod tests {
     }
 
     #[test]
+    fn test_run_hb_solves_jfet_nonlinear_devices() {
+        use crate::Netlist;
+
+        let netlist_str = r#"
+            * JFET nonlinear HB support
+            IBIAS 0 d DC 1m
+            VG g 0 DC -1
+            R1 d 0 2k
+            C1 d 0 1n
+            J1 d g 0 JMOD
+            .MODEL JMOD NJF (VTO=-2 BETA=1e-3 LAMBDA=0.01)
+            .END
+        "#;
+
+        let netlist = Netlist::parse(netlist_str).expect("Parse failed");
+        let engine = Engine::default();
+        let config = HbConfig::new(1e6).with_harmonics(3);
+
+        let result = engine.run_hb(&netlist, config);
+        assert!(
+            result.is_ok(),
+            "JFET nonlinear HB should succeed: {:?}",
+            result.err()
+        );
+        let hb = result.expect("JFET nonlinear HB should succeed");
+        assert!(hb.result.is_valid());
+    }
+
+    #[test]
+    fn test_run_hb_solves_voltage_switch_nonlinear_devices() {
+        use crate::Netlist;
+
+        let netlist_str = r#"
+            * Voltage-controlled switch nonlinear HB support
+            VCTRL vc 0 DC 2
+            IBIAS 0 out DC 1m
+            RLOAD out 0 2k
+            C1 out 0 1n
+            S1 out 0 vc 0 SMOD
+            .MODEL SMOD VSWITCH (VT=1 VH=0 RON=10 ROFF=1e9)
+            .END
+        "#;
+
+        let netlist = Netlist::parse(netlist_str).expect("Parse failed");
+        let engine = Engine::default();
+        let config = HbConfig::new(1e6).with_harmonics(3);
+
+        let result = engine.run_hb(&netlist, config);
+        assert!(
+            result.is_ok(),
+            "VSwitch nonlinear HB should succeed: {:?}",
+            result.err()
+        );
+        let hb = result.expect("VSwitch nonlinear HB should succeed");
+        assert!(hb.result.is_valid());
+    }
+
+    #[test]
     fn test_run_hb_rejects_unsupported_nonlinear_device_classes() {
         use crate::Netlist;
 
         let netlist_str = r#"
-            * JFET is not yet supported in HB nonlinear runtime
-            VDD d 0 DC 5
-            VG g 0 DC -1
-            R1 d 0 1k
-            C1 d 0 1n
-            J1 d g 0 JMOD
-            .MODEL JMOD NJF (VTO=-2 BETA=1e-3)
+            * ISwitch remains unsupported in HB nonlinear runtime
+            VCTRL ctrl 0 DC 0
+            VSENSE nsense 0 DC 0
+            IBIAS 0 out DC 1m
+            RLOAD out 0 1k
+            C1 out 0 1n
+            W1 out 0 VSENSE SMOD
+            .MODEL SMOD ISWITCH (IT=1m IH=0 RON=1 ROFF=1e9)
             .END
         "#;
 
@@ -733,7 +827,11 @@ mod tests {
             "expected unsupported device diagnostics: {}",
             msg
         );
-        assert!(msg.contains("JFET"), "expected JFET summary: {}", msg);
+        assert!(
+            msg.contains("current switch"),
+            "expected current switch summary: {}",
+            msg
+        );
     }
 
     // =========================================================================
@@ -934,30 +1032,26 @@ mod tests {
         );
 
         let hb = result.expect("HB run should succeed");
-        assert!(
-            hb.result
-                .node_names
-                .iter()
-                .any(|name| name.eq_ignore_ascii_case("vin"))
-        );
-        assert!(
-            hb.result
-                .node_names
-                .iter()
-                .any(|name| name.eq_ignore_ascii_case("vout"))
-        );
-        assert!(
-            hb.result
-                .spectral_voltages
-                .iter()
-                .any(|spectrum| spectrum.node_name.eq_ignore_ascii_case("vin"))
-        );
-        assert!(
-            hb.result
-                .spectral_voltages
-                .iter()
-                .any(|spectrum| spectrum.node_name.eq_ignore_ascii_case("vout"))
-        );
+        assert!(hb
+            .result
+            .node_names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case("vin")));
+        assert!(hb
+            .result
+            .node_names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case("vout")));
+        assert!(hb
+            .result
+            .spectral_voltages
+            .iter()
+            .any(|spectrum| spectrum.node_name.eq_ignore_ascii_case("vin")));
+        assert!(hb
+            .result
+            .spectral_voltages
+            .iter()
+            .any(|spectrum| spectrum.node_name.eq_ignore_ascii_case("vout")));
     }
 
     #[test]
@@ -2035,8 +2129,8 @@ mod tests {
     fn test_dcac_parsing_and_circuit_building() {
         // Comprehensive test to verify DC AC combined syntax parsing
         // and propagation through circuit building to HB solver
-        use crate::Netlist;
         use crate::netlist::{ElementKind, SourceSpec};
+        use crate::Netlist;
 
         let netlist_str = r#"
             * Test DC AC combined source
@@ -2125,7 +2219,7 @@ mod tests {
         let r: f64 = 100.0;
         let l: f64 = 1e-3; // 1mH
         let c: f64 = 10e-9; // 10nF
-        // Resonant frequency = 1/(2π√(1e-3 * 10e-9)) ≈ 50.33 kHz
+                            // Resonant frequency = 1/(2π√(1e-3 * 10e-9)) ≈ 50.33 kHz
         let f0 = 1.0 / (2.0 * PI * (l * c).sqrt());
 
         // Test at resonance
