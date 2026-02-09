@@ -245,6 +245,16 @@ impl Engine {
                 .iswitches
                 .iter()
                 .any(|sw| Self::hb_resolve_iswitch_control(circuit, sw, num_nodes).is_ok())
+            || {
+                #[cfg(feature = "veriloga")]
+                {
+                    !circuit.veriloga_devices.is_empty()
+                }
+                #[cfg(not(feature = "veriloga"))]
+                {
+                    false
+                }
+            }
     }
 
     fn hb_unsupported_nonlinear_device_summary(
@@ -264,14 +274,6 @@ impl Engine {
                 unsupported_iswitch
             ));
         }
-        #[cfg(feature = "veriloga")]
-        if !circuit.veriloga_devices.is_empty() {
-            kinds.push(format!(
-                "{} Verilog-A device(s)",
-                circuit.veriloga_devices.len()
-            ));
-        }
-
         if kinds.is_empty() {
             None
         } else {
@@ -448,6 +450,11 @@ impl Engine {
                 sw.smooth,
                 HB_NORTON_G,
             );
+        }
+
+        #[cfg(feature = "veriloga")]
+        for device in circuit.veriloga_devices.iter() {
+            solver.add_veriloga_device(device.clone());
         }
     }
 
@@ -680,6 +687,87 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::analysis::HbConfig;
+    #[cfg(feature = "veriloga")]
+    use crate::circuit::CircuitData;
+    #[cfg(feature = "veriloga")]
+    use crate::device::veriloga::VerilogADevice;
+    #[cfg(feature = "veriloga")]
+    use rspice_veriloga::codegen::{
+        BytecodeProgram, CompiledModel, CompiledParameter, Instruction,
+        JacobianEntry as VaJacobianEntry, StampIndex, StampLocation, StampProgram,
+    };
+
+    #[cfg(feature = "veriloga")]
+    fn create_veriloga_resistor_model() -> CompiledModel {
+        let value_program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushParam(0),
+                Instruction::PushVoltage(0, 1),
+                Instruction::Mul,
+            ],
+        };
+        let g_pos = BytecodeProgram {
+            instructions: vec![Instruction::PushParam(0)],
+        };
+        let g_neg = BytecodeProgram {
+            instructions: vec![Instruction::PushParam(0), Instruction::Neg],
+        };
+
+        CompiledModel {
+            name: "hb_engine_va_resistor".into(),
+            num_terminals: 2,
+            terminal_names: vec!["p".into(), "n".into()],
+            parameters: vec![CompiledParameter {
+                name: "g".into(),
+                default: 1e-3,
+                min: Some(0.0),
+                max: None,
+            }],
+            num_variables: 0,
+            assignment_programs: vec![],
+            stamp_programs: vec![StampProgram {
+                stamp_locations: vec![
+                    StampLocation {
+                        row: StampIndex::Terminal(0),
+                        col: StampIndex::Ground,
+                        sign: -1.0,
+                    },
+                    StampLocation {
+                        row: StampIndex::Terminal(1),
+                        col: StampIndex::Ground,
+                        sign: 1.0,
+                    },
+                ],
+                value_program,
+                jacobian_programs: vec![
+                    VaJacobianEntry {
+                        row: StampIndex::Terminal(0),
+                        col: StampIndex::Terminal(0),
+                        program: g_pos.clone(),
+                    },
+                    VaJacobianEntry {
+                        row: StampIndex::Terminal(0),
+                        col: StampIndex::Terminal(1),
+                        program: g_neg.clone(),
+                    },
+                    VaJacobianEntry {
+                        row: StampIndex::Terminal(1),
+                        col: StampIndex::Terminal(0),
+                        program: g_neg,
+                    },
+                    VaJacobianEntry {
+                        row: StampIndex::Terminal(1),
+                        col: StampIndex::Terminal(1),
+                        program: g_pos,
+                    },
+                ],
+            }],
+            lookup_tables: vec![],
+            internal_nodes: 0,
+            branch_currents: 0,
+            laplace_filters: vec![],
+        }
+    }
 
     // =========================================================================
     // Error Type Tests
@@ -930,6 +1018,46 @@ mod tests {
         );
         let hb = result.expect("ISwitch nonlinear HB should succeed");
         assert!(hb.result.is_valid());
+    }
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn test_hb_veriloga_devices_are_treated_as_supported() {
+        let mut circuit = CircuitData::new();
+        let node = circuit.get_or_create_node("n1");
+        let mut device = VerilogADevice::new("RVA1", create_veriloga_resistor_model(), &[node, 0]);
+        assert!(device.set_parameter("g", 1e-3));
+        circuit.veriloga_devices.add(device);
+        let num_nodes = circuit.num_nodes();
+
+        assert!(
+            Engine::hb_has_supported_nonlinear_devices(&circuit, num_nodes),
+            "Verilog-A devices should enable nonlinear HB mode"
+        );
+        assert!(
+            Engine::hb_unsupported_nonlinear_device_summary(&circuit, num_nodes).is_none(),
+            "Verilog-A devices should not be rejected as unsupported"
+        );
+    }
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn test_hb_stamps_veriloga_devices_into_solver() {
+        let mut circuit = CircuitData::new();
+        let node = circuit.get_or_create_node("n1");
+        let mut device = VerilogADevice::new("RVA1", create_veriloga_resistor_model(), &[node, 0]);
+        assert!(device.set_parameter("g", 1e-3));
+        circuit.veriloga_devices.add(device);
+
+        let num_nodes = circuit.num_nodes();
+        let mut solver = HbSolver::new(HbConfig::new(1e6).with_harmonics(1), num_nodes);
+        let engine = Engine::default();
+        engine.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
+
+        assert!(
+            solver.has_nonlinear_devices(),
+            "Verilog-A device stamping should register nonlinear HB devices"
+        );
     }
 
     #[test]
