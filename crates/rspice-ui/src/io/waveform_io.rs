@@ -1,14 +1,17 @@
 //! Waveform I/O
 //!
 //! Read and write waveform data in various formats.
-//! Supports industry-standard formats used by commercial simulators.
+//! Supports interchange formats used by commercial simulators.
 //!
 //! # Supported Formats
 //!
+//! - NUTMEG (SPICE3/ngspice raw format) for import
+//! - CSV and TSV for import/export
+//!
+//! # Planned Formats
+//!
 //! - PSF (Parameter Storage Format) - Cadence
-//! - NUTMEG (SPICE3/ngspice raw format)
-//! - CSV (comma-separated values)
-//! - BSIM (Berkeley format)
+//! - Touchstone S-parameter format
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -63,6 +66,22 @@ impl WaveformFormat {
             WaveformFormat::Tsv => "tsv",
             WaveformFormat::Touchstone => "s2p",
         }
+    }
+
+    /// Whether this format currently supports reading.
+    pub fn can_read(&self) -> bool {
+        matches!(
+            self,
+            WaveformFormat::Csv
+                | WaveformFormat::Tsv
+                | WaveformFormat::Nutmeg
+                | WaveformFormat::AsciiRaw
+        )
+    }
+
+    /// Whether this format currently supports writing.
+    pub fn can_write(&self) -> bool {
+        matches!(self, WaveformFormat::Csv | WaveformFormat::Tsv)
     }
 }
 
@@ -260,7 +279,10 @@ impl WaveformReader {
             WaveformFormat::Csv => self.read_csv(path),
             WaveformFormat::Tsv => self.read_tsv(path),
             WaveformFormat::Nutmeg | WaveformFormat::AsciiRaw => self.read_nutmeg(path),
-            _ => Err(format!("Format {:?} not yet implemented", self.format)),
+            _ => Err(format!(
+                "Format {:?} read is not implemented (supported: Csv, Tsv, Nutmeg/AsciiRaw)",
+                self.format
+            )),
         }
     }
 
@@ -425,7 +447,10 @@ impl WaveformWriter {
         match self.format {
             WaveformFormat::Csv => self.write_csv(dataset, path),
             WaveformFormat::Tsv => self.write_tsv(dataset, path),
-            _ => Err(format!("Writing format {:?} not implemented", self.format)),
+            _ => Err(format!(
+                "Format {:?} write is not implemented (supported: Csv, Tsv)",
+                self.format
+            )),
         }
     }
 
@@ -489,6 +514,7 @@ impl WaveformWriter {
 mod tests {
     use super::*;
     use std::io::Write;
+    use std::path::Path;
     use tempfile::NamedTempFile;
 
     // =========================================================================
@@ -510,6 +536,16 @@ mod tests {
             Some(WaveformFormat::Psf)
         );
         assert_eq!(WaveformFormat::from_extension("xyz"), None);
+    }
+
+    #[test]
+    fn test_format_capabilities() {
+        assert!(WaveformFormat::Csv.can_read());
+        assert!(WaveformFormat::Csv.can_write());
+        assert!(WaveformFormat::Nutmeg.can_read());
+        assert!(!WaveformFormat::Nutmeg.can_write());
+        assert!(!WaveformFormat::Psf.can_read());
+        assert!(!WaveformFormat::Touchstone.can_write());
     }
 
     // =========================================================================
@@ -663,5 +699,15 @@ mod tests {
 
         assert_eq!(dataset.title, "Test Simulation");
         assert_eq!(dataset.analysis, "Transient Analysis");
+    }
+
+    #[test]
+    fn test_reader_reports_unsupported_format() {
+        let reader = WaveformReader::new(WaveformFormat::Psf);
+        let err = reader
+            .read(Path::new("dummy.psf"))
+            .expect_err("PSF read should be unsupported");
+        assert!(err.contains("not implemented"));
+        assert!(err.contains("supported"));
     }
 }
