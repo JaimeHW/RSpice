@@ -7,11 +7,14 @@
 //!
 //! - NUTMEG (SPICE3/ngspice raw format) for import
 //! - CSV and TSV for import/export
+//! - PSF-Lite binary waveform format (`PSFL`) for import
 //!
 //! # Planned Formats
 //!
-//! - PSF (Parameter Storage Format) - Cadence
+//! - Cadence PSF native database import
 //! - Touchstone S-parameter format
+
+use super::binary_io::PsfReader;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -72,7 +75,8 @@ impl WaveformFormat {
     pub fn can_read(&self) -> bool {
         matches!(
             self,
-            WaveformFormat::Csv
+            WaveformFormat::Psf
+                | WaveformFormat::Csv
                 | WaveformFormat::Tsv
                 | WaveformFormat::Nutmeg
                 | WaveformFormat::AsciiRaw
@@ -276,14 +280,62 @@ impl WaveformReader {
     /// Read from file
     pub fn read(&self, path: &Path) -> Result<WaveformDataset, String> {
         match self.format {
+            WaveformFormat::Psf => self.read_psf(path),
             WaveformFormat::Csv => self.read_csv(path),
             WaveformFormat::Tsv => self.read_tsv(path),
             WaveformFormat::Nutmeg | WaveformFormat::AsciiRaw => self.read_nutmeg(path),
             _ => Err(format!(
-                "Format {:?} read is not implemented (supported: Csv, Tsv, Nutmeg/AsciiRaw)",
+                "Format {:?} read is not implemented (supported: PSF-Lite, Csv, Tsv, Nutmeg/AsciiRaw)",
                 self.format
             )),
         }
+    }
+
+    /// Read PSF-Lite binary waveform format (`PSFL`).
+    ///
+    /// This currently supports rspice's PSF-Lite container and does not yet parse
+    /// Cadence native PSF directory databases.
+    fn read_psf(&self, path: &Path) -> Result<WaveformDataset, String> {
+        let mut reader = PsfReader::open(path)
+            .map_err(|e| format!("Failed to open PSF-Lite file '{}': {}", path.display(), e))?;
+
+        let header = reader.header().clone();
+        if header.num_traces == 0 {
+            return Err("PSF-Lite file contains zero traces".to_string());
+        }
+
+        let mut dataset =
+            WaveformDataset::new(path.file_stem().and_then(|s| s.to_str()).unwrap_or("psf"));
+        dataset.analysis = "PSF-Lite".to_string();
+        dataset
+            .metadata
+            .insert("format".to_string(), "psf-lite".to_string());
+        dataset
+            .metadata
+            .insert("num_traces".to_string(), header.num_traces.to_string());
+        dataset
+            .metadata
+            .insert("num_points".to_string(), header.num_points.to_string());
+        dataset
+            .metadata
+            .insert("timestamp".to_string(), header.timestamp.to_string());
+
+        let mut x = WaveformSignal::new("time", SignalType::Time);
+        x.data = reader
+            .read_trace(0)
+            .map_err(|e| format!("Failed to read PSF-Lite trace 0: {}", e))?;
+        dataset.set_x(x);
+
+        for trace_idx in 1..header.num_traces {
+            let mut signal =
+                WaveformSignal::new(format!("trace{}", trace_idx), SignalType::Unknown);
+            signal.data = reader
+                .read_trace(trace_idx)
+                .map_err(|e| format!("Failed to read PSF-Lite trace {}: {}", trace_idx, e))?;
+            dataset.add_signal(signal);
+        }
+
+        Ok(dataset)
     }
 
     /// Read CSV file
@@ -513,8 +565,8 @@ impl WaveformWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::io::binary_io::{PsfHeader, PsfWriter};
     use std::io::Write;
-    use std::path::Path;
     use tempfile::NamedTempFile;
 
     // =========================================================================
@@ -544,7 +596,7 @@ mod tests {
         assert!(WaveformFormat::Csv.can_write());
         assert!(WaveformFormat::Nutmeg.can_read());
         assert!(!WaveformFormat::Nutmeg.can_write());
-        assert!(!WaveformFormat::Psf.can_read());
+        assert!(WaveformFormat::Psf.can_read());
         assert!(!WaveformFormat::Touchstone.can_write());
     }
 
@@ -702,12 +754,32 @@ mod tests {
     }
 
     #[test]
-    fn test_reader_reports_unsupported_format() {
+    fn test_read_psf_lite_roundtrip() {
+        let temp = NamedTempFile::new().expect("temp file");
+        let header = PsfHeader::new(3, 4);
+
+        {
+            let mut writer = PsfWriter::create(temp.path()).expect("psf writer");
+            writer.write_header(&header).expect("header");
+            writer.write_trace(&[0.0, 1.0, 2.0, 3.0]).expect("time");
+            writer.write_trace(&[0.1, 0.2, 0.3, 0.4]).expect("trace 1");
+            writer.write_trace(&[1.1, 1.2, 1.3, 1.4]).expect("trace 2");
+        }
+
         let reader = WaveformReader::new(WaveformFormat::Psf);
-        let err = reader
-            .read(Path::new("dummy.psf"))
-            .expect_err("PSF read should be unsupported");
-        assert!(err.contains("not implemented"));
-        assert!(err.contains("supported"));
+        let dataset = reader.read(temp.path()).expect("PSF-Lite read should work");
+
+        assert_eq!(dataset.analysis, "PSF-Lite");
+        assert_eq!(dataset.point_count(), 4);
+        assert_eq!(dataset.signal_count(), 2);
+        assert_eq!(
+            dataset
+                .x_signal
+                .as_ref()
+                .and_then(|x| x.get(2))
+                .unwrap_or(0.0),
+            2.0
+        );
+        assert_eq!(dataset.signals[0].data[0], 0.1);
     }
 }

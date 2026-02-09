@@ -67,6 +67,10 @@ impl PsfReader {
         Ok(Self { file, header })
     }
 
+    pub fn header(&self) -> &PsfHeader {
+        &self.header
+    }
+
     /// Read a specific trace by index
     pub fn read_trace(&mut self, trace_idx: u32) -> std::io::Result<Vec<f64>> {
         if trace_idx >= self.header.num_traces {

@@ -10,6 +10,7 @@
 //! - `netlist_export` - Netlist generation from schematic
 //! - `waveform_io` - Waveform file formats (PSF, NUTMEG, CSV)
 
+pub mod binary_io;
 pub mod lib_parser;
 pub mod netlist_export;
 pub mod schematic_io;
@@ -17,6 +18,7 @@ pub mod session_io;
 pub mod waveform_io;
 
 // Re-exports
+pub use binary_io::{PsfHeader, PsfReader, PsfWriter};
 pub use lib_parser::{
     IncludeDirective, IncludeType, LibrarySection, ModelDef, ParamValue, ParsedLibrary,
     SubcircuitDef,
