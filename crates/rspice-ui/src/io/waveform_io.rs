@@ -1244,8 +1244,11 @@ impl WaveformReader {
                             let first = numeric_tokens[offset];
                             let second = numeric_tokens[offset + 1];
                             offset += 2;
-                            let (re, im) =
-                                Self::touchstone_pair_to_complex(first, second, options.data_format);
+                            let (re, im) = Self::touchstone_pair_to_complex(
+                                first,
+                                second,
+                                options.data_format,
+                            );
                             matrix_re[row][col][freq_idx] = re;
                             matrix_im[row][col][freq_idx] = im;
                         }
@@ -1255,8 +1258,11 @@ impl WaveformReader {
                             let first = numeric_tokens[offset];
                             let second = numeric_tokens[offset + 1];
                             offset += 2;
-                            let (re, im) =
-                                Self::touchstone_pair_to_complex(first, second, options.data_format);
+                            let (re, im) = Self::touchstone_pair_to_complex(
+                                first,
+                                second,
+                                options.data_format,
+                            );
                             matrix_re[row][col][freq_idx] = re;
                             matrix_im[row][col][freq_idx] = im;
                         }
@@ -1266,8 +1272,11 @@ impl WaveformReader {
                             let first = numeric_tokens[offset];
                             let second = numeric_tokens[offset + 1];
                             offset += 2;
-                            let (re, im) =
-                                Self::touchstone_pair_to_complex(first, second, options.data_format);
+                            let (re, im) = Self::touchstone_pair_to_complex(
+                                first,
+                                second,
+                                options.data_format,
+                            );
                             matrix_re[row][col][freq_idx] = re;
                             matrix_im[row][col][freq_idx] = im;
                         }
@@ -1377,9 +1386,9 @@ impl WaveformReader {
     ) -> Option<usize> {
         let matrix_points = match matrix_format {
             TouchstoneMatrixFormat::Full => num_ports.checked_mul(num_ports)?,
-            TouchstoneMatrixFormat::Lower | TouchstoneMatrixFormat::Upper => {
-                num_ports.checked_mul(num_ports.checked_add(1)?)?.checked_div(2)?
-            }
+            TouchstoneMatrixFormat::Lower | TouchstoneMatrixFormat::Upper => num_ports
+                .checked_mul(num_ports.checked_add(1)?)?
+                .checked_div(2)?,
         };
         matrix_points.checked_mul(2)?.checked_add(1)
     }
@@ -1940,7 +1949,8 @@ impl WaveformWriter {
 mod tests {
     use super::super::cadence_psf::test_helpers::{
         build_non_windowed_complex_psf, build_non_windowed_int32_psf, build_non_windowed_int8_psf,
-        build_non_windowed_real_psf,
+        build_non_windowed_mixed_real_and_string_psf, build_non_windowed_real_psf,
+        build_non_windowed_struct_psf,
     };
     use super::*;
     use crate::io::binary_io::{PsfHeader, PsfWriter};
@@ -2706,6 +2716,71 @@ mod tests {
             dataset.get_signal("V(out)").expect("trace exists").data,
             vec![1024.0, -2.0]
         );
+    }
+
+    #[test]
+    fn test_read_cadence_psf_binary_struct_trace_flattens_members() {
+        let temp = Builder::new().suffix(".psf").tempfile().expect("temp psf");
+        std::fs::write(temp.path(), build_non_windowed_struct_psf()).expect("write cadence psf");
+
+        let dataset = WaveformReader::new(WaveformFormat::Psf)
+            .read(temp.path())
+            .expect("cadence psf binary read should work");
+
+        assert_eq!(
+            dataset
+                .x_signal
+                .as_ref()
+                .expect("x axis exists")
+                .data
+                .as_slice(),
+            &[0.0, 1.0]
+        );
+        assert_eq!(
+            dataset.get_signal("V(out).dc").expect("dc signal").data,
+            vec![1.0, 1.5]
+        );
+        assert_eq!(
+            dataset
+                .get_signal("V(out).ac_RE")
+                .expect("ac re signal")
+                .data,
+            vec![2.0, 2.5]
+        );
+        assert_eq!(
+            dataset
+                .get_signal("V(out).ac_IM")
+                .expect("ac im signal")
+                .data,
+            vec![0.5, -0.25]
+        );
+    }
+
+    #[test]
+    fn test_read_cadence_psf_binary_ignores_string_traces() {
+        let temp = Builder::new().suffix(".psf").tempfile().expect("temp psf");
+        std::fs::write(temp.path(), build_non_windowed_mixed_real_and_string_psf())
+            .expect("write cadence psf");
+
+        let dataset = WaveformReader::new(WaveformFormat::Psf)
+            .read(temp.path())
+            .expect("cadence psf binary read should work");
+
+        assert_eq!(
+            dataset
+                .x_signal
+                .as_ref()
+                .expect("x axis exists")
+                .data
+                .as_slice(),
+            &[0.0, 1.0]
+        );
+        assert_eq!(dataset.signal_count(), 1);
+        assert_eq!(
+            dataset.get_signal("V(out)").expect("real signal").data,
+            vec![1.25, 2.5]
+        );
+        assert!(dataset.get_signal("meta").is_none());
     }
 
     #[test]

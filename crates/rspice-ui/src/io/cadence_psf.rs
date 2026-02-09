@@ -140,6 +140,19 @@ impl DataType {
 }
 
 #[derive(Debug, Clone)]
+struct TypeDecl {
+    name: String,
+    kind: TypeKind,
+}
+
+#[derive(Debug, Clone)]
+enum TypeKind {
+    Primitive(DataType),
+    Array { element_type: DataType },
+    Struct { members: Vec<u32> },
+}
+
+#[derive(Debug, Clone)]
 struct SignalRef {
     id: u32,
     name: String,
@@ -156,6 +169,30 @@ enum TraceDef {
 enum SignalValues {
     Real(Vec<f64>),
     Complex(Vec<(f64, f64)>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChannelKind {
+    Real,
+    Complex,
+}
+
+#[derive(Debug, Clone)]
+struct ChannelSpec {
+    suffix: String,
+    kind: ChannelKind,
+}
+
+#[derive(Debug, Clone)]
+struct SignalChannel {
+    suffix: String,
+    values: SignalValues,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum NumericSample {
+    Real(f64),
+    Complex((f64, f64)),
 }
 
 pub fn parse_cadence_psf_binary(data: &[u8]) -> Result<ParsedCadencePsfBinary, CadencePsfError> {
@@ -178,26 +215,34 @@ pub fn parse_cadence_psf_binary(data: &[u8]) -> Result<ParsedCadencePsfBinary, C
     let mut complex_signals = Vec::new();
 
     for signal in flat_traces {
-        match signal_values.get(&signal.id) {
-            Some(SignalValues::Real(values)) => real_signals.push(NamedRealSignal {
-                name: signal.name.clone(),
-                values: values.clone(),
-            }),
-            Some(SignalValues::Complex(values)) => complex_signals.push(NamedComplexSignal {
-                name: signal.name.clone(),
-                values: values.clone(),
-            }),
-            None => {}
+        if let Some(channels) = signal_values.get(&signal.id) {
+            for channel in channels {
+                let name = qualify_signal_name(&signal.name, &channel.suffix);
+                match &channel.values {
+                    SignalValues::Real(values) => real_signals.push(NamedRealSignal {
+                        name,
+                        values: values.clone(),
+                    }),
+                    SignalValues::Complex(values) => complex_signals.push(NamedComplexSignal {
+                        name,
+                        values: values.clone(),
+                    }),
+                }
+            }
         }
     }
 
     let mut sweep_signals = Vec::new();
     for sweep in &sweeps {
-        if let Some(SignalValues::Real(values)) = signal_values.get(&sweep.id) {
-            sweep_signals.push(NamedRealSignal {
-                name: sweep.name.clone(),
-                values: values.clone(),
-            });
+        if let Some(channels) = signal_values.get(&sweep.id) {
+            for channel in channels {
+                if let SignalValues::Real(values) = &channel.values {
+                    sweep_signals.push(NamedRealSignal {
+                        name: qualify_signal_name(&sweep.name, &channel.suffix),
+                        values: values.clone(),
+                    });
+                }
+            }
         }
     }
 
@@ -304,7 +349,7 @@ fn parse_header(
     Ok(header)
 }
 
-fn parse_types(file: &[u8], entry: TocEntry) -> Result<HashMap<u32, DataType>, CadencePsfError> {
+fn parse_types(file: &[u8], entry: TocEntry) -> Result<HashMap<u32, TypeDecl>, CadencePsfError> {
     if entry.start + 16 > file.len() {
         return Err(CadencePsfError::new("type section truncated"));
     }
@@ -323,22 +368,50 @@ fn parse_types(file: &[u8], entry: TocEntry) -> Result<HashMap<u32, DataType>, C
     let mut cursor = &file[entry.start + 16..end_of_section];
     let mut types = HashMap::new();
     while cursor.len() > 4 {
-        let block = read_u32(&mut cursor)?;
-        if block != 16 {
-            return Err(CadencePsfError::new(format!(
-                "type item expected block 16, got {}",
-                block
-            )));
-        }
-        let type_id = read_u32(&mut cursor)?;
-        let _name = parse_string(&mut cursor)?;
-        let _array_type = read_u32(&mut cursor)?;
-        let data_type = read_u32(&mut cursor)?;
-        skip_properties(&mut cursor)?;
-        types.insert(type_id, DataType::from_u32(data_type));
+        parse_type_decl(&mut cursor, &mut types)?;
     }
 
     Ok(types)
+}
+
+fn parse_type_decl(
+    cursor: &mut &[u8],
+    types: &mut HashMap<u32, TypeDecl>,
+) -> Result<u32, CadencePsfError> {
+    let block = read_u32(cursor)?;
+    if block != 16 {
+        return Err(CadencePsfError::new(format!(
+            "type item expected block 16, got {}",
+            block
+        )));
+    }
+
+    let type_id = read_u32(cursor)?;
+    let name = parse_string(cursor)?;
+    let array_type = DataType::from_u32(read_u32(cursor)?);
+    let data_type = DataType::from_u32(read_u32(cursor)?);
+    let kind = match data_type {
+        DataType::Struct => {
+            let mut members = Vec::new();
+            while cursor.len() > 4 {
+                if peek_u32(cursor) == 18 {
+                    let _ = read_u32(cursor)?;
+                    break;
+                }
+                let member_id = parse_type_decl(cursor, types)?;
+                members.push(member_id);
+            }
+            TypeKind::Struct { members }
+        }
+        DataType::Array => TypeKind::Array {
+            element_type: array_type,
+        },
+        other => TypeKind::Primitive(other),
+    };
+
+    skip_properties(cursor)?;
+    types.insert(type_id, TypeDecl { name, kind });
+    Ok(type_id)
 }
 
 fn parse_sweeps(file: &[u8], entry: TocEntry) -> Result<Vec<SignalRef>, CadencePsfError> {
@@ -404,10 +477,10 @@ fn parse_values(
     file: &[u8],
     entry: TocEntry,
     header: &HashMap<String, CadencePsfValue>,
-    types: &HashMap<u32, DataType>,
+    types: &HashMap<u32, TypeDecl>,
     sweeps: &[SignalRef],
     traces: &[TraceDef],
-) -> Result<HashMap<u32, SignalValues>, CadencePsfError> {
+) -> Result<HashMap<u32, Vec<SignalChannel>>, CadencePsfError> {
     if entry.start + 8 > file.len() {
         return Err(CadencePsfError::new("value section truncated"));
     }
@@ -416,31 +489,26 @@ fn parse_values(
         return Err(CadencePsfError::new("invalid value section end offset"));
     }
 
-    let mut values: HashMap<u32, SignalValues> = HashMap::new();
+    let mut values: HashMap<u32, Vec<SignalChannel>> = HashMap::new();
     for sweep in sweeps {
-        values.insert(sweep.id, SignalValues::Real(Vec::new()));
+        values.insert(
+            sweep.id,
+            vec![SignalChannel {
+                suffix: String::new(),
+                values: SignalValues::Real(Vec::new()),
+            }],
+        );
     }
 
     let flat_traces = flatten_traces(traces);
     for signal in &flat_traces {
-        let dtype = types
+        let _ = types
             .get(&signal.type_id)
-            .copied()
             .ok_or_else(|| CadencePsfError::new(format!("missing type {}", signal.type_id)))?;
-        match dtype {
-            DataType::Int8 | DataType::Int32 | DataType::Real => {
-                values.insert(signal.id, SignalValues::Real(Vec::new()));
-            }
-            DataType::Complex => {
-                values.insert(signal.id, SignalValues::Complex(Vec::new()));
-            }
-            DataType::String | DataType::Array | DataType::Struct | DataType::Other(_) => {
-                return Err(CadencePsfError::new(format!(
-                    "unsupported PSF signal data type {} for '{}'",
-                    dtype.to_u32(),
-                    signal.name
-                )));
-            }
+        let mut specs = Vec::new();
+        collect_channel_specs_for_type(signal.type_id, types, "", &mut specs)?;
+        if !specs.is_empty() {
+            values.insert(signal.id, init_channels(&specs));
         }
     }
 
@@ -472,8 +540,8 @@ fn parse_non_windowed_values(
     header: &HashMap<String, CadencePsfValue>,
     sweeps: &[SignalRef],
     flat_traces: &[SignalRef],
-    types: &HashMap<u32, DataType>,
-    values: &mut HashMap<u32, SignalValues>,
+    types: &HashMap<u32, TypeDecl>,
+    values: &mut HashMap<u32, Vec<SignalChannel>>,
 ) -> Result<(), CadencePsfError> {
     let sweep_points = header_usize(header, "PSF sweep points")?;
     let sweep_id = sweeps.first().map(|s| s.id);
@@ -483,37 +551,32 @@ fn parse_non_windowed_values(
         let _param_kind = read_u32(&mut cursor)?;
         let sweep_value = read_f64(&mut cursor)?;
         if let Some(id) = sweep_id {
-            push_real(values, id, sweep_value)?;
+            push_scalar_channel(values, id, 0, NumericSample::Real(sweep_value))?;
         }
 
         for signal in flat_traces {
             let _unused = read_f64(&mut cursor)?;
-            let dtype = types
-                .get(&signal.type_id)
-                .copied()
-                .unwrap_or(DataType::Other(0));
-            match dtype {
-                DataType::Int8 => {
-                    let sample = read_u8_padded(&mut cursor)? as f64;
-                    push_real(values, signal.id, sample)?;
-                }
-                DataType::Int32 => {
-                    let sample = read_i32(&mut cursor)? as f64;
-                    push_real(values, signal.id, sample)?;
-                }
-                DataType::Real => {
-                    let sample = read_f64(&mut cursor)?;
-                    push_real(values, signal.id, sample)?;
-                }
-                DataType::Complex => {
-                    let re = read_f64(&mut cursor)?;
-                    let im = read_f64(&mut cursor)?;
-                    push_complex(values, signal.id, (re, im))?;
-                }
-                DataType::String | DataType::Array | DataType::Struct | DataType::Other(_) => {
+            let mut channel_idx = 0usize;
+            let mut channels_opt = values.get_mut(&signal.id).map(Vec::as_mut_slice);
+            read_type_value_with_numeric_visit(
+                &mut cursor,
+                signal.type_id,
+                types,
+                &mut |sample| {
+                    if let Some(channels) = channels_opt.as_deref_mut() {
+                        push_scalar_slice(channels, channel_idx, sample)?;
+                    }
+                    channel_idx += 1;
+                    Ok(())
+                },
+            )?;
+            if let Some(channels) = channels_opt {
+                if channel_idx != channels.len() {
                     return Err(CadencePsfError::new(format!(
-                        "unsupported non-windowed signal data type {}",
-                        dtype.to_u32()
+                        "decoded {} numeric field(s) but signal {} expects {}",
+                        channel_idx,
+                        signal.id,
+                        channels.len()
                     )));
                 }
             }
@@ -528,8 +591,8 @@ fn parse_windowed_values(
     header: &HashMap<String, CadencePsfValue>,
     sweeps: &[SignalRef],
     flat_traces: &[SignalRef],
-    types: &HashMap<u32, DataType>,
-    values: &mut HashMap<u32, SignalValues>,
+    _types: &HashMap<u32, TypeDecl>,
+    values: &mut HashMap<u32, Vec<SignalChannel>>,
 ) -> Result<(), CadencePsfError> {
     let window_size = header_usize(header, "PSF window size")?;
     let num_traces = header_usize(header, "PSF traces")?;
@@ -573,7 +636,12 @@ fn parse_windowed_values(
         let block_init = read_u32(&mut cursor)?;
         let window_count = (block_init & 0xffff) as usize;
         for _ in 0..window_count {
-            push_real(values, sweep_id, read_f64(&mut cursor)?)?;
+            push_scalar_channel(
+                values,
+                sweep_id,
+                0,
+                NumericSample::Real(read_f64(&mut cursor)?),
+            )?;
         }
 
         let block_len = num_traces
@@ -585,20 +653,13 @@ fn parse_windowed_values(
         let block = &cursor[..block_len];
 
         for signal in flat_traces {
-            let dtype = types
-                .get(&signal.type_id)
-                .copied()
-                .unwrap_or(DataType::Other(0));
-            let sample_width = match dtype {
-                DataType::Complex => 16usize,
-                DataType::Int8 | DataType::Int32 | DataType::Real => 8usize,
-                DataType::String | DataType::Array | DataType::Struct | DataType::Other(_) => {
-                    return Err(CadencePsfError::new(format!(
-                        "unsupported windowed signal data type {}",
-                        dtype.to_u32()
-                    )));
-                }
-            };
+            let channels = values.get(&signal.id).ok_or_else(|| {
+                CadencePsfError::new(format!(
+                    "windowed PSF signal '{}' has no numeric channels",
+                    signal.name
+                ))
+            })?;
+            let sample_width = channel_sample_width(channels)?;
             let offset = *offsets
                 .get(&signal.id)
                 .ok_or_else(|| CadencePsfError::new("missing signal offset in windowed parser"))?;
@@ -617,21 +678,19 @@ fn parse_windowed_values(
             }
             let mut trace_cursor = &block[idx..];
 
-            match dtype {
-                DataType::Int8 | DataType::Int32 | DataType::Real => {
-                    for _ in 0..window_count {
-                        push_real(values, signal.id, read_f64(&mut trace_cursor)?)?;
+            let channels = values.get_mut(&signal.id).ok_or_else(|| {
+                CadencePsfError::new(format!("missing value vector for signal {}", signal.id))
+            })?;
+            for _ in 0..window_count {
+                for channel in channels.iter_mut() {
+                    match &mut channel.values {
+                        SignalValues::Real(vec) => vec.push(read_f64(&mut trace_cursor)?),
+                        SignalValues::Complex(vec) => {
+                            let re = read_f64(&mut trace_cursor)?;
+                            let im = read_f64(&mut trace_cursor)?;
+                            vec.push((re, im));
+                        }
                     }
-                }
-                DataType::Complex => {
-                    for _ in 0..window_count {
-                        let re = read_f64(&mut trace_cursor)?;
-                        let im = read_f64(&mut trace_cursor)?;
-                        push_complex(values, signal.id, (re, im))?;
-                    }
-                }
-                DataType::String | DataType::Array | DataType::Struct | DataType::Other(_) => {
-                    unreachable!("unsupported windowed types are rejected before decode")
                 }
             }
         }
@@ -735,42 +794,192 @@ fn parse_zero_pad(mut cursor: &[u8]) -> Result<&[u8], CadencePsfError> {
     Ok(&cursor[len..])
 }
 
-fn push_real(
-    values: &mut HashMap<u32, SignalValues>,
-    signal_id: u32,
-    value: f64,
+fn qualify_signal_name(base: &str, suffix: &str) -> String {
+    if suffix.is_empty() {
+        base.to_string()
+    } else {
+        format!("{}.{}", base, suffix)
+    }
+}
+
+fn init_channels(specs: &[ChannelSpec]) -> Vec<SignalChannel> {
+    specs
+        .iter()
+        .map(|spec| SignalChannel {
+            suffix: spec.suffix.clone(),
+            values: match spec.kind {
+                ChannelKind::Real => SignalValues::Real(Vec::new()),
+                ChannelKind::Complex => SignalValues::Complex(Vec::new()),
+            },
+        })
+        .collect()
+}
+
+fn collect_channel_specs_for_type(
+    type_id: u32,
+    types: &HashMap<u32, TypeDecl>,
+    prefix: &str,
+    specs: &mut Vec<ChannelSpec>,
 ) -> Result<(), CadencePsfError> {
-    let slot = values.get_mut(&signal_id).ok_or_else(|| {
+    let decl = types
+        .get(&type_id)
+        .ok_or_else(|| CadencePsfError::new(format!("missing type declaration {}", type_id)))?;
+    match &decl.kind {
+        TypeKind::Primitive(dtype) => match dtype {
+            DataType::Int8 | DataType::Int32 | DataType::Real => specs.push(ChannelSpec {
+                suffix: prefix.to_string(),
+                kind: ChannelKind::Real,
+            }),
+            DataType::Complex => specs.push(ChannelSpec {
+                suffix: prefix.to_string(),
+                kind: ChannelKind::Complex,
+            }),
+            DataType::String | DataType::Array | DataType::Struct => {}
+            DataType::Other(other) => {
+                return Err(CadencePsfError::new(format!(
+                    "unsupported PSF signal data type {}",
+                    other
+                )));
+            }
+        },
+        TypeKind::Array { .. } => {}
+        TypeKind::Struct { members } => {
+            for member_id in members {
+                let member = types.get(member_id).ok_or_else(|| {
+                    CadencePsfError::new(format!("missing struct member type {}", member_id))
+                })?;
+                let next = if prefix.is_empty() {
+                    member.name.clone()
+                } else {
+                    format!("{}.{}", prefix, member.name)
+                };
+                collect_channel_specs_for_type(*member_id, types, &next, specs)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn channel_sample_width(channels: &[SignalChannel]) -> Result<usize, CadencePsfError> {
+    let mut width = 0usize;
+    for channel in channels {
+        let ch_width = match channel.values {
+            SignalValues::Real(_) => 8usize,
+            SignalValues::Complex(_) => 16usize,
+        };
+        width = width
+            .checked_add(ch_width)
+            .ok_or_else(|| CadencePsfError::new("windowed PSF channel width overflow"))?;
+    }
+    Ok(width)
+}
+
+fn push_scalar_channel(
+    values: &mut HashMap<u32, Vec<SignalChannel>>,
+    signal_id: u32,
+    channel_idx: usize,
+    sample: NumericSample,
+) -> Result<(), CadencePsfError> {
+    let channels = values.get_mut(&signal_id).ok_or_else(|| {
         CadencePsfError::new(format!("missing value vector for signal {}", signal_id))
     })?;
-    match slot {
-        SignalValues::Real(v) => {
+    push_scalar_slice(channels.as_mut_slice(), channel_idx, sample)
+}
+
+fn push_scalar_slice(
+    channels: &mut [SignalChannel],
+    channel_idx: usize,
+    sample: NumericSample,
+) -> Result<(), CadencePsfError> {
+    let channel_count = channels.len();
+    let channel = channels.get_mut(channel_idx).ok_or_else(|| {
+        CadencePsfError::new(format!(
+            "decoded sample for channel index {} but only {} channel(s) allocated",
+            channel_idx, channel_count
+        ))
+    })?;
+    match (&mut channel.values, sample) {
+        (SignalValues::Real(v), NumericSample::Real(value)) => {
             v.push(value);
             Ok(())
         }
-        SignalValues::Complex(_) => Err(CadencePsfError::new(format!(
-            "real sample written to complex signal {}",
-            signal_id
+        (SignalValues::Complex(v), NumericSample::Complex(value)) => {
+            v.push(value);
+            Ok(())
+        }
+        (SignalValues::Real(_), NumericSample::Complex(_)) => Err(CadencePsfError::new(format!(
+            "complex sample written to real channel '{}'",
+            channel.suffix
+        ))),
+        (SignalValues::Complex(_), NumericSample::Real(_)) => Err(CadencePsfError::new(format!(
+            "real sample written to complex channel '{}'",
+            channel.suffix
         ))),
     }
 }
 
-fn push_complex(
-    values: &mut HashMap<u32, SignalValues>,
-    signal_id: u32,
-    value: (f64, f64),
-) -> Result<(), CadencePsfError> {
-    let slot = values.get_mut(&signal_id).ok_or_else(|| {
-        CadencePsfError::new(format!("missing value vector for signal {}", signal_id))
-    })?;
-    match slot {
-        SignalValues::Complex(v) => {
-            v.push(value);
+fn read_type_value_with_numeric_visit<F>(
+    cursor: &mut &[u8],
+    type_id: u32,
+    types: &HashMap<u32, TypeDecl>,
+    on_numeric: &mut F,
+) -> Result<(), CadencePsfError>
+where
+    F: FnMut(NumericSample) -> Result<(), CadencePsfError>,
+{
+    let decl = types
+        .get(&type_id)
+        .ok_or_else(|| CadencePsfError::new(format!("missing type declaration {}", type_id)))?;
+    match &decl.kind {
+        TypeKind::Primitive(dtype) => {
+            read_data_type_value_with_numeric_visit(cursor, *dtype, on_numeric)
+        }
+        TypeKind::Array { element_type } => {
+            let count = read_u32(cursor)? as usize;
+            for _ in 0..count {
+                read_data_type_value_with_numeric_visit(cursor, *element_type, on_numeric)?;
+            }
             Ok(())
         }
-        SignalValues::Real(_) => Err(CadencePsfError::new(format!(
-            "complex sample written to real signal {}",
-            signal_id
+        TypeKind::Struct { members } => {
+            for member_id in members {
+                read_type_value_with_numeric_visit(cursor, *member_id, types, on_numeric)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn read_data_type_value_with_numeric_visit<F>(
+    cursor: &mut &[u8],
+    dtype: DataType,
+    on_numeric: &mut F,
+) -> Result<(), CadencePsfError>
+where
+    F: FnMut(NumericSample) -> Result<(), CadencePsfError>,
+{
+    match dtype {
+        DataType::Int8 => on_numeric(NumericSample::Real(read_u8_padded(cursor)? as f64)),
+        DataType::Int32 => on_numeric(NumericSample::Real(read_i32(cursor)? as f64)),
+        DataType::Real => on_numeric(NumericSample::Real(read_f64(cursor)?)),
+        DataType::Complex => {
+            let re = read_f64(cursor)?;
+            let im = read_f64(cursor)?;
+            on_numeric(NumericSample::Complex((re, im)))
+        }
+        DataType::String => {
+            let _ = parse_string(cursor)?;
+            Ok(())
+        }
+        DataType::Array => Err(CadencePsfError::new(
+            "nested ARRAY element types are not supported in PSF parser",
+        )),
+        DataType::Struct => Err(CadencePsfError::new(
+            "array element type STRUCT is not supported in PSF parser",
+        )),
+        DataType::Other(other) => Err(CadencePsfError::new(format!(
+            "unsupported PSF signal data type {}",
+            other
         ))),
     }
 }
@@ -886,6 +1095,203 @@ pub(crate) mod test_helpers {
 
     pub(crate) fn build_non_windowed_int32_psf() -> Vec<u8> {
         build_simple_non_windowed_psf(SampleEncoding::Int32)
+    }
+
+    pub(crate) fn build_non_windowed_struct_psf() -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        let header_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let header_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_named_int(&mut bytes, "PSF sweep points", 2);
+        let header_end = bytes.len() as u32;
+        patch_u32(&mut bytes, header_eofs_pos, header_end);
+
+        let types_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let types_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        // Root type: struct with two members.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 1);
+        push_string(&mut bytes, "sigtype");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        // Member 1: real scalar
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_string(&mut bytes, "dc");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 11);
+        // Member 2: complex scalar
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 3);
+        push_string(&mut bytes, "ac");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 12);
+        push_u32(&mut bytes, 18); // struct end
+        let types_end = bytes.len() as u32;
+        patch_u32(&mut bytes, types_eofs_pos, types_end);
+
+        let sweep_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let sweep_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 100, "time", 2);
+        let sweep_end = bytes.len() as u32;
+        patch_u32(&mut bytes, sweep_eofs_pos, sweep_end);
+
+        let trace_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let trace_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 200, "V(out)", 1);
+        let trace_end = bytes.len() as u32;
+        patch_u32(&mut bytes, trace_eofs_pos, trace_end);
+
+        let value_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let value_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+
+        // Point 0
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_f64(&mut bytes, 0.0);
+        push_f64(&mut bytes, 0.0);
+        push_f64(&mut bytes, 1.0); // dc
+        push_f64(&mut bytes, 2.0); // ac.re
+        push_f64(&mut bytes, 0.5); // ac.im
+
+        // Point 1
+        push_u32(&mut bytes, 1);
+        push_u32(&mut bytes, 0);
+        push_f64(&mut bytes, 1.0);
+        push_f64(&mut bytes, 0.0);
+        push_f64(&mut bytes, 1.5); // dc
+        push_f64(&mut bytes, 2.5); // ac.re
+        push_f64(&mut bytes, -0.25); // ac.im
+
+        let value_end = bytes.len() as u32;
+        patch_u32(&mut bytes, value_eofs_pos, value_end);
+
+        let toc_offset = bytes.len();
+        for (kind, start) in [
+            (0u32, header_start),
+            (1u32, types_start),
+            (2u32, sweep_start),
+            (3u32, trace_start),
+            (4u32, value_start),
+        ] {
+            push_u32(&mut bytes, kind);
+            push_u32(&mut bytes, start as u32);
+        }
+        bytes.extend_from_slice(&[0u8; 8]);
+        push_u32(&mut bytes, toc_offset as u32);
+        bytes
+    }
+
+    pub(crate) fn build_non_windowed_mixed_real_and_string_psf() -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        let header_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let header_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_named_int(&mut bytes, "PSF sweep points", 2);
+        let header_end = bytes.len() as u32;
+        patch_u32(&mut bytes, header_eofs_pos, header_end);
+
+        let types_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let types_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        // Real scalar type
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 1);
+        push_string(&mut bytes, "realtype");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 11);
+        // String scalar type
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_string(&mut bytes, "stringtype");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 2);
+        let types_end = bytes.len() as u32;
+        patch_u32(&mut bytes, types_eofs_pos, types_end);
+
+        let sweep_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let sweep_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 100, "time", 1);
+        let sweep_end = bytes.len() as u32;
+        patch_u32(&mut bytes, sweep_eofs_pos, sweep_end);
+
+        let trace_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let trace_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 200, "V(out)", 1);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 201, "meta", 2);
+        let trace_end = bytes.len() as u32;
+        patch_u32(&mut bytes, trace_eofs_pos, trace_end);
+
+        let value_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let value_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+
+        // Point 0
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_f64(&mut bytes, 0.0);
+        push_f64(&mut bytes, 0.0);
+        push_f64(&mut bytes, 1.25);
+        push_f64(&mut bytes, 0.0);
+        push_string(&mut bytes, "A");
+
+        // Point 1
+        push_u32(&mut bytes, 1);
+        push_u32(&mut bytes, 0);
+        push_f64(&mut bytes, 1.0);
+        push_f64(&mut bytes, 0.0);
+        push_f64(&mut bytes, 2.5);
+        push_f64(&mut bytes, 0.0);
+        push_string(&mut bytes, "B2");
+
+        let value_end = bytes.len() as u32;
+        patch_u32(&mut bytes, value_eofs_pos, value_end);
+
+        let toc_offset = bytes.len();
+        for (kind, start) in [
+            (0u32, header_start),
+            (1u32, types_start),
+            (2u32, sweep_start),
+            (3u32, trace_start),
+            (4u32, value_start),
+        ] {
+            push_u32(&mut bytes, kind);
+            push_u32(&mut bytes, start as u32);
+        }
+        bytes.extend_from_slice(&[0u8; 8]);
+        push_u32(&mut bytes, toc_offset as u32);
+        bytes
     }
 
     fn build_simple_non_windowed_psf(sample_encoding: SampleEncoding) -> Vec<u8> {
@@ -1046,7 +1452,8 @@ pub(crate) mod test_helpers {
 mod tests {
     use super::test_helpers::{
         build_non_windowed_complex_psf, build_non_windowed_int32_psf, build_non_windowed_int8_psf,
-        build_non_windowed_real_psf,
+        build_non_windowed_mixed_real_and_string_psf, build_non_windowed_real_psf,
+        build_non_windowed_struct_psf,
     };
     use super::*;
 
@@ -1106,6 +1513,39 @@ mod tests {
         assert_eq!(parsed.real_signals.len(), 1);
         assert_eq!(parsed.real_signals[0].name, "V(out)");
         assert_eq!(parsed.real_signals[0].values, vec![1024.0, -2.0]);
+    }
+
+    #[test]
+    fn test_parse_non_windowed_struct_psf_binary() {
+        let bytes = build_non_windowed_struct_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.sweeps[0].name, "time");
+        assert_eq!(parsed.sweeps[0].values, vec![0.0, 1.0]);
+
+        assert_eq!(parsed.real_signals.len(), 1);
+        assert_eq!(parsed.real_signals[0].name, "V(out).dc");
+        assert_eq!(parsed.real_signals[0].values, vec![1.0, 1.5]);
+
+        assert_eq!(parsed.complex_signals.len(), 1);
+        assert_eq!(parsed.complex_signals[0].name, "V(out).ac");
+        assert_eq!(
+            parsed.complex_signals[0].values,
+            vec![(2.0, 0.5), (2.5, -0.25)]
+        );
+    }
+
+    #[test]
+    fn test_parse_non_windowed_string_trace_is_ignored() {
+        let bytes = build_non_windowed_mixed_real_and_string_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.real_signals.len(), 1);
+        assert_eq!(parsed.real_signals[0].name, "V(out)");
+        assert_eq!(parsed.real_signals[0].values, vec![1.25, 2.5]);
+        assert!(parsed.complex_signals.is_empty());
     }
 
     #[test]
