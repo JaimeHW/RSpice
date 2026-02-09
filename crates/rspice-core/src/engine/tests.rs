@@ -2086,46 +2086,61 @@ O1 1 0 2 0 MISSING_MODEL
     }
 
     #[test]
-    fn test_build_coupled_p_line_reports_not_supported() {
+    fn test_build_coupled_p_line_expands_multiconductor_runtime() {
         let netlist_str = r#"
 * Coupled/multiconductor transmission line
 P1 1 0 2 0 3 0 PMOD
+.MODEL PMOD LTRA (Z0=50 TD=1N)
 .end
 "#;
         let netlist = Netlist::parse(netlist_str).unwrap();
         let engine = Engine::default();
 
-        let err = engine
+        let circuit = engine
             .build_circuit(&netlist)
-            .expect_err("P-line should fail clearly until multiconductor runtime is implemented");
-        let msg = err.to_string();
-        assert!(
-            msg.contains("not yet supported"),
-            "expected explicit unsupported P-line error, got {}",
-            msg
+            .expect("P-line should expand into runtime multiconductor conductors");
+
+        assert_eq!(
+            circuit.tlines.len(),
+            3,
+            "expected three uncoupled conductors for six-node P-line"
         );
+        assert!(
+            circuit
+                .tlines
+                .iter()
+                .all(|tl| tl.node1_neg == 0 && tl.node2_neg == 0),
+            "expanded P-line conductors should use ground-referenced returns"
+        );
+        assert_eq!(circuit.tlines[0].name, "P1#1");
+        assert_eq!(circuit.tlines[1].name, "P1#2");
+        assert_eq!(circuit.tlines[2].name, "P1#3");
     }
 
     #[test]
-    fn test_build_jiles_atherton_inductor_reports_not_supported() {
+    fn test_build_jiles_atherton_inductor_integrates_runtime_model() {
         let netlist_str = r#"
-* Jiles-Atherton inductor should fail until runtime integration is implemented
+* Jiles-Atherton inductor should build with runtime integration
 L1 in 0 1m MODEL=CORE1
 V1 in 0 DC 0
-.MODEL CORE1 CORE (MS=8e5 A=100 K=50 C=0.2 ALPHA=1e-3)
+.MODEL CORE1 CORE (MS=8e5 A=100 K=50 C=0.2 ALPHA=1e-3 AREA=1e-4 LENGTH=0.1)
 .end
 "#;
         let netlist = Netlist::parse(netlist_str).unwrap();
         let engine = Engine::default();
 
-        let err = engine
+        let circuit = engine
             .build_circuit(&netlist)
-            .expect_err("Jiles-Atherton model should fail fast until solver support exists");
-        let msg = err.to_string();
+            .expect("Jiles-Atherton model should build with runtime state");
         assert!(
-            msg.contains("Jiles-Atherton") && msg.contains("not yet supported"),
-            "expected explicit unsupported JA error, got {}",
-            msg
+            !circuit.jiles_atherton_inductors.is_empty(),
+            "expected Jiles-Atherton binding to be present"
+        );
+        assert_eq!(circuit.jiles_atherton_inductors.len(), 1);
+        assert_eq!(circuit.inductors.len(), 1);
+        assert!(
+            circuit.inductors.inductances[0].is_finite() && circuit.inductors.inductances[0] > 0.0,
+            "runtime inductor must have finite positive effective inductance"
         );
     }
 

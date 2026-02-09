@@ -1422,6 +1422,17 @@ impl Mosfets {
 //=============================================================================
 
 /// High-performance circuit representation using Struct-of-Arrays
+#[derive(Debug, Clone)]
+pub struct JilesAthertonBinding {
+    /// Index into `inductors` SoA arrays that owns this runtime branch/state.
+    pub inductor_index: usize,
+    /// Branch ordinal (1-indexed) allocated for this inductor.
+    pub branch_ordinal: NodeId,
+    /// Stateful Jiles-Atherton model used to update effective inductance.
+    pub device: crate::device::passive::JilesAthertonInductor,
+}
+
+/// High-performance circuit representation using Struct-of-Arrays
 #[derive(Debug)]
 pub struct CircuitData {
     /// Node name to ID mapping
@@ -1466,6 +1477,7 @@ pub struct CircuitData {
     pub iswitches: Vec<crate::device::CurrentSwitch>,
     pub tlines: Vec<crate::device::TransmissionLine>,
     pub couplings: Vec<crate::device::InductorCoupling>,
+    pub jiles_atherton_inductors: Vec<JilesAthertonBinding>,
 
     // Behavioral sources (expression-based B-elements)
     pub behavioral_sources: BehavioralSources,
@@ -1515,6 +1527,7 @@ impl CircuitData {
             iswitches: Vec::new(),
             tlines: Vec::new(),
             couplings: Vec::new(),
+            jiles_atherton_inductors: Vec::new(),
             behavioral_sources: BehavioralSources::new(),
             // XSPICE instances
             xspice_instances: Vec::new(),
@@ -1672,6 +1685,10 @@ impl CircuitData {
             self.inductors.node_pos[i] = remap(self.inductors.node_pos[i]);
             self.inductors.node_neg[i] = remap(self.inductors.node_neg[i]);
         }
+        for binding in &mut self.jiles_atherton_inductors {
+            binding.device.node_pos = remap(binding.device.node_pos);
+            binding.device.node_neg = remap(binding.device.node_neg);
+        }
 
         // Decrement num_nodes since one node is now ground
         if self.num_nodes > 0 {
@@ -1746,6 +1763,20 @@ impl CircuitData {
             .push((iswitch_index, control_element_name));
     }
 
+    /// Register a Jiles-Atherton inductor runtime binding.
+    pub fn add_jiles_atherton_inductor(
+        &mut self,
+        inductor_index: usize,
+        branch_ordinal: NodeId,
+        device: crate::device::passive::JilesAthertonInductor,
+    ) {
+        self.jiles_atherton_inductors.push(JilesAthertonBinding {
+            inductor_index,
+            branch_ordinal,
+            device,
+        });
+    }
+
     /// Resolve all pending CCCS/CCVS/ISWITCH control element references.
     /// Call this after all elements have been added to the circuit
     /// Returns an error if any control element is not found
@@ -1816,6 +1847,34 @@ impl CircuitData {
         self.num_branches
     }
 
+    /// Refresh effective inductance values for all Jiles-Atherton inductors.
+    ///
+    /// Call this with the latest solution vector before transient companion
+    /// stamping so nonlinear core state updates feed into the MNA coefficients.
+    pub fn refresh_jiles_atherton_inductances(&mut self, solution: &[Value]) {
+        use crate::device::NonlinearDevice;
+
+        let num_nodes = self.num_nodes;
+        for idx in 0..self.jiles_atherton_inductors.len() {
+            let (inductor_index, l_eff) = {
+                let binding = &mut self.jiles_atherton_inductors[idx];
+                let branch_matrix_index = num_nodes + binding.branch_ordinal;
+                binding.device.set_branch_index(branch_matrix_index);
+                binding.device.update(solution);
+                (
+                    binding.inductor_index,
+                    binding.device.effective_inductance(),
+                )
+            };
+
+            if let Some(slot) = self.inductors.inductances.get_mut(inductor_index) {
+                if l_eff.is_finite() && l_eff > 0.0 {
+                    *slot = l_eff.max(1e-18);
+                }
+            }
+        }
+    }
+
     /// Get node names sorted by their node index (1, 2, 3, ...)
     /// Returns a Vec where index i contains the name of node (i+1)
     /// This is useful for waveform output labels like V(N001), V(N002)
@@ -1852,7 +1911,8 @@ impl CircuitData {
             + self.vcvs.len()
             + self.vccs.len()
             + self.cccs.len()
-            + self.ccvs.len();
+            + self.ccvs.len()
+            + self.jiles_atherton_inductors.len();
         #[cfg(feature = "veriloga")]
         {
             return count + self.veriloga_devices.len();
@@ -1893,6 +1953,10 @@ impl CircuitData {
         self.mosfets.link_all(matrix);
         for jfet in &mut self.jfets {
             jfet.link(matrix);
+        }
+        for binding in &mut self.jiles_atherton_inductors {
+            let branch_matrix_index = self.num_nodes + binding.branch_ordinal;
+            binding.device.set_branch_index(branch_matrix_index);
         }
     }
 

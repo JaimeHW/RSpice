@@ -353,6 +353,7 @@ impl Engine {
                 circuit.inductors.v_prev[l_idx] = v_new;
             }
         }
+        circuit.refresh_jiles_atherton_inductances(accepted_solution);
 
         // Update transmission-line delayed-wave history from the accepted state.
         for tl in &mut circuit.tlines {
@@ -464,6 +465,7 @@ impl Engine {
         } else {
             self.solve_linear(&circuit, &mut matrix)?
         };
+        circuit.refresh_jiles_atherton_inductances(&dc_solution);
 
         let num_nodes = circuit.num_nodes();
         let size = circuit.matrix_size();
@@ -643,6 +645,7 @@ impl Engine {
                 // Get current integration method from TrapGear controller
                 let current_method = trapgear.current_method();
                 let coeff = CompanionCoefficients::for_method(current_method);
+                circuit.refresh_jiles_atherton_inductances(&new_solution);
 
                 // Stamp capacitor companion models for transient
                 circuit

@@ -35,7 +35,7 @@ pub enum HbError {
     InvalidConfig(String),
     /// Matrix is singular
     SingularMatrix,
-    /// Nonlinear devices are present but nonlinear HB Newton loop is not integrated yet
+    /// Circuit contains nonlinear/advanced devices not yet supported by HB runtime.
     UnsupportedNonlinearDevices(String),
 }
 
@@ -55,11 +55,9 @@ impl std::fmt::Display for HbError {
             Self::NoReactiveElements => write!(f, "Circuit has no capacitors or inductors"),
             Self::InvalidConfig(msg) => write!(f, "Invalid HB config: {}", msg),
             Self::SingularMatrix => write!(f, "Singular admittance matrix"),
-            Self::UnsupportedNonlinearDevices(summary) => write!(
-                f,
-                "HB nonlinear solve is not implemented yet for circuits containing {}",
-                summary
-            ),
+            Self::UnsupportedNonlinearDevices(summary) => {
+                write!(f, "HB runtime does not yet support {}", summary)
+            }
         }
     }
 }
@@ -146,12 +144,10 @@ impl Engine {
         if !has_reactive {
             return Err(HbError::NoReactiveElements.into());
         }
-        if circuit.has_nonlinear_devices() {
-            return Err(
-                HbError::UnsupportedNonlinearDevices(Self::hb_nonlinear_device_summary(&circuit))
-                    .into(),
-            );
+        if let Some(summary) = Self::hb_unsupported_nonlinear_device_summary(&circuit) {
+            return Err(HbError::UnsupportedNonlinearDevices(summary).into());
         }
+        let has_supported_nonlinear = Self::hb_has_supported_nonlinear_devices(&circuit);
 
         // Create solver
         let mut solver = HbSolver::new(config.clone(), num_nodes);
@@ -164,8 +160,15 @@ impl Engine {
         self.hb_stamp_resistors(&circuit, &mut solver);
         self.hb_stamp_capacitors(&circuit, &mut solver);
         self.hb_stamp_inductors(&circuit, &mut solver);
-        self.hb_stamp_voltage_sources(&circuit, &mut solver);
+        if has_supported_nonlinear {
+            self.hb_stamp_voltage_sources_norton(&circuit, &mut solver);
+        } else {
+            self.hb_stamp_voltage_sources(&circuit, &mut solver);
+        }
         self.hb_stamp_current_sources(&circuit, &mut solver);
+        if has_supported_nonlinear {
+            self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
+        }
 
         // Create solver state
         let mut state = HbSolverState::new(num_nodes, config.num_harmonics);
@@ -177,10 +180,24 @@ impl Engine {
             }
         }
 
-        // Solve linear HB system
-        solver
-            .solve_linear(&mut state)
-            .map_err(|_| SimulationError::Circuit("HB linear solve failed".to_string()))?;
+        if has_supported_nonlinear {
+            solver.solve_newton(&mut state).map_err(|e| match e {
+                crate::analysis::HbError::ConvergenceFailed {
+                    iterations,
+                    residual,
+                } => HbError::ConvergenceFailed {
+                    iterations,
+                    residual,
+                }
+                .into(),
+                other => SimulationError::Circuit(format!("HB nonlinear solve failed: {}", other)),
+            })?;
+        } else {
+            // Solve linear HB system
+            solver
+                .solve_linear(&mut state)
+                .map_err(|_| SimulationError::Circuit("HB linear solve failed".to_string()))?;
+        }
 
         // Build result
         let result = solver.build_result(&state);
@@ -208,18 +225,13 @@ impl Engine {
         node_names
     }
 
-    fn hb_nonlinear_device_summary(circuit: &CircuitData) -> String {
+    fn hb_has_supported_nonlinear_devices(circuit: &CircuitData) -> bool {
+        !circuit.diodes.is_empty() || !circuit.bjts.is_empty() || !circuit.mosfets.is_empty()
+    }
+
+    fn hb_unsupported_nonlinear_device_summary(circuit: &CircuitData) -> Option<String> {
         let mut kinds: Vec<String> = Vec::new();
 
-        if !circuit.diodes.is_empty() {
-            kinds.push(format!("{} diode(s)", circuit.diodes.len()));
-        }
-        if !circuit.bjts.is_empty() {
-            kinds.push(format!("{} BJT(s)", circuit.bjts.len()));
-        }
-        if !circuit.mosfets.is_empty() {
-            kinds.push(format!("{} MOSFET(s)", circuit.mosfets.len()));
-        }
         if !circuit.jfets.is_empty() {
             kinds.push(format!("{} JFET(s)", circuit.jfets.len()));
         }
@@ -228,6 +240,12 @@ impl Engine {
         }
         if !circuit.iswitches.is_empty() {
             kinds.push(format!("{} current switch(es)", circuit.iswitches.len()));
+        }
+        if !circuit.jiles_atherton_inductors.is_empty() {
+            kinds.push(format!(
+                "{} Jiles-Atherton inductor(s)",
+                circuit.jiles_atherton_inductors.len()
+            ));
         }
         #[cfg(feature = "veriloga")]
         if !circuit.veriloga_devices.is_empty() {
@@ -238,9 +256,57 @@ impl Engine {
         }
 
         if kinds.is_empty() {
-            "nonlinear devices".to_string()
+            None
         } else {
-            kinds.join(", ")
+            Some(kinds.join(", "))
+        }
+    }
+
+    #[inline]
+    fn hb_node_to_solver_index(node: usize, num_nodes: usize) -> usize {
+        if node == 0 { num_nodes } else { node - 1 }
+    }
+
+    fn hb_stamp_supported_nonlinear_devices(
+        &self,
+        circuit: &CircuitData,
+        solver: &mut HbSolver,
+        num_nodes: usize,
+    ) {
+        for diode in &circuit.diodes.devices {
+            let anode = Self::hb_node_to_solver_index(diode.node_anode, num_nodes);
+            let cathode = Self::hb_node_to_solver_index(diode.node_cathode, num_nodes);
+            solver.add_diode(anode, cathode, diode.is, diode.n);
+        }
+
+        for bjt in &circuit.bjts.devices {
+            let collector = Self::hb_node_to_solver_index(bjt.node_collector, num_nodes);
+            let base = Self::hb_node_to_solver_index(bjt.node_base, num_nodes);
+            let emitter = Self::hb_node_to_solver_index(bjt.node_emitter, num_nodes);
+            match bjt.bjt_type {
+                crate::device::BjtType::Npn => {
+                    solver.add_npn_bjt(collector, base, emitter, bjt.is, bjt.bf);
+                }
+                crate::device::BjtType::Pnp => {
+                    solver.add_pnp_bjt(collector, base, emitter, bjt.is, bjt.bf);
+                }
+            }
+        }
+
+        for mos in &circuit.mosfets.devices {
+            let drain = Self::hb_node_to_solver_index(mos.node_drain, num_nodes);
+            let gate = Self::hb_node_to_solver_index(mos.node_gate, num_nodes);
+            let source = Self::hb_node_to_solver_index(mos.node_source, num_nodes);
+            let bulk = Self::hb_node_to_solver_index(mos.node_bulk, num_nodes);
+            let kp = mos.kp.max(1e-18);
+            match mos.mos_type {
+                crate::device::MosType::Nmos => {
+                    solver.add_nmos(drain, gate, source, bulk, kp, mos.vto);
+                }
+                crate::device::MosType::Pmos => {
+                    solver.add_pmos(drain, gate, source, bulk, kp, mos.vto.abs());
+                }
+            }
         }
     }
 
@@ -326,6 +392,53 @@ impl Engine {
                 .copied()
                 .unwrap_or(0.0);
             solver.add_voltage_source_branch_ac(np, nn, dc, ac_mag, ac_phase);
+        }
+    }
+
+    /// Stamp ideal voltage sources as stiff Norton equivalents for nonlinear HB.
+    ///
+    /// Nonlinear HB Newton currently solves in node-voltage space only. Converting
+    /// ideal voltage sources to Norton form avoids branch-current unknowns while
+    /// preserving source waveforms with a very small equivalent source resistance.
+    fn hb_stamp_voltage_sources_norton(&self, circuit: &CircuitData, solver: &mut HbSolver) {
+        const NORTON_G: Value = 1e6; // Rs = 1 uOhm
+
+        for i in 0..circuit.voltage_sources.len() {
+            let np = circuit.voltage_sources.node_pos[i];
+            let nn = circuit.voltage_sources.node_neg[i];
+            let dc = circuit.voltage_sources.dc_values[i];
+            let ac_mag = circuit
+                .voltage_sources
+                .ac_magnitudes
+                .get(i)
+                .copied()
+                .unwrap_or(0.0);
+            let ac_phase = circuit
+                .voltage_sources
+                .ac_phases
+                .get(i)
+                .copied()
+                .unwrap_or(0.0);
+
+            self.hb_stamp_admittance(solver, np, nn, NORTON_G, true);
+
+            let i_dc = dc * NORTON_G;
+            if np > 0 {
+                solver.add_dc_source(np - 1, -i_dc);
+            }
+            if nn > 0 {
+                solver.add_dc_source(nn - 1, i_dc);
+            }
+
+            let i_ac = ac_mag * NORTON_G;
+            if i_ac.abs() > 1e-30 {
+                if np > 0 {
+                    solver.add_ac_source(np - 1, -i_ac, ac_phase);
+                }
+                if nn > 0 {
+                    solver.add_ac_source(nn - 1, i_ac, ac_phase);
+                }
+            }
         }
     }
 
@@ -565,15 +678,15 @@ mod tests {
     }
 
     #[test]
-    fn test_run_hb_rejects_nonlinear_devices_until_nonlinear_solver_is_integrated() {
+    fn test_run_hb_solves_supported_nonlinear_devices() {
         use crate::Netlist;
 
         let netlist_str = r#"
             * Nonlinear diode with reactive element
-            V1 in 0 DC 1
-            R1 in out 1k
-            C1 out 0 1n
-            D1 out 0 DMOD
+            I1 0 in DC 1m
+            R1 in 0 1k
+            C1 in 0 1n
+            D1 in 0 DMOD
             .MODEL DMOD D (IS=1e-14 N=1)
             .END
         "#;
@@ -584,16 +697,43 @@ mod tests {
 
         let result = engine.run_hb(&netlist, config);
         assert!(
-            result.is_err(),
-            "HB should reject nonlinear circuits until nonlinear solve is integrated"
+            result.is_ok(),
+            "HB should solve supported nonlinear circuits: {:?}",
+            result.err()
         );
+
+        let hb = result.expect("nonlinear HB should succeed");
+        assert!(hb.result.is_valid());
+    }
+
+    #[test]
+    fn test_run_hb_rejects_unsupported_nonlinear_device_classes() {
+        use crate::Netlist;
+
+        let netlist_str = r#"
+            * JFET is not yet supported in HB nonlinear runtime
+            VDD d 0 DC 5
+            VG g 0 DC -1
+            R1 d 0 1k
+            C1 d 0 1n
+            J1 d g 0 JMOD
+            .MODEL JMOD NJF (VTO=-2 BETA=1e-3)
+            .END
+        "#;
+
+        let netlist = Netlist::parse(netlist_str).expect("Parse failed");
+        let engine = Engine::default();
+        let config = HbConfig::new(1e6).with_harmonics(3);
+
+        let result = engine.run_hb(&netlist, config);
+        assert!(result.is_err(), "unsupported HB device classes should fail");
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
         assert!(
-            msg.contains("nonlinear"),
-            "expected nonlinear warning: {}",
+            msg.contains("does not yet support"),
+            "expected unsupported device diagnostics: {}",
             msg
         );
-        assert!(msg.contains("diode"), "expected diode summary: {}", msg);
+        assert!(msg.contains("JFET"), "expected JFET summary: {}", msg);
     }
 
     // =========================================================================

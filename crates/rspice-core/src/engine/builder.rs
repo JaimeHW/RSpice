@@ -990,6 +990,107 @@ fn tline_model_attenuation(params: TransmissionLineModelParams, z0: f64) -> Opti
     None
 }
 
+fn positive_model_param(
+    model_def: &crate::netlist::ModelDef,
+    names: &[&str],
+    param_label: &str,
+) -> Result<Option<f64>, SimulationError> {
+    if let Some(value) = model_param(&model_def.params, names) {
+        if !value.is_finite() || value <= 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Jiles-Atherton model '{}' has invalid {}={} (must be finite and > 0)",
+                model_def.name, param_label, value
+            )));
+        }
+        Ok(Some(value))
+    } else {
+        Ok(None)
+    }
+}
+
+fn unit_interval_model_param(
+    model_def: &crate::netlist::ModelDef,
+    names: &[&str],
+    param_label: &str,
+) -> Result<Option<f64>, SimulationError> {
+    if let Some(value) = model_param(&model_def.params, names) {
+        if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+            return Err(SimulationError::Circuit(format!(
+                "Jiles-Atherton model '{}' has invalid {}={} (must be finite and within [0, 1])",
+                model_def.name, param_label, value
+            )));
+        }
+        Ok(Some(value))
+    } else {
+        Ok(None)
+    }
+}
+
+fn nonnegative_model_param(
+    model_def: &crate::netlist::ModelDef,
+    names: &[&str],
+    param_label: &str,
+) -> Result<Option<f64>, SimulationError> {
+    if let Some(value) = model_param(&model_def.params, names) {
+        if !value.is_finite() || value < 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Jiles-Atherton model '{}' has invalid {}={} (must be finite and >= 0)",
+                model_def.name, param_label, value
+            )));
+        }
+        Ok(Some(value))
+    } else {
+        Ok(None)
+    }
+}
+
+fn resolve_jiles_atherton_model_params(
+    model_def: &crate::netlist::ModelDef,
+    nominal_inductance: f64,
+) -> Result<crate::device::passive::JilesAthertonParams, SimulationError> {
+    let mut params = crate::device::passive::JilesAthertonParams::default();
+    let mut explicit_turns = false;
+
+    if let Some(ms) = positive_model_param(model_def, &["MS"], "MS")? {
+        params.ms = ms;
+    }
+    if let Some(a) = positive_model_param(model_def, &["A"], "A")? {
+        params.a = a;
+    }
+    if let Some(k) = positive_model_param(model_def, &["K"], "K")? {
+        params.k = k;
+    }
+    if let Some(c) = unit_interval_model_param(model_def, &["C"], "C")? {
+        params.c = c;
+    }
+    if let Some(alpha) = nonnegative_model_param(model_def, &["ALPHA"], "ALPHA")? {
+        params.alpha = alpha;
+    }
+    if let Some(area) = positive_model_param(model_def, &["AREA", "ACORE", "COREAREA"], "AREA")? {
+        params.area = area;
+    }
+    if let Some(length) = positive_model_param(model_def, &["LENGTH", "LEN", "PATHLEN"], "LENGTH")?
+    {
+        params.length = length;
+    }
+    if let Some(n_turns) = positive_model_param(model_def, &["N", "NT", "NTURNS", "TURNS"], "N")? {
+        params.n_turns = n_turns;
+        explicit_turns = true;
+    }
+
+    if !explicit_turns && nominal_inductance.is_finite() && nominal_inductance > 0.0 {
+        let base = params.base_inductance();
+        if base.is_finite() && base > 0.0 {
+            let turns_scale = (nominal_inductance / base).sqrt();
+            if turns_scale.is_finite() && turns_scale > 0.0 {
+                params.n_turns *= turns_scale;
+            }
+        }
+    }
+
+    Ok(params)
+}
+
 fn resolve_bjt_type_from_model(model_type: &str) -> Option<crate::netlist::BjtType> {
     if model_type.eq_ignore_ascii_case("NPN") {
         Some(crate::netlist::BjtType::Npn)
@@ -1152,10 +1253,21 @@ impl Engine {
                         .add(element.name.clone(), np, nn, branch, *value);
                 }
                 ElementKind::JilesAthertonInductor {
-                    value: _,
+                    value,
                     model,
-                    initial_current: _,
+                    initial_current,
                 } => {
+                    if !value.is_finite() || *value <= 0.0 {
+                        return Err(SimulationError::Circuit(format!(
+                            "Jiles-Atherton inductor '{}' has invalid inductance value {}",
+                            element.name, value
+                        )));
+                    }
+
+                    let np = circuit.get_or_create_node(&element.nodes[0]);
+                    let nn = circuit.get_or_create_node(&element.nodes[1]);
+                    let branch = circuit.allocate_branch_named(&element.name);
+
                     let model_def = find_model_def(netlist, model).ok_or_else(|| {
                         SimulationError::Circuit(format!(
                             "Jiles-Atherton inductor '{}' references unknown model '{}'",
@@ -1169,10 +1281,42 @@ impl Engine {
                         model_def,
                         &["CORE", "JA", "JILES", "JILESATHERTON"],
                     )?;
-                    return Err(SimulationError::Circuit(format!(
-                        "Jiles-Atherton inductor '{}' is not yet supported by the runtime solver (model '{}')",
-                        element.name, model
-                    )));
+
+                    let params = resolve_jiles_atherton_model_params(model_def, *value)?;
+                    let mut ja = crate::device::passive::JilesAthertonInductor::new(
+                        element.name.clone(),
+                        np,
+                        nn,
+                    )
+                    .with_params(params);
+                    if let Some(ic) = *initial_current {
+                        ja.set_initial_current(ic);
+                    }
+
+                    let effective_l = ja.effective_inductance();
+                    let runtime_l = if effective_l.is_finite() && effective_l > 0.0 {
+                        effective_l
+                    } else {
+                        *value
+                    };
+
+                    if let Some(ic) = *initial_current {
+                        circuit.inductors.add_with_ic(
+                            element.name.clone(),
+                            np,
+                            nn,
+                            branch,
+                            runtime_l,
+                            ic,
+                        );
+                    } else {
+                        circuit
+                            .inductors
+                            .add(element.name.clone(), np, nn, branch, runtime_l);
+                    }
+
+                    let inductor_index = circuit.inductors.len().saturating_sub(1);
+                    circuit.add_jiles_atherton_inductor(inductor_index, branch, ja);
                 }
                 ElementKind::VoltageSource(spec) => {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
@@ -1715,13 +1859,6 @@ impl Engine {
                     nl,
                     model,
                 } => {
-                    if element.nodes.len() > 4 {
-                        return Err(SimulationError::Circuit(format!(
-                            "Transmission line '{}' has {} nodes; coupled/multiconductor P-lines are not yet supported",
-                            element.name,
-                            element.nodes.len()
-                        )));
-                    }
                     if element.nodes.len() < 4 {
                         return Err(SimulationError::Circuit(format!(
                             "Transmission line '{}' requires 4 nodes",
@@ -1789,22 +1926,57 @@ impl Engine {
                         )));
                     }
 
-                    let mut tline = crate::device::TransmissionLine::new(
-                        element.name.clone(),
-                        p1p,
-                        p1n,
-                        p2p,
-                        p2n,
-                        z0_eff,
-                        delay,
-                    );
-                    tline.freq = freq_eff;
-                    tline.nl = nl_eff;
-                    if let Some(att) = model_params.and_then(|p| tline_model_attenuation(p, z0_eff))
-                    {
-                        tline.set_attenuation(att);
+                    let attenuation = model_params.and_then(|p| tline_model_attenuation(p, z0_eff));
+                    let push_tline = |circuit: &mut CircuitData,
+                                      name: String,
+                                      p1p: usize,
+                                      p1n: usize,
+                                      p2p: usize,
+                                      p2n: usize| {
+                        let mut tline = crate::device::TransmissionLine::new(
+                            name, p1p, p1n, p2p, p2n, z0_eff, delay,
+                        );
+                        tline.freq = freq_eff;
+                        tline.nl = nl_eff;
+                        if let Some(att) = attenuation {
+                            tline.set_attenuation(att);
+                        }
+                        circuit.tlines.push(tline);
+                    };
+
+                    if element.nodes.len() == 4 {
+                        push_tline(&mut circuit, element.name.clone(), p1p, p1n, p2p, p2n);
+                    } else {
+                        if element.nodes.len() % 2 != 0 {
+                            return Err(SimulationError::Circuit(format!(
+                                "Multiconductor transmission line '{}' requires an even number of nodes, found {}",
+                                element.name,
+                                element.nodes.len()
+                            )));
+                        }
+
+                        let conductors = element.nodes.len() / 2;
+                        if conductors < 2 {
+                            return Err(SimulationError::Circuit(format!(
+                                "Multiconductor transmission line '{}' requires at least two conductors",
+                                element.name
+                            )));
+                        }
+
+                        for conductor_idx in 0..conductors {
+                            let near = circuit.get_or_create_node(&element.nodes[conductor_idx]);
+                            let far = circuit
+                                .get_or_create_node(&element.nodes[conductor_idx + conductors]);
+                            push_tline(
+                                &mut circuit,
+                                format!("{}#{}", element.name, conductor_idx + 1),
+                                near,
+                                0,
+                                far,
+                                0,
+                            );
+                        }
                     }
-                    circuit.tlines.push(tline);
                 }
                 ElementKind::Coupling {
                     inductors,

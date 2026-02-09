@@ -375,6 +375,22 @@ impl NonlinearDeviceInstance {
         }
     }
 
+    /// Create a PMOS instance
+    pub fn pmos(
+        drain: usize,
+        gate: usize,
+        source: usize,
+        bulk: usize,
+        vth: Value,
+        kp: Value,
+    ) -> Self {
+        Self {
+            device_type: NonlinearDeviceType::Pmos,
+            terminals: vec![drain, gate, source, bulk],
+            params: NonlinearDeviceParams::mosfet(vth, kp, 0.0),
+        }
+    }
+
     /// Evaluate device current given terminal voltages
     /// Returns Vec of (node_index, current) pairs - current flowing INTO each node
     pub fn evaluate(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
@@ -1309,6 +1325,21 @@ impl HbSolver {
         vth: Value,
     ) {
         self.add_nonlinear_device(NonlinearDeviceInstance::nmos(
+            drain, gate, source, bulk, vth, kp,
+        ));
+    }
+
+    /// Add a PMOS for Newton iteration
+    pub fn add_pmos(
+        &mut self,
+        drain: usize,
+        gate: usize,
+        source: usize,
+        bulk: usize,
+        kp: Value,
+        vth: Value,
+    ) {
+        self.add_nonlinear_device(NonlinearDeviceInstance::pmos(
             drain, gate, source, bulk, vth, kp,
         ));
     }

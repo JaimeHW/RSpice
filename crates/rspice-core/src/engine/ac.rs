@@ -278,6 +278,7 @@ impl Engine {
         } else {
             self.solve_linear(&circuit, &mut matrix)?
         };
+        circuit.refresh_jiles_atherton_inductances(&dc_solution);
         if has_nonlinear {
             // Align stateful nonlinear models (limited junction voltages, operating region)
             // with the final converged operating-point solution before AC linearization.
