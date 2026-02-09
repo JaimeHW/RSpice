@@ -261,27 +261,25 @@ impl Engine {
         }
     }
 
-    /// Stamp voltage sources into HB solver
-    /// Note: For full HB, voltage sources require branch currents (MNA).
-    /// Here we use a simplified Norton equivalent approach.
+    /// Stamp ideal voltage sources into HB solver using MNA branch equations.
     fn hb_stamp_voltage_sources(&self, circuit: &CircuitData, solver: &mut HbSolver) {
-        const SOURCE_CONDUCTANCE: Value = 1e-3; // 1k source resistance approximation
-
         for i in 0..circuit.voltage_sources.len() {
             let np = circuit.voltage_sources.node_pos[i];
             let nn = circuit.voltage_sources.node_neg[i];
             let dc = circuit.voltage_sources.dc_values[i];
-
-            // Add small source conductance for numerical stability
-            self.hb_stamp_admittance(solver, np, nn, SOURCE_CONDUCTANCE, true);
-
-            // Stamp DC component as Norton current: I = V * G
-            if np > 0 {
-                solver.set_dc_source(np - 1, dc * SOURCE_CONDUCTANCE);
-            }
-            if nn > 0 {
-                solver.set_dc_source(nn - 1, -dc * SOURCE_CONDUCTANCE);
-            }
+            let ac_mag = circuit
+                .voltage_sources
+                .ac_magnitudes
+                .get(i)
+                .copied()
+                .unwrap_or(0.0);
+            let ac_phase = circuit
+                .voltage_sources
+                .ac_phases
+                .get(i)
+                .copied()
+                .unwrap_or(0.0);
+            solver.add_voltage_source_branch_ac(np, nn, dc, ac_mag, ac_phase);
         }
     }
 
@@ -298,10 +296,10 @@ impl Engine {
 
             // Stamp DC component (harmonic 0)
             if np > 0 {
-                solver.set_dc_source(np - 1, -dc); // Current leaves at + terminal
+                solver.add_dc_source(np - 1, -dc); // Current leaves at + terminal
             }
             if nn > 0 {
-                solver.set_dc_source(nn - 1, dc); // Current enters at - terminal
+                solver.add_dc_source(nn - 1, dc); // Current enters at - terminal
             }
 
             // Stamp AC component at fundamental (harmonic 1)
@@ -321,10 +319,10 @@ impl Engine {
             if ac_mag.abs() > 1e-30 {
                 // AC current at fundamental frequency
                 if np > 0 {
-                    solver.set_ac_source(np - 1, -ac_mag, ac_phase); // Current leaves at + terminal
+                    solver.add_ac_source(np - 1, -ac_mag, ac_phase); // Current leaves at + terminal
                 }
                 if nn > 0 {
-                    solver.set_ac_source(nn - 1, ac_mag, ac_phase); // Current enters at - terminal
+                    solver.add_ac_source(nn - 1, ac_mag, ac_phase); // Current enters at - terminal
                 }
             }
         }
@@ -718,26 +716,30 @@ mod tests {
         );
 
         let hb = result.expect("HB run should succeed");
-        assert!(hb
-            .result
-            .node_names
-            .iter()
-            .any(|name| name.eq_ignore_ascii_case("vin")));
-        assert!(hb
-            .result
-            .node_names
-            .iter()
-            .any(|name| name.eq_ignore_ascii_case("vout")));
-        assert!(hb
-            .result
-            .spectral_voltages
-            .iter()
-            .any(|spectrum| spectrum.node_name.eq_ignore_ascii_case("vin")));
-        assert!(hb
-            .result
-            .spectral_voltages
-            .iter()
-            .any(|spectrum| spectrum.node_name.eq_ignore_ascii_case("vout")));
+        assert!(
+            hb.result
+                .node_names
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case("vin"))
+        );
+        assert!(
+            hb.result
+                .node_names
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case("vout"))
+        );
+        assert!(
+            hb.result
+                .spectral_voltages
+                .iter()
+                .any(|spectrum| spectrum.node_name.eq_ignore_ascii_case("vin"))
+        );
+        assert!(
+            hb.result
+                .spectral_voltages
+                .iter()
+                .any(|spectrum| spectrum.node_name.eq_ignore_ascii_case("vout"))
+        );
     }
 
     #[test]
@@ -1190,6 +1192,73 @@ mod tests {
             result.is_ok(),
             "HB should work with mixed sources: {:?}",
             result.err()
+        );
+    }
+
+    #[test]
+    fn test_hb_voltage_source_enforces_dc_constraint_without_norton_error() {
+        // Ideal source + divider should give exact DC divider ratio.
+        use crate::Netlist;
+
+        let netlist_str = r#"
+            V1 in 0 DC 10
+            R1 in out 1k
+            R2 out 0 1k
+            C1 out 0 1p
+            .END
+        "#;
+
+        let netlist = Netlist::parse(netlist_str).expect("Parse failed");
+        let engine = Engine::default();
+        let config = HbConfig::new(10e3).with_harmonics(3).with_tolerance(1e-9);
+
+        let result = engine
+            .run_hb(&netlist, config)
+            .expect("HB run should succeed");
+        let out = result
+            .result
+            .spectral_voltages
+            .iter()
+            .find(|sv| sv.node_name.eq_ignore_ascii_case("out"))
+            .expect("out node should exist")
+            .dc();
+        assert!(
+            (out - 5.0).abs() < 1e-6,
+            "ideal source should produce 5.0 V divider output, got {}",
+            out
+        );
+    }
+
+    #[test]
+    fn test_hb_voltage_source_ac_amplitude_is_ideal() {
+        // AC amplitude at an ideal source node should remain 1V regardless of load.
+        use crate::Netlist;
+
+        let netlist_str = r#"
+            V1 in 0 DC 0 AC 1
+            R1 in 0 1k
+            C1 in 0 1n
+            .END
+        "#;
+
+        let netlist = Netlist::parse(netlist_str).expect("Parse failed");
+        let engine = Engine::default();
+        let config = HbConfig::new(1e3).with_harmonics(3).with_tolerance(1e-9);
+
+        let result = engine
+            .run_hb(&netlist, config)
+            .expect("HB run should succeed");
+        let in_node = result
+            .result
+            .spectral_voltages
+            .iter()
+            .find(|sv| sv.node_name.eq_ignore_ascii_case("in"))
+            .expect("in node should exist");
+        let fundamental = in_node.magnitude(1);
+        assert!(
+            (fundamental - 1.0).abs() < 1e-6,
+            "ideal AC source amplitude should be 1.0 V, got {}",
+            fundamental
         );
     }
 
@@ -1748,8 +1817,8 @@ mod tests {
     fn test_dcac_parsing_and_circuit_building() {
         // Comprehensive test to verify DC AC combined syntax parsing
         // and propagation through circuit building to HB solver
-        use crate::netlist::{ElementKind, SourceSpec};
         use crate::Netlist;
+        use crate::netlist::{ElementKind, SourceSpec};
 
         let netlist_str = r#"
             * Test DC AC combined source
@@ -1838,7 +1907,7 @@ mod tests {
         let r: f64 = 100.0;
         let l: f64 = 1e-3; // 1mH
         let c: f64 = 10e-9; // 10nF
-                            // Resonant frequency = 1/(2π√(1e-3 * 10e-9)) ≈ 50.33 kHz
+        // Resonant frequency = 1/(2π√(1e-3 * 10e-9)) ≈ 50.33 kHz
         let f0 = 1.0 / (2.0 * PI * (l * c).sqrt());
 
         // Test at resonance

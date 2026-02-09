@@ -876,10 +876,24 @@ impl HbSolver {
         }
     }
 
+    /// Add DC source current contribution at a node
+    pub fn add_dc_source(&mut self, node: usize, current: Value) {
+        if node < self.source_spectra.len() {
+            self.source_spectra[node][0] += Complex64::new(current, 0.0);
+        }
+    }
+
     /// Set AC source at a node (sinusoidal at fundamental)
     pub fn set_ac_source(&mut self, node: usize, magnitude: Value, phase: Value) {
         if node < self.source_spectra.len() && self.source_spectra[node].len() > 1 {
             self.source_spectra[node][1] = Complex64::from_polar(magnitude, phase);
+        }
+    }
+
+    /// Add AC source contribution at the fundamental harmonic for a node
+    pub fn add_ac_source(&mut self, node: usize, magnitude: Value, phase: Value) {
+        if node < self.source_spectra.len() && self.source_spectra[node].len() > 1 {
+            self.source_spectra[node][1] += Complex64::from_polar(magnitude, phase);
         }
     }
 
@@ -1030,75 +1044,217 @@ impl HbSolver {
         jac
     }
 
-    /// Solve for linear circuit (direct solve for diagonal blocks)
+    fn voltage_source_value_at_harmonic(
+        branch: &VoltageSourceBranch,
+        harmonic: usize,
+    ) -> Complex64 {
+        if harmonic == 0 {
+            Complex64::new(branch.dc_voltage, 0.0)
+        } else if harmonic == 1 {
+            Complex64::from_polar(branch.ac_magnitude, branch.ac_phase)
+        } else {
+            Complex64::new(0.0, 0.0)
+        }
+    }
+
+    fn compute_linear_residual_with_branches(
+        &self,
+        state: &mut HbSolverState,
+        branch_currents: &[Vec<Complex64>],
+    ) -> Value {
+        let omega0 = 2.0 * PI * self.config.fundamental_freq;
+        let h = self.num_harmonics + 1;
+
+        for node_res in &mut state.residual {
+            for c in node_res.iter_mut() {
+                *c = Complex64::new(0.0, 0.0);
+            }
+        }
+
+        // Start with nodal current source spectra.
+        for (node, source) in self.source_spectra.iter().enumerate() {
+            if node < state.residual.len() {
+                for (k, &s) in source.iter().enumerate() {
+                    if k < state.residual[node].len() {
+                        state.residual[node][k] += s;
+                    }
+                }
+            }
+        }
+
+        // Subtract linear passive contributions.
+        for &(i, j, g) in &self.g_matrix {
+            if i < state.x.len() && j < state.x.len() {
+                for k in 0..h {
+                    if k < state.x[j].len() && k < state.residual[i].len() {
+                        state.residual[i][k] -= g * state.x[j][k];
+                    }
+                }
+            }
+        }
+        for &(i, j, c) in &self.c_matrix {
+            if i < state.x.len() && j < state.x.len() {
+                for k in 0..h {
+                    if k < state.x[j].len() && k < state.residual[i].len() {
+                        let omega_k = (k as f64) * omega0;
+                        state.residual[i][k] -= Complex64::new(0.0, omega_k) * c * state.x[j][k];
+                    }
+                }
+            }
+        }
+        for &(i, j, l) in &self.l_matrix {
+            if i < state.x.len() && j < state.x.len() && l.abs() > 1e-30 {
+                for k in 0..h {
+                    if k < state.x[j].len() && k < state.residual[i].len() {
+                        if k == 0 {
+                            const DC_SHORT_CONDUCTANCE: Value = 1e6;
+                            state.residual[i][k] -= DC_SHORT_CONDUCTANCE * state.x[j][k];
+                        } else {
+                            let omega_k = (k as f64) * omega0;
+                            let y_l = Complex64::new(0.0, -1.0 / (omega_k * l));
+                            state.residual[i][k] -= y_l * state.x[j][k];
+                        }
+                    }
+                }
+            }
+        }
+
+        // Subtract MNA branch current coupling in nodal equations.
+        for branch in &self.voltage_source_branches {
+            let Some(currents) = branch_currents.get(branch.branch_idx) else {
+                continue;
+            };
+            for k in 0..h {
+                let ib = currents.get(k).copied().unwrap_or_default();
+                if branch.node_pos > 0 && branch.node_pos - 1 < state.residual.len() {
+                    state.residual[branch.node_pos - 1][k] -= ib;
+                }
+                if branch.node_neg > 0 && branch.node_neg - 1 < state.residual.len() {
+                    state.residual[branch.node_neg - 1][k] += ib;
+                }
+            }
+        }
+
+        let mut residual_sum: Value = state
+            .residual
+            .iter()
+            .flat_map(|node| node.iter())
+            .map(|c| c.norm_sqr())
+            .sum();
+
+        // Include branch KVL residuals in the overall convergence norm.
+        for branch in &self.voltage_source_branches {
+            for k in 0..h {
+                let mut v_drop = Complex64::new(0.0, 0.0);
+                if branch.node_pos > 0 && branch.node_pos - 1 < state.x.len() {
+                    v_drop += state.x[branch.node_pos - 1][k];
+                }
+                if branch.node_neg > 0 && branch.node_neg - 1 < state.x.len() {
+                    v_drop -= state.x[branch.node_neg - 1][k];
+                }
+                let source_v = Self::voltage_source_value_at_harmonic(branch, k);
+                let branch_residual = source_v - v_drop;
+                residual_sum += branch_residual.norm_sqr();
+            }
+        }
+
+        residual_sum.sqrt()
+    }
+
+    /// Solve for linear circuit (direct solve for diagonal harmonic blocks).
     ///
-    /// Builds Y = G + jωC + 1/(jωL) admittance matrix for each harmonic
-    /// and solves Y*V = I
+    /// Builds Y = G + jωC + 1/(jωL) and augments with MNA branch equations for
+    /// ideal voltage sources when present.
     pub fn solve_linear(&self, state: &mut HbSolverState) -> Result<(), HbError> {
         let omega0 = 2.0 * PI * self.config.fundamental_freq;
         let n = self.num_nodes;
         let h = self.num_harmonics + 1;
+        let m = self.num_branches;
+        let total_unknowns = n + m;
 
-        // For each harmonic, solve the linear system independently
+        let mut branch_currents = vec![vec![Complex64::new(0.0, 0.0); h]; m];
+
+        // For each harmonic, solve an independent linear system.
         for k in 0..h {
             let omega_k = (k as f64) * omega0;
+            let mut y_matrix = vec![vec![Complex64::new(0.0, 0.0); total_unknowns]; total_unknowns];
+            let mut rhs = vec![Complex64::new(0.0, 0.0); total_unknowns];
 
-            // Build matrix for this harmonic: Y_k = G + jω_k*C + 1/(jω_k*L)
-            let mut y_matrix = vec![vec![Complex64::new(0.0, 0.0); n]; n];
-
-            // Conductance contribution
             for &(i, j, g) in &self.g_matrix {
                 if i < n && j < n {
                     y_matrix[i][j] += g;
                 }
             }
 
-            // Capacitance contribution: jωC
             for &(i, j, c) in &self.c_matrix {
                 if i < n && j < n {
                     y_matrix[i][j] += Complex64::new(0.0, omega_k) * c;
                 }
             }
 
-            // Inductance contribution: 1/(jωL) = -j/(ωL)
             for &(i, j, l) in &self.l_matrix {
                 if i < n && j < n && l.abs() > 1e-30 {
                     if k == 0 {
-                        // DC: inductor is short circuit (large conductance)
                         const DC_SHORT_CONDUCTANCE: Value = 1e6;
                         y_matrix[i][j] += DC_SHORT_CONDUCTANCE;
                     } else {
-                        // AC: Y_L = -j/(ωL)
                         let y_l = Complex64::new(0.0, -1.0 / (omega_k * l));
                         y_matrix[i][j] += y_l;
                     }
                 }
             }
 
-            // Get RHS for this harmonic
-            let rhs: Vec<Complex64> = (0..n)
-                .map(|node| {
-                    self.source_spectra
-                        .get(node)
-                        .and_then(|s| s.get(k))
-                        .copied()
-                        .unwrap_or(Complex64::new(0.0, 0.0))
-                })
-                .collect();
+            for node in 0..n {
+                rhs[node] = self
+                    .source_spectra
+                    .get(node)
+                    .and_then(|s| s.get(k))
+                    .copied()
+                    .unwrap_or_default();
+            }
 
-            // Solve Y * V = I using Gaussian elimination
+            // MNA branch equations for ideal voltage sources.
+            for branch in &self.voltage_source_branches {
+                let row = n + branch.branch_idx;
+                if row >= total_unknowns {
+                    continue;
+                }
+
+                if branch.node_pos > 0 && branch.node_pos - 1 < n {
+                    let np = branch.node_pos - 1;
+                    y_matrix[np][row] += Complex64::new(1.0, 0.0);
+                    y_matrix[row][np] += Complex64::new(1.0, 0.0);
+                }
+                if branch.node_neg > 0 && branch.node_neg - 1 < n {
+                    let nn = branch.node_neg - 1;
+                    y_matrix[nn][row] -= Complex64::new(1.0, 0.0);
+                    y_matrix[row][nn] -= Complex64::new(1.0, 0.0);
+                }
+
+                rhs[row] = Self::voltage_source_value_at_harmonic(branch, k);
+            }
+
             let solution = self.solve_complex_linear_system(&y_matrix, &rhs)?;
 
-            // Store solution
-            for (node, &v) in solution.iter().enumerate() {
+            for node in 0..n {
                 if node < state.x.len() && k < state.x[node].len() {
-                    state.x[node][k] = v;
+                    state.x[node][k] = solution[node];
+                }
+            }
+            for branch_idx in 0..m {
+                let col = n + branch_idx;
+                if col < solution.len() && branch_idx < branch_currents.len() {
+                    branch_currents[branch_idx][k] = solution[col];
                 }
             }
         }
 
-        // Compute final residual
-        self.compute_linear_residual(state);
+        state.residual_norm = if m == 0 {
+            self.compute_linear_residual(state);
+            state.residual_norm
+        } else {
+            self.compute_linear_residual_with_branches(state, &branch_currents)
+        };
         state.converged = state.residual_norm < self.config.tolerance;
 
         Ok(())
@@ -2827,6 +2983,40 @@ mod solver_tests {
 
         assert!((solver.source_spectra[0][0].re - 1.0).abs() < 1e-10);
         assert!((solver.source_spectra[0][1].re - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_add_sources_accumulate() {
+        let config = HbConfig::new(1e9).with_harmonics(3);
+        let mut solver = HbSolver::new(config, 1);
+
+        solver.add_dc_source(0, 1.0);
+        solver.add_dc_source(0, 2.0);
+        solver.add_ac_source(0, 3.0, 0.0);
+        solver.add_ac_source(0, 1.0, 0.0);
+
+        assert!((solver.source_spectra[0][0].re - 3.0).abs() < 1e-12);
+        assert!((solver.source_spectra[0][1].re - 4.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_solve_linear_with_voltage_source_branch() {
+        let config = HbConfig::new(1e6).with_harmonics(3).with_tolerance(1e-12);
+        let mut solver = HbSolver::new(config, 1);
+
+        // Add a tiny capacitor so this remains a valid HB setup.
+        solver.add_capacitance(0, 0, 1e-12);
+        solver.add_voltage_source_branch(1, 0, 3.3);
+
+        let mut state = HbSolverState::new(1, 3);
+        solver
+            .solve_linear(&mut state)
+            .expect("linear solve should succeed");
+
+        assert!(
+            (state.x[0][0].re - 3.3).abs() < 1e-9,
+            "ideal source should force the node DC voltage"
+        );
     }
 
     #[test]
