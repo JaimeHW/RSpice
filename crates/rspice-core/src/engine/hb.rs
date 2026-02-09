@@ -35,6 +35,8 @@ pub enum HbError {
     InvalidConfig(String),
     /// Matrix is singular
     SingularMatrix,
+    /// Nonlinear devices are present but nonlinear HB Newton loop is not integrated yet
+    UnsupportedNonlinearDevices(String),
 }
 
 impl std::fmt::Display for HbError {
@@ -53,6 +55,11 @@ impl std::fmt::Display for HbError {
             Self::NoReactiveElements => write!(f, "Circuit has no capacitors or inductors"),
             Self::InvalidConfig(msg) => write!(f, "Invalid HB config: {}", msg),
             Self::SingularMatrix => write!(f, "Singular admittance matrix"),
+            Self::UnsupportedNonlinearDevices(summary) => write!(
+                f,
+                "HB nonlinear solve is not implemented yet for circuits containing {}",
+                summary
+            ),
         }
     }
 }
@@ -139,6 +146,12 @@ impl Engine {
         if !has_reactive {
             return Err(HbError::NoReactiveElements.into());
         }
+        if circuit.has_nonlinear_devices() {
+            return Err(
+                HbError::UnsupportedNonlinearDevices(Self::hb_nonlinear_device_summary(&circuit))
+                    .into(),
+            );
+        }
 
         // Create solver
         let mut solver = HbSolver::new(config.clone(), num_nodes);
@@ -169,9 +182,6 @@ impl Engine {
             .solve_linear(&mut state)
             .map_err(|_| SimulationError::Circuit("HB linear solve failed".to_string()))?;
 
-        // For nonlinear circuits, we would do Newton iteration here
-        // TODO: Add nonlinear Newton loop with FFT/IFFT for diodes, BJTs, MOSFETs
-
         // Build result
         let result = solver.build_result(&state);
 
@@ -196,6 +206,42 @@ impl Engine {
             }
         }
         node_names
+    }
+
+    fn hb_nonlinear_device_summary(circuit: &CircuitData) -> String {
+        let mut kinds: Vec<String> = Vec::new();
+
+        if !circuit.diodes.is_empty() {
+            kinds.push(format!("{} diode(s)", circuit.diodes.len()));
+        }
+        if !circuit.bjts.is_empty() {
+            kinds.push(format!("{} BJT(s)", circuit.bjts.len()));
+        }
+        if !circuit.mosfets.is_empty() {
+            kinds.push(format!("{} MOSFET(s)", circuit.mosfets.len()));
+        }
+        if !circuit.jfets.is_empty() {
+            kinds.push(format!("{} JFET(s)", circuit.jfets.len()));
+        }
+        if !circuit.vswitches.is_empty() {
+            kinds.push(format!("{} voltage switch(es)", circuit.vswitches.len()));
+        }
+        if !circuit.iswitches.is_empty() {
+            kinds.push(format!("{} current switch(es)", circuit.iswitches.len()));
+        }
+        #[cfg(feature = "veriloga")]
+        if !circuit.veriloga_devices.is_empty() {
+            kinds.push(format!(
+                "{} Verilog-A device(s)",
+                circuit.veriloga_devices.len()
+            ));
+        }
+
+        if kinds.is_empty() {
+            "nonlinear devices".to_string()
+        } else {
+            kinds.join(", ")
+        }
     }
 
     /// Stamp resistors into HB solver G matrix
@@ -516,6 +562,38 @@ mod tests {
             let msg = format!("{}", e);
             assert!(msg.contains("capacitor") || msg.contains("reactive"));
         }
+    }
+
+    #[test]
+    fn test_run_hb_rejects_nonlinear_devices_until_nonlinear_solver_is_integrated() {
+        use crate::Netlist;
+
+        let netlist_str = r#"
+            * Nonlinear diode with reactive element
+            V1 in 0 DC 1
+            R1 in out 1k
+            C1 out 0 1n
+            D1 out 0 DMOD
+            .MODEL DMOD D (IS=1e-14 N=1)
+            .END
+        "#;
+
+        let netlist = Netlist::parse(netlist_str).expect("Parse failed");
+        let engine = Engine::default();
+        let config = HbConfig::new(1e6).with_harmonics(5);
+
+        let result = engine.run_hb(&netlist, config);
+        assert!(
+            result.is_err(),
+            "HB should reject nonlinear circuits until nonlinear solve is integrated"
+        );
+        let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(
+            msg.contains("nonlinear"),
+            "expected nonlinear warning: {}",
+            msg
+        );
+        assert!(msg.contains("diode"), "expected diode summary: {}", msg);
     }
 
     // =========================================================================
