@@ -46,6 +46,6 @@ fn main() {
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
-    // Web support can be added in the future using egui web
-    panic!("Web support is not yet implemented. Use desktop version.");
+    // Keep wasm builds non-panicking so packaging and static analysis pipelines can run.
+    log::warn!("RSpice web bootstrap is not implemented yet.");
 }
