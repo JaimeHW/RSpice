@@ -1599,7 +1599,7 @@ impl SimulationController {
         let optimization_cfg = optimization_state
             .to_config()
             .map_err(|e| format!("invalid optimization settings: {}", e))?;
-        Ok(format!("* {}", optimization_cfg.to_spice()))
+        Ok(optimization_cfg.to_spice())
     }
 
     fn build_soa_command(&self, state: &AppState) -> Result<String, String> {
@@ -1608,7 +1608,7 @@ impl SimulationController {
         let soa_cfg = soa_state
             .to_config()
             .map_err(|e| format!("invalid SOA settings: {}", e))?;
-        Ok(format!("* {}", soa_cfg.to_spice()))
+        Ok(soa_cfg.to_spice())
     }
 
     fn build_pac_command(&self, state: &AppState) -> Result<String, String> {
@@ -4036,6 +4036,58 @@ mod tests {
             }
             other => panic!("expected SOA spec, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_build_queue_from_plan_uses_executable_optimization_command() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses.insert(22);
+
+        let plan = controller
+            .build_analysis_plan(&state)
+            .expect("optimization plan should build");
+        assert_eq!(plan.analyses.len(), 1);
+
+        let queue = controller
+            .build_queue_from_plan(&state, &plan)
+            .expect("optimization queue should build");
+        assert_eq!(queue.len(), 1);
+        assert!(
+            queue[0].analysis_line.starts_with(".opt "),
+            "optimization command must be emitted as executable SPICE, got: {}",
+            queue[0].analysis_line
+        );
+        assert!(
+            !queue[0].analysis_line.trim_start().starts_with('*'),
+            "optimization command must not be commented out"
+        );
+    }
+
+    #[test]
+    fn test_build_queue_from_plan_uses_executable_soa_command() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses.insert(23);
+
+        let plan = controller
+            .build_analysis_plan(&state)
+            .expect("soa plan should build");
+        assert_eq!(plan.analyses.len(), 1);
+
+        let queue = controller
+            .build_queue_from_plan(&state, &plan)
+            .expect("soa queue should build");
+        assert_eq!(queue.len(), 1);
+        assert!(
+            queue[0].analysis_line.starts_with(".soa "),
+            "soa command must be emitted as executable SPICE, got: {}",
+            queue[0].analysis_line
+        );
+        assert!(
+            !queue[0].analysis_line.trim_start().starts_with('*'),
+            "soa command must not be commented out"
+        );
     }
 
     #[test]
