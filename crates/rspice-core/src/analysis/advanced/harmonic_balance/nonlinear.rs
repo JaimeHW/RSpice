@@ -318,20 +318,6 @@ impl HbBjt {
         }
     }
 
-    /// Compute diode current
-    #[inline]
-    fn diode_current(&self, v: Value, n: Value) -> Value {
-        let p = self.polarity();
-        let vd = p * v;
-        let arg = (vd / (n * self.vt)).min(40.0);
-
-        if arg > -40.0 {
-            self.is * (arg.exp() - 1.0)
-        } else {
-            -self.is
-        }
-    }
-
     /// Compute diode conductance
     #[inline]
     fn diode_conductance(&self, v: Value, n: Value) -> Value {
@@ -901,7 +887,7 @@ mod tests {
         let bjt = HbBjt::new_npn("Q1", 0, 1, 2);
 
         // Cutoff: Vbe < 0
-        let (ic, ib, ie) = bjt.calculate_currents(-0.1, -5.0);
+        let (ic, ib, _ie) = bjt.calculate_currents(-0.1, -5.0);
 
         assert!(ic.abs() < 1e-10, "Cutoff Ic should be very small");
         assert!(ib.abs() < 1e-10, "Cutoff Ib should be very small");

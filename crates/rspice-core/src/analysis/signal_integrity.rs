@@ -123,7 +123,6 @@ impl EyeDiagram {
         self.voltage_range.1 = self.voltage_range.1.max(v_max);
 
         let ui = self.config.ui();
-        let total_ui_width = ui * self.config.num_ui as Value;
 
         // Find clock recovery - detect crossings
         let crossings = self.find_crossings(time, voltage);
@@ -166,7 +165,6 @@ impl EyeDiagram {
     fn add_segment(&mut self, time: &[Value], voltage: &[Value], crossing_time: Value, ui: Value) {
         let total_ui_width = ui * self.config.num_ui as Value;
         let t_start = crossing_time - total_ui_width / 2.0;
-        let t_end = crossing_time + total_ui_width / 2.0;
 
         let v_range = self.voltage_range.1 - self.voltage_range.0;
         if v_range < 1e-12 {
@@ -438,7 +436,7 @@ impl JitterAnalysis {
     }
 
     /// Estimate periodic jitter using basic spectral analysis
-    fn estimate_periodic_jitter(tie: &[Value], ui: Value) -> Value {
+    fn estimate_periodic_jitter(tie: &[Value], _ui: Value) -> Value {
         if tie.len() < 32 {
             return 0.0;
         }

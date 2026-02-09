@@ -264,7 +264,6 @@ impl PacAnalyzer {
                     let coupling = self.compute_harmonic_coupling(
                         harmonic_order,
                         &time_samples,
-                        fundamental,
                         pss_result,
                         num_nodes,
                     );
@@ -297,7 +296,6 @@ impl PacAnalyzer {
         &self,
         harmonic_order: i32,
         time_samples: &[Value],
-        fundamental: Value,
         pss_result: &PssResult,
         _num_nodes: usize,
     ) -> Complex64 {
@@ -388,11 +386,7 @@ impl PacAnalyzer {
         result: &mut PacResult,
         num_nodes: usize,
     ) -> Result<(), PacError> {
-        let fundamental = result.fundamental_frequency;
-
         for freq_idx in 0..result.num_frequencies() {
-            let freq_offset = result.frequencies[freq_idx];
-
             // For each sideband, compute output voltage
             for out_sb in self.config.sideband_min..=self.config.sideband_max {
                 // Output voltage is sum of contributions from all input sidebands
@@ -608,8 +602,8 @@ mod tests {
         let pss = create_test_pss_result();
 
         // DC component (harmonic 0) should have largest magnitude
-        let h0 = analyzer.compute_harmonic_coupling(0, &time_samples, 1e9, &pss, 3);
-        let h1 = analyzer.compute_harmonic_coupling(1, &time_samples, 1e9, &pss, 3);
+        let h0 = analyzer.compute_harmonic_coupling(0, &time_samples, &pss, 3);
+        let h1 = analyzer.compute_harmonic_coupling(1, &time_samples, &pss, 3);
 
         assert!(
             h0.norm() >= h1.norm() * 0.5,

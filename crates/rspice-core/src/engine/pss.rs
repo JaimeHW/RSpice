@@ -141,7 +141,7 @@ impl Engine {
         // Phase 1: Stabilization (tstab)
         // ==================================================================
         let period = config.period();
-        let (stabilized_waveform, mut current_state) =
+        let (stabilized_waveform, current_state) =
             self.pss_run_stabilization(&mut circuit, &mut matrix, &dc_solution, &config)?;
 
         // ==================================================================
@@ -196,7 +196,6 @@ impl Engine {
 
             // Update state with damping
             shooting_state.update_x0(&delta, solver.damping);
-            current_state = shooting_state.x0.clone();
             final_waveform = Some(waveform);
 
             iteration += 1;

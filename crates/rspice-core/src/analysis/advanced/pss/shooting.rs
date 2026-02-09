@@ -21,10 +21,6 @@ pub struct ShootingState {
     /// Current period estimate (for autonomous circuits)
     pub period: Value,
 
-    /// Monodromy matrix (Jacobian of x(T) w.r.t. x(0))
-    /// This is the state transition matrix over one period
-    monodromy: Option<Vec<Vec<Value>>>,
-
     /// Number of state variables
     n_states: usize,
 }
@@ -38,7 +34,6 @@ impl ShootingState {
             x_t: vec![0.0; n],
             residual: vec![0.0; n],
             period,
-            monodromy: None,
             n_states: n,
         }
     }
@@ -467,22 +462,6 @@ impl Default for ShootingNewtonSolver {
     fn default() -> Self {
         Self::new(1e-6, 100)
     }
-}
-
-/// Result of a single shooting iteration
-#[derive(Debug, Clone)]
-pub struct ShootingIterationResult {
-    /// Residual norm before this iteration
-    pub residual_before: Value,
-
-    /// Residual norm after this iteration
-    pub residual_after: Value,
-
-    /// Newton step norm
-    pub step_norm: Value,
-
-    /// Effective damping used
-    pub damping_used: Value,
 }
 
 #[cfg(test)]

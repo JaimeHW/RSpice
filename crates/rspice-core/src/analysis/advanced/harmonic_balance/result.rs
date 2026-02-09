@@ -58,7 +58,6 @@ impl SpectralVoltage {
     /// Get peak-to-peak voltage (approximation from harmonics)
     pub fn peak_to_peak(&self) -> Value {
         // Sum of all harmonic amplitudes * 2 (approximate)
-        let dc = self.dc();
         let ac_sum: Value = self.coefficients.iter().skip(1).map(|c| c.norm()).sum();
         2.0 * ac_sum // Peak-to-peak of AC component
     }

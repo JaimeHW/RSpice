@@ -396,7 +396,6 @@ pub struct EnvelopeTransientState {
 impl EnvelopeTransientState {
     /// Create new state with initial envelopes
     pub fn new(initial_envelopes: Vec<Complex64>) -> Self {
-        let n = initial_envelopes.len();
         Self {
             time: 0.0,
             envelopes: initial_envelopes.clone(),
@@ -606,7 +605,7 @@ impl EnvelopeTransientSolver {
 
         // Error estimate (difference between predictor and corrector)
         let mut max_error = 0.0_f64;
-        for (i, (&e_p, &e_c)) in e_predict.iter().zip(e_new.iter()).enumerate() {
+        for (&e_p, &e_c) in e_predict.iter().zip(e_new.iter()) {
             let err = (e_c - e_p).norm();
             let scale = e_c.norm().max(self.config.abs_tol);
             let rel_err = err / scale;
@@ -984,7 +983,7 @@ mod tests {
         let mut solver = EnvelopeTransientSolver::new(config, 1);
 
         // Simple decay: dE/dt = -E
-        let accepted = solver.step(|e, _t| e.iter().map(|&env| -env * 1e8).collect());
+        let _accepted = solver.step(|e, _t| e.iter().map(|&env| -env * 1e8).collect());
 
         // Should take at least one step
         assert!(solver.state.steps > 0 || solver.state.rejected_steps > 0);

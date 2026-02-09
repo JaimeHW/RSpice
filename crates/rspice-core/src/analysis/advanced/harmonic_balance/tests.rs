@@ -75,7 +75,7 @@ mod integration_tests {
         solver.solve_linear(&mut state).unwrap();
 
         // DC voltages
-        let v0_dc = state.x[0][0].re;
+        let _v0_dc = state.x[0][0].re;
         let v1_dc = state.x[1][0].re;
 
         // V1 should be approximately V0/2

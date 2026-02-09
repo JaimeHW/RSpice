@@ -19,14 +19,12 @@
 //! - No quantum effects (unlike BSIM4)
 
 use crate::Value;
-use std::f64::consts::PI;
 
 /// Physical constants for BSIM3
 const Q: Value = 1.60217663e-19; // Electron charge (C)
 const EPSSI: Value = 1.03594e-10; // Silicon permittivity (F/m)
 const EPSOX: Value = 3.453e-11; // SiO2 permittivity (F/m)
 const KB: Value = 1.38064852e-23; // Boltzmann constant (J/K)
-const NI_300K: Value = 1.45e16; // Intrinsic carrier concentration (m^-3)
 
 /// BSIM3 device type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -620,10 +618,6 @@ impl Bsim3 {
             Bsim3Region::Linear => p.cgdo * weff, // Simplified
         }
     }
-}
-
-fn sqrt(x: Value) -> Value {
-    x.sqrt()
 }
 
 //=============================================================================

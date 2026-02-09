@@ -7,10 +7,9 @@
 //! - Integration for RMS jitter
 
 use super::config::PnoiseConfig;
-use super::floquet::{FloquetAnalyzer, FloquetMode};
+use super::floquet::FloquetAnalyzer;
 use super::result::{NoiseContributor, PhaseNoisePoint, PnoiseResult};
 use crate::Value;
-use num_complex::Complex64;
 use std::f64::consts::PI;
 
 /// Phase noise solver state

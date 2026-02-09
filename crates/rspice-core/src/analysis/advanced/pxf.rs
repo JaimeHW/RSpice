@@ -1012,7 +1012,7 @@ mod tests {
         let config = PxfConfig::new().with_sweep(1e3, 1e6, 10);
         let analyzer = PxfAnalyzer::new(config);
 
-        let mut result = analyzer.create_test_transfer(26.0, 1e4); // ~20x gain, 10kHz pole
+        let result = analyzer.create_test_transfer(26.0, 1e4); // ~20x gain, 10kHz pole
 
         // Metrics should be computed
         assert!(result.peak_gain.is_some());

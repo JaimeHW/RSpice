@@ -109,17 +109,6 @@ impl HbSolverState {
     }
 }
 
-/// Represents a linear circuit element for HB
-#[derive(Debug, Clone)]
-pub struct HbLinearElement {
-    /// Conductance matrix stamp (node_i, node_j, value)
-    pub g_stamps: Vec<(usize, usize, Value)>,
-    /// Capacitance matrix stamp (node_i, node_j, value)
-    pub c_stamps: Vec<(usize, usize, Value)>,
-    /// Inductance matrix stamp (node_i, node_j, value)
-    pub l_stamps: Vec<(usize, usize, Value)>,
-}
-
 /// Voltage source branch for MNA
 ///
 /// In Modified Nodal Analysis, voltage sources require branch current
@@ -159,28 +148,6 @@ impl VoltageSourceBranch {
         self.ac_phase = phase;
         self
     }
-
-    /// Get voltage spectrum (DC + AC at fundamental)
-    pub fn voltage_spectrum(&self, num_harmonics: usize) -> Vec<Complex64> {
-        let mut spectrum = vec![Complex64::new(0.0, 0.0); num_harmonics + 1];
-        spectrum[0] = Complex64::new(self.dc_voltage, 0.0);
-        if num_harmonics >= 1 {
-            spectrum[1] = Complex64::from_polar(self.ac_magnitude, self.ac_phase);
-        }
-        spectrum
-    }
-}
-
-/// Represents a nonlinear device for HB
-pub trait HbNonlinearDevice: Send + Sync {
-    /// Evaluate device current given terminal voltages in time domain
-    fn evaluate(&self, voltages: &[Value]) -> Value;
-
-    /// Get device terminals (node indices)
-    fn terminals(&self) -> &[usize];
-
-    /// Compute Jacobian contribution (dI/dV) in time domain
-    fn jacobian(&self, voltages: &[Value]) -> Vec<(usize, Value)>;
 }
 
 /// Harmonic Balance solver
@@ -2970,6 +2937,7 @@ impl HbSolver {
     }
 
     /// Compute full residual including linear and nonlinear contributions
+    #[cfg(test)]
     fn compute_full_residual(&mut self, state: &mut HbSolverState) {
         // Start with linear residual
         self.compute_linear_residual(state);
@@ -3260,6 +3228,7 @@ impl HbSolver {
     ///
     /// Starts with α = 1 (full Newton step), reduces if residual doesn't decrease.
     /// This is critical for convergence on highly nonlinear circuits.
+    #[cfg(test)]
     fn apply_line_search(
         &mut self,
         state: &mut HbSolverState,
@@ -4375,8 +4344,6 @@ mod solver_tests {
 
         // Compute initial residual
         solver.compute_full_residual(&mut state);
-        let initial_norm = state.residual_norm;
-
         // Apply line search
         let result = solver.apply_line_search(&mut state, &delta_x);
         assert!(result.is_ok(), "Line search should not fail");

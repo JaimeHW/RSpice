@@ -879,7 +879,6 @@ impl Engine {
                         Self::is_clipped_force_candidate(&solution, &new_solution, num_nodes);
                     if clipped_force_candidate {
                         trapgear.force_method(IntegrationMethod::Gear2);
-                        force_accept_cooldown = 0;
                         timestep.force_step((dt * 0.5).min(max_step));
                     }
                     stale_accept_count = 0;
@@ -1012,7 +1011,6 @@ impl Engine {
                         Self::is_clipped_force_candidate(&solution, &new_solution, num_nodes);
                     if clipped_force_candidate {
                         trapgear.force_method(IntegrationMethod::Gear2);
-                        force_accept_cooldown = 0;
                         timestep.force_step((dt * 0.5).min(max_step));
                     }
                     stale_accept_count = 0;

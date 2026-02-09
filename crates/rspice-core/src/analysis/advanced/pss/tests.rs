@@ -7,26 +7,6 @@ mod integration_tests {
     use super::super::*;
     use std::f64::consts::PI;
 
-    /// Generate a damped sinusoidal approach to steady state
-    fn generate_oscillator_waveform(
-        freq: f64,
-        damping_time: f64,
-        duration: f64,
-        n_points: usize,
-    ) -> (Vec<f64>, Vec<f64>) {
-        let time: Vec<f64> = (0..n_points)
-            .map(|i| i as f64 * duration / (n_points - 1) as f64)
-            .collect();
-        let values: Vec<f64> = time
-            .iter()
-            .map(|&t| {
-                let envelope = 1.0 - (-t / damping_time).exp();
-                envelope * (2.0 * PI * freq * t).sin()
-            })
-            .collect();
-        (time, values)
-    }
-
     #[test]
     fn test_pss_config_to_result_flow() {
         // Test the data flow from config to result
@@ -686,9 +666,6 @@ mod integration_tests {
         let integrate = |x0: &[f64]| -> Vec<f64> { vec![2.0 * x0[0]] };
 
         let mut state = ShootingState::new(vec![1.0], 1.0);
-        #[allow(unused_assignments)]
-        let mut converged = false;
-
         for _iter in 0..10 {
             state.x_t = integrate(&state.x0);
             state.compute_residual();
@@ -698,7 +675,6 @@ mod integration_tests {
             }
 
             if solver.check_convergence(&state) {
-                converged = true;
                 break;
             }
 

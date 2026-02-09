@@ -142,7 +142,6 @@ impl PacResult {
         node_names: Vec<String>,
         branch_names: Vec<String>,
     ) -> Self {
-        let num_sidebands = (sideband_max - sideband_min + 1) as usize;
         let num_nodes = node_names.len();
         let num_branches = branch_names.len();
 

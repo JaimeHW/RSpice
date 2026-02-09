@@ -692,7 +692,6 @@ impl FloquetAnalyzer {
     /// The PPV projects noise perturbations onto the phase deviation.
     /// This is essentially the ISF sampled at the given time.
     pub fn phase_sensitivity(&self, time_normalized: Value) -> Vec<Complex64> {
-        let n = self.isf_samples.len().max(1);
         let n_samples = self.num_time_samples.max(1);
 
         // Map normalized time to sample index

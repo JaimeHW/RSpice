@@ -529,23 +529,6 @@ impl VerilogADevice {
             StampIndex::Ground => None,
         }
     }
-
-    /// Convert a StampIndex to circuit node
-    fn stamp_index_to_node(&self, index: &StampIndex) -> Option<usize> {
-        match index {
-            StampIndex::Terminal(t) => {
-                let node = self.node_mapping.get(*t).copied().unwrap_or(0);
-                if node > 0 { Some(node - 1) } else { None }
-            }
-            StampIndex::Internal(i) => {
-                // Internal nodes would need additional mapping
-                // For now, treat as offset from terminal nodes
-                let base = self.node_mapping.len();
-                Some(base + i)
-            }
-            StampIndex::Ground => None,
-        }
-    }
 }
 
 /// Result of Jacobian computation

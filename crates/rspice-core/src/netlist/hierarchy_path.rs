@@ -90,10 +90,6 @@ pub struct HierarchyPath {
     separator: char,
 }
 
-fn default_separator() -> char {
-    '.'
-}
-
 impl Default for HierarchyPath {
     fn default() -> Self {
         Self::root()
@@ -598,6 +594,7 @@ mod tests {
         let path2 = HierarchyPath::parse("X1_X2", '_').with_separator('.');
 
         // Different separators used in parsing, but same logical path
+        assert_eq!(path1, path2);
         let path3 = HierarchyPath::from_segments(vec!["X1".to_string(), "X2".to_string()]);
         assert_eq!(path1, path3);
 

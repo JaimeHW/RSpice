@@ -367,7 +367,7 @@ impl GanHemt {
     }
 
     /// Get small-signal capacitances at operating point
-    pub fn capacitances(&self, vgs: Value, vds: Value) -> (Value, Value, Value) {
+    pub fn capacitances(&self, _vgs: Value, _vds: Value) -> (Value, Value, Value) {
         // For now, use constant capacitances
         // A more sophisticated model would have voltage-dependent caps
         (self.params.cgs, self.params.cgd, self.params.cds)
@@ -404,7 +404,7 @@ impl GanHemt {
     }
 
     /// Check if device is in safe operating area
-    pub fn is_soa_ok(&self, vgs: Value, vds: Value, ids: Value) -> bool {
+    pub fn is_soa_ok(&self, _vgs: Value, vds: Value, ids: Value) -> bool {
         let tj = self.state.tj;
 
         // Voltage limit

@@ -301,7 +301,7 @@ impl Bjt {
         } else {
             voltages[self.node_collector - 1]
         };
-        let vb = if self.node_base == 0 {
+        let _vb = if self.node_base == 0 {
             0.0
         } else {
             voltages[self.node_base - 1]
