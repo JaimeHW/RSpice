@@ -233,13 +233,16 @@ impl<'a> NetlistGenerator<'a> {
         // Phase 3: Generate header
         self.generate_header();
 
-        // Phase 4: Generate component instances
+        // Phase 4: Generate Verilog-A include directives for library-bound instances
+        self.generate_veriloga_includes();
+
+        // Phase 5: Generate component instances
         self.generate_instances();
 
-        // Phase 5: Add models if needed
+        // Phase 6: Add models if needed
         self.generate_models();
 
-        // Phase 6: Add analysis commands (if requested)
+        // Phase 7: Add analysis commands (if requested)
         if !analysis_lines.is_empty() {
             self.lines.push(String::new());
             self.lines.push("* Analysis commands".to_string());
@@ -248,7 +251,7 @@ impl<'a> NetlistGenerator<'a> {
             }
         }
 
-        // Phase 7: End statement
+        // Phase 8: End statement
         self.lines.push(String::new());
         self.lines.push(".end".to_string());
 
@@ -443,6 +446,50 @@ impl<'a> NetlistGenerator<'a> {
         self.lines.push(String::new());
     }
 
+    /// Emit `.VERILOGA` include directives for placed library cell instances.
+    fn generate_veriloga_includes(&mut self) {
+        let mut includes = std::collections::BTreeMap::<String, Option<String>>::new();
+
+        for component in &self.schematic.components {
+            let Some(binding) = component.library_cell.as_ref() else {
+                continue;
+            };
+
+            // Explicit Verilog-A view binding or explicit source path qualifies.
+            let is_veriloga_view = binding.view.eq_ignore_ascii_case("veriloga");
+            let Some(source_path) = binding.source_path.as_ref() else {
+                continue;
+            };
+            if !is_veriloga_view {
+                continue;
+            }
+
+            let key = source_path.to_string_lossy().to_string();
+            let model = binding
+                .module_name
+                .as_ref()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            includes.entry(key).or_insert(model);
+        }
+
+        if includes.is_empty() {
+            return;
+        }
+
+        self.lines.push("* Verilog-A includes".to_string());
+        for (path, model) in includes {
+            let quoted_path = Self::quote_path_for_netlist(&path);
+            if let Some(model_name) = model {
+                self.lines
+                    .push(format!(".VERILOGA {} {}", quoted_path, model_name));
+            } else {
+                self.lines.push(format!(".VERILOGA {}", quoted_path));
+            }
+        }
+        self.lines.push(String::new());
+    }
+
     //-------------------------------------------------------------------------
     // Phase 4: Instance Generation
     //-------------------------------------------------------------------------
@@ -594,6 +641,34 @@ impl<'a> NetlistGenerator<'a> {
             // Ground - handled separately
             ComponentType::Ground => None,
 
+            // Generic library/cell/view instance.
+            // For Verilog-A views, this emits a standard X-instance referring to the
+            // compiled module name (or cell name fallback).
+            ComponentType::CellInstance => {
+                let Some(binding) = component.library_cell.as_ref() else {
+                    return None;
+                };
+
+                let subckt_name = binding
+                    .module_name
+                    .as_ref()
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(binding.cell.as_str());
+
+                let mut instance_name = component.spice_instance_name();
+                if !instance_name.starts_with('X') && !instance_name.starts_with('x') {
+                    instance_name = format!("X{}", instance_name);
+                }
+
+                let nodes = node_names.join(" ");
+                let params = self.format_params(&component.params);
+                Some(format!(
+                    "{} {} {}{}",
+                    instance_name, nodes, subckt_name, params
+                ))
+            }
+
             // XSPICE components: A name nodes model [params]
             _ if component.kind.is_xspice() => {
                 let nodes = node_names.join(" ");
@@ -629,6 +704,11 @@ impl<'a> NetlistGenerator<'a> {
             "float_{}",
             point.x.abs() as u32 * 10000 + point.y.abs() as u32
         )
+    }
+
+    fn quote_path_for_netlist(path: &str) -> String {
+        let escaped = path.replace('"', "\\\"");
+        format!("\"{}\"", escaped)
     }
 
     /// Format node list for SPICE line
@@ -942,7 +1022,7 @@ fn chrono_lite_timestamp() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::Point;
+    use crate::state::{LibraryCellInstance, Point};
 
     // -------------------------------------------------------------------------
     // Net Tests
@@ -1303,6 +1383,48 @@ mod tests {
         assert!(result.netlist.contains(".tran 1n 100n"));
         assert!(result.netlist.contains(".end"));
         assert!(result.errors.is_empty());
+    }
+
+    #[test]
+    fn test_generate_veriloga_include_and_cell_instance() {
+        let mut schematic = SchematicState::default();
+        let mut binding = LibraryCellInstance::new("veriloga", "my_resistor", "veriloga");
+        binding.source_path = Some(std::path::PathBuf::from("models/my resistor.va"));
+        binding.module_name = Some("my_resistor".to_string());
+        binding.terminal_order = vec!["p".to_string(), "n".to_string()];
+
+        let mut comp = Component::new(1, ComponentType::CellInstance, Point::new(0, 0))
+            .with_name_value("X1", "");
+        comp.library_cell = Some(binding);
+        comp.params = "g=2m".to_string();
+        schematic.components.push(comp);
+
+        let mut gen = NetlistGenerator::new(&schematic);
+        let netlist = gen.generate();
+
+        assert!(netlist.contains(".VERILOGA \"models/my resistor.va\" my_resistor"));
+        assert!(netlist.contains("X1"));
+        assert!(netlist.contains("my_resistor g=2m"));
+    }
+
+    #[test]
+    fn test_cell_instance_line_uses_module_or_cell_fallback() {
+        let schematic = SchematicState::default();
+        let mut gen = NetlistGenerator::new(&schematic);
+
+        let mut binding = LibraryCellInstance::new("veriloga", "fallback_cell", "veriloga");
+        binding.source_path = Some(std::path::PathBuf::from("fallback.va"));
+
+        let mut comp = Component::new(1, ComponentType::CellInstance, Point::new(10, 20))
+            .with_name_value("inst1", "");
+        comp.library_cell = Some(binding);
+
+        let line = gen
+            .generate_instance_line(&comp)
+            .expect("cell instance should netlist");
+
+        assert!(line.starts_with("Xinst1 "));
+        assert!(line.contains(" fallback_cell"));
     }
 
     // -------------------------------------------------------------------------

@@ -31,7 +31,7 @@ mod wire;
 
 // Re-export all public types for backwards compatibility
 pub use clipboard::ClipboardData;
-pub use component::Component;
+pub use component::{Component, LibraryCellInstance};
 pub use component_type::ComponentType;
 pub use net_highlight::{NetGraph, NetHighlightState};
 pub use net_label::{Junction, NetLabel};

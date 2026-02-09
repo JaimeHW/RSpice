@@ -124,6 +124,8 @@ pub enum ComponentType {
     // =========================================================================
     /// Ground node (no SPICE prefix - implicit node 0)
     Ground,
+    /// Generic hierarchical/library cell instance (SPICE prefix: X)
+    CellInstance,
 
     // =========================================================================
     // XSPICE Analog Behavioral Models
@@ -220,6 +222,7 @@ impl ComponentType {
             ComponentType::Ccvs => "H",
             ComponentType::Cccs => "F",
             ComponentType::Ground => "",
+            ComponentType::CellInstance => "X",
             // All XSPICE components use "A" prefix
             ComponentType::XspiceGain
             | ComponentType::XspiceSummer
@@ -282,6 +285,7 @@ impl ComponentType {
             ComponentType::Ccvs => "CCVS (H)",
             ComponentType::Cccs => "CCCS (F)",
             ComponentType::Ground => "Ground",
+            ComponentType::CellInstance => "Cell Instance",
             // XSPICE Analog Behavioral
             ComponentType::XspiceGain => "Gain",
             ComponentType::XspiceSummer => "Summer",
@@ -313,6 +317,7 @@ impl ComponentType {
     pub fn terminal_count(&self) -> usize {
         match self {
             ComponentType::Ground => 1,
+            ComponentType::CellInstance => 2,
             ComponentType::NpnBjt | ComponentType::PnpBjt => 3,
             ComponentType::Njfet | ComponentType::Pjfet => 3,
             ComponentType::Nmos
@@ -432,6 +437,10 @@ impl ComponentType {
             ],
             // Coupled inductor doesn't have terminals (it's a coupling statement)
             ComponentType::CoupledInductor => vec![],
+            // Generic instance: default 2-pin symbol, dynamic pin layouts are handled in Component
+            ComponentType::CellInstance => {
+                vec![("1", Point::new(-hw, 0)), ("2", Point::new(hw, 0))]
+            }
             // Ground: single terminal at top
             ComponentType::Ground => vec![("GND", Point::new(0, -hh))],
 
@@ -628,6 +637,8 @@ impl ComponentType {
 
             // Ground: compact but on grid
             ComponentType::Ground => (20, 20),
+            // Generic instance: wider rectangular body for block-style symbols
+            ComponentType::CellInstance => (60, 40),
 
             // Diode: horizontal
             ComponentType::Diode => (40, 20),
@@ -697,6 +708,7 @@ impl ComponentType {
             | ComponentType::VoltageSourcePulse
             | ComponentType::VoltageSourceSin => "5",
             ComponentType::CurrentSource => "1m",
+            ComponentType::CellInstance => "",
             _ => "",
         }
     }

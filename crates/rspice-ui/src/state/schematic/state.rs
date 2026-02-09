@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use super::clipboard::ClipboardData;
-use super::component::Component;
+use super::component::{Component, LibraryCellInstance};
 use super::component_type::ComponentType;
 use super::net_label::{Junction, NetLabel};
 use super::point::Point;
@@ -93,6 +93,12 @@ pub struct SchematicState {
     /// Preview rotation for component placement
     pub preview_rotation: Rotation,
 
+    /// Pending library/cell/view placement payload used with `Tool::Place(CellInstance)`.
+    ///
+    /// Runtime interaction state only and never persisted to schematic files.
+    #[serde(skip)]
+    pub pending_library_cell: Option<LibraryCellInstance>,
+
     /// Wire-to-terminal connections (for rubber-banding)
     pub connections: Vec<WireConnection>,
 
@@ -160,6 +166,7 @@ impl Default for SchematicState {
             net_labels: Vec::new(),
             junctions: Vec::new(),
             preview_rotation: Rotation::default(),
+            pending_library_cell: None,
             connections: Vec::new(),
             net_mapping: HashMap::new(),
             is_dirty: false,
@@ -516,6 +523,26 @@ impl SchematicState {
 
         // Set default values
         component.value = kind.default_value().to_string();
+
+        self.components.push(component);
+        self.is_dirty = true;
+        self.bump_topology_version();
+        id
+    }
+
+    /// Add a generic library/cell/view instance at the given position.
+    pub fn add_library_cell_component(
+        &mut self,
+        pos: Point,
+        library_cell: LibraryCellInstance,
+    ) -> u64 {
+        let id = self.next_id();
+        let name = self.generate_name(ComponentType::CellInstance);
+        let mut component = Component::new(id, ComponentType::CellInstance, pos);
+        component.name = name;
+        component.rotation = self.preview_rotation;
+        component.value = library_cell.cell.clone();
+        component.library_cell = Some(library_cell);
 
         self.components.push(component);
         self.is_dirty = true;

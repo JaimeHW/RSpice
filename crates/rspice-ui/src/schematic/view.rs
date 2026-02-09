@@ -349,8 +349,24 @@ pub fn render_schematic_view(
                 Tool::Place(component_type) => {
                     // Components snap to full grid
                     let grid_pos = screen_to_grid(pos);
-                    state.schematic.add_component(component_type, grid_pos);
-                    log::info!("Placed {:?} at {:?}", component_type, grid_pos);
+                    if component_type == ComponentType::CellInstance {
+                        if let Some(library_cell) = state.schematic.pending_library_cell.clone() {
+                            state
+                                .schematic
+                                .add_library_cell_component(grid_pos, library_cell);
+                            log::info!("Placed library cell instance at {:?}", grid_pos);
+                        } else {
+                            state.console_messages.push(
+                                crate::common::app::ConsoleMessage::warning(
+                                    "No library cell selected for placement".to_string(),
+                                ),
+                            );
+                            state.schematic.tool = Tool::Select;
+                        }
+                    } else {
+                        state.schematic.add_component(component_type, grid_pos);
+                        log::info!("Placed {:?} at {:?}", component_type, grid_pos);
+                    }
                 }
                 Tool::Wire => {
                     // Wires snap to half grid for connecting to component terminals

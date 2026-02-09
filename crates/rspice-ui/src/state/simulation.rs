@@ -961,10 +961,7 @@ mod tests {
             AnalysisType::HarmonicBalance.axis_info(),
             ("Frequency", "Hz", "Magnitude", "V")
         );
-        assert_eq!(
-            AnalysisType::Pss.axis_info(),
-            ("Time", "s", "Voltage", "V")
-        );
+        assert_eq!(AnalysisType::Pss.axis_info(), ("Time", "s", "Voltage", "V"));
     }
 
     // =========================================================================

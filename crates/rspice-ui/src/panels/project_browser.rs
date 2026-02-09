@@ -14,7 +14,9 @@
 use egui::{CollapsingHeader, Ui};
 
 use crate::common::app::AppState;
-use crate::state::{Component, ComponentType, LibraryManager, Tool};
+use crate::state::{
+    Cell, Component, ComponentType, LibraryCellInstance, LibraryManager, Tool, View, ViewType,
+};
 
 // =============================================================================
 // Public API
@@ -117,7 +119,7 @@ fn render_category(
 /// Render user library cells with full LCV hierarchy and management
 fn render_user_library_cells(ui: &mut Ui, lib_name: &str, filter: &str, state: &mut AppState) {
     // Get cells matching filter
-    let cells: Vec<(String, Vec<String>)> = state
+    let cells: Vec<(Cell, Vec<View>)> = state
         .library_manager
         .get_library(lib_name)
         .map(|lib| {
@@ -125,9 +127,8 @@ fn render_user_library_cells(ui: &mut Ui, lib_name: &str, filter: &str, state: &
                 .iter()
                 .filter(|c| filter.is_empty() || c.name.to_lowercase().contains(filter))
                 .map(|c| {
-                    let views: Vec<String> =
-                        c.views_sorted().iter().map(|v| v.name.clone()).collect();
-                    (c.name.clone(), views)
+                    let views: Vec<View> = c.views_sorted().iter().map(|v| (*v).clone()).collect();
+                    ((*c).clone(), views)
                 })
                 .collect()
         })
@@ -136,22 +137,64 @@ fn render_user_library_cells(ui: &mut Ui, lib_name: &str, filter: &str, state: &
     if cells.is_empty() {
         ui.label("No cells defined");
     } else {
-        for (cell_name, views) in &cells {
+        for (cell, views) in &cells {
+            let cell_name = &cell.name;
+
             // Render cell as collapsible header
             CollapsingHeader::new(format!("📄 {}", cell_name))
                 .default_open(false)
                 .show(ui, |ui| {
                     // Show views within cell
-                    for view_name in views {
+                    for view in views {
+                        let view_name = &view.name;
+                        let placeable_instance = build_placeable_instance(lib_name, cell, view);
+                        let is_selected = if let Some(instance) = &placeable_instance {
+                            matches!(
+                                state.schematic.tool,
+                                Tool::Place(ComponentType::CellInstance)
+                            ) && state
+                                .schematic
+                                .pending_library_cell
+                                .as_ref()
+                                .map(|pending| {
+                                    pending.library == instance.library
+                                        && pending.cell == instance.cell
+                                        && pending.view == instance.view
+                                })
+                                .unwrap_or(false)
+                        } else {
+                            false
+                        };
+
                         ui.horizontal(|ui| {
                             let icon = view_icon(view_name);
-                            ui.label(format!("  {} {}", icon, view_name));
+                            if let Some(instance) = placeable_instance {
+                                let response = ui.selectable_label(
+                                    is_selected,
+                                    format!("  {} {}", icon, view_name),
+                                );
+                                if response.clicked() {
+                                    state.schematic.tool = Tool::Place(ComponentType::CellInstance);
+                                    state.schematic.pending_library_cell = Some(instance);
+                                    state.console_messages.push(
+                                        crate::common::app::ConsoleMessage::info(format!(
+                                            "Click on schematic to place {}/{}/{}",
+                                            lib_name, cell_name, view_name
+                                        )),
+                                    );
+                                }
+                                response.on_hover_text(
+                                    "Click to place this library cell instance on schematic",
+                                );
+                            } else {
+                                ui.label(format!("  {} {}", icon, view_name));
+                            }
 
                             // Delete view button (small X)
                             if ui.small_button("×").on_hover_text("Delete view").clicked() {
                                 state.pending_delete_view = Some((
                                     lib_name.to_string(),
-                                    cell_name.clone(),
+                                    cell_name.to_string(),
                                     view_name.clone(),
                                 ));
                             }
@@ -163,7 +206,7 @@ fn render_user_library_cells(ui: &mut Ui, lib_name: &str, filter: &str, state: &
                         if ui.small_button("+ View").clicked() {
                             state.dialogs.new_view_dialog = true;
                             state.dialogs.new_view_library = lib_name.to_string();
-                            state.dialogs.new_view_cell = cell_name.clone();
+                            state.dialogs.new_view_cell = cell_name.to_string();
                         }
 
                         // Delete cell button
@@ -173,7 +216,7 @@ fn render_user_library_cells(ui: &mut Ui, lib_name: &str, filter: &str, state: &
                             .clicked()
                         {
                             state.pending_delete_cell =
-                                Some((lib_name.to_string(), cell_name.clone()));
+                                Some((lib_name.to_string(), cell_name.to_string()));
                         }
                     });
                 });
@@ -189,7 +232,6 @@ fn render_user_library_cells(ui: &mut Ui, lib_name: &str, filter: &str, state: &
         state.dialogs.new_cell_library = lib_name.to_string();
     }
 }
-
 /// Get icon for a view type
 fn view_icon(view_name: &str) -> &'static str {
     match view_name {
@@ -264,6 +306,7 @@ fn render_library_cell(
     if button.clicked() {
         // Set tool to place this component
         state.schematic.tool = Tool::Place(component_type);
+        state.schematic.pending_library_cell = None;
         state
             .console_messages
             .push(crate::common::app::ConsoleMessage::info(format!(
@@ -278,6 +321,68 @@ fn render_library_cell(
         component_type,
         component_type.spice_prefix()
     ));
+}
+
+fn build_placeable_instance(
+    lib_name: &str,
+    cell: &Cell,
+    view: &View,
+) -> Option<LibraryCellInstance> {
+    if view.view_type != ViewType::VerilogA {
+        return None;
+    }
+
+    let source_path = view
+        .file_path
+        .clone()
+        .or_else(|| {
+            view.metadata
+                .get("veriloga.source_path")
+                .map(std::path::PathBuf::from)
+        })
+        .or_else(|| {
+            cell.metadata
+                .get("veriloga.source_path")
+                .map(std::path::PathBuf::from)
+        });
+
+    let mut instance = LibraryCellInstance::new(lib_name, &cell.name, &view.name);
+    instance.source_path = source_path;
+    instance.module_name = view
+        .metadata
+        .get("veriloga.module")
+        .cloned()
+        .or_else(|| cell.metadata.get("veriloga.module").cloned())
+        .or_else(|| Some(cell.name.clone()));
+
+    if let Some(raw_ports) = view
+        .metadata
+        .get("veriloga.ports")
+        .or_else(|| cell.metadata.get("veriloga.ports"))
+    {
+        instance.terminal_order = parse_terminal_order(raw_ports);
+    }
+
+    if instance.source_path.is_none() {
+        return None;
+    }
+
+    Some(instance)
+}
+
+fn parse_terminal_order(raw: &str) -> Vec<String> {
+    if let Ok(parsed) = serde_json::from_str::<Vec<String>>(raw) {
+        return parsed
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+    }
+
+    raw.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 // =============================================================================
@@ -309,6 +414,7 @@ pub fn generate_component_name(comp_type: &ComponentType, existing: &[Component]
 mod tests {
     use super::*;
     use crate::state::Point;
+    use std::path::PathBuf;
 
     #[test]
     fn test_generate_component_name_resistor() {
@@ -359,6 +465,89 @@ mod tests {
         for s in semis {
             assert!(!s.is_empty());
         }
+    }
+
+    #[test]
+    fn test_parse_terminal_order_json_array() {
+        let terminals = parse_terminal_order(r#"[" p ","n","","b"]"#);
+        assert_eq!(terminals, vec!["p", "n", "b"]);
+    }
+
+    #[test]
+    fn test_parse_terminal_order_csv_fallback() {
+        let terminals = parse_terminal_order("p, n, , b");
+        assert_eq!(terminals, vec!["p", "n", "b"]);
+    }
+
+    #[test]
+    fn test_build_placeable_instance_veriloga_from_view_metadata() {
+        let mut cell = Cell::new("res_mod");
+        let mut view = View::new("veriloga", ViewType::VerilogA);
+        view.file_path = Some(PathBuf::from("models/res_mod.va"));
+        view.metadata
+            .insert("veriloga.module".to_string(), "my_res_mod".to_string());
+        view.metadata
+            .insert("veriloga.ports".to_string(), r#"["p","n"]"#.to_string());
+
+        let instance = build_placeable_instance("veriloga", &cell, &view)
+            .expect("expected placeable Verilog-A instance");
+        assert_eq!(instance.library, "veriloga");
+        assert_eq!(instance.cell, "res_mod");
+        assert_eq!(instance.view, "veriloga");
+        assert_eq!(instance.module_name.as_deref(), Some("my_res_mod"));
+        assert_eq!(
+            instance.source_path,
+            Some(PathBuf::from("models/res_mod.va"))
+        );
+        assert_eq!(instance.terminal_order, vec!["p", "n"]);
+
+        // Ensure non-empty fallback still works if view metadata is absent.
+        cell.metadata
+            .insert("veriloga.module".to_string(), "cell_level_mod".to_string());
+        let instance_from_cell =
+            build_placeable_instance("veriloga", &cell, &view).expect("still placeable");
+        assert_eq!(
+            instance_from_cell.module_name.as_deref(),
+            Some("my_res_mod")
+        );
+    }
+
+    #[test]
+    fn test_build_placeable_instance_uses_cell_metadata_fallbacks() {
+        let mut cell = Cell::new("vactrl");
+        cell.metadata
+            .insert("veriloga.module".to_string(), "varactor".to_string());
+        cell.metadata.insert(
+            "veriloga.source_path".to_string(),
+            "models/varactor.va".to_string(),
+        );
+        cell.metadata
+            .insert("veriloga.ports".to_string(), "anode,cathode".to_string());
+
+        let view = View::new("veriloga", ViewType::VerilogA);
+        let instance = build_placeable_instance("veriloga", &cell, &view)
+            .expect("expected placeable Verilog-A instance from cell metadata");
+        assert_eq!(instance.module_name.as_deref(), Some("varactor"));
+        assert_eq!(
+            instance.source_path,
+            Some(PathBuf::from("models/varactor.va"))
+        );
+        assert_eq!(instance.terminal_order, vec!["anode", "cathode"]);
+    }
+
+    #[test]
+    fn test_build_placeable_instance_requires_source_path() {
+        let cell = Cell::new("res_mod");
+        let view = View::new("veriloga", ViewType::VerilogA);
+        assert!(build_placeable_instance("veriloga", &cell, &view).is_none());
+    }
+
+    #[test]
+    fn test_build_placeable_instance_rejects_non_veriloga_view() {
+        let cell = Cell::new("res_mod");
+        let mut view = View::new("symbol", ViewType::Symbol);
+        view.file_path = Some(PathBuf::from("models/res_mod.va"));
+        assert!(build_placeable_instance("veriloga", &cell, &view).is_none());
     }
 
     // =========================================================================
