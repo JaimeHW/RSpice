@@ -7,12 +7,15 @@
 //! - Result caching
 
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
 };
 use std::thread::{self, JoinHandle};
 
-use super::config::AnalysisConfig;
+use super::config::{
+    AcAnalysisConfig, AcSweepType, AnalysisConfig, DcSweepConfig, NoiseAnalysisConfig,
+    PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
+};
 use super::multi_run::AnalysisSpec;
 use super::results::{MonteCarloVariableResult, SimulationResult, WaveformData};
 use super::status::{SimulationProgress, SimulationStatus};
@@ -445,7 +448,7 @@ fn run_simulation_thread(
         }
         SimulationRequest::Spec { spec, options } => {
             log::info!("Running simulation via spec path: {:?}", spec.run_type());
-            run_spec_request(spec, options, &netlist, &abort_flag)?
+            run_spec_request(&bridge, spec, options, &netlist, &abort_flag)?
         }
     };
 
@@ -460,6 +463,7 @@ fn run_simulation_thread(
 }
 
 fn run_spec_request(
+    bridge: &super::engine_bridge::EngineBridge,
     spec: AnalysisSpec,
     options: SpecExecutionOptions,
     netlist: &str,
@@ -469,6 +473,10 @@ fn run_spec_request(
 
     if abort_flag.load(Ordering::SeqCst) {
         return Err(SimulationError::Aborted);
+    }
+
+    if let Some(config) = analysis_config_from_spec(&spec) {
+        return bridge.run_with_abort(&config, netlist, abort_flag);
     }
 
     match spec {
@@ -1286,6 +1294,112 @@ fn run_spec_request(
     }
 }
 
+fn analysis_config_from_spec(spec: &AnalysisSpec) -> Option<AnalysisConfig> {
+    match spec {
+        AnalysisSpec::DcOp => Some(AnalysisConfig::DcOp),
+        AnalysisSpec::DcSweep {
+            source_name,
+            start,
+            stop,
+            step,
+            source2,
+            start2,
+            stop2,
+            step2,
+        } => Some(AnalysisConfig::DcSweep(DcSweepConfig {
+            source: source_name.clone(),
+            start: *start,
+            stop: *stop,
+            step: *step,
+            source2: source2.clone(),
+            start2: *start2,
+            stop2: *stop2,
+            step2: *step2,
+        })),
+        AnalysisSpec::Transient {
+            stop_time,
+            step_time,
+        } => Some(AnalysisConfig::Transient(TransientAnalysisConfig {
+            stop_time: *stop_time,
+            step_time: *step_time,
+            start_time: 0.0,
+            max_timestep: None,
+            uic: false,
+        })),
+        AnalysisSpec::Ac {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+        } => Some(AnalysisConfig::Ac(AcAnalysisConfig {
+            sweep_type: ac_sweep_type_from_spec(*sweep),
+            num_points: *points_per_unit,
+            start_freq: *start_freq,
+            stop_freq: *stop_freq,
+        })),
+        AnalysisSpec::Noise {
+            output_node,
+            start_freq,
+            stop_freq,
+            points_per_decade,
+            ..
+        } => Some(AnalysisConfig::Noise(NoiseAnalysisConfig {
+            output_node: output_node.clone(),
+            reference_node: "0".to_string(),
+            input_source: "V1".to_string(),
+            sweep_type: AcSweepType::Decade,
+            num_points: *points_per_decade,
+            start_freq: *start_freq,
+            stop_freq: *stop_freq,
+        })),
+        AnalysisSpec::PoleZero {
+            input_node,
+            input_ref,
+            output_node,
+            output_ref,
+            transfer_type,
+            analysis_type,
+        } => Some(AnalysisConfig::PoleZero(PoleZeroConfig {
+            input_node: input_node.clone(),
+            input_ref: input_ref.clone(),
+            output_node: output_node.clone(),
+            output_ref: output_ref.clone(),
+            transfer_type: transfer_type.clone(),
+            analysis_type: pz_analysis_type_from_spec(analysis_type),
+        })),
+        AnalysisSpec::Sensitivity {
+            output_var,
+            ac_mode,
+            frequency,
+        } => Some(AnalysisConfig::Sensitivity(SensitivityConfig {
+            output_var: output_var.clone(),
+            ac_mode: *ac_mode,
+            frequency: *frequency,
+        })),
+        _ => None,
+    }
+}
+
+#[inline]
+fn ac_sweep_type_from_spec(sweep: crate::simulation::multi_run::FrequencySweep) -> AcSweepType {
+    match sweep {
+        crate::simulation::multi_run::FrequencySweep::Decade => AcSweepType::Decade,
+        crate::simulation::multi_run::FrequencySweep::Octave => AcSweepType::Octave,
+        crate::simulation::multi_run::FrequencySweep::Linear => AcSweepType::Linear,
+    }
+}
+
+#[inline]
+fn pz_analysis_type_from_spec(mode: &str) -> PzAnalysisType {
+    if mode.eq_ignore_ascii_case("POL") {
+        PzAnalysisType::PolesOnly
+    } else if mode.eq_ignore_ascii_case("ZER") {
+        PzAnalysisType::ZerosOnly
+    } else {
+        PzAnalysisType::PoleZero
+    }
+}
+
 //=============================================================================
 // Simulation Error
 //=============================================================================
@@ -1521,6 +1635,273 @@ mod tests {
     }
 
     #[test]
+    fn test_analysis_config_from_spec_covers_base_analyses() {
+        let specs = vec![
+            AnalysisSpec::DcOp,
+            AnalysisSpec::DcSweep {
+                source_name: "V1".to_string(),
+                start: 0.0,
+                stop: 1.0,
+                step: 0.1,
+                source2: None,
+                start2: None,
+                stop2: None,
+                step2: None,
+            },
+            AnalysisSpec::Transient {
+                stop_time: 1e-6,
+                step_time: 1e-9,
+            },
+            AnalysisSpec::Ac {
+                start_freq: 1.0,
+                stop_freq: 1e6,
+                points_per_unit: 10,
+                sweep: crate::simulation::multi_run::FrequencySweep::Decade,
+            },
+            AnalysisSpec::Noise {
+                output_node: "out".to_string(),
+                start_freq: 1.0,
+                stop_freq: 1e6,
+                points_per_decade: 10,
+                temperature: 300.0,
+            },
+            AnalysisSpec::PoleZero {
+                input_node: "in".to_string(),
+                input_ref: "0".to_string(),
+                output_node: "out".to_string(),
+                output_ref: "0".to_string(),
+                transfer_type: "VOL".to_string(),
+                analysis_type: "PZ".to_string(),
+            },
+            AnalysisSpec::Sensitivity {
+                output_var: "V(out)".to_string(),
+                ac_mode: false,
+                frequency: None,
+            },
+        ];
+
+        for spec in specs {
+            assert!(
+                analysis_config_from_spec(&spec).is_some(),
+                "expected base spec to map to AnalysisConfig: {:?}",
+                spec.run_type()
+            );
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_dc_op_routes_through_engine_bridge() {
+        let mut runner = SimulationRunner::new();
+        runner
+            .start_spec(AnalysisSpec::DcOp, test_netlist())
+            .expect("DC OP spec should start");
+
+        let result = wait_for_result(&mut runner, Duration::from_secs(5));
+        assert!(result.is_some(), "Expected DC OP result");
+        let result = result.unwrap().expect("DC OP should succeed");
+        assert!(matches!(result, SimulationResult::DcOp(_)));
+    }
+
+    #[test]
+    fn test_runner_start_spec_dc_sweep_routes_through_engine_bridge() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* DC sweep routing test
+V1 in 0 0
+R1 in out 1k
+R2 out 0 1k
+.end
+"#
+        .to_string();
+
+        runner
+            .start_spec(
+                AnalysisSpec::DcSweep {
+                    source_name: "V1".to_string(),
+                    start: 0.0,
+                    stop: 1.0,
+                    step: 0.1,
+                    source2: None,
+                    start2: None,
+                    stop2: None,
+                    step2: None,
+                },
+                netlist,
+            )
+            .expect("DC sweep spec should start");
+
+        let result = wait_for_result(&mut runner, Duration::from_secs(5));
+        assert!(result.is_some(), "Expected DC sweep result");
+        let result = result.unwrap().expect("DC sweep should succeed");
+        match result {
+            SimulationResult::DcSweep {
+                sweep_values,
+                waveforms,
+                ..
+            } => {
+                assert!(!sweep_values.is_empty());
+                assert!(!waveforms.is_empty());
+            }
+            other => panic!("Expected DC sweep result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_ac_routes_through_engine_bridge() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* AC routing test
+V1 in 0 DC 1 AC 1
+R1 in out 1k
+C1 out 0 1n
+.end
+"#
+        .to_string();
+
+        runner
+            .start_spec(
+                AnalysisSpec::Ac {
+                    start_freq: 1.0,
+                    stop_freq: 1e6,
+                    points_per_unit: 8,
+                    sweep: crate::simulation::multi_run::FrequencySweep::Decade,
+                },
+                netlist,
+            )
+            .expect("AC spec should start");
+
+        let result = wait_for_result(&mut runner, Duration::from_secs(10));
+        assert!(result.is_some(), "Expected AC result");
+        let result = result.unwrap().expect("AC should succeed");
+        match result {
+            SimulationResult::Ac {
+                frequencies,
+                waveforms,
+            } => {
+                assert!(!frequencies.is_empty());
+                assert!(!waveforms.is_empty());
+            }
+            other => panic!("Expected AC result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_noise_routes_through_engine_bridge() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* Noise routing test
+V1 in 0 DC 1 AC 1
+R1 in out 1k
+R2 out 0 1k
+.end
+"#
+        .to_string();
+
+        runner
+            .start_spec(
+                AnalysisSpec::Noise {
+                    output_node: "out".to_string(),
+                    start_freq: 10.0,
+                    stop_freq: 1e6,
+                    points_per_decade: 6,
+                    temperature: 300.0,
+                },
+                netlist,
+            )
+            .expect("Noise spec should start");
+
+        let result = wait_for_result(&mut runner, Duration::from_secs(10));
+        assert!(result.is_some(), "Expected noise result");
+        let result = result.unwrap().expect("Noise should succeed");
+        match result {
+            SimulationResult::Noise {
+                frequencies,
+                output_noise,
+                ..
+            } => {
+                assert!(!frequencies.is_empty());
+                assert_eq!(frequencies.len(), output_noise.len());
+            }
+            other => panic!("Expected Noise result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_pole_zero_routes_through_engine_bridge() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* Pole-zero routing test
+V1 in 0 DC 1 AC 1
+R1 in out 1k
+C1 out 0 1n
+.end
+"#
+        .to_string();
+
+        runner
+            .start_spec(
+                AnalysisSpec::PoleZero {
+                    input_node: "in".to_string(),
+                    input_ref: "0".to_string(),
+                    output_node: "out".to_string(),
+                    output_ref: "0".to_string(),
+                    transfer_type: "VOL".to_string(),
+                    analysis_type: "PZ".to_string(),
+                },
+                netlist,
+            )
+            .expect("Pole-zero spec should start");
+
+        let result = wait_for_result(&mut runner, Duration::from_secs(10));
+        assert!(result.is_some(), "Expected pole-zero result");
+        let result = result.unwrap().expect("Pole-zero should succeed");
+        match result {
+            SimulationResult::PoleZero { poles, .. } => {
+                assert!(!poles.is_empty(), "expected at least one pole");
+            }
+            other => panic!("Expected PoleZero result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_sensitivity_routes_through_engine_bridge() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* Sensitivity routing test
+.param RV=1k
+V1 in 0 1
+R1 in out {RV}
+R2 out 0 1k
+.end
+"#
+        .to_string();
+
+        runner
+            .start_spec(
+                AnalysisSpec::Sensitivity {
+                    output_var: "V(out)".to_string(),
+                    ac_mode: false,
+                    frequency: None,
+                },
+                netlist,
+            )
+            .expect("Sensitivity spec should start");
+
+        let result = wait_for_result(&mut runner, Duration::from_secs(10));
+        assert!(result.is_some(), "Expected sensitivity result");
+        let result = result.unwrap().expect("Sensitivity should succeed");
+        match result {
+            SimulationResult::Sensitivity { sensitivities, .. } => {
+                assert!(
+                    !sensitivities.is_empty(),
+                    "expected at least one sensitivity entry"
+                );
+            }
+            other => panic!("Expected Sensitivity result, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_runner_start_spec_monte_carlo() {
         let mut runner = SimulationRunner::new();
         let netlist = r#"
@@ -1738,9 +2119,11 @@ R2 out 0 1k
                 assert_eq!(x_label, "Corner Index");
                 assert_eq!(x_unit, "");
                 assert_eq!(corner_labels.len(), 4);
-                assert!(corner_labels
-                    .iter()
-                    .any(|label| label.contains("FF_1.100000V")));
+                assert!(
+                    corner_labels
+                        .iter()
+                        .any(|label| label.contains("FF_1.100000V"))
+                );
             }
             other => panic!("Expected Corner result, got {:?}", other),
         }
@@ -1944,9 +2327,11 @@ R2 out 0 50
                 assert!(waveforms.contains_key("S21"));
                 assert!(waveforms.contains_key("S12"));
                 assert!(waveforms.contains_key("S22"));
-                assert!(waveforms
-                    .values()
-                    .all(|wf| wf.is_complex && wf.y_imag.as_ref().is_some()));
+                assert!(
+                    waveforms
+                        .values()
+                        .all(|wf| wf.is_complex && wf.y_imag.as_ref().is_some())
+                );
             }
             other => panic!("Expected AC result for S-parameter, got {:?}", other),
         }
@@ -2072,9 +2457,11 @@ M1 d g 0 0 NM W=10u L=1u
                 assert_eq!(years, vec![1.0, 5.0, 10.0]);
                 assert!(!device_results.is_empty());
                 assert!(!waveforms.is_empty());
-                assert!(waveforms
-                    .keys()
-                    .any(|name| name.starts_with("DVTH(") || name.starts_with("DRDS(")));
+                assert!(
+                    waveforms
+                        .keys()
+                        .any(|name| name.starts_with("DVTH(") || name.starts_with("DRDS("))
+                );
             }
             other => panic!("Expected Reliability result, got {:?}", other),
         }
@@ -2311,9 +2698,11 @@ C1 out 0 1n
                     "expected PXF transfer waveform name, got {:?}",
                     waveforms.keys().collect::<Vec<_>>()
                 );
-                assert!(waveforms
-                    .values()
-                    .any(|wf| wf.is_complex && wf.y_imag.as_ref().is_some()));
+                assert!(
+                    waveforms
+                        .values()
+                        .any(|wf| wf.is_complex && wf.y_imag.as_ref().is_some())
+                );
             }
             other => panic!("Expected AC result for PXF, got {:?}", other),
         }
@@ -2341,9 +2730,11 @@ C1 out 0 1n
             .expect("Expected PXF completion result")
             .expect_err("PXF without options should fail");
         assert!(matches!(result, SimulationError::InvalidConfig(_)));
-        assert!(result
-            .to_string()
-            .contains("requires explicit PXF execution options"));
+        assert!(
+            result
+                .to_string()
+                .contains("requires explicit PXF execution options")
+        );
     }
 
     #[test]
@@ -2408,9 +2799,11 @@ C1 out 0 1n
                     "expected Zout waveform, got {:?}",
                     waveforms.keys().collect::<Vec<_>>()
                 );
-                assert!(waveforms
-                    .values()
-                    .any(|wf| wf.is_complex && wf.y_imag.as_ref().is_some()));
+                assert!(
+                    waveforms
+                        .values()
+                        .any(|wf| wf.is_complex && wf.y_imag.as_ref().is_some())
+                );
             }
             other => panic!("Expected AC result for TF, got {:?}", other),
         }
@@ -2620,8 +3013,10 @@ C1 out 0 1n
             .expect("Expected PSTB completion result")
             .expect_err("PSTB without options should fail");
         assert!(matches!(result, SimulationError::InvalidConfig(_)));
-        assert!(result
-            .to_string()
-            .contains("requires explicit PSTB execution options"));
+        assert!(
+            result
+                .to_string()
+                .contains("requires explicit PSTB execution options")
+        );
     }
 }
