@@ -123,14 +123,38 @@ pub enum AnalysisType {
     Noise,
     /// Pole-zero analysis - transfer function poles and zeros
     PoleZero,
+    /// Transfer function analysis
+    Tf,
     /// Sensitivity analysis - output sensitivity to parameters
     Sensitivity,
+    /// Periodic AC analysis
+    Pac,
+    /// Periodic noise analysis
+    Pnoise,
+    /// Periodic transfer function analysis
+    Pxf,
+    /// Periodic stability analysis
+    Pstb,
+    /// Stability analysis
+    Stb,
     /// Monte Carlo statistical analysis
     MonteCarlo,
     /// Parametric sweep analysis
     Parametric,
     /// Corner sweep analysis
     Corner,
+    /// Reliability aging analysis
+    Reliability,
+    /// Optimization analysis
+    Optimization,
+    /// Safety/SOA analysis
+    Soa,
+    /// S-parameter analysis
+    SParameter,
+    /// Envelope analysis
+    Envelope,
+    /// Fourier analysis
+    Fourier,
     /// Harmonic Balance analysis for RF circuits
     HarmonicBalance,
     /// Periodic Steady State analysis
@@ -147,10 +171,22 @@ impl AnalysisType {
             AnalysisType::Transient => "Transient",
             AnalysisType::Noise => "Noise",
             AnalysisType::PoleZero => "Pole-Zero",
+            AnalysisType::Tf => "Transfer Function",
             AnalysisType::Sensitivity => "Sensitivity",
+            AnalysisType::Pac => "PAC",
+            AnalysisType::Pnoise => "PNoise",
+            AnalysisType::Pxf => "PXF",
+            AnalysisType::Pstb => "PSTB",
+            AnalysisType::Stb => "STB",
             AnalysisType::MonteCarlo => "Monte Carlo",
             AnalysisType::Parametric => "Parametric Sweep",
             AnalysisType::Corner => "Corner Sweep",
+            AnalysisType::Reliability => "Reliability",
+            AnalysisType::Optimization => "Optimization",
+            AnalysisType::Soa => "Safety (SOA)",
+            AnalysisType::SParameter => "S-Parameter",
+            AnalysisType::Envelope => "Envelope",
+            AnalysisType::Fourier => "Fourier",
             AnalysisType::HarmonicBalance => "Harmonic Balance",
             AnalysisType::Pss => "PSS",
         }
@@ -165,10 +201,22 @@ impl AnalysisType {
             AnalysisType::Transient => "TR",
             AnalysisType::Noise => "NS",
             AnalysisType::PoleZero => "PZ",
+            AnalysisType::Tf => "TF",
             AnalysisType::Sensitivity => "SN",
+            AnalysisType::Pac => "PAC",
+            AnalysisType::Pnoise => "PN",
+            AnalysisType::Pxf => "PXF",
+            AnalysisType::Pstb => "PSTB",
+            AnalysisType::Stb => "STB",
             AnalysisType::MonteCarlo => "MC",
             AnalysisType::Parametric => "PAR",
             AnalysisType::Corner => "CRN",
+            AnalysisType::Reliability => "REL",
+            AnalysisType::Optimization => "OPT",
+            AnalysisType::Soa => "SOA",
+            AnalysisType::SParameter => "SP",
+            AnalysisType::Envelope => "ENV",
+            AnalysisType::Fourier => "FOU",
             AnalysisType::HarmonicBalance => "HB",
             AnalysisType::Pss => "PSS",
         }
@@ -179,8 +227,21 @@ impl AnalysisType {
     /// Returns (x_axis_label, x_axis_unit, y_axis_label, y_axis_unit)
     pub fn axis_info(&self) -> (&'static str, &'static str, &'static str, &'static str) {
         match self {
-            AnalysisType::Transient | AnalysisType::Pss => ("Time", "s", "Voltage", "V"),
-            AnalysisType::Ac | AnalysisType::Noise => ("Frequency", "Hz", "Magnitude", "V"),
+            AnalysisType::Transient
+            | AnalysisType::Pss
+            | AnalysisType::Envelope
+            | AnalysisType::Soa => ("Time", "s", "Voltage", "V"),
+            AnalysisType::Ac
+            | AnalysisType::Noise
+            | AnalysisType::Tf
+            | AnalysisType::Pac
+            | AnalysisType::Pxf
+            | AnalysisType::Pstb
+            | AnalysisType::Stb
+            | AnalysisType::SParameter
+            | AnalysisType::HarmonicBalance
+            | AnalysisType::Fourier => ("Frequency", "Hz", "Magnitude", "V"),
+            AnalysisType::Pnoise => ("Frequency", "Hz", "Noise", "V^2/Hz"),
             AnalysisType::DcSweep => ("Voltage", "V", "Voltage", "V"),
             AnalysisType::DcOp => ("", "", "Voltage", "V"),
             AnalysisType::PoleZero => ("Real", "", "Imaginary", ""),
@@ -188,7 +249,8 @@ impl AnalysisType {
             AnalysisType::MonteCarlo => ("Value", "", "Count", "count"),
             AnalysisType::Parametric => ("Sweep", "", "Voltage", "V"),
             AnalysisType::Corner => ("Temperature", "C", "Voltage", "V"),
-            AnalysisType::HarmonicBalance => ("Frequency", "Hz", "Magnitude", "V"),
+            AnalysisType::Reliability => ("Lifetime", "year", "Shift", ""),
+            AnalysisType::Optimization => ("Iteration", "iter", "Cost", "cost"),
         }
     }
 }
@@ -926,9 +988,21 @@ mod tests {
         assert_eq!(AnalysisType::Transient.display_name(), "Transient");
         assert_eq!(AnalysisType::Noise.display_name(), "Noise");
         assert_eq!(AnalysisType::PoleZero.display_name(), "Pole-Zero");
+        assert_eq!(AnalysisType::Tf.display_name(), "Transfer Function");
+        assert_eq!(AnalysisType::Pac.display_name(), "PAC");
+        assert_eq!(AnalysisType::Pnoise.display_name(), "PNoise");
+        assert_eq!(AnalysisType::Pxf.display_name(), "PXF");
+        assert_eq!(AnalysisType::Pstb.display_name(), "PSTB");
+        assert_eq!(AnalysisType::Stb.display_name(), "STB");
         assert_eq!(AnalysisType::MonteCarlo.display_name(), "Monte Carlo");
         assert_eq!(AnalysisType::Parametric.display_name(), "Parametric Sweep");
         assert_eq!(AnalysisType::Corner.display_name(), "Corner Sweep");
+        assert_eq!(AnalysisType::Reliability.display_name(), "Reliability");
+        assert_eq!(AnalysisType::Optimization.display_name(), "Optimization");
+        assert_eq!(AnalysisType::Soa.display_name(), "Safety (SOA)");
+        assert_eq!(AnalysisType::SParameter.display_name(), "S-Parameter");
+        assert_eq!(AnalysisType::Envelope.display_name(), "Envelope");
+        assert_eq!(AnalysisType::Fourier.display_name(), "Fourier");
     }
 
     #[test]
@@ -936,9 +1010,21 @@ mod tests {
         assert_eq!(AnalysisType::DcOp.short_label(), "DC");
         assert_eq!(AnalysisType::Ac.short_label(), "AC");
         assert_eq!(AnalysisType::Transient.short_label(), "TR");
+        assert_eq!(AnalysisType::Tf.short_label(), "TF");
+        assert_eq!(AnalysisType::Pac.short_label(), "PAC");
+        assert_eq!(AnalysisType::Pnoise.short_label(), "PN");
+        assert_eq!(AnalysisType::Pxf.short_label(), "PXF");
+        assert_eq!(AnalysisType::Pstb.short_label(), "PSTB");
+        assert_eq!(AnalysisType::Stb.short_label(), "STB");
         assert_eq!(AnalysisType::MonteCarlo.short_label(), "MC");
         assert_eq!(AnalysisType::Parametric.short_label(), "PAR");
         assert_eq!(AnalysisType::Corner.short_label(), "CRN");
+        assert_eq!(AnalysisType::Reliability.short_label(), "REL");
+        assert_eq!(AnalysisType::Optimization.short_label(), "OPT");
+        assert_eq!(AnalysisType::Soa.short_label(), "SOA");
+        assert_eq!(AnalysisType::SParameter.short_label(), "SP");
+        assert_eq!(AnalysisType::Envelope.short_label(), "ENV");
+        assert_eq!(AnalysisType::Fourier.short_label(), "FOU");
         assert_eq!(AnalysisType::HarmonicBalance.short_label(), "HB");
         assert_eq!(AnalysisType::Pss.short_label(), "PSS");
     }
@@ -962,6 +1048,18 @@ mod tests {
             ("Frequency", "Hz", "Magnitude", "V")
         );
         assert_eq!(AnalysisType::Pss.axis_info(), ("Time", "s", "Voltage", "V"));
+        assert_eq!(
+            AnalysisType::Pnoise.axis_info(),
+            ("Frequency", "Hz", "Noise", "V^2/Hz")
+        );
+        assert_eq!(
+            AnalysisType::Optimization.axis_info(),
+            ("Iteration", "iter", "Cost", "cost")
+        );
+        assert_eq!(
+            AnalysisType::Reliability.axis_info(),
+            ("Lifetime", "year", "Shift", "")
+        );
     }
 
     // =========================================================================

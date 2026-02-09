@@ -60,6 +60,16 @@ pub enum MappedAnalysisType {
     PoleZero,
     /// S-Parameter
     SParameter,
+    /// Reliability
+    Reliability,
+    /// Optimization
+    Optimization,
+    /// SOA
+    Soa,
+    /// Envelope
+    Envelope,
+    /// Fourier
+    Fourier,
     /// Harmonic Balance
     HarmonicBalance,
     /// Periodic Steady-State
