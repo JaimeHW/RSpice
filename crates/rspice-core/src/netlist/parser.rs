@@ -91,20 +91,10 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
         }
 
         // Handle .VERILOGA directive directly (before continuation handling)
-        let upper_trimmed = trimmed.to_uppercase();
-        if upper_trimmed.starts_with(".VERILOGA") || upper_trimmed.starts_with(".VA") {
-            // Parse: .VERILOGA filename.va [MODELNAME]
-            let parts: Vec<&str> = trimmed.split_whitespace().collect();
-            if parts.len() >= 2 {
-                let file_path = std::path::PathBuf::from(parts[1]);
-                let model_name = parts.get(2).map(|s| s.to_string());
-                veriloga_includes.push(VerilogAInclude {
-                    file_path,
-                    model_name,
-                });
-                log::debug!("Found .VERILOGA include: {:?}", parts[1]);
-                continue; // Skip normal processing
-            }
+        if let Some(include) = parse_veriloga_directive(trimmed) {
+            log::debug!("Found .VERILOGA include: {:?}", include.file_path);
+            veriloga_includes.push(include);
+            continue; // Skip normal processing
         }
 
         // Start new continuation or process line
@@ -160,6 +150,70 @@ fn strip_inline_semicolon_comment(line: &str) -> &str {
         Some(idx) => &line[..idx],
         None => line,
     }
+}
+
+fn parse_veriloga_directive(line: &str) -> Option<VerilogAInclude> {
+    let mut parts = line.trim().splitn(2, char::is_whitespace);
+    let command = parts.next()?;
+    if !command.eq_ignore_ascii_case(".veriloga") && !command.eq_ignore_ascii_case(".va") {
+        return None;
+    }
+
+    let remainder = parts.next()?.trim();
+    if remainder.is_empty() {
+        return None;
+    }
+
+    let (raw_path, rest) = consume_quoted_or_token(remainder)?;
+    let path = raw_path.trim();
+    if path.is_empty() {
+        return None;
+    }
+
+    let model_name = rest
+        .split_whitespace()
+        .next()
+        .map(|s| s.trim_matches(|c| c == '"' || c == '\'').to_string())
+        .filter(|s| !s.is_empty());
+
+    Some(VerilogAInclude {
+        file_path: std::path::PathBuf::from(path),
+        model_name,
+    })
+}
+
+fn consume_quoted_or_token(input: &str) -> Option<(String, &str)> {
+    let trimmed = input.trim_start();
+    let first = trimmed.chars().next()?;
+
+    if first == '"' || first == '\'' {
+        let quote = first;
+        let mut escaped = false;
+        let mut value = String::new();
+        for (idx, ch) in trimmed.char_indices().skip(1) {
+            if escaped {
+                value.push(ch);
+                escaped = false;
+                continue;
+            }
+            if ch == '\\' {
+                escaped = true;
+                continue;
+            }
+            if ch == quote {
+                let rest = trimmed[idx + ch.len_utf8()..].trim_start();
+                return Some((value, rest));
+            }
+            value.push(ch);
+        }
+        // Unclosed quote: consume remaining text as path body.
+        return Some((value, ""));
+    }
+
+    let end = trimmed.find(char::is_whitespace).unwrap_or(trimmed.len());
+    let token = trimmed[..end].to_string();
+    let rest = trimmed[end..].trim_start();
+    Some((token, rest))
 }
 
 fn process_line(
@@ -4188,5 +4242,40 @@ R1 1 0 1k
             result.veriloga_includes[0].file_path.to_str().unwrap(),
             "models/varactor.va"
         );
+    }
+
+    #[test]
+    fn test_parse_veriloga_with_quoted_path_and_model() {
+        let netlist = r#"VA Quoted Path
+.VERILOGA "models/custom device.va" custom_device
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+
+        assert_eq!(result.veriloga_includes.len(), 1);
+        assert_eq!(
+            result.veriloga_includes[0].file_path.to_string_lossy(),
+            "models/custom device.va"
+        );
+        assert_eq!(
+            result.veriloga_includes[0].model_name.as_deref(),
+            Some("custom_device")
+        );
+    }
+
+    #[test]
+    fn test_parse_veriloga_with_single_quoted_path() {
+        let netlist = r#"VA Single Quote Path
+.VA 'pdk/models/va mos.va'
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+
+        assert_eq!(result.veriloga_includes.len(), 1);
+        assert_eq!(
+            result.veriloga_includes[0].file_path.to_string_lossy(),
+            "pdk/models/va mos.va"
+        );
+        assert!(result.veriloga_includes[0].model_name.is_none());
     }
 }

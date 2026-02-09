@@ -7,7 +7,11 @@ use super::{Engine, SimulationError, extract_dc_value};
 use crate::netlist::{ElementKind, flatten_netlist};
 use crate::{CircuitData, Netlist};
 use std::collections::HashMap;
+#[cfg(feature = "veriloga")]
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+#[cfg(feature = "veriloga")]
+use std::sync::RwLock;
 
 /// Embedded transistor model library used for fallback model resolution.
 const BUILTIN_TRANSISTOR_LIB: &str = include_str!("../../../../models/spice/transistor.lib");
@@ -34,6 +38,115 @@ fn builtin_bjt_model_map() -> &'static HashMap<String, HashMap<String, f64>> {
         }
         map
     })
+}
+
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct VerilogACacheFingerprint {
+    modified_ns: Option<u128>,
+    file_len: Option<u64>,
+}
+
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone)]
+struct CachedVerilogAModel {
+    fingerprint: VerilogACacheFingerprint,
+    model: rspice_veriloga::CompiledModel,
+}
+
+#[cfg(feature = "veriloga")]
+fn veriloga_model_cache() -> &'static RwLock<HashMap<PathBuf, CachedVerilogAModel>> {
+    static CACHE: OnceLock<RwLock<HashMap<PathBuf, CachedVerilogAModel>>> = OnceLock::new();
+    CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+#[cfg(feature = "veriloga")]
+fn canonicalize_for_cache(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+#[cfg(feature = "veriloga")]
+fn file_fingerprint(path: &Path) -> Option<VerilogACacheFingerprint> {
+    use std::time::UNIX_EPOCH;
+
+    let metadata = std::fs::metadata(path).ok()?;
+    let modified_ns = metadata
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos());
+    Some(VerilogACacheFingerprint {
+        modified_ns,
+        file_len: Some(metadata.len()),
+    })
+}
+
+#[cfg(feature = "veriloga")]
+fn normalize_model_key(name: &str) -> String {
+    name.to_ascii_uppercase()
+}
+
+#[cfg(feature = "veriloga")]
+fn resolve_cached_or_compile_veriloga(
+    path: &Path,
+) -> Result<rspice_veriloga::CompiledModel, SimulationError> {
+    let canonical = canonicalize_for_cache(path);
+    let fingerprint = file_fingerprint(path);
+
+    if let Ok(cache) = veriloga_model_cache().read() {
+        if let Some(entry) = cache.get(&canonical) {
+            if fingerprint.is_none() || fingerprint == Some(entry.fingerprint) {
+                return Ok(entry.model.clone());
+            }
+        }
+    }
+
+    let fp = fingerprint.ok_or_else(|| {
+        SimulationError::Netlist(format!(
+            "Verilog-A source not found and no cached model available: {}",
+            path.display()
+        ))
+    })?;
+
+    let compiler = rspice_veriloga::VerilogACompiler::default();
+    let model = compiler.compile_file(path).map_err(|e| {
+        SimulationError::Netlist(format!(
+            "Failed to compile Verilog-A '{}': {}",
+            path.display(),
+            e
+        ))
+    })?;
+
+    if let Ok(mut cache) = veriloga_model_cache().write() {
+        cache.insert(
+            canonical,
+            CachedVerilogAModel {
+                fingerprint: fp,
+                model: model.clone(),
+            },
+        );
+    }
+
+    Ok(model)
+}
+
+/// Register a precompiled Verilog-A model in the global engine cache.
+///
+/// This allows UI workflows to compile once on import and reuse the compiled
+/// artifact during simulation without recompilation.
+#[cfg(feature = "veriloga")]
+pub fn register_precompiled_veriloga_model(
+    source_path: impl AsRef<Path>,
+    model: rspice_veriloga::CompiledModel,
+) -> Result<(), String> {
+    let path = source_path.as_ref();
+    let canonical = canonicalize_for_cache(path);
+    let fingerprint = file_fingerprint(path).unwrap_or_default();
+    let mut cache = veriloga_model_cache()
+        .write()
+        .map_err(|_| "failed to acquire Verilog-A cache lock".to_string())?;
+    cache.insert(canonical, CachedVerilogAModel { fingerprint, model });
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -257,6 +370,40 @@ impl Engine {
                 element.nodes,
                 element.kind
             );
+        }
+
+        #[cfg(feature = "veriloga")]
+        let mut veriloga_models: HashMap<String, rspice_veriloga::CompiledModel> = HashMap::new();
+
+        // Load and cache Verilog-A models referenced by .VERILOGA directives.
+        #[cfg(feature = "veriloga")]
+        {
+            for include in &netlist.veriloga_includes {
+                let model = resolve_cached_or_compile_veriloga(&include.file_path)?;
+
+                let model_key = normalize_model_key(model.name.as_str());
+                veriloga_models
+                    .entry(model_key)
+                    .or_insert_with(|| model.clone());
+
+                if let Some(alias) = include.model_name.as_deref() {
+                    veriloga_models
+                        .entry(normalize_model_key(alias))
+                        .or_insert_with(|| model.clone());
+                }
+
+                if let Some(stem) = include.file_path.file_stem().and_then(|s| s.to_str()) {
+                    veriloga_models
+                        .entry(normalize_model_key(stem))
+                        .or_insert_with(|| model.clone());
+                }
+
+                log::info!(
+                    "Loaded Verilog-A model '{}' from {}",
+                    model.name,
+                    include.file_path.display()
+                );
+            }
         }
 
         for element in &flat_elements {
@@ -690,8 +837,70 @@ impl Engine {
                     );
                     circuit.behavioral_sources.add_current(bcs);
                 }
-                // Subcircuit instances should be flattened before reaching here
-                ElementKind::Subcircuit { .. } => {}
+                // Flattened tree leaves external subcircuit-backed devices here
+                // (for example, Verilog-A model instances).
+                #[cfg(feature = "veriloga")]
+                ElementKind::Subcircuit {
+                    subckt_name,
+                    params,
+                } => {
+                    if let Some(model) = veriloga_models.get(&normalize_model_key(subckt_name)) {
+                        if element.nodes.len() != model.num_terminals {
+                            return Err(SimulationError::Circuit(format!(
+                                "Verilog-A instance '{}' expects {} terminals for model '{}', found {}",
+                                element.name,
+                                model.num_terminals,
+                                subckt_name,
+                                element.nodes.len()
+                            )));
+                        }
+
+                        let mut node_ids = Vec::with_capacity(model.num_terminals);
+                        for node_name in &element.nodes {
+                            node_ids.push(if node_name.eq_ignore_ascii_case("0") {
+                                0
+                            } else {
+                                circuit.get_or_create_node(node_name)
+                            });
+                        }
+
+                        let mut device = crate::device::veriloga::VerilogADevice::new(
+                            element.name.clone(),
+                            model.clone(),
+                            &node_ids,
+                        );
+
+                        // Allocate global circuit node indices for internal Verilog-A nodes.
+                        if device.num_internal_nodes() > 0 {
+                            let mut internal_nodes =
+                                Vec::with_capacity(device.num_internal_nodes());
+                            for idx in 0..device.num_internal_nodes() {
+                                let node_name = format!("{}.__int{}", element.name, idx + 1);
+                                internal_nodes.push(circuit.get_or_create_node(&node_name));
+                            }
+                            device.set_internal_node_indices(&internal_nodes);
+                        }
+
+                        for (name, value) in params {
+                            let _ = device.set_parameter(name, *value);
+                        }
+                        device.set_temperature(self.config.temperature);
+                        circuit.veriloga_devices.add(device);
+                        continue;
+                    }
+
+                    return Err(SimulationError::Circuit(format!(
+                        "Unresolved subcircuit instance '{}' referencing '{}'",
+                        element.name, subckt_name
+                    )));
+                }
+                #[cfg(not(feature = "veriloga"))]
+                ElementKind::Subcircuit { subckt_name, .. } => {
+                    return Err(SimulationError::Circuit(format!(
+                        "Unresolved subcircuit instance '{}' referencing '{}'",
+                        element.name, subckt_name
+                    )));
+                }
 
                 // New element types
                 ElementKind::VSwitch {
@@ -986,33 +1195,6 @@ impl Engine {
                         );
                     }
                 }
-            }
-        }
-
-        // Load Verilog-A models from .VERILOGA includes
-        #[cfg(feature = "veriloga")]
-        {
-            for include in &netlist.veriloga_includes {
-                // Compile the Verilog-A source file
-                let compiler = rspice_veriloga::VerilogACompiler::default();
-                let model = compiler.compile_file(&include.file_path).map_err(|e| {
-                    SimulationError::Netlist(format!(
-                        "Failed to compile Verilog-A '{}': {}",
-                        include.file_path.display(),
-                        e
-                    ))
-                })?;
-
-                log::info!(
-                    "Loaded Verilog-A model '{}' from {}",
-                    model.name,
-                    include.file_path.display()
-                );
-
-                // Store the compiled model for later device instantiation
-                // Note: Actual device instances are created based on .MODEL and X statements
-                // For now, we just validate that the VA file compiles successfully
-                let _ = model; // TODO: Store models for lookup during device instantiation
             }
         }
 

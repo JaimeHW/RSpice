@@ -18,7 +18,7 @@ use super::hierarchy_path::HierarchyPath;
 use super::param_scope::ParamResolver;
 use super::{Element, ElementKind, Netlist, ParseError, SubcircuitDef};
 use crate::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 //=============================================================================
 // Flattener Configuration
@@ -122,6 +122,9 @@ pub struct Flattener<'a> {
     param_resolver: ParamResolver,
     /// Collected instance metadata (if collect_metadata is enabled)
     instance_metadata: Vec<InstanceMetadata>,
+    /// External subcircuit/model names backed by out-of-line implementations
+    /// (for example `.VERILOGA` includes).
+    external_subckts: HashSet<String>,
 }
 
 impl<'a> Flattener<'a> {
@@ -147,6 +150,7 @@ impl<'a> Flattener<'a> {
             config,
             param_resolver,
             instance_metadata: Vec::new(),
+            external_subckts: HashSet::new(),
         }
     }
 
@@ -163,6 +167,7 @@ impl<'a> Flattener<'a> {
     /// Flatten a netlist, expanding all subcircuit instances
     pub fn flatten(&mut self, netlist: &Netlist) -> Result<Vec<Element>, ParseError> {
         let mut flat_elements = Vec::new();
+        self.external_subckts = Self::collect_external_subckts(netlist);
 
         // Set global parameters from netlist
         for (name, value) in netlist.params.all_params() {
@@ -200,15 +205,26 @@ impl<'a> Flattener<'a> {
                 subckt_name,
                 params,
             } => {
-                self.expand_subcircuit(
-                    element,
-                    subckt_name,
-                    params,
-                    prefix,
-                    node_map,
-                    depth,
-                    output,
-                )?;
+                if self.subcircuits.contains_key(subckt_name.as_str()) {
+                    self.expand_subcircuit(
+                        element,
+                        subckt_name,
+                        params,
+                        prefix,
+                        node_map,
+                        depth,
+                        output,
+                    )?;
+                } else if self.is_external_subckt(subckt_name) {
+                    // Preserve external instance (e.g. Verilog-A model) as a leaf.
+                    let new_element = self.remap_element(element, prefix, node_map);
+                    output.push(new_element);
+                } else {
+                    return Err(ParseError::Syntax {
+                        line: 0,
+                        message: format!("Undefined subcircuit: {}", subckt_name),
+                    });
+                }
             }
             _ => {
                 // Regular element - remap nodes and add to output
@@ -218,6 +234,23 @@ impl<'a> Flattener<'a> {
         }
 
         Ok(())
+    }
+
+    fn collect_external_subckts(netlist: &Netlist) -> HashSet<String> {
+        let mut names = HashSet::new();
+        for include in &netlist.veriloga_includes {
+            if let Some(model_name) = &include.model_name {
+                names.insert(model_name.to_ascii_uppercase());
+            }
+            if let Some(stem) = include.file_path.file_stem().and_then(|s| s.to_str()) {
+                names.insert(stem.to_ascii_uppercase());
+            }
+        }
+        names
+    }
+
+    fn is_external_subckt(&self, name: &str) -> bool {
+        self.external_subckts.contains(&name.to_ascii_uppercase())
     }
 
     /// Expand a subcircuit instance into its constituent elements
@@ -652,5 +685,58 @@ V1 1 0 5
 
         // Verify flattening still works: V1 + X1.R1 + X1.R2 = 3 elements
         assert_eq!(flat.len(), 3);
+    }
+
+    #[test]
+    fn test_flatten_preserves_veriloga_external_instance() {
+        let netlist_str = r#"External VerilogA Test
+.VERILOGA custom_model.va custom_model
+V1 in 0 1
+X1 in 0 custom_model g=2m
+.end
+"#;
+        let netlist = parse_netlist(netlist_str).unwrap();
+        let flat = flatten_netlist(&netlist).unwrap();
+
+        assert_eq!(flat.len(), 2, "Expected V1 and X1 to remain");
+        let x1 = flat
+            .iter()
+            .find(|e| e.name == "X1")
+            .expect("Missing external X1 instance");
+        match &x1.kind {
+            ElementKind::Subcircuit {
+                subckt_name,
+                params,
+            } => {
+                assert!(subckt_name.eq_ignore_ascii_case("custom_model"));
+                assert!(
+                    params
+                        .iter()
+                        .any(|(name, value)| name.eq_ignore_ascii_case("g") && value.is_finite())
+                );
+            }
+            other => panic!(
+                "Expected Subcircuit kind for external instance, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn test_flatten_unknown_external_without_include_errors() {
+        let netlist_str = r#"Unknown External
+V1 in 0 1
+X1 in 0 missing_model
+.end
+"#;
+        let netlist = parse_netlist(netlist_str).unwrap();
+        let err = flatten_netlist(&netlist).expect_err("missing external model should error");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Undefined subcircuit")
+                && msg.to_ascii_uppercase().contains("MISSING_MODEL"),
+            "Unexpected error: {}",
+            err
+        );
     }
 }

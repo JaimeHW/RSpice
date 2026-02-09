@@ -345,6 +345,35 @@ impl Engine {
             }
         }
 
+        #[cfg(feature = "veriloga")]
+        for device in circuit.veriloga_devices.iter() {
+            // Build a conservative matrix topology for this Verilog-A device:
+            // full coupling among all external and internal nodes used by the
+            // instance. This guarantees all Jacobian stamp locations exist.
+            let mut device_nodes: Vec<usize> = Vec::new();
+            for term in 0..device.num_terminals() {
+                let node = device.node_for_terminal(term);
+                if node > 0 {
+                    device_nodes.push(node);
+                }
+            }
+            for idx in 0..device.num_internal_nodes() {
+                if let Some(node) = device.internal_node_index(idx) {
+                    if node > 0 {
+                        device_nodes.push(node);
+                    }
+                }
+            }
+            device_nodes.sort_unstable();
+            device_nodes.dedup();
+
+            for &row in &device_nodes {
+                for &col in &device_nodes {
+                    triplets.push((row - 1, col - 1, 0.0));
+                }
+            }
+        }
+
         // Add diagonal entries to ensure structure
         for i in 0..size {
             triplets.push((i, i, 1e-12)); // GMIN for numerical stability

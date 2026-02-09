@@ -123,12 +123,7 @@ impl Engine {
                     .get(i)
                     .cloned()
                     .unwrap_or_else(|| format!("R{}", i + 1));
-                noise_sources.push(NoiseSource::thermal(
-                    name,
-                    stamp.pp.row,
-                    stamp.nn.row,
-                    r,
-                ));
+                noise_sources.push(NoiseSource::thermal(name, stamp.pp.row, stamp.nn.row, r));
             }
         }
 
@@ -2193,7 +2188,9 @@ mod tests {
         let results = engine
             .run_noise(&netlist, 2, &[1e3], 300.0)
             .expect("noise analysis should succeed");
-        let first = results.first().expect("noise result should contain one point");
+        let first = results
+            .first()
+            .expect("noise result should contain one point");
         let names: std::collections::HashSet<&str> = first
             .contributions
             .iter()

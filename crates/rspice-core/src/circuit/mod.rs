@@ -1840,7 +1840,7 @@ impl CircuitData {
 
     /// Total device count (for parallel stamping threshold)
     pub fn device_count(&self) -> usize {
-        self.resistors.len()
+        let count = self.resistors.len()
             + self.capacitors.len()
             + self.inductors.len()
             + self.voltage_sources.len()
@@ -1852,7 +1852,15 @@ impl CircuitData {
             + self.vcvs.len()
             + self.vccs.len()
             + self.cccs.len()
-            + self.ccvs.len()
+            + self.ccvs.len();
+        #[cfg(feature = "veriloga")]
+        {
+            return count + self.veriloga_devices.len();
+        }
+        #[cfg(not(feature = "veriloga"))]
+        {
+            count
+        }
     }
 
     /// Create a triplet matrix for this circuit
@@ -2015,6 +2023,16 @@ impl CircuitData {
             || !self.jfets.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
+            || {
+                #[cfg(feature = "veriloga")]
+                {
+                    !self.veriloga_devices.is_empty()
+                }
+                #[cfg(not(feature = "veriloga"))]
+                {
+                    false
+                }
+            }
     }
 
     /// Update all nonlinear devices with current solution
@@ -2032,11 +2050,15 @@ impl CircuitData {
         for iswitch in &mut self.iswitches {
             iswitch.update(voltages);
         }
+        #[cfg(feature = "veriloga")]
+        {
+            self.veriloga_devices.update_all_voltages(voltages);
+        }
     }
 
     /// Stamp all nonlinear devices into matrix using O(1) direct indexing
     pub fn stamp_nonlinear(
-        &self,
+        &mut self,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
@@ -2054,6 +2076,19 @@ impl CircuitData {
         }
         for iswitch in &self.iswitches {
             iswitch.stamp_nonlinear(voltages, &mut stamper, &mut []);
+        }
+        #[cfg(feature = "veriloga")]
+        {
+            self.veriloga_devices.update_all_voltages(voltages);
+            self.veriloga_devices.stamp_all(
+                voltages,
+                |row, col, value| matrix.add(row, col, value),
+                |index, value| {
+                    if let Some(slot) = rhs.get_mut(index) {
+                        *slot += value;
+                    }
+                },
+            );
         }
     }
 
