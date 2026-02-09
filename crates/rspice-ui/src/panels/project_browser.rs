@@ -147,8 +147,9 @@ fn render_user_library_cells(ui: &mut Ui, lib_name: &str, filter: &str, state: &
                     // Show views within cell
                     for view in views {
                         let view_name = &view.name;
-                        let placeable_instance = build_placeable_instance(lib_name, cell, view);
-                        let is_selected = if let Some(instance) = &placeable_instance {
+                        let placeable_instance_result =
+                            build_placeable_instance_with_reason(lib_name, cell, view);
+                        let is_selected = if let Ok(instance) = &placeable_instance_result {
                             matches!(
                                 state.schematic.tool,
                                 Tool::Place(ComponentType::CellInstance)
@@ -168,26 +169,31 @@ fn render_user_library_cells(ui: &mut Ui, lib_name: &str, filter: &str, state: &
 
                         ui.horizontal(|ui| {
                             let icon = view_icon(view_name);
-                            if let Some(instance) = placeable_instance {
-                                let response = ui.selectable_label(
-                                    is_selected,
-                                    format!("  {} {}", icon, view_name),
-                                );
-                                if response.clicked() {
-                                    state.schematic.tool = Tool::Place(ComponentType::CellInstance);
-                                    state.schematic.pending_library_cell = Some(instance);
-                                    state.console_messages.push(
-                                        crate::common::app::ConsoleMessage::info(format!(
-                                            "Click on schematic to place {}/{}/{}",
-                                            lib_name, cell_name, view_name
-                                        )),
+                            match placeable_instance_result {
+                                Ok(instance) => {
+                                    let response = ui.selectable_label(
+                                        is_selected,
+                                        format!("  {} {}", icon, view_name),
+                                    );
+                                    if response.clicked() {
+                                        state.schematic.tool =
+                                            Tool::Place(ComponentType::CellInstance);
+                                        state.schematic.pending_library_cell = Some(instance);
+                                        state.console_messages.push(
+                                            crate::common::app::ConsoleMessage::info(format!(
+                                                "Click on schematic to place {}/{}/{}",
+                                                lib_name, cell_name, view_name
+                                            )),
+                                        );
+                                    }
+                                    response.on_hover_text(
+                                        "Click to place this library cell instance on schematic",
                                     );
                                 }
-                                response.on_hover_text(
-                                    "Click to place this library cell instance on schematic",
-                                );
-                            } else {
-                                ui.label(format!("  {} {}", icon, view_name));
+                                Err(reason) => {
+                                    let response = ui.label(format!("  {} {}", icon, view_name));
+                                    response.on_hover_text(format!("Not placeable: {}", reason));
+                                }
                             }
 
                             // Delete view button (small X)
@@ -328,22 +334,45 @@ fn build_placeable_instance(
     cell: &Cell,
     view: &View,
 ) -> Option<LibraryCellInstance> {
+    build_placeable_instance_with_reason(lib_name, cell, view).ok()
+}
+
+fn build_placeable_instance_with_reason(
+    lib_name: &str,
+    cell: &Cell,
+    view: &View,
+) -> Result<LibraryCellInstance, String> {
     if !is_netlistable_view(view.view_type) {
-        return None;
+        return Err(format!(
+            "view type '{}' is not netlistable",
+            view.view_type.display_name()
+        ));
     }
 
     let source_path = resolve_view_source_path(cell, view);
+    let source_path = source_path.ok_or_else(|| "missing source path metadata".to_string())?;
 
     let mut instance = LibraryCellInstance::new(lib_name, &cell.name, &view.name);
-    instance.source_path = source_path;
+    instance.source_path = Some(source_path);
     instance.module_name = resolve_master_name(cell, view);
     instance.terminal_order = resolve_terminal_order(cell, view);
 
-    if instance.source_path.is_none() {
-        return None;
+    if instance
+        .module_name
+        .as_ref()
+        .map(|s| s.trim().is_empty())
+        .unwrap_or(true)
+    {
+        return Err("missing netlist master/module binding".to_string());
     }
 
-    Some(instance)
+    if instance.terminal_order.is_empty() {
+        return Err(
+            "missing terminal order metadata (netlist.ports/netlist.terminals)".to_string(),
+        );
+    }
+
+    Ok(instance)
 }
 
 fn is_netlistable_view(view_type: ViewType) -> bool {
@@ -627,6 +656,10 @@ mod tests {
         let mut cell = Cell::new("lp_filter");
         cell.metadata
             .insert("netlist.master".to_string(), "lp_filter_subckt".to_string());
+        cell.metadata.insert(
+            "netlist.ports".to_string(),
+            r#"["in","out","vss"]"#.to_string(),
+        );
         let mut view = View::new("spice", ViewType::Spice);
         view.file_path = Some(PathBuf::from("models/lp_filter.sp"));
 
@@ -640,6 +673,7 @@ mod tests {
             Some(PathBuf::from("models/lp_filter.sp"))
         );
         assert_eq!(instance.module_name.as_deref(), Some("lp_filter_subckt"));
+        assert_eq!(instance.terminal_order, vec!["in", "out", "vss"]);
     }
 
     #[test]
@@ -648,6 +682,33 @@ mod tests {
         let mut view = View::new("layout", ViewType::Layout);
         view.file_path = Some(PathBuf::from("cells/layout.gds"));
         assert!(build_placeable_instance("user_lib", &cell, &view).is_none());
+    }
+
+    #[test]
+    fn test_build_placeable_instance_requires_terminal_order_metadata() {
+        let mut cell = Cell::new("lp_filter");
+        cell.metadata
+            .insert("netlist.master".to_string(), "lp_filter_subckt".to_string());
+        let mut view = View::new("spice", ViewType::Spice);
+        view.file_path = Some(PathBuf::from("models/lp_filter.sp"));
+
+        let result = build_placeable_instance_with_reason("user_lib", &cell, &view);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("terminal order metadata"));
+    }
+
+    #[test]
+    fn test_build_placeable_instance_with_reason_reports_missing_source_path() {
+        let mut cell = Cell::new("lp_filter");
+        cell.metadata
+            .insert("netlist.master".to_string(), "lp_filter_subckt".to_string());
+        cell.metadata
+            .insert("netlist.ports".to_string(), "in,out,vss".to_string());
+        let view = View::new("spice", ViewType::Spice);
+
+        let result = build_placeable_instance_with_reason("user_lib", &cell, &view);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("source path"));
     }
 
     // =========================================================================

@@ -89,8 +89,8 @@ pub fn generate_netlist_with_analysis(
         netlist,
         nets,
         point_to_net,
-        warnings: Vec::new(),
-        errors: Vec::new(),
+        warnings: gen.warnings().to_vec(),
+        errors: gen.errors().to_vec(),
     }
 }
 
@@ -188,6 +188,10 @@ pub struct NetlistGenerator<'a> {
 
     /// Subcircuit definitions needed
     subcircuits: Vec<String>,
+    /// Netlist generation warnings surfaced to simulation controller.
+    warnings: Vec<String>,
+    /// Netlist generation errors that should block simulation.
+    errors: Vec<String>,
 }
 
 impl<'a> NetlistGenerator<'a> {
@@ -201,6 +205,8 @@ impl<'a> NetlistGenerator<'a> {
             lines: Vec::new(),
             models: BTreeMap::new(),
             subcircuits: Vec::new(),
+            warnings: Vec::new(),
+            errors: Vec::new(),
         }
     }
 
@@ -218,6 +224,18 @@ impl<'a> NetlistGenerator<'a> {
         self.lines.clear();
         self.models.clear();
         self.subcircuits.clear();
+        self.warnings.clear();
+        self.errors.clear();
+    }
+
+    /// Read-only warnings collected during generation.
+    pub fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
+
+    /// Read-only errors collected during generation.
+    pub fn errors(&self) -> &[String] {
+        &self.errors
     }
 
     /// Generate netlist with custom analysis commands
@@ -470,7 +488,24 @@ impl<'a> NetlistGenerator<'a> {
                     .as_ref()
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty());
-                includes.entry(key).or_insert(model);
+                if model.is_none() {
+                    self.warnings.push(format!(
+                        "Cell instance '{}' ({}/{}/{}) has no explicit Verilog-A module name; falling back to cell name during netlisting",
+                        component.name, binding.library, binding.cell, binding.view
+                    ));
+                }
+                if let Some(existing_model) = includes.get(&key) {
+                    if existing_model.as_deref() != model.as_deref() {
+                        self.warnings.push(format!(
+                            "Conflicting Verilog-A module bindings for include '{}': keeping '{}' and ignoring '{}'",
+                            key,
+                            existing_model.as_deref().unwrap_or("<none>"),
+                            model.as_deref().unwrap_or("<none>")
+                        ));
+                    }
+                } else {
+                    includes.insert(key, model);
+                }
             } else {
                 generic_includes.insert(key);
             }
@@ -653,8 +688,39 @@ impl<'a> NetlistGenerator<'a> {
             // (Verilog-A module or subcircuit/cell fallback).
             ComponentType::CellInstance => {
                 let Some(binding) = component.library_cell.as_ref() else {
+                    self.errors.push(format!(
+                        "Cell instance '{}' is missing library binding metadata",
+                        component.name
+                    ));
                     return None;
                 };
+
+                if binding.terminal_order.is_empty() {
+                    self.errors.push(format!(
+                        "Cell instance '{}' ({}/{}/{}) is missing terminal order metadata (netlist.ports/netlist.terminals)",
+                        component.name, binding.library, binding.cell, binding.view
+                    ));
+                    return None;
+                }
+                if node_names.len() != binding.terminal_order.len() {
+                    self.errors.push(format!(
+                        "Cell instance '{}' ({}/{}/{}) terminal mismatch: schematic has {} nodes but binding defines {} terminals",
+                        component.name,
+                        binding.library,
+                        binding.cell,
+                        binding.view,
+                        node_names.len(),
+                        binding.terminal_order.len()
+                    ));
+                    return None;
+                }
+                if binding.source_path.is_none() {
+                    self.errors.push(format!(
+                        "Cell instance '{}' ({}/{}/{}) is missing source path metadata",
+                        component.name, binding.library, binding.cell, binding.view
+                    ));
+                    return None;
+                }
 
                 let subckt_name = binding
                     .module_name
@@ -662,6 +728,13 @@ impl<'a> NetlistGenerator<'a> {
                     .map(|s| s.trim())
                     .filter(|s| !s.is_empty())
                     .unwrap_or(binding.cell.as_str());
+                if subckt_name.is_empty() {
+                    self.errors.push(format!(
+                        "Cell instance '{}' ({}/{}/{}) has no netlist master/module name",
+                        component.name, binding.library, binding.cell, binding.view
+                    ));
+                    return None;
+                }
 
                 let mut instance_name = component.spice_instance_name();
                 if !instance_name.starts_with('X') && !instance_name.starts_with('x') {
@@ -1443,6 +1516,7 @@ mod tests {
             let mut binding = LibraryCellInstance::new("user_lib", "amp", "spice");
             binding.source_path = Some(std::path::PathBuf::from("models/amp.sp"));
             binding.module_name = Some("amp".to_string());
+            binding.terminal_order = vec!["in".to_string(), "out".to_string()];
 
             let mut comp = Component::new(id, ComponentType::CellInstance, Point::new(0, 0))
                 .with_name_value(name, "");
@@ -1463,6 +1537,7 @@ mod tests {
 
         let mut binding = LibraryCellInstance::new("veriloga", "fallback_cell", "veriloga");
         binding.source_path = Some(std::path::PathBuf::from("fallback.va"));
+        binding.terminal_order = vec!["p".to_string(), "n".to_string()];
 
         let mut comp = Component::new(1, ComponentType::CellInstance, Point::new(10, 20))
             .with_name_value("inst1", "");
@@ -1474,6 +1549,51 @@ mod tests {
 
         assert!(line.starts_with("Xinst1 "));
         assert!(line.contains(" fallback_cell"));
+    }
+
+    #[test]
+    fn test_generate_netlist_reports_error_for_missing_terminal_order() {
+        let mut schematic = SchematicState::default();
+        let mut binding = LibraryCellInstance::new("user_lib", "amp", "spice");
+        binding.source_path = Some(std::path::PathBuf::from("models/amp.sp"));
+        binding.module_name = Some("amp".to_string());
+        // Intentionally leave terminal_order empty for strict validation.
+
+        let mut comp = Component::new(1, ComponentType::CellInstance, Point::new(0, 0))
+            .with_name_value("x_missing_ports", "");
+        comp.library_cell = Some(binding);
+        schematic.components.push(comp);
+
+        let result = generate_netlist(&schematic);
+        assert!(!result.errors.is_empty());
+        assert!(result
+            .errors
+            .iter()
+            .any(|err| err.contains("terminal order metadata")));
+    }
+
+    #[test]
+    fn test_generate_netlist_warns_on_conflicting_veriloga_module_binding() {
+        let mut schematic = SchematicState::default();
+
+        for (id, module) in [(1_u64, "mod_a"), (2_u64, "mod_b")] {
+            let mut binding = LibraryCellInstance::new("veriloga", "same_cell", "veriloga");
+            binding.source_path = Some(std::path::PathBuf::from("models/shared.va"));
+            binding.module_name = Some(module.to_string());
+            binding.terminal_order = vec!["p".to_string(), "n".to_string()];
+
+            let mut comp = Component::new(id, ComponentType::CellInstance, Point::new(0, 0))
+                .with_name_value(format!("x{}", id), "");
+            comp.library_cell = Some(binding);
+            schematic.components.push(comp);
+        }
+
+        let result = generate_netlist(&schematic);
+        assert!(!result.warnings.is_empty());
+        assert!(result
+            .warnings
+            .iter()
+            .any(|warn| warn.contains("Conflicting Verilog-A module bindings")));
     }
 
     // -------------------------------------------------------------------------
