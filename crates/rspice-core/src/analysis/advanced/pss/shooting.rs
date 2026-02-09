@@ -312,92 +312,148 @@ impl ShootingNewtonSolver {
         if n == 0 {
             return Vec::new();
         }
-
-        // For small systems, use power iteration for dominant eigenvalue
-        // For production, would use LAPACK/nalgebra eigenvalue decomposition
-
-        // Simplified: return approximation based on trace and determinant
-        // (only valid for 2x2, placeholder for larger systems)
-
-        if n == 2 {
-            let trace = monodromy[0][0] + monodromy[1][1];
-            let det = monodromy[0][0] * monodromy[1][1] - monodromy[0][1] * monodromy[1][0];
-
-            let discriminant = trace * trace - 4.0 * det;
-
-            if discriminant >= 0.0 {
-                let sqrt_d = discriminant.sqrt();
-                vec![
-                    num_complex::Complex64::new((trace + sqrt_d) / 2.0, 0.0),
-                    num_complex::Complex64::new((trace - sqrt_d) / 2.0, 0.0),
-                ]
-            } else {
-                let sqrt_d = (-discriminant).sqrt();
-                vec![
-                    num_complex::Complex64::new(trace / 2.0, sqrt_d / 2.0),
-                    num_complex::Complex64::new(trace / 2.0, -sqrt_d / 2.0),
-                ]
-            }
-        } else {
-            // For larger systems, use iterative methods
-            // Return empty for now - full implementation needs eigenvalue solver
-            self.power_iteration_eigenvalues(monodromy, 3)
-        }
-    }
-
-    /// Power iteration for finding dominant eigenvalues
-    fn power_iteration_eigenvalues(
-        &self,
-        matrix: &[Vec<Value>],
-        num_eigenvalues: usize,
-    ) -> Vec<num_complex::Complex64> {
-        let n = matrix.len();
-        if n == 0 {
+        if monodromy
+            .iter()
+            .any(|row| row.len() != n || row.iter().any(|v| !v.is_finite()))
+        {
             return Vec::new();
         }
 
-        let mut eigenvalues = Vec::with_capacity(num_eigenvalues);
+        if n == 1 {
+            return vec![num_complex::Complex64::new(monodromy[0][0], 0.0)];
+        }
+        if n == 2 {
+            return self.eigenvalues_2x2(
+                monodromy[0][0],
+                monodromy[0][1],
+                monodromy[1][0],
+                monodromy[1][1],
+            );
+        }
 
-        // Simple power iteration for dominant eigenvalue
-        let mut v: Vec<Value> = (0..n).map(|i| if i == 0 { 1.0 } else { 0.0 }).collect();
-        let mut eigenvalue = 0.0;
+        self.qr_eigenvalues(monodromy)
+    }
 
-        for _ in 0..100 {
-            // Matrix-vector multiply
-            let mut w: Vec<Value> = vec![0.0; n];
-            for i in 0..n {
-                for j in 0..n {
-                    w[i] += matrix[i][j] * v[j];
+    fn eigenvalues_2x2(
+        &self,
+        a00: Value,
+        a01: Value,
+        a10: Value,
+        a11: Value,
+    ) -> Vec<num_complex::Complex64> {
+        let trace = a00 + a11;
+        let det = a00 * a11 - a01 * a10;
+        let discriminant = trace * trace - 4.0 * det;
+
+        if discriminant >= 0.0 {
+            let sqrt_d = discriminant.sqrt();
+            vec![
+                num_complex::Complex64::new((trace + sqrt_d) / 2.0, 0.0),
+                num_complex::Complex64::new((trace - sqrt_d) / 2.0, 0.0),
+            ]
+        } else {
+            let sqrt_d = (-discriminant).sqrt() / 2.0;
+            vec![
+                num_complex::Complex64::new(trace / 2.0, sqrt_d),
+                num_complex::Complex64::new(trace / 2.0, -sqrt_d),
+            ]
+        }
+    }
+
+    fn qr_eigenvalues(&self, matrix: &[Vec<Value>]) -> Vec<num_complex::Complex64> {
+        let n = matrix.len();
+        let mut a = matrix.to_vec();
+        let tol = 1e-12;
+        let max_iter = self.max_iterations.max(200) * n.max(2);
+
+        for _ in 0..max_iter {
+            let mut converged = true;
+            for i in 1..n {
+                if a[i][i - 1].abs() > tol {
+                    converged = false;
+                    break;
+                }
+            }
+            if converged {
+                break;
+            }
+
+            // Basic shifted QR iteration.
+            let shift = a[n - 1][n - 1];
+            for (i, row) in a.iter_mut().enumerate().take(n) {
+                row[i] -= shift;
+            }
+
+            let (q, r) = self.qr_decompose(&a);
+            a = self.matrix_multiply(&r, &q);
+
+            for (i, row) in a.iter_mut().enumerate().take(n) {
+                row[i] += shift;
+            }
+        }
+
+        let mut eigenvalues = Vec::with_capacity(n);
+        let mut i = 0;
+        while i < n {
+            if i == n - 1 || a[i + 1][i].abs() < tol {
+                eigenvalues.push(num_complex::Complex64::new(a[i][i], 0.0));
+                i += 1;
+            } else {
+                eigenvalues.extend(self.eigenvalues_2x2(
+                    a[i][i],
+                    a[i][i + 1],
+                    a[i + 1][i],
+                    a[i + 1][i + 1],
+                ));
+                i += 2;
+            }
+        }
+
+        eigenvalues
+    }
+
+    fn qr_decompose(&self, a: &[Vec<Value>]) -> (Vec<Vec<Value>>, Vec<Vec<Value>>) {
+        let n = a.len();
+        let mut q = vec![vec![0.0; n]; n];
+        let mut r = vec![vec![0.0; n]; n];
+        let cols: Vec<Vec<Value>> = (0..n).map(|j| (0..n).map(|i| a[i][j]).collect()).collect();
+
+        for j in 0..n {
+            let mut v = cols[j].clone();
+            for i in 0..j {
+                let q_col: Vec<Value> = (0..n).map(|k| q[k][i]).collect();
+                let dot: Value = v.iter().zip(&q_col).map(|(x, y)| x * y).sum();
+                r[i][j] = dot;
+                for k in 0..n {
+                    v[k] -= dot * q_col[k];
                 }
             }
 
-            // Compute norm
-            let norm: Value = w.iter().map(|x| x * x).sum::<Value>().sqrt();
-            if norm < 1e-15 {
-                break;
+            let norm = v.iter().map(|x| x * x).sum::<Value>().sqrt();
+            r[j][j] = norm;
+            if norm > 1e-15 {
+                for k in 0..n {
+                    q[k][j] = v[k] / norm;
+                }
             }
-
-            // Estimate eigenvalue from Rayleigh quotient
-            let new_eigenvalue: Value = v.iter().zip(w.iter()).map(|(vi, wi)| vi * wi).sum();
-
-            // Normalize
-            for x in w.iter_mut() {
-                *x /= norm;
-            }
-            v = w;
-
-            if (new_eigenvalue - eigenvalue).abs() < 1e-10 {
-                eigenvalue = new_eigenvalue;
-                break;
-            }
-            eigenvalue = new_eigenvalue;
         }
 
-        eigenvalues.push(num_complex::Complex64::new(eigenvalue, 0.0));
+        (q, r)
+    }
 
-        // For simplicity, only return dominant eigenvalue
-        // Full implementation would use deflation or QR iteration
-        eigenvalues
+    fn matrix_multiply(&self, a: &[Vec<Value>], b: &[Vec<Value>]) -> Vec<Vec<Value>> {
+        let n = a.len();
+        let mut out = vec![vec![0.0; n]; n];
+        for i in 0..n {
+            for j in 0..n {
+                let mut sum = 0.0;
+                for k in 0..n {
+                    sum += a[i][k] * b[k][j];
+                }
+                out[i][j] = sum;
+            }
+        }
+        out
     }
 
     /// Reset solver state for new analysis
@@ -590,6 +646,55 @@ mod tests {
         for m in &multipliers {
             assert!((m.norm() - 1.0).abs() < 0.01);
         }
+    }
+
+    #[test]
+    fn test_floquet_multipliers_3x3_diagonal_matrix() {
+        let solver = ShootingNewtonSolver::default();
+        let monodromy = vec![
+            vec![0.9, 0.0, 0.0],
+            vec![0.0, 0.7, 0.0],
+            vec![0.0, 0.0, 0.5],
+        ];
+
+        let multipliers = solver.compute_floquet_multipliers(&monodromy);
+        assert_eq!(multipliers.len(), 3);
+
+        let mut reals: Vec<Value> = multipliers.iter().map(|m| m.re).collect();
+        reals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        assert!((reals[0] - 0.5).abs() < 1e-3);
+        assert!((reals[1] - 0.7).abs() < 1e-3);
+        assert!((reals[2] - 0.9).abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_floquet_multipliers_extract_complex_pair_from_larger_system() {
+        let solver = ShootingNewtonSolver::default();
+        let angle = std::f64::consts::PI / 6.0; // 30 degrees
+        let mag = 0.8;
+        let cos_a = mag * angle.cos();
+        let sin_a = mag * angle.sin();
+
+        // Block-diagonal: [rotation*mag] + [0.6] + [0.3]
+        let monodromy = vec![
+            vec![cos_a, -sin_a, 0.0, 0.0],
+            vec![sin_a, cos_a, 0.0, 0.0],
+            vec![0.0, 0.0, 0.6, 0.0],
+            vec![0.0, 0.0, 0.0, 0.3],
+        ];
+
+        let multipliers = solver.compute_floquet_multipliers(&monodromy);
+        assert_eq!(multipliers.len(), 4);
+
+        let has_complex_pair = multipliers.iter().any(|m| m.im.abs() > 1e-3);
+        assert!(has_complex_pair, "expected complex conjugate pair");
+
+        let mut magnitudes: Vec<Value> = multipliers.iter().map(|m| m.norm()).collect();
+        magnitudes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        assert!((magnitudes[0] - 0.3).abs() < 1e-3);
+        assert!((magnitudes[1] - 0.6).abs() < 1e-3);
+        assert!((magnitudes[2] - 0.8).abs() < 2e-2);
+        assert!((magnitudes[3] - 0.8).abs() < 2e-2);
     }
 
     #[test]

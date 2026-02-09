@@ -630,20 +630,17 @@ mod integration_tests {
         // Test that Floquet multipliers match known eigenvalues
         let solver = ShootingNewtonSolver::default();
 
-        // Monodromy matrix with known eigenvalues: 0.9 and 0.5
+        // Upper-triangular matrix: eigenvalues are the diagonal entries.
         let monodromy = vec![vec![0.7, 0.2], vec![0.0, 0.7]];
-
-        // This is upper triangular, eigenvalues are diagonal entries (both 0.7)
         let multipliers = solver.compute_floquet_multipliers(&monodromy);
-
-        // With power iteration, we get the dominant eigenvalue
-        let dominant = multipliers.iter().map(|m| m.norm()).fold(0.0, f64::max);
-
-        assert!(
-            (dominant - 0.7).abs() < 0.1,
-            "Dominant eigenvalue should be ~0.7, got {}",
-            dominant
-        );
+        assert_eq!(multipliers.len(), 2);
+        for m in &multipliers {
+            assert!(
+                (m.re - 0.7).abs() < 1e-3 && m.im.abs() < 1e-6,
+                "Expected real eigenvalue 0.7, got {}",
+                m
+            );
+        }
     }
 
     #[test]
