@@ -186,31 +186,38 @@ impl YieldAnalysisManager {
             let mut values = Vec::with_capacity(num_runs);
 
             for result in mc_results {
-                // In a real implementation, we would extract the specific measurement value
-                // For this commercial-grade architecture, we assume measurements are stored in the result
                 if let Some(val) = self.extract_measurement(result, name) {
-                    let passes = spec.evaluates(val);
-                    if passes {
-                        pass_count += 1;
+                    if val.is_finite() {
+                        let passes = spec.evaluates(val);
+                        if passes {
+                            pass_count += 1;
+                        }
+                        trail.push(passes);
+                        values.push(val);
+                    } else {
+                        trail.push(false);
                     }
-                    trail.push(passes);
-                    values.push(val);
+                } else {
+                    // Missing measurement is treated as a failed run for this spec.
+                    trail.push(false);
                 }
             }
 
-            if !values.is_empty() {
-                let stats = self.calculate_stats(&values, spec);
-                let yield_result = YieldResult {
-                    spec: spec.clone(),
-                    total_runs: num_runs,
-                    pass_count,
-                    fail_count: num_runs - pass_count,
-                    yield_percent: (pass_count as f32 / num_runs as f32) * 100.0,
-                    stats,
-                    trail,
-                };
-                self.results.insert(name.clone(), yield_result);
-            }
+            let stats = self.calculate_stats(&values, spec);
+            let yield_result = YieldResult {
+                spec: spec.clone(),
+                total_runs: num_runs,
+                pass_count,
+                fail_count: num_runs.saturating_sub(pass_count),
+                yield_percent: if num_runs == 0 {
+                    0.0
+                } else {
+                    (pass_count as f32 / num_runs as f32) * 100.0
+                },
+                stats,
+                trail,
+            };
+            self.results.insert(name.clone(), yield_result);
         }
 
         &self.results
@@ -218,24 +225,38 @@ impl YieldAnalysisManager {
 
     /// Extract a specific measurement value from a simulation result
     fn extract_measurement(&self, result: &SimulationResult, name: &str) -> Option<f64> {
-        // Commercial simulators store scalar measurements like 'risetime', 'bandwidth', 'dc_gain'
-        // This would call into simulation::results::SimulationResult's measurement map
-        result.measurements().get(name).cloned()
+        result.measurement(name)
     }
 
     /// Calculate comprehensive statistical metrics
     fn calculate_stats(&self, values: &[f64], spec: &YieldSpec) -> DistributionStats {
-        let n = values.len() as f64;
         if values.is_empty() {
             return DistributionStats::default();
         }
 
+        if values.len() == 1 {
+            let value = values[0];
+            return DistributionStats {
+                count: 1,
+                mean: value,
+                std_dev: 0.0,
+                min: value,
+                max: value,
+                median: value,
+                skewness: 0.0,
+                kurtosis: 0.0,
+                cp: None,
+                cpk: None,
+            };
+        }
+
+        let n = values.len() as f64;
         let mean = values.iter().sum::<f64>() / n;
         let variance = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (n - 1.0);
         let std_dev = variance.sqrt();
 
         let mut sorted_vals = values.to_vec();
-        sorted_vals.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted_vals.sort_by(f64::total_cmp);
 
         let median = if values.len() % 2 == 0 {
             (sorted_vals[values.len() / 2 - 1] + sorted_vals[values.len() / 2]) / 2.0
@@ -244,10 +265,13 @@ impl YieldAnalysisManager {
         };
 
         // Skewness and Kurtosis
-        let m3 = values.iter().map(|v| (v - mean).powi(3)).sum::<f64>() / n;
-        let m4 = values.iter().map(|v| (v - mean).powi(4)).sum::<f64>() / n;
-        let skewness = m3 / std_dev.powi(3);
-        let kurtosis = (m4 / std_dev.powi(4)) - 3.0; // Excess kurtosis
+        let (skewness, kurtosis) = if std_dev > 0.0 {
+            let m3 = values.iter().map(|v| (v - mean).powi(3)).sum::<f64>() / n;
+            let m4 = values.iter().map(|v| (v - mean).powi(4)).sum::<f64>() / n;
+            (m3 / std_dev.powi(3), (m4 / std_dev.powi(4)) - 3.0)
+        } else {
+            (0.0, 0.0)
+        };
 
         // Capability Indices
         let mut cp = None;
@@ -341,5 +365,70 @@ mod tests {
         assert_eq!(gain_res.pass_count, 5); // 46, 48, 50, 52, 54
         assert_eq!(gain_res.fail_count, 2); // 44, 56
         assert!((gain_res.yield_percent - 71.428).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_yield_analysis_missing_measurements_count_as_failures() {
+        let mut manager = YieldAnalysisManager::new();
+        manager.add_spec(YieldSpec::lower("gain", 1.0, "V"));
+
+        let results = vec![
+            SimulationResult::Empty {
+                measurements: HashMap::from([("gain".to_string(), 1.2)]),
+            },
+            SimulationResult::Empty {
+                measurements: HashMap::new(),
+            },
+            SimulationResult::Empty {
+                measurements: HashMap::from([("gain".to_string(), f64::NAN)]),
+            },
+        ];
+
+        let report = manager.analyze(&results);
+        let gain = report.get("gain").expect("gain yield result should exist");
+        assert_eq!(gain.total_runs, 3);
+        assert_eq!(gain.pass_count, 1);
+        assert_eq!(gain.fail_count, 2);
+        assert_eq!(gain.trail, vec![true, false, false]);
+    }
+
+    #[test]
+    fn test_calculate_stats_single_value_is_stable() {
+        let manager = YieldAnalysisManager::new();
+        let stats = manager.calculate_stats(&[3.3], &YieldSpec::upper("vout", 5.0, "V"));
+        assert_eq!(stats.count, 1);
+        assert_eq!(stats.mean, 3.3);
+        assert_eq!(stats.std_dev, 0.0);
+        assert_eq!(stats.skewness, 0.0);
+        assert_eq!(stats.kurtosis, 0.0);
+    }
+
+    #[test]
+    fn test_extract_measurement_from_monte_carlo_summary() {
+        let mut manager = YieldAnalysisManager::new();
+        manager.add_spec(YieldSpec::range("vout", 0.9, 1.1, "V"));
+
+        let mc = SimulationResult::MonteCarlo {
+            runs_requested: 20,
+            runs_completed: 20,
+            num_failures: 0,
+            all_converged: true,
+            variables: vec![crate::simulation::results::MonteCarloVariableResult {
+                name: "vout".to_string(),
+                mean: 1.0,
+                std_dev: 0.01,
+                min: 0.97,
+                max: 1.03,
+                histogram: vec![2, 6, 10, 2],
+                bin_edges: vec![0.95, 0.98, 1.0, 1.02, 1.05],
+            }],
+        };
+
+        let report = manager.analyze(&[mc]);
+        let gain = report.get("vout").expect("vout result should exist");
+        assert_eq!(gain.total_runs, 1);
+        assert_eq!(gain.pass_count, 1);
+        assert_eq!(gain.fail_count, 0);
+        assert_eq!(gain.yield_percent, 100.0);
     }
 }

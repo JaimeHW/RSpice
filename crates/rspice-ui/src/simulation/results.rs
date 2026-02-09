@@ -383,13 +383,223 @@ impl Default for SimulationResult {
 }
 
 impl SimulationResult {
+    /// Get a single scalar measurement by name without allocating a map.
+    pub fn measurement(&self, name: &str) -> Option<f64> {
+        let key = name.trim();
+        if key.is_empty() {
+            return None;
+        }
+
+        match self {
+            SimulationResult::DcOp(op) => measurement_from_dc_op(op, key),
+            SimulationResult::DcSweep { waveforms, .. }
+            | SimulationResult::Transient { waveforms, .. }
+            | SimulationResult::Ac { waveforms, .. }
+            | SimulationResult::Parametric { waveforms, .. }
+            | SimulationResult::Corner { waveforms, .. }
+            | SimulationResult::Reliability { waveforms, .. }
+            | SimulationResult::Optimization { waveforms, .. }
+            | SimulationResult::Soa { waveforms, .. } => {
+                waveform_last_value_by_name(waveforms, key)
+            }
+            SimulationResult::Noise {
+                output_noise,
+                input_noise,
+                contributors,
+                ..
+            } => {
+                if key.eq_ignore_ascii_case("output_noise")
+                    || key.eq_ignore_ascii_case("onoise_total")
+                {
+                    return output_noise.last().copied();
+                }
+                if key.eq_ignore_ascii_case("input_noise")
+                    || key.eq_ignore_ascii_case("inoise_total")
+                {
+                    return input_noise.as_ref().and_then(|vals| vals.last().copied());
+                }
+                contributors.get(key).and_then(|vals| vals.last().copied())
+            }
+            SimulationResult::PoleZero { poles, zeros, gain } => {
+                if key.eq_ignore_ascii_case("gain") {
+                    return Some(*gain);
+                }
+                if key.eq_ignore_ascii_case("num_poles") {
+                    return Some(poles.len() as f64);
+                }
+                if key.eq_ignore_ascii_case("num_zeros") {
+                    return Some(zeros.len() as f64);
+                }
+                None
+            }
+            SimulationResult::Sensitivity {
+                sensitivities,
+                normalized,
+            } => sensitivities
+                .get(key)
+                .copied()
+                .or_else(|| normalized.get(key).copied()),
+            SimulationResult::MonteCarlo { variables, .. } => {
+                if let Some(var) = variables.iter().find(|var| var.name == key) {
+                    return Some(var.mean);
+                }
+
+                parse_wrapped_identifier(key, "mean")
+                    .and_then(|inner| variables.iter().find(|var| var.name == inner))
+                    .map(|var| var.mean)
+            }
+            SimulationResult::Empty { measurements } => measurements.get(key).copied(),
+        }
+    }
+
     /// Get all measurements associated with this result
     pub fn measurements(&self) -> HashMap<String, f64> {
         match self {
+            SimulationResult::DcOp(op) => {
+                let mut out = HashMap::with_capacity(
+                    op.node_voltages.len().saturating_mul(2) + op.branch_currents.len(),
+                );
+                for (node, value) in &op.node_voltages {
+                    out.insert(node.clone(), *value);
+                    out.insert(format!("V({})", node), *value);
+                }
+                for (branch, value) in &op.branch_currents {
+                    out.insert(branch.clone(), *value);
+                    if !branch.starts_with("I(") {
+                        out.insert(format!("I({})", branch), *value);
+                    }
+                }
+                out
+            }
+            SimulationResult::DcSweep { waveforms, .. }
+            | SimulationResult::Transient { waveforms, .. }
+            | SimulationResult::Ac { waveforms, .. }
+            | SimulationResult::Parametric { waveforms, .. }
+            | SimulationResult::Corner { waveforms, .. }
+            | SimulationResult::Reliability { waveforms, .. }
+            | SimulationResult::Optimization { waveforms, .. }
+            | SimulationResult::Soa { waveforms, .. } => waveforms
+                .iter()
+                .filter_map(|(name, wf)| {
+                    wf.y_values
+                        .last()
+                        .copied()
+                        .map(|value| (name.clone(), value))
+                })
+                .collect(),
+            SimulationResult::Noise {
+                output_noise,
+                input_noise,
+                contributors,
+                ..
+            } => {
+                let mut out = HashMap::new();
+                if let Some(v) = output_noise.last().copied() {
+                    out.insert("output_noise".to_string(), v);
+                    out.insert("onoise_total".to_string(), v);
+                }
+                if let Some(v) = input_noise.as_ref().and_then(|vals| vals.last().copied()) {
+                    out.insert("input_noise".to_string(), v);
+                    out.insert("inoise_total".to_string(), v);
+                }
+                for (name, vals) in contributors {
+                    if let Some(v) = vals.last().copied() {
+                        out.insert(name.clone(), v);
+                    }
+                }
+                out
+            }
+            SimulationResult::PoleZero { poles, zeros, gain } => HashMap::from([
+                ("gain".to_string(), *gain),
+                ("num_poles".to_string(), poles.len() as f64),
+                ("num_zeros".to_string(), zeros.len() as f64),
+            ]),
+            SimulationResult::Sensitivity {
+                sensitivities,
+                normalized,
+            } => {
+                let mut out = sensitivities.clone();
+                for (name, value) in normalized {
+                    out.insert(format!("normalized:{}", name), *value);
+                }
+                out
+            }
+            SimulationResult::MonteCarlo { variables, .. } => variables
+                .iter()
+                .map(|var| (var.name.clone(), var.mean))
+                .collect(),
             SimulationResult::Empty { measurements } => measurements.clone(),
-            _ => HashMap::new(),
         }
     }
+}
+
+fn parse_wrapped_identifier<'a>(key: &'a str, prefix: &str) -> Option<&'a str> {
+    if key.len() <= prefix.len() + 2 {
+        return None;
+    }
+    if !key[..prefix.len()].eq_ignore_ascii_case(prefix) {
+        return None;
+    }
+    if !key[prefix.len()..].starts_with('(') || !key.ends_with(')') {
+        return None;
+    }
+    Some(&key[prefix.len() + 1..key.len() - 1])
+}
+
+fn measurement_from_dc_op(op: &DcOpResult, key: &str) -> Option<f64> {
+    if let Some(v) = op.node_voltages.get(key).copied() {
+        return Some(v);
+    }
+    if let Some(v) = op.branch_currents.get(key).copied() {
+        return Some(v);
+    }
+    if let Some(node) = parse_wrapped_identifier(key, "V") {
+        return op.node_voltages.get(node).copied();
+    }
+    if let Some(branch) = parse_wrapped_identifier(key, "I") {
+        return op
+            .branch_currents
+            .get(branch)
+            .copied()
+            .or_else(|| op.branch_currents.get(key).copied());
+    }
+    None
+}
+
+fn waveform_last_value_by_name(
+    waveforms: &HashMap<String, WaveformData>,
+    key: &str,
+) -> Option<f64> {
+    if let Some(v) = waveforms
+        .get(key)
+        .and_then(|wf| wf.y_values.last().copied())
+    {
+        return Some(v);
+    }
+
+    if let Some(inner) =
+        parse_wrapped_identifier(key, "V").or_else(|| parse_wrapped_identifier(key, "I"))
+    {
+        if let Some(v) = waveforms
+            .get(inner)
+            .and_then(|wf| wf.y_values.last().copied())
+        {
+            return Some(v);
+        }
+    }
+
+    let voltage_key = format!("V({})", key);
+    if let Some(v) = waveforms
+        .get(&voltage_key)
+        .and_then(|wf| wf.y_values.last().copied())
+    {
+        return Some(v);
+    }
+
+    let current_key = format!("I({})", key);
+    waveforms
+        .get(&current_key)
+        .and_then(|wf| wf.y_values.last().copied())
 }
 
 impl SimulationResult {
@@ -765,5 +975,88 @@ mod tests {
         assert!(result.has_data());
         assert_eq!(result.type_name(), "Safety (SOA)");
         assert!(result.get_waveform("SOA_VIOLATION_COUNT").is_some());
+    }
+
+    #[test]
+    fn test_measurement_lookup_dc_op_aliases() {
+        let mut result = DcOpResult::default();
+        result.node_voltages.insert("out".to_string(), 1.8);
+        result.branch_currents.insert("R1".to_string(), 2.5e-3);
+
+        let sim = SimulationResult::DcOp(result);
+        assert_eq!(sim.measurement("out"), Some(1.8));
+        assert_eq!(sim.measurement("V(out)"), Some(1.8));
+        assert_eq!(sim.measurement("I(R1)"), Some(2.5e-3));
+    }
+
+    #[test]
+    fn test_measurement_lookup_waveform_last_value() {
+        let mut waveforms = HashMap::new();
+        waveforms.insert(
+            "V(out)".to_string(),
+            WaveformData::new_time_domain("V(out)", vec![0.0, 1.0, 2.0], vec![0.2, 0.7, 1.1]),
+        );
+
+        let sim = SimulationResult::Transient {
+            time: vec![0.0, 1.0, 2.0],
+            waveforms,
+        };
+
+        assert_eq!(sim.measurement("V(out)"), Some(1.1));
+        assert_eq!(sim.measurement("out"), Some(1.1));
+        assert_eq!(sim.measurement("V(missing)"), None);
+    }
+
+    #[test]
+    fn test_measurements_map_non_empty_for_waveform_results() {
+        let mut waveforms = HashMap::new();
+        waveforms.insert(
+            "gain".to_string(),
+            WaveformData::new_time_domain("gain", vec![0.0, 1.0], vec![40.0, 42.0]),
+        );
+        let sim = SimulationResult::DcSweep {
+            sweep_var: "vin".to_string(),
+            sweep_values: vec![0.0, 1.0],
+            waveforms,
+        };
+
+        let map = sim.measurements();
+        assert_eq!(map.get("gain").copied(), Some(42.0));
+    }
+
+    #[test]
+    fn test_measurement_lookup_monte_carlo_mean() {
+        let sim = SimulationResult::MonteCarlo {
+            runs_requested: 50,
+            runs_completed: 48,
+            num_failures: 2,
+            all_converged: false,
+            variables: vec![MonteCarloVariableResult {
+                name: "vout".to_string(),
+                mean: 1.234,
+                std_dev: 0.02,
+                min: 1.15,
+                max: 1.30,
+                histogram: vec![1, 4, 9],
+                bin_edges: vec![1.1, 1.2, 1.25, 1.35],
+            }],
+        };
+
+        assert_eq!(sim.measurement("vout"), Some(1.234));
+        assert_eq!(sim.measurement("mean(vout)"), Some(1.234));
+    }
+
+    #[test]
+    fn test_measurements_noise_summary_values() {
+        let sim = SimulationResult::Noise {
+            frequencies: vec![1e3, 1e4],
+            output_noise: vec![1.0e-12, 2.0e-12],
+            input_noise: Some(vec![5.0e-9, 6.0e-9]),
+            contributors: HashMap::from([("R1".to_string(), vec![0.2, 0.4])]),
+        };
+
+        assert_eq!(sim.measurement("output_noise"), Some(2.0e-12));
+        assert_eq!(sim.measurement("inoise_total"), Some(6.0e-9));
+        assert_eq!(sim.measurement("R1"), Some(0.4));
     }
 }
