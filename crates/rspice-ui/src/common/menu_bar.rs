@@ -976,10 +976,6 @@ fn action_export_csv(state: &mut AppState) {
 }
 
 fn action_export_netlist(state: &mut AppState, format: crate::io::NetlistFormat) {
-    use crate::io::{ExportOptions, NetlistExporter};
-    #[allow(unused_imports)]
-    use crate::state::ComponentType;
-
     // Check if we have a schematic to export
     if state.schematic.components.is_empty() {
         state
@@ -990,56 +986,9 @@ fn action_export_netlist(state: &mut AppState, format: crate::io::NetlistFormat)
         return;
     }
 
-    // Generate netlist from schematic using NetlistExporter
-    let mut exporter = NetlistExporter::default();
-    exporter.options.format = format;
-    exporter.title = state
-        .schematic
-        .current_file
-        .as_ref()
-        .and_then(|p| p.file_stem())
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "Untitled".to_string());
-
-    // Convert schematic components to netlist instances
-    for comp in &state.schematic.components {
-        let comp_type_char = match comp.kind {
-            ComponentType::Resistor => 'R',
-            ComponentType::Capacitor => 'C',
-            ComponentType::Inductor => 'L',
-            ComponentType::VoltageSource
-            | ComponentType::VoltageSourceAc
-            | ComponentType::VoltageSourcePulse
-            | ComponentType::VoltageSourceSin
-            | ComponentType::VoltageSourcePwl
-            | ComponentType::VoltageSourceExp
-            | ComponentType::VoltageSourceSffm => 'V',
-            ComponentType::CurrentSource
-            | ComponentType::CurrentSourceAc
-            | ComponentType::CurrentSourcePulse
-            | ComponentType::CurrentSourceSin
-            | ComponentType::CurrentSourcePwl
-            | ComponentType::CurrentSourceExp => 'I',
-            ComponentType::Diode => 'D',
-            ComponentType::Nmos => 'M',
-            ComponentType::Pmos => 'M',
-            ComponentType::NpnBjt | ComponentType::PnpBjt => 'Q',
-            ComponentType::Njfet | ComponentType::Pjfet => 'J',
-            ComponentType::Vcvs => 'E',
-            ComponentType::Vccs => 'G',
-            ComponentType::Ccvs => 'H',
-            ComponentType::Cccs => 'F',
-            _ => 'X',
-        };
-
-        let nodes = vec!["N1".to_string(), "N2".to_string()]; // Simplified
-        let instance =
-            crate::io::netlist_export::ComponentInstance::new(&comp.name, comp_type_char, nodes)
-                .with_param("value", &comp.value);
-        exporter.instances.push(instance);
-    }
-
-    let netlist_content = exporter.generate();
+    let Some(netlist_content) = build_menu_netlist(state, format) else {
+        return;
+    };
 
     // Default filename
     let default_name = state
@@ -1098,9 +1047,6 @@ fn action_export_netlist(state: &mut AppState, format: crate::io::NetlistFormat)
 }
 
 fn action_view_netlist(state: &mut AppState) {
-    use crate::io::{NetlistExporter, NetlistFormat};
-    use crate::state::ComponentType;
-
     // Check if we have a schematic to view
     if state.schematic.components.is_empty() {
         state
@@ -1111,56 +1057,9 @@ fn action_view_netlist(state: &mut AppState) {
         return;
     }
 
-    // Generate netlist from schematic using NetlistExporter
-    let mut exporter = NetlistExporter::default();
-    exporter.options.format = NetlistFormat::Spice;
-    exporter.title = state
-        .schematic
-        .current_file
-        .as_ref()
-        .and_then(|p| p.file_stem())
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "Untitled".to_string());
-
-    // Convert schematic components to netlist instances
-    for comp in &state.schematic.components {
-        let comp_type_char = match comp.kind {
-            ComponentType::Resistor => 'R',
-            ComponentType::Capacitor => 'C',
-            ComponentType::Inductor => 'L',
-            ComponentType::VoltageSource
-            | ComponentType::VoltageSourceAc
-            | ComponentType::VoltageSourcePulse
-            | ComponentType::VoltageSourceSin
-            | ComponentType::VoltageSourcePwl
-            | ComponentType::VoltageSourceExp
-            | ComponentType::VoltageSourceSffm => 'V',
-            ComponentType::CurrentSource
-            | ComponentType::CurrentSourceAc
-            | ComponentType::CurrentSourcePulse
-            | ComponentType::CurrentSourceSin
-            | ComponentType::CurrentSourcePwl
-            | ComponentType::CurrentSourceExp => 'I',
-            ComponentType::Diode => 'D',
-            ComponentType::Nmos => 'M',
-            ComponentType::Pmos => 'M',
-            ComponentType::NpnBjt | ComponentType::PnpBjt => 'Q',
-            ComponentType::Njfet | ComponentType::Pjfet => 'J',
-            ComponentType::Vcvs => 'E',
-            ComponentType::Vccs => 'G',
-            ComponentType::Ccvs => 'H',
-            ComponentType::Cccs => 'F',
-            _ => 'X',
-        };
-
-        let nodes = vec!["N1".to_string(), "N2".to_string()]; // Simplified
-        let instance =
-            crate::io::netlist_export::ComponentInstance::new(&comp.name, comp_type_char, nodes)
-                .with_param("value", &comp.value);
-        exporter.instances.push(instance);
-    }
-
-    let netlist_content = exporter.generate();
+    let Some(netlist_content) = build_menu_netlist(state, crate::io::NetlistFormat::Spice) else {
+        return;
+    };
 
     // Store in simulation state for editor viewing
     state.simulation.netlist_content = netlist_content.clone();
@@ -1178,6 +1077,101 @@ fn action_view_netlist(state: &mut AppState) {
             preview,
             if total_lines > 10 { "\n..." } else { "" }
         )));
+}
+
+fn build_menu_netlist(state: &mut AppState, format: crate::io::NetlistFormat) -> Option<String> {
+    let generation =
+        crate::simulation::netlist_gen::generate_netlist_with_analysis(&state.schematic, &[]);
+
+    if !generation.errors.is_empty() {
+        for err in generation.errors {
+            state
+                .console_messages
+                .push(crate::common::app::ConsoleMessage::error(err));
+        }
+        return None;
+    }
+
+    for warning in generation.warnings {
+        state
+            .console_messages
+            .push(crate::common::app::ConsoleMessage::warning(warning));
+    }
+
+    let spice_netlist = generation.netlist;
+    Some(match format {
+        crate::io::NetlistFormat::Spectre => spice_to_spectre_compatible_netlist(&spice_netlist),
+        _ => spice_netlist,
+    })
+}
+
+fn spice_to_spectre_compatible_netlist(spice_netlist: &str) -> String {
+    let mut ahdl_paths: Vec<String> = Vec::new();
+    let mut retained_lines: Vec<&str> = Vec::new();
+
+    for line in spice_netlist.lines() {
+        if let Some(path) = parse_veriloga_include_path(line) {
+            if !ahdl_paths.iter().any(|existing| existing == &path) {
+                ahdl_paths.push(path);
+            }
+            continue;
+        }
+        retained_lines.push(line);
+    }
+
+    if ahdl_paths.is_empty() {
+        return retained_lines.join("\n");
+    }
+
+    let mut output: Vec<String> = Vec::new();
+    let mut inserted_prefix = false;
+    for line in retained_lines {
+        let trimmed = line.trim();
+        if !inserted_prefix && !trimmed.is_empty() && !trimmed.starts_with('*') {
+            output.push("simulator lang=spectre".to_string());
+            for path in &ahdl_paths {
+                output.push(format!("ahdl_include {}", quote_netlist_path(path)));
+            }
+            output.push("simulator lang=spice".to_string());
+            inserted_prefix = true;
+        }
+        output.push(line.to_string());
+    }
+
+    if !inserted_prefix {
+        output.push("simulator lang=spectre".to_string());
+        for path in &ahdl_paths {
+            output.push(format!("ahdl_include {}", quote_netlist_path(path)));
+        }
+        output.push("simulator lang=spice".to_string());
+    }
+
+    output.join("\n")
+}
+
+fn parse_veriloga_include_path(line: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    let prefix = trimmed.get(..9)?;
+    if !prefix.eq_ignore_ascii_case(".veriloga") {
+        return None;
+    }
+
+    let rest = trimmed.get(9..)?.trim_start();
+    if rest.is_empty() {
+        return None;
+    }
+
+    if let Some(quoted) = rest.strip_prefix('"') {
+        let end = quoted.find('"')?;
+        return Some(quoted[..end].to_string());
+    }
+
+    rest.split_whitespace().next().map(ToString::to_string)
+}
+
+fn quote_netlist_path(path: &str) -> String {
+    let escaped = path.replace('"', "\\\"");
+    format!("\"{}\"", escaped)
 }
 
 fn format_cache_bytes(bytes: u64) -> String {
@@ -1579,6 +1573,60 @@ mod tests {
             .console_messages
             .iter()
             .any(|msg| msg.message.contains("No global 'veriloga' library found")));
+    }
+
+    #[test]
+    fn test_parse_veriloga_include_path_handles_quoted_and_unquoted_paths() {
+        let quoted = r#".VERILOGA "C:/models/opamp.va" opamp"#;
+        let bare = ".veriloga C:/models/opamp.va";
+        let unrelated = ".include \"models.lib\"";
+
+        assert_eq!(
+            parse_veriloga_include_path(quoted),
+            Some("C:/models/opamp.va".to_string())
+        );
+        assert_eq!(
+            parse_veriloga_include_path(bare),
+            Some("C:/models/opamp.va".to_string())
+        );
+        assert_eq!(parse_veriloga_include_path(unrelated), None);
+    }
+
+    #[test]
+    fn test_spice_to_spectre_compatible_netlist_converts_veriloga_directives() {
+        let spice = r#"
+* Header
+.VERILOGA "C:/models/opamp.va" opamp
+R1 in out 1k
+.end
+"#;
+
+        let spectre = spice_to_spectre_compatible_netlist(spice);
+        assert!(spectre.contains("simulator lang=spectre"));
+        assert!(spectre.contains("ahdl_include \"C:/models/opamp.va\""));
+        assert!(spectre.contains("simulator lang=spice"));
+        assert!(spectre.contains("R1 in out 1k"));
+        assert!(!spectre.contains(".VERILOGA"));
+    }
+
+    #[test]
+    fn test_action_view_netlist_uses_generated_schematic_netlist() {
+        let mut state = AppState::default();
+        use crate::state::{Component, ComponentType, Point};
+        let comp = Component::new(1, ComponentType::Resistor, Point::new(100, 100))
+            .with_name_value("R1", "1k");
+        state.schematic.components.push(comp);
+
+        action_view_netlist(&mut state);
+
+        assert!(
+            state.simulation.netlist_content.contains("R1"),
+            "generated netlist should include the real component instance"
+        );
+        assert!(
+            !state.simulation.netlist_content.contains("N1 N2"),
+            "legacy placeholder node names must not appear"
+        );
     }
 
     // NOTE: action_file_open, action_file_save, and action_file_save_as
