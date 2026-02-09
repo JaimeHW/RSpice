@@ -946,10 +946,27 @@ impl std::error::Error for SimulationError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, Instant};
 
     /// Minimal valid netlist for testing DC operating point
     fn test_netlist() -> String {
         "* Test Circuit\nV1 vdd 0 5\nR1 vdd out 1k\nR2 out 0 1k\n.end\n".to_string()
+    }
+
+    fn wait_for_result(
+        runner: &mut SimulationRunner,
+        timeout: Duration,
+    ) -> Option<Result<SimulationResult, SimulationError>> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(result) = runner.poll_result() {
+                return Some(result);
+            }
+            if Instant::now() >= deadline {
+                return None;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]
@@ -1514,9 +1531,7 @@ C1 out 0 1n
         runner
             .start_spec_with_options(AnalysisSpec::Pac, netlist, options)
             .expect("PAC spec should start");
-        thread::sleep(std::time::Duration::from_millis(250));
-
-        let result = runner.poll_result();
+        let result = wait_for_result(&mut runner, Duration::from_secs(5));
         assert!(result.is_some(), "Expected PAC result");
         let result = result.unwrap().expect("PAC should succeed");
         match result {
@@ -1533,11 +1548,13 @@ C1 out 0 1n
                     "expected PAC sideband trace names, got {:?}",
                     waveforms.keys().collect::<Vec<_>>()
                 );
-                assert!(waveforms.values().all(|wf| wf.is_complex
-                    && wf
-                        .y_imag
-                        .as_ref()
-                        .is_some_and(|imag| imag.len() == wf.y_values.len())));
+                assert!(waveforms.values().all(|wf| {
+                    wf.is_complex
+                        && wf
+                            .y_imag
+                            .as_ref()
+                            .is_some_and(|imag| imag.len() == wf.y_values.len())
+                }));
             }
             other => panic!("Expected AC result for PAC, got {:?}", other),
         }
@@ -1584,9 +1601,7 @@ C1 out 0 1n
         runner
             .start_spec_with_options(AnalysisSpec::Pxf, netlist, options)
             .expect("PXF spec should start");
-        thread::sleep(std::time::Duration::from_millis(250));
-
-        let result = runner.poll_result();
+        let result = wait_for_result(&mut runner, Duration::from_secs(5));
         assert!(result.is_some(), "Expected PXF result");
         let result = result.unwrap().expect("PXF should succeed");
         match result {
