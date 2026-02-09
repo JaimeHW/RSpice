@@ -2672,9 +2672,9 @@ impl SimulationController {
                         dc_result.node_voltages.len()
                     )));
 
-                // Auto-show console panel so user sees results
+                // Auto-show log panel so user sees results
                 state.panels.bottom_panel = true;
-                state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Console;
+                state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Log;
             }
 
             SimulationResult::Transient { time, waveforms } => {
@@ -2963,7 +2963,7 @@ impl SimulationController {
 
                 state.panels.bottom_panel = true;
                 state.panels.active_bottom_tab = if state.simulation.waveforms.is_empty() {
-                    crate::common::app::BottomPanelTab::Console
+                    crate::common::app::BottomPanelTab::Log
                 } else {
                     crate::common::app::BottomPanelTab::Waveform
                 };

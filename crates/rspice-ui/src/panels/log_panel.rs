@@ -437,8 +437,12 @@ impl LogPanelState {
 // Log Panel Rendering
 // =============================================================================
 
-/// Render the log panel UI
-pub fn render_log_panel(ui: &mut Ui, buffer: &LogBuffer, state: &mut LogPanelState) {
+/// Render the log panel UI.
+///
+/// Returns `true` if the user cleared the log during this frame.
+pub fn render_log_panel(ui: &mut Ui, buffer: &mut LogBuffer, state: &mut LogPanelState) -> bool {
+    let mut clear_requested = false;
+
     // Toolbar
     ui.horizontal(|ui| {
         // Filter text
@@ -468,6 +472,10 @@ pub fn render_log_panel(ui: &mut Ui, buffer: &LogBuffer, state: &mut LogPanelSta
         // Auto-scroll toggle
         ui.checkbox(&mut state.auto_scroll, "Auto-scroll");
 
+        if ui.small_button("Clear").clicked() {
+            clear_requested = true;
+        }
+
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // Error/warning counts
             let errors = buffer.error_count();
@@ -484,6 +492,10 @@ pub fn render_log_panel(ui: &mut Ui, buffer: &LogBuffer, state: &mut LogPanelSta
             ui.label(format!("{} entries", buffer.len()));
         });
     });
+
+    if clear_requested {
+        buffer.clear();
+    }
 
     ui.separator();
 
@@ -530,6 +542,8 @@ pub fn render_log_panel(ui: &mut Ui, buffer: &LogBuffer, state: &mut LogPanelSta
             });
         }
     });
+
+    clear_requested
 }
 
 // =============================================================================

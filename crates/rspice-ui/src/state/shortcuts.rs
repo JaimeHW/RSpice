@@ -81,7 +81,7 @@ pub enum ShortcutAction {
     ToggleGrid,
     /// Toggle waveform panel (Ctrl+W)
     ToggleWaveform,
-    /// Toggle console panel (Ctrl+`)
+    /// Toggle log panel (Ctrl+`)
     ToggleConsole,
     /// Toggle library browser (Ctrl+L)
     ToggleLibrary,
@@ -165,7 +165,7 @@ impl ShortcutAction {
             Self::ZoomReset => "Zoom 100%",
             Self::ToggleGrid => "Toggle Grid",
             Self::ToggleWaveform => "Toggle Waveform",
-            Self::ToggleConsole => "Toggle Console",
+            Self::ToggleConsole => "Toggle Log",
             Self::ToggleLibrary => "Toggle Library",
             // Tools
             Self::SelectTool => "Select Tool",

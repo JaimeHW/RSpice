@@ -70,7 +70,7 @@ pub enum ShortcutCommand {
     ViewZoomFit,
     /// Toggle project browser (Ctrl+Shift+L)
     ViewToggleBrowser,
-    /// Toggle console (Ctrl+`)
+    /// Toggle log panel (Ctrl+`)
     ViewToggleConsole,
     /// Toggle waveform viewer (Ctrl+W)
     ViewToggleWaveform,
@@ -157,7 +157,7 @@ impl ShortcutCommand {
             Self::ViewZoomOut => "Zoom Out",
             Self::ViewZoomFit => "Zoom to Fit",
             Self::ViewToggleBrowser => "Toggle Browser",
-            Self::ViewToggleConsole => "Toggle Console",
+            Self::ViewToggleConsole => "Toggle Log",
             Self::ViewToggleWaveform => "Toggle Waveform",
             Self::ToolSelect => "Select Tool",
             Self::ToolWire => "Wire Tool",

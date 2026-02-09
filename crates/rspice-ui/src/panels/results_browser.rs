@@ -346,7 +346,7 @@ fn analysis_type_icon(analysis_type: AnalysisType) -> &'static str {
 /// Map analysis type to appropriate bottom panel tab
 fn analysis_type_to_tab(analysis_type: AnalysisType) -> BottomPanelTab {
     match analysis_type {
-        AnalysisType::DcOp => BottomPanelTab::Console,
+        AnalysisType::DcOp => BottomPanelTab::Log,
         AnalysisType::DcSweep => BottomPanelTab::Waveform,
         AnalysisType::Ac => BottomPanelTab::Waveform, // AC uses waveform viewer for now
         AnalysisType::Transient => BottomPanelTab::Waveform,
@@ -451,5 +451,13 @@ mod tests {
             // Just verify it doesn't panic
             let _ = analysis_type_to_tab(t);
         }
+    }
+
+    #[test]
+    fn test_analysis_type_to_tab_routes_dcop_to_log() {
+        assert_eq!(
+            analysis_type_to_tab(AnalysisType::DcOp),
+            BottomPanelTab::Log
+        );
     }
 }

@@ -221,22 +221,22 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
                 ui.close_menu();
             }
 
-            let console_label = if state.panels.bottom_panel
-                && state.panels.active_bottom_tab == crate::common::app::BottomPanelTab::Console
+            let log_label = if state.panels.bottom_panel
+                && state.panels.active_bottom_tab == crate::common::app::BottomPanelTab::Log
             {
-                "✓ Console"
+                "[x] Log"
             } else {
-                "  Console"
+                "[ ] Log"
             };
-            if ui.button(console_label).clicked() {
-                // Toggle: if already on Console tab, hide panel; otherwise show and switch to it
+            if ui.button(log_label).clicked() {
+                // Toggle: if already on Log tab, hide panel; otherwise show and switch to it
                 if state.panels.bottom_panel
-                    && state.panels.active_bottom_tab == crate::common::app::BottomPanelTab::Console
+                    && state.panels.active_bottom_tab == crate::common::app::BottomPanelTab::Log
                 {
                     state.panels.bottom_panel = false;
                 } else {
                     state.panels.bottom_panel = true;
-                    state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Console;
+                    state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Log;
                 }
                 ui.close_menu();
             }

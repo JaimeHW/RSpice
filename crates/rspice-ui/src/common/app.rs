@@ -21,7 +21,7 @@
 //! │  ├──────────────┴────────────────────────────────────────┤ s  │
 //! │ R│               Waveform Viewer (resizable)             │    │
 //! │ A├───────────────────────────────────────────────────────┤────┤
-//! │ I│               Console (resizable)                     │    │
+//! │ I│               Log (resizable)                     │    │
 //! │ L│                                                       │    │
 //! └──┴───────────────────────────────────────────────────────┴────┘
 //! ```
@@ -56,13 +56,11 @@ use super::theme::RSpiceTheme;
 /// Active tab in the unified bottom panel
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum BottomPanelTab {
-    /// Console output and messages
+    /// Log output and history
     #[default]
-    Console,
+    Log,
     /// Waveform viewer / results
     Waveform,
-    /// Log / history
-    Log,
     /// Automation / scripting console
     Automation,
 }
@@ -71,16 +69,15 @@ impl BottomPanelTab {
     /// Display name for tab
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Console => "Console",
-            Self::Waveform => "Waveform",
             Self::Log => "Log",
+            Self::Waveform => "Waveform",
             Self::Automation => "Automation",
         }
     }
 
     /// All available tabs in display order
     pub fn all() -> &'static [BottomPanelTab] {
-        &[Self::Console, Self::Waveform, Self::Log, Self::Automation]
+        &[Self::Log, Self::Waveform, Self::Automation]
     }
 }
 
@@ -111,8 +108,8 @@ impl Default for PanelVisibility {
             project_browser: false,
             results_browser: false,
             properties: true,
-            bottom_panel: true, // Visible by default with Console tab
-            active_bottom_tab: BottomPanelTab::Console,
+            bottom_panel: true, // Visible by default with Log tab
+            active_bottom_tab: BottomPanelTab::Log,
             smith_chart: false,
             signal_browser: false,
             script_console: false,
@@ -836,7 +833,7 @@ impl RSpiceApp {
             self.toggle_panel_browser();
         }
         if ctx.input(|i| i.key_pressed(Key::Backtick) && i.modifiers.ctrl) {
-            self.toggle_panel_console_new();
+            self.toggle_panel_log_new();
         }
 
         // Help shortcuts
@@ -1205,15 +1202,15 @@ impl RSpiceApp {
         self.state.panels.project_browser = !self.state.panels.project_browser;
     }
 
-    fn toggle_panel_console(&mut self) {
-        // Show bottom panel and switch to Console tab
+    fn toggle_panel_log(&mut self) {
+        // Show bottom panel and switch to Log tab
         if self.state.panels.bottom_panel
-            && self.state.panels.active_bottom_tab == BottomPanelTab::Console
+            && self.state.panels.active_bottom_tab == BottomPanelTab::Log
         {
             self.state.panels.bottom_panel = false;
         } else {
             self.state.panels.bottom_panel = true;
-            self.state.panels.active_bottom_tab = BottomPanelTab::Console;
+            self.state.panels.active_bottom_tab = BottomPanelTab::Log;
         }
     }
 
@@ -2037,7 +2034,7 @@ impl eframe::App for RSpiceApp {
         // =====================================================================
         // Panel Layout Order:
         // 1. Icon Rail (leftmost) - first so all other content is to its right
-        // 2. Console/Waveform (bottom) - spans full width except icon rail
+        // 2. Log/Waveform (bottom) - spans full width except icon rail
         // 3. Side panels (project browser, properties)
         // 4. Central panel (schematic)
         // =====================================================================
@@ -2054,7 +2051,7 @@ impl eframe::App for RSpiceApp {
             });
 
         // =====================================================================
-        // Unified Bottom Panel (tabbed: Console, Waveform, Log)
+        // Unified Bottom Panel (tabbed: Log, Waveform, Automation)
         // =====================================================================
         if self.state.panels.bottom_panel {
             TopBottomPanel::bottom("bottom_panel")
@@ -2207,9 +2204,8 @@ impl eframe::App for RSpiceApp {
 
                     // Render active tab content
                     match self.state.panels.active_bottom_tab {
-                        BottomPanelTab::Console => self.render_console_panel(ui),
-                        BottomPanelTab::Waveform => self.render_waveform_panel(ui),
                         BottomPanelTab::Log => self.render_log_panel(ui),
+                        BottomPanelTab::Waveform => self.render_waveform_panel(ui),
                         BottomPanelTab::Automation => self.render_automation_panel(ui),
                     }
                 });
@@ -3632,16 +3628,9 @@ impl RSpiceApp {
         self.state.panels.bottom_panel = !self.state.panels.bottom_panel;
     }
 
-    /// Toggle the console panel visibility
-    pub fn toggle_panel_console_new(&mut self) {
-        // Switch to console tab if not active
-        if self.state.panels.active_bottom_tab != BottomPanelTab::Console {
-            self.state.panels.active_bottom_tab = BottomPanelTab::Console;
-            self.state.panels.bottom_panel = true;
-        } else {
-            // Toggle visibility if already active
-            self.state.panels.bottom_panel = !self.state.panels.bottom_panel;
-        }
+    /// Toggle the log panel visibility.
+    pub fn toggle_panel_log_new(&mut self) {
+        self.toggle_panel_log();
     }
 
     /// Toggle the waveform panel visibility
@@ -3811,7 +3800,7 @@ impl RSpiceApp {
             ui.add_space(ui.available_height() - 40.0);
 
             // Unified Bottom Panel Toggle
-            // Replaces separate Console and Waveform buttons for a cleaner UI
+            // Replaces separate Log and Waveform buttons for a cleaner UI
             // The active tab is managed within the panel itself
             let panel_active = self.state.panels.bottom_panel;
             if rail_icon_button(
@@ -3826,55 +3815,6 @@ impl RSpiceApp {
                 self.toggle_bottom_panel();
             }
         });
-    }
-
-    /// Render the console panel
-    fn render_console_panel(&mut self, ui: &mut Ui) {
-        // Header row with Clear button only (no close button - that's in tab bar)
-        ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), 26.0),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.add_space(8.0);
-                ui.label(
-                    egui::RichText::new("Output")
-                        .size(12.0)
-                        .color(egui::Color32::from_rgb(160, 160, 170)),
-                );
-
-                // Small "Clear" button
-                ui.add_space(6.0);
-                if ui.small_button("Clear").clicked() {
-                    self.state.console_messages.clear();
-                }
-            },
-        );
-
-        // Custom separator line with no extra spacing
-        let rect = ui.available_rect_before_wrap();
-        let y = rect.top();
-        ui.painter().hline(
-            rect.left()..=rect.right(),
-            y,
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(50, 52, 58)),
-        );
-        ui.add_space(1.0); // Just account for the line we painted
-
-        // Scrollable message area
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .stick_to_bottom(true)
-            .show(ui, |ui| {
-                ui.add_space(4.0);
-                for msg in &self.state.console_messages {
-                    let color = match msg.level {
-                        ConsoleLevel::Info => self.state.theme.text_primary,
-                        ConsoleLevel::Warning => egui::Color32::from_rgb(255, 180, 50),
-                        ConsoleLevel::Error => egui::Color32::from_rgb(255, 80, 80),
-                    };
-                    ui.colored_label(color, &msg.message);
-                }
-            });
     }
 
     /// Render the waveform panel
@@ -3913,11 +3853,15 @@ impl RSpiceApp {
     /// Render the structured log panel.
     fn render_log_panel(&mut self, ui: &mut Ui) {
         self.sync_console_messages_into_log_buffer();
-        crate::panels::render_log_panel(
+        let cleared = crate::panels::render_log_panel(
             ui,
-            &self.state.log_buffer,
+            &mut self.state.log_buffer,
             &mut self.state.log_panel_state,
         );
+        if cleared {
+            self.state.console_messages.clear();
+            self.state.log_sync_cursor = 0;
+        }
     }
 
     /// Render the automation/scripting panel
@@ -4026,7 +3970,6 @@ impl From<&PanelVisibility> for PanelVisibilitySer {
             properties: p.properties,
             bottom_panel: p.bottom_panel,
             active_bottom_tab: match p.active_bottom_tab {
-                BottomPanelTab::Console => 0,
                 BottomPanelTab::Waveform => 1,
                 BottomPanelTab::Log => 2,
                 BottomPanelTab::Automation => 3,
@@ -4046,11 +3989,11 @@ impl From<PanelVisibilitySer> for PanelVisibility {
             properties: s.properties,
             bottom_panel: s.bottom_panel,
             active_bottom_tab: match s.active_bottom_tab {
-                0 => BottomPanelTab::Console,
+                0 => BottomPanelTab::Log, // Backwards-compat: old sessions used index 0 for Console.
                 1 => BottomPanelTab::Waveform,
                 2 => BottomPanelTab::Log,
                 3 => BottomPanelTab::Automation,
-                _ => BottomPanelTab::Console,
+                _ => BottomPanelTab::Log,
             },
             smith_chart: s.smith_chart,
             signal_browser: s.signal_browser,
@@ -4116,8 +4059,8 @@ mod tests {
         );
         assert_eq!(
             state.panels.active_bottom_tab,
-            BottomPanelTab::Console,
-            "Console tab should be active by default"
+            BottomPanelTab::Log,
+            "Log tab should be active by default"
         );
     }
 
@@ -4256,6 +4199,22 @@ mod tests {
         assert!(!panels2.properties);
         assert!(panels2.bottom_panel);
         assert_eq!(panels2.active_bottom_tab, BottomPanelTab::Waveform);
+    }
+
+    #[test]
+    fn test_panel_visibility_deserialization_legacy_console_index_maps_to_log() {
+        let legacy = PanelVisibilitySer {
+            project_browser: false,
+            results_browser: false,
+            properties: true,
+            bottom_panel: true,
+            active_bottom_tab: 0,
+            smith_chart: false,
+            signal_browser: false,
+            script_console: false,
+        };
+        let panels: PanelVisibility = legacy.into();
+        assert_eq!(panels.active_bottom_tab, BottomPanelTab::Log);
     }
 
     #[test]
