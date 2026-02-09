@@ -54,7 +54,10 @@ pub use engine::{
 };
 #[cfg(feature = "veriloga")]
 pub use engine::{
-    register_precompiled_veriloga_model, register_precompiled_veriloga_model_with_dependencies,
+    VerilogACacheEntry, VerilogACachePruneReport, VerilogACacheStats, clear_veriloga_cache,
+    prune_veriloga_cache, register_precompiled_veriloga_model,
+    register_precompiled_veriloga_model_with_dependencies, veriloga_cache_entries,
+    veriloga_cache_stats,
 };
 pub use netlist::Netlist;
 pub use solver::{SimulationResult, Simulator, SparseLuSolver, StaticMatrix, TripletMatrix};

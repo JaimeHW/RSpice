@@ -34,7 +34,10 @@ mod tests;
 pub use crate::analysis::waveform::CompressionConfig;
 #[cfg(feature = "veriloga")]
 pub use builder::{
-    register_precompiled_veriloga_model, register_precompiled_veriloga_model_with_dependencies,
+    VerilogACacheEntry, VerilogACachePruneReport, VerilogACacheStats, clear_veriloga_cache,
+    prune_veriloga_cache, register_precompiled_veriloga_model,
+    register_precompiled_veriloga_model_with_dependencies, veriloga_cache_entries,
+    veriloga_cache_stats,
 };
 pub use config_resolver::{
     ConvergencePreset, SimulationConfigOverrides, resolve_simulation_config,

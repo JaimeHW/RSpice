@@ -10,12 +10,16 @@ use crate::{CircuitData, Netlist};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 #[cfg(feature = "veriloga")]
-use std::io::Read;
+use std::io::{Read, Write};
 #[cfg(feature = "veriloga")]
 use std::path::{Path, PathBuf};
+#[cfg(all(test, feature = "veriloga"))]
+use std::sync::Mutex;
 use std::sync::OnceLock;
 #[cfg(feature = "veriloga")]
 use std::sync::RwLock;
+#[cfg(feature = "veriloga")]
+use std::time::{Duration, Instant};
 
 /// Embedded transistor model library used for fallback model resolution.
 const BUILTIN_TRANSISTOR_LIB: &str = include_str!("../../../../models/spice/transistor.lib");
@@ -46,6 +50,66 @@ fn builtin_bjt_model_map() -> &'static HashMap<String, HashMap<String, f64>> {
 
 #[cfg(feature = "veriloga")]
 const VERILOGA_CACHE_RECORD_VERSION: u32 = 1;
+#[cfg(feature = "veriloga")]
+const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
+#[cfg(feature = "veriloga")]
+const VERILOGA_CACHE_LOCK_WAIT_TIMEOUT: Duration = Duration::from_secs(15);
+#[cfg(feature = "veriloga")]
+const VERILOGA_CACHE_LOCK_STALE_TIMEOUT: Duration = Duration::from_secs(180);
+#[cfg(feature = "veriloga")]
+const VERILOGA_CACHE_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(25);
+#[cfg(feature = "veriloga")]
+const VERILOGA_CACHE_DEFAULT_MAX_ENTRIES: usize = 512;
+#[cfg(feature = "veriloga")]
+const VERILOGA_CACHE_DEFAULT_MAX_BYTES: u64 = 512 * 1024 * 1024;
+#[cfg(feature = "veriloga")]
+const VERILOGA_CACHE_MAX_ENTRIES_ENV: &str = "RSPICE_VERILOGA_CACHE_MAX_ENTRIES";
+#[cfg(feature = "veriloga")]
+const VERILOGA_CACHE_MAX_BYTES_ENV: &str = "RSPICE_VERILOGA_CACHE_MAX_BYTES";
+
+/// On-disk Verilog-A cache statistics.
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerilogACacheStats {
+    /// Cache root directory.
+    pub root: PathBuf,
+    /// Number of persisted records.
+    pub entry_count: usize,
+    /// Total persisted bytes.
+    pub total_bytes: u64,
+    /// Active maximum entry budget.
+    pub max_entries: usize,
+    /// Active maximum byte budget.
+    pub max_bytes: u64,
+}
+
+/// A single Verilog-A cache entry from disk.
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerilogACacheEntry {
+    /// Serialized cache file location.
+    pub cache_path: PathBuf,
+    /// Canonical source file path.
+    pub source_path: PathBuf,
+    /// Canonical dependency list used for freshness checks.
+    pub dependencies: Vec<PathBuf>,
+    /// Serialized file size.
+    pub size_bytes: u64,
+    /// Record modification timestamp.
+    pub modified_ns: Option<u128>,
+}
+
+/// Result of a cache prune/clear operation.
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerilogACachePruneReport {
+    /// Number of removed records.
+    pub removed_entries: usize,
+    /// Total bytes reclaimed.
+    pub reclaimed_bytes: u64,
+    /// Final cache stats after pruning.
+    pub stats: VerilogACacheStats,
+}
 
 #[cfg(feature = "veriloga")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +140,19 @@ struct CachedVerilogAModel {
 fn veriloga_model_cache() -> &'static RwLock<HashMap<PathBuf, CachedVerilogAModel>> {
     static CACHE: OnceLock<RwLock<HashMap<PathBuf, CachedVerilogAModel>>> = OnceLock::new();
     CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+#[cfg(all(test, feature = "veriloga"))]
+fn veriloga_cache_test_guard() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+#[cfg(feature = "veriloga")]
+fn clear_in_memory_veriloga_cache() {
+    if let Ok(mut cache) = veriloga_model_cache().write() {
+        cache.clear();
+    }
 }
 
 #[cfg(feature = "veriloga")]
@@ -178,6 +255,38 @@ fn dependencies_are_fresh(dependencies: &[VerilogADependencyFingerprint]) -> boo
 }
 
 #[cfg(feature = "veriloga")]
+fn parse_cache_env_usize(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(default)
+}
+
+#[cfg(feature = "veriloga")]
+fn parse_cache_env_u64(name: &str, default: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(default)
+}
+
+#[cfg(feature = "veriloga")]
+fn veriloga_cache_limits() -> (usize, u64) {
+    (
+        parse_cache_env_usize(
+            VERILOGA_CACHE_MAX_ENTRIES_ENV,
+            VERILOGA_CACHE_DEFAULT_MAX_ENTRIES,
+        ),
+        parse_cache_env_u64(
+            VERILOGA_CACHE_MAX_BYTES_ENV,
+            VERILOGA_CACHE_DEFAULT_MAX_BYTES,
+        ),
+    )
+}
+
+#[cfg(feature = "veriloga")]
 fn veriloga_cache_root() -> PathBuf {
     if let Some(override_dir) = std::env::var_os("RSPICE_VERILOGA_CACHE_DIR") {
         return PathBuf::from(override_dir);
@@ -191,17 +300,200 @@ fn veriloga_cache_root() -> PathBuf {
 }
 
 #[cfg(feature = "veriloga")]
-fn cache_record_path(source_path: &Path) -> PathBuf {
+fn cache_record_path_with_root(source_path: &Path, cache_root: &Path) -> PathBuf {
     let canonical = canonicalize_for_cache(source_path);
     let mut hasher = blake3::Hasher::new();
     hasher.update(canonical.to_string_lossy().as_bytes());
     let key = hasher.finalize().to_hex().to_string();
-    veriloga_cache_root().join(format!("{key}.bin"))
+    cache_root.join(format!("{key}.bin"))
 }
 
 #[cfg(feature = "veriloga")]
-fn persist_model_to_disk(source_path: &Path, entry: &CachedVerilogAModel) -> Result<(), String> {
-    let cache_path = cache_record_path(source_path);
+#[allow(dead_code)]
+fn cache_record_path(source_path: &Path) -> PathBuf {
+    cache_record_path_with_root(source_path, &veriloga_cache_root())
+}
+
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone)]
+struct VerilogACacheFileInfo {
+    path: PathBuf,
+    size_bytes: u64,
+    modified_ns: Option<u128>,
+}
+
+#[cfg(feature = "veriloga")]
+#[derive(Debug)]
+struct VerilogACacheDiskLock {
+    lock_path: PathBuf,
+}
+
+#[cfg(feature = "veriloga")]
+impl VerilogACacheDiskLock {
+    fn acquire(root: &Path) -> Result<Self, String> {
+        std::fs::create_dir_all(root).map_err(|e| {
+            format!(
+                "failed to create cache directory '{}': {}",
+                root.display(),
+                e
+            )
+        })?;
+        let lock_path = root.join(VERILOGA_CACHE_LOCK_FILE);
+        let start = Instant::now();
+
+        loop {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&lock_path)
+            {
+                Ok(mut file) => {
+                    let timestamp_ns = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .ok()
+                        .map(|d| d.as_nanos())
+                        .unwrap_or(0);
+                    let _ = writeln!(
+                        file,
+                        "pid={} timestamp_ns={}",
+                        std::process::id(),
+                        timestamp_ns
+                    );
+                    return Ok(Self { lock_path });
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if cache_lock_is_stale(&lock_path) {
+                        let _ = std::fs::remove_file(&lock_path);
+                        continue;
+                    }
+
+                    if start.elapsed() >= VERILOGA_CACHE_LOCK_WAIT_TIMEOUT {
+                        return Err(format!(
+                            "timed out waiting for Verilog-A cache lock '{}'",
+                            lock_path.display()
+                        ));
+                    }
+
+                    std::thread::sleep(VERILOGA_CACHE_LOCK_POLL_INTERVAL);
+                }
+                Err(err) => {
+                    return Err(format!(
+                        "failed to acquire Verilog-A cache lock '{}': {}",
+                        lock_path.display(),
+                        err
+                    ));
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "veriloga")]
+impl Drop for VerilogACacheDiskLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.lock_path);
+    }
+}
+
+#[cfg(feature = "veriloga")]
+fn cache_lock_is_stale(lock_path: &Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(lock_path) else {
+        return false;
+    };
+    let Ok(modified) = metadata.modified() else {
+        return false;
+    };
+    match modified.elapsed() {
+        Ok(elapsed) => elapsed > VERILOGA_CACHE_LOCK_STALE_TIMEOUT,
+        Err(_) => false,
+    }
+}
+
+#[cfg(feature = "veriloga")]
+fn with_veriloga_cache_disk_lock<T>(
+    operation: &str,
+    f: impl FnOnce(&Path) -> Result<T, String>,
+) -> Result<T, String> {
+    let root = veriloga_cache_root();
+    let _lock =
+        VerilogACacheDiskLock::acquire(&root).map_err(|e| format!("{}: {}", operation, e))?;
+    f(&root)
+}
+
+#[cfg(feature = "veriloga")]
+fn list_cache_files(cache_root: &Path) -> Result<Vec<VerilogACacheFileInfo>, String> {
+    if !cache_root.exists() {
+        return Ok(Vec::new());
+    }
+
+    let dir_iter = std::fs::read_dir(cache_root).map_err(|e| {
+        format!(
+            "failed to list cache directory '{}': {}",
+            cache_root.display(),
+            e
+        )
+    })?;
+    let mut files = Vec::new();
+    for entry in dir_iter {
+        let entry = entry.map_err(|e| format!("failed to read cache directory entry: {}", e))?;
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("bin") {
+            continue;
+        }
+        let metadata = entry.metadata().map_err(|e| {
+            format!(
+                "failed to read cache file metadata '{}': {}",
+                path.display(),
+                e
+            )
+        })?;
+        if !metadata.is_file() {
+            continue;
+        }
+        files.push(VerilogACacheFileInfo {
+            path,
+            size_bytes: metadata.len(),
+            modified_ns: metadata_modified_ns(&metadata),
+        });
+    }
+    Ok(files)
+}
+
+#[cfg(feature = "veriloga")]
+fn cache_stats_from_files(
+    cache_root: &Path,
+    files: &[VerilogACacheFileInfo],
+) -> VerilogACacheStats {
+    let (max_entries, max_bytes) = veriloga_cache_limits();
+    VerilogACacheStats {
+        root: cache_root.to_path_buf(),
+        entry_count: files.len(),
+        total_bytes: files.iter().map(|f| f.size_bytes).sum(),
+        max_entries,
+        max_bytes,
+    }
+}
+
+#[cfg(feature = "veriloga")]
+fn read_cache_record(path: &Path) -> Result<VerilogADiskCacheRecord, String> {
+    let bytes = std::fs::read(path)
+        .map_err(|e| format!("failed to read cache record '{}': {}", path.display(), e))?;
+    bincode::deserialize::<VerilogADiskCacheRecord>(&bytes).map_err(|e| {
+        format!(
+            "failed to deserialize cache record '{}': {}",
+            path.display(),
+            e
+        )
+    })
+}
+
+#[cfg(feature = "veriloga")]
+fn persist_model_to_disk_locked(
+    source_path: &Path,
+    entry: &CachedVerilogAModel,
+    cache_root: &Path,
+) -> Result<(), String> {
+    let cache_path = cache_record_path_with_root(source_path, cache_root);
     if let Some(parent) = cache_path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("failed to create cache directory: {}", e))?;
@@ -216,37 +508,254 @@ fn persist_model_to_disk(source_path: &Path, entry: &CachedVerilogAModel) -> Res
     let encoded = bincode::serialize(&record)
         .map_err(|e| format!("failed to serialize Verilog-A cache record: {}", e))?;
 
-    let tmp_path = cache_path.with_extension("tmp");
+    let tmp_path = cache_path.with_extension(format!("tmp.{}", std::process::id()));
     std::fs::write(&tmp_path, encoded)
         .map_err(|e| format!("failed to write Verilog-A cache record: {}", e))?;
-    std::fs::rename(&tmp_path, &cache_path)
-        .map_err(|e| format!("failed to finalize Verilog-A cache record: {}", e))?;
+
+    if let Err(rename_err) = std::fs::rename(&tmp_path, &cache_path) {
+        // std::fs::rename does not replace existing files on Windows.
+        if cache_path.exists() {
+            std::fs::remove_file(&cache_path).map_err(|e| {
+                let _ = std::fs::remove_file(&tmp_path);
+                format!(
+                    "failed to replace existing Verilog-A cache record '{}': {} (rename error: {})",
+                    cache_path.display(),
+                    e,
+                    rename_err
+                )
+            })?;
+            std::fs::rename(&tmp_path, &cache_path).map_err(|e| {
+                let _ = std::fs::remove_file(&tmp_path);
+                format!(
+                    "failed to finalize Verilog-A cache record '{}' after replacement: {}",
+                    cache_path.display(),
+                    e
+                )
+            })?;
+        } else {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(format!(
+                "failed to finalize Verilog-A cache record '{}': {}",
+                cache_path.display(),
+                rename_err
+            ));
+        }
+    }
 
     Ok(())
 }
 
 #[cfg(feature = "veriloga")]
-fn load_model_from_disk(source_path: &Path) -> Option<CachedVerilogAModel> {
-    let cache_path = cache_record_path(source_path);
-    let bytes = std::fs::read(cache_path).ok()?;
-    let record: VerilogADiskCacheRecord = bincode::deserialize(&bytes).ok()?;
+fn remove_cache_file(path: &Path) {
+    if let Err(err) = std::fs::remove_file(path) {
+        if err.kind() != std::io::ErrorKind::NotFound {
+            log::warn!(
+                "failed to remove stale/corrupt Verilog-A cache file '{}': {}",
+                path.display(),
+                err
+            );
+        }
+    }
+}
+
+#[cfg(feature = "veriloga")]
+fn prune_veriloga_cache_locked(cache_root: &Path) -> Result<VerilogACachePruneReport, String> {
+    let (max_entries, max_bytes) = veriloga_cache_limits();
+    let mut files = list_cache_files(cache_root)?;
+    files.sort_by(|a, b| {
+        let left = a.modified_ns.unwrap_or(0);
+        let right = b.modified_ns.unwrap_or(0);
+        left.cmp(&right).then_with(|| a.path.cmp(&b.path))
+    });
+
+    let mut entry_count = files.len();
+    let mut total_bytes: u64 = files.iter().map(|f| f.size_bytes).sum();
+    let mut removed_entries = 0_usize;
+    let mut reclaimed_bytes = 0_u64;
+
+    for file in files {
+        if entry_count <= max_entries && total_bytes <= max_bytes {
+            break;
+        }
+
+        match std::fs::remove_file(&file.path) {
+            Ok(()) => {
+                entry_count = entry_count.saturating_sub(1);
+                total_bytes = total_bytes.saturating_sub(file.size_bytes);
+                removed_entries += 1;
+                reclaimed_bytes = reclaimed_bytes.saturating_add(file.size_bytes);
+            }
+            Err(err) => {
+                log::warn!(
+                    "failed to evict Verilog-A cache record '{}': {}",
+                    file.path.display(),
+                    err
+                );
+            }
+        }
+    }
+
+    let stats = VerilogACacheStats {
+        root: cache_root.to_path_buf(),
+        entry_count,
+        total_bytes,
+        max_entries,
+        max_bytes,
+    };
+
+    Ok(VerilogACachePruneReport {
+        removed_entries,
+        reclaimed_bytes,
+        stats,
+    })
+}
+
+#[cfg(feature = "veriloga")]
+fn persist_model_to_disk(source_path: &Path, entry: &CachedVerilogAModel) -> Result<(), String> {
+    with_veriloga_cache_disk_lock("persist Verilog-A cache record", |cache_root| {
+        persist_model_to_disk_locked(source_path, entry, cache_root)?;
+        if let Err(err) = prune_veriloga_cache_locked(cache_root) {
+            log::warn!("failed to prune Verilog-A cache after write: {}", err);
+        }
+        Ok(())
+    })
+}
+
+#[cfg(feature = "veriloga")]
+fn load_model_from_disk_locked(
+    source_path: &Path,
+    cache_root: &Path,
+) -> Result<Option<CachedVerilogAModel>, String> {
+    let cache_path = cache_record_path_with_root(source_path, cache_root);
+    let record = match read_cache_record(&cache_path) {
+        Ok(record) => record,
+        Err(err) => {
+            if cache_path.exists() {
+                log::warn!("{}", err);
+                remove_cache_file(&cache_path);
+            }
+            return Ok(None);
+        }
+    };
+
     if record.version != VERILOGA_CACHE_RECORD_VERSION {
-        return None;
+        remove_cache_file(&cache_path);
+        return Ok(None);
     }
 
     let requested_source = canonicalize_for_cache(source_path);
     let record_source = canonicalize_for_cache(&record.source_path);
     if requested_source != record_source {
-        return None;
+        remove_cache_file(&cache_path);
+        return Ok(None);
     }
 
     if !dependencies_are_fresh(&record.dependencies) {
-        return None;
+        remove_cache_file(&cache_path);
+        return Ok(None);
     }
 
-    Some(CachedVerilogAModel {
+    Ok(Some(CachedVerilogAModel {
         dependencies: record.dependencies,
         model: record.model,
+    }))
+}
+
+#[cfg(feature = "veriloga")]
+fn load_model_from_disk(source_path: &Path) -> Option<CachedVerilogAModel> {
+    match with_veriloga_cache_disk_lock("load Verilog-A cache record", |cache_root| {
+        load_model_from_disk_locked(source_path, cache_root)
+    }) {
+        Ok(model) => model,
+        Err(err) => {
+            log::warn!("{}", err);
+            None
+        }
+    }
+}
+
+/// Query on-disk Verilog-A cache statistics.
+#[cfg(feature = "veriloga")]
+pub fn veriloga_cache_stats() -> Result<VerilogACacheStats, String> {
+    with_veriloga_cache_disk_lock("inspect Verilog-A cache", |cache_root| {
+        let files = list_cache_files(cache_root)?;
+        Ok(cache_stats_from_files(cache_root, &files))
+    })
+}
+
+/// List persisted Verilog-A cache entries including dependency paths.
+#[cfg(feature = "veriloga")]
+pub fn veriloga_cache_entries() -> Result<Vec<VerilogACacheEntry>, String> {
+    with_veriloga_cache_disk_lock("list Verilog-A cache entries", |cache_root| {
+        let mut files = list_cache_files(cache_root)?;
+        files.sort_by(|a, b| a.path.cmp(&b.path));
+
+        let mut entries = Vec::with_capacity(files.len());
+        for file in files {
+            let Ok(record) = read_cache_record(&file.path) else {
+                remove_cache_file(&file.path);
+                continue;
+            };
+            if record.version != VERILOGA_CACHE_RECORD_VERSION {
+                remove_cache_file(&file.path);
+                continue;
+            }
+            entries.push(VerilogACacheEntry {
+                cache_path: file.path,
+                source_path: canonicalize_for_cache(&record.source_path),
+                dependencies: record
+                    .dependencies
+                    .into_iter()
+                    .map(|dep| dep.canonical_path)
+                    .collect(),
+                size_bytes: file.size_bytes,
+                modified_ns: file.modified_ns,
+            });
+        }
+
+        entries.sort_by(|a, b| a.source_path.cmp(&b.source_path));
+        Ok(entries)
+    })
+}
+
+/// Prune on-disk Verilog-A cache to configured limits.
+#[cfg(feature = "veriloga")]
+pub fn prune_veriloga_cache() -> Result<VerilogACachePruneReport, String> {
+    with_veriloga_cache_disk_lock("prune Verilog-A cache", |cache_root| {
+        prune_veriloga_cache_locked(cache_root)
+    })
+}
+
+/// Clear all on-disk and in-memory Verilog-A cache entries.
+#[cfg(feature = "veriloga")]
+pub fn clear_veriloga_cache() -> Result<VerilogACachePruneReport, String> {
+    with_veriloga_cache_disk_lock("clear Verilog-A cache", |cache_root| {
+        let files = list_cache_files(cache_root)?;
+        let mut removed_entries = 0_usize;
+        let mut reclaimed_bytes = 0_u64;
+        for file in files {
+            match std::fs::remove_file(&file.path) {
+                Ok(()) => {
+                    removed_entries += 1;
+                    reclaimed_bytes = reclaimed_bytes.saturating_add(file.size_bytes);
+                }
+                Err(err) => {
+                    log::warn!(
+                        "failed to remove Verilog-A cache entry '{}': {}",
+                        file.path.display(),
+                        err
+                    );
+                }
+            }
+        }
+        clear_in_memory_veriloga_cache();
+        let empty_files = list_cache_files(cache_root)?;
+        let stats = cache_stats_from_files(cache_root, &empty_files);
+        Ok(VerilogACachePruneReport {
+            removed_entries,
+            reclaimed_bytes,
+            stats,
+        })
     })
 }
 
@@ -255,12 +764,21 @@ fn resolve_cached_or_compile_veriloga(
     path: &Path,
 ) -> Result<rspice_veriloga::CompiledModel, SimulationError> {
     let canonical = canonicalize_for_cache(path);
+    let mut stale_in_memory = false;
 
     if let Ok(cache) = veriloga_model_cache().read() {
         if let Some(entry) = cache.get(&canonical) {
             if dependencies_are_fresh(&entry.dependencies) {
+                log::debug!("Verilog-A cache hit (memory): '{}'", canonical.display());
                 return Ok(entry.model.clone());
             }
+            stale_in_memory = true;
+        }
+    }
+
+    if stale_in_memory {
+        if let Ok(mut cache) = veriloga_model_cache().write() {
+            cache.remove(&canonical);
         }
     }
 
@@ -269,9 +787,11 @@ fn resolve_cached_or_compile_veriloga(
         if let Ok(mut cache) = veriloga_model_cache().write() {
             cache.insert(canonical.clone(), entry);
         }
+        log::debug!("Verilog-A cache hit (disk): '{}'", canonical.display());
         return Ok(model);
     }
 
+    log::info!("Verilog-A cache miss, compiling '{}'", canonical.display());
     let compiler = rspice_veriloga::VerilogACompiler::default();
     let compiled = compiler.compile_file_with_metadata(path).map_err(|e| {
         SimulationError::Netlist(format!(
@@ -1421,7 +1941,9 @@ impl Engine {
 mod veriloga_cache_tests {
     use super::*;
     use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::sync::MutexGuard;
+    use std::thread;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     fn create_temp_dir(label: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -1438,9 +1960,9 @@ mod veriloga_cache_tests {
         dir
     }
 
-    fn dummy_model() -> rspice_veriloga::CompiledModel {
+    fn dummy_model_named(name: &str) -> rspice_veriloga::CompiledModel {
         rspice_veriloga::CompiledModel {
-            name: "dummy".into(),
+            name: name.into(),
             num_terminals: 2,
             terminal_names: vec!["p".into(), "n".into()],
             parameters: vec![rspice_veriloga::codegen::CompiledParameter {
@@ -1459,61 +1981,320 @@ mod veriloga_cache_tests {
         }
     }
 
+    fn dummy_model() -> rspice_veriloga::CompiledModel {
+        dummy_model_named("dummy")
+    }
+
+    fn cache_test_lock() -> MutexGuard<'static, ()> {
+        veriloga_cache_test_guard()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn with_cache_env(label: &str, test_fn: impl FnOnce(PathBuf)) {
+        let _lock = cache_test_lock();
+        let dir = create_temp_dir(label);
+        let dir_text = dir.to_string_lossy().to_string();
+
+        // SAFETY: Tests serialize all environment access through cache_test_lock().
+        unsafe {
+            std::env::set_var("RSPICE_VERILOGA_CACHE_DIR", &dir_text);
+            std::env::remove_var(VERILOGA_CACHE_MAX_ENTRIES_ENV);
+            std::env::remove_var(VERILOGA_CACHE_MAX_BYTES_ENV);
+        }
+        clear_in_memory_veriloga_cache();
+        test_fn(dir.clone());
+        clear_in_memory_veriloga_cache();
+        // SAFETY: Tests serialize all environment access through cache_test_lock().
+        unsafe {
+            std::env::remove_var("RSPICE_VERILOGA_CACHE_DIR");
+            std::env::remove_var(VERILOGA_CACHE_MAX_ENTRIES_ENV);
+            std::env::remove_var(VERILOGA_CACHE_MAX_BYTES_ENV);
+        }
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    fn write_source(dir: &Path, name: &str, content: &str) -> PathBuf {
+        let path = dir.join(name);
+        fs::write(&path, content).expect("failed to write source file");
+        path
+    }
+
+    fn make_cache_entry(paths: &[PathBuf], model_name: &str) -> CachedVerilogAModel {
+        let dependencies = fingerprint_paths(paths).expect("expected dependency fingerprints");
+        CachedVerilogAModel {
+            dependencies,
+            model: dummy_model_named(model_name),
+        }
+    }
+
     #[test]
     fn test_dependency_fingerprint_invalidates_after_file_change() {
-        let dir = create_temp_dir("invalidates");
-        let file = dir.join("model.va");
-        fs::write(&file, "module m; endmodule\n").expect("failed to write model file");
+        with_cache_env("invalidates", |dir| {
+            let file = write_source(&dir, "model.va", "module m; endmodule\n");
+            let fingerprint =
+                dependency_fingerprint(&file).expect("initial dependency fingerprint expected");
+            assert!(dependency_matches_cached_fingerprint(&fingerprint));
 
-        let fingerprint =
-            dependency_fingerprint(&file).expect("initial dependency fingerprint expected");
-        assert!(dependency_matches_cached_fingerprint(&fingerprint));
-
-        fs::write(&file, "module m; parameter real x=1; endmodule\n")
-            .expect("failed to update model file");
-        assert!(!dependency_matches_cached_fingerprint(&fingerprint));
-
-        let _ = fs::remove_dir_all(dir);
+            fs::write(&file, "module m; parameter real x=1; endmodule\n")
+                .expect("failed to update model file");
+            assert!(!dependency_matches_cached_fingerprint(&fingerprint));
+        });
     }
 
     #[test]
     fn test_fingerprint_paths_deduplicates_same_file() {
-        let dir = create_temp_dir("dedup");
-        let file = dir.join("model.va");
-        fs::write(&file, "module m; endmodule\n").expect("failed to write model file");
+        with_cache_env("dedup", |dir| {
+            let file = write_source(&dir, "model.va", "module m; endmodule\n");
 
-        let canonical = file.canonicalize().expect("canonical path expected");
-        let fingerprints = fingerprint_paths(&[file.clone(), canonical.clone()])
-            .expect("fingerprints should succeed");
-        assert_eq!(fingerprints.len(), 1);
-        assert_eq!(fingerprints[0].canonical_path, canonical);
-
-        let _ = fs::remove_dir_all(dir);
+            let canonical = file.canonicalize().expect("canonical path expected");
+            let fingerprints = fingerprint_paths(&[file.clone(), canonical.clone()])
+                .expect("fingerprints should succeed");
+            assert_eq!(fingerprints.len(), 1);
+            assert_eq!(fingerprints[0].canonical_path, canonical);
+        });
     }
 
     #[test]
     fn test_cache_record_serialization_roundtrip() {
-        let dir = create_temp_dir("serde");
-        let file = dir.join("model.va");
-        fs::write(&file, "module m; endmodule\n").expect("failed to write model file");
-        let dep = dependency_fingerprint(&file).expect("dependency fingerprint expected");
+        with_cache_env("serde", |dir| {
+            let file = write_source(&dir, "model.va", "module m; endmodule\n");
+            let dep = dependency_fingerprint(&file).expect("dependency fingerprint expected");
 
-        let record = VerilogADiskCacheRecord {
-            version: VERILOGA_CACHE_RECORD_VERSION,
-            source_path: file.canonicalize().expect("canonical path expected"),
-            dependencies: vec![dep],
-            model: dummy_model(),
-        };
+            let record = VerilogADiskCacheRecord {
+                version: VERILOGA_CACHE_RECORD_VERSION,
+                source_path: file.canonicalize().expect("canonical path expected"),
+                dependencies: vec![dep],
+                model: dummy_model(),
+            };
 
-        let encoded =
-            bincode::serialize(&record).expect("cache record should serialize successfully");
-        let decoded: VerilogADiskCacheRecord =
-            bincode::deserialize(&encoded).expect("cache record should deserialize");
+            let encoded =
+                bincode::serialize(&record).expect("cache record should serialize successfully");
+            let decoded: VerilogADiskCacheRecord =
+                bincode::deserialize(&encoded).expect("cache record should deserialize");
 
-        assert_eq!(decoded.version, VERILOGA_CACHE_RECORD_VERSION);
-        assert_eq!(decoded.model.name.as_str(), "dummy");
-        assert_eq!(decoded.dependencies.len(), 1);
+            assert_eq!(decoded.version, VERILOGA_CACHE_RECORD_VERSION);
+            assert_eq!(decoded.model.name.as_str(), "dummy");
+            assert_eq!(decoded.dependencies.len(), 1);
+        });
+    }
 
-        let _ = fs::remove_dir_all(dir);
+    #[test]
+    fn test_persist_and_load_model_roundtrip() {
+        with_cache_env("persist_roundtrip", |dir| {
+            let source = write_source(&dir, "model.va", "module m; endmodule\n");
+            let entry = make_cache_entry(std::slice::from_ref(&source), "roundtrip");
+
+            persist_model_to_disk(&source, &entry).expect("cache persist should succeed");
+            let loaded =
+                load_model_from_disk(&source).expect("expected roundtrip cache entry to load");
+            assert_eq!(loaded.model.name.as_str(), "roundtrip");
+            assert_eq!(loaded.dependencies.len(), 1);
+        });
+    }
+
+    #[test]
+    fn test_persist_replaces_existing_cache_record() {
+        with_cache_env("replace_record", |dir| {
+            let source = write_source(&dir, "model.va", "module m; endmodule\n");
+            let first = make_cache_entry(std::slice::from_ref(&source), "v1");
+            let second = make_cache_entry(std::slice::from_ref(&source), "v2");
+
+            persist_model_to_disk(&source, &first).expect("first persist should succeed");
+            persist_model_to_disk(&source, &second).expect("second persist should overwrite");
+
+            let loaded = load_model_from_disk(&source).expect("expected overwritten cache entry");
+            assert_eq!(loaded.model.name.as_str(), "v2");
+        });
+    }
+
+    #[test]
+    fn test_load_model_from_disk_removes_corrupt_record() {
+        with_cache_env("corrupt_record", |dir| {
+            let source = write_source(&dir, "model.va", "module m; endmodule\n");
+            let cache_path = cache_record_path(&source);
+            fs::write(&cache_path, b"not-valid-bincode").expect("failed to write corrupt cache");
+
+            assert!(load_model_from_disk(&source).is_none());
+            assert!(!cache_path.exists(), "corrupt cache file should be removed");
+        });
+    }
+
+    #[test]
+    fn test_load_model_from_disk_removes_stale_dependency_record() {
+        with_cache_env("stale_dependency", |dir| {
+            let source = write_source(&dir, "model.va", "module m; endmodule\n");
+            let include = write_source(&dir, "defs.vams", "`define GAIN 1\n");
+            let entry = make_cache_entry(&[source.clone(), include.clone()], "stale");
+            persist_model_to_disk(&source, &entry).expect("persist should succeed");
+
+            fs::write(&include, "`define GAIN 2\n").expect("failed to mutate dependency");
+            let cache_path = cache_record_path(&source);
+            assert!(load_model_from_disk(&source).is_none());
+            assert!(
+                !cache_path.exists(),
+                "stale cache file should be removed after invalidation"
+            );
+        });
+    }
+
+    #[test]
+    fn test_veriloga_cache_entries_reports_dependencies() {
+        with_cache_env("list_entries", |dir| {
+            let source = write_source(&dir, "model.va", "module m; endmodule\n");
+            let include = write_source(&dir, "defs.vams", "`define X 1\n");
+            let entry = make_cache_entry(&[source.clone(), include.clone()], "entry_list");
+            persist_model_to_disk(&source, &entry).expect("persist should succeed");
+
+            let entries = veriloga_cache_entries().expect("cache entries should load");
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].source_path, canonicalize_for_cache(&source));
+            assert_eq!(entries[0].dependencies.len(), 2);
+            assert!(
+                entries[0]
+                    .dependencies
+                    .iter()
+                    .any(|p| *p == canonicalize_for_cache(&include))
+            );
+        });
+    }
+
+    #[test]
+    fn test_veriloga_cache_stats_reports_limits() {
+        with_cache_env("stats_limits", |dir| {
+            // SAFETY: Tests serialize all environment access through cache_test_lock().
+            unsafe {
+                std::env::set_var(VERILOGA_CACHE_MAX_ENTRIES_ENV, "7");
+                std::env::set_var(VERILOGA_CACHE_MAX_BYTES_ENV, "1234");
+            }
+
+            let source = write_source(&dir, "model.va", "module m; endmodule\n");
+            let entry = make_cache_entry(std::slice::from_ref(&source), "stats");
+            persist_model_to_disk(&source, &entry).expect("persist should succeed");
+
+            let stats = veriloga_cache_stats().expect("stats should succeed");
+            assert_eq!(stats.max_entries, 7);
+            assert_eq!(stats.max_bytes, 1234);
+            assert_eq!(stats.entry_count, 1);
+            assert!(stats.total_bytes > 0);
+        });
+    }
+
+    #[test]
+    fn test_prune_veriloga_cache_enforces_entry_limit() {
+        with_cache_env("prune_entries", |dir| {
+            // SAFETY: Tests serialize all environment access through cache_test_lock().
+            unsafe {
+                std::env::set_var(VERILOGA_CACHE_MAX_ENTRIES_ENV, "2");
+                std::env::set_var(VERILOGA_CACHE_MAX_BYTES_ENV, "10485760");
+            }
+
+            let source_a = write_source(&dir, "a.va", "module a; endmodule\n");
+            let source_b = write_source(&dir, "b.va", "module b; endmodule\n");
+            let source_c = write_source(&dir, "c.va", "module c; endmodule\n");
+
+            persist_model_to_disk(
+                &source_a,
+                &make_cache_entry(std::slice::from_ref(&source_a), "a"),
+            )
+            .expect("persist a");
+            thread::sleep(Duration::from_millis(10));
+            persist_model_to_disk(
+                &source_b,
+                &make_cache_entry(std::slice::from_ref(&source_b), "b"),
+            )
+            .expect("persist b");
+            thread::sleep(Duration::from_millis(10));
+            persist_model_to_disk(
+                &source_c,
+                &make_cache_entry(std::slice::from_ref(&source_c), "c"),
+            )
+            .expect("persist c");
+
+            let report = prune_veriloga_cache().expect("prune should succeed");
+            assert!(report.stats.entry_count <= 2);
+            assert!(
+                !cache_record_path(&source_a).exists(),
+                "oldest entry should be evicted first"
+            );
+        });
+    }
+
+    #[test]
+    fn test_prune_veriloga_cache_enforces_byte_limit() {
+        with_cache_env("prune_bytes", |dir| {
+            // SAFETY: Tests serialize all environment access through cache_test_lock().
+            unsafe {
+                std::env::set_var(VERILOGA_CACHE_MAX_ENTRIES_ENV, "128");
+                std::env::set_var(VERILOGA_CACHE_MAX_BYTES_ENV, "1");
+            }
+
+            let source = write_source(&dir, "model.va", "module m; endmodule\n");
+            let entry = make_cache_entry(std::slice::from_ref(&source), "bytes");
+            persist_model_to_disk(&source, &entry).expect("persist should succeed");
+
+            let report = prune_veriloga_cache().expect("prune should succeed");
+            assert_eq!(report.stats.entry_count, 0);
+            assert!(
+                !cache_record_path(&source).exists(),
+                "byte-limited cache should evict persisted record"
+            );
+        });
+    }
+
+    #[test]
+    fn test_clear_veriloga_cache_removes_disk_and_memory_entries() {
+        with_cache_env("clear_cache", |dir| {
+            let source = write_source(&dir, "model.va", "module m; endmodule\n");
+            register_precompiled_veriloga_model(&source, dummy_model_named("clear_test"))
+                .expect("registration should succeed");
+            assert!(
+                !veriloga_model_cache().read().expect("read lock").is_empty(),
+                "in-memory cache should contain entry before clear"
+            );
+
+            let report = clear_veriloga_cache().expect("clear should succeed");
+            assert_eq!(report.stats.entry_count, 0);
+            assert!(
+                veriloga_model_cache().read().expect("read lock").is_empty(),
+                "in-memory cache should be cleared"
+            );
+            assert!(report.removed_entries >= 1);
+        });
+    }
+
+    #[test]
+    fn test_cache_lock_is_released_after_operation() {
+        with_cache_env("lock_release", |dir| {
+            let source = write_source(&dir, "model.va", "module m; endmodule\n");
+            let entry = make_cache_entry(std::slice::from_ref(&source), "lock_release");
+            persist_model_to_disk(&source, &entry).expect("persist should succeed");
+
+            let lock_path = dir.join(VERILOGA_CACHE_LOCK_FILE);
+            assert!(
+                !lock_path.exists(),
+                "cache lock file should not remain after operation"
+            );
+        });
+    }
+
+    #[test]
+    fn test_cache_lock_waits_for_existing_lock() {
+        with_cache_env("lock_wait", |dir| {
+            let source = write_source(&dir, "model.va", "module m; endmodule\n");
+            let entry = make_cache_entry(std::slice::from_ref(&source), "lock_wait");
+            let lock_path = dir.join(VERILOGA_CACHE_LOCK_FILE);
+            fs::write(&lock_path, "held").expect("failed to write lock file");
+
+            let lock_path_for_thread = lock_path.clone();
+            let releaser = thread::spawn(move || {
+                thread::sleep(Duration::from_millis(80));
+                let _ = fs::remove_file(lock_path_for_thread);
+            });
+
+            persist_model_to_disk(&source, &entry).expect("persist should wait and succeed");
+            releaser.join().expect("lock release thread failed");
+            assert!(!lock_path.exists(), "lock file should be cleaned up");
+        });
     }
 }
