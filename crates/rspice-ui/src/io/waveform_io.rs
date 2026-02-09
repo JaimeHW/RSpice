@@ -9,14 +9,11 @@
 //! - CSV and TSV for import/export
 //! - PSF-Lite binary waveform format (`PSFL`) for import
 //! - PSF ASCII waveform exports (`psfascii`) for import
+//! - Cadence PSF native binary waveform databases for import
 //! - Touchstone S-parameter format (`.sNp`) for import/export
-//!
-//! # Planned Formats
-//!
-//! - Full Cadence PSF native binary database import
 
 use super::binary_io::PsfReader;
-
+use super::cadence_psf::{parse_cadence_psf_binary, ParsedCadencePsfBinary};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -330,6 +327,7 @@ impl WaveformReader {
     ///
     /// Supports both:
     /// - `PSFL` binary files emitted by rspice (`psf-lite`)
+    /// - Cadence native PSF binary files
     /// - Cadence-style PSF ASCII exports (`psfascii`) from file or directory targets
     fn read_psf(&self, path: &Path) -> Result<WaveformDataset, String> {
         if path.is_dir() {
@@ -346,16 +344,23 @@ impl WaveformReader {
         match self.read_psf_lite_file(path) {
             Ok(dataset) => return Ok(dataset),
             Err(psf_lite_err) => {
-                // Fall back to PSF ASCII text parsing for Cadence-style exports.
-                match self.read_psf_ascii_file(path) {
+                // Then try Cadence native binary PSF.
+                match self.read_cadence_psf_binary_file(path) {
                     Ok(dataset) => return Ok(dataset),
-                    Err(psf_ascii_err) => {
-                        return Err(format!(
-                            "Failed to read PSF '{}': {} ; fallback PSF ASCII parse failed: {}",
-                            path.display(),
-                            psf_lite_err,
-                            psf_ascii_err
-                        ));
+                    Err(cadence_bin_err) => {
+                        // Finally fall back to PSF ASCII text parsing.
+                        match self.read_psf_ascii_file(path) {
+                            Ok(dataset) => return Ok(dataset),
+                            Err(psf_ascii_err) => {
+                                return Err(format!(
+                                    "Failed to read PSF '{}': {}; Cadence PSF binary parse failed: {}; PSF ASCII parse failed: {}",
+                                    path.display(),
+                                    psf_lite_err,
+                                    cadence_bin_err,
+                                    psf_ascii_err
+                                ));
+                            }
+                        }
                     }
                 }
             }
@@ -400,6 +405,207 @@ impl WaveformReader {
                 .read_trace(trace_idx)
                 .map_err(|e| format!("Failed to read PSF-Lite trace {}: {}", trace_idx, e))?;
             dataset.add_signal(signal);
+        }
+
+        Ok(dataset)
+    }
+
+    fn read_cadence_psf_binary_file(&self, path: &Path) -> Result<WaveformDataset, String> {
+        let bytes = fs::read(path)
+            .map_err(|e| format!("Failed to read PSF file '{}': {}", path.display(), e))?;
+
+        let parsed = std::panic::catch_unwind(|| parse_cadence_psf_binary(&bytes));
+        let parsed = match parsed {
+            Ok(Ok(parsed)) => parsed,
+            Ok(Err(e)) => {
+                return Err(format!(
+                    "Cadence PSF binary parser error for '{}': {}",
+                    path.display(),
+                    e
+                ));
+            }
+            Err(_) => {
+                return Err(format!(
+                    "Cadence PSF binary parser panicked for '{}'",
+                    path.display()
+                ));
+            }
+        };
+
+        self.cadence_psf_binary_to_dataset(path, parsed)
+    }
+
+    fn cadence_psf_binary_to_dataset(
+        &self,
+        path: &Path,
+        parsed: ParsedCadencePsfBinary,
+    ) -> Result<WaveformDataset, String> {
+        let has_declared_sweeps = !parsed.sweeps.is_empty();
+        let mut sweep_traces: Vec<(String, Vec<f64>)> = parsed
+            .sweeps
+            .into_iter()
+            .filter_map(|sweep| (!sweep.values.is_empty()).then_some((sweep.name, sweep.values)))
+            .collect();
+        let mut real_traces: HashMap<String, Vec<f64>> = parsed
+            .real_signals
+            .into_iter()
+            .map(|signal| (signal.name, signal.values))
+            .collect();
+        let complex_traces: HashMap<String, Vec<(f64, f64)>> = parsed
+            .complex_signals
+            .into_iter()
+            .map(|signal| (signal.name, signal.values))
+            .collect();
+
+        if real_traces.is_empty() && complex_traces.is_empty() && sweep_traces.is_empty() {
+            return Err(format!(
+                "Cadence PSF binary file '{}' contained no traces",
+                path.display()
+            ));
+        }
+
+        let mut x_candidate = sweep_traces
+            .iter()
+            .position(|(name, _)| name.eq_ignore_ascii_case("time"))
+            .or_else(|| {
+                sweep_traces.iter().position(|(name, _)| {
+                    name.eq_ignore_ascii_case("freq") || name.eq_ignore_ascii_case("frequency")
+                })
+            })
+            .or_else(|| (!sweep_traces.is_empty()).then_some(0))
+            .map(|idx| sweep_traces.swap_remove(idx));
+
+        if x_candidate.is_none() {
+            let x_from_real = real_traces
+                .iter()
+                .find(|(name, values)| name.eq_ignore_ascii_case("time") && !values.is_empty())
+                .map(|(name, _)| name.clone())
+                .or_else(|| {
+                    real_traces
+                        .iter()
+                        .find(|(name, values)| {
+                            (name.eq_ignore_ascii_case("freq")
+                                || name.eq_ignore_ascii_case("frequency"))
+                                && !values.is_empty()
+                        })
+                        .map(|(name, _)| name.clone())
+                });
+            if let Some(name) = x_from_real {
+                if let Some(values) = real_traces.remove(&name) {
+                    x_candidate = Some((name, values));
+                }
+            }
+        }
+
+        let (x_name, x_values) = if let Some((name, values)) = x_candidate {
+            (name, values)
+        } else {
+            let max_len = real_traces
+                .values()
+                .map(Vec::len)
+                .chain(complex_traces.values().map(Vec::len))
+                .max()
+                .unwrap_or(0);
+            if max_len == 0 {
+                return Err(format!(
+                    "Cadence PSF binary file '{}' has no usable sample vectors",
+                    path.display()
+                ));
+            }
+            (
+                "index".to_string(),
+                (0..max_len).map(|i| i as f64).collect(),
+            )
+        };
+
+        let x_len = x_values.len();
+        if x_len == 0 {
+            return Err(format!(
+                "Cadence PSF binary file '{}' has empty independent variable '{}'",
+                path.display(),
+                x_name
+            ));
+        }
+
+        let mut dataset =
+            WaveformDataset::new(path.file_stem().and_then(|s| s.to_str()).unwrap_or("psf"));
+        dataset.analysis = if x_name.eq_ignore_ascii_case("time") {
+            "Transient".to_string()
+        } else if x_name.eq_ignore_ascii_case("freq") || x_name.eq_ignore_ascii_case("frequency") {
+            "AC".to_string()
+        } else if !has_declared_sweeps && x_name == "index" && x_len <= 1 {
+            "DC OP".to_string()
+        } else if has_declared_sweeps {
+            "DC Sweep".to_string()
+        } else {
+            "PSF-Binary".to_string()
+        };
+        dataset
+            .metadata
+            .insert("format".to_string(), "psf-binary-cadence".to_string());
+        dataset
+            .metadata
+            .insert("source_path".to_string(), path.display().to_string());
+
+        let x_signal_type = if x_name.eq_ignore_ascii_case("time") {
+            SignalType::Time
+        } else if x_name.eq_ignore_ascii_case("freq") || x_name.eq_ignore_ascii_case("frequency") {
+            SignalType::Frequency
+        } else {
+            SignalType::Unknown
+        };
+        let mut x_signal = WaveformSignal::new(x_name.clone(), x_signal_type);
+        x_signal.data = x_values;
+        dataset.set_x(x_signal);
+
+        let mut real_names: Vec<_> = real_traces.keys().cloned().collect();
+        real_names.sort();
+        for signal_name in real_names {
+            if signal_name == x_name {
+                continue;
+            }
+            let Some(values) = real_traces.get(&signal_name) else {
+                continue;
+            };
+            if values.len() != x_len {
+                continue;
+            }
+            let mut signal =
+                WaveformSignal::new(signal_name.clone(), Self::infer_signal_type(&signal_name));
+            signal.data = values.clone();
+            dataset.add_signal(signal);
+        }
+
+        let mut complex_names: Vec<_> = complex_traces.keys().cloned().collect();
+        complex_names.sort();
+        for signal_name in complex_names {
+            let Some(values) = complex_traces.get(&signal_name) else {
+                continue;
+            };
+            if values.len() != x_len {
+                continue;
+            }
+
+            let mut real = WaveformSignal::new(
+                format!("{}_RE", signal_name),
+                Self::infer_complex_signal_type(&signal_name, false),
+            );
+            let mut imag = WaveformSignal::new(
+                format!("{}_IM", signal_name),
+                Self::infer_complex_signal_type(&signal_name, true),
+            );
+            real.data = values.iter().map(|(re, _)| *re).collect();
+            imag.data = values.iter().map(|(_, im)| *im).collect();
+            dataset.add_signal(real);
+            dataset.add_signal(imag);
+        }
+
+        if dataset.signals.is_empty() {
+            return Err(format!(
+                "Cadence PSF binary file '{}' had no traces aligned to '{}'",
+                path.display(),
+                x_name
+            ));
         }
 
         Ok(dataset)
@@ -466,12 +672,21 @@ impl WaveformReader {
 
         let mut errors = Vec::new();
         for candidate in candidates {
-            if let Ok(dataset) = self.read_psf_ascii_file(&candidate) {
-                return Ok(dataset);
-            }
             match self.read_psf_lite_file(&candidate) {
                 Ok(dataset) => return Ok(dataset),
-                Err(err) => errors.push(format!("{}: {}", candidate.display(), err)),
+                Err(psf_lite_err) => match self.read_cadence_psf_binary_file(&candidate) {
+                    Ok(dataset) => return Ok(dataset),
+                    Err(cadence_bin_err) => match self.read_psf_ascii_file(&candidate) {
+                        Ok(dataset) => return Ok(dataset),
+                        Err(psf_ascii_err) => errors.push(format!(
+                            "{}: {}; {}; {}",
+                            candidate.display(),
+                            psf_lite_err,
+                            cadence_bin_err,
+                            psf_ascii_err
+                        )),
+                    },
+                },
             }
         }
 
@@ -688,6 +903,40 @@ impl WaveformReader {
                     .or_default()
                     .extend_from_slice(values);
             }
+        }
+    }
+
+    fn infer_signal_type(name: &str) -> SignalType {
+        let lower = name.to_ascii_lowercase();
+        if lower.starts_with("v(") {
+            SignalType::Voltage
+        } else if lower.starts_with("i(") {
+            SignalType::Current
+        } else if lower == "time" {
+            SignalType::Time
+        } else if lower == "freq" || lower == "frequency" {
+            SignalType::Frequency
+        } else {
+            SignalType::Unknown
+        }
+    }
+
+    fn infer_complex_signal_type(name: &str, imag: bool) -> SignalType {
+        let lower = name.to_ascii_lowercase();
+        if lower.starts_with("v(") {
+            if imag {
+                SignalType::VoltageImag
+            } else {
+                SignalType::VoltageReal
+            }
+        } else if lower.starts_with("i(") {
+            if imag {
+                SignalType::CurrentImag
+            } else {
+                SignalType::CurrentReal
+            }
+        } else {
+            SignalType::Unknown
         }
     }
 
@@ -1620,6 +1869,9 @@ impl WaveformWriter {
 
 #[cfg(test)]
 mod tests {
+    use super::super::cadence_psf::test_helpers::{
+        build_non_windowed_complex_psf, build_non_windowed_real_psf,
+    };
     use super::*;
     use crate::io::binary_io::{PsfHeader, PsfWriter};
     use std::io::Write;
@@ -2176,6 +2428,70 @@ mod tests {
             2.0
         );
         assert_eq!(dataset.signals[0].data[0], 0.1);
+    }
+
+    #[test]
+    fn test_read_cadence_psf_binary_real_trace() {
+        let temp = Builder::new().suffix(".psf").tempfile().expect("temp psf");
+        std::fs::write(temp.path(), build_non_windowed_real_psf()).expect("write cadence psf");
+
+        let dataset = WaveformReader::new(WaveformFormat::Psf)
+            .read(temp.path())
+            .expect("cadence psf binary read should work");
+
+        assert_eq!(
+            dataset.metadata.get("format").map(String::as_str),
+            Some("psf-binary-cadence")
+        );
+        assert_eq!(dataset.analysis, "Transient");
+        assert_eq!(
+            dataset.x_signal.as_ref().expect("x axis exists").data,
+            vec![0.0, 1.0]
+        );
+        assert_eq!(dataset.signal_count(), 1);
+        assert_eq!(
+            dataset.get_signal("V(out)").expect("trace exists").data,
+            vec![1.0, 2.0]
+        );
+    }
+
+    #[test]
+    fn test_read_cadence_psf_binary_complex_trace() {
+        let temp = Builder::new().suffix(".psf").tempfile().expect("temp psf");
+        std::fs::write(temp.path(), build_non_windowed_complex_psf()).expect("write cadence psf");
+
+        let dataset = WaveformReader::new(WaveformFormat::Psf)
+            .read(temp.path())
+            .expect("cadence psf binary read should work");
+
+        assert_eq!(
+            dataset.metadata.get("format").map(String::as_str),
+            Some("psf-binary-cadence")
+        );
+        assert_eq!(
+            dataset
+                .x_signal
+                .as_ref()
+                .expect("x axis exists")
+                .data
+                .as_slice(),
+            &[0.0, 1.0]
+        );
+        assert_eq!(dataset.signal_count(), 2);
+        assert_eq!(
+            dataset
+                .get_signal("V(out)_RE")
+                .expect("real trace exists")
+                .data,
+            vec![1.0, 2.0]
+        );
+        assert_eq!(
+            dataset
+                .get_signal("V(out)_IM")
+                .expect("imag trace exists")
+                .data,
+            vec![0.5, -0.25]
+        );
     }
 
     #[test]

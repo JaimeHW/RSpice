@@ -11,6 +11,7 @@
 //! - `waveform_io` - Waveform file formats (PSF, NUTMEG, CSV)
 
 pub mod binary_io;
+mod cadence_psf;
 pub mod lib_parser;
 pub mod netlist_export;
 pub mod schematic_io;
