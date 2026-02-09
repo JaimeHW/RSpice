@@ -93,6 +93,18 @@ pub use semantic::SemanticAnalyzer;
 pub use source::{SourceId, SourceMap, Span};
 pub use types::{FunctionRegistry, ParameterRange, ValueType};
 
+/// Result of compiling a Verilog-A source file from disk.
+///
+/// Includes the compiled model artifact and canonical dependency paths
+/// discovered during preprocessing (`include` expansion).
+#[derive(Debug, Clone)]
+pub struct CompiledFile {
+    /// Compiled model artifact used by the simulation engine.
+    pub model: CompiledModel,
+    /// Canonical source/include dependencies captured at compile time.
+    pub dependencies: Vec<std::path::PathBuf>,
+}
+
 /// Main compiler entry point
 pub struct VerilogACompiler {
     options: CompilerOptions,
@@ -153,8 +165,11 @@ impl VerilogACompiler {
         Ok(model)
     }
 
-    /// Compile a source file from disk with preprocessing
-    pub fn compile_file(&self, path: &std::path::Path) -> CompileResult<CompiledModel> {
+    /// Compile a source file from disk with preprocessing and dependency metadata.
+    pub fn compile_file_with_metadata(
+        &self,
+        path: &std::path::Path,
+    ) -> CompileResult<CompiledFile> {
         // Create preprocessor with options
         let mut pp = Preprocessor::new();
 
@@ -173,6 +188,7 @@ impl VerilogACompiler {
         let preprocessed = pp
             .preprocess_file(path)
             .map_err(|e| CompileError::io_error(format!("Preprocessor error: {}", e)))?;
+        let dependencies = pp.take_dependencies();
 
         // DEBUG: Dump preprocessed content to file for debugging
         if std::env::var("RSPICE_DEBUG_PP").is_ok() {
@@ -185,13 +201,40 @@ impl VerilogACompiler {
         }
 
         // Compile the preprocessed source
-        self.compile(&preprocessed)
+        let model = self.compile(&preprocessed)?;
+        Ok(CompiledFile {
+            model,
+            dependencies,
+        })
+    }
+
+    /// Compile a source file from disk with preprocessing
+    pub fn compile_file(&self, path: &std::path::Path) -> CompileResult<CompiledModel> {
+        self.compile_file_with_metadata(path)
+            .map(|compiled| compiled.model)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn create_temp_dir(label: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be monotonic")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "rspice_veriloga_compiler_{}_{}_{}",
+            label,
+            std::process::id(),
+            nanos
+        ));
+        fs::create_dir_all(&dir).expect("failed to create temp directory");
+        dir
+    }
 
     #[test]
     fn test_compiler_creation() {
@@ -211,5 +254,45 @@ mod tests {
         assert!(options.enable_ams);
         assert!(options.strict_mode);
         assert_eq!(options.integration_order, IntegrationOrder::First);
+    }
+
+    #[test]
+    fn test_compile_file_with_metadata_tracks_include_dependencies() {
+        let dir = create_temp_dir("metadata");
+        let include_path = dir.join("defs.vams");
+        let source_path = dir.join("res_model.va");
+
+        fs::write(&include_path, "`define RES_VAL 1000.0\n").expect("failed to write include");
+        fs::write(
+            &source_path,
+            r#"`include "defs.vams"
+module my_res(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        I(p, n) <+ V(p, n) / `RES_VAL;
+    end
+endmodule
+"#,
+        )
+        .expect("failed to write source");
+
+        let compiler = VerilogACompiler::default();
+        let compiled = compiler
+            .compile_file_with_metadata(&source_path)
+            .expect("compile should succeed");
+
+        assert_eq!(compiled.model.name.as_str(), "my_res");
+        let canonical_source = source_path
+            .canonicalize()
+            .expect("source should canonicalize");
+        let canonical_include = include_path
+            .canonicalize()
+            .expect("include should canonicalize");
+        assert!(compiled.dependencies.contains(&canonical_source));
+        assert!(compiled.dependencies.contains(&canonical_include));
+        assert_eq!(compiled.dependencies.len(), 2);
+
+        let _ = fs::remove_dir_all(dir);
     }
 }

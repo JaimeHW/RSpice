@@ -10,7 +10,7 @@
 //!
 //! This preprocessor runs before lexing, producing a single expanded source string.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// Error type for preprocessor errors
@@ -165,6 +165,8 @@ pub struct Preprocessor {
     include_stack: HashSet<PathBuf>,
     /// Current file being processed
     current_file: Option<PathBuf>,
+    /// Canonical dependency set encountered during preprocessing.
+    dependencies: BTreeSet<PathBuf>,
 }
 
 impl Default for Preprocessor {
@@ -181,6 +183,7 @@ impl Preprocessor {
             include_paths: Vec::new(),
             include_stack: HashSet::new(),
             current_file: None,
+            dependencies: BTreeSet::new(),
         };
 
         // Add standard Verilog-AMS predefined macros
@@ -212,6 +215,11 @@ impl Preprocessor {
 
     /// Preprocess a file, returning the expanded source
     pub fn preprocess_file(&mut self, path: &Path) -> Result<String, PreprocessorError> {
+        let is_root_call = self.include_stack.is_empty();
+        if is_root_call {
+            self.dependencies.clear();
+        }
+
         let canonical = path.canonicalize().map_err(|e| {
             PreprocessorError::new(
                 format!("Cannot open file: {}", e),
@@ -219,6 +227,8 @@ impl Preprocessor {
                 0,
             )
         })?;
+
+        self.dependencies.insert(canonical.clone());
 
         // Add the file's directory to include paths
         if let Some(parent) = canonical.parent() {
@@ -237,7 +247,7 @@ impl Preprocessor {
         }
 
         self.include_stack.insert(canonical.clone());
-        self.current_file = Some(canonical.clone());
+        let prev_file = self.current_file.replace(canonical.clone());
 
         let content = std::fs::read_to_string(&canonical).map_err(|e| {
             PreprocessorError::new(
@@ -247,11 +257,23 @@ impl Preprocessor {
             )
         })?;
 
-        let result = self.preprocess_source(&content)?;
+        let result = self.preprocess_source(&content);
 
         self.include_stack.remove(&canonical);
+        self.current_file = prev_file;
 
-        Ok(result)
+        result
+    }
+
+    /// Return canonical source/include dependencies captured during the most
+    /// recent top-level `preprocess_file` call.
+    pub fn dependencies(&self) -> Vec<PathBuf> {
+        self.dependencies.iter().cloned().collect()
+    }
+
+    /// Consume and return the captured dependency list.
+    pub fn take_dependencies(&mut self) -> Vec<PathBuf> {
+        std::mem::take(&mut self.dependencies).into_iter().collect()
     }
 
     /// Preprocess source string
@@ -631,6 +653,23 @@ impl Preprocessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn create_temp_dir(label: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be monotonic")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "rspice_veriloga_pp_{}_{}_{}",
+            label,
+            std::process::id(),
+            nanos
+        ));
+        fs::create_dir_all(&dir).expect("failed to create temp directory");
+        dir
+    }
 
     #[test]
     fn test_simple_define() {
@@ -845,5 +884,98 @@ Vtm = `KboQ * T;"#;
             "Constants should be expanded through KboQ. Got: {}",
             result
         );
+    }
+
+    #[test]
+    fn test_preprocess_file_tracks_root_and_nested_include_dependencies() {
+        let dir = create_temp_dir("deps");
+        let root = dir.join("top.va");
+        let child = dir.join("child.vams");
+        let nested = dir.join("nested.vams");
+
+        fs::write(&nested, "`define SCALE 2.0\n").expect("failed to write nested include");
+        fs::write(
+            &child,
+            format!(
+                "`include \"{}\"\nI(p,n) <+ `SCALE * V(p,n);\n",
+                nested
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .expect("nested file name should be utf8")
+            ),
+        )
+        .expect("failed to write child include");
+        fs::write(
+            &root,
+            format!(
+                "`include \"{}\"\nmodule m(p,n); inout p,n; electrical p,n; analog begin\nI(p,n) <+ V(p,n);\nendmodule\n",
+                child
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .expect("child file name should be utf8")
+            ),
+        )
+        .expect("failed to write root source");
+
+        let mut pp = Preprocessor::new();
+        let expanded = pp
+            .preprocess_file(&root)
+            .expect("preprocess should succeed");
+        assert!(expanded.contains("module m"));
+        assert!(expanded.contains("I(p,n) <+ 2.0 * V(p,n);"));
+
+        let deps = pp.dependencies();
+        assert_eq!(deps.len(), 3);
+        assert!(deps.contains(&root.canonicalize().expect("canonical root")));
+        assert!(deps.contains(&child.canonicalize().expect("canonical child")));
+        assert!(deps.contains(&nested.canonicalize().expect("canonical nested")));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_preprocess_file_restores_parent_current_file_after_nested_include() {
+        let dir = create_temp_dir("current_file");
+        let subdir = dir.join("sub");
+        fs::create_dir_all(&subdir).expect("failed to create subdir");
+
+        let first = subdir.join("first.vams");
+        let second = dir.join("second.vams");
+        let root = dir.join("top.va");
+
+        fs::write(&first, "real from_first;\n").expect("failed to write first include");
+        fs::write(&second, "real from_second;\n").expect("failed to write second include");
+        fs::write(
+            &root,
+            "`include \"sub/first.vams\"\n`include \"second.vams\"\nmodule m; endmodule\n",
+        )
+        .expect("failed to write root source");
+
+        let mut pp = Preprocessor::new();
+        let expanded = pp
+            .preprocess_file(&root)
+            .expect("preprocess should succeed");
+        assert!(expanded.contains("real from_first;"));
+        assert!(expanded.contains("real from_second;"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_take_dependencies_returns_and_clears_snapshot() {
+        let dir = create_temp_dir("take_deps");
+        let root = dir.join("top.va");
+        fs::write(&root, "module m; endmodule\n").expect("failed to write root source");
+
+        let mut pp = Preprocessor::new();
+        pp.preprocess_file(&root)
+            .expect("preprocess should succeed");
+
+        let deps = pp.take_dependencies();
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0], root.canonicalize().expect("canonical root"));
+        assert!(pp.dependencies().is_empty());
+
+        let _ = fs::remove_dir_all(dir);
     }
 }

@@ -9,6 +9,7 @@ use crate::error::{CodeGenError, CodeGenErrorKind, CompileError, CompileResult};
 use crate::ir::{BranchEquation, DerivativeWrt, DeviceIR, IrExpr, IrFunction};
 use crate::laplace::{Complex, StateSpaceFilter};
 use crate::semantic::AnalyzedFile;
+use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
 /// Code generator
@@ -20,7 +21,7 @@ pub struct CodeGenerator<'a> {
 }
 
 /// Compiled device model ready for simulation
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompiledModel {
     /// Model name
     pub name: SmolStr,
@@ -53,7 +54,7 @@ pub struct CompiledModel {
 /// - Linear extrapolation beyond table bounds
 /// - Proper handling of edge cases (empty, single point, duplicate x)
 /// - Optional derivative computation for Jacobian calculation
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LookupTable {
     /// X (input) values - must be sorted in ascending order
     pub x_data: Vec<f64>,
@@ -280,7 +281,7 @@ impl LookupTable {
 }
 
 /// Compiled parameter
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompiledParameter {
     pub name: SmolStr,
     pub default: f64,
@@ -289,7 +290,7 @@ pub struct CompiledParameter {
 }
 
 /// Stamp program for a contribution
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StampProgram {
     /// Which row/col this stamps to
     pub stamp_locations: Vec<StampLocation>,
@@ -300,7 +301,7 @@ pub struct StampProgram {
 }
 
 /// Assignment program for a variable
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssignmentProgram {
     /// Index of variable being assigned
     pub var_index: usize,
@@ -309,7 +310,7 @@ pub struct AssignmentProgram {
 }
 
 /// Location to stamp in matrix
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StampLocation {
     pub row: StampIndex,
     pub col: StampIndex,
@@ -317,7 +318,7 @@ pub struct StampLocation {
 }
 
 /// Index for stamping (terminal or internal)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StampIndex {
     Terminal(usize),
     Internal(usize),
@@ -325,7 +326,7 @@ pub enum StampIndex {
 }
 
 /// Jacobian entry
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JacobianEntry {
     pub row: StampIndex,
     pub col: StampIndex,
@@ -333,13 +334,13 @@ pub struct JacobianEntry {
 }
 
 /// Bytecode program for expression evaluation
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BytecodeProgram {
     pub instructions: Vec<Instruction>,
 }
 
 /// VM Instructions
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Instruction {
     /// Push constant
     PushConst(f64),

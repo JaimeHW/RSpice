@@ -19,10 +19,11 @@
 //!
 //! where h is the timestep.
 
+use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 
 /// Complex number representation for poles and zeros
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Complex {
     pub re: f64,
     pub im: f64,
@@ -54,7 +55,7 @@ impl Complex {
 }
 
 /// State-space filter representation
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateSpaceFilter {
     /// State matrix A (n x n)
     pub a: Vec<Vec<f64>>,
@@ -474,7 +475,7 @@ impl StateSpaceFilter {
 }
 
 /// Laplace transform filter type
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum LaplaceFilter {
     /// Pole-zero form: H(s) = gain * prod(s-zeros) / prod(s-poles)
     PoleZero {
