@@ -21,7 +21,7 @@ veriloga = []
 
 [dependencies]
 # RSpice core simulation engine
-rspice-core = { path = "../rspice-core", default-features = false }
+rspice-core = { path = "../rspice-core", default-features = false, features = ["veriloga"] }
 
 # Verilog-A compiler (pure Rust, works on all platforms)
 rspice-veriloga = { path = "../rspice-veriloga" }

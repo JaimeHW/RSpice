@@ -38,6 +38,7 @@
 //! 2. Observable for efficient updates
 //! 3. Serializable for session recovery
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use egui::{
@@ -567,6 +568,68 @@ impl Default for AppState {
     }
 }
 
+const VERILOGA_LIBRARY_NAME: &str = "veriloga";
+const VERILOGA_LIBRARY_CONFIG_FILE: &str = "veriloga_library.json";
+const VERILOGA_LIBRARY_FORMAT_VERSION: u32 = 1;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PersistedVerilogALibrary {
+    version: u32,
+    library: crate::state::Library,
+}
+
+fn global_veriloga_library_path() -> PathBuf {
+    dirs::config_dir()
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("rspice")
+        .join(VERILOGA_LIBRARY_CONFIG_FILE)
+}
+
+fn load_global_veriloga_library() -> Option<crate::state::Library> {
+    let path = global_veriloga_library_path();
+    if !path.exists() {
+        return None;
+    }
+
+    let text = std::fs::read_to_string(&path).ok()?;
+    let parsed: PersistedVerilogALibrary = serde_json::from_str(&text).ok()?;
+    if parsed.version != VERILOGA_LIBRARY_FORMAT_VERSION {
+        return None;
+    }
+    Some(parsed.library)
+}
+
+fn save_global_veriloga_library(
+    library_manager: &crate::state::LibraryManager,
+) -> Result<(), String> {
+    let Some(library) = library_manager.get_library(VERILOGA_LIBRARY_NAME) else {
+        return Ok(());
+    };
+
+    let path = global_veriloga_library_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    let persisted = PersistedVerilogALibrary {
+        version: VERILOGA_LIBRARY_FORMAT_VERSION,
+        library: library.clone(),
+    };
+    let json = serde_json::to_string_pretty(&persisted).map_err(|e| e.to_string())?;
+    std::fs::write(path, json).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn restore_global_veriloga_library(library_manager: &mut crate::state::LibraryManager) {
+    let Some(mut library) = load_global_veriloga_library() else {
+        return;
+    };
+    library.name = VERILOGA_LIBRARY_NAME.to_string();
+    library.read_only = false;
+    library_manager.add_library(library);
+}
+
 /// Console message with severity level
 #[derive(Debug, Clone)]
 pub struct ConsoleMessage {
@@ -649,11 +712,14 @@ impl RSpiceApp {
         theme.apply_to_egui(&cc.egui_ctx);
 
         // Load persisted state if available
-        let state = if let Some(storage) = cc.storage {
+        let mut state = if let Some(storage) = cc.storage {
             eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default()
         } else {
             AppState::default()
         };
+
+        // Restore global user Verilog-A library (commercial-style user library).
+        restore_global_veriloga_library(&mut state.library_manager);
 
         // Load symbol library
         let symbol_library = match crate::schematic::symbols::SymbolLibrary::load_embedded() {
@@ -881,7 +947,7 @@ impl RSpiceApp {
 
     /// Internal: Actually open a schematic (after confirmation)
     fn do_file_open(&mut self) {
-        use crate::io::{SchematicIoError, load_schematic, show_open_dialog};
+        use crate::io::{load_schematic, show_open_dialog, SchematicIoError};
 
         match show_open_dialog() {
             Ok(path) => match load_schematic(&path) {
@@ -952,7 +1018,7 @@ impl RSpiceApp {
     }
 
     fn action_file_save(&mut self) {
-        use crate::io::{SchematicIoError, save_schematic, show_save_dialog};
+        use crate::io::{save_schematic, show_save_dialog, SchematicIoError};
 
         // If we have a current file path, save directly
         // Otherwise, show Save As dialog
@@ -977,7 +1043,7 @@ impl RSpiceApp {
     }
 
     fn action_file_save_as(&mut self) {
-        use crate::io::{SchematicIoError, save_schematic, show_save_dialog};
+        use crate::io::{save_schematic, show_save_dialog, SchematicIoError};
 
         // Get default filename from current file or use "untitled"
         let default_name = self
@@ -1524,7 +1590,8 @@ impl RSpiceApp {
                 // Keep preview fixed at bottom, with a dedicated reserved region.
                 let preview_height = 170.0;
                 let footer_height = 60.0;
-                let content_height = (ui.available_height() - preview_height - footer_height).max(0.0);
+                let content_height =
+                    (ui.available_height() - preview_height - footer_height).max(0.0);
                 ui.allocate_ui_with_layout(
                     egui::vec2(ui.available_width(), content_height),
                     egui::Layout::top_down(egui::Align::LEFT),
@@ -2436,7 +2503,7 @@ impl eframe::App for RSpiceApp {
         // Component Properties Dialog
 
         {
-            use crate::properties::dialog::{PropertiesDialogResult, render_properties_dialog};
+            use crate::properties::dialog::{render_properties_dialog, PropertiesDialogResult};
             let result = render_properties_dialog(ctx, &mut self.state.property_editor);
             match result {
                 PropertiesDialogResult::Apply(id, props) => {
@@ -2471,64 +2538,131 @@ impl eframe::App for RSpiceApp {
             &mut self.state.dialogs.veriloga_dialog,
         );
         if veriloga_result == crate::panels::VerilogADialogResult::AddToLibrary {
-            // Register the compiled model in the library
-            if let Some(module) = &self.state.dialogs.veriloga_dialog.compiled_module {
-                // Create or get the veriloga library
-                const VERILOGA_LIBRARY: &str = "veriloga";
+            if let Some(module) = self.state.dialogs.veriloga_dialog.compiled_module.clone() {
+                let compiled_artifact =
+                    self.state.dialogs.veriloga_dialog.compiled_artifact.clone();
+                let source_path_text = module.source_path.to_string_lossy().to_string();
+                let serialized_ports =
+                    serde_json::to_string(&module.ports).unwrap_or_else(|_| module.ports.join(","));
+
+                // Create or get the global user Verilog-A library.
                 if self
                     .state
                     .library_manager
-                    .get_library(VERILOGA_LIBRARY)
+                    .get_library(VERILOGA_LIBRARY_NAME)
                     .is_none()
                 {
-                    let mut lib = crate::state::library_browser::Library::new(VERILOGA_LIBRARY);
+                    let mut lib =
+                        crate::state::library_browser::Library::new(VERILOGA_LIBRARY_NAME);
                     lib.read_only = false;
                     self.state.library_manager.add_library(lib);
                 }
 
-                // Create a cell for the Verilog-A model
-                if let Some(lib) = self.state.library_manager.get_library_mut(VERILOGA_LIBRARY) {
-                    let mut cell = crate::state::library_browser::Cell::new(&module.name);
+                // Upsert cell/view metadata for robust placement + netlisting.
+                let mut add_ok = false;
+                if let Some(lib) = self
+                    .state
+                    .library_manager
+                    .get_library_mut(VERILOGA_LIBRARY_NAME)
+                {
+                    let mut cell = lib
+                        .get_cell(&module.name)
+                        .cloned()
+                        .unwrap_or_else(|| crate::state::library_browser::Cell::new(&module.name));
                     cell.description = format!(
                         "Verilog-A model with {} terminals: {}",
                         module.ports.len(),
                         module.ports.join(", ")
                     );
                     cell.category = "Verilog-A".to_string();
+                    cell.metadata
+                        .insert("veriloga.module".to_string(), module.name.clone());
+                    cell.metadata
+                        .insert("veriloga.source_path".to_string(), source_path_text.clone());
+                    cell.metadata
+                        .insert("veriloga.ports".to_string(), serialized_ports.clone());
 
-                    // Add a VerilogA view
-                    let mut view = crate::state::library_browser::View::new(
-                        "veriloga",
-                        crate::state::library_browser::ViewType::VerilogA,
-                    );
-                    view.file_path = Some(module.source_path.clone());
-                    cell.add_view(view);
-
-                    // Store parameters in metadata
+                    // Store parameter defaults in cell metadata for property/editor binding.
                     for param in &module.parameters {
                         cell.metadata
                             .insert(format!("param_{}", param.name), param.default_value.clone());
                     }
 
+                    let mut view = cell.get_view("veriloga").cloned().unwrap_or_else(|| {
+                        crate::state::library_browser::View::new(
+                            "veriloga",
+                            crate::state::library_browser::ViewType::VerilogA,
+                        )
+                    });
+                    view.view_type = crate::state::library_browser::ViewType::VerilogA;
+                    view.file_path = Some(module.source_path.clone());
+                    view.metadata
+                        .insert("veriloga.module".to_string(), module.name.clone());
+                    view.metadata
+                        .insert("veriloga.source_path".to_string(), source_path_text.clone());
+                    view.metadata
+                        .insert("veriloga.ports".to_string(), serialized_ports);
+                    cell.add_view(view);
+
                     lib.add_cell(cell);
+                    add_ok = true;
                 }
 
-                // Log confirmation
-                log::info!(
-                    "Registered Verilog-A model '{}' with {} terminals and {} parameters",
-                    module.name,
-                    module.ports.len(),
-                    module.parameters.len()
-                );
-
-                // Add console message
-                self.state
-                    .console_messages
-                    .push(crate::common::app::ConsoleMessage::info(format!(
-                        "Verilog-A model '{}' added to library with terminals: {}",
+                if !add_ok {
+                    self.state
+                        .console_messages
+                        .push(ConsoleMessage::error(format!(
+                            "Failed to add Verilog-A model '{}' to library '{}'",
+                            module.name, VERILOGA_LIBRARY_NAME
+                        )));
+                } else {
+                    log::info!(
+                        "Registered Verilog-A model '{}' with {} terminals and {} parameters",
                         module.name,
-                        module.ports.join(", ")
+                        module.ports.len(),
+                        module.parameters.len()
+                    );
+                    self.state
+                        .console_messages
+                        .push(ConsoleMessage::info(format!(
+                            "Verilog-A model '{}' added to library with terminals: {}",
+                            module.name,
+                            module.ports.join(", ")
+                        )));
+                }
+
+                if let Some(compiled_model) = compiled_artifact {
+                    if let Err(err) = rspice_core::register_precompiled_veriloga_model(
+                        &module.source_path,
+                        compiled_model,
+                    ) {
+                        self.state
+                            .console_messages
+                            .push(ConsoleMessage::warning(format!(
+                                "Verilog-A compile cache registration failed for '{}': {}",
+                                module.name, err
+                            )));
+                    }
+                } else {
+                    self.state.console_messages.push(ConsoleMessage::warning(format!(
+                        "No compiled Verilog-A artifact available for '{}'; simulation will recompile if needed",
+                        module.name
                     )));
+                }
+
+                if let Err(err) = save_global_veriloga_library(&self.state.library_manager) {
+                    log::warn!("Failed to persist global Verilog-A library: {}", err);
+                    self.state
+                        .console_messages
+                        .push(ConsoleMessage::warning(format!(
+                            "Failed to persist Verilog-A library: {}",
+                            err
+                        )));
+                }
+            } else {
+                self.state.console_messages.push(ConsoleMessage::warning(
+                    "No compiled Verilog-A module available to add".to_string(),
+                ));
             }
         }
 
@@ -3074,6 +3208,7 @@ impl eframe::App for RSpiceApp {
         if self.state.dialogs.new_cell_dialog {
             let mut should_close = false;
             let mut should_create = false;
+            let mut persist_global_veriloga = false;
 
             egui::Window::new("📦 Create New Cell")
                 .collapsible(false)
@@ -3231,10 +3366,23 @@ impl eframe::App for RSpiceApp {
                                 name, library
                             )));
                         should_close = true;
+                        persist_global_veriloga = library == VERILOGA_LIBRARY_NAME;
                     } else {
                         self.state.dialogs.new_cell_error =
                             Some(format!("Library '{}' not found", library));
                     }
+                }
+            }
+
+            if persist_global_veriloga {
+                if let Err(err) = save_global_veriloga_library(&self.state.library_manager) {
+                    log::warn!("Failed to persist global Verilog-A library: {}", err);
+                    self.state
+                        .console_messages
+                        .push(ConsoleMessage::warning(format!(
+                            "Failed to persist Verilog-A library: {}",
+                            err
+                        )));
                 }
             }
 
@@ -3254,6 +3402,7 @@ impl eframe::App for RSpiceApp {
         if self.state.dialogs.new_view_dialog {
             let mut should_close = false;
             let mut should_create = false;
+            let mut persist_global_veriloga = false;
 
             egui::Window::new("📐 Create New View")
                 .collapsible(false)
@@ -3374,9 +3523,22 @@ impl eframe::App for RSpiceApp {
                                         view_name, cell
                                     )));
                                 should_close = true;
+                                persist_global_veriloga = library == VERILOGA_LIBRARY_NAME;
                             }
                         }
                     }
+                }
+            }
+
+            if persist_global_veriloga {
+                if let Err(err) = save_global_veriloga_library(&self.state.library_manager) {
+                    log::warn!("Failed to persist global Verilog-A library: {}", err);
+                    self.state
+                        .console_messages
+                        .push(ConsoleMessage::warning(format!(
+                            "Failed to persist Verilog-A library: {}",
+                            err
+                        )));
                 }
             }
 
@@ -3389,27 +3551,55 @@ impl eframe::App for RSpiceApp {
 
         // Process pending cell deletion
         if let Some((lib_name, cell_name)) = self.state.pending_delete_cell.take() {
+            let mut deleted = false;
             if let Some(lib) = self.state.library_manager.get_library_mut(&lib_name) {
-                lib.remove_cell(&cell_name);
-                self.state
-                    .console_messages
-                    .push(ConsoleMessage::info(format!(
-                        "Deleted cell '{}' from library '{}'",
-                        cell_name, lib_name
-                    )));
+                deleted = lib.remove_cell(&cell_name);
+                if deleted {
+                    self.state
+                        .console_messages
+                        .push(ConsoleMessage::info(format!(
+                            "Deleted cell '{}' from library '{}'",
+                            cell_name, lib_name
+                        )));
+                }
+            }
+            if deleted && lib_name == VERILOGA_LIBRARY_NAME {
+                if let Err(err) = save_global_veriloga_library(&self.state.library_manager) {
+                    log::warn!("Failed to persist global Verilog-A library: {}", err);
+                    self.state
+                        .console_messages
+                        .push(ConsoleMessage::warning(format!(
+                            "Failed to persist Verilog-A library: {}",
+                            err
+                        )));
+                }
             }
         }
 
         // Process pending view deletion
         if let Some((lib_name, cell_name, view_name)) = self.state.pending_delete_view.take() {
+            let mut deleted = false;
             if let Some(lib) = self.state.library_manager.get_library_mut(&lib_name) {
                 if let Some(cell) = lib.get_cell_mut(&cell_name) {
-                    cell.remove_view(&view_name);
+                    deleted = cell.remove_view(&view_name);
+                    if deleted {
+                        self.state
+                            .console_messages
+                            .push(ConsoleMessage::info(format!(
+                                "Deleted view '{}' from cell '{}'",
+                                view_name, cell_name
+                            )));
+                    }
+                }
+            }
+            if deleted && lib_name == VERILOGA_LIBRARY_NAME {
+                if let Err(err) = save_global_veriloga_library(&self.state.library_manager) {
+                    log::warn!("Failed to persist global Verilog-A library: {}", err);
                     self.state
                         .console_messages
-                        .push(ConsoleMessage::info(format!(
-                            "Deleted view '{}' from cell '{}'",
-                            view_name, cell_name
+                        .push(ConsoleMessage::warning(format!(
+                            "Failed to persist Verilog-A library: {}",
+                            err
                         )));
                 }
             }
@@ -3418,6 +3608,12 @@ impl eframe::App for RSpiceApp {
 
     /// Save state on exit
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        if let Err(err) = save_global_veriloga_library(&self.state.library_manager) {
+            log::warn!(
+                "Failed to persist global Verilog-A library during app save: {}",
+                err
+            );
+        }
         eframe::set_value(storage, eframe::APP_KEY, &self.state);
     }
 }
@@ -3552,8 +3748,8 @@ fn rail_icon_button_disabled(
 impl RSpiceApp {
     /// Render the left icon rail (VSCode style)
     fn render_icon_rail(&mut self, ui: &mut Ui) {
-        use crate::schematic::toolbar::{IconType, paint_icon};
-        use egui::{Rect, Sense, pos2};
+        use crate::schematic::toolbar::{paint_icon, IconType};
+        use egui::{pos2, Rect, Sense};
 
         // Use zero item spacing for precise centering control
         ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);

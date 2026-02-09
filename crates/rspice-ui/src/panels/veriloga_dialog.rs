@@ -31,6 +31,8 @@ pub struct VerilogALoadDialogState {
     pub errors: Vec<CompileErrorDisplay>,
     /// Successfully compiled module info
     pub compiled_module: Option<CompiledModuleInfo>,
+    /// Successfully compiled model artifact for simulation cache registration
+    pub compiled_artifact: Option<rspice_veriloga::CompiledModel>,
     /// Whether to show advanced options
     pub show_advanced_options: bool,
     /// Background compilation task receiver
@@ -47,6 +49,7 @@ impl Default for VerilogALoadDialogState {
             compilation_state: CompilationState::Idle,
             errors: Vec::new(),
             compiled_module: None,
+            compiled_artifact: None,
             show_advanced_options: false,
             compile_task_receiver: None,
         }
@@ -63,6 +66,7 @@ impl Clone for VerilogALoadDialogState {
             compilation_state: self.compilation_state,
             errors: self.errors.clone(),
             compiled_module: self.compiled_module.clone(),
+            compiled_artifact: self.compiled_artifact.clone(),
             show_advanced_options: self.show_advanced_options,
             // Clone the Arc, not the receiver itself
             compile_task_receiver: self.compile_task_receiver.clone(),
@@ -81,6 +85,10 @@ impl std::fmt::Debug for VerilogALoadDialogState {
             .field(
                 "compiled_module",
                 &self.compiled_module.as_ref().map(|m| &m.name),
+            )
+            .field(
+                "compiled_artifact",
+                &self.compiled_artifact.as_ref().map(|m| &m.name),
             )
             .field("show_advanced_options", &self.show_advanced_options)
             .field(
@@ -121,6 +129,7 @@ impl VerilogALoadDialogState {
         // Clear previous results when path changes
         self.errors.clear();
         self.compiled_module = None;
+        self.compiled_artifact = None;
         self.compilation_state = CompilationState::Idle;
     }
 
@@ -405,7 +414,10 @@ impl CompileTask {
 /// Result from background compilation
 pub enum CompileTaskResult {
     /// Compilation succeeded
-    Success(CompiledModuleInfo),
+    Success {
+        module_info: CompiledModuleInfo,
+        compiled_model: rspice_veriloga::CompiledModel,
+    },
     /// Compilation failed with errors
     Failure(Vec<CompileErrorDisplay>),
 }
@@ -475,6 +487,7 @@ pub fn render_veriloga_load_dialog(
                         // Clear previous results
                         state.errors.clear();
                         state.compiled_module = None;
+                        state.compiled_artifact = None;
                         state.compilation_state = CompilationState::Idle;
                     }
 
@@ -789,7 +802,11 @@ fn start_compile(state: &mut VerilogALoadDialogState) {
     }
 
     // Check extension
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
     if ext != "va" && ext != "vams" {
         state.errors = vec![CompileErrorDisplay::error(
             "Invalid file extension. Expected .va or .vams",
@@ -826,24 +843,27 @@ fn start_compile(state: &mut VerilogALoadDialogState) {
         let task_result = match result {
             Ok(model) => {
                 log::info!("Verilog-A compilation succeeded: module '{}'", model.name);
-                CompileTaskResult::Success(CompiledModuleInfo {
-                    name: model.name.to_string(),
-                    ports: model.terminal_names.iter().map(|s| s.to_string()).collect(),
-                    parameters: model
-                        .parameters
-                        .iter()
-                        .map(|p| ParameterInfo {
-                            name: p.name.to_string(),
-                            default_value: format!("{}", p.default),
-                            min: p.min,
-                            max: p.max,
-                            description: None,
-                        })
-                        .collect(),
-                    source_path,
-                    internal_nodes: model.internal_nodes,
-                    num_variables: model.num_variables,
-                })
+                CompileTaskResult::Success {
+                    module_info: CompiledModuleInfo {
+                        name: model.name.to_string(),
+                        ports: model.terminal_names.iter().map(|s| s.to_string()).collect(),
+                        parameters: model
+                            .parameters
+                            .iter()
+                            .map(|p| ParameterInfo {
+                                name: p.name.to_string(),
+                                default_value: format!("{}", p.default),
+                                min: p.min,
+                                max: p.max,
+                                description: None,
+                            })
+                            .collect(),
+                        source_path,
+                        internal_nodes: model.internal_nodes,
+                        num_variables: model.num_variables,
+                    },
+                    compiled_model: model,
+                }
             }
             Err(e) => {
                 log::error!("Verilog-A compilation failed: {}", e);
@@ -860,6 +880,7 @@ fn start_compile(state: &mut VerilogALoadDialogState) {
     state.compilation_state = CompilationState::Compiling;
     state.errors.clear();
     state.compiled_module = None;
+    state.compiled_artifact = None;
 }
 
 /// Poll for compilation result (non-blocking)
@@ -890,12 +911,17 @@ fn poll_compile(state: &mut VerilogALoadDialogState) {
     // Now update state based on received result
     if let Some(task_result) = received {
         match task_result {
-            CompileTaskResult::Success(module_info) => {
+            CompileTaskResult::Success {
+                module_info,
+                compiled_model,
+            } => {
                 state.compiled_module = Some(module_info);
+                state.compiled_artifact = Some(compiled_model);
                 state.compilation_state = CompilationState::Success;
             }
             CompileTaskResult::Failure(errors) => {
                 state.errors = errors;
+                state.compiled_artifact = None;
                 state.compilation_state = CompilationState::Failed;
             }
         }
