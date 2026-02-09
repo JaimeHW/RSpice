@@ -14,8 +14,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc,
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use std::thread;
 use std::time::Instant;
@@ -991,10 +991,7 @@ impl RunExecutor {
                 points_per_unit,
                 sweep,
                 z0,
-                port1_pos,
-                port1_neg,
-                port2_pos,
-                port2_neg,
+                ports,
             } => {
                 let sweep = match sweep {
                     super::multi_run::FrequencySweep::Decade => {
@@ -1013,47 +1010,34 @@ impl RunExecutor {
                     points_per_unit: *points_per_unit,
                     sweep,
                     z0: *z0,
-                    ports: [
-                        simulation_runner::SParameterPort {
-                            node_pos: port1_pos.clone(),
-                            node_neg: port1_neg.clone(),
-                        },
-                        simulation_runner::SParameterPort {
-                            node_pos: port2_pos.clone(),
-                            node_neg: port2_neg.clone(),
-                        },
-                    ],
+                    ports: ports
+                        .iter()
+                        .map(|port| simulation_runner::SParameterPort {
+                            node_pos: port.node_pos.clone(),
+                            node_neg: port.node_neg.clone(),
+                        })
+                        .collect(),
                 };
                 let sp_result = simulation_runner::run_sparameter_analysis(netlist, &cfg);
                 match sp_result {
                     Ok(data) => {
-                        let freq = data.frequencies.clone();
-                        let waveforms = vec![
-                            MappedWaveform::complex_ac(
-                                "S11",
-                                freq.clone(),
-                                data.s11.iter().map(|v| v.re).collect(),
-                                data.s11.iter().map(|v| v.im).collect(),
-                            ),
-                            MappedWaveform::complex_ac(
-                                "S21",
-                                freq.clone(),
-                                data.s21.iter().map(|v| v.re).collect(),
-                                data.s21.iter().map(|v| v.im).collect(),
-                            ),
-                            MappedWaveform::complex_ac(
-                                "S12",
-                                freq.clone(),
-                                data.s12.iter().map(|v| v.re).collect(),
-                                data.s12.iter().map(|v| v.im).collect(),
-                            ),
-                            MappedWaveform::complex_ac(
-                                "S22",
-                                freq,
-                                data.s22.iter().map(|v| v.re).collect(),
-                                data.s22.iter().map(|v| v.im).collect(),
-                            ),
-                        ];
+                        let mut waveforms = Vec::with_capacity(data.num_ports * data.num_ports);
+                        for row in 0..data.num_ports {
+                            for col in 0..data.num_ports {
+                                let name = if data.num_ports <= 9 {
+                                    format!("S{}{}", row + 1, col + 1)
+                                } else {
+                                    format!("S{}_{}", row + 1, col + 1)
+                                };
+                                let trace = &data.s[row][col];
+                                waveforms.push(MappedWaveform::complex_ac(
+                                    name,
+                                    data.frequencies.clone(),
+                                    trace.iter().map(|v| v.re).collect(),
+                                    trace.iter().map(|v| v.im).collect(),
+                                ));
+                            }
+                        }
 
                         Ok(MappedResult {
                             analysis_type: MappedAnalysisType::SParameter,
@@ -1089,7 +1073,7 @@ impl RunExecutor {
                             .collect();
 
                         Ok(MappedResult {
-                            analysis_type: MappedAnalysisType::Transient,
+                            analysis_type: MappedAnalysisType::Envelope,
                             status: ResultStatus::Success,
                             waveforms,
                             ..Default::default()
@@ -1139,7 +1123,7 @@ impl RunExecutor {
                         ];
 
                         Ok(MappedResult {
-                            analysis_type: MappedAnalysisType::Ac,
+                            analysis_type: MappedAnalysisType::Fourier,
                             status: ResultStatus::Success,
                             waveforms,
                             ..Default::default()
@@ -1483,7 +1467,7 @@ impl RunExecutor {
                         }
 
                         Ok(MappedResult {
-                            analysis_type: MappedAnalysisType::Parametric,
+                            analysis_type: MappedAnalysisType::Reliability,
                             status: ResultStatus::Success,
                             waveforms,
                             measurements: vec![
@@ -1622,7 +1606,7 @@ impl RunExecutor {
                         }
 
                         Ok(MappedResult {
-                            analysis_type: MappedAnalysisType::Parametric,
+                            analysis_type: MappedAnalysisType::Optimization,
                             status: ResultStatus::Success,
                             waveforms,
                             measurements,
@@ -1678,7 +1662,7 @@ impl RunExecutor {
                         }
 
                         Ok(MappedResult {
-                            analysis_type: MappedAnalysisType::Transient,
+                            analysis_type: MappedAnalysisType::Soa,
                             status: if data.violations.is_empty() {
                                 ResultStatus::Success
                             } else {
@@ -2317,12 +2301,12 @@ impl RunExecutor {
             AnalysisRunType::MonteCarlo => MappedAnalysisType::MonteCarlo,
             AnalysisRunType::Parametric => MappedAnalysisType::Parametric,
             AnalysisRunType::Corner => MappedAnalysisType::Corner,
-            AnalysisRunType::Reliability => MappedAnalysisType::Parametric,
-            AnalysisRunType::Optimization => MappedAnalysisType::Parametric,
-            AnalysisRunType::Soa => MappedAnalysisType::Transient,
+            AnalysisRunType::Reliability => MappedAnalysisType::Reliability,
+            AnalysisRunType::Optimization => MappedAnalysisType::Optimization,
+            AnalysisRunType::Soa => MappedAnalysisType::Soa,
             AnalysisRunType::SParameter => MappedAnalysisType::SParameter,
-            AnalysisRunType::Envelope => MappedAnalysisType::Transient,
-            AnalysisRunType::Fourier => MappedAnalysisType::Ac,
+            AnalysisRunType::Envelope => MappedAnalysisType::Envelope,
+            AnalysisRunType::Fourier => MappedAnalysisType::Fourier,
         }
     }
 
@@ -2613,12 +2597,17 @@ mod tests {
             (AnalysisRunType::Pxf, MappedAnalysisType::Pxf),
             (AnalysisRunType::Pstb, MappedAnalysisType::Pstb),
             (AnalysisRunType::Stb, MappedAnalysisType::Stb),
-            (AnalysisRunType::Reliability, MappedAnalysisType::Parametric),
+            (
+                AnalysisRunType::Reliability,
+                MappedAnalysisType::Reliability,
+            ),
             (
                 AnalysisRunType::Optimization,
-                MappedAnalysisType::Parametric,
+                MappedAnalysisType::Optimization,
             ),
-            (AnalysisRunType::Soa, MappedAnalysisType::Transient),
+            (AnalysisRunType::Soa, MappedAnalysisType::Soa),
+            (AnalysisRunType::Envelope, MappedAnalysisType::Envelope),
+            (AnalysisRunType::Fourier, MappedAnalysisType::Fourier),
         ];
 
         for (run_type, expected) in mappings {
@@ -2834,10 +2823,12 @@ mod tests {
         assert_eq!(result.state.failed_runs, 3);
         assert_eq!(result.state.completed_runs, 3);
         assert_eq!(result.errors.len(), 3);
-        assert!(result
-            .errors
-            .values()
-            .all(|err| err.contains("No netlist configured for queue")));
+        assert!(
+            result
+                .errors
+                .values()
+                .all(|err| err.contains("No netlist configured for queue"))
+        );
     }
 
     #[test]
@@ -3217,19 +3208,23 @@ mod tests {
             .values()
             .next()
             .expect("expected mapped reliability result");
-        assert_eq!(mapped.analysis_type, MappedAnalysisType::Parametric);
+        assert_eq!(mapped.analysis_type, MappedAnalysisType::Reliability);
         assert!(
             !mapped.waveforms.is_empty(),
             "expected reliability waveforms"
         );
-        assert!(mapped
-            .waveforms
-            .iter()
-            .any(|wf| wf.name.starts_with("DVTH(") || wf.name.starts_with("DRDS(")));
-        assert!(mapped
-            .measurements
-            .iter()
-            .any(|m| m.name == "devices_analyzed"));
+        assert!(
+            mapped
+                .waveforms
+                .iter()
+                .any(|wf| wf.name.starts_with("DVTH(") || wf.name.starts_with("DRDS("))
+        );
+        assert!(
+            mapped
+                .measurements
+                .iter()
+                .any(|m| m.name == "devices_analyzed")
+        );
     }
 
     #[test]
@@ -3270,11 +3265,13 @@ mod tests {
             .values()
             .next()
             .expect("expected mapped optimization result");
-        assert_eq!(mapped.analysis_type, MappedAnalysisType::Parametric);
-        assert!(mapped
-            .waveforms
-            .iter()
-            .any(|wf| wf.name == "Optimization Cost"));
+        assert_eq!(mapped.analysis_type, MappedAnalysisType::Optimization);
+        assert!(
+            mapped
+                .waveforms
+                .iter()
+                .any(|wf| wf.name == "Optimization Cost")
+        );
         assert!(mapped.measurements.iter().any(|m| m.name == "best_cost"));
     }
 
@@ -3310,15 +3307,19 @@ mod tests {
             .values()
             .next()
             .expect("expected mapped SOA result");
-        assert_eq!(mapped.analysis_type, MappedAnalysisType::Transient);
-        assert!(mapped
-            .waveforms
-            .iter()
-            .any(|wf| wf.name == "SOA Violation Count"));
-        assert!(mapped
-            .measurements
-            .iter()
-            .any(|m| m.name == "num_violations"));
+        assert_eq!(mapped.analysis_type, MappedAnalysisType::Soa);
+        assert!(
+            mapped
+                .waveforms
+                .iter()
+                .any(|wf| wf.name == "SOA Violation Count")
+        );
+        assert!(
+            mapped
+                .measurements
+                .iter()
+                .any(|m| m.name == "num_violations")
+        );
     }
 
     #[test]
@@ -3502,14 +3503,18 @@ mod tests {
             .expect("expected mapped STB result");
         assert_eq!(mapped.analysis_type, MappedAnalysisType::Stb);
         assert_eq!(mapped.waveforms.len(), 2);
-        assert!(mapped
-            .waveforms
-            .iter()
-            .any(|wf| wf.name == "Loop Gain (dB)"));
-        assert!(mapped
-            .waveforms
-            .iter()
-            .any(|wf| wf.name == "Loop Phase (deg)"));
+        assert!(
+            mapped
+                .waveforms
+                .iter()
+                .any(|wf| wf.name == "Loop Gain (dB)")
+        );
+        assert!(
+            mapped
+                .waveforms
+                .iter()
+                .any(|wf| wf.name == "Loop Phase (deg)")
+        );
         assert!(mapped.measurements.iter().any(|m| m.name == "phase_margin"));
     }
 
@@ -3536,33 +3541,47 @@ mod tests {
             .expect("expected mapped PSTB result");
         assert_eq!(mapped.analysis_type, MappedAnalysisType::Pstb);
         assert_eq!(mapped.waveforms.len(), 4);
-        assert!(mapped
-            .waveforms
-            .iter()
-            .any(|wf| wf.name == "Floquet |lambda|"));
-        assert!(mapped
-            .waveforms
-            .iter()
-            .any(|wf| wf.name == "Stability Margin (dB)"));
-        assert!(mapped
-            .waveforms
-            .iter()
-            .any(|wf| wf.name == "Probe Mode Participation"));
-        assert!(mapped
-            .measurements
-            .iter()
-            .any(|m| m.name == "dominant_multiplier"));
-        assert!(mapped
-            .measurements
-            .iter()
-            .any(|m| m.name == "probe_state_index"));
-        assert!(mapped
-            .measurements
-            .iter()
-            .any(|m| m.name == "probe_state_persistence_db"));
-        assert!(mapped
-            .measurements
-            .iter()
-            .any(|m| m.name == "dominant_probe_mode_participation"));
+        assert!(
+            mapped
+                .waveforms
+                .iter()
+                .any(|wf| wf.name == "Floquet |lambda|")
+        );
+        assert!(
+            mapped
+                .waveforms
+                .iter()
+                .any(|wf| wf.name == "Stability Margin (dB)")
+        );
+        assert!(
+            mapped
+                .waveforms
+                .iter()
+                .any(|wf| wf.name == "Probe Mode Participation")
+        );
+        assert!(
+            mapped
+                .measurements
+                .iter()
+                .any(|m| m.name == "dominant_multiplier")
+        );
+        assert!(
+            mapped
+                .measurements
+                .iter()
+                .any(|m| m.name == "probe_state_index")
+        );
+        assert!(
+            mapped
+                .measurements
+                .iter()
+                .any(|m| m.name == "probe_state_persistence_db")
+        );
+        assert!(
+            mapped
+                .measurements
+                .iter()
+                .any(|m| m.name == "dominant_probe_mode_participation")
+        );
     }
 }

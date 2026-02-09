@@ -25,7 +25,7 @@ use crate::simulation::config::{
 };
 use crate::simulation::multi_run::{
     AnalysisPlan, AnalysisRunType, AnalysisSpec, FrequencySweep, OptimizationAlgorithm,
-    OptimizationGoal, OptimizationVariable,
+    OptimizationGoal, OptimizationVariable, SpPort,
 };
 use crate::simulation::runner::SpecExecutionOptions;
 use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
@@ -1282,14 +1282,14 @@ impl SimulationController {
         let sp_cfg = sp_state
             .to_config()
             .map_err(|e| format!("invalid S-parameter settings: {}", e))?;
-        if sp_cfg.ports.len() != 2 {
-            return Err(
-                "S-parameter runner currently supports exactly two ports (port1 and port2)"
-                    .to_string(),
-            );
-        }
-        let port1 = &sp_cfg.ports[0];
-        let port2 = &sp_cfg.ports[1];
+        let ports = sp_cfg
+            .ports
+            .iter()
+            .map(|port| SpPort {
+                node_pos: port.node_pos.clone(),
+                node_neg: port.node_neg.clone(),
+            })
+            .collect();
         Ok(AnalysisSpec::SParameter {
             start_freq: sp_cfg.start_freq,
             stop_freq: sp_cfg.stop_freq,
@@ -1300,10 +1300,7 @@ impl SimulationController {
                 crate::simulation::dialog::sp::SpSweepType::Linear => FrequencySweep::Linear,
             },
             z0: sp_cfg.z0,
-            port1_pos: port1.node_pos.clone(),
-            port1_neg: port1.node_neg.clone(),
-            port2_pos: port2.node_pos.clone(),
-            port2_neg: port2.node_neg.clone(),
+            ports,
         })
     }
 
@@ -1686,7 +1683,6 @@ impl SimulationController {
         }
 
         let run_id = state.simulation.active_run().map(|run| run.id).unwrap_or(0);
-        let path = Self::touchstone_export_path(state, run_id, self.current_analysis_idx);
         let dataset =
             match Self::build_touchstone_dataset(result, *z0, sp_cfg.touchstone_version as usize) {
                 Ok(dataset) => dataset,
@@ -1698,6 +1694,13 @@ impl SimulationController {
                     return;
                 }
             };
+        let num_ports = dataset
+            .metadata
+            .get("num_ports")
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(2);
+        let path =
+            Self::touchstone_export_path(state, run_id, self.current_analysis_idx, num_ports);
 
         let writer = WaveformWriter::new(WaveformFormat::Touchstone);
         match writer.write(&dataset, &path) {
@@ -1728,30 +1731,35 @@ impl SimulationController {
             return Err("frequency vector is empty".to_string());
         }
 
-        let s11 = Self::extract_complex_waveform(waveforms, "S11")?;
-        let s21 = Self::extract_complex_waveform(waveforms, "S21")?;
-        let s12 = Self::extract_complex_waveform(waveforms, "S12")?;
-        let s22 = Self::extract_complex_waveform(waveforms, "S22")?;
-
-        for (name, wf) in [("S11", s11), ("S21", s21), ("S12", s12), ("S22", s22)] {
-            let imag = wf
-                .y_imag
-                .as_ref()
-                .ok_or_else(|| format!("{} waveform is missing imaginary component", name))?;
-            if wf.y_values.len() != frequencies.len() || imag.len() != frequencies.len() {
+        let mut entries: std::collections::HashMap<
+            (usize, usize),
+            &crate::simulation::results::WaveformData,
+        > = std::collections::HashMap::new();
+        let mut max_port = 0usize;
+        for (name, waveform) in waveforms {
+            let matrix_index = Self::parse_sparameter_waveform_name(name)
+                .or_else(|| Self::parse_sparameter_waveform_name(&waveform.name));
+            let Some((row, col)) = matrix_index else {
+                continue;
+            };
+            if entries.insert((row, col), waveform).is_some() {
                 return Err(format!(
-                    "{} waveform length mismatch (freq={}, re={}, im={})",
-                    name,
-                    frequencies.len(),
-                    wf.y_values.len(),
-                    imag.len()
+                    "duplicate S-parameter waveform for S{}{}",
+                    row, col
                 ));
             }
+            max_port = max_port.max(row).max(col);
+        }
+        if max_port < 2 {
+            return Err("no complete S-parameter matrix waveforms found".to_string());
         }
 
         let mut dataset = WaveformDataset::new("S-Parameters");
         dataset.analysis = "S-Parameter".to_string();
         dataset.metadata.insert("z0".to_string(), format!("{}", z0));
+        dataset
+            .metadata
+            .insert("num_ports".to_string(), max_port.to_string());
         dataset.metadata.insert(
             "touchstone_version".to_string(),
             touchstone_version.to_string(),
@@ -1761,10 +1769,29 @@ impl SimulationController {
         x.data = frequencies.clone();
         dataset.set_x(x);
 
-        Self::push_complex_signal_pair(&mut dataset, "S11", s11)?;
-        Self::push_complex_signal_pair(&mut dataset, "S21", s21)?;
-        Self::push_complex_signal_pair(&mut dataset, "S12", s12)?;
-        Self::push_complex_signal_pair(&mut dataset, "S22", s22)?;
+        for row in 1..=max_port {
+            for col in 1..=max_port {
+                let name = Self::sparameter_name(row, col, max_port);
+                let waveform = entries
+                    .get(&(row, col))
+                    .copied()
+                    .ok_or_else(|| format!("missing {} waveform", name))?;
+                let imag = waveform
+                    .y_imag
+                    .as_ref()
+                    .ok_or_else(|| format!("{} waveform is missing imaginary component", name))?;
+                if waveform.y_values.len() != frequencies.len() || imag.len() != frequencies.len() {
+                    return Err(format!(
+                        "{} waveform length mismatch (freq={}, re={}, im={})",
+                        name,
+                        frequencies.len(),
+                        waveform.y_values.len(),
+                        imag.len()
+                    ));
+                }
+                Self::push_complex_signal_pair(&mut dataset, &name, waveform)?;
+            }
+        }
 
         Ok(dataset)
     }
@@ -1790,20 +1817,45 @@ impl SimulationController {
         Ok(())
     }
 
-    fn extract_complex_waveform<'a>(
-        waveforms: &'a std::collections::HashMap<String, crate::simulation::results::WaveformData>,
-        target: &str,
-    ) -> Result<&'a crate::simulation::results::WaveformData, String> {
-        waveforms
-            .iter()
-            .find(|(name, wf)| {
-                name.eq_ignore_ascii_case(target) || wf.name.eq_ignore_ascii_case(target)
-            })
-            .map(|(_, wf)| wf)
-            .ok_or_else(|| format!("missing {} waveform", target))
+    fn parse_sparameter_waveform_name(name: &str) -> Option<(usize, usize)> {
+        let normalized = name.trim().to_ascii_uppercase().replace(' ', "");
+        let rest = normalized.strip_prefix('S')?;
+        if let Some(inner) = rest
+            .strip_prefix('(')
+            .and_then(|value| value.strip_suffix(')'))
+        {
+            let (row, col) = inner.split_once(',')?;
+            let row = row.trim().parse::<usize>().ok()?;
+            let col = col.trim().parse::<usize>().ok()?;
+            return (row > 0 && col > 0).then_some((row, col));
+        }
+        if let Some((row, col)) = rest.split_once('_') {
+            let row = row.trim().parse::<usize>().ok()?;
+            let col = col.trim().parse::<usize>().ok()?;
+            return (row > 0 && col > 0).then_some((row, col));
+        }
+        if rest.len() == 2 && rest.chars().all(|ch| ch.is_ascii_digit()) {
+            let row = rest[0..1].parse::<usize>().ok()?;
+            let col = rest[1..2].parse::<usize>().ok()?;
+            return Some((row, col));
+        }
+        None
     }
 
-    fn touchstone_export_path(state: &AppState, run_id: u64, analysis_idx: usize) -> PathBuf {
+    fn sparameter_name(row: usize, col: usize, num_ports: usize) -> String {
+        if num_ports <= 9 {
+            format!("S{}{}", row, col)
+        } else {
+            format!("S{}_{}", row, col)
+        }
+    }
+
+    fn touchstone_export_path(
+        state: &AppState,
+        run_id: u64,
+        analysis_idx: usize,
+        num_ports: usize,
+    ) -> PathBuf {
         let source_path = state
             .schematic
             .current_file
@@ -1828,10 +1880,11 @@ impl SimulationController {
         };
 
         base_dir.join(format!(
-            "{}_run{:04}_sp{:02}.s2p",
+            "{}_run{:04}_sp{:02}.s{}p",
             stem,
             run_id,
-            analysis_idx.max(1)
+            analysis_idx.max(1),
+            num_ports.max(2)
         ))
     }
 
@@ -2036,25 +2089,25 @@ impl SimulationController {
             AnalysisRunType::Ac => AnalysisType::Ac,
             AnalysisRunType::Transient => AnalysisType::Transient,
             AnalysisRunType::Noise => AnalysisType::Noise,
-            AnalysisRunType::Tf => AnalysisType::Ac,
+            AnalysisRunType::Tf => AnalysisType::Tf,
             AnalysisRunType::Sensitivity => AnalysisType::Sensitivity,
             AnalysisRunType::PoleZero => AnalysisType::PoleZero,
             AnalysisRunType::HarmonicBalance => AnalysisType::HarmonicBalance,
             AnalysisRunType::Pss => AnalysisType::Pss,
-            AnalysisRunType::Pac => AnalysisType::Ac,
-            AnalysisRunType::Pnoise => AnalysisType::Noise,
-            AnalysisRunType::Pxf => AnalysisType::Ac,
-            AnalysisRunType::Pstb => AnalysisType::Ac,
-            AnalysisRunType::Stb => AnalysisType::Ac,
+            AnalysisRunType::Pac => AnalysisType::Pac,
+            AnalysisRunType::Pnoise => AnalysisType::Pnoise,
+            AnalysisRunType::Pxf => AnalysisType::Pxf,
+            AnalysisRunType::Pstb => AnalysisType::Pstb,
+            AnalysisRunType::Stb => AnalysisType::Stb,
             AnalysisRunType::MonteCarlo => AnalysisType::MonteCarlo,
             AnalysisRunType::Parametric => AnalysisType::Parametric,
             AnalysisRunType::Corner => AnalysisType::Corner,
-            AnalysisRunType::Reliability => AnalysisType::Parametric,
-            AnalysisRunType::Optimization => AnalysisType::Parametric,
-            AnalysisRunType::Soa => AnalysisType::Transient,
-            AnalysisRunType::SParameter => AnalysisType::Ac,
-            AnalysisRunType::Envelope => AnalysisType::Transient,
-            AnalysisRunType::Fourier => AnalysisType::Ac,
+            AnalysisRunType::Reliability => AnalysisType::Reliability,
+            AnalysisRunType::Optimization => AnalysisType::Optimization,
+            AnalysisRunType::Soa => AnalysisType::Soa,
+            AnalysisRunType::SParameter => AnalysisType::SParameter,
+            AnalysisRunType::Envelope => AnalysisType::Envelope,
+            AnalysisRunType::Fourier => AnalysisType::Fourier,
         }
     }
 
@@ -3712,20 +3765,18 @@ mod tests {
                 points_per_unit,
                 sweep,
                 z0,
-                port1_pos,
-                port1_neg,
-                port2_pos,
-                port2_neg,
+                ports,
             } => {
                 assert!((start_freq - 1e6).abs() < 1e-6);
                 assert!((stop_freq - 2e9).abs() < 1e-3);
                 assert_eq!(points_per_unit, 20);
                 assert!(matches!(sweep, FrequencySweep::Decade));
                 assert!((z0 - 75.0).abs() < 1e-9);
-                assert_eq!(port1_pos, "RF_IN");
-                assert_eq!(port1_neg, "0");
-                assert_eq!(port2_pos, "RF_OUT");
-                assert_eq!(port2_neg, "0");
+                assert_eq!(ports.len(), 2);
+                assert_eq!(ports[0].node_pos, "RF_IN");
+                assert_eq!(ports[0].node_neg, "0");
+                assert_eq!(ports[1].node_pos, "RF_OUT");
+                assert_eq!(ports[1].node_neg, "0");
             }
             other => panic!("expected S-parameter spec, got {:?}", other),
         }
@@ -4769,14 +4820,130 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_spec_to_analysis_type_preserves_advanced_categories() {
+        let controller = SimulationController::new();
+        let cases = [
+            (AnalysisSpec::Tf, crate::state::AnalysisType::Tf),
+            (AnalysisSpec::Pac, crate::state::AnalysisType::Pac),
+            (AnalysisSpec::Pnoise, crate::state::AnalysisType::Pnoise),
+            (AnalysisSpec::Pxf, crate::state::AnalysisType::Pxf),
+            (AnalysisSpec::Pstb, crate::state::AnalysisType::Pstb),
+            (
+                AnalysisSpec::Stb {
+                    probe_node: "L1".to_string(),
+                    start_freq: 1.0,
+                    stop_freq: 1e6,
+                    points_per_decade: 10,
+                },
+                crate::state::AnalysisType::Stb,
+            ),
+            (
+                AnalysisSpec::Reliability {
+                    target_years: vec![1.0, 5.0],
+                    enable_hci: true,
+                    enable_nbti: false,
+                    enable_em: false,
+                    min_stress_voltage: 0.05,
+                },
+                crate::state::AnalysisType::Reliability,
+            ),
+            (
+                AnalysisSpec::Optimization {
+                    variables: vec![OptimizationVariable {
+                        name: "X".to_string(),
+                        min: 0.0,
+                        max: 1.0,
+                        initial: 0.5,
+                    }],
+                    objective_node: "out".to_string(),
+                    objective_ref: "0".to_string(),
+                    goal: OptimizationGoal::Minimize,
+                    target: None,
+                    algorithm: OptimizationAlgorithm::PatternSearch,
+                    max_iterations: 10,
+                    cost_tolerance: 1e-6,
+                    fd_step: 1e-3,
+                    initial_step: 0.1,
+                    min_step: 1e-5,
+                },
+                crate::state::AnalysisType::Optimization,
+            ),
+            (
+                AnalysisSpec::Soa {
+                    stop_time: 1e-6,
+                    step_time: 1e-9,
+                    check_vgs_max: true,
+                    max_vgs: 1.2,
+                    check_vds_max: true,
+                    max_vds: 3.3,
+                    check_vbe_max: false,
+                    max_vbe: 0.9,
+                    check_vce_max: false,
+                    max_vce: 5.0,
+                },
+                crate::state::AnalysisType::Soa,
+            ),
+            (
+                AnalysisSpec::SParameter {
+                    start_freq: 1e6,
+                    stop_freq: 1e9,
+                    points_per_unit: 10,
+                    sweep: FrequencySweep::Decade,
+                    z0: 50.0,
+                    ports: vec![
+                        SpPort {
+                            node_pos: "in".to_string(),
+                            node_neg: "0".to_string(),
+                        },
+                        SpPort {
+                            node_pos: "out".to_string(),
+                            node_neg: "0".to_string(),
+                        },
+                    ],
+                },
+                crate::state::AnalysisType::SParameter,
+            ),
+            (
+                AnalysisSpec::Envelope {
+                    fundamental_freq: 1e9,
+                    stop_time: 1e-6,
+                    num_harmonics: 9,
+                    max_step: None,
+                },
+                crate::state::AnalysisType::Envelope,
+            ),
+            (
+                AnalysisSpec::Fourier {
+                    fundamental_freq: 1e6,
+                    num_harmonics: 11,
+                    output_node: "out".to_string(),
+                    output_ref: "0".to_string(),
+                    start_time: 0.0,
+                    stop_time: 10e-6,
+                },
+                crate::state::AnalysisType::Fourier,
+            ),
+        ];
+
+        for (spec, expected) in cases {
+            assert_eq!(
+                controller.spec_to_analysis_type(&spec),
+                expected,
+                "unexpected analysis type mapping for {:?}",
+                spec.run_type()
+            );
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Convert to Analysis Result Tests
     // -------------------------------------------------------------------------
 
     #[test]
     fn test_convert_dc_op_result() {
-        use crate::simulation::results::DcOpResult as EngineDcOpResult;
         use crate::simulation::SimulationResult;
+        use crate::simulation::results::DcOpResult as EngineDcOpResult;
 
         let controller = SimulationController::new();
         let config = AnalysisConfig::DcOp;
@@ -4808,8 +4975,8 @@ mod tests {
 
     #[test]
     fn test_convert_transient_result() {
-        use crate::simulation::results::WaveformData as EngineWaveformData;
         use crate::simulation::SimulationResult;
+        use crate::simulation::results::WaveformData as EngineWaveformData;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -4846,8 +5013,8 @@ mod tests {
 
     #[test]
     fn test_convert_ac_result() {
-        use crate::simulation::results::WaveformData as EngineWaveformData;
         use crate::simulation::SimulationResult;
+        use crate::simulation::results::WaveformData as EngineWaveformData;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -4882,8 +5049,8 @@ mod tests {
 
     #[test]
     fn test_convert_dc_sweep_result() {
-        use crate::simulation::results::WaveformData as EngineWaveformData;
         use crate::simulation::SimulationResult;
+        use crate::simulation::results::WaveformData as EngineWaveformData;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -4923,8 +5090,8 @@ mod tests {
 
     #[test]
     fn test_convert_pole_zero_result() {
-        use crate::simulation::config::{PoleZeroConfig, PzAnalysisType};
         use crate::simulation::SimulationResult;
+        use crate::simulation::config::{PoleZeroConfig, PzAnalysisType};
 
         let controller = SimulationController::new();
         let config = AnalysisConfig::PoleZero(PoleZeroConfig {
@@ -4949,8 +5116,8 @@ mod tests {
 
     #[test]
     fn test_convert_monte_carlo_result() {
-        use crate::simulation::results::MonteCarloVariableResult;
         use crate::simulation::SimulationResult;
+        use crate::simulation::results::MonteCarloVariableResult;
 
         let controller = SimulationController::new();
         let sim_result = SimulationResult::MonteCarlo {
@@ -4984,8 +5151,8 @@ mod tests {
 
     #[test]
     fn test_convert_parametric_result() {
-        use crate::simulation::results::WaveformData as EngineWaveformData;
         use crate::simulation::SimulationResult;
+        use crate::simulation::results::WaveformData as EngineWaveformData;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -5021,8 +5188,8 @@ mod tests {
 
     #[test]
     fn test_convert_corner_result() {
-        use crate::simulation::results::WaveformData as EngineWaveformData;
         use crate::simulation::SimulationResult;
+        use crate::simulation::results::WaveformData as EngineWaveformData;
         use std::collections::HashMap;
 
         let controller = SimulationController::new();
@@ -5089,8 +5256,8 @@ mod tests {
 
     #[test]
     fn test_build_touchstone_dataset_from_sparameter_ac_result() {
-        use crate::simulation::results::WaveformData as EngineWaveformData;
         use crate::simulation::SimulationResult;
+        use crate::simulation::results::WaveformData as EngineWaveformData;
         use std::collections::HashMap;
 
         let freqs = vec![1e6, 2e6];
@@ -5129,6 +5296,14 @@ mod tests {
         assert_eq!(
             dataset
                 .metadata
+                .get("num_ports")
+                .cloned()
+                .unwrap_or_default(),
+            "2"
+        );
+        assert_eq!(
+            dataset
+                .metadata
                 .get("touchstone_version")
                 .cloned()
                 .unwrap_or_default(),
@@ -5138,8 +5313,8 @@ mod tests {
 
     #[test]
     fn test_build_touchstone_dataset_requires_complex_components() {
-        use crate::simulation::results::WaveformData as EngineWaveformData;
         use crate::simulation::SimulationResult;
+        use crate::simulation::results::WaveformData as EngineWaveformData;
         use std::collections::HashMap;
 
         let freqs = vec![1e6, 2e6];
@@ -5177,14 +5352,70 @@ mod tests {
     }
 
     #[test]
+    fn test_build_touchstone_dataset_from_three_port_result() {
+        use crate::simulation::SimulationResult;
+        use crate::simulation::results::WaveformData as EngineWaveformData;
+        use std::collections::HashMap;
+
+        let freqs = vec![1e6, 2e6];
+        let mut waveforms = HashMap::new();
+        for row in 1..=3 {
+            for col in 1..=3 {
+                let name = format!("S{}_{}", row, col);
+                waveforms.insert(
+                    name.clone(),
+                    EngineWaveformData::new_complex(
+                        name.clone(),
+                        freqs.clone(),
+                        vec![0.1 * row as f64, 0.2 * col as f64],
+                        vec![0.01 * col as f64, -0.02 * row as f64],
+                    ),
+                );
+            }
+        }
+
+        let result = SimulationResult::Ac {
+            frequencies: freqs.clone(),
+            waveforms,
+        };
+        let dataset = SimulationController::build_touchstone_dataset(&result, 50.0, 2)
+            .expect("touchstone dataset should build for three ports");
+
+        assert_eq!(dataset.point_count(), 2);
+        assert_eq!(dataset.signal_count(), 18);
+        assert_eq!(
+            dataset
+                .metadata
+                .get("num_ports")
+                .cloned()
+                .unwrap_or_default(),
+            "3"
+        );
+    }
+
+    #[test]
     fn test_touchstone_export_path_uses_schematic_file_directory() {
         let mut state = AppState::default();
         state.schematic.current_file = Some(PathBuf::from("C:\\proj\\rf\\amp_top.rsch"));
 
-        let path = SimulationController::touchstone_export_path(&state, 7, 2);
+        let path = SimulationController::touchstone_export_path(&state, 7, 2, 2);
         let normalized = path.to_string_lossy().replace('\\', "/");
         assert!(
             normalized.ends_with("C:/proj/rf/amp_top_run0007_sp02.s2p"),
+            "unexpected export path: {}",
+            normalized
+        );
+    }
+
+    #[test]
+    fn test_touchstone_export_path_uses_port_count_extension() {
+        let mut state = AppState::default();
+        state.schematic.current_file = Some(PathBuf::from("C:\\proj\\rf\\amp_top.rsch"));
+
+        let path = SimulationController::touchstone_export_path(&state, 7, 2, 3);
+        let normalized = path.to_string_lossy().replace('\\', "/");
+        assert!(
+            normalized.ends_with("C:/proj/rf/amp_top_run0007_sp02.s3p"),
             "unexpected export path: {}",
             normalized
         );

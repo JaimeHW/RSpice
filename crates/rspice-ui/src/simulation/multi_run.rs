@@ -219,6 +219,15 @@ pub struct OptimizationVariable {
     pub initial: f64,
 }
 
+/// S-parameter port definition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpPort {
+    /// Positive node.
+    pub node_pos: String,
+    /// Negative/reference node.
+    pub node_neg: String,
+}
+
 /// Strongly-typed analysis request used by queue execution.
 ///
 /// This removes hidden/default execution parameters from the run executor.
@@ -347,10 +356,7 @@ pub enum AnalysisSpec {
         points_per_unit: usize,
         sweep: FrequencySweep,
         z0: f64,
-        port1_pos: String,
-        port1_neg: String,
-        port2_pos: String,
-        port2_neg: String,
+        ports: Vec<SpPort>,
     },
     /// Envelope transient analysis
     Envelope {
@@ -626,10 +632,7 @@ impl AnalysisSpec {
                 stop_freq,
                 points_per_unit,
                 z0,
-                port1_pos,
-                port1_neg,
-                port2_pos,
-                port2_neg,
+                ports,
                 ..
             } => {
                 if *start_freq <= 0.0 {
@@ -647,11 +650,22 @@ impl AnalysisSpec {
                 if *z0 <= 0.0 {
                     return Err("S-parameter z0 must be > 0".to_string());
                 }
-                if port1_pos.trim().is_empty() || port2_pos.trim().is_empty() {
-                    return Err("S-parameter port positive nodes are required".to_string());
+                if ports.len() < 2 {
+                    return Err("S-parameter requires at least two ports".to_string());
                 }
-                if port1_neg.trim().is_empty() || port2_neg.trim().is_empty() {
-                    return Err("S-parameter port negative nodes are required".to_string());
+                for (idx, port) in ports.iter().enumerate() {
+                    if port.node_pos.trim().is_empty() {
+                        return Err(format!(
+                            "S-parameter port{} positive node is required",
+                            idx + 1
+                        ));
+                    }
+                    if port.node_neg.trim().is_empty() {
+                        return Err(format!(
+                            "S-parameter port{} negative node is required",
+                            idx + 1
+                        ));
+                    }
                 }
                 Ok(())
             }
@@ -1585,6 +1599,49 @@ mod tests {
             max_vbe: 0.0,
             check_vce_max: false,
             max_vce: 0.0,
+        };
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn test_analysis_spec_sparameter_validation_supports_multiport() {
+        let valid = AnalysisSpec::SParameter {
+            start_freq: 1e3,
+            stop_freq: 1e9,
+            points_per_unit: 10,
+            sweep: FrequencySweep::Decade,
+            z0: 50.0,
+            ports: vec![
+                SpPort {
+                    node_pos: "in".to_string(),
+                    node_neg: "0".to_string(),
+                },
+                SpPort {
+                    node_pos: "out".to_string(),
+                    node_neg: "0".to_string(),
+                },
+                SpPort {
+                    node_pos: "aux".to_string(),
+                    node_neg: "0".to_string(),
+                },
+            ],
+        };
+        assert!(valid.validate().is_ok());
+        assert_eq!(valid.run_type(), AnalysisRunType::SParameter);
+    }
+
+    #[test]
+    fn test_analysis_spec_sparameter_validation_rejects_missing_ports() {
+        let invalid = AnalysisSpec::SParameter {
+            start_freq: 1e3,
+            stop_freq: 1e9,
+            points_per_unit: 10,
+            sweep: FrequencySweep::Decade,
+            z0: 50.0,
+            ports: vec![SpPort {
+                node_pos: "in".to_string(),
+                node_neg: "0".to_string(),
+            }],
         };
         assert!(invalid.validate().is_err());
     }

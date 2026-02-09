@@ -357,6 +357,43 @@ impl SpConfig {
 
 /// Dialog state with string buffers for SI-prefix input
 #[derive(Debug, Clone, Default)]
+pub struct SpPortDialogState {
+    /// Positive node name.
+    pub node_pos: String,
+    /// Differential mode flag.
+    pub differential: bool,
+    /// Negative node name for differential mode.
+    pub node_neg: String,
+}
+
+impl SpPortDialogState {
+    fn single_ended(node_pos: impl Into<String>) -> Self {
+        Self {
+            node_pos: node_pos.into(),
+            differential: false,
+            node_neg: "0".to_string(),
+        }
+    }
+
+    fn from_port_config(port: &SpPortConfig) -> Self {
+        Self {
+            node_pos: port.node_pos.clone(),
+            differential: port.is_differential(),
+            node_neg: port.node_neg.clone(),
+        }
+    }
+
+    fn to_port_config(&self, number: u32) -> SpPortConfig {
+        if self.differential {
+            SpPortConfig::differential(number, &self.node_pos, &self.node_neg)
+        } else {
+            SpPortConfig::single_ended(number, &self.node_pos)
+        }
+    }
+}
+
+/// Dialog state with string buffers for SI-prefix input
+#[derive(Debug, Clone, Default)]
 pub struct SpDialogState {
     /// Start frequency buffer
     pub start_freq: String,
@@ -368,18 +405,8 @@ pub struct SpDialogState {
     pub sweep_type_idx: usize,
     /// Reference impedance buffer
     pub z0: String,
-    /// Port 1 node buffer
-    pub port1_node: String,
-    /// Port 2 node buffer
-    pub port2_node: String,
-    /// Port 1 is differential
-    pub port1_differential: bool,
-    /// Port 1 negative node (for differential)
-    pub port1_neg: String,
-    /// Port 2 is differential
-    pub port2_differential: bool,
-    /// Port 2 negative node (for differential)
-    pub port2_neg: String,
+    /// Editable port definitions
+    pub ports: Vec<SpPortDialogState>,
     /// Enable noise analysis
     pub do_noise: bool,
     /// Enable Touchstone export
@@ -389,14 +416,37 @@ pub struct SpDialogState {
 }
 
 impl SpDialogState {
+    fn default_port_node(index: usize) -> String {
+        match index {
+            0 => "IN".to_string(),
+            1 => "OUT".to_string(),
+            _ => format!("P{}", index + 1),
+        }
+    }
+
+    fn ensure_min_ports(&mut self) {
+        while self.ports.len() < 2 {
+            let node = Self::default_port_node(self.ports.len());
+            self.ports.push(SpPortDialogState::single_ended(node));
+        }
+    }
+
     /// Initialize from config
     pub fn from_config(config: &SpConfig) -> Self {
-        let port1 = config.ports.first().cloned().unwrap_or_default();
-        let port2 = config
-            .ports
-            .get(1)
-            .cloned()
-            .unwrap_or_else(|| SpPortConfig::single_ended(2, "OUT"));
+        let mut sorted_ports = config.ports.clone();
+        sorted_ports.sort_by_key(|port| port.number);
+        let mut port_states: Vec<SpPortDialogState> = sorted_ports
+            .iter()
+            .map(SpPortDialogState::from_port_config)
+            .collect();
+        if port_states.is_empty() {
+            port_states.push(SpPortDialogState::single_ended("IN"));
+            port_states.push(SpPortDialogState::single_ended("OUT"));
+        }
+        while port_states.len() < 2 {
+            let node = Self::default_port_node(port_states.len());
+            port_states.push(SpPortDialogState::single_ended(node));
+        }
 
         Self {
             start_freq: format_freq(config.start_freq),
@@ -408,12 +458,7 @@ impl SpDialogState {
                 SpSweepType::Linear => 2,
             },
             z0: config.z0.to_string(),
-            port1_node: port1.node_pos.clone(),
-            port2_node: port2.node_pos.clone(),
-            port1_differential: port1.is_differential(),
-            port1_neg: port1.node_neg.clone(),
-            port2_differential: port2.is_differential(),
-            port2_neg: port2.node_neg.clone(),
+            ports: port_states,
             do_noise: config.do_noise,
             touchstone_export: config.touchstone_export,
             initialized: true,
@@ -438,19 +483,12 @@ impl SpDialogState {
             _ => SpSweepType::Linear,
         };
 
-        // Build port 1
-        let port1 = if self.port1_differential {
-            SpPortConfig::differential(1, &self.port1_node, &self.port1_neg)
-        } else {
-            SpPortConfig::single_ended(1, &self.port1_node)
-        };
-
-        // Build port 2
-        let port2 = if self.port2_differential {
-            SpPortConfig::differential(2, &self.port2_node, &self.port2_neg)
-        } else {
-            SpPortConfig::single_ended(2, &self.port2_node)
-        };
+        let ports = self
+            .ports
+            .iter()
+            .enumerate()
+            .map(|(idx, port)| port.to_port_config((idx + 1) as u32))
+            .collect();
 
         let config = SpConfig {
             start_freq: start,
@@ -458,7 +496,7 @@ impl SpDialogState {
             num_points: points,
             sweep_type,
             z0,
-            ports: vec![port1, port2],
+            ports,
             do_noise: self.do_noise,
             touchstone_export: self.touchstone_export,
             touchstone_version: 2,
@@ -474,6 +512,7 @@ impl SpDialogState {
         if !self.initialized {
             *self = Self::from_config(&SpConfig::default());
         }
+        self.ensure_min_ports();
     }
 
     /// Render dialog content
@@ -482,10 +521,7 @@ impl SpDialogState {
 
         ui.heading("S-Parameter Analysis");
         ui.add_space(4.0);
-        ui.label(
-            egui::RichText::new("RF/microwave network characterization (S11, S21, S12, S22)")
-                .weak(),
-        );
+        ui.label(egui::RichText::new("RF/microwave network characterization (Sij matrix)").weak());
         ui.add_space(12.0);
 
         // Frequency Range
@@ -564,50 +600,41 @@ impl SpDialogState {
             ui.label(egui::RichText::new("Port Configuration").strong());
             ui.add_space(4.0);
 
-            // Port 1
-            ui.horizontal(|ui| {
-                ui.label("Port 1:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.port1_node)
-                        .desired_width(80.0)
-                        .hint_text("IN"),
-                );
-                ui.checkbox(&mut self.port1_differential, "Differential");
-            });
-            if self.port1_differential {
+            let mut remove_index = None;
+            for (idx, port) in self.ports.iter_mut().enumerate() {
+                let hint = Self::default_port_node(idx);
                 ui.horizontal(|ui| {
-                    ui.add_space(55.0);
-                    ui.label("Neg:");
+                    ui.label(format!("Port {}:", idx + 1));
                     ui.add(
-                        egui::TextEdit::singleline(&mut self.port1_neg)
-                            .desired_width(80.0)
-                            .hint_text("INM"),
+                        egui::TextEdit::singleline(&mut port.node_pos)
+                            .desired_width(110.0)
+                            .hint_text(hint.as_str()),
                     );
+                    ui.checkbox(&mut port.differential, "Differential");
+                    if idx >= 2 && ui.small_button("Remove").clicked() {
+                        remove_index = Some(idx);
+                    }
                 });
+                if port.differential {
+                    ui.horizontal(|ui| {
+                        ui.add_space(55.0);
+                        ui.label("Neg:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut port.node_neg)
+                                .desired_width(110.0)
+                                .hint_text("0"),
+                        );
+                    });
+                }
+                ui.add_space(4.0);
+            }
+            if let Some(idx) = remove_index {
+                self.ports.remove(idx);
             }
 
-            ui.add_space(4.0);
-
-            // Port 2
-            ui.horizontal(|ui| {
-                ui.label("Port 2:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.port2_node)
-                        .desired_width(80.0)
-                        .hint_text("OUT"),
-                );
-                ui.checkbox(&mut self.port2_differential, "Differential");
-            });
-            if self.port2_differential {
-                ui.horizontal(|ui| {
-                    ui.add_space(55.0);
-                    ui.label("Neg:");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.port2_neg)
-                            .desired_width(80.0)
-                            .hint_text("OUTM"),
-                    );
-                });
+            if ui.button("+ Add Port").clicked() {
+                let node = Self::default_port_node(self.ports.len());
+                self.ports.push(SpPortDialogState::single_ended(node));
             }
         });
 
@@ -619,7 +646,7 @@ impl SpDialogState {
             ui.add_space(4.0);
 
             ui.checkbox(&mut self.do_noise, "Include Noise Analysis (NF)");
-            ui.checkbox(&mut self.touchstone_export, "Export Touchstone (.s2p)");
+            ui.checkbox(&mut self.touchstone_export, "Export Touchstone (.sNp)");
         });
 
         // Info footer
@@ -984,12 +1011,16 @@ mod tests {
     fn test_dialog_state_to_config() {
         let mut state = SpDialogState::from_config(&SpConfig::default());
         state.z0 = "100".to_string();
+        state.ports.push(SpPortDialogState::single_ended("AUX"));
 
         let result = state.to_config();
         assert!(result.is_ok());
 
         let cfg = result.unwrap();
         assert_eq!(cfg.z0, 100.0);
+        assert_eq!(cfg.ports.len(), 3);
+        assert_eq!(cfg.ports[2].number, 3);
+        assert_eq!(cfg.ports[2].node_pos, "AUX");
     }
 
     #[test]
@@ -1004,14 +1035,28 @@ mod tests {
     #[test]
     fn test_dialog_state_differential_port() {
         let mut state = SpDialogState::from_config(&SpConfig::default());
-        state.port1_differential = true;
-        state.port1_neg = "INM".to_string();
+        state.ports[0].differential = true;
+        state.ports[0].node_neg = "INM".to_string();
 
         let result = state.to_config();
         assert!(result.is_ok());
 
         let cfg = result.unwrap();
         assert!(cfg.ports[0].is_differential());
+    }
+
+    #[test]
+    fn test_dialog_state_preserves_multiport_config() {
+        let cfg = SpConfig::default().with_ports(vec![
+            SpPortConfig::single_ended(1, "IN"),
+            SpPortConfig::single_ended(2, "OUT"),
+            SpPortConfig::differential(3, "VIP", "VIN"),
+        ]);
+        let state = SpDialogState::from_config(&cfg);
+        assert_eq!(state.ports.len(), 3);
+        assert_eq!(state.ports[2].node_pos, "VIP");
+        assert!(state.ports[2].differential);
+        assert_eq!(state.ports[2].node_neg, "VIN");
     }
 
     #[test]

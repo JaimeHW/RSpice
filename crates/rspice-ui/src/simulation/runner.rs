@@ -7,8 +7,8 @@
 //! - Result caching
 
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
 };
 use std::thread::{self, JoinHandle};
 
@@ -856,10 +856,7 @@ fn run_spec_request(
             points_per_unit,
             sweep,
             z0,
-            port1_pos,
-            port1_neg,
-            port2_pos,
-            port2_neg,
+            ports,
         } => {
             let sweep = match sweep {
                 crate::simulation::multi_run::FrequencySweep::Decade => {
@@ -878,56 +875,36 @@ fn run_spec_request(
                 points_per_unit,
                 sweep,
                 z0,
-                ports: [
-                    svc_runner::SParameterPort {
-                        node_pos: port1_pos,
-                        node_neg: port1_neg,
-                    },
-                    svc_runner::SParameterPort {
-                        node_pos: port2_pos,
-                        node_neg: port2_neg,
-                    },
-                ],
+                ports: ports
+                    .into_iter()
+                    .map(|port| svc_runner::SParameterPort {
+                        node_pos: port.node_pos,
+                        node_neg: port.node_neg,
+                    })
+                    .collect(),
             };
             let data = svc_runner::run_sparameter_analysis(netlist, &cfg)
                 .map_err(SimulationError::InvalidConfig)?;
             let mut waveforms = std::collections::HashMap::new();
-            waveforms.insert(
-                "S11".to_string(),
-                WaveformData::new_complex(
-                    "S11".to_string(),
-                    data.frequencies.clone(),
-                    data.s11.iter().map(|value| value.re).collect(),
-                    data.s11.iter().map(|value| value.im).collect(),
-                ),
-            );
-            waveforms.insert(
-                "S21".to_string(),
-                WaveformData::new_complex(
-                    "S21".to_string(),
-                    data.frequencies.clone(),
-                    data.s21.iter().map(|value| value.re).collect(),
-                    data.s21.iter().map(|value| value.im).collect(),
-                ),
-            );
-            waveforms.insert(
-                "S12".to_string(),
-                WaveformData::new_complex(
-                    "S12".to_string(),
-                    data.frequencies.clone(),
-                    data.s12.iter().map(|value| value.re).collect(),
-                    data.s12.iter().map(|value| value.im).collect(),
-                ),
-            );
-            waveforms.insert(
-                "S22".to_string(),
-                WaveformData::new_complex(
-                    "S22".to_string(),
-                    data.frequencies.clone(),
-                    data.s22.iter().map(|value| value.re).collect(),
-                    data.s22.iter().map(|value| value.im).collect(),
-                ),
-            );
+            for row in 0..data.num_ports {
+                for col in 0..data.num_ports {
+                    let name = if data.num_ports <= 9 {
+                        format!("S{}{}", row + 1, col + 1)
+                    } else {
+                        format!("S{}_{}", row + 1, col + 1)
+                    };
+                    let trace = &data.s[row][col];
+                    waveforms.insert(
+                        name.clone(),
+                        WaveformData::new_complex(
+                            name,
+                            data.frequencies.clone(),
+                            trace.iter().map(|value| value.re).collect(),
+                            trace.iter().map(|value| value.im).collect(),
+                        ),
+                    );
+                }
+            }
 
             Ok(SimulationResult::Ac {
                 frequencies: data.frequencies,
@@ -1760,9 +1737,11 @@ R2 out 0 1k
                 assert_eq!(x_label, "Corner Index");
                 assert_eq!(x_unit, "");
                 assert_eq!(corner_labels.len(), 4);
-                assert!(corner_labels
-                    .iter()
-                    .any(|label| label.contains("FF_1.100000V")));
+                assert!(
+                    corner_labels
+                        .iter()
+                        .any(|label| label.contains("FF_1.100000V"))
+                );
             }
             other => panic!("Expected Corner result, got {:?}", other),
         }
@@ -1936,10 +1915,16 @@ R2 out 0 50
                     points_per_unit: 5,
                     sweep: crate::simulation::multi_run::FrequencySweep::Decade,
                     z0: 50.0,
-                    port1_pos: "in".to_string(),
-                    port1_neg: "0".to_string(),
-                    port2_pos: "out".to_string(),
-                    port2_neg: "0".to_string(),
+                    ports: vec![
+                        crate::simulation::multi_run::SpPort {
+                            node_pos: "in".to_string(),
+                            node_neg: "0".to_string(),
+                        },
+                        crate::simulation::multi_run::SpPort {
+                            node_pos: "out".to_string(),
+                            node_neg: "0".to_string(),
+                        },
+                    ],
                 },
                 netlist,
             )
@@ -1958,9 +1943,11 @@ R2 out 0 50
                 assert!(waveforms.contains_key("S21"));
                 assert!(waveforms.contains_key("S12"));
                 assert!(waveforms.contains_key("S22"));
-                assert!(waveforms
-                    .values()
-                    .all(|wf| wf.is_complex && wf.y_imag.as_ref().is_some()));
+                assert!(
+                    waveforms
+                        .values()
+                        .all(|wf| wf.is_complex && wf.y_imag.as_ref().is_some())
+                );
             }
             other => panic!("Expected AC result for S-parameter, got {:?}", other),
         }
@@ -2086,9 +2073,11 @@ M1 d g 0 0 NM W=10u L=1u
                 assert_eq!(years, vec![1.0, 5.0, 10.0]);
                 assert!(!device_results.is_empty());
                 assert!(!waveforms.is_empty());
-                assert!(waveforms
-                    .keys()
-                    .any(|name| name.starts_with("DVTH(") || name.starts_with("DRDS(")));
+                assert!(
+                    waveforms
+                        .keys()
+                        .any(|name| name.starts_with("DVTH(") || name.starts_with("DRDS("))
+                );
             }
             other => panic!("Expected Reliability result, got {:?}", other),
         }
@@ -2325,9 +2314,11 @@ C1 out 0 1n
                     "expected PXF transfer waveform name, got {:?}",
                     waveforms.keys().collect::<Vec<_>>()
                 );
-                assert!(waveforms
-                    .values()
-                    .any(|wf| wf.is_complex && wf.y_imag.as_ref().is_some()));
+                assert!(
+                    waveforms
+                        .values()
+                        .any(|wf| wf.is_complex && wf.y_imag.as_ref().is_some())
+                );
             }
             other => panic!("Expected AC result for PXF, got {:?}", other),
         }
@@ -2355,9 +2346,11 @@ C1 out 0 1n
             .expect("Expected PXF completion result")
             .expect_err("PXF without options should fail");
         assert!(matches!(result, SimulationError::InvalidConfig(_)));
-        assert!(result
-            .to_string()
-            .contains("requires explicit PXF execution options"));
+        assert!(
+            result
+                .to_string()
+                .contains("requires explicit PXF execution options")
+        );
     }
 
     #[test]
@@ -2422,9 +2415,11 @@ C1 out 0 1n
                     "expected Zout waveform, got {:?}",
                     waveforms.keys().collect::<Vec<_>>()
                 );
-                assert!(waveforms
-                    .values()
-                    .any(|wf| wf.is_complex && wf.y_imag.as_ref().is_some()));
+                assert!(
+                    waveforms
+                        .values()
+                        .any(|wf| wf.is_complex && wf.y_imag.as_ref().is_some())
+                );
             }
             other => panic!("Expected AC result for TF, got {:?}", other),
         }
@@ -2634,8 +2629,10 @@ C1 out 0 1n
             .expect("Expected PSTB completion result")
             .expect_err("PSTB without options should fail");
         assert!(matches!(result, SimulationError::InvalidConfig(_)));
-        assert!(result
-            .to_string()
-            .contains("requires explicit PSTB execution options"));
+        assert!(
+            result
+                .to_string()
+                .contains("requires explicit PSTB execution options")
+        );
     }
 }

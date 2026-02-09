@@ -3,10 +3,10 @@
 //! Async wrapper around rspice-core for running simulations from the GUI.
 
 use crate::output_spec::{
-    ac_output_value, collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
-    normalized_sensitivity, parse_output_spec, resolve_node_or_ground_index,
-    resolve_sensitivity_ac_frequency, run_ac_output_at_frequency, run_dc_output_sensitivity,
-    validate_sensitivity_output_spec, OutputSpec, OutputVoltageSpec,
+    OutputSpec, OutputVoltageSpec, ac_output_value, collect_sensitivity_parameters,
+    dc_output_value, finite_difference_derivative, normalized_sensitivity, parse_output_spec,
+    resolve_node_or_ground_index, resolve_sensitivity_ac_frequency, run_ac_output_at_frequency,
+    run_dc_output_sensitivity, validate_sensitivity_output_spec,
 };
 use crate::services::safety::{SoADefinition, SoALimit, SoAManager, SoAParameter, SoAViolation};
 use crate::simulation::optimizer::{
@@ -26,7 +26,7 @@ use rspice_core::netlist::{
     StepSweep, StepTarget,
 };
 use rspice_core::solver::SimulationResult as CoreSimulationResult;
-use rspice_core::{resolve_simulation_config, SimulationConfigOverrides, Value};
+use rspice_core::{SimulationConfigOverrides, Value, resolve_simulation_config};
 
 // =============================================================================
 // Platform-agnostic timing utilities
@@ -440,7 +440,7 @@ pub struct SParameterRunConfig {
     pub points_per_unit: usize,
     pub sweep: SParameterSweep,
     pub z0: Value,
-    pub ports: [SParameterPort; 2],
+    pub ports: Vec<SParameterPort>,
 }
 
 impl SParameterRunConfig {
@@ -458,6 +458,9 @@ impl SParameterRunConfig {
         }
         if !self.z0.is_finite() || self.z0 <= 0.0 {
             return Err("S-parameter reference impedance must be positive".to_string());
+        }
+        if self.ports.len() < 2 {
+            return Err("S-parameter analysis requires at least 2 ports".to_string());
         }
         for (idx, port) in self.ports.iter().enumerate() {
             if port.node_pos.trim().is_empty() {
@@ -477,18 +480,18 @@ impl SParameterRunConfig {
     }
 }
 
-/// 2-port S-parameter analysis output.
+/// N-port S-parameter analysis output.
 #[derive(Debug, Clone)]
 pub struct SParameterData {
     pub frequencies: Vec<Value>,
-    pub s11: Vec<Complex64>,
-    pub s21: Vec<Complex64>,
-    pub s12: Vec<Complex64>,
-    pub s22: Vec<Complex64>,
+    /// Number of ports in the solved network.
+    pub num_ports: usize,
+    /// S-parameter matrix traces indexed as [row][col][frequency_index], 0-based.
+    pub s: Vec<Vec<Vec<Complex64>>>,
     pub z0: Value,
 }
 
-/// Run 2-port S-parameter analysis by solving Y-parameters from AC source injections.
+/// Run N-port S-parameter analysis by solving Y-parameters from AC source injections.
 pub fn run_sparameter_analysis(
     netlist_text: &str,
     config: &SParameterRunConfig,
@@ -508,27 +511,26 @@ pub fn run_sparameter_analysis(
         return Err("S-parameter sweep generated no frequency points".to_string());
     }
 
-    let mut y11 = vec![Complex64::new(0.0, 0.0); frequencies.len()];
-    let mut y12 = vec![Complex64::new(0.0, 0.0); frequencies.len()];
-    let mut y21 = vec![Complex64::new(0.0, 0.0); frequencies.len()];
-    let mut y22 = vec![Complex64::new(0.0, 0.0); frequencies.len()];
+    let num_ports = config.ports.len();
+    let num_freqs = frequencies.len();
+    let mut y = vec![vec![vec![Complex64::new(0.0, 0.0); num_freqs]; num_ports]; num_ports];
 
-    for excite_port in 0..2 {
+    for excite_port in 0..num_ports {
         let mut excited_netlist = parsed_netlist.clone();
-        let (port1_src, port2_src) =
+        let port_sources =
             inject_sparameter_port_sources(&mut excited_netlist, config, excite_port)?;
         let engine = Engine::new(build_engine_config(&excited_netlist, None));
         let circuit = engine
             .build_circuit(&excited_netlist)
             .map_err(|e| format!("S-parameter circuit build error: {}", e))?;
-        let port1_branch = circuit
-            .get_branch_by_name(&port1_src)
-            .ok_or_else(|| format!("S-parameter source '{}' branch not found", port1_src))?
-            as usize;
-        let port2_branch = circuit
-            .get_branch_by_name(&port2_src)
-            .ok_or_else(|| format!("S-parameter source '{}' branch not found", port2_src))?
-            as usize;
+        let mut port_branches = Vec::with_capacity(num_ports);
+        for port_src in &port_sources {
+            let branch = circuit
+                .get_branch_by_name(port_src)
+                .ok_or_else(|| format!("S-parameter source '{}' branch not found", port_src))?
+                as usize;
+            port_branches.push(branch);
+        }
 
         let ac_points = engine
             .run_ac(&excited_netlist, &frequencies)
@@ -541,51 +543,42 @@ pub fn run_sparameter_analysis(
             ));
         }
 
-        for (idx, point) in ac_points.iter().enumerate() {
+        for (freq_idx, point) in ac_points.iter().enumerate() {
             // AC source branch current sign is opposite to port-current-into-network.
-            let i1 = -branch_current_from_ac(point, port1_branch).ok_or_else(|| {
-                format!(
-                    "S-parameter missing branch current for {} at point {}",
-                    port1_src, idx
-                )
-            })?;
-            let i2 = -branch_current_from_ac(point, port2_branch).ok_or_else(|| {
-                format!(
-                    "S-parameter missing branch current for {} at point {}",
-                    port2_src, idx
-                )
-            })?;
-
-            if excite_port == 0 {
-                y11[idx] = i1;
-                y21[idx] = i2;
-            } else {
-                y12[idx] = i1;
-                y22[idx] = i2;
+            for (row_port, (branch, port_src)) in
+                port_branches.iter().zip(port_sources.iter()).enumerate()
+            {
+                let current = -branch_current_from_ac(point, *branch).ok_or_else(|| {
+                    format!(
+                        "S-parameter missing branch current for {} at point {}",
+                        port_src, freq_idx
+                    )
+                })?;
+                y[row_port][excite_port][freq_idx] = current;
             }
         }
     }
 
-    let mut s11 = Vec::with_capacity(frequencies.len());
-    let mut s21 = Vec::with_capacity(frequencies.len());
-    let mut s12 = Vec::with_capacity(frequencies.len());
-    let mut s22 = Vec::with_capacity(frequencies.len());
-
-    for idx in 0..frequencies.len() {
-        let [[sp11, sp12], [sp21, sp22]] =
-            compute_s_from_y(y11[idx], y12[idx], y21[idx], y22[idx], config.z0);
-        s11.push(sp11);
-        s12.push(sp12);
-        s21.push(sp21);
-        s22.push(sp22);
+    let mut s = vec![vec![vec![Complex64::new(0.0, 0.0); num_freqs]; num_ports]; num_ports];
+    for freq_idx in 0..num_freqs {
+        let mut y_matrix = vec![vec![Complex64::new(0.0, 0.0); num_ports]; num_ports];
+        for row in 0..num_ports {
+            for col in 0..num_ports {
+                y_matrix[row][col] = y[row][col][freq_idx];
+            }
+        }
+        let s_matrix = compute_s_from_y_matrix(&y_matrix, config.z0);
+        for row in 0..num_ports {
+            for col in 0..num_ports {
+                s[row][col][freq_idx] = s_matrix[row][col];
+            }
+        }
     }
 
     Ok(SParameterData {
         frequencies,
-        s11,
-        s21,
-        s12,
-        s22,
+        num_ports,
+        s,
         z0: config.z0,
     })
 }
@@ -594,42 +587,32 @@ fn inject_sparameter_port_sources(
     netlist: &mut rspice_core::Netlist,
     config: &SParameterRunConfig,
     excite_port: usize,
-) -> Result<(String, String), String> {
-    if excite_port > 1 {
-        return Err("S-parameter excite_port must be 0 or 1".to_string());
+) -> Result<Vec<String>, String> {
+    if excite_port >= config.ports.len() {
+        return Err(format!(
+            "S-parameter excite_port {} out of range for {} ports",
+            excite_port,
+            config.ports.len()
+        ));
     }
 
-    let name1 = unique_aux_element_name(netlist, "__RSPICE_SP_PORT1");
-    let name2 = unique_aux_element_name(netlist, "__RSPICE_SP_PORT2");
-    let mag1 = if excite_port == 0 { 1.0 } else { 0.0 };
-    let mag2 = if excite_port == 1 { 1.0 } else { 0.0 };
+    let mut port_sources = Vec::with_capacity(config.ports.len());
+    for (idx, port) in config.ports.iter().enumerate() {
+        let name = unique_aux_element_name(netlist, &format!("__RSPICE_SP_PORT{}", idx + 1));
+        let magnitude = if idx == excite_port { 1.0 } else { 0.0 };
+        netlist.elements.push(Element {
+            name: name.clone(),
+            nodes: vec![port.node_pos.clone(), port.node_neg.clone()],
+            kind: ElementKind::VoltageSource(SourceSpec::DcAc {
+                dc_value: 0.0,
+                ac_magnitude: magnitude,
+                ac_phase: 0.0,
+            }),
+        });
+        port_sources.push(name);
+    }
 
-    netlist.elements.push(Element {
-        name: name1.clone(),
-        nodes: vec![
-            config.ports[0].node_pos.clone(),
-            config.ports[0].node_neg.clone(),
-        ],
-        kind: ElementKind::VoltageSource(SourceSpec::DcAc {
-            dc_value: 0.0,
-            ac_magnitude: mag1,
-            ac_phase: 0.0,
-        }),
-    });
-    netlist.elements.push(Element {
-        name: name2.clone(),
-        nodes: vec![
-            config.ports[1].node_pos.clone(),
-            config.ports[1].node_neg.clone(),
-        ],
-        kind: ElementKind::VoltageSource(SourceSpec::DcAc {
-            dc_value: 0.0,
-            ac_magnitude: mag2,
-            ac_phase: 0.0,
-        }),
-    });
-
-    Ok((name1, name2))
+    Ok(port_sources)
 }
 
 fn unique_aux_element_name(netlist: &rspice_core::Netlist, base: &str) -> String {
@@ -658,35 +641,114 @@ fn branch_current_from_ac(point: &AcResult, branch_ordinal: usize) -> Option<Com
     point.currents.get(branch_index).copied()
 }
 
-fn compute_s_from_y(
-    y11: Complex64,
-    y12: Complex64,
-    y21: Complex64,
-    y22: Complex64,
-    z0: Value,
-) -> [[Complex64; 2]; 2] {
-    let z = Complex64::new(z0, 0.0);
-    let one = Complex64::new(1.0, 0.0);
-    let a11 = one + z * y11;
-    let a12 = z * y12;
-    let a21 = z * y21;
-    let a22 = one + z * y22;
-    let b11 = one - z * y11;
-    let b12 = -z * y12;
-    let b21 = -z * y21;
-    let b22 = one - z * y22;
-    let det_a = a11 * a22 - a12 * a21;
-    if det_a.norm() <= 1e-30 {
-        return [[Complex64::new(0.0, 0.0); 2]; 2];
+fn compute_s_from_y_matrix(y: &[Vec<Complex64>], z0: Value) -> Vec<Vec<Complex64>> {
+    let n = y.len();
+    if n == 0 || y.iter().any(|row| row.len() != n) {
+        return Vec::new();
     }
-    let inv_a11 = a22 / det_a;
-    let inv_a12 = -a12 / det_a;
-    let inv_a21 = -a21 / det_a;
-    let inv_a22 = a11 / det_a;
-    [
-        [b11 * inv_a11 + b12 * inv_a21, b11 * inv_a12 + b12 * inv_a22],
-        [b21 * inv_a11 + b22 * inv_a21, b21 * inv_a12 + b22 * inv_a22],
-    ]
+
+    let z = Complex64::new(z0, 0.0);
+    let mut a = identity_complex_matrix(n);
+    let mut b = identity_complex_matrix(n);
+    for row in 0..n {
+        for col in 0..n {
+            let zy = z * y[row][col];
+            a[row][col] += zy;
+            b[row][col] -= zy;
+        }
+    }
+
+    let Some(inv_a) = invert_complex_matrix(&a) else {
+        return vec![vec![Complex64::new(0.0, 0.0); n]; n];
+    };
+    multiply_complex_matrix(&b, &inv_a)
+}
+
+fn identity_complex_matrix(size: usize) -> Vec<Vec<Complex64>> {
+    let mut matrix = vec![vec![Complex64::new(0.0, 0.0); size]; size];
+    for (idx, row) in matrix.iter_mut().enumerate() {
+        row[idx] = Complex64::new(1.0, 0.0);
+    }
+    matrix
+}
+
+fn multiply_complex_matrix(lhs: &[Vec<Complex64>], rhs: &[Vec<Complex64>]) -> Vec<Vec<Complex64>> {
+    let rows = lhs.len();
+    let cols = rhs.first().map_or(0, |row| row.len());
+    let inner = rhs.len();
+    let mut out = vec![vec![Complex64::new(0.0, 0.0); cols]; rows];
+    for row in 0..rows {
+        for k in 0..inner {
+            let lhs_value = lhs[row][k];
+            if lhs_value.norm() <= 1e-30 {
+                continue;
+            }
+            for col in 0..cols {
+                out[row][col] += lhs_value * rhs[k][col];
+            }
+        }
+    }
+    out
+}
+
+fn invert_complex_matrix(matrix: &[Vec<Complex64>]) -> Option<Vec<Vec<Complex64>>> {
+    let n = matrix.len();
+    if n == 0 || matrix.iter().any(|row| row.len() != n) {
+        return None;
+    }
+
+    let mut augmented = vec![vec![Complex64::new(0.0, 0.0); 2 * n]; n];
+    for row in 0..n {
+        for col in 0..n {
+            augmented[row][col] = matrix[row][col];
+        }
+        augmented[row][n + row] = Complex64::new(1.0, 0.0);
+    }
+
+    for col in 0..n {
+        let mut pivot_row = col;
+        let mut pivot_norm = augmented[col][col].norm();
+        for row in (col + 1)..n {
+            let candidate_norm = augmented[row][col].norm();
+            if candidate_norm > pivot_norm {
+                pivot_norm = candidate_norm;
+                pivot_row = row;
+            }
+        }
+        if pivot_norm <= 1e-30 {
+            return None;
+        }
+        if pivot_row != col {
+            augmented.swap(pivot_row, col);
+        }
+
+        let pivot = augmented[col][col];
+        for idx in col..(2 * n) {
+            augmented[col][idx] /= pivot;
+        }
+
+        let pivot_snapshot = augmented[col].clone();
+        for row in 0..n {
+            if row == col {
+                continue;
+            }
+            let factor = augmented[row][col];
+            if factor.norm() <= 1e-30 {
+                continue;
+            }
+            for idx in col..(2 * n) {
+                augmented[row][idx] -= factor * pivot_snapshot[idx];
+            }
+        }
+    }
+
+    let mut inverse = vec![vec![Complex64::new(0.0, 0.0); n]; n];
+    for row in 0..n {
+        for col in 0..n {
+            inverse[row][col] = augmented[row][n + col];
+        }
+    }
+    Some(inverse)
 }
 
 // =============================================================================
@@ -1882,8 +1944,8 @@ fn run_pac_internal(
     netlist: &rspice_core::Netlist,
     config: &PacRunConfig,
 ) -> Result<PacInternalResult, String> {
-    use rspice_core::analysis::advanced::pac::{PacAnalyzer, PacConfig};
     use rspice_core::analysis::PssConfig;
+    use rspice_core::analysis::advanced::pac::{PacAnalyzer, PacConfig};
 
     config.validate()?;
 
@@ -4690,11 +4752,7 @@ fn sanitize_nonnegative(value: Value) -> Value {
 }
 
 fn sanitize_finite(value: Value) -> Value {
-    if value.is_finite() {
-        value
-    } else {
-        0.0
-    }
+    if value.is_finite() { value } else { 0.0 }
 }
 
 fn normalized_probe_participation(
@@ -4724,8 +4782,8 @@ pub fn run_pstb_analysis_with_config(
     netlist_text: &str,
     config: &PstbRunConfig,
 ) -> Result<PstbData, String> {
-    use rspice_core::analysis::advanced::pstb::{PstbAnalyzer, PstbConfig};
     use rspice_core::analysis::PssConfig;
+    use rspice_core::analysis::advanced::pstb::{PstbAnalyzer, PstbConfig};
 
     config.validate()?;
 
@@ -6815,10 +6873,12 @@ mod tests {
             .expect("sensitivity run should succeed");
         assert_eq!(result.output_var, "V(out)");
         assert!(!result.sensitivities.is_empty());
-        assert!(result
-            .sensitivities
-            .iter()
-            .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL")));
+        assert!(
+            result
+                .sensitivities
+                .iter()
+                .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL"))
+        );
     }
 
     #[test]
@@ -6828,14 +6888,18 @@ mod tests {
         let result = run_sensitivity_analysis(netlist, "V(out)", false, None)
             .expect("sensitivity run should succeed");
 
-        assert!(result
-            .sensitivities
-            .iter()
-            .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL")));
-        assert!(result
-            .sensitivities
-            .iter()
-            .all(|(name, _, _)| !name.starts_with("IC_") && !name.starts_with("NODESET_")));
+        assert!(
+            result
+                .sensitivities
+                .iter()
+                .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL"))
+        );
+        assert!(
+            result
+                .sensitivities
+                .iter()
+                .all(|(name, _, _)| !name.starts_with("IC_") && !name.starts_with("NODESET_"))
+        );
     }
 
     #[test]
@@ -6861,10 +6925,12 @@ mod tests {
         let result = run_sensitivity_analysis(netlist, "V(out,in)", false, None)
             .expect("differential sensitivity run should succeed");
         assert!(!result.sensitivities.is_empty());
-        assert!(result
-            .sensitivities
-            .iter()
-            .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite()));
+        assert!(
+            result
+                .sensitivities
+                .iter()
+                .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite())
+        );
     }
 
     #[test]
@@ -6892,10 +6958,12 @@ mod tests {
             .expect("current-output ac sensitivity should succeed");
         assert_eq!(result.output_var, "I(V1)");
         assert!(!result.sensitivities.is_empty());
-        assert!(result
-            .sensitivities
-            .iter()
-            .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite()));
+        assert!(
+            result
+                .sensitivities
+                .iter()
+                .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite())
+        );
     }
 
     #[test]
@@ -6994,10 +7062,12 @@ mod tests {
         assert_eq!(result.target, "PARAM RVAL");
         assert_eq!(result.sweep_values.len(), 4);
         assert_eq!(result.num_points, 4);
-        assert!(result
-            .voltages
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("V(out)")));
+        assert!(
+            result
+                .voltages
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
+        );
     }
 
     #[test]
@@ -7078,12 +7148,14 @@ mod tests {
             .expect("temperature sweep AC base mode should execute");
         assert_eq!(result.target, "TEMP");
         assert_eq!(result.num_points, 3);
-        assert!(result
-            .voltages
-            .iter()
-            .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
-                && values.len() == 3
-                && values.iter().all(|v| v.is_finite() && *v >= 0.0)));
+        assert!(
+            result
+                .voltages
+                .iter()
+                .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
+                    && values.len() == 3
+                    && values.iter().all(|v| v.is_finite() && *v >= 0.0))
+        );
     }
 
     #[test]
@@ -7104,10 +7176,12 @@ mod tests {
         assert_eq!(result.corner_labels.len(), 3);
         assert!(result.corner_labels[0].starts_with("TT_1.000000V_"));
         assert_eq!(result.num_points, 3);
-        assert!(result
-            .voltages
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("V(out)")));
+        assert!(
+            result
+                .voltages
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
+        );
     }
 
     #[test]
@@ -7141,10 +7215,12 @@ mod tests {
         assert_eq!(result.temperatures_c.len(), 8);
         assert_eq!(result.corner_labels.len(), 8);
         assert_eq!(result.num_failures, 0);
-        assert!(result
-            .corner_labels
-            .iter()
-            .any(|label| label.contains("FF_1.100000V_125.000000C")));
+        assert!(
+            result
+                .corner_labels
+                .iter()
+                .any(|label| label.contains("FF_1.100000V_125.000000C"))
+        );
     }
 
     #[test]
@@ -7234,12 +7310,14 @@ mod tests {
         assert_eq!(result.x_label, "Temperature");
         assert_eq!(result.x_unit, "C");
         assert_eq!(result.x_values, vec![-40.0, 25.0, 125.0]);
-        assert!(result
-            .voltages
-            .iter()
-            .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
-                && values.len() == 3
-                && values.iter().all(|v| v.is_finite() && *v >= 0.0)));
+        assert!(
+            result
+                .voltages
+                .iter()
+                .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
+                    && values.len() == 3
+                    && values.iter().all(|v| v.is_finite() && *v >= 0.0))
+        );
     }
 
     #[test]
@@ -7437,10 +7515,12 @@ mod tests {
         assert_eq!(result.input_sideband, 1);
         assert_eq!(result.output_sideband, 1);
         assert!(result.output_label.starts_with("V("));
-        assert!(result
-            .transfer
-            .iter()
-            .all(|value| value.re.is_finite() && value.im.is_finite()));
+        assert!(
+            result
+                .transfer
+                .iter()
+                .all(|value| value.re.is_finite() && value.im.is_finite())
+        );
         assert!(result.magnitude_db.iter().all(|value| value.is_finite()));
         assert!(result.phase_deg.iter().all(|value| value.is_finite()));
     }
@@ -7525,22 +7605,30 @@ mod tests {
         assert_eq!(result.transfer.len(), result.frequencies.len());
         assert_eq!(result.magnitude_db.len(), result.frequencies.len());
         assert_eq!(result.phase_deg.len(), result.frequencies.len());
-        assert!(result
-            .transfer
-            .iter()
-            .all(|value| value.re.is_finite() && value.im.is_finite()));
-        assert!(result
-            .group_delay
-            .as_ref()
-            .is_some_and(|curve| !curve.is_empty()));
-        assert!(result
-            .input_impedance
-            .as_ref()
-            .is_some_and(|curve| curve.iter().all(|value| value.re.is_finite())));
-        assert!(result
-            .output_impedance
-            .as_ref()
-            .is_some_and(|curve| curve.iter().all(|value| value.re.is_finite())));
+        assert!(
+            result
+                .transfer
+                .iter()
+                .all(|value| value.re.is_finite() && value.im.is_finite())
+        );
+        assert!(
+            result
+                .group_delay
+                .as_ref()
+                .is_some_and(|curve| !curve.is_empty())
+        );
+        assert!(
+            result
+                .input_impedance
+                .as_ref()
+                .is_some_and(|curve| curve.iter().all(|value| value.re.is_finite()))
+        );
+        assert!(
+            result
+                .output_impedance
+                .as_ref()
+                .is_some_and(|curve| curve.iter().all(|value| value.re.is_finite()))
+        );
     }
 
     #[test]
@@ -7609,9 +7697,11 @@ mod tests {
         assert_eq!(result.output_noise.len(), result.frequencies.len());
         assert_eq!(result.reference, PnoiseReference::Output);
         assert_eq!(result.sideband_factor, 7);
-        assert!(result
-            .total_output_noise
-            .is_some_and(|value| value.is_finite() && value >= 0.0));
+        assert!(
+            result
+                .total_output_noise
+                .is_some_and(|value| value.is_finite() && value >= 0.0)
+        );
     }
 
     #[test]
@@ -7698,14 +7788,18 @@ mod tests {
             .as_ref()
             .expect("input-referred mode should return an input-noise vector");
         assert_eq!(input_curve.len(), output_result.output_noise.len());
-        assert!(!input_result
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("TF fallback")));
-        assert!(!input_result
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("unity gain")));
+        assert!(
+            !input_result
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("TF fallback"))
+        );
+        assert!(
+            !input_result
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("unity gain"))
+        );
 
         let parsed = rspice_core::netlist::parse_netlist(netlist).expect("netlist should parse");
         let mut sim_config = build_engine_config(&parsed, None);
@@ -7825,10 +7919,12 @@ mod tests {
         };
         let result = run_pnoise_analysis_with_config(netlist, &cfg)
             .expect("sideband PNOISE input run should execute");
-        assert!(!result
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("TF fallback")));
+        assert!(
+            !result
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("TF fallback"))
+        );
 
         let input_curve = result
             .input_noise
@@ -7969,14 +8065,18 @@ mod tests {
             .expect("differential PNOISE output should execute");
         assert_eq!(result.output_noise.len(), result.frequencies.len());
         assert!(!result.contributors.is_empty());
-        assert!(result
-            .contributors
-            .iter()
-            .all(|(_, percentage)| percentage.is_finite() && *percentage >= 0.0));
-        assert!(!result
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("uncorrelated PSD summation")));
+        assert!(
+            result
+                .contributors
+                .iter()
+                .all(|(_, percentage)| percentage.is_finite() && *percentage >= 0.0)
+        );
+        assert!(
+            !result
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("uncorrelated PSD summation"))
+        );
     }
 
     #[test]
@@ -8116,27 +8216,37 @@ mod tests {
         assert_eq!(result.mode_indices.len(), result.mode_damping.len());
         assert_eq!(result.mode_indices.len(), result.mode_frequency_hz.len());
         assert_eq!(result.mode_indices.len(), result.stability_margin_db.len());
-        assert!(result
-            .probe_mode_participation
-            .iter()
-            .all(|value| value.is_finite() && *value >= 0.0 && *value <= 1.0));
-        assert!(result
-            .multiplier_magnitude
-            .iter()
-            .all(|value| value.is_finite() && *value >= 0.0));
-        assert!(result
-            .multiplier_phase_deg
-            .iter()
-            .all(|value| value.is_finite()));
+        assert!(
+            result
+                .probe_mode_participation
+                .iter()
+                .all(|value| value.is_finite() && *value >= 0.0 && *value <= 1.0)
+        );
+        assert!(
+            result
+                .multiplier_magnitude
+                .iter()
+                .all(|value| value.is_finite() && *value >= 0.0)
+        );
+        assert!(
+            result
+                .multiplier_phase_deg
+                .iter()
+                .all(|value| value.is_finite())
+        );
         assert!(result.mode_damping.iter().all(|value| value.is_finite()));
-        assert!(result
-            .mode_frequency_hz
-            .iter()
-            .all(|value| value.is_finite() && *value >= 0.0));
-        assert!(result
-            .stability_margin_db
-            .iter()
-            .all(|value| value.is_finite()));
+        assert!(
+            result
+                .mode_frequency_hz
+                .iter()
+                .all(|value| value.is_finite() && *value >= 0.0)
+        );
+        assert!(
+            result
+                .stability_margin_db
+                .iter()
+                .all(|value| value.is_finite())
+        );
         assert!(result.dominant_multiplier_magnitude.is_finite());
         assert!(result.min_stability_margin_db.is_finite());
         assert!(
@@ -8179,8 +8289,7 @@ mod tests {
 
     #[test]
     fn test_run_pstb_analysis_with_config_rejects_non_dynamic_probe_branch() {
-        let netlist =
-            "* pstb non-dynamic probe\nV1 in 0 1\nR1 in mid 1k\nLPROBE mid out 1u\nC1 out 0 1n\n.end\n";
+        let netlist = "* pstb non-dynamic probe\nV1 in 0 1\nR1 in mid 1k\nLPROBE mid out 1u\nC1 out 0 1n\n.end\n";
         let cfg = PstbRunConfig {
             probe_instance: "V1".to_string(),
             ..PstbRunConfig::default()
@@ -8262,7 +8371,7 @@ mod tests {
             points_per_unit: 5,
             sweep: SParameterSweep::Decade,
             z0: 50.0,
-            ports: [
+            ports: vec![
                 SParameterPort::single_ended("in"),
                 SParameterPort::single_ended("out"),
             ],
@@ -8271,26 +8380,112 @@ mod tests {
         let result = run_sparameter_analysis(netlist, &cfg)
             .expect("S-parameter analysis should execute for simple two-port");
         assert!(!result.frequencies.is_empty());
-        assert_eq!(result.frequencies.len(), result.s11.len());
-        assert_eq!(result.frequencies.len(), result.s21.len());
-        assert_eq!(result.frequencies.len(), result.s12.len());
-        assert_eq!(result.frequencies.len(), result.s22.len());
+        assert_eq!(result.num_ports, 2);
+        assert_eq!(result.s.len(), 2);
+        assert_eq!(result.s[0].len(), 2);
+        assert_eq!(result.s[1].len(), 2);
+        assert_eq!(result.frequencies.len(), result.s[0][0].len());
         for idx in 0..result.frequencies.len() {
             assert!(
-                result.s21[idx].norm() < 1e-8,
+                result.s[1][0][idx].norm() < 1e-8,
                 "S21 should be near 0 for decoupled ports"
             );
             assert!(
-                result.s12[idx].norm() < 1e-8,
+                result.s[0][1][idx].norm() < 1e-8,
                 "S12 should be near 0 for decoupled ports"
             );
             assert!(
-                (result.s11[idx] - result.s22[idx]).norm() < 1e-9,
+                (result.s[0][0][idx] - result.s[1][1][idx]).norm() < 1e-9,
                 "symmetric ports should have matching reflections"
             );
-            assert!(result.s11[idx].norm().is_finite() && result.s11[idx].norm() <= 1.0 + 1e-6);
-            assert!(result.s22[idx].norm().is_finite() && result.s22[idx].norm() <= 1.0 + 1e-6);
+            assert!(
+                result.s[0][0][idx].norm().is_finite() && result.s[0][0][idx].norm() <= 1.0 + 1e-6
+            );
+            assert!(
+                result.s[1][1][idx].norm().is_finite() && result.s[1][1][idx].norm() <= 1.0 + 1e-6
+            );
         }
+    }
+
+    #[test]
+    fn test_run_sparameter_analysis_supports_three_port_matrices() {
+        let netlist = "* S-parameter 3-port matched\nR1 p1 0 50\nR2 p2 0 50\nR3 p3 0 50\n.end\n";
+        let cfg = SParameterRunConfig {
+            start_freq: 1e3,
+            stop_freq: 1e5,
+            points_per_unit: 3,
+            sweep: SParameterSweep::Decade,
+            z0: 50.0,
+            ports: vec![
+                SParameterPort::single_ended("p1"),
+                SParameterPort::single_ended("p2"),
+                SParameterPort::single_ended("p3"),
+            ],
+        };
+
+        let result = run_sparameter_analysis(netlist, &cfg)
+            .expect("S-parameter analysis should execute for simple three-port");
+        assert_eq!(result.num_ports, 3);
+        assert_eq!(result.s.len(), 3);
+        for row in &result.s {
+            assert_eq!(row.len(), 3);
+            for trace in row {
+                assert_eq!(trace.len(), result.frequencies.len());
+            }
+        }
+        for idx in 0..result.frequencies.len() {
+            for row in 0..3 {
+                for col in 0..3 {
+                    assert!(
+                        result.s[row][col][idx].norm().is_finite(),
+                        "S{}{} should be finite",
+                        row + 1,
+                        col + 1
+                    );
+                }
+            }
+            for row in 0..3 {
+                for col in 0..3 {
+                    if row == col {
+                        continue;
+                    }
+                    assert!(
+                        result.s[row][col][idx].norm() <= 1e-8,
+                        "S{}{} should be near 0 for decoupled ports",
+                        row + 1,
+                        col + 1
+                    );
+                }
+            }
+            for row in 0..3 {
+                assert!(
+                    result.s[row][row][idx].norm() <= 1.0 + 1e-6,
+                    "S{}{} should stay passive and bounded",
+                    row + 1,
+                    row + 1
+                );
+            }
+            let s11 = result.s[0][0][idx];
+            assert!((s11 - result.s[1][1][idx]).norm() < 1e-9);
+            assert!((s11 - result.s[2][2][idx]).norm() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn test_run_sparameter_analysis_rejects_single_port_config() {
+        let netlist = "* S-parameter invalid\nR1 p1 0 50\n.end\n";
+        let cfg = SParameterRunConfig {
+            start_freq: 1e3,
+            stop_freq: 1e6,
+            points_per_unit: 5,
+            sweep: SParameterSweep::Decade,
+            z0: 50.0,
+            ports: vec![SParameterPort::single_ended("p1")],
+        };
+
+        let err = run_sparameter_analysis(netlist, &cfg)
+            .expect_err("single-port S-parameter config should be rejected");
+        assert!(err.contains("at least 2 ports"));
     }
 
     #[test]
