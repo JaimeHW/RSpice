@@ -2107,6 +2107,29 @@ P1 1 0 2 0 3 0 PMOD
     }
 
     #[test]
+    fn test_build_jiles_atherton_inductor_reports_not_supported() {
+        let netlist_str = r#"
+* Jiles-Atherton inductor should fail until runtime integration is implemented
+L1 in 0 1m MODEL=CORE1
+V1 in 0 DC 0
+.MODEL CORE1 CORE (MS=8e5 A=100 K=50 C=0.2 ALPHA=1e-3)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+
+        let err = engine
+            .build_circuit(&netlist)
+            .expect_err("Jiles-Atherton model should fail fast until solver support exists");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Jiles-Atherton") && msg.contains("not yet supported"),
+            "expected explicit unsupported JA error, got {}",
+            msg
+        );
+    }
+
+    #[test]
     fn test_build_tline_model_sets_attenuation_from_rlgc() {
         let netlist_str = r#"
 * O-line with model-derived attenuation

@@ -1151,26 +1151,28 @@ impl Engine {
                         .inductors
                         .add(element.name.clone(), np, nn, branch, *value);
                 }
-                // Jiles-Atherton hysteresis inductor - currently treated as standard inductor
-                // TODO: Look up JA model parameters and create JilesAthertonInductor device
                 ElementKind::JilesAthertonInductor {
-                    value,
-                    model: _,
+                    value: _,
+                    model,
                     initial_current: _,
                 } => {
-                    let np = circuit.get_or_create_node(&element.nodes[0]);
-                    let nn = circuit.get_or_create_node(&element.nodes[1]);
-                    let branch = circuit.allocate_branch_named(&element.name);
-                    // For now, create standard inductor - full JA integration requires:
-                    // 1. Looking up .MODEL CORE JA parameters from netlist
-                    // 2. Creating JilesAthertonInductor device with hysteresis state
-                    log::info!(
-                        "Jiles-Atherton inductor {} created as linear inductor (JA model not yet integrated)",
-                        element.name
-                    );
-                    circuit
-                        .inductors
-                        .add(element.name.clone(), np, nn, branch, *value);
+                    let model_def = find_model_def(netlist, model).ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "Jiles-Atherton inductor '{}' references unknown model '{}'",
+                            element.name, model
+                        ))
+                    })?;
+                    ensure_model_type(
+                        "Jiles-Atherton inductor",
+                        &element.name,
+                        model,
+                        model_def,
+                        &["CORE", "JA", "JILES", "JILESATHERTON"],
+                    )?;
+                    return Err(SimulationError::Circuit(format!(
+                        "Jiles-Atherton inductor '{}' is not yet supported by the runtime solver (model '{}')",
+                        element.name, model
+                    )));
                 }
                 ElementKind::VoltageSource(spec) => {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
