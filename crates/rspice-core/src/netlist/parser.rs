@@ -460,7 +460,7 @@ fn parse_command(
                 params: model_params,
             });
         }
-        ".PARAM" => {
+        ".PARAM" | ".CSPARAM" => {
             parse_param_statement(stream, line_num, params)?;
         }
         ".STEP" => {
@@ -3407,6 +3407,44 @@ R1 1 0 {R}
 "#;
         let result = parse_netlist(netlist).unwrap();
         assert!((result.params.get("RTOTAL").unwrap() - 1500.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_parse_csparam() {
+        let netlist = r#"CsParam Test
+.CSPARAM R=2k
+R1 1 0 {R}
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+        assert!(result.params.get("R").is_some());
+        assert!((result.params.get("R").unwrap() - 2000.0).abs() < 1e-10);
+
+        match &result.elements[0].kind {
+            ElementKind::Resistor { value, .. } => {
+                assert!((value - 2000.0).abs() < 1e-10);
+            }
+            _ => panic!("Expected Resistor"),
+        }
+    }
+
+    #[test]
+    fn test_parse_csparam_expression_with_param_reference() {
+        let netlist = r#"CsParam Expression Test
+.PARAM RBASE=1k
+.CSPARAM RLOAD={RBASE*2}
+R1 1 0 {RLOAD}
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+        assert!((result.params.get("RLOAD").unwrap() - 2000.0).abs() < 1e-10);
+
+        match &result.elements[0].kind {
+            ElementKind::Resistor { value, .. } => {
+                assert!((*value - 2000.0).abs() < 1e-10);
+            }
+            _ => panic!("Expected Resistor"),
+        }
     }
 
     #[test]

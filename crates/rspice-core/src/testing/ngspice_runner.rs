@@ -647,23 +647,14 @@ impl TestRunner {
 
     /// Check if netlist uses unsupported features
     fn check_unsupported(&self, source: &str) -> Option<String> {
-        let lower = source.to_lowercase();
-
-        // Directive-based patterns (can match anywhere since they start with '.')
+        // Directive-based patterns.
         // NOTE: .subckt is now supported via flattening
         // NOTE: .tf and .sens are handled by running DC OP (sufficient for basic validation)
         // NOTE: .noise, .pz, and .four are exercised directly in regression suites.
         let directive_patterns = [
             (".disto", "distortion analysis"),
-            (".csparam", "constant parameter"),
             // .control blocks are ignored - we just run the circuit simulation part
         ];
-
-        for (pattern, reason) in directive_patterns {
-            if lower.contains(pattern) {
-                return Some(reason.to_string());
-            }
-        }
 
         // Device-based patterns (must be at start of line)
         // These are single-letter device prefixes that need line-start checking
@@ -673,8 +664,25 @@ impl TestRunner {
             // All previously listed devices are now supported
         ];
 
-        for line in lower.lines() {
-            let trimmed = line.trim();
+        let mut has_xspice = false;
+
+        for line in source.lines() {
+            let trimmed = Self::strip_netlist_comment(line)
+                .trim()
+                .to_ascii_lowercase();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            if let Some(directive) = trimmed.strip_prefix('.') {
+                let token = format!(".{}", directive.split_whitespace().next().unwrap_or(""));
+                for (pattern, reason) in directive_patterns {
+                    if token == pattern {
+                        return Some(reason.to_string());
+                    }
+                }
+            }
+
             // Check if line starts with device letter followed by alphanumeric (e.g., "t1", "k1")
             for (prefix, reason) in &line_start_devices {
                 if trimmed.starts_with(prefix) {
@@ -686,14 +694,27 @@ impl TestRunner {
                     }
                 }
             }
+
+            if trimmed.contains("xspice") {
+                has_xspice = true;
+            }
         }
 
-        // Check for XSPICE (a-devices)
-        if lower.contains("xspice") {
+        if has_xspice {
             return Some("XSPICE".to_string());
         }
 
         None
+    }
+
+    fn strip_netlist_comment(line: &str) -> &str {
+        let no_inline = line.split_once(';').map(|(head, _)| head).unwrap_or(line);
+        let trimmed = no_inline.trim_start();
+        if trimmed.starts_with('*') || trimmed.starts_with("//") {
+            ""
+        } else {
+            no_inline
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -989,8 +1010,19 @@ mod tests {
                 .is_none()
         );
         assert!(runner.check_unsupported(".disto h1 2").is_some());
+        assert!(runner.check_unsupported(".csparam gain=2").is_none());
         assert!(runner.check_unsupported(".pz in out vol pz").is_none());
         assert!(runner.check_unsupported(".four 1k v(out)").is_none());
+        assert!(
+            runner
+                .check_unsupported("* .disto appears in a comment only")
+                .is_none()
+        );
+        assert!(
+            runner
+                .check_unsupported("R1 1 0 1k ; .disto in inline comment")
+                .is_none()
+        );
         assert!(
             runner
                 .check_unsupported("r1 1 2 1k\n.dc v1 0 5 0.1")
