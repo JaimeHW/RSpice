@@ -193,6 +193,24 @@ impl ElementDesc {
         }
     }
 
+    /// Create independent current source element.
+    ///
+    /// `value` is the source current flowing from `n_pos` to `n_neg`.
+    pub fn current_source(
+        name: &str,
+        n_pos: Option<usize>,
+        n_neg: Option<usize>,
+        current: Value,
+    ) -> Self {
+        Self {
+            name: name.to_string(),
+            element_type: ElementType::CurrentSource,
+            node_pos: n_pos,
+            node_neg: n_neg,
+            value: current,
+        }
+    }
+
     /// Get conductance (for resistors)
     pub fn conductance(&self) -> Value {
         if self.value.abs() > 1e-15 {
@@ -339,6 +357,22 @@ impl SensitivityAnalyzer {
         0.0
     }
 
+    /// Compute sensitivity of an independent current source.
+    ///
+    /// MNA stamp for a source flowing from n_pos -> n_neg:
+    /// b[n_pos] -= I, b[n_neg] += I
+    ///
+    /// With residual form Gx - b = 0:
+    /// d(output)/dI = lambda^T * db/dI = -(lambda_pos - lambda_neg)
+    fn current_source_sensitivity(&self, elem: &ElementDesc) -> Value {
+        -self.adjoint_difference(elem.node_pos, elem.node_neg)
+    }
+
+    #[inline]
+    fn unsupported_linearized_sensitivity(&self, _elem: &ElementDesc) -> Value {
+        0.0
+    }
+
     /// Get voltage difference across element
     fn voltage_difference(&self, n_pos: Option<usize>, n_neg: Option<usize>) -> Value {
         let v_pos = n_pos.map(|i| self.solution[i]).unwrap_or(0.0);
@@ -399,7 +433,11 @@ impl SensitivityAnalyzer {
             let absolute = match elem.element_type {
                 ElementType::Resistor => self.resistor_sensitivity(elem),
                 ElementType::Capacitor => self.capacitor_sensitivity(elem),
-                _ => 0.0, // Other types not implemented yet
+                ElementType::CurrentSource => self.current_source_sensitivity(elem),
+                ElementType::Inductor
+                | ElementType::VoltageSource
+                | ElementType::Transconductance
+                | ElementType::Transresistance => self.unsupported_linearized_sensitivity(elem),
             };
 
             let sensitivity = Sensitivity::new(
@@ -715,6 +753,63 @@ mod tests {
             sens_c.absolute, 0.0,
             "Capacitor should have zero DC sensitivity"
         );
+    }
+
+    /// Test current source DC sensitivity sign and magnitude.
+    #[test]
+    fn test_current_source_sensitivity_dc() {
+        let r = 1_000.0;
+        let g = 1.0 / r;
+        let i = 2e-3;
+
+        // Single-node DC system: G * v = b, with current source from node->gnd
+        // stamped as b = -I, so v = -I / G.
+        let g_matrix = vec![vec![g]];
+        let solution = vec![-i / g];
+        let elements = vec![
+            ElementDesc::resistor("R1", Some(0), None, r),
+            ElementDesc::current_source("I1", Some(0), None, i),
+        ];
+
+        let mut analyzer = SensitivityAnalyzer::new(g_matrix, solution, elements);
+        let result = analyzer
+            .analyze(0, None)
+            .expect("sensitivity analysis should succeed");
+        let sens_i = result
+            .get("I1")
+            .expect("current source sensitivity should be reported");
+
+        // dv/dI = -1/G = -R for this stamping convention.
+        assert!(
+            (sens_i.absolute + r).abs() < 1e-9,
+            "expected dv/dI = -R, got {} for R={}",
+            sens_i.absolute,
+            r
+        );
+    }
+
+    /// Unsupported element kinds should be reported with zero sensitivity
+    /// instead of being silently dropped.
+    #[test]
+    fn test_unsupported_element_type_yields_zero_sensitivity_entry() {
+        let g_matrix = vec![vec![1e-3]];
+        let solution = vec![1.0];
+        let elements = vec![ElementDesc {
+            name: "L1".to_string(),
+            element_type: ElementType::Inductor,
+            node_pos: Some(0),
+            node_neg: None,
+            value: 1e-6,
+        }];
+
+        let mut analyzer = SensitivityAnalyzer::new(g_matrix, solution, elements);
+        let result = analyzer
+            .analyze(0, None)
+            .expect("sensitivity analysis should succeed");
+        let sens_l = result
+            .get("L1")
+            .expect("inductor entry should still be reported");
+        assert_eq!(sens_l.absolute, 0.0);
     }
 
     /// Test percent_per_percent calculation correctness.

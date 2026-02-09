@@ -652,11 +652,9 @@ impl TestRunner {
         // Directive-based patterns (can match anywhere since they start with '.')
         // NOTE: .subckt is now supported via flattening
         // NOTE: .tf and .sens are handled by running DC OP (sufficient for basic validation)
+        // NOTE: .noise, .pz, and .four are exercised directly in regression suites.
         let directive_patterns = [
-            (".noise", "noise analysis"),
-            (".pz", "pole-zero analysis"),
             (".disto", "distortion analysis"),
-            (".four", "Fourier analysis"),
             (".csparam", "constant parameter"),
             // .control blocks are ignored - we just run the circuit simulation part
         ];
@@ -988,10 +986,11 @@ mod tests {
         assert!(
             runner
                 .check_unsupported(".noise v(out) v1 dec 10 1 1meg")
-                .is_some()
+                .is_none()
         );
         assert!(runner.check_unsupported(".disto h1 2").is_some());
-        assert!(runner.check_unsupported(".pz in out vol pz").is_some());
+        assert!(runner.check_unsupported(".pz in out vol pz").is_none());
+        assert!(runner.check_unsupported(".four 1k v(out)").is_none());
         assert!(
             runner
                 .check_unsupported("r1 1 2 1k\n.dc v1 0 5 0.1")
