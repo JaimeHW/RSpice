@@ -517,7 +517,72 @@ pub mod autodiff {
                         let den = IrExpr::Binary(BinaryOp::Mul, right.clone(), right.clone());
                         IrExpr::Binary(BinaryOp::Div, Box::new(num), Box::new(den))
                     }
-                    _ => IrExpr::Const(0.0), // TODO: handle other ops
+                    BinaryOp::Pow => {
+                        // d(u^v) =
+                        //   if v is const c: c*u^(c-1)*u'
+                        //   else: u^v * (v' * ln(u) + v * u'/u)
+                        match right.as_ref() {
+                            IrExpr::Const(c) => {
+                                let u_pow = IrExpr::Binary(
+                                    BinaryOp::Pow,
+                                    left.clone(),
+                                    Box::new(IrExpr::Const(*c - 1.0)),
+                                );
+                                IrExpr::Binary(
+                                    BinaryOp::Mul,
+                                    Box::new(IrExpr::Const(*c)),
+                                    Box::new(IrExpr::Binary(
+                                        BinaryOp::Mul,
+                                        Box::new(u_pow),
+                                        Box::new(dl),
+                                    )),
+                                )
+                            }
+                            _ => {
+                                let u_pow_v =
+                                    IrExpr::Binary(BinaryOp::Pow, left.clone(), right.clone());
+                                let vprime_ln_u = IrExpr::Binary(
+                                    BinaryOp::Mul,
+                                    Box::new(dr),
+                                    Box::new(IrExpr::Call(
+                                        IrFunction::Log,
+                                        vec![left.as_ref().clone()],
+                                    )),
+                                );
+                                let v_uprime_over_u = IrExpr::Binary(
+                                    BinaryOp::Mul,
+                                    right.clone(),
+                                    Box::new(IrExpr::Binary(
+                                        BinaryOp::Div,
+                                        Box::new(dl),
+                                        left.clone(),
+                                    )),
+                                );
+                                let term = IrExpr::Binary(
+                                    BinaryOp::Add,
+                                    Box::new(vprime_ln_u),
+                                    Box::new(v_uprime_over_u),
+                                );
+                                IrExpr::Binary(BinaryOp::Mul, Box::new(u_pow_v), Box::new(term))
+                            }
+                        }
+                    }
+                    // Piecewise-constant or discontinuous operators are treated
+                    // as zero derivative in the DC Jacobian.
+                    BinaryOp::Mod
+                    | BinaryOp::Eq
+                    | BinaryOp::Ne
+                    | BinaryOp::Lt
+                    | BinaryOp::Le
+                    | BinaryOp::Gt
+                    | BinaryOp::Ge
+                    | BinaryOp::And
+                    | BinaryOp::Or
+                    | BinaryOp::BitAnd
+                    | BinaryOp::BitOr
+                    | BinaryOp::BitXor
+                    | BinaryOp::Shl
+                    | BinaryOp::Shr => IrExpr::Const(0.0),
                 }
             }
 
@@ -531,11 +596,29 @@ pub mod autodiff {
 
                 // Chain rule: d(f(g)) = f'(g) * g'
                 let outer_deriv = match func {
+                    IrFunction::Abs => IrExpr::Conditional(
+                        Box::new(IrExpr::Binary(
+                            BinaryOp::Ge,
+                            Box::new(inner.clone()),
+                            Box::new(IrExpr::Const(0.0)),
+                        )),
+                        Box::new(IrExpr::Const(1.0)),
+                        Box::new(IrExpr::Const(-1.0)),
+                    ),
                     IrFunction::Exp => IrExpr::Call(IrFunction::Exp, vec![inner.clone()]),
                     IrFunction::Log => IrExpr::Binary(
                         BinaryOp::Div,
                         Box::new(IrExpr::Const(1.0)),
                         Box::new(inner.clone()),
+                    ),
+                    IrFunction::Log10 => IrExpr::Binary(
+                        BinaryOp::Div,
+                        Box::new(IrExpr::Const(1.0)),
+                        Box::new(IrExpr::Binary(
+                            BinaryOp::Mul,
+                            Box::new(inner.clone()),
+                            Box::new(IrExpr::Const(std::f64::consts::LN_10)),
+                        )),
                     ),
                     IrFunction::Sqrt => IrExpr::Binary(
                         BinaryOp::Div,
@@ -547,10 +630,147 @@ pub mod autodiff {
                         UnaryOp::Neg,
                         Box::new(IrExpr::Call(IrFunction::Sin, vec![inner.clone()])),
                     ),
+                    IrFunction::Tan => IrExpr::Binary(
+                        BinaryOp::Div,
+                        Box::new(IrExpr::Const(1.0)),
+                        Box::new(IrExpr::Binary(
+                            BinaryOp::Pow,
+                            Box::new(IrExpr::Call(IrFunction::Cos, vec![inner.clone()])),
+                            Box::new(IrExpr::Const(2.0)),
+                        )),
+                    ),
+                    IrFunction::Sinh => IrExpr::Call(IrFunction::Cosh, vec![inner.clone()]),
+                    IrFunction::Cosh => IrExpr::Call(IrFunction::Sinh, vec![inner.clone()]),
+                    IrFunction::Tanh => IrExpr::Binary(
+                        BinaryOp::Div,
+                        Box::new(IrExpr::Const(1.0)),
+                        Box::new(IrExpr::Binary(
+                            BinaryOp::Pow,
+                            Box::new(IrExpr::Call(IrFunction::Cosh, vec![inner.clone()])),
+                            Box::new(IrExpr::Const(2.0)),
+                        )),
+                    ),
+                    IrFunction::Asin => IrExpr::Binary(
+                        BinaryOp::Div,
+                        Box::new(IrExpr::Const(1.0)),
+                        Box::new(IrExpr::Call(
+                            IrFunction::Sqrt,
+                            vec![IrExpr::Binary(
+                                BinaryOp::Sub,
+                                Box::new(IrExpr::Const(1.0)),
+                                Box::new(IrExpr::Binary(
+                                    BinaryOp::Pow,
+                                    Box::new(inner.clone()),
+                                    Box::new(IrExpr::Const(2.0)),
+                                )),
+                            )],
+                        )),
+                    ),
+                    IrFunction::Acos => IrExpr::Unary(
+                        UnaryOp::Neg,
+                        Box::new(IrExpr::Binary(
+                            BinaryOp::Div,
+                            Box::new(IrExpr::Const(1.0)),
+                            Box::new(IrExpr::Call(
+                                IrFunction::Sqrt,
+                                vec![IrExpr::Binary(
+                                    BinaryOp::Sub,
+                                    Box::new(IrExpr::Const(1.0)),
+                                    Box::new(IrExpr::Binary(
+                                        BinaryOp::Pow,
+                                        Box::new(inner.clone()),
+                                        Box::new(IrExpr::Const(2.0)),
+                                    )),
+                                )],
+                            )),
+                        )),
+                    ),
+                    IrFunction::Atan => IrExpr::Binary(
+                        BinaryOp::Div,
+                        Box::new(IrExpr::Const(1.0)),
+                        Box::new(IrExpr::Binary(
+                            BinaryOp::Add,
+                            Box::new(IrExpr::Const(1.0)),
+                            Box::new(IrExpr::Binary(
+                                BinaryOp::Pow,
+                                Box::new(inner.clone()),
+                                Box::new(IrExpr::Const(2.0)),
+                            )),
+                        )),
+                    ),
+                    IrFunction::Floor | IrFunction::Ceil => IrExpr::Const(0.0),
                     _ => return IrExpr::Const(0.0),
                 };
 
                 IrExpr::Binary(BinaryOp::Mul, Box::new(outer_deriv), Box::new(di))
+            }
+            IrExpr::Call(IrFunction::Atan2, args) if args.len() == 2 => {
+                // atan2(y, x): d = (x*dy - y*dx)/(x^2 + y^2)
+                let y = args[0].clone();
+                let x = args[1].clone();
+                let dy = differentiate(&y, wrt);
+                let dx = differentiate(&x, wrt);
+                let num = IrExpr::Binary(
+                    BinaryOp::Sub,
+                    Box::new(IrExpr::Binary(
+                        BinaryOp::Mul,
+                        Box::new(x.clone()),
+                        Box::new(dy),
+                    )),
+                    Box::new(IrExpr::Binary(
+                        BinaryOp::Mul,
+                        Box::new(y.clone()),
+                        Box::new(dx),
+                    )),
+                );
+                let den = IrExpr::Binary(
+                    BinaryOp::Add,
+                    Box::new(IrExpr::Binary(
+                        BinaryOp::Pow,
+                        Box::new(x),
+                        Box::new(IrExpr::Const(2.0)),
+                    )),
+                    Box::new(IrExpr::Binary(
+                        BinaryOp::Pow,
+                        Box::new(y),
+                        Box::new(IrExpr::Const(2.0)),
+                    )),
+                );
+                IrExpr::Binary(BinaryOp::Div, Box::new(num), Box::new(den))
+            }
+            IrExpr::Call(IrFunction::Pow, args) if args.len() == 2 => {
+                let as_binary = IrExpr::Binary(
+                    BinaryOp::Pow,
+                    Box::new(args[0].clone()),
+                    Box::new(args[1].clone()),
+                );
+                differentiate(&as_binary, wrt)
+            }
+            IrExpr::Call(IrFunction::Min, args) if args.len() == 2 => {
+                let left = args[0].clone();
+                let right = args[1].clone();
+                IrExpr::Conditional(
+                    Box::new(IrExpr::Binary(
+                        BinaryOp::Le,
+                        Box::new(left.clone()),
+                        Box::new(right.clone()),
+                    )),
+                    Box::new(differentiate(&left, wrt)),
+                    Box::new(differentiate(&right, wrt)),
+                )
+            }
+            IrExpr::Call(IrFunction::Max, args) if args.len() == 2 => {
+                let left = args[0].clone();
+                let right = args[1].clone();
+                IrExpr::Conditional(
+                    Box::new(IrExpr::Binary(
+                        BinaryOp::Ge,
+                        Box::new(left.clone()),
+                        Box::new(right.clone()),
+                    )),
+                    Box::new(differentiate(&left, wrt)),
+                    Box::new(differentiate(&right, wrt)),
+                )
             }
 
             IrExpr::Limexp(inner) => {
@@ -696,6 +916,31 @@ mod tests {
         let simplified = simplify(deriv);
         // Result should contain exp
         assert!(matches!(simplified, IrExpr::Call(IrFunction::Exp, _)));
+    }
+
+    #[test]
+    fn test_differentiate_pow_constant_exponent() {
+        let expr = IrExpr::Binary(
+            BinaryOp::Pow,
+            Box::new(IrExpr::Voltage(0, 1)),
+            Box::new(IrExpr::Const(2.0)),
+        );
+        let wrt = DerivativeWrt::Voltage(0);
+        let deriv = differentiate(&expr, &wrt);
+        let simplified = simplify(deriv);
+        // d(v^2)/dv = 2*v
+        assert!(matches!(simplified, IrExpr::Binary(BinaryOp::Mul, _, _)));
+    }
+
+    #[test]
+    fn test_differentiate_atan2_two_args() {
+        let expr = IrExpr::Call(
+            IrFunction::Atan2,
+            vec![IrExpr::Voltage(0, 1), IrExpr::Param("g".into())],
+        );
+        let wrt = DerivativeWrt::Voltage(0);
+        let deriv = differentiate(&expr, &wrt);
+        assert!(matches!(deriv, IrExpr::Binary(BinaryOp::Div, _, _)));
     }
 
     #[test]

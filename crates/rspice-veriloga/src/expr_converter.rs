@@ -16,6 +16,7 @@ use crate::ir::{BranchRef, IrExpr, IrFunction};
 use crate::semantic::AnalyzedModule;
 use smol_str::SmolStr;
 use std::collections::HashMap;
+use std::path::Path;
 
 /// Context for expression conversion
 ///
@@ -224,22 +225,23 @@ impl<'a> ExprConverter<'a> {
                 Ok(IrExpr::Limit(Box::new(inner), step))
             }
             "$table_model" => {
-                // $table_model(input, "tablefile", "intercol")
-                // For now, create placeholder with empty table data
-                // Real implementation would parse table file or inline data
-                if func.args.is_empty() {
+                // $table_model(input, table_spec, ...)
+                // Supports:
+                // 1) Inline numeric pairs: $table_model(x, 0,0, 1,2, 2,4)
+                // 2) Inline string table: $table_model(x, "0 0; 1 2; 2 4")
+                // 3) Table file path:    $table_model(x, "table.dat")
+                if func.args.len() < 2 {
                     return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "$table_model requires at least one argument".into(),
+                        "$table_model requires input expression and table data".into(),
                     ))
                     .into());
                 }
                 let input = self.convert(&func.args[0])?;
-                // TODO: Parse table data from file or parameters
-                // For now, use placeholder empty tables
+                let (x_data, y_data) = self.parse_table_model_data(func)?;
                 Ok(IrExpr::TableLookup {
                     input: Box::new(input),
-                    x_data: vec![],
-                    y_data: vec![],
+                    x_data,
+                    y_data,
                 })
             }
             "absdelay" => {
@@ -818,6 +820,168 @@ impl<'a> ExprConverter<'a> {
             .into()),
         }
     }
+
+    fn parse_table_model_data(&self, func: &SystemFunction) -> CompileResult<(Vec<f64>, Vec<f64>)> {
+        let data_args = &func.args[1..];
+
+        if data_args.len() >= 2
+            && data_args
+                .iter()
+                .all(|arg| matches!(arg, Expression::Number(_)))
+        {
+            if data_args.len() % 2 != 0 {
+                return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                    "$table_model numeric table data requires x/y pairs".into(),
+                ))
+                .into());
+            }
+            let mut x_data = Vec::with_capacity(data_args.len() / 2);
+            let mut y_data = Vec::with_capacity(data_args.len() / 2);
+            for pair in data_args.chunks_exact(2) {
+                let Expression::Number(x) = &pair[0] else {
+                    unreachable!()
+                };
+                let Expression::Number(y) = &pair[1] else {
+                    unreachable!()
+                };
+                x_data.push(x.value);
+                y_data.push(y.value);
+            }
+            return Self::validate_and_sort_table_data(x_data, y_data);
+        }
+
+        let Some(Expression::StringLit(spec)) = data_args.first() else {
+            return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                "$table_model table data must be numeric pairs or a string table/file path".into(),
+            ))
+            .into());
+        };
+
+        let raw = spec.value.as_str();
+        if let Ok((x_data, y_data)) = Self::parse_inline_table_spec(raw) {
+            return Self::validate_and_sort_table_data(x_data, y_data);
+        }
+
+        let path = Path::new(raw);
+        let table_text = std::fs::read_to_string(path).map_err(|e| {
+            CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                "$table_model could not parse inline table and failed to read '{}': {}",
+                raw, e
+            )))
+        })?;
+        let (x_data, y_data) = Self::parse_inline_table_spec(&table_text).map_err(|e| {
+            CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                "$table_model failed to parse table file '{}': {}",
+                raw, e
+            )))
+        })?;
+        Self::validate_and_sort_table_data(x_data, y_data)
+    }
+
+    fn parse_inline_table_spec(spec: &str) -> Result<(Vec<f64>, Vec<f64>), String> {
+        let cleaned_lines: Vec<String> = spec
+            .lines()
+            .map(|line| line.split('!').next().unwrap_or("").trim().to_string())
+            .filter(|line| !line.is_empty())
+            .collect();
+        let normalized = cleaned_lines.join(";");
+        if normalized.is_empty() {
+            return Err("table data is empty".to_string());
+        }
+
+        let mut x_data = Vec::new();
+        let mut y_data = Vec::new();
+
+        let segments: Vec<&str> = normalized
+            .split(';')
+            .map(str::trim)
+            .filter(|segment| !segment.is_empty())
+            .collect();
+        if !segments.is_empty() {
+            let mut all_pairs = true;
+            for segment in &segments {
+                let segment_normalized = segment.replace(',', " ");
+                let tokens: Vec<&str> = segment_normalized.split_whitespace().collect();
+                if tokens.len() != 2 {
+                    all_pairs = false;
+                    break;
+                }
+                let x = tokens[0]
+                    .parse::<f64>()
+                    .map_err(|_| format!("invalid x value '{}'", tokens[0]))?;
+                let y = tokens[1]
+                    .parse::<f64>()
+                    .map_err(|_| format!("invalid y value '{}'", tokens[1]))?;
+                x_data.push(x);
+                y_data.push(y);
+            }
+            if all_pairs && !x_data.is_empty() {
+                return Ok((x_data, y_data));
+            }
+            x_data.clear();
+            y_data.clear();
+        }
+
+        let normalized_commas = normalized.replace(',', " ");
+        let tokens: Vec<&str> = normalized_commas.split_whitespace().collect();
+        if tokens.len() < 4 || tokens.len() % 2 != 0 {
+            return Err("table data must contain at least two x/y pairs".to_string());
+        }
+        for pair in tokens.chunks_exact(2) {
+            let x = pair[0]
+                .parse::<f64>()
+                .map_err(|_| format!("invalid x value '{}'", pair[0]))?;
+            let y = pair[1]
+                .parse::<f64>()
+                .map_err(|_| format!("invalid y value '{}'", pair[1]))?;
+            x_data.push(x);
+            y_data.push(y);
+        }
+        Ok((x_data, y_data))
+    }
+
+    fn validate_and_sort_table_data(
+        x_data: Vec<f64>,
+        y_data: Vec<f64>,
+    ) -> CompileResult<(Vec<f64>, Vec<f64>)> {
+        if x_data.len() != y_data.len() {
+            return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                "$table_model x/y data length mismatch".into(),
+            ))
+            .into());
+        }
+        if x_data.len() < 2 {
+            return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                "$table_model requires at least two table points".into(),
+            ))
+            .into());
+        }
+        if x_data.iter().any(|value| !value.is_finite())
+            || y_data.iter().any(|value| !value.is_finite())
+        {
+            return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                "$table_model table data must be finite".into(),
+            ))
+            .into());
+        }
+
+        let mut pairs: Vec<(f64, f64)> = x_data.into_iter().zip(y_data).collect();
+        pairs.sort_by(|(x_a, _), (x_b, _)| {
+            x_a.partial_cmp(x_b).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        for idx in 1..pairs.len() {
+            if (pairs[idx].0 - pairs[idx - 1].0).abs() < 1e-30 {
+                return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                    "$table_model x values must be strictly monotonic".into(),
+                ))
+                .into());
+            }
+        }
+
+        let (x_sorted, y_sorted): (Vec<f64>, Vec<f64>) = pairs.into_iter().unzip();
+        Ok((x_sorted, y_sorted))
+    }
 }
 
 // ============================================================================
@@ -827,7 +991,7 @@ impl<'a> ExprConverter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{NumberLit, UnaryOp};
+    use crate::ast::{NumberLit, StringLit, UnaryOp};
     use crate::source::SourceId;
     use crate::source::Span;
 
@@ -1246,5 +1410,149 @@ mod tests {
         let result = conv.convert(&expr).unwrap();
         // hypot(x, y) = sqrt(x^2 + y^2), should be Call(Sqrt, ...)
         assert!(matches!(result, IrExpr::Call(IrFunction::Sqrt, _)));
+    }
+
+    #[test]
+    fn test_convert_table_model_inline_numeric_pairs() {
+        let ctx = make_ctx();
+        let conv = ExprConverter::new(&ctx);
+
+        let expr = Expression::SystemFunction(SystemFunction {
+            name: "$table_model".into(),
+            args: vec![
+                Expression::Identifier(Identifier {
+                    name: "x".into(),
+                    span: dummy_span(),
+                }),
+                Expression::Number(NumberLit {
+                    value: 0.0,
+                    raw: "0".into(),
+                    span: dummy_span(),
+                }),
+                Expression::Number(NumberLit {
+                    value: 0.0,
+                    raw: "0".into(),
+                    span: dummy_span(),
+                }),
+                Expression::Number(NumberLit {
+                    value: 1.0,
+                    raw: "1".into(),
+                    span: dummy_span(),
+                }),
+                Expression::Number(NumberLit {
+                    value: 2.0,
+                    raw: "2".into(),
+                    span: dummy_span(),
+                }),
+            ],
+            span: dummy_span(),
+        });
+
+        let result = conv.convert(&expr).unwrap();
+        let IrExpr::TableLookup { x_data, y_data, .. } = result else {
+            panic!("expected table lookup expression");
+        };
+        assert_eq!(x_data, vec![0.0, 1.0]);
+        assert_eq!(y_data, vec![0.0, 2.0]);
+    }
+
+    #[test]
+    fn test_convert_table_model_inline_string_pairs() {
+        let ctx = make_ctx();
+        let conv = ExprConverter::new(&ctx);
+
+        let expr = Expression::SystemFunction(SystemFunction {
+            name: "$table_model".into(),
+            args: vec![
+                Expression::Identifier(Identifier {
+                    name: "x".into(),
+                    span: dummy_span(),
+                }),
+                Expression::StringLit(StringLit {
+                    value: "0 0; 1 2; 2 4".into(),
+                    span: dummy_span(),
+                }),
+            ],
+            span: dummy_span(),
+        });
+
+        let result = conv.convert(&expr).unwrap();
+        let IrExpr::TableLookup { x_data, y_data, .. } = result else {
+            panic!("expected table lookup expression");
+        };
+        assert_eq!(x_data, vec![0.0, 1.0, 2.0]);
+        assert_eq!(y_data, vec![0.0, 2.0, 4.0]);
+    }
+
+    #[test]
+    fn test_convert_table_model_file_path() {
+        let ctx = make_ctx();
+        let conv = ExprConverter::new(&ctx);
+
+        let temp_dir = std::env::temp_dir();
+        let unique_name = format!(
+            "rspice_table_model_{}_{}.tbl",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        );
+        let table_path = temp_dir.join(unique_name);
+        std::fs::write(&table_path, "0 0\n1 1\n2 4\n").expect("write table file");
+
+        let expr = Expression::SystemFunction(SystemFunction {
+            name: "$table_model".into(),
+            args: vec![
+                Expression::Identifier(Identifier {
+                    name: "x".into(),
+                    span: dummy_span(),
+                }),
+                Expression::StringLit(StringLit {
+                    value: table_path.to_string_lossy().to_string().into(),
+                    span: dummy_span(),
+                }),
+            ],
+            span: dummy_span(),
+        });
+
+        let result = conv.convert(&expr).unwrap();
+        let IrExpr::TableLookup { x_data, y_data, .. } = result else {
+            panic!("expected table lookup expression");
+        };
+        assert_eq!(x_data, vec![0.0, 1.0, 2.0]);
+        assert_eq!(y_data, vec![0.0, 1.0, 4.0]);
+
+        let _ = std::fs::remove_file(table_path);
+    }
+
+    #[test]
+    fn test_convert_table_model_rejects_non_monotonic_x() {
+        let ctx = make_ctx();
+        let conv = ExprConverter::new(&ctx);
+
+        let expr = Expression::SystemFunction(SystemFunction {
+            name: "$table_model".into(),
+            args: vec![
+                Expression::Identifier(Identifier {
+                    name: "x".into(),
+                    span: dummy_span(),
+                }),
+                Expression::StringLit(StringLit {
+                    value: "0 0; 1 1; 1 2".into(),
+                    span: dummy_span(),
+                }),
+            ],
+            span: dummy_span(),
+        });
+
+        let err = conv
+            .convert(&expr)
+            .expect_err("duplicate x values must fail");
+        assert!(
+            err.to_string()
+                .to_lowercase()
+                .contains("strictly monotonic")
+        );
     }
 }

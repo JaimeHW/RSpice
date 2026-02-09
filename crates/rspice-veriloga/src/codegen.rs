@@ -18,6 +18,8 @@ pub struct CodeGenerator<'a> {
     options: &'a CompilerOptions,
     /// Collected Laplace filters
     laplace_filters: std::cell::RefCell<Vec<StateSpaceFilter>>,
+    /// Collected lookup tables used by $table_model expressions.
+    lookup_tables: std::cell::RefCell<Vec<LookupTable>>,
 }
 
 /// Compiled device model ready for simulation
@@ -458,6 +460,7 @@ impl<'a> CodeGenerator<'a> {
         Self {
             options,
             laplace_filters: std::cell::RefCell::new(Vec::new()),
+            lookup_tables: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -477,6 +480,9 @@ impl<'a> CodeGenerator<'a> {
 
     /// Generate from IR
     fn generate_from_ir(&self, ir: &DeviceIR) -> CompileResult<CompiledModel> {
+        self.lookup_tables.borrow_mut().clear();
+        self.laplace_filters.borrow_mut().clear();
+
         let mut model = CompiledModel {
             name: ir.name.clone(),
             num_terminals: ir.terminals.len(),
@@ -516,6 +522,7 @@ impl<'a> CodeGenerator<'a> {
         }
 
         model.laplace_filters = self.laplace_filters.take();
+        model.lookup_tables = self.lookup_tables.take();
 
         Ok(model)
     }
@@ -755,10 +762,10 @@ impl<'a> CodeGenerator<'a> {
                 // $table_model lookup with linear interpolation
                 // Emit input expression, then TableLookup instruction referencing the table
                 self.emit_expr(input, ir, program)?;
-                // For now, we need to store tables separately - using table index 0
-                // TODO: Proper table registration and indexing
-                let _ = (x_data, y_data); // Tables stored in CompiledModel
-                program.instructions.push(Instruction::TableLookup(0));
+                let table_id = self.register_lookup_table(x_data, y_data)?;
+                program
+                    .instructions
+                    .push(Instruction::TableLookup(table_id));
             }
             IrExpr::AbsDelay { expr, delay_time } => {
                 // absdelay(expr, delay_time) - transport delay
@@ -941,6 +948,34 @@ impl<'a> CodeGenerator<'a> {
             }
         }
         Ok(())
+    }
+
+    fn register_lookup_table(&self, x_data: &[f64], y_data: &[f64]) -> CompileResult<usize> {
+        if x_data.len() != y_data.len() {
+            return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                "$table_model x/y table length mismatch".into(),
+            ))
+            .into());
+        }
+        if x_data.len() < 2 {
+            return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                "$table_model requires at least two table points".into(),
+            ))
+            .into());
+        }
+
+        let mut tables = self.lookup_tables.borrow_mut();
+        if let Some((existing_idx, _)) = tables
+            .iter()
+            .enumerate()
+            .find(|(_, table)| table.x_data == x_data && table.y_data == y_data)
+        {
+            return Ok(existing_idx);
+        }
+
+        let table = LookupTable::from_data(x_data.to_vec(), y_data.to_vec());
+        tables.push(table);
+        Ok(tables.len() - 1)
     }
 }
 
@@ -1172,6 +1207,94 @@ mod tests {
 
         // PushVoltage, Exp, PushConst(1), Sub
         assert_eq!(program.instructions.len(), 4);
+    }
+
+    #[test]
+    fn test_compile_table_lookup_registers_table_and_instruction() {
+        let options = CompilerOptions::default();
+        let codegen = CodeGenerator::new(&options);
+        let ir = create_test_ir();
+
+        let expr = IrExpr::TableLookup {
+            input: Box::new(IrExpr::Voltage(0, 1)),
+            x_data: vec![0.0, 1.0, 2.0],
+            y_data: vec![0.0, 1.0, 4.0],
+        };
+        let program = codegen.compile_expr(&expr, &ir).unwrap();
+
+        assert_eq!(program.instructions.len(), 2);
+        assert!(matches!(
+            program.instructions[0],
+            Instruction::PushVoltage(0, 1)
+        ));
+        assert!(matches!(
+            program.instructions[1],
+            Instruction::TableLookup(0)
+        ));
+        let tables = codegen.lookup_tables.borrow();
+        assert_eq!(tables.len(), 1);
+        assert_eq!(tables[0].x_data, vec![0.0, 1.0, 2.0]);
+        assert_eq!(tables[0].y_data, vec![0.0, 1.0, 4.0]);
+    }
+
+    #[test]
+    fn test_compile_table_lookup_reuses_identical_table() {
+        let options = CompilerOptions::default();
+        let codegen = CodeGenerator::new(&options);
+        let ir = create_test_ir();
+
+        let expr_a = IrExpr::TableLookup {
+            input: Box::new(IrExpr::Const(0.25)),
+            x_data: vec![0.0, 1.0],
+            y_data: vec![0.0, 2.0],
+        };
+        let expr_b = IrExpr::TableLookup {
+            input: Box::new(IrExpr::Const(0.75)),
+            x_data: vec![0.0, 1.0],
+            y_data: vec![0.0, 2.0],
+        };
+        let prog_a = codegen.compile_expr(&expr_a, &ir).unwrap();
+        let prog_b = codegen.compile_expr(&expr_b, &ir).unwrap();
+
+        assert!(matches!(
+            prog_a.instructions[1],
+            Instruction::TableLookup(0)
+        ));
+        assert!(matches!(
+            prog_b.instructions[1],
+            Instruction::TableLookup(0)
+        ));
+        assert_eq!(codegen.lookup_tables.borrow().len(), 1);
+    }
+
+    #[test]
+    fn test_compile_table_lookup_assigns_distinct_ids_for_distinct_tables() {
+        let options = CompilerOptions::default();
+        let codegen = CodeGenerator::new(&options);
+        let ir = create_test_ir();
+
+        let expr_a = IrExpr::TableLookup {
+            input: Box::new(IrExpr::Const(0.25)),
+            x_data: vec![0.0, 1.0],
+            y_data: vec![0.0, 1.0],
+        };
+        let expr_b = IrExpr::TableLookup {
+            input: Box::new(IrExpr::Const(0.25)),
+            x_data: vec![0.0, 2.0],
+            y_data: vec![0.0, 1.0],
+        };
+        let prog_a = codegen.compile_expr(&expr_a, &ir).unwrap();
+        let prog_b = codegen.compile_expr(&expr_b, &ir).unwrap();
+
+        assert!(matches!(
+            prog_a.instructions[1],
+            Instruction::TableLookup(0)
+        ));
+        assert!(matches!(
+            prog_b.instructions[1],
+            Instruction::TableLookup(1)
+        ));
+        assert_eq!(codegen.lookup_tables.borrow().len(), 2);
     }
 
     #[test]
