@@ -177,7 +177,7 @@ mod tests {
     use super::*;
 
     fn create_test_model() -> CompiledModel {
-        use rspice_veriloga::codegen::{BytecodeProgram, Instruction, JacobianEntry, StampProgram};
+        use rspice_veriloga::codegen::{BytecodeProgram, Instruction, StampProgram};
 
         let value_program = BytecodeProgram {
             instructions: vec![
@@ -197,6 +197,8 @@ mod tests {
                 min: Some(0.0),
                 max: None,
             }],
+            num_variables: 0,
+            assignment_programs: Vec::new(),
             stamp_programs: vec![StampProgram {
                 stamp_locations: vec![
                     StampLocation {
@@ -213,8 +215,10 @@ mod tests {
                 value_program,
                 jacobian_programs: vec![],
             }],
+            lookup_tables: Vec::new(),
             internal_nodes: 0,
             branch_currents: 0,
+            laplace_filters: Vec::new(),
         }
     }
 

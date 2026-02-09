@@ -33,7 +33,9 @@ mod tests;
 // Re-export CompressionConfig for public API
 pub use crate::analysis::waveform::CompressionConfig;
 #[cfg(feature = "veriloga")]
-pub use builder::register_precompiled_veriloga_model;
+pub use builder::{
+    register_precompiled_veriloga_model, register_precompiled_veriloga_model_with_dependencies,
+};
 pub use config_resolver::{
     ConvergencePreset, SimulationConfigOverrides, resolve_simulation_config,
 };

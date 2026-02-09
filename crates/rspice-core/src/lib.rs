@@ -48,11 +48,13 @@ pub use abort_signal::{AbortSignal, AtomicAbort, NoAbort};
 pub use analysis::{AcAnalysis, DcAnalysis, MeasureEngine, TransientAnalysis};
 pub use circuit::{Circuit, CircuitData, Node, NodeId};
 pub use device::{Device, DeviceModel};
-#[cfg(feature = "veriloga")]
-pub use engine::register_precompiled_veriloga_model;
 pub use engine::{
     ConvergenceConfig, ConvergencePreset, DampingStrategy, Engine, SimulationConfig,
     SimulationConfigOverrides, SimulationError, resolve_simulation_config,
+};
+#[cfg(feature = "veriloga")]
+pub use engine::{
+    register_precompiled_veriloga_model, register_precompiled_veriloga_model_with_dependencies,
 };
 pub use netlist::Netlist;
 pub use solver::{SimulationResult, Simulator, SparseLuSolver, StaticMatrix, TripletMatrix};

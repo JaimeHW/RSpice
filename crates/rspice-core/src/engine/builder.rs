@@ -6,7 +6,11 @@
 use super::{Engine, SimulationError, extract_dc_value};
 use crate::netlist::{ElementKind, flatten_netlist};
 use crate::{CircuitData, Netlist};
+#[cfg(feature = "veriloga")]
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+#[cfg(feature = "veriloga")]
+use std::io::Read;
 #[cfg(feature = "veriloga")]
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -41,16 +45,30 @@ fn builtin_bjt_model_map() -> &'static HashMap<String, HashMap<String, f64>> {
 }
 
 #[cfg(feature = "veriloga")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-struct VerilogACacheFingerprint {
+const VERILOGA_CACHE_RECORD_VERSION: u32 = 1;
+
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct VerilogADependencyFingerprint {
+    canonical_path: PathBuf,
     modified_ns: Option<u128>,
-    file_len: Option<u64>,
+    file_len: u64,
+    content_hash: [u8; 32],
+}
+
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct VerilogADiskCacheRecord {
+    version: u32,
+    source_path: PathBuf,
+    dependencies: Vec<VerilogADependencyFingerprint>,
+    model: rspice_veriloga::CompiledModel,
 }
 
 #[cfg(feature = "veriloga")]
 #[derive(Debug, Clone)]
 struct CachedVerilogAModel {
-    fingerprint: VerilogACacheFingerprint,
+    dependencies: Vec<VerilogADependencyFingerprint>,
     model: rspice_veriloga::CompiledModel,
 }
 
@@ -66,24 +84,170 @@ fn canonicalize_for_cache(path: &Path) -> PathBuf {
 }
 
 #[cfg(feature = "veriloga")]
-fn file_fingerprint(path: &Path) -> Option<VerilogACacheFingerprint> {
+fn normalize_model_key(name: &str) -> String {
+    name.to_ascii_uppercase()
+}
+
+#[cfg(feature = "veriloga")]
+fn metadata_modified_ns(metadata: &std::fs::Metadata) -> Option<u128> {
     use std::time::UNIX_EPOCH;
 
-    let metadata = std::fs::metadata(path).ok()?;
-    let modified_ns = metadata
+    metadata
         .modified()
         .ok()
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_nanos());
-    Some(VerilogACacheFingerprint {
-        modified_ns,
-        file_len: Some(metadata.len()),
+        .map(|d| d.as_nanos())
+}
+
+#[cfg(feature = "veriloga")]
+fn hash_file(path: &Path) -> std::io::Result<[u8; 32]> {
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = blake3::Hasher::new();
+    let mut buffer = [0_u8; 64 * 1024];
+
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+
+    Ok(*hasher.finalize().as_bytes())
+}
+
+#[cfg(feature = "veriloga")]
+fn dependency_fingerprint(path: &Path) -> Option<VerilogADependencyFingerprint> {
+    let canonical_path = canonicalize_for_cache(path);
+    let metadata = std::fs::metadata(&canonical_path).ok()?;
+    let content_hash = hash_file(&canonical_path).ok()?;
+    Some(VerilogADependencyFingerprint {
+        canonical_path,
+        modified_ns: metadata_modified_ns(&metadata),
+        file_len: metadata.len(),
+        content_hash,
     })
 }
 
 #[cfg(feature = "veriloga")]
-fn normalize_model_key(name: &str) -> String {
-    name.to_ascii_uppercase()
+fn fingerprint_paths(
+    paths: &[PathBuf],
+) -> Result<Vec<VerilogADependencyFingerprint>, SimulationError> {
+    let mut canonical_paths: Vec<PathBuf> =
+        paths.iter().map(|p| canonicalize_for_cache(p)).collect();
+    canonical_paths.sort();
+    canonical_paths.dedup();
+
+    let mut fingerprints = Vec::with_capacity(canonical_paths.len());
+    for canonical_path in canonical_paths {
+        let fingerprint = dependency_fingerprint(&canonical_path).ok_or_else(|| {
+            SimulationError::Netlist(format!(
+                "Verilog-A dependency does not exist or is unreadable: {}",
+                canonical_path.display()
+            ))
+        })?;
+        fingerprints.push(fingerprint);
+    }
+
+    Ok(fingerprints)
+}
+
+#[cfg(feature = "veriloga")]
+fn dependency_matches_cached_fingerprint(dep: &VerilogADependencyFingerprint) -> bool {
+    let metadata = match std::fs::metadata(&dep.canonical_path) {
+        Ok(metadata) => metadata,
+        Err(_) => return false,
+    };
+
+    let current_modified_ns = metadata_modified_ns(&metadata);
+    if metadata.len() == dep.file_len && current_modified_ns == dep.modified_ns {
+        return true;
+    }
+
+    match hash_file(&dep.canonical_path) {
+        Ok(hash) => hash == dep.content_hash,
+        Err(_) => false,
+    }
+}
+
+#[cfg(feature = "veriloga")]
+fn dependencies_are_fresh(dependencies: &[VerilogADependencyFingerprint]) -> bool {
+    dependencies
+        .iter()
+        .all(dependency_matches_cached_fingerprint)
+}
+
+#[cfg(feature = "veriloga")]
+fn veriloga_cache_root() -> PathBuf {
+    if let Some(override_dir) = std::env::var_os("RSPICE_VERILOGA_CACHE_DIR") {
+        return PathBuf::from(override_dir);
+    }
+
+    if let Some(cache_dir) = dirs::cache_dir() {
+        return cache_dir.join("rspice").join("veriloga");
+    }
+
+    std::env::temp_dir().join("rspice-veriloga-cache")
+}
+
+#[cfg(feature = "veriloga")]
+fn cache_record_path(source_path: &Path) -> PathBuf {
+    let canonical = canonicalize_for_cache(source_path);
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(canonical.to_string_lossy().as_bytes());
+    let key = hasher.finalize().to_hex().to_string();
+    veriloga_cache_root().join(format!("{key}.bin"))
+}
+
+#[cfg(feature = "veriloga")]
+fn persist_model_to_disk(source_path: &Path, entry: &CachedVerilogAModel) -> Result<(), String> {
+    let cache_path = cache_record_path(source_path);
+    if let Some(parent) = cache_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("failed to create cache directory: {}", e))?;
+    }
+
+    let record = VerilogADiskCacheRecord {
+        version: VERILOGA_CACHE_RECORD_VERSION,
+        source_path: canonicalize_for_cache(source_path),
+        dependencies: entry.dependencies.clone(),
+        model: entry.model.clone(),
+    };
+    let encoded = bincode::serialize(&record)
+        .map_err(|e| format!("failed to serialize Verilog-A cache record: {}", e))?;
+
+    let tmp_path = cache_path.with_extension("tmp");
+    std::fs::write(&tmp_path, encoded)
+        .map_err(|e| format!("failed to write Verilog-A cache record: {}", e))?;
+    std::fs::rename(&tmp_path, &cache_path)
+        .map_err(|e| format!("failed to finalize Verilog-A cache record: {}", e))?;
+
+    Ok(())
+}
+
+#[cfg(feature = "veriloga")]
+fn load_model_from_disk(source_path: &Path) -> Option<CachedVerilogAModel> {
+    let cache_path = cache_record_path(source_path);
+    let bytes = std::fs::read(cache_path).ok()?;
+    let record: VerilogADiskCacheRecord = bincode::deserialize(&bytes).ok()?;
+    if record.version != VERILOGA_CACHE_RECORD_VERSION {
+        return None;
+    }
+
+    let requested_source = canonicalize_for_cache(source_path);
+    let record_source = canonicalize_for_cache(&record.source_path);
+    if requested_source != record_source {
+        return None;
+    }
+
+    if !dependencies_are_fresh(&record.dependencies) {
+        return None;
+    }
+
+    Some(CachedVerilogAModel {
+        dependencies: record.dependencies,
+        model: record.model,
+    })
 }
 
 #[cfg(feature = "veriloga")]
@@ -91,25 +255,25 @@ fn resolve_cached_or_compile_veriloga(
     path: &Path,
 ) -> Result<rspice_veriloga::CompiledModel, SimulationError> {
     let canonical = canonicalize_for_cache(path);
-    let fingerprint = file_fingerprint(path);
 
     if let Ok(cache) = veriloga_model_cache().read() {
         if let Some(entry) = cache.get(&canonical) {
-            if fingerprint.is_none() || fingerprint == Some(entry.fingerprint) {
+            if dependencies_are_fresh(&entry.dependencies) {
                 return Ok(entry.model.clone());
             }
         }
     }
 
-    let fp = fingerprint.ok_or_else(|| {
-        SimulationError::Netlist(format!(
-            "Verilog-A source not found and no cached model available: {}",
-            path.display()
-        ))
-    })?;
+    if let Some(entry) = load_model_from_disk(&canonical) {
+        let model = entry.model.clone();
+        if let Ok(mut cache) = veriloga_model_cache().write() {
+            cache.insert(canonical.clone(), entry);
+        }
+        return Ok(model);
+    }
 
     let compiler = rspice_veriloga::VerilogACompiler::default();
-    let model = compiler.compile_file(path).map_err(|e| {
+    let compiled = compiler.compile_file_with_metadata(path).map_err(|e| {
         SimulationError::Netlist(format!(
             "Failed to compile Verilog-A '{}': {}",
             path.display(),
@@ -117,17 +281,25 @@ fn resolve_cached_or_compile_veriloga(
         ))
     })?;
 
+    let dependencies = fingerprint_paths(&compiled.dependencies)?;
+    let entry = CachedVerilogAModel {
+        dependencies,
+        model: compiled.model.clone(),
+    };
+
     if let Ok(mut cache) = veriloga_model_cache().write() {
-        cache.insert(
-            canonical,
-            CachedVerilogAModel {
-                fingerprint: fp,
-                model: model.clone(),
-            },
+        cache.insert(canonical.clone(), entry.clone());
+    }
+
+    if let Err(err) = persist_model_to_disk(&canonical, &entry) {
+        log::warn!(
+            "Failed to persist Verilog-A cache entry for '{}': {}",
+            canonical.display(),
+            err
         );
     }
 
-    Ok(model)
+    Ok(compiled.model)
 }
 
 /// Register a precompiled Verilog-A model in the global engine cache.
@@ -135,18 +307,51 @@ fn resolve_cached_or_compile_veriloga(
 /// This allows UI workflows to compile once on import and reuse the compiled
 /// artifact during simulation without recompilation.
 #[cfg(feature = "veriloga")]
+pub fn register_precompiled_veriloga_model_with_dependencies(
+    source_path: impl AsRef<Path>,
+    dependencies: &[PathBuf],
+    model: rspice_veriloga::CompiledModel,
+) -> Result<(), String> {
+    let canonical_source = canonicalize_for_cache(source_path.as_ref());
+    let mut dependency_paths = dependencies.to_vec();
+    if dependency_paths.is_empty() {
+        dependency_paths.push(canonical_source.clone());
+    }
+    let dependency_fingerprints = fingerprint_paths(&dependency_paths)
+        .map_err(|e| format!("dependency fingerprinting failed: {}", e))?;
+
+    let entry = CachedVerilogAModel {
+        dependencies: dependency_fingerprints,
+        model,
+    };
+
+    let mut cache = veriloga_model_cache()
+        .write()
+        .map_err(|_| "failed to acquire Verilog-A cache lock".to_string())?;
+    cache.insert(canonical_source.clone(), entry.clone());
+    drop(cache);
+
+    if let Err(err) = persist_model_to_disk(&canonical_source, &entry) {
+        log::warn!(
+            "Failed to persist precompiled Verilog-A cache for '{}': {}",
+            canonical_source.display(),
+            err
+        );
+    }
+
+    Ok(())
+}
+
+/// Register a precompiled Verilog-A model in the global engine cache.
+///
+/// This compatibility wrapper fingerprints only the source file path.
+#[cfg(feature = "veriloga")]
 pub fn register_precompiled_veriloga_model(
     source_path: impl AsRef<Path>,
     model: rspice_veriloga::CompiledModel,
 ) -> Result<(), String> {
-    let path = source_path.as_ref();
-    let canonical = canonicalize_for_cache(path);
-    let fingerprint = file_fingerprint(path).unwrap_or_default();
-    let mut cache = veriloga_model_cache()
-        .write()
-        .map_err(|_| "failed to acquire Verilog-A cache lock".to_string())?;
-    cache.insert(canonical, CachedVerilogAModel { fingerprint, model });
-    Ok(())
+    let dependency = vec![canonicalize_for_cache(source_path.as_ref())];
+    register_precompiled_veriloga_model_with_dependencies(source_path, &dependency, model)
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -1209,5 +1414,106 @@ impl Engine {
             .map_err(|e| SimulationError::Circuit(e.to_string()))?;
 
         Ok(circuit)
+    }
+}
+
+#[cfg(all(test, feature = "veriloga"))]
+mod veriloga_cache_tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn create_temp_dir(label: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be monotonic")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "rspice_core_va_cache_{}_{}_{}",
+            label,
+            std::process::id(),
+            nanos
+        ));
+        fs::create_dir_all(&dir).expect("failed to create temp directory");
+        dir
+    }
+
+    fn dummy_model() -> rspice_veriloga::CompiledModel {
+        rspice_veriloga::CompiledModel {
+            name: "dummy".into(),
+            num_terminals: 2,
+            terminal_names: vec!["p".into(), "n".into()],
+            parameters: vec![rspice_veriloga::codegen::CompiledParameter {
+                name: "gain".into(),
+                default: 1.0,
+                min: Some(0.0),
+                max: None,
+            }],
+            num_variables: 0,
+            assignment_programs: Vec::new(),
+            stamp_programs: Vec::new(),
+            lookup_tables: Vec::new(),
+            internal_nodes: 0,
+            branch_currents: 0,
+            laplace_filters: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_dependency_fingerprint_invalidates_after_file_change() {
+        let dir = create_temp_dir("invalidates");
+        let file = dir.join("model.va");
+        fs::write(&file, "module m; endmodule\n").expect("failed to write model file");
+
+        let fingerprint =
+            dependency_fingerprint(&file).expect("initial dependency fingerprint expected");
+        assert!(dependency_matches_cached_fingerprint(&fingerprint));
+
+        fs::write(&file, "module m; parameter real x=1; endmodule\n")
+            .expect("failed to update model file");
+        assert!(!dependency_matches_cached_fingerprint(&fingerprint));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_fingerprint_paths_deduplicates_same_file() {
+        let dir = create_temp_dir("dedup");
+        let file = dir.join("model.va");
+        fs::write(&file, "module m; endmodule\n").expect("failed to write model file");
+
+        let canonical = file.canonicalize().expect("canonical path expected");
+        let fingerprints = fingerprint_paths(&[file.clone(), canonical.clone()])
+            .expect("fingerprints should succeed");
+        assert_eq!(fingerprints.len(), 1);
+        assert_eq!(fingerprints[0].canonical_path, canonical);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_cache_record_serialization_roundtrip() {
+        let dir = create_temp_dir("serde");
+        let file = dir.join("model.va");
+        fs::write(&file, "module m; endmodule\n").expect("failed to write model file");
+        let dep = dependency_fingerprint(&file).expect("dependency fingerprint expected");
+
+        let record = VerilogADiskCacheRecord {
+            version: VERILOGA_CACHE_RECORD_VERSION,
+            source_path: file.canonicalize().expect("canonical path expected"),
+            dependencies: vec![dep],
+            model: dummy_model(),
+        };
+
+        let encoded =
+            bincode::serialize(&record).expect("cache record should serialize successfully");
+        let decoded: VerilogADiskCacheRecord =
+            bincode::deserialize(&encoded).expect("cache record should deserialize");
+
+        assert_eq!(decoded.version, VERILOGA_CACHE_RECORD_VERSION);
+        assert_eq!(decoded.model.name.as_str(), "dummy");
+        assert_eq!(decoded.dependencies.len(), 1);
+
+        let _ = fs::remove_dir_all(dir);
     }
 }
