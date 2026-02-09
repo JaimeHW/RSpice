@@ -307,6 +307,27 @@ impl Cell {
     pub fn full_name(&self) -> String {
         format!("{}:{}", self.library, self.name)
     }
+
+    /// Ensure this cell has a concrete symbol view derived from its interface pins.
+    ///
+    /// Existing non-empty symbol views are preserved to avoid overriding user-authored graphics.
+    pub fn ensure_symbol_view(&mut self) {
+        let should_generate = match self.views.get("symbol") {
+            None => true,
+            Some(view) => match &view.content {
+                ViewContent::Empty => true,
+                ViewContent::Symbol(symbol) => {
+                    symbol.pins.is_empty() && !self.interface.pins.is_empty()
+                }
+                _ => true,
+            },
+        };
+
+        if should_generate {
+            let symbol = SymbolContent::generated(&self.name, &self.interface.pins);
+            self.add_view(CellView::symbol(symbol));
+        }
+    }
 }
 
 impl InterfacePin {
@@ -443,15 +464,9 @@ impl CellView {
 
     /// Create a placeholder symbol view (for primitive components)
     ///
-    /// Primitive components use built-in SVG symbols from the schematic view,
-    /// so this creates an empty symbol view as a placeholder.
+    /// Kept for backward compatibility. New code should use `Cell::ensure_symbol_view`.
     pub fn symbol_placeholder() -> Self {
-        Self {
-            name: "symbol".to_string(),
-            view_type: ViewType::Symbol,
-            content: ViewContent::Empty,
-            modified: String::new(),
-        }
+        Self::symbol(SymbolContent::generated("symbol", &[]))
     }
 }
 
@@ -561,6 +576,72 @@ impl SymbolContent {
             graphics,
         }
     }
+
+    /// Generate a pin-aware symbol body from a cell interface.
+    pub fn generated(name: &str, interface_pins: &[InterfacePin]) -> Self {
+        const PIN_PITCH: i32 = 12;
+        const EDGE_MARGIN: i32 = 10;
+
+        let mut left: Vec<&InterfacePin> = Vec::new();
+        let mut right: Vec<&InterfacePin> = Vec::new();
+        let mut top: Vec<&InterfacePin> = Vec::new();
+        let mut bottom: Vec<&InterfacePin> = Vec::new();
+
+        for pin in interface_pins {
+            match pin.pin_type {
+                PinType::Power => top.push(pin),
+                PinType::Ground => bottom.push(pin),
+                PinType::Clock | PinType::Signal => match pin.direction {
+                    PinDirection::Output => right.push(pin),
+                    PinDirection::Input | PinDirection::InOut => left.push(pin),
+                },
+            }
+        }
+
+        let vertical_slots = left.len().max(right.len()).max(1) as i32;
+        let horizontal_slots = top.len().max(bottom.len()).max(1) as i32;
+
+        let width = (EDGE_MARGIN * 2 + (horizontal_slots - 1) * PIN_PITCH + 24).max(48);
+        let height = (EDGE_MARGIN * 2 + (vertical_slots - 1) * PIN_PITCH + 24).max(48);
+
+        let mut pins = Vec::with_capacity(interface_pins.len());
+        for (idx, pin) in left.iter().enumerate() {
+            let y = EDGE_MARGIN + idx as i32 * PIN_PITCH + 12;
+            pins.push(SymbolPin::left(&pin.name, y));
+        }
+        for (idx, pin) in right.iter().enumerate() {
+            let y = EDGE_MARGIN + idx as i32 * PIN_PITCH + 12;
+            pins.push(SymbolPin::right(&pin.name, width, y));
+        }
+        for (idx, pin) in top.iter().enumerate() {
+            let x = EDGE_MARGIN + idx as i32 * PIN_PITCH + 12;
+            pins.push(SymbolPin::top(&pin.name, x));
+        }
+        for (idx, pin) in bottom.iter().enumerate() {
+            let x = EDGE_MARGIN + idx as i32 * PIN_PITCH + 12;
+            pins.push(SymbolPin::bottom(&pin.name, x, height));
+        }
+
+        let mut graphics = SymbolGraphics::default();
+        graphics.primitives.push(DrawingPrimitive::Rect {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        });
+        graphics.primitives.push(DrawingPrimitive::Text {
+            x: width / 2,
+            y: height / 2,
+            text: name.to_string(),
+            anchor: TextAnchor::Middle,
+        });
+
+        Self {
+            bounds: (width, height),
+            pins,
+            graphics,
+        }
+    }
 }
 
 impl SymbolPin {
@@ -581,6 +662,16 @@ impl SymbolPin {
     /// Create right-side pin
     pub fn right(name: &str, width: i32, y: i32) -> Self {
         Self::new(name, width, y, PinOrientation::Right)
+    }
+
+    /// Create top-side pin
+    pub fn top(name: &str, x: i32) -> Self {
+        Self::new(name, x, 0, PinOrientation::Top)
+    }
+
+    /// Create bottom-side pin
+    pub fn bottom(name: &str, x: i32, height: i32) -> Self {
+        Self::new(name, x, height, PinOrientation::Bottom)
     }
 }
 
@@ -866,12 +957,44 @@ impl HierarchyManager {
     /// voltage/current sources, transistors, diodes, and controlled sources.
     /// Each cell has a `component_type` property that maps to `ComponentType`.
     pub fn create_primitives_library(&mut self) {
-        use crate::state::ComponentType;
-
         let mut lib = Library::new(Self::PRIMITIVES_LIBRARY).with_type(LibraryType::Technology);
         lib.read_only = true;
         lib.metadata.description = "Built-in primitive components".to_string();
         lib.metadata.author = "RSpice".to_string();
+
+        fn primitive_interface_pins(comp_type: &str) -> Vec<InterfacePin> {
+            match comp_type {
+                "Resistor" | "Capacitor" | "Inductor" | "VoltageSource" | "CurrentSource"
+                | "VoltageSourceAc" | "VoltageSourcePulse" | "VoltageSourceSin" | "Diode" => {
+                    vec![InterfacePin::inout("p"), InterfacePin::inout("n")]
+                }
+                "CoupledInductor" => vec![
+                    InterfacePin::inout("p1"),
+                    InterfacePin::inout("n1"),
+                    InterfacePin::inout("p2"),
+                    InterfacePin::inout("n2"),
+                ],
+                "Vcvs" | "Vccs" | "Ccvs" | "Cccs" => vec![
+                    InterfacePin::inout("outp"),
+                    InterfacePin::inout("outn"),
+                    InterfacePin::input("ctrlp"),
+                    InterfacePin::input("ctrln"),
+                ],
+                "NpnBjt" | "PnpBjt" => vec![
+                    InterfacePin::inout("c"),
+                    InterfacePin::input("b"),
+                    InterfacePin::inout("e"),
+                ],
+                "Nmos" | "Pmos" | "Njfet" | "Pjfet" => vec![
+                    InterfacePin::inout("d"),
+                    InterfacePin::input("g"),
+                    InterfacePin::inout("s"),
+                    InterfacePin::inout("b"),
+                ],
+                "Ground" => vec![InterfacePin::input("0").ground()],
+                _ => vec![InterfacePin::inout("p"), InterfacePin::inout("n")],
+            }
+        }
 
         // Helper to create a primitive cell with component type and category
         fn add_primitive(
@@ -893,8 +1016,10 @@ impl HierarchyManager {
                 cell.properties
                     .insert("shortcut".to_string(), key.to_string());
             }
-            // Add a symbol view (placeholder for now)
-            cell.add_view(CellView::symbol_placeholder());
+            for pin in primitive_interface_pins(comp_type) {
+                cell.add_pin(pin);
+            }
+            cell.ensure_symbol_view();
             lib.cells.insert(name.to_string(), cell);
         }
 
@@ -1132,6 +1257,7 @@ impl HierarchyManager {
             let pin = InterfacePin::inout(terminal);
             cell.add_pin(pin);
         }
+        cell.ensure_symbol_view();
 
         // Store category for Project Browser grouping
         cell.properties
@@ -1825,6 +1951,28 @@ mod tests {
         assert!(resistor.properties.contains_key("category"));
     }
 
+    #[test]
+    fn test_hierarchy_manager_primitives_generate_symbol_views() {
+        let mut mgr = HierarchyManager::new();
+        mgr.create_primitives_library();
+
+        let lib = mgr
+            .get_library(HierarchyManager::PRIMITIVES_LIBRARY)
+            .expect("primitives library should exist");
+        let resistor = lib.get_cell("Resistor").expect("resistor should exist");
+        let symbol_view = resistor
+            .symbol()
+            .expect("primitive should have a symbol view");
+
+        match &symbol_view.content {
+            ViewContent::Symbol(symbol) => {
+                assert!(!symbol.graphics.primitives.is_empty());
+                assert!(!symbol.pins.is_empty());
+            }
+            other => panic!("expected symbol content, got {:?}", other),
+        }
+    }
+
     // =========================================================================
     // Verilog-A Library Tests
     // =========================================================================
@@ -1866,6 +2014,13 @@ mod tests {
         assert_eq!(model.interface.pins.len(), 2);
         assert!(model.properties.contains_key("source_path"));
         assert!(model.properties.contains_key("parameters"));
+        let symbol_view = model
+            .symbol()
+            .expect("veriloga import should generate a symbol view");
+        match &symbol_view.content {
+            ViewContent::Symbol(symbol) => assert_eq!(symbol.pins.len(), 2),
+            _ => panic!("expected symbol content"),
+        }
     }
 
     #[test]
@@ -1925,6 +2080,35 @@ mod tests {
         assert_eq!(pin.name, "vdd");
         assert_eq!(pin.position.x, 10);
         assert_eq!(pin.position.y, -20);
+    }
+
+    #[test]
+    fn test_symbol_content_generated_pin_placement() {
+        let pins = vec![
+            InterfacePin::input("IN"),
+            InterfacePin::output("OUT"),
+            InterfacePin::input("VDD").power(),
+            InterfacePin::input("VSS").ground(),
+        ];
+        let symbol = SymbolContent::generated("amp", &pins);
+
+        assert_eq!(symbol.pins.len(), 4);
+        assert!(symbol
+            .pins
+            .iter()
+            .any(|pin| pin.orientation == PinOrientation::Left));
+        assert!(symbol
+            .pins
+            .iter()
+            .any(|pin| pin.orientation == PinOrientation::Right));
+        assert!(symbol
+            .pins
+            .iter()
+            .any(|pin| pin.orientation == PinOrientation::Top));
+        assert!(symbol
+            .pins
+            .iter()
+            .any(|pin| pin.orientation == PinOrientation::Bottom));
     }
 
     // =========================================================================
