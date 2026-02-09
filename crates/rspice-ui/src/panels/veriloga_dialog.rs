@@ -750,6 +750,18 @@ fn render_success_section(ui: &mut Ui, state: &VerilogALoadDialogState) {
                     .size(10.0),
                 );
             });
+            if let Some(deps) = &state.compiled_dependencies {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!(
+                            "{} dependency file(s) captured for compile cache",
+                            deps.len()
+                        ))
+                        .color(egui::Color32::GRAY)
+                        .size(10.0),
+                    );
+                });
+            }
         });
     }
 }

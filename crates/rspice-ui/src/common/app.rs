@@ -2639,19 +2639,28 @@ impl eframe::App for RSpiceApp {
                 }
 
                 if let Some(compiled_model) = compiled_artifact {
-                    if let Err(err) =
-                        rspice_core::register_precompiled_veriloga_model_with_dependencies(
-                            &module.source_path,
-                            &compiled_dependencies,
-                            compiled_model,
-                        )
-                    {
-                        self.state
-                            .console_messages
-                            .push(ConsoleMessage::warning(format!(
-                                "Verilog-A compile cache registration failed for '{}': {}",
-                                module.name, err
-                            )));
+                    match rspice_core::register_precompiled_veriloga_model_with_dependencies(
+                        &module.source_path,
+                        &compiled_dependencies,
+                        compiled_model,
+                    ) {
+                        Ok(()) => {
+                            self.state
+                                .console_messages
+                                .push(ConsoleMessage::info(format!(
+                                    "Registered Verilog-A compile cache for '{}' ({} dependency file(s))",
+                                    module.name,
+                                    compiled_dependencies.len()
+                                )));
+                        }
+                        Err(err) => {
+                            self.state
+                                .console_messages
+                                .push(ConsoleMessage::warning(format!(
+                                    "Verilog-A compile cache registration failed for '{}': {}",
+                                    module.name, err
+                                )));
+                        }
                     }
                 } else {
                     self.state.console_messages.push(ConsoleMessage::warning(format!(
