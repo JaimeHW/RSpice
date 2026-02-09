@@ -251,6 +251,62 @@ impl VerilogADevice {
         self.internal_node_indices.get(internal_idx).copied()
     }
 
+    /// Build mapped RHS stamp rows for each stamp program.
+    ///
+    /// Returns one entry per stamp program; each program entry contains
+    /// `(node_index, sign)` pairs for non-ground RHS rows.
+    pub fn mapped_rhs_rows(&self) -> Vec<Vec<(usize, f64)>> {
+        self.model
+            .stamp_programs
+            .iter()
+            .map(|program| {
+                program
+                    .stamp_locations
+                    .iter()
+                    .filter_map(|loc| {
+                        Self::index_to_node(
+                            &loc.row,
+                            &self.node_mapping,
+                            &self.internal_node_indices,
+                        )
+                        .map(|row| (row, loc.sign))
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// Build mapped Jacobian matrix locations for each stamp program.
+    ///
+    /// Returns one entry per stamp program; each program entry contains
+    /// `(row, col)` locations for each Jacobian program where `None` means ground.
+    pub fn mapped_jacobian_locations(&self) -> Vec<Vec<(Option<usize>, Option<usize>)>> {
+        self.model
+            .stamp_programs
+            .iter()
+            .map(|program| {
+                program
+                    .jacobian_programs
+                    .iter()
+                    .map(|jac| {
+                        (
+                            Self::index_to_node(
+                                &jac.row,
+                                &self.node_mapping,
+                                &self.internal_node_indices,
+                            ),
+                            Self::index_to_node(
+                                &jac.col,
+                                &self.node_mapping,
+                                &self.internal_node_indices,
+                            ),
+                        )
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
     /// Update terminal voltages from circuit solution
     ///
     /// Called before evaluating device equations.
@@ -1170,5 +1226,29 @@ mod tests {
             "Changed internal node should affect result: got {}, expected 1.5",
             result2[0]
         );
+    }
+
+    #[test]
+    fn test_mapped_rhs_rows_skips_ground() {
+        let model = create_simple_resistor_model();
+        let device = VerilogADevice::new("R1", model, &[1, 0]);
+        let rows = device.mapped_rhs_rows();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].len(), 1);
+        assert_eq!(rows[0][0].0, 0);
+        assert!((rows[0][0].1 - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_mapped_jacobian_locations_with_ground_terminal() {
+        let model = create_simple_resistor_model();
+        let device = VerilogADevice::new("R1", model, &[1, 0]);
+        let locs = device.mapped_jacobian_locations();
+
+        assert_eq!(locs.len(), 1);
+        assert_eq!(locs[0].len(), 2);
+        assert_eq!(locs[0][0], (Some(0), Some(0)));
+        assert_eq!(locs[0][1], (Some(0), None));
     }
 }
