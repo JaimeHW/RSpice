@@ -494,6 +494,12 @@ pub struct AppState {
     pub theme: RSpiceTheme,
     /// Console messages
     pub console_messages: Vec<ConsoleMessage>,
+    /// Structured log history buffer (ring-buffer, filterable).
+    pub log_buffer: crate::panels::LogBuffer,
+    /// UI state for the structured log panel.
+    pub log_panel_state: crate::panels::LogPanelState,
+    /// Number of console messages already mirrored into `log_buffer`.
+    pub log_sync_cursor: usize,
     /// Component property editor state
     pub property_editor: crate::properties::dialog::PropertyEditorState,
     /// Scripting/Automation console state
@@ -546,6 +552,9 @@ impl Default for AppState {
             dialogs: DialogState::default(),
             theme: RSpiceTheme::dark(),
             console_messages: Vec::new(),
+            log_buffer: crate::panels::LogBuffer::default(),
+            log_panel_state: crate::panels::LogPanelState::default(),
+            log_sync_cursor: 0,
             property_editor: crate::properties::dialog::PropertyEditorState::default(),
             script_console: crate::panels::ScriptConsoleState::default(),
             active_viewer: crate::viewers::ActiveViewer::default(),
@@ -3874,43 +3883,41 @@ impl RSpiceApp {
         crate::waveform::render_waveform_panel(ui, &mut self.state);
     }
 
-    /// Render the log panel (placeholder for future implementation)
+    fn sync_console_messages_into_log_buffer(&mut self) {
+        if self.state.log_sync_cursor > self.state.console_messages.len() {
+            self.state.log_sync_cursor = self.state.console_messages.len();
+        }
+
+        for message in self
+            .state
+            .console_messages
+            .iter()
+            .skip(self.state.log_sync_cursor)
+        {
+            let severity = match message.level {
+                ConsoleLevel::Info => crate::panels::LogSeverity::Info,
+                ConsoleLevel::Warning => crate::panels::LogSeverity::Warning,
+                ConsoleLevel::Error => crate::panels::LogSeverity::Error,
+            };
+            self.state.log_buffer.log(
+                severity,
+                crate::panels::LogSource::System,
+                message.message.clone(),
+                None,
+            );
+        }
+
+        self.state.log_sync_cursor = self.state.console_messages.len();
+    }
+
+    /// Render the structured log panel.
     fn render_log_panel(&mut self, ui: &mut Ui) {
-        // Header row styled consistently with console panel
-        ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), 26.0),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.add_space(8.0);
-                ui.label(
-                    egui::RichText::new("Log History")
-                        .size(12.0)
-                        .color(egui::Color32::from_rgb(160, 160, 170)),
-                );
-            },
+        self.sync_console_messages_into_log_buffer();
+        crate::panels::render_log_panel(
+            ui,
+            &self.state.log_buffer,
+            &mut self.state.log_panel_state,
         );
-
-        // Custom separator line with no extra spacing
-        let rect = ui.available_rect_before_wrap();
-        ui.painter().hline(
-            rect.left()..=rect.right(),
-            rect.top(),
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(50, 52, 58)),
-        );
-
-        egui::ScrollArea::vertical()
-            .auto_shrink([false; 2])
-            .show(ui, |ui| {
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(8.0);
-                    ui.label(
-                        egui::RichText::new("No log entries yet.")
-                            .size(11.0)
-                            .color(egui::Color32::from_rgb(120, 120, 130)),
-                    );
-                });
-            });
     }
 
     /// Render the automation/scripting panel
