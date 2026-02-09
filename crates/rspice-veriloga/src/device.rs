@@ -364,13 +364,24 @@ impl VerilogADevice {
 
     /// Evaluate using the bytecode VM interpreter
     fn evaluate_interpreter(&mut self) -> Vec<f64> {
+        self.context.clear_currents();
+
         let mut vm = Vm::new(&mut self.context);
         let mut currents = Vec::with_capacity(self.model.stamp_programs.len());
 
         for program in &self.model.stamp_programs {
             match vm.execute(&program.value_program) {
-                Ok(value) => currents.push(value),
-                Err(_) => currents.push(0.0),
+                Ok(value) => {
+                    currents.push(value);
+                    vm.context.currents.push(value);
+                    if let Some((pos, neg)) = Self::infer_current_terminal_pair(program) {
+                        vm.context.set_branch_current(pos, neg, value);
+                    }
+                }
+                Err(_) => {
+                    currents.push(0.0);
+                    vm.context.currents.push(0.0);
+                }
             }
         }
 
@@ -432,10 +443,18 @@ impl VerilogADevice {
         let context = &mut self.context;
         let model = &self.model;
 
+        context.clear_currents();
+
         let mut vm = Vm::new(context);
         let mut entries = Vec::new();
 
         for (prog_idx, program) in model.stamp_programs.iter().enumerate() {
+            let value = vm.execute(&program.value_program).unwrap_or(0.0);
+            vm.context.currents.push(value);
+            if let Some((pos, neg)) = Self::infer_current_terminal_pair(program) {
+                vm.context.set_branch_current(pos, neg, value);
+            }
+
             for (jac_idx, jac_entry) in program.jacobian_programs.iter().enumerate() {
                 match vm.execute(&jac_entry.program) {
                     Ok(value) => {
@@ -477,6 +496,8 @@ impl VerilogADevice {
         let node_mapping = &self.node_mapping;
         let internal_node_indices = &self.internal_node_indices;
 
+        context.clear_currents();
+
         let mut vm = Vm::new(context);
 
         for program in &model.stamp_programs {
@@ -485,6 +506,11 @@ impl VerilogADevice {
                 Ok(v) => v,
                 Err(_) => continue,
             };
+
+            vm.context.currents.push(value);
+            if let Some((pos, neg)) = Self::infer_current_terminal_pair(program) {
+                vm.context.set_branch_current(pos, neg, value);
+            }
 
             // Stamp RHS contributions
             for loc in &program.stamp_locations {
@@ -527,6 +553,50 @@ impl VerilogADevice {
                 if node > 0 { Some(node - 1) } else { None }
             }
             StampIndex::Ground => None,
+        }
+    }
+
+    /// Convert a stamp index to matrix node index for this device instance.
+    pub fn stamp_index_to_node(&self, index: &StampIndex) -> Option<usize> {
+        match index {
+            StampIndex::Internal(i) => {
+                let mapped = self.internal_node_indices.get(*i).copied().unwrap_or(0);
+                if mapped > 0 {
+                    Some(mapped - 1)
+                } else {
+                    Some(self.model.num_terminals + *i)
+                }
+            }
+            _ => Self::index_to_node(index, &self.node_mapping, &self.internal_node_indices),
+        }
+    }
+
+    fn infer_current_terminal_pair(
+        program: &crate::codegen::StampProgram,
+    ) -> Option<(usize, usize)> {
+        let mut pos_terminal = None;
+        let mut neg_terminal = None;
+
+        for loc in &program.stamp_locations {
+            let terminal = match loc.row {
+                StampIndex::Terminal(term) => term,
+                _ => continue,
+            };
+
+            if loc.sign < 0.0 {
+                if pos_terminal.replace(terminal).is_some() {
+                    return None;
+                }
+            } else if loc.sign > 0.0 {
+                if neg_terminal.replace(terminal).is_some() {
+                    return None;
+                }
+            }
+        }
+
+        match (pos_terminal, neg_terminal) {
+            (Some(pos), Some(neg)) if pos != neg => Some((pos, neg)),
+            _ => None,
         }
     }
 }
@@ -710,6 +780,78 @@ mod tests {
         }
     }
 
+    fn create_current_feedback_model() -> CompiledModel {
+        // Program 0: I(0,1) = g * V(0,1)
+        let current_program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushParam(0),
+                Instruction::PushVoltage(0, 1),
+                Instruction::Mul,
+            ],
+        };
+
+        // Program 1: I(0,1) again, but references the previously computed branch current.
+        let doubled_program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushCurrent(0, 1),
+                Instruction::PushConst(2.0),
+                Instruction::Mul,
+            ],
+        };
+
+        CompiledModel {
+            name: "current_feedback".into(),
+            num_terminals: 2,
+            terminal_names: vec!["p".into(), "n".into()],
+            parameters: vec![CompiledParameter {
+                name: "g".into(),
+                default: 1.0e-3,
+                min: Some(0.0),
+                max: None,
+            }],
+            num_variables: 0,
+            assignment_programs: vec![],
+            stamp_programs: vec![
+                StampProgram {
+                    stamp_locations: vec![
+                        StampLocation {
+                            row: StampIndex::Terminal(0),
+                            col: StampIndex::Ground,
+                            sign: -1.0,
+                        },
+                        StampLocation {
+                            row: StampIndex::Terminal(1),
+                            col: StampIndex::Ground,
+                            sign: 1.0,
+                        },
+                    ],
+                    value_program: current_program,
+                    jacobian_programs: vec![],
+                },
+                StampProgram {
+                    stamp_locations: vec![
+                        StampLocation {
+                            row: StampIndex::Terminal(0),
+                            col: StampIndex::Ground,
+                            sign: -1.0,
+                        },
+                        StampLocation {
+                            row: StampIndex::Terminal(1),
+                            col: StampIndex::Ground,
+                            sign: 1.0,
+                        },
+                    ],
+                    value_program: doubled_program,
+                    jacobian_programs: vec![],
+                },
+            ],
+            lookup_tables: vec![],
+            internal_nodes: 0,
+            branch_currents: 0,
+            laplace_filters: vec![],
+        }
+    }
+
     fn create_diode_model() -> CompiledModel {
         // I = Is * (exp(V/Vt) - 1)
         let value_program = BytecodeProgram {
@@ -873,6 +1015,19 @@ mod tests {
         // Should be in mA range for a forward-biased diode
         assert!(currents[0] > 1e-4);
         assert!(currents[0] < 1.0);
+    }
+
+    #[test]
+    fn test_evaluate_current_feedback_uses_terminal_pair_lookup() {
+        let model = create_current_feedback_model();
+        let mut device = VerilogADevice::new("X1", model, &[1, 2]);
+        device.set_parameter("g", 1.0e-3);
+        device.update_voltages(&[3.0, 1.0]); // V(0,1)=2V
+
+        let currents = device.evaluate();
+        assert_eq!(currents.len(), 2);
+        assert!((currents[0] - 2.0e-3).abs() < 1e-12);
+        assert!((currents[1] - 4.0e-3).abs() < 1e-12);
     }
 
     #[test]

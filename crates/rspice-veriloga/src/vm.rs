@@ -16,6 +16,8 @@ pub struct VmContext {
     pub internal_voltages: Vec<f64>,
     /// Branch currents
     pub currents: Vec<f64>,
+    /// Terminal-pair branch current lookup table (flattened NxN matrix).
+    terminal_pair_currents: Vec<f64>,
     /// Parameter values (indexed by parameter)
     pub parameters: Vec<f64>,
     /// Variable values (indexed by variable)
@@ -307,6 +309,7 @@ impl Default for VmContext {
             voltages: Vec::new(),
             internal_voltages: Vec::new(),
             currents: Vec::new(),
+            terminal_pair_currents: Vec::new(),
             parameters: Vec::new(),
             variables: Vec::new(),
             time: 0.0,
@@ -329,6 +332,7 @@ impl VmContext {
             voltages: vec![0.0; num_terminals],
             internal_voltages: Vec::new(),
             currents: Vec::new(),
+            terminal_pair_currents: vec![f64::NAN; num_terminals.saturating_mul(num_terminals)],
             parameters: Vec::new(),
             variables: Vec::new(),
             time: 0.0,
@@ -349,6 +353,7 @@ impl VmContext {
             voltages: vec![0.0; num_terminals],
             internal_voltages: vec![0.0; num_internal],
             currents: Vec::new(),
+            terminal_pair_currents: vec![f64::NAN; num_terminals.saturating_mul(num_terminals)],
             parameters: Vec::new(),
             variables: Vec::new(),
             time: 0.0,
@@ -369,6 +374,7 @@ impl VmContext {
             voltages: vec![0.0; num_terminals],
             internal_voltages: Vec::new(),
             currents: Vec::new(),
+            terminal_pair_currents: vec![f64::NAN; num_terminals.saturating_mul(num_terminals)],
             parameters: Vec::new(),
             variables: Vec::new(),
             time: 0.0,
@@ -399,6 +405,35 @@ impl VmContext {
         self.state_values_prev.resize(count, 0.0);
     }
 
+    /// Clear cached branch current values.
+    pub fn clear_currents(&mut self) {
+        self.currents.clear();
+        self.terminal_pair_currents.fill(f64::NAN);
+    }
+
+    /// Set branch current from `pos` to `neg`.
+    ///
+    /// Also populates the reverse direction with opposite sign.
+    pub fn set_branch_current(&mut self, pos: usize, neg: usize, value: f64) {
+        let n = self.voltages.len();
+        if n == 0 || pos >= n || neg >= n {
+            return;
+        }
+
+        if self.terminal_pair_currents.len() != n.saturating_mul(n) {
+            self.terminal_pair_currents
+                .resize(n.saturating_mul(n), f64::NAN);
+        }
+
+        let idx = pos * n + neg;
+        self.terminal_pair_currents[idx] = value;
+
+        if pos != neg {
+            let reverse_idx = neg * n + pos;
+            self.terminal_pair_currents[reverse_idx] = -value;
+        }
+    }
+
     /// Get the voltage difference between two terminals
     #[inline]
     pub fn voltage(&self, pos: usize, neg: usize) -> f64 {
@@ -413,11 +448,19 @@ impl VmContext {
         self.internal_voltages.get(idx).copied().unwrap_or(0.0)
     }
 
-    /// Get current between terminals (placeholder)
+    /// Get current between terminals.
     #[inline]
     pub fn current(&self, pos: usize, neg: usize) -> f64 {
-        // For now, currents are computed from branch equations
-        let _ = (pos, neg);
+        let n = self.voltages.len();
+        if pos < n && neg < n {
+            let idx = pos * n + neg;
+            if idx < self.terminal_pair_currents.len() {
+                let value = self.terminal_pair_currents[idx];
+                if value.is_finite() {
+                    return value;
+                }
+            }
+        }
         self.currents.first().copied().unwrap_or(0.0)
     }
 
@@ -1413,6 +1456,27 @@ mod tests {
     }
 
     #[test]
+    fn test_context_branch_current_lookup_bidirectional() {
+        let mut ctx = VmContext::new(2);
+        ctx.set_branch_current(0, 1, 2.5e-3);
+
+        assert!((ctx.current(0, 1) - 2.5e-3).abs() < 1e-12);
+        assert!((ctx.current(1, 0) + 2.5e-3).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_context_branch_current_clear_reverts_to_vector_fallback() {
+        let mut ctx = VmContext::new(2);
+        ctx.currents.push(1.0e-3);
+        ctx.set_branch_current(0, 1, 2.0e-3);
+        assert!((ctx.current(0, 1) - 2.0e-3).abs() < 1e-12);
+
+        ctx.clear_currents();
+        assert!(ctx.currents.is_empty());
+        assert!(ctx.current(0, 1).abs() < 1e-15);
+    }
+
+    #[test]
     fn test_vm_error_display() {
         let err = VmError::StackUnderflow("test");
         assert!(err.to_string().contains("Stack underflow"));
@@ -1448,7 +1512,7 @@ mod tests {
 
     #[test]
     fn test_context_with_internal_nodes() {
-        let mut ctx = VmContext::with_internal_nodes(2, 3);
+        let ctx = VmContext::with_internal_nodes(2, 3);
         assert_eq!(ctx.voltages.len(), 2);
         assert_eq!(ctx.internal_voltages.len(), 3);
     }
@@ -1467,7 +1531,7 @@ mod tests {
 
     #[test]
     fn test_internal_voltage_out_of_bounds() {
-        let mut ctx = VmContext::with_internal_nodes(2, 1);
+        let ctx = VmContext::with_internal_nodes(2, 1);
         // Out of bounds returns 0.0
         assert!((ctx.internal_voltage(100)).abs() < 1e-15);
     }
@@ -2077,7 +2141,7 @@ mod tests {
 
     #[test]
     fn test_context_with_states() {
-        let mut ctx = VmContext::with_states(2, 3);
+        let ctx = VmContext::with_states(2, 3);
         assert_eq!(ctx.state_values.len(), 3);
         assert_eq!(ctx.state_values_prev.len(), 3);
         assert_eq!(ctx.timestep, 0.0);
