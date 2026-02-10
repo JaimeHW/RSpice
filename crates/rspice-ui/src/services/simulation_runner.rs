@@ -19,6 +19,8 @@ use rspice_core::{SimulationConfigOverrides, Value, resolve_simulation_config};
 mod harmonic_basis;
 use harmonic_basis::{build_disto_two_tone_harmonic_plan, build_multi_tone_hb_layout};
 
+#[path = "simulation_runner/ac.rs"]
+mod ac;
 #[path = "simulation_runner/dc_sweep.rs"]
 mod dc_sweep;
 #[path = "simulation_runner/disto.rs"]
@@ -57,6 +59,7 @@ mod stb;
 mod sweeps;
 #[path = "simulation_runner/tf.rs"]
 mod tf;
+pub use ac::{AcData, run_ac_analysis};
 pub use dc_sweep::{DcSweepData, run_dc_sweep};
 #[cfg(test)]
 use disto::interpolate_magnitude_at_for_tests;
@@ -410,104 +413,6 @@ pub fn run_transient_analysis(
 
     let node_names = result.node_names.clone();
     Ok(TransientData::from_result(result, &node_names))
-}
-
-// =============================================================================
-// AC Analysis
-// =============================================================================
-
-/// AC small-signal analysis data for Bode plots
-#[derive(Debug, Clone)]
-pub struct AcData {
-    /// Frequency points (Hz)
-    pub frequencies: Vec<Value>,
-    /// Node responses: (node_name, complex values)
-    pub responses: Vec<(String, Vec<Complex64>)>,
-    /// Number of frequency points
-    pub num_points: usize,
-}
-
-impl AcData {
-    /// Get magnitude in dB for a response
-    pub fn magnitude_db(&self, response_idx: usize) -> Vec<Value> {
-        self.responses
-            .get(response_idx)
-            .map(|(_, vals)| vals.iter().map(|c| 20.0 * c.norm().log10()).collect())
-            .unwrap_or_default()
-    }
-
-    /// Get phase in degrees for a response
-    pub fn phase_deg(&self, response_idx: usize) -> Vec<Value> {
-        self.responses
-            .get(response_idx)
-            .map(|(_, vals)| vals.iter().map(|c| c.arg().to_degrees()).collect())
-            .unwrap_or_default()
-    }
-
-    /// Create from engine AcResult vector
-    pub fn from_results(results: Vec<AcResult>, node_names: &[String]) -> Self {
-        let frequencies: Vec<Value> = results.iter().map(|r| r.frequency).collect();
-        let num_points = frequencies.len();
-
-        // Build response vectors for each node
-        let mut responses = Vec::new();
-        if !results.is_empty() && !results[0].voltages.is_empty() {
-            for (idx, name) in node_names.iter().enumerate() {
-                if name == "0" || name.eq_ignore_ascii_case("gnd") {
-                    continue;
-                }
-                // AcResult voltages are node-indexed without ground, so map
-                // node_names index (with ground at 0) to AC vector index.
-                let ac_idx = idx.saturating_sub(1);
-                // Collect voltage at this node across all frequencies
-                let values: Vec<Complex64> = results
-                    .iter()
-                    .filter_map(|r| r.voltages.get(ac_idx).copied())
-                    .collect();
-                if !values.is_empty() {
-                    responses.push((format!("V({})", name), values));
-                }
-            }
-        }
-
-        Self {
-            frequencies,
-            responses,
-            num_points,
-        }
-    }
-}
-
-/// Run AC small-signal analysis
-pub fn run_ac_analysis(
-    netlist_text: &str,
-    start_freq: Value,
-    stop_freq: Value,
-    num_points: usize,
-    sweep_type: &str, // "dec", "oct", or "lin"
-) -> Result<AcData, String> {
-    // Parse the netlist
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
-
-    // Generate frequency points
-    let frequencies = generate_freq_points(start_freq, stop_freq, num_points, sweep_type);
-
-    // Create engine
-    let engine = Engine::new(build_engine_config(&netlist, None));
-
-    // Run DC OP first to get node names
-    let dc_result = engine
-        .run_dc_op(&netlist)
-        .map_err(|e| format!("DC OP error (required for AC): {}", e))?;
-    let node_names = dc_result.node_names.clone();
-
-    // Run AC analysis
-    let results = engine
-        .run_ac(&netlist, &frequencies)
-        .map_err(|e| format!("AC analysis error: {}", e))?;
-
-    Ok(AcData::from_results(results, &node_names))
 }
 
 // =============================================================================
