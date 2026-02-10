@@ -127,11 +127,7 @@ fn calculate_layout(available: Rect, show_stats: bool) -> HistogramLayout {
 // Header Rendering
 // =============================================================================
 
-fn render_header(
-    ui: &mut Ui,
-    layout: &HistogramLayout,
-    state: &mut HistogramState,
-) -> bool {
+fn render_header(ui: &mut Ui, layout: &HistogramLayout, state: &mut HistogramState) -> bool {
     let painter = ui.painter();
     let mut close_requested = false;
 

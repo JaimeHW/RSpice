@@ -659,8 +659,8 @@ pub fn render_toolbar(ui: &mut Ui, state: &mut AppState) {
             );
             state.simulation.trigger_simulation = true;
             state.push_user_message(crate::common::app::ConsoleMessage::info(
-                    "Simulation started...",
-                ));
+                "Simulation started...",
+            ));
         }
 
         // Stop button
@@ -672,8 +672,8 @@ pub fn render_toolbar(ui: &mut Ui, state: &mut AppState) {
             // Set the abort trigger - SimulationController will call runner.abort()
             state.simulation.trigger_abort = true;
             state.push_user_message(crate::common::app::ConsoleMessage::warning(
-                    "Stopping simulation...",
-                ));
+                "Stopping simulation...",
+            ));
         }
 
         // Setup button

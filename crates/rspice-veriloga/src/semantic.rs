@@ -7,12 +7,12 @@
 //! - Expression validation
 //! - Parameter range checking
 
+use crate::CompilerOptions;
 use crate::ast::*;
 use crate::disciplines::DisciplineDb;
 use crate::error::{CompileError, CompileResult, SemanticError, SemanticErrorKind};
 use crate::source::Span;
 use crate::types::{FunctionRegistry, ParameterRange as TypedParameterRange, ValueType};
-use crate::CompilerOptions;
 use smol_str::SmolStr;
 use std::collections::HashMap;
 

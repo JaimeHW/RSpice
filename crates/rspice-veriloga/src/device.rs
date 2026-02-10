@@ -543,19 +543,11 @@ impl VerilogADevice {
         match index {
             StampIndex::Terminal(t) => {
                 let node = node_mapping.get(*t).copied().unwrap_or(0);
-                if node > 0 {
-                    Some(node - 1)
-                } else {
-                    None
-                }
+                if node > 0 { Some(node - 1) } else { None }
             }
             StampIndex::Internal(i) => {
                 let node = internal_node_indices.get(*i).copied().unwrap_or(0);
-                if node > 0 {
-                    Some(node - 1)
-                } else {
-                    None
-                }
+                if node > 0 { Some(node - 1) } else { None }
             }
             StampIndex::Ground => None,
         }

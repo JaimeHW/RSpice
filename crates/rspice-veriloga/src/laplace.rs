@@ -529,11 +529,7 @@ impl LaplaceFilter {
                 // H(0) = N(0)/D(0) = numerator[last] / denominator[last]
                 let n0 = numerator.last().copied().unwrap_or(1.0);
                 let d0 = denominator.last().copied().unwrap_or(1.0);
-                if d0.abs() > 1e-15 {
-                    n0 / d0
-                } else {
-                    1.0
-                }
+                if d0.abs() > 1e-15 { n0 / d0 } else { 1.0 }
             }
         }
     }

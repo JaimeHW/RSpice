@@ -1459,7 +1459,7 @@ impl<'a> Parser<'a> {
 
     fn skip_directive(&mut self) -> Result<(), ParseError> {
         self.advance(); // Skip directive token
-                        // Skip until newline (handled by lexer in practice)
+        // Skip until newline (handled by lexer in practice)
         Ok(())
     }
 

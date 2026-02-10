@@ -163,11 +163,7 @@ fn calculate_layout(available: Rect, state: &BodePlotState) -> BodeLayout {
 // Header Rendering
 // =============================================================================
 
-fn render_header(
-    ui: &mut Ui,
-    layout: &BodeLayout,
-    state: &mut BodePlotState,
-) -> bool {
+fn render_header(ui: &mut Ui, layout: &BodeLayout, state: &mut BodePlotState) -> bool {
     let painter = ui.painter();
     let mut close_requested = false;
 

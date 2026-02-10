@@ -356,11 +356,9 @@ pub fn render_schematic_view(
                                 .add_library_cell_component(grid_pos, library_cell);
                             log::info!("Placed library cell instance at {:?}", grid_pos);
                         } else {
-                            state.push_user_message(
-                                crate::common::app::ConsoleMessage::warning(
-                                    "No library cell selected for placement".to_string(),
-                                ),
-                            );
+                            state.push_user_message(crate::common::app::ConsoleMessage::warning(
+                                "No library cell selected for placement".to_string(),
+                            ));
                             state.schematic.tool = Tool::Select;
                         }
                     } else {
@@ -442,11 +440,9 @@ pub fn render_schematic_view(
                             // Check if this is ground
                             if net_name == "0" {
                                 log::info!("Probe: ground net (0V reference)");
-                                state.push_user_message(
-                                    crate::common::app::ConsoleMessage::info(
-                                        "Ground node: 0V reference".to_string(),
-                                    ),
-                                );
+                                state.push_user_message(crate::common::app::ConsoleMessage::info(
+                                    "Ground node: 0V reference".to_string(),
+                                ));
                             } else {
                                 // Try to toggle waveform visibility for this net
                                 let toggled =
@@ -490,11 +486,9 @@ pub fn render_schematic_view(
                                 "Probe: wire at {:?} not in netlist (regenerate netlist?)",
                                 grid_pos
                             );
-                            state.push_user_message(
-                                crate::common::app::ConsoleMessage::warning(
-                                    "Wire not in netlist. Run simulation to update.".to_string(),
-                                ),
-                            );
+                            state.push_user_message(crate::common::app::ConsoleMessage::warning(
+                                "Wire not in netlist. Run simulation to update.".to_string(),
+                            ));
                         }
                     } else if let Some(comp_id) = state.schematic.component_at(grid_pos) {
                         // Component probing - look up component and probe its nodes
@@ -531,12 +525,9 @@ pub fn render_schematic_view(
 
                             let toggled = state.simulation.toggle_waveform_visibility(&probe_name);
                             if toggled {
-                                state.push_user_message(
-                                    crate::common::app::ConsoleMessage::info(format!(
-                                        "Toggled waveform: {}",
-                                        probe_name
-                                    )),
-                                );
+                                state.push_user_message(crate::common::app::ConsoleMessage::info(
+                                    format!("Toggled waveform: {}", probe_name),
+                                ));
                             } else {
                                 state.push_user_message(
                                     crate::common::app::ConsoleMessage::warning(format!(

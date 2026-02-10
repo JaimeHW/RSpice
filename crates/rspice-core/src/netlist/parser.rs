@@ -7,7 +7,7 @@
 //! - Subcircuit definitions and instances
 
 use super::expr::eval_expression;
-use super::lexer::{tokenize, LexError, TokenKind, TokenStream};
+use super::lexer::{LexError, TokenKind, TokenStream, tokenize};
 use super::xspice_parser;
 use super::{
     AnalysisCommand, Element, ElementKind, FreqVariation, InitialCondition, ModelDef,
@@ -4211,9 +4211,10 @@ R1 1 0 1k
 .END
 "#;
         let err = parse_netlist(netlist).expect_err("expected invalid .DISTO variation");
-        assert!(err
-            .to_string()
-            .contains("Invalid .DISTO frequency variation"));
+        assert!(
+            err.to_string()
+                .contains("Invalid .DISTO frequency variation")
+        );
     }
 
     #[test]
@@ -4301,9 +4302,10 @@ R1 1 0 1k
 .END
 "#;
         let err = parse_netlist(netlist).expect_err("expected .MC distribution parse error");
-        assert!(err
-            .to_string()
-            .contains("expected GAUSS, UNIFORM, or WORSTCASE"));
+        assert!(
+            err.to_string()
+                .contains("expected GAUSS, UNIFORM, or WORSTCASE")
+        );
     }
 
     #[test]

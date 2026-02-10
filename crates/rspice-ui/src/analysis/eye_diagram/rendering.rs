@@ -129,11 +129,7 @@ fn calculate_layout(available: Rect) -> EyeLayout {
 // Header Rendering
 // =============================================================================
 
-fn render_header(
-    ui: &mut Ui,
-    layout: &EyeLayout,
-    state: &mut EyeDiagramState,
-)-> bool {
+fn render_header(ui: &mut Ui, layout: &EyeLayout, state: &mut EyeDiagramState) -> bool {
     let painter = ui.painter();
     let mut close_requested = false;
 

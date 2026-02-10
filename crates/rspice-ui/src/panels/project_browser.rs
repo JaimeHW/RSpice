@@ -314,9 +314,9 @@ fn render_library_cell(
         state.schematic.tool = Tool::Place(component_type);
         state.schematic.pending_library_cell = None;
         state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
-                "Click on schematic to place {} (R to rotate, Esc to cancel)",
-                cell_name
-            )));
+            "Click on schematic to place {} (R to rotate, Esc to cancel)",
+            cell_name
+        )));
     }
 
     // Tooltip with component info

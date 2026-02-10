@@ -387,9 +387,7 @@ fn analysis_type_to_viewer(analysis_type: AnalysisType) -> ActiveViewer {
         | AnalysisType::Disto
         | AnalysisType::Tf
         | AnalysisType::Pac
-        | AnalysisType::Pxf => {
-            ActiveViewer::BodePlot
-        }
+        | AnalysisType::Pxf => ActiveViewer::BodePlot,
         AnalysisType::Noise | AnalysisType::Pnoise => ActiveViewer::BodePlot,
         AnalysisType::PoleZero => ActiveViewer::PoleZero,
         AnalysisType::Sensitivity => ActiveViewer::Waveform,

@@ -8,10 +8,10 @@
 
 use super::SolverError;
 use crate::Value;
+use faer::Mat;
 use faer::linalg::solvers::Solve;
 use faer::sparse::linalg::solvers::{Lu, SymbolicLu};
 use faer::sparse::{SparseColMat, SymbolicSparseColMat};
-use faer::Mat;
 
 //=============================================================================
 // Static Structure Matrix - The Key Optimization
