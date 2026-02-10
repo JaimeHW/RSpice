@@ -1,7 +1,7 @@
 use super::{is_ground_like, normalize_voltage_signal_name, run_transient_analysis};
 use crate::services::safety::{SoADefinition, SoALimit, SoAManager, SoAParameter, SoAViolation};
-use rspice_core::netlist::{Element, ElementKind};
 use rspice_core::Value;
+use rspice_core::netlist::{Element, ElementKind};
 use std::collections::HashMap;
 
 /// Configuration for SOA analysis.

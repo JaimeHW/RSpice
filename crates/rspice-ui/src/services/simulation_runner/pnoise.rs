@@ -3,14 +3,14 @@ use super::pnoise_sideband::{
     fold_sideband_noise_results, resolve_pnoise_sideband_stride,
 };
 use super::{
-    build_engine_config, generate_freq_points, infer_primary_output_node,
+    PssData, build_engine_config, generate_freq_points, infer_primary_output_node,
     infer_primary_source_name, is_ground_like, netlist_has_independent_source_named,
-    normalize_voltage_signal_name, run_pss_analysis, PssData,
+    normalize_voltage_signal_name, run_pss_analysis,
 };
 use crate::output_spec::resolve_node_or_ground_index;
+use rspice_core::Value;
 use rspice_core::analysis::noise::NoiseResult;
 use rspice_core::engine::Engine;
-use rspice_core::Value;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,8 +1,8 @@
 //! DC sweep analysis runner.
 
 use super::build_engine_config;
-use rspice_core::engine::Engine;
 use rspice_core::Value;
+use rspice_core::engine::Engine;
 
 /// DC sweep analysis data
 #[derive(Debug, Clone)]
