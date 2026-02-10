@@ -309,7 +309,16 @@ impl PoleZeroData {
 
     /// Find the dominant poles (closest to stability boundary)
     pub fn dominant_poles(&self) -> Vec<&ComplexRoot> {
-        let mut poles: Vec<&ComplexRoot> = self.poles().collect();
+        let mut poles: Vec<&ComplexRoot> = self
+            .poles()
+            .filter(|root| {
+                if self.z_domain {
+                    root.magnitude().is_finite()
+                } else {
+                    root.real.is_finite()
+                }
+            })
+            .collect();
 
         if poles.is_empty() {
             return Vec::new();
@@ -320,14 +329,14 @@ impl PoleZeroData {
             poles.sort_by(|a, b| {
                 let da = (1.0 - a.magnitude()).abs();
                 let db = (1.0 - b.magnitude()).abs();
-                da.partial_cmp(&db).unwrap()
+                da.total_cmp(&db)
             });
         } else {
             // For s-domain: closest to jω axis (least negative real part)
             poles.sort_by(|a, b| {
                 let da = a.real.abs();
                 let db = b.real.abs();
-                da.partial_cmp(&db).unwrap()
+                da.total_cmp(&db)
             });
         }
 
@@ -346,9 +355,10 @@ impl PoleZeroData {
             .into_iter()
             .filter(|p| {
                 if self.z_domain {
-                    (1.0 - p.magnitude()).abs() <= threshold
+                    let distance = (1.0 - p.magnitude()).abs();
+                    distance.is_finite() && distance <= threshold
                 } else {
-                    p.real.abs() <= threshold
+                    p.real.is_finite() && p.real.abs() <= threshold
                 }
             })
             .collect()
@@ -615,6 +625,40 @@ mod tests {
         let dominant = data.dominant_poles();
         assert!(!dominant.is_empty());
         assert!(approx_eq_rel(dominant[0].real, -0.1, 0.01));
+    }
+
+    #[test]
+    fn test_dominant_poles_ignores_non_finite_s_domain_roots() {
+        let mut data = PoleZeroData::new("NonFinite");
+        data.roots.push(ComplexRoot::pole(f64::NAN, 1.0));
+        data.roots.push(ComplexRoot::pole(-0.05, 0.2));
+        data.roots.push(ComplexRoot::pole(-5.0, 0.0));
+
+        let dominant = data.dominant_poles();
+        assert!(!dominant.is_empty());
+        assert!(dominant.iter().all(|root| root.real.is_finite()));
+        assert!(
+            dominant
+                .iter()
+                .any(|root| approx_eq_rel(root.real, -0.05, 0.01))
+        );
+    }
+
+    #[test]
+    fn test_dominant_poles_ignores_non_finite_z_domain_roots() {
+        let mut data = PoleZeroData::new_z_domain("NonFiniteZ");
+        data.roots.push(ComplexRoot::pole(f64::NAN, 0.0));
+        data.roots.push(ComplexRoot::pole(0.95, 0.01));
+        data.roots.push(ComplexRoot::pole(0.2, 0.0));
+
+        let dominant = data.dominant_poles();
+        assert!(!dominant.is_empty());
+        assert!(dominant.iter().all(|root| root.magnitude().is_finite()));
+        assert!(
+            dominant
+                .iter()
+                .any(|root| approx_eq_rel(root.real, 0.95, 0.01))
+        );
     }
 
     #[test]
