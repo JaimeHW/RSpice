@@ -423,20 +423,15 @@ impl CornerResult {
                 .corners
                 .iter()
                 .filter_map(|r| r.outputs.get(&name).map(|&v| (r.corner.name(), v)))
+                .filter(|(_, value)| value.is_finite())
                 .collect();
 
             if values.is_empty() {
                 continue;
             }
 
-            let min_entry = values
-                .iter()
-                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-                .unwrap();
-            let max_entry = values
-                .iter()
-                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-                .unwrap();
+            let min_entry = values.iter().min_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
+            let max_entry = values.iter().max_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
 
             let sum: Value = values.iter().map(|(_, v)| v).sum();
             let mean = sum / values.len() as Value;
@@ -473,25 +468,29 @@ impl CornerResult {
         if minimize {
             self.corners
                 .iter()
-                .filter(|r| r.outputs.contains_key(name))
-                .min_by(|a, b| {
-                    a.outputs
+                .filter_map(|result| {
+                    result
+                        .outputs
                         .get(name)
-                        .unwrap()
-                        .partial_cmp(b.outputs.get(name).unwrap())
-                        .unwrap()
+                        .copied()
+                        .filter(|value| value.is_finite())
+                        .map(|value| (result, value))
                 })
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(result, _)| result)
         } else {
             self.corners
                 .iter()
-                .filter(|r| r.outputs.contains_key(name))
-                .max_by(|a, b| {
-                    a.outputs
+                .filter_map(|result| {
+                    result
+                        .outputs
                         .get(name)
-                        .unwrap()
-                        .partial_cmp(b.outputs.get(name).unwrap())
-                        .unwrap()
+                        .copied()
+                        .filter(|value| value.is_finite())
+                        .map(|value| (result, value))
                 })
+                .max_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(result, _)| result)
         }
     }
 }
@@ -844,6 +843,67 @@ mod tests {
 
         // Best case for delay (minimize)
         let worst_min = result.worst_case("delay", true).unwrap();
+        assert_eq!(worst_min.corner.process, ProcessCorner::FF);
+    }
+
+    #[test]
+    fn test_summary_ignores_non_finite_outputs() {
+        let config = CornerConfig::new().with_process_corners(vec![
+            ProcessCorner::SS,
+            ProcessCorner::TT,
+            ProcessCorner::FF,
+        ]);
+        let runner = CornerRunner::new(config);
+
+        let result = runner.run(|corner| {
+            let mut outputs = HashMap::new();
+            let gain = match corner.process {
+                ProcessCorner::SS => 90.0,
+                ProcessCorner::TT => f64::NAN,
+                ProcessCorner::FF => 110.0,
+                _ => unreachable!("test config only instantiates SS/TT/FF"),
+            };
+            outputs.insert("gain".to_string(), gain);
+            Ok::<_, ()>(outputs)
+        });
+
+        let summary = result
+            .get_summary("gain")
+            .expect("finite values should remain");
+        assert!((summary.min - 90.0).abs() < 0.1);
+        assert!((summary.max - 110.0).abs() < 0.1);
+        assert!((summary.mean - 100.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_worst_case_ignores_non_finite_outputs() {
+        let config = CornerConfig::new().with_process_corners(vec![
+            ProcessCorner::SS,
+            ProcessCorner::TT,
+            ProcessCorner::FF,
+        ]);
+        let runner = CornerRunner::new(config);
+
+        let result = runner.run(|corner| {
+            let mut outputs = HashMap::new();
+            let delay = match corner.process {
+                ProcessCorner::SS => f64::NAN,
+                ProcessCorner::TT => 10.0,
+                ProcessCorner::FF => 7.5,
+                _ => unreachable!("test config only instantiates SS/TT/FF"),
+            };
+            outputs.insert("delay".to_string(), delay);
+            Ok::<_, ()>(outputs)
+        });
+
+        let worst_max = result
+            .worst_case("delay", false)
+            .expect("finite values should remain");
+        assert_eq!(worst_max.corner.process, ProcessCorner::TT);
+
+        let worst_min = result
+            .worst_case("delay", true)
+            .expect("finite values should remain");
         assert_eq!(worst_min.corner.process, ProcessCorner::FF);
     }
 
