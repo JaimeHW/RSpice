@@ -3,7 +3,7 @@
 //! Visualizes results from yield analysis and Monte Carlo simulations.
 //! Displays pass/fail status, yield percentage, and statistical distributions.
 
-use crate::services::yield_manager::{SpecLimitType, YieldResult};
+use crate::services::yield_manager::{SpecLimitType, YieldResult, YieldSpec};
 use egui::{Align, Color32, Layout, RichText, Ui};
 
 /// Renders the Yield Summary Panel
@@ -74,34 +74,28 @@ fn render_yield_item(ui: &mut Ui, result: &YieldResult) {
         // Spec Limits
         ui.horizontal(|ui| {
             ui.label(RichText::new("Limits: ").weak());
-            match result.spec.limit_type {
-                SpecLimitType::Lower => {
-                    ui.label(format!(
-                        "> {:.4}{}",
-                        result.spec.min.unwrap(),
-                        result.spec.unit
-                    ));
-                }
-                SpecLimitType::Upper => {
-                    ui.label(format!(
-                        "< {:.4}{}",
-                        result.spec.max.unwrap(),
-                        result.spec.unit
-                    ));
-                }
-                SpecLimitType::Range => {
-                    ui.label(format!(
-                        "{:.4} - {:.4} {}",
-                        result.spec.min.unwrap(),
-                        result.spec.max.unwrap(),
-                        result.spec.unit
-                    ));
-                }
-            }
+            ui.label(format_spec_limits(&result.spec));
         });
 
         ui.add_space(8.0);
     });
+}
+
+fn format_spec_limits(spec: &YieldSpec) -> String {
+    match spec.limit_type {
+        SpecLimitType::Lower => spec
+            .min
+            .map(|min| format!("> {:.4}{}", min, spec.unit))
+            .unwrap_or_else(|| "Invalid lower limit".to_string()),
+        SpecLimitType::Upper => spec
+            .max
+            .map(|max| format!("< {:.4}{}", max, spec.unit))
+            .unwrap_or_else(|| "Invalid upper limit".to_string()),
+        SpecLimitType::Range => match (spec.min, spec.max) {
+            (Some(min), Some(max)) => format!("{:.4} - {:.4} {}", min, max, spec.unit),
+            _ => "Invalid range limits".to_string(),
+        },
+    }
 }
 
 // =============================================================================
@@ -134,5 +128,57 @@ mod tests {
 
         assert!(result.yield_percent > 95.0);
         assert_eq!(result.spec.unit, "V");
+    }
+
+    #[test]
+    fn test_format_spec_limits_valid_specs() {
+        assert_eq!(
+            format_spec_limits(&YieldSpec::lower("idd", 0.1, "A")),
+            "> 0.1000A"
+        );
+        assert_eq!(
+            format_spec_limits(&YieldSpec::upper("vout", 1.8, "V")),
+            "< 1.8000V"
+        );
+        assert_eq!(
+            format_spec_limits(&YieldSpec::range("gain", 10.0, 20.0, "dB")),
+            "10.0000 - 20.0000 dB"
+        );
+    }
+
+    #[test]
+    fn test_format_spec_limits_handles_missing_bounds_without_panicking() {
+        let invalid_lower = YieldSpec {
+            target: "idd".to_string(),
+            limit_type: SpecLimitType::Lower,
+            min: None,
+            max: None,
+            target_val: None,
+            unit: "A".to_string(),
+            weight: 1.0,
+        };
+        assert_eq!(format_spec_limits(&invalid_lower), "Invalid lower limit");
+
+        let invalid_upper = YieldSpec {
+            target: "vout".to_string(),
+            limit_type: SpecLimitType::Upper,
+            min: None,
+            max: None,
+            target_val: None,
+            unit: "V".to_string(),
+            weight: 1.0,
+        };
+        assert_eq!(format_spec_limits(&invalid_upper), "Invalid upper limit");
+
+        let invalid_range = YieldSpec {
+            target: "gain".to_string(),
+            limit_type: SpecLimitType::Range,
+            min: Some(10.0),
+            max: None,
+            target_val: None,
+            unit: "dB".to_string(),
+            weight: 1.0,
+        };
+        assert_eq!(format_spec_limits(&invalid_range), "Invalid range limits");
     }
 }
