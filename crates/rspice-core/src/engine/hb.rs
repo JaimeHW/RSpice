@@ -24,6 +24,7 @@ use crate::circuit::CircuitData;
 use crate::netlist::SourceSpec;
 use crate::{Netlist, Value};
 use num_complex::Complex64;
+use std::collections::BTreeSet;
 
 /// HB-specific error types
 #[derive(Debug, Clone)]
@@ -159,6 +160,7 @@ impl Engine {
             return Err(HbError::UnsupportedNonlinearDevices(summary).into());
         }
         let has_supported_nonlinear = Self::hb_has_supported_nonlinear_devices(&circuit, num_nodes);
+        let ac_harmonics = Self::hb_collect_ac_harmonics(&config)?;
 
         // Create solver
         let mut solver = HbSolver::new(config.clone(), num_nodes);
@@ -172,11 +174,11 @@ impl Engine {
         self.hb_stamp_capacitors(&circuit, &mut solver);
         self.hb_stamp_inductors(&circuit, &mut solver);
         if has_supported_nonlinear {
-            self.hb_stamp_voltage_sources_norton(&circuit, &mut solver);
+            self.hb_stamp_voltage_sources_norton(&circuit, &mut solver, &ac_harmonics);
         } else {
-            self.hb_stamp_voltage_sources(&circuit, &mut solver);
+            self.hb_stamp_voltage_sources(&circuit, &mut solver, &ac_harmonics);
         }
-        self.hb_stamp_current_sources(&circuit, &mut solver);
+        self.hb_stamp_current_sources(&circuit, &mut solver, &ac_harmonics);
         if has_supported_nonlinear {
             self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
         }
@@ -236,6 +238,66 @@ impl Engine {
         node_names
     }
 
+    fn hb_collect_ac_harmonics(config: &HbConfig) -> Result<Vec<usize>, SimulationError> {
+        if config.tones.is_empty() {
+            return Ok(vec![1]);
+        }
+
+        if !config.fundamental_freq.is_finite() || config.fundamental_freq <= 0.0 {
+            return Err(HbError::InvalidConfig(
+                "HB multi-tone requires a positive basis fundamental frequency".to_string(),
+            )
+            .into());
+        }
+
+        let mut harmonics = BTreeSet::new();
+        for tone in &config.tones {
+            if !tone.frequency.is_finite() || tone.frequency <= 0.0 {
+                return Err(HbError::InvalidConfig(format!(
+                    "HB tone '{}' has invalid frequency {}",
+                    tone.name, tone.frequency
+                ))
+                .into());
+            }
+
+            let ratio = tone.frequency / config.fundamental_freq;
+            let harmonic = ratio.round();
+            let abs_error = (ratio - harmonic).abs();
+            let rel_error = abs_error / harmonic.abs().max(1.0);
+
+            if !harmonic.is_finite() || harmonic < 1.0 {
+                return Err(HbError::InvalidConfig(format!(
+                    "HB tone '{}' does not map to a positive harmonic of f0={:.6e} Hz",
+                    tone.name, config.fundamental_freq
+                ))
+                .into());
+            }
+            if rel_error > 1e-9 {
+                return Err(HbError::InvalidConfig(format!(
+                    "HB tone '{}' at {:.6e} Hz is not an integer harmonic of f0={:.6e} Hz",
+                    tone.name, tone.frequency, config.fundamental_freq
+                ))
+                .into());
+            }
+
+            let harmonic = harmonic as usize;
+            if harmonic > config.num_harmonics {
+                return Err(HbError::InvalidConfig(format!(
+                    "HB tone '{}' maps to harmonic {} but num_harmonics is {}",
+                    tone.name, harmonic, config.num_harmonics
+                ))
+                .into());
+            }
+            harmonics.insert(harmonic);
+        }
+
+        if harmonics.is_empty() {
+            Ok(vec![1])
+        } else {
+            Ok(harmonics.into_iter().collect())
+        }
+    }
+
     fn hb_has_supported_nonlinear_devices(circuit: &CircuitData, num_nodes: usize) -> bool {
         !circuit.diodes.is_empty()
             || !circuit.bjts.is_empty()
@@ -282,7 +344,10 @@ impl Engine {
         }
     }
 
-    fn hb_extract_static_source_voltage(spec: Option<&SourceSpec>, fallback_dc: Value) -> Option<Value> {
+    fn hb_extract_static_source_voltage(
+        spec: Option<&SourceSpec>,
+        fallback_dc: Value,
+    ) -> Option<Value> {
         match spec {
             None => Some(fallback_dc),
             Some(SourceSpec::Dc(v)) => Some(*v),
@@ -549,7 +614,12 @@ impl Engine {
     }
 
     /// Stamp ideal voltage sources into HB solver using MNA branch equations.
-    fn hb_stamp_voltage_sources(&self, circuit: &CircuitData, solver: &mut HbSolver) {
+    fn hb_stamp_voltage_sources(
+        &self,
+        circuit: &CircuitData,
+        solver: &mut HbSolver,
+        ac_harmonics: &[usize],
+    ) {
         for i in 0..circuit.voltage_sources.len() {
             let np = circuit.voltage_sources.node_pos[i];
             let nn = circuit.voltage_sources.node_neg[i];
@@ -566,7 +636,17 @@ impl Engine {
                 .get(i)
                 .copied()
                 .unwrap_or(0.0);
-            solver.add_voltage_source_branch_ac(np, nn, dc, ac_mag, ac_phase);
+            if ac_mag.abs() <= 1e-30 {
+                solver.add_voltage_source_branch(np, nn, dc);
+                continue;
+            }
+
+            let harmonic_terms: Vec<(usize, Value, Value)> = ac_harmonics
+                .iter()
+                .copied()
+                .map(|harmonic| (harmonic, ac_mag, ac_phase))
+                .collect();
+            solver.add_voltage_source_branch_harmonics(np, nn, dc, &harmonic_terms);
         }
     }
 
@@ -575,7 +655,12 @@ impl Engine {
     /// Nonlinear HB Newton currently solves in node-voltage space only. Converting
     /// ideal voltage sources to Norton form avoids branch-current unknowns while
     /// preserving source waveforms with a very small equivalent source resistance.
-    fn hb_stamp_voltage_sources_norton(&self, circuit: &CircuitData, solver: &mut HbSolver) {
+    fn hb_stamp_voltage_sources_norton(
+        &self,
+        circuit: &CircuitData,
+        solver: &mut HbSolver,
+        ac_harmonics: &[usize],
+    ) {
         for i in 0..circuit.voltage_sources.len() {
             let np = circuit.voltage_sources.node_pos[i];
             let nn = circuit.voltage_sources.node_neg[i];
@@ -605,11 +690,13 @@ impl Engine {
 
             let i_ac = ac_mag * HB_NORTON_G;
             if i_ac.abs() > 1e-30 {
-                if np > 0 {
-                    solver.add_ac_source(np - 1, -i_ac, ac_phase);
-                }
-                if nn > 0 {
-                    solver.add_ac_source(nn - 1, i_ac, ac_phase);
+                for harmonic in ac_harmonics {
+                    if np > 0 {
+                        solver.add_harmonic_source(np - 1, *harmonic, -i_ac, ac_phase);
+                    }
+                    if nn > 0 {
+                        solver.add_harmonic_source(nn - 1, *harmonic, i_ac, ac_phase);
+                    }
                 }
             }
         }
@@ -619,8 +706,13 @@ impl Engine {
     ///
     /// Stamps both DC and AC components:
     /// - DC component goes into harmonic 0
-    /// - AC component goes into harmonic 1 (fundamental) with magnitude and phase
-    fn hb_stamp_current_sources(&self, circuit: &CircuitData, solver: &mut HbSolver) {
+    /// - AC component is applied to configured HB drive harmonics with magnitude and phase
+    fn hb_stamp_current_sources(
+        &self,
+        circuit: &CircuitData,
+        solver: &mut HbSolver,
+        ac_harmonics: &[usize],
+    ) {
         for i in 0..circuit.current_sources.len() {
             let np = circuit.current_sources.node_pos[i];
             let nn = circuit.current_sources.node_neg[i];
@@ -634,7 +726,7 @@ impl Engine {
                 solver.add_dc_source(nn - 1, dc); // Current enters at - terminal
             }
 
-            // Stamp AC component at fundamental (harmonic 1)
+            // Stamp AC component across configured drive harmonics.
             let ac_mag = circuit
                 .current_sources
                 .ac_magnitudes
@@ -649,12 +741,15 @@ impl Engine {
                 .unwrap_or(0.0);
 
             if ac_mag.abs() > 1e-30 {
-                // AC current at fundamental frequency
-                if np > 0 {
-                    solver.add_ac_source(np - 1, -ac_mag, ac_phase); // Current leaves at + terminal
-                }
-                if nn > 0 {
-                    solver.add_ac_source(nn - 1, ac_mag, ac_phase); // Current enters at - terminal
+                for harmonic in ac_harmonics {
+                    if np > 0 {
+                        // Current leaves at + terminal.
+                        solver.add_harmonic_source(np - 1, *harmonic, -ac_mag, ac_phase);
+                    }
+                    if nn > 0 {
+                        // Current enters at - terminal.
+                        solver.add_harmonic_source(nn - 1, *harmonic, ac_mag, ac_phase);
+                    }
                 }
             }
         }
@@ -713,7 +808,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::HbConfig;
+    use crate::analysis::{HbConfig, HbTone};
     #[cfg(feature = "veriloga")]
     use crate::circuit::CircuitData;
     #[cfg(feature = "veriloga")]
@@ -1108,7 +1203,10 @@ mod tests {
         let config = HbConfig::new(1e6).with_harmonics(3);
 
         let result = engine.run_hb(&netlist, config);
-        assert!(result.is_ok(), "static DC control source should be supported in HB");
+        assert!(
+            result.is_ok(),
+            "static DC control source should be supported in HB"
+        );
     }
 
     #[test]
@@ -1133,7 +1231,11 @@ mod tests {
         let result = engine.run_hb(&netlist, config);
         assert!(result.is_err(), "time-varying control source should fail");
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(msg.contains("current switch"), "expected current switch summary: {}", msg);
+        assert!(
+            msg.contains("current switch"),
+            "expected current switch summary: {}",
+            msg
+        );
         assert!(
             msg.contains("static control-source waveforms"),
             "expected static-waveform guidance in diagnostics: {}",
@@ -2691,6 +2793,97 @@ C1 1 0 1n
                 phase_deg
             );
         }
+    }
+
+    #[test]
+    fn test_run_hb_multi_tone_source_stamps_target_harmonics() {
+        use crate::Netlist;
+
+        let netlist_str = "* Multi-tone harmonic source stamp
+V1 1 0 DC 0 AC 1
+R1 1 2 1k
+C1 2 0 1n
+.END";
+        let netlist = Netlist::parse(netlist_str).expect("netlist should parse");
+        let engine = Engine::default();
+
+        let mut config = HbConfig::new(1e6).with_harmonics(9).with_tolerance(1e-6);
+        config.tones = vec![
+            HbTone::new(2e6, 1).with_name("f1"),
+            HbTone::new(3e6, 1).with_name("f2"),
+        ];
+
+        let result = engine
+            .run_hb(&netlist, config)
+            .expect("HB multi-tone solve should succeed");
+        assert!(result.converged);
+
+        let v1 = result
+            .result
+            .get_node_voltage("1")
+            .expect("node 1 should exist in HB result");
+        assert!(
+            v1.magnitude(2) > 0.9,
+            "tone at harmonic 2 should be injected by the source"
+        );
+        assert!(
+            v1.magnitude(3) > 0.9,
+            "tone at harmonic 3 should be injected by the source"
+        );
+        assert!(
+            v1.magnitude(1) < 1e-9,
+            "no source energy should be stamped at harmonic 1 for this configuration"
+        );
+    }
+
+    #[test]
+    fn test_run_hb_rejects_non_integer_tone_mapping() {
+        use crate::Netlist;
+
+        let netlist_str = "* Non-integer tone mapping
+V1 1 0 DC 0 AC 1
+R1 1 0 1k
+C1 1 0 1n
+.END";
+        let netlist = Netlist::parse(netlist_str).expect("netlist should parse");
+        let engine = Engine::default();
+
+        let mut config = HbConfig::new(1e6).with_harmonics(12).with_tolerance(1e-6);
+        config.tones = vec![HbTone::new(2.5e6, 1).with_name("bad-tone")];
+
+        let err = engine
+            .run_hb(&netlist, config)
+            .expect_err("tone not on integer harmonic should fail");
+        assert!(
+            err.to_string().contains("integer harmonic"),
+            "expected integer-harmonic validation error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_run_hb_rejects_tone_harmonic_beyond_configured_limit() {
+        use crate::Netlist;
+
+        let netlist_str = "* Tone harmonic limit
+V1 1 0 DC 0 AC 1
+R1 1 0 1k
+C1 1 0 1n
+.END";
+        let netlist = Netlist::parse(netlist_str).expect("netlist should parse");
+        let engine = Engine::default();
+
+        let mut config = HbConfig::new(1e6).with_harmonics(4).with_tolerance(1e-6);
+        config.tones = vec![HbTone::new(5e6, 1).with_name("h5")];
+
+        let err = engine
+            .run_hb(&netlist, config)
+            .expect_err("tone above harmonic cap should fail");
+        assert!(
+            err.to_string().contains("num_harmonics"),
+            "expected harmonic-cap validation error, got: {}",
+            err
+        );
     }
 
     /// Verify inductor acts as open circuit at very high frequency

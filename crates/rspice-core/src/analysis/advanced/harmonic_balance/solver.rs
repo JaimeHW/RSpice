@@ -123,10 +123,10 @@ pub struct VoltageSourceBranch {
     pub branch_idx: usize,
     /// DC voltage value
     pub dc_voltage: Value,
-    /// AC voltage magnitude (at fundamental)
-    pub ac_magnitude: Value,
-    /// AC voltage phase (radians)
-    pub ac_phase: Value,
+    /// AC harmonic spectrum entries `(harmonic_index, complex_voltage)`.
+    ///
+    /// Harmonic index `1` is the fundamental of the HB basis frequency.
+    pub ac_harmonics: Vec<(usize, Complex64)>,
 }
 
 impl VoltageSourceBranch {
@@ -137,16 +137,35 @@ impl VoltageSourceBranch {
             node_neg,
             branch_idx,
             dc_voltage,
-            ac_magnitude: 0.0,
-            ac_phase: 0.0,
+            ac_harmonics: Vec::new(),
         }
     }
 
-    /// Set AC parameters
+    /// Set AC parameters at the fundamental harmonic (k=1).
     pub fn with_ac(mut self, magnitude: Value, phase: Value) -> Self {
-        self.ac_magnitude = magnitude;
-        self.ac_phase = phase;
+        self.set_harmonic_component(1, Complex64::from_polar(magnitude, phase));
         self
+    }
+
+    /// Set AC parameters for a specific harmonic.
+    pub fn with_harmonic(mut self, harmonic: usize, magnitude: Value, phase: Value) -> Self {
+        self.set_harmonic_component(harmonic, Complex64::from_polar(magnitude, phase));
+        self
+    }
+
+    fn set_harmonic_component(&mut self, harmonic: usize, value: Complex64) {
+        if harmonic == 0 {
+            return;
+        }
+        if let Some((_, component)) = self
+            .ac_harmonics
+            .iter_mut()
+            .find(|(index, _)| *index == harmonic)
+        {
+            *component = value;
+        } else {
+            self.ac_harmonics.push((harmonic, value));
+        }
     }
 }
 
@@ -187,7 +206,7 @@ pub struct HbSolver {
     l_matrix: Vec<(usize, usize, Value)>,
 
     /// Voltage source branches for MNA
-    /// (node_pos, node_neg, branch_idx, dc_value, ac_magnitude, ac_phase)
+    /// Each branch may define AC entries on arbitrary HB harmonics.
     voltage_source_branches: Vec<VoltageSourceBranch>,
 
     /// Node names
@@ -1222,6 +1241,24 @@ impl HbSolver {
         branch_idx
     }
 
+    /// Add voltage source with arbitrary AC harmonic entries.
+    pub fn add_voltage_source_branch_harmonics(
+        &mut self,
+        node_pos: usize,
+        node_neg: usize,
+        dc_voltage: Value,
+        harmonics: &[(usize, Value, Value)],
+    ) -> usize {
+        let branch_idx = self.num_branches;
+        let mut branch = VoltageSourceBranch::new(node_pos, node_neg, branch_idx, dc_voltage);
+        for (harmonic, magnitude, phase) in harmonics {
+            branch = branch.with_harmonic(*harmonic, *magnitude, *phase);
+        }
+        self.voltage_source_branches.push(branch);
+        self.num_branches += 1;
+        branch_idx
+    }
+
     /// Get number of MNA branch currents
     pub fn num_branches(&self) -> usize {
         self.num_branches
@@ -1243,15 +1280,37 @@ impl HbSolver {
 
     /// Set AC source at a node (sinusoidal at fundamental)
     pub fn set_ac_source(&mut self, node: usize, magnitude: Value, phase: Value) {
-        if node < self.source_spectra.len() && self.source_spectra[node].len() > 1 {
-            self.source_spectra[node][1] = Complex64::from_polar(magnitude, phase);
-        }
+        self.set_harmonic_source(node, 1, magnitude, phase);
     }
 
     /// Add AC source contribution at the fundamental harmonic for a node
     pub fn add_ac_source(&mut self, node: usize, magnitude: Value, phase: Value) {
-        if node < self.source_spectra.len() && self.source_spectra[node].len() > 1 {
-            self.source_spectra[node][1] += Complex64::from_polar(magnitude, phase);
+        self.add_harmonic_source(node, 1, magnitude, phase);
+    }
+
+    /// Set AC source contribution at an arbitrary harmonic for a node.
+    pub fn set_harmonic_source(
+        &mut self,
+        node: usize,
+        harmonic: usize,
+        magnitude: Value,
+        phase: Value,
+    ) {
+        if node < self.source_spectra.len() && harmonic < self.source_spectra[node].len() {
+            self.source_spectra[node][harmonic] = Complex64::from_polar(magnitude, phase);
+        }
+    }
+
+    /// Add AC source contribution at an arbitrary harmonic for a node.
+    pub fn add_harmonic_source(
+        &mut self,
+        node: usize,
+        harmonic: usize,
+        magnitude: Value,
+        phase: Value,
+    ) {
+        if node < self.source_spectra.len() && harmonic < self.source_spectra[node].len() {
+            self.source_spectra[node][harmonic] += Complex64::from_polar(magnitude, phase);
         }
     }
 
@@ -1408,10 +1467,12 @@ impl HbSolver {
     ) -> Complex64 {
         if harmonic == 0 {
             Complex64::new(branch.dc_voltage, 0.0)
-        } else if harmonic == 1 {
-            Complex64::from_polar(branch.ac_magnitude, branch.ac_phase)
         } else {
-            Complex64::new(0.0, 0.0)
+            branch
+                .ac_harmonics
+                .iter()
+                .find_map(|(index, value)| (*index == harmonic).then_some(*value))
+                .unwrap_or_else(|| Complex64::new(0.0, 0.0))
         }
     }
 
@@ -3607,6 +3668,42 @@ mod solver_tests {
 
         assert!((solver.source_spectra[0][0].re - 3.0).abs() < 1e-12);
         assert!((solver.source_spectra[0][1].re - 4.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_add_harmonic_source_accumulates_non_fundamental_components() {
+        let config = HbConfig::new(1e9).with_harmonics(5);
+        let mut solver = HbSolver::new(config, 1);
+
+        solver.add_harmonic_source(0, 3, 1.0, 0.0);
+        solver.add_harmonic_source(0, 3, 0.5, 0.0);
+
+        assert!((solver.source_spectra[0][3].re - 1.5).abs() < 1e-12);
+        assert!(solver.source_spectra[0][1].norm() < 1e-15);
+    }
+
+    #[test]
+    fn test_voltage_source_branch_harmonics_supports_arbitrary_indices() {
+        let config = HbConfig::new(1e6).with_harmonics(6);
+        let mut solver = HbSolver::new(config, 1);
+
+        solver.add_voltage_source_branch_harmonics(
+            1,
+            0,
+            0.5,
+            &[(2, 1.0, 0.0), (5, 0.25, std::f64::consts::FRAC_PI_2)],
+        );
+
+        let branch = solver
+            .voltage_source_branches
+            .first()
+            .expect("expected one voltage source branch");
+        assert!((HbSolver::voltage_source_value_at_harmonic(branch, 0).re - 0.5).abs() < 1e-12);
+        assert!((HbSolver::voltage_source_value_at_harmonic(branch, 2).norm() - 1.0).abs() < 1e-12);
+        assert!(
+            (HbSolver::voltage_source_value_at_harmonic(branch, 5).norm() - 0.25).abs() < 1e-12
+        );
+        assert!(HbSolver::voltage_source_value_at_harmonic(branch, 1).norm() < 1e-15);
     }
 
     #[test]
