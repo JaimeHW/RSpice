@@ -1948,16 +1948,19 @@ impl WaveformWriter {
 #[cfg(test)]
 mod tests {
     use super::super::cadence_psf::test_helpers::{
-        build_non_windowed_array_complex_psf, build_non_windowed_array_of_struct_psf,
-        build_non_windowed_array_real_psf, build_non_windowed_complex_psf,
-        build_non_windowed_int32_psf, build_non_windowed_int8_psf,
-        build_non_windowed_mixed_real_and_string_psf, build_non_windowed_nested_array_real_psf,
-        build_non_windowed_real_psf, build_non_windowed_struct_psf,
-        build_non_windowed_struct_with_array_psf, build_non_windowed_variable_length_array_psf,
-        build_windowed_array_complex_psf, build_windowed_array_of_struct_psf,
-        build_windowed_array_real_psf, build_windowed_nested_array_real_psf,
-        build_windowed_real_psf, build_windowed_struct_with_array_psf,
-        build_windowed_variable_length_array_psf,
+        build_non_windowed_array_complex_psf,
+        build_non_windowed_array_of_struct_bare_descriptor_psf,
+        build_non_windowed_array_of_struct_psf, build_non_windowed_array_real_psf,
+        build_non_windowed_complex_psf, build_non_windowed_int32_psf, build_non_windowed_int8_psf,
+        build_non_windowed_mixed_real_and_string_psf,
+        build_non_windowed_nested_array_real_bare_descriptor_psf,
+        build_non_windowed_nested_array_real_psf, build_non_windowed_real_psf,
+        build_non_windowed_struct_psf, build_non_windowed_struct_with_array_psf,
+        build_non_windowed_variable_length_array_psf, build_windowed_array_complex_psf,
+        build_windowed_array_of_struct_bare_descriptor_psf, build_windowed_array_of_struct_psf,
+        build_windowed_array_real_psf, build_windowed_nested_array_real_bare_descriptor_psf,
+        build_windowed_nested_array_real_psf, build_windowed_real_psf,
+        build_windowed_struct_with_array_psf, build_windowed_variable_length_array_psf,
     };
     use super::*;
     use crate::io::binary_io::{PsfHeader, PsfWriter};
@@ -2968,10 +2971,94 @@ mod tests {
     }
 
     #[test]
+    fn test_read_cadence_psf_binary_array_of_struct_bare_descriptor_expands_nested_members() {
+        let temp = Builder::new().suffix(".psf").tempfile().expect("temp psf");
+        std::fs::write(
+            temp.path(),
+            build_non_windowed_array_of_struct_bare_descriptor_psf(),
+        )
+        .expect("write cadence psf");
+
+        let dataset = WaveformReader::new(WaveformFormat::Psf)
+            .read(temp.path())
+            .expect("cadence psf binary read should work");
+
+        assert_eq!(dataset.signal_count(), 6);
+        assert_eq!(
+            dataset.get_signal("V(out)[0].dc").expect("idx0 dc").data,
+            vec![1.0, 1.5]
+        );
+        assert_eq!(
+            dataset
+                .get_signal("V(out)[0].ac_RE")
+                .expect("idx0 ac re")
+                .data,
+            vec![2.0, 2.5]
+        );
+        assert_eq!(
+            dataset
+                .get_signal("V(out)[0].ac_IM")
+                .expect("idx0 ac im")
+                .data,
+            vec![0.5, -0.2]
+        );
+        assert_eq!(
+            dataset.get_signal("V(out)[1].dc").expect("idx1 dc").data,
+            vec![1.1, 1.6]
+        );
+        assert_eq!(
+            dataset
+                .get_signal("V(out)[1].ac_RE")
+                .expect("idx1 ac re")
+                .data,
+            vec![2.1, 2.6]
+        );
+        assert_eq!(
+            dataset
+                .get_signal("V(out)[1].ac_IM")
+                .expect("idx1 ac im")
+                .data,
+            vec![0.6, -0.3]
+        );
+    }
+
+    #[test]
     fn test_read_cadence_psf_binary_nested_array_real_expands_indices() {
         let temp = Builder::new().suffix(".psf").tempfile().expect("temp psf");
         std::fs::write(temp.path(), build_non_windowed_nested_array_real_psf())
             .expect("write cadence psf");
+
+        let dataset = WaveformReader::new(WaveformFormat::Psf)
+            .read(temp.path())
+            .expect("cadence psf binary read should work");
+
+        assert_eq!(dataset.signal_count(), 4);
+        assert_eq!(
+            dataset.get_signal("V(out)[0][0]").expect("00").data,
+            vec![1.0, 1.5]
+        );
+        assert_eq!(
+            dataset.get_signal("V(out)[0][1]").expect("01").data,
+            vec![2.0, 2.5]
+        );
+        assert_eq!(
+            dataset.get_signal("V(out)[1][0]").expect("10").data,
+            vec![3.0, 3.5]
+        );
+        assert_eq!(
+            dataset.get_signal("V(out)[1][1]").expect("11").data,
+            vec![4.0, 4.5]
+        );
+    }
+
+    #[test]
+    fn test_read_cadence_psf_binary_nested_array_real_bare_descriptor_expands_indices() {
+        let temp = Builder::new().suffix(".psf").tempfile().expect("temp psf");
+        std::fs::write(
+            temp.path(),
+            build_non_windowed_nested_array_real_bare_descriptor_psf(),
+        )
+        .expect("write cadence psf");
 
         let dataset = WaveformReader::new(WaveformFormat::Psf)
             .read(temp.path())
@@ -3202,10 +3289,95 @@ mod tests {
     }
 
     #[test]
+    fn test_read_cadence_psf_binary_windowed_array_of_struct_bare_descriptor_expands_nested_members(
+    ) {
+        let temp = Builder::new().suffix(".psf").tempfile().expect("temp psf");
+        std::fs::write(
+            temp.path(),
+            build_windowed_array_of_struct_bare_descriptor_psf(),
+        )
+        .expect("write cadence psf");
+
+        let dataset = WaveformReader::new(WaveformFormat::Psf)
+            .read(temp.path())
+            .expect("cadence psf binary read should work");
+
+        assert_eq!(dataset.signal_count(), 6);
+        assert_eq!(
+            dataset.get_signal("V(out)[0].dc").expect("idx0 dc").data,
+            vec![1.0, 1.5]
+        );
+        assert_eq!(
+            dataset
+                .get_signal("V(out)[0].ac_RE")
+                .expect("idx0 ac re")
+                .data,
+            vec![2.0, 2.5]
+        );
+        assert_eq!(
+            dataset
+                .get_signal("V(out)[0].ac_IM")
+                .expect("idx0 ac im")
+                .data,
+            vec![0.5, -0.2]
+        );
+        assert_eq!(
+            dataset.get_signal("V(out)[1].dc").expect("idx1 dc").data,
+            vec![1.1, 1.6]
+        );
+        assert_eq!(
+            dataset
+                .get_signal("V(out)[1].ac_RE")
+                .expect("idx1 ac re")
+                .data,
+            vec![2.1, 2.6]
+        );
+        assert_eq!(
+            dataset
+                .get_signal("V(out)[1].ac_IM")
+                .expect("idx1 ac im")
+                .data,
+            vec![0.6, -0.3]
+        );
+    }
+
+    #[test]
     fn test_read_cadence_psf_binary_windowed_nested_array_real_expands_indices() {
         let temp = Builder::new().suffix(".psf").tempfile().expect("temp psf");
         std::fs::write(temp.path(), build_windowed_nested_array_real_psf())
             .expect("write cadence psf");
+
+        let dataset = WaveformReader::new(WaveformFormat::Psf)
+            .read(temp.path())
+            .expect("cadence psf binary read should work");
+
+        assert_eq!(dataset.signal_count(), 4);
+        assert_eq!(
+            dataset.get_signal("V(out)[0][0]").expect("00").data,
+            vec![1.0, 1.5]
+        );
+        assert_eq!(
+            dataset.get_signal("V(out)[0][1]").expect("01").data,
+            vec![2.0, 2.5]
+        );
+        assert_eq!(
+            dataset.get_signal("V(out)[1][0]").expect("10").data,
+            vec![3.0, 3.5]
+        );
+        assert_eq!(
+            dataset.get_signal("V(out)[1][1]").expect("11").data,
+            vec![4.0, 4.5]
+        );
+    }
+
+    #[test]
+    fn test_read_cadence_psf_binary_windowed_nested_array_real_bare_descriptor_expands_indices() {
+        let temp = Builder::new().suffix(".psf").tempfile().expect("temp psf");
+        std::fs::write(
+            temp.path(),
+            build_windowed_nested_array_real_bare_descriptor_psf(),
+        )
+        .expect("write cadence psf");
 
         let dataset = WaveformReader::new(WaveformFormat::Psf)
             .read(temp.path())
