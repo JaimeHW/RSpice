@@ -32,6 +32,15 @@ use rspice_core::{resolve_simulation_config, SimulationConfigOverrides, Value};
 mod harmonic_basis;
 use harmonic_basis::{build_disto_two_tone_harmonic_plan, build_multi_tone_hb_layout};
 
+#[path = "simulation_runner/pnoise_sideband.rs"]
+mod pnoise_sideband;
+#[cfg(test)]
+use pnoise_sideband::fold_sideband_samples;
+use pnoise_sideband::{
+    build_pnoise_sideband_translated_frequencies, fold_sideband_contributors,
+    fold_sideband_noise_results, resolve_pnoise_sideband_stride,
+};
+
 // =============================================================================
 // Platform-agnostic timing utilities
 // =============================================================================
@@ -3131,15 +3140,13 @@ pub fn run_pnoise_analysis_with_config(
         return Err("PNOISE frequency sweep produced no points".to_string());
     }
 
-    let sideband_factor = (2_i64
-        .saturating_mul(config.max_sideband.max(0) as i64)
-        .saturating_add(1)) as usize;
-    let sideband_stride = sideband_factor;
+    let sideband_stride = resolve_pnoise_sideband_stride(config.max_sideband)?;
+    let sideband_factor = sideband_stride;
     let translated_frequencies = build_pnoise_sideband_translated_frequencies(
         &frequencies,
         pss_data.frequency,
         config.max_sideband,
-    );
+    )?;
     let translated_noise_results = engine
         .run_noise_ports(
             &netlist,
@@ -3149,14 +3156,12 @@ pub fn run_pnoise_analysis_with_config(
             noise_temperature,
         )
         .map_err(|e| format!("PNOISE noise analysis error: {}", e))?;
-    let folded_output_noise = fold_sideband_samples(
-        &translated_noise_results
-            .iter()
-            .map(|point| point.output_noise_density.max(0.0))
-            .collect::<Vec<_>>(),
+    let folded_output_noise = fold_sideband_noise_results(
+        &translated_noise_results,
         frequencies.len(),
         sideband_stride,
         "output-referred",
+        |point| point.output_noise_density.max(0.0),
     )?;
 
     let warnings = Vec::new();
@@ -3178,6 +3183,7 @@ pub fn run_pnoise_analysis_with_config(
                 output_idx,
                 output_ref_idx,
                 config,
+                frequencies.len(),
                 &translated_frequencies,
                 sideband_stride,
                 noise_temperature,
@@ -3212,7 +3218,7 @@ pub fn run_pnoise_analysis_with_config(
     }
 
     let contributors = if config.noise_summary {
-        fold_sideband_contributors(&translated_noise_results, sideband_stride)
+        fold_sideband_contributors(&translated_noise_results, sideband_stride)?
     } else {
         Vec::new()
     };
@@ -3230,113 +3236,24 @@ pub fn run_pnoise_analysis_with_config(
     })
 }
 
-fn build_pnoise_sideband_translated_frequencies(
-    offset_frequencies: &[Value],
-    carrier_frequency: Value,
-    max_sideband: i32,
-) -> Vec<Value> {
-    let sideband_max = max_sideband.max(0);
-    let mut translated =
-        Vec::with_capacity(offset_frequencies.len() * (2 * sideband_max + 1) as usize);
-    for &offset in offset_frequencies {
-        for sideband in -sideband_max..=sideband_max {
-            let translated_freq = (offset + sideband as Value * carrier_frequency)
-                .abs()
-                .max(1e-30);
-            translated.push(translated_freq);
-        }
-    }
-    translated
-}
-
-fn fold_sideband_samples(
-    translated_values: &[Value],
-    num_offsets: usize,
-    sideband_stride: usize,
-    quantity: &str,
-) -> Result<Vec<Value>, String> {
-    let expected_len = num_offsets.saturating_mul(sideband_stride);
-    if translated_values.len() != expected_len {
-        return Err(format!(
-            "PNOISE {} folding expected {} translated points but received {}",
-            quantity,
-            expected_len,
-            translated_values.len()
-        ));
-    }
-    if sideband_stride == 0 {
-        return Err(format!(
-            "PNOISE {} folding requires a positive sideband stride",
-            quantity
-        ));
-    }
-
-    Ok(translated_values
-        .chunks_exact(sideband_stride)
-        .map(|chunk| chunk.iter().sum())
-        .collect())
-}
-
-fn fold_sideband_contributors(
-    translated_results: &[NoiseResult],
-    sideband_stride: usize,
-) -> Vec<(String, Value)> {
-    if translated_results.is_empty() || sideband_stride == 0 {
-        return Vec::new();
-    }
-
-    let mut combined: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
-    for point in translated_results.iter().take(sideband_stride) {
-        for contrib in &point.contributions {
-            let entry = combined.entry(contrib.device_name.clone()).or_insert(0.0);
-            *entry += contrib.output_contribution.max(0.0);
-        }
-    }
-
-    let total: Value = combined.values().sum();
-    let mut contributors: Vec<(String, Value)> = combined
-        .into_iter()
-        .map(|(name, contribution)| {
-            let percentage = if total > 0.0 {
-                100.0 * contribution / total
-            } else {
-                0.0
-            };
-            (name, percentage)
-        })
-        .collect();
-    contributors.sort_by(|lhs, rhs| {
-        rhs.1
-            .partial_cmp(&lhs.1)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    contributors
-}
-
 fn compute_input_referred_pnoise(
     engine: &Engine,
     netlist: &rspice_core::Netlist,
     output_idx: usize,
     output_ref_idx: Option<usize>,
     config: &PnoiseRunConfig,
+    num_offsets: usize,
     translated_frequencies: &[Value],
     sideband_stride: usize,
     temperature: Value,
 ) -> Result<Vec<Value>, String> {
     let fold_input_density = |core_results: &[NoiseResult]| -> Result<Vec<Value>, String> {
-        fold_sideband_samples(
-            &core_results
-                .iter()
-                .map(|point| point.input_referred_density.max(0.0))
-                .collect::<Vec<_>>(),
-            translated_frequencies
-                .len()
-                .checked_div(sideband_stride)
-                .ok_or_else(|| {
-                    "PNOISE input-referred folding encountered invalid stride".to_string()
-                })?,
+        fold_sideband_noise_results(
+            core_results,
+            num_offsets,
             sideband_stride,
             "input-referred",
+            |point| point.input_referred_density.max(0.0),
         )
     };
 
@@ -8528,7 +8445,8 @@ C1 out 0 1n
             &result.frequencies,
             result.carrier_frequency,
             cfg.max_sideband,
-        );
+        )
+        .expect("translated sideband frequencies should be generated");
         let core = engine
             .run_noise_ports(
                 &parsed,
@@ -8605,7 +8523,8 @@ C1 out 0 1n
             &result.frequencies,
             result.carrier_frequency,
             cfg.max_sideband,
-        );
+        )
+        .expect("translated sideband frequencies should be generated");
         let core = engine
             .run_noise_with_input_source(
                 &parsed,
