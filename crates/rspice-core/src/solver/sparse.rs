@@ -8,10 +8,10 @@
 
 use super::SolverError;
 use crate::Value;
-use faer::Mat;
 use faer::linalg::solvers::Solve;
 use faer::sparse::linalg::solvers::{Lu, SymbolicLu};
 use faer::sparse::{SparseColMat, SymbolicSparseColMat};
+use faer::Mat;
 
 //=============================================================================
 // Static Structure Matrix - The Key Optimization
@@ -52,6 +52,14 @@ impl StaticMatrix {
     ) -> Result<Self, SolverError> {
         if nrows == 0 || ncols == 0 {
             return Err(SolverError::InvalidCircuit("Empty matrix".to_string()));
+        }
+        for (idx, &(row, col, _)) in triplets.iter().enumerate() {
+            if row >= nrows || col >= ncols {
+                return Err(SolverError::InvalidCircuit(format!(
+                    "Triplet {} index out of bounds: ({}, {}) for matrix {}x{}",
+                    idx, row, col, nrows, ncols
+                )));
+            }
         }
 
         // Sort by (col, row) for CSC format
@@ -669,6 +677,32 @@ mod tests {
         // Solve again - should use cached structure
         let x2 = matrix.solve(&[5.0, 7.0]).unwrap();
         assert!((x2[0] - 1.6).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_static_matrix_from_triplets_rejects_out_of_bounds_row() {
+        let triplets = vec![(2, 0, 1.0)];
+        match StaticMatrix::from_triplets(2, 2, &triplets) {
+            Err(SolverError::InvalidCircuit(msg)) => {
+                assert!(msg.contains("out of bounds"));
+                assert!(msg.contains("(2, 0)"));
+            }
+            Ok(_) => panic!("expected invalid-circuit error for out-of-bounds row"),
+            Err(other) => panic!("unexpected error variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_static_matrix_from_triplets_rejects_out_of_bounds_col() {
+        let triplets = vec![(0, 2, 1.0)];
+        match StaticMatrix::from_triplets(2, 2, &triplets) {
+            Err(SolverError::InvalidCircuit(msg)) => {
+                assert!(msg.contains("out of bounds"));
+                assert!(msg.contains("(0, 2)"));
+            }
+            Ok(_) => panic!("expected invalid-circuit error for out-of-bounds col"),
+            Err(other) => panic!("unexpected error variant: {:?}", other),
+        }
     }
 
     #[test]
