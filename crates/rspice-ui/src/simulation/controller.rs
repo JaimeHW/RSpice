@@ -4471,6 +4471,27 @@ mod tests {
     }
 
     #[test]
+    fn test_build_queue_from_plan_routes_disto_without_optional_ratio() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses.insert(24);
+        state.dialogs.ac_fstart = "10".to_string();
+        state.dialogs.ac_fstop = "10Meg".to_string();
+        state.dialogs.ac_points = "8".to_string();
+        state.dialogs.disto_f2_over_f1 = String::new();
+
+        let plan = controller
+            .build_analysis_plan(&state)
+            .expect("disto plan should build");
+        let queue = controller
+            .build_queue_from_plan(&state, &plan)
+            .expect("disto queue should build");
+        assert_eq!(queue.len(), 1);
+        assert!(queue[0].analysis_line.starts_with(".disto "));
+        assert_eq!(queue[0].analysis_line.split_whitespace().count(), 5);
+    }
+
+    #[test]
     fn test_build_analysis_spec_for_pac_accepts_valid_dialog_configuration() {
         use crate::simulation::dialog::pac::PacConfig;
 
