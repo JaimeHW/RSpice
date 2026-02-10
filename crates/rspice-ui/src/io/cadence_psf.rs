@@ -10,6 +10,16 @@ use std::fmt;
 mod cadence_psf_type_meta;
 use cadence_psf_type_meta::TypeMetaCache;
 
+#[path = "cadence_psf/binary_io.rs"]
+mod binary_io;
+use binary_io::{
+    parse_string, peek_u32, read_f64, read_i32, read_u32, read_u8_padded, skip_opaque_scalar,
+};
+
+#[path = "cadence_psf/toc.rs"]
+mod toc;
+use toc::{parse_toc, SectionKind, Toc, TocEntry};
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum CadencePsfValue {
     Int(i64),
@@ -57,51 +67,6 @@ impl fmt::Display for CadencePsfError {
 }
 
 impl std::error::Error for CadencePsfError {}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum SectionKind {
-    Header,
-    Type,
-    Sweep,
-    Trace,
-    Value,
-}
-
-impl SectionKind {
-    fn from_u32(value: u32) -> Result<Self, CadencePsfError> {
-        match value {
-            0 => Ok(Self::Header),
-            1 => Ok(Self::Type),
-            2 => Ok(Self::Sweep),
-            3 => Ok(Self::Trace),
-            4 => Ok(Self::Value),
-            other => Err(CadencePsfError::new(format!(
-                "unexpected section kind id {}",
-                other
-            ))),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct TocEntry {
-    start: usize,
-    end: usize,
-}
-
-#[derive(Debug, Clone)]
-struct Toc {
-    entries: HashMap<SectionKind, TocEntry>,
-}
-
-impl Toc {
-    fn section(&self, kind: SectionKind) -> Result<TocEntry, CadencePsfError> {
-        self.entries
-            .get(&kind)
-            .copied()
-            .ok_or_else(|| CadencePsfError::new(format!("missing {:?} section in TOC", kind)))
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DataType {
@@ -262,79 +227,6 @@ pub fn parse_cadence_psf_binary(data: &[u8]) -> Result<ParsedCadencePsfBinary, C
         real_signals,
         complex_signals,
     })
-}
-
-fn parse_toc(data: &[u8]) -> Result<Toc, CadencePsfError> {
-    if data.len() < 12 {
-        return Err(CadencePsfError::new(
-            "PSF binary payload too small to contain TOC trailer",
-        ));
-    }
-
-    let toc_offset = peek_u32(&data[data.len() - 4..]) as usize;
-    if toc_offset >= data.len() {
-        return Err(CadencePsfError::new(format!(
-            "invalid TOC offset {} for payload size {}",
-            toc_offset,
-            data.len()
-        )));
-    }
-
-    let toc_bytes = data.len().saturating_sub(toc_offset + 12);
-    if toc_bytes == 0 || toc_bytes % 8 != 0 {
-        return Err(CadencePsfError::new(format!(
-            "invalid TOC span {} bytes",
-            toc_bytes
-        )));
-    }
-
-    let mut starts: Vec<(SectionKind, usize)> = Vec::new();
-    let num_entries = toc_bytes / 8;
-    for i in 0..num_entries {
-        let base = toc_offset + i * 8;
-        let kind = SectionKind::from_u32(peek_u32(&data[base..base + 4]))?;
-        let start = peek_u32(&data[base + 4..base + 8]) as usize;
-        if start >= data.len() {
-            return Err(CadencePsfError::new(format!(
-                "TOC entry start {} out of range",
-                start
-            )));
-        }
-        starts.push((kind, start));
-    }
-
-    starts.sort_by_key(|(_, start)| *start);
-    let mut entries = HashMap::new();
-    for idx in 0..starts.len() {
-        let (kind, start) = starts[idx];
-        let end = starts
-            .get(idx + 1)
-            .map(|(_, next_start)| *next_start)
-            .unwrap_or(data.len());
-        if end <= start {
-            return Err(CadencePsfError::new(
-                "TOC entries are not strictly increasing",
-            ));
-        }
-        entries.insert(kind, TocEntry { start, end });
-    }
-
-    for kind in [
-        SectionKind::Header,
-        SectionKind::Type,
-        SectionKind::Sweep,
-        SectionKind::Trace,
-        SectionKind::Value,
-    ] {
-        if !entries.contains_key(&kind) {
-            return Err(CadencePsfError::new(format!(
-                "PSF binary is missing required {:?} section",
-                kind
-            )));
-        }
-    }
-
-    Ok(Toc { entries })
 }
 
 fn parse_header(
@@ -1587,88 +1479,6 @@ where
             Ok(())
         }
     }
-}
-
-fn skip_opaque_scalar(cursor: &mut &[u8]) -> Result<(), CadencePsfError> {
-    // Unknown scalar kinds in some PSF variants are commonly encoded as aligned
-    // 32-bit words. Consume one word so known signals in the same dataset can
-    // still be decoded.
-    let _ = read_u32(cursor)?;
-    Ok(())
-}
-
-fn parse_string(cursor: &mut &[u8]) -> Result<String, CadencePsfError> {
-    let len = read_u32(cursor)? as usize;
-    if cursor.len() < len {
-        return Err(CadencePsfError::new("string block truncated"));
-    }
-    let raw = &cursor[..len];
-    let value = std::str::from_utf8(raw)
-        .map_err(|e| CadencePsfError::new(format!("invalid UTF-8 in PSF string: {}", e)))?
-        .to_string();
-
-    let pad = (4 - (len % 4)) % 4;
-    if cursor.len() < len + pad {
-        return Err(CadencePsfError::new(
-            "string padding exceeds remaining bytes",
-        ));
-    }
-    *cursor = &cursor[len + pad..];
-    Ok(value)
-}
-
-fn read_u32(cursor: &mut &[u8]) -> Result<u32, CadencePsfError> {
-    if cursor.len() < 4 {
-        return Err(CadencePsfError::new(
-            "unexpected end of PSF data while reading u32",
-        ));
-    }
-    let (head, tail) = cursor.split_at(4);
-    *cursor = tail;
-    Ok(u32::from_be_bytes(
-        head.try_into().expect("slice length checked"),
-    ))
-}
-
-fn read_i32(cursor: &mut &[u8]) -> Result<i32, CadencePsfError> {
-    if cursor.len() < 4 {
-        return Err(CadencePsfError::new(
-            "unexpected end of PSF data while reading i32",
-        ));
-    }
-    let (head, tail) = cursor.split_at(4);
-    *cursor = tail;
-    Ok(i32::from_be_bytes(
-        head.try_into().expect("slice length checked"),
-    ))
-}
-
-fn read_u8_padded(cursor: &mut &[u8]) -> Result<u8, CadencePsfError> {
-    if cursor.len() < 4 {
-        return Err(CadencePsfError::new(
-            "unexpected end of PSF data while reading padded u8",
-        ));
-    }
-    let (head, tail) = cursor.split_at(4);
-    *cursor = tail;
-    Ok(head[0])
-}
-
-fn read_f64(cursor: &mut &[u8]) -> Result<f64, CadencePsfError> {
-    if cursor.len() < 8 {
-        return Err(CadencePsfError::new(
-            "unexpected end of PSF data while reading f64",
-        ));
-    }
-    let (head, tail) = cursor.split_at(8);
-    *cursor = tail;
-    Ok(f64::from_be_bytes(
-        head.try_into().expect("slice length checked"),
-    ))
-}
-
-fn peek_u32(data: &[u8]) -> u32 {
-    u32::from_be_bytes(data[..4].try_into().expect("slice length checked"))
 }
 
 #[cfg(test)]
