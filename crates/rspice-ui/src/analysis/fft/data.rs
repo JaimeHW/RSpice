@@ -4,7 +4,7 @@
 
 use std::f64::consts::PI;
 
-use super::window::{apply_window_copy, generate_window, WindowFunction};
+use super::window::{WindowFunction, apply_window_copy, generate_window};
 
 // =============================================================================
 // FFT Point
@@ -179,12 +179,13 @@ impl FftData {
         let points: Vec<FftPoint> = (0..n)
             .map(|i| FftPoint::new(frequencies[i], magnitudes[i], phases[i]))
             .collect();
+        let fft_size = n.saturating_sub(1).saturating_mul(2);
 
         Self {
             name: name.to_string(),
             points,
             sample_rate,
-            fft_size: (frequencies.len() - 1) * 2,
+            fft_size,
             window: WindowFunction::Rectangular,
         }
     }
@@ -643,6 +644,27 @@ mod tests {
 
         assert_eq!(fft.len(), 4);
         assert_eq!(fft.points[1].magnitude, 1.0);
+    }
+
+    #[test]
+    fn test_fft_from_spectrum_empty_inputs() {
+        let fft = FftData::from_spectrum("Empty", &[], &[], &[], 1000.0);
+        assert!(fft.is_empty());
+        assert_eq!(fft.fft_size, 0);
+    }
+
+    #[test]
+    fn test_fft_from_spectrum_mismatched_lengths_uses_shortest_input() {
+        let freqs = vec![0.0, 100.0, 200.0, 300.0];
+        let mags = vec![0.0, 1.0];
+        let phases = vec![0.0, 0.25];
+
+        let fft = FftData::from_spectrum("Short", &freqs, &mags, &phases, 1000.0);
+
+        assert_eq!(fft.len(), 2);
+        assert_eq!(fft.fft_size, 2);
+        assert_eq!(fft.points[0].frequency, 0.0);
+        assert_eq!(fft.points[1].frequency, 100.0);
     }
 
     // =========================================================================
