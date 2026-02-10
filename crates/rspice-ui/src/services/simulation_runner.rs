@@ -471,15 +471,168 @@ pub fn run_ac_analysis(
 
 /// Run DISTO analysis using transfer-based harmonic sideband estimation.
 ///
-/// This computes distortion-oriented traces over frequency by combining:
-/// - Fundamental transfer magnitude at `f`
-/// - Harmonic sideband transfer magnitude at `2f` and `3f`
-/// - Optional IMD sidebands using `f2_over_f1`
-///
-/// The estimation is linearized and derived from AC transfer response.
+/// Primary execution uses nonlinear HB solves per sweep point and extracts
+/// distortion directly from harmonic spectra. If HB is unavailable for the
+/// circuit class, this falls back to linearized transfer-based estimation.
 pub fn run_disto_analysis(netlist_text: &str, config: &DistoRunConfig) -> Result<DistoData, String> {
     config.validate()?;
 
+    match run_disto_analysis_nonlinear_hb(netlist_text, config) {
+        Ok(data) => Ok(data),
+        Err(nonlinear_error) => {
+            let mut linearized = run_disto_analysis_linearized(netlist_text, config)?;
+            linearized.warnings.push(format!(
+                "DISTO nonlinear HB path was unavailable ({}); used linearized transfer-based fallback.",
+                nonlinear_error
+            ));
+            Ok(linearized)
+        }
+    }
+}
+
+fn run_disto_analysis_nonlinear_hb(
+    netlist_text: &str,
+    config: &DistoRunConfig,
+) -> Result<DistoData, String> {
+    use rspice_core::analysis::HbConfig;
+
+    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
+        .map_err(|e| format!("Parse error: {}", e))?;
+    let engine = Engine::new(build_engine_config(&netlist, None));
+
+    let frequencies = generate_freq_points(
+        config.start_freq,
+        config.stop_freq,
+        config.points_per_unit,
+        config.sweep.keyword(),
+    );
+    if frequencies.is_empty() {
+        return Err("DISTO sweep generated no frequency points".to_string());
+    }
+
+    struct DistoAccum {
+        fundamental_gain_db: Vec<Value>,
+        hd2_db: Vec<Value>,
+        hd3_db: Vec<Value>,
+        thd_percent: Vec<Value>,
+    }
+
+    let mut accumulators: Vec<(String, DistoAccum)> = Vec::new();
+    for (point_idx, &freq) in frequencies.iter().enumerate() {
+        let hb_config = HbConfig::new(freq).with_harmonics(3).with_tolerance(1e-6);
+        let hb = engine
+            .run_hb(&netlist, hb_config)
+            .map_err(|e| format!("HB DISTO solve failed at {:.6e} Hz: {}", freq, e))?;
+
+        if point_idx == 0 {
+            accumulators = hb
+                .result
+                .spectral_voltages
+                .iter()
+                .map(|sv| {
+                    (
+                        format!("V({})", sv.node_name),
+                        DistoAccum {
+                            fundamental_gain_db: Vec::with_capacity(frequencies.len()),
+                            hd2_db: Vec::with_capacity(frequencies.len()),
+                            hd3_db: Vec::with_capacity(frequencies.len()),
+                            thd_percent: Vec::with_capacity(frequencies.len()),
+                        },
+                    )
+                })
+                .collect();
+        }
+
+        for (trace_name, acc) in &mut accumulators {
+            let node_name = trace_name
+                .strip_prefix("V(")
+                .and_then(|s| s.strip_suffix(')'))
+                .unwrap_or(trace_name.as_str());
+            let spectrum = hb
+                .result
+                .spectral_voltages
+                .iter()
+                .find(|sv| sv.node_name.eq_ignore_ascii_case(node_name))
+                .ok_or_else(|| {
+                    format!(
+                        "HB DISTO solve at {:.6e} Hz is missing spectral voltage for {}",
+                        freq, trace_name
+                    )
+                })?;
+            let fund = spectrum
+                .coefficients
+                .get(1)
+                .copied()
+                .unwrap_or_else(|| Complex64::new(0.0, 0.0))
+                .norm()
+                .max(1e-30);
+            let h2 = spectrum
+                .coefficients
+                .get(2)
+                .copied()
+                .unwrap_or_else(|| Complex64::new(0.0, 0.0))
+                .norm()
+                .max(0.0);
+            let h3 = spectrum
+                .coefficients
+                .get(3)
+                .copied()
+                .unwrap_or_else(|| Complex64::new(0.0, 0.0))
+                .norm()
+                .max(0.0);
+
+            let r2 = h2 / fund;
+            let r3 = h3 / fund;
+            acc.fundamental_gain_db.push(magnitude_to_db(fund));
+            acc.hd2_db.push(ratio_to_dbc(r2));
+            acc.hd3_db.push(ratio_to_dbc(r3));
+            acc.thd_percent.push((r2 * r2 + r3 * r3).sqrt() * 100.0);
+        }
+    }
+
+    if accumulators.is_empty() {
+        return Err("DISTO produced no output traces".to_string());
+    }
+
+    let mut traces: Vec<DistoTrace> = accumulators
+        .into_iter()
+        .map(|(name, acc)| DistoTrace {
+            name,
+            fundamental_gain_db: acc.fundamental_gain_db,
+            hd2_db: acc.hd2_db,
+            hd3_db: acc.hd3_db,
+            thd_percent: acc.thd_percent,
+            imd2_db: None,
+            imd3_db: None,
+        })
+        .collect();
+
+    let mut warnings = Vec::new();
+    if let Some(f2_over_f1) = config.f2_over_f1 {
+        let imd = compute_linearized_imd_sidebands(netlist_text, config, f2_over_f1)?;
+        for trace in &mut traces {
+            if let Some((imd2, imd3)) = imd.get(&trace.name) {
+                trace.imd2_db = Some(imd2.clone());
+                trace.imd3_db = Some(imd3.clone());
+            }
+        }
+        warnings.push(
+            "DISTO IMD2/IMD3 are estimated from linearized sideband transfer response; nonlinear two-tone HB solve is not yet enabled in this path."
+                .to_string(),
+        );
+    }
+
+    Ok(DistoData {
+        frequencies,
+        traces,
+        warnings,
+    })
+}
+
+fn run_disto_analysis_linearized(
+    netlist_text: &str,
+    config: &DistoRunConfig,
+) -> Result<DistoData, String> {
     let f2_over_f1 = config.f2_over_f1.unwrap_or(2.0);
     let max_factor = 3.0_f64
         .max(f2_over_f1 + 1.0)
@@ -568,10 +721,57 @@ pub fn run_disto_analysis(netlist_text: &str, config: &DistoRunConfig) -> Result
     Ok(DistoData {
         frequencies,
         traces,
-        warnings: vec![
-            "DISTO uses linearized transfer-based HD/IMD estimates from AC response; nonlinear source/device distortion generation is not yet modeled.".to_string(),
-        ],
+        warnings: Vec::new(),
     })
+}
+
+fn compute_linearized_imd_sidebands(
+    netlist_text: &str,
+    config: &DistoRunConfig,
+    f2_over_f1: Value,
+) -> Result<std::collections::HashMap<String, (Vec<Value>, Vec<Value>)>, String> {
+    let max_factor = (f2_over_f1 + 1.0)
+        .max((2.0 * f2_over_f1 - 1.0).abs())
+        .max((2.0 - f2_over_f1).abs())
+        .max((f2_over_f1 - 1.0).abs());
+    let ac = run_ac_analysis(
+        netlist_text,
+        config.start_freq,
+        config.stop_freq * max_factor,
+        config.points_per_unit,
+        config.sweep.keyword(),
+    )?;
+    let frequencies = generate_freq_points(
+        config.start_freq,
+        config.stop_freq,
+        config.points_per_unit,
+        config.sweep.keyword(),
+    );
+
+    let mut per_trace = std::collections::HashMap::new();
+    for (name, response) in &ac.responses {
+        let magnitudes: Vec<Value> = response.iter().map(|value| value.norm()).collect();
+        let mut imd2 = Vec::with_capacity(frequencies.len());
+        let mut imd3 = Vec::with_capacity(frequencies.len());
+        for &f1 in &frequencies {
+            let fund = interpolate_magnitude_at(&ac.frequencies, &magnitudes, f1)
+                .unwrap_or(0.0)
+                .max(1e-30);
+            let sidebands2 = [((f2_over_f1 - 1.0).abs() * f1), ((f2_over_f1 + 1.0) * f1)];
+            let sidebands3 = [
+                ((2.0 - f2_over_f1).abs() * f1),
+                ((2.0 * f2_over_f1 - 1.0).abs() * f1),
+            ];
+            let ratio2 = max_sideband_ratio(&ac.frequencies, &magnitudes, &sidebands2, fund)
+                .unwrap_or(0.0);
+            let ratio3 = max_sideband_ratio(&ac.frequencies, &magnitudes, &sidebands3, fund)
+                .unwrap_or(0.0);
+            imd2.push(ratio_to_dbc(ratio2));
+            imd3.push(ratio_to_dbc(ratio3));
+        }
+        per_trace.insert(name.clone(), (imd2, imd3));
+    }
+    Ok(per_trace)
 }
 
 fn magnitude_to_db(value: Value) -> Value {
@@ -2736,14 +2936,6 @@ impl PnoiseFrequencySweep {
             Self::Linear => "lin",
         }
     }
-
-    fn as_tf_sweep(self) -> TfFrequencySweep {
-        match self {
-            Self::Decade => TfFrequencySweep::Decade,
-            Self::Octave => TfFrequencySweep::Octave,
-            Self::Linear => TfFrequencySweep::Linear,
-        }
-    }
 }
 
 /// PNoise noise-reference mode.
@@ -2824,11 +3016,6 @@ impl PnoiseRunConfig {
         if self.output_node.trim().is_empty() {
             return Err("PNOISE output node must be specified".to_string());
         }
-        if self.noise_ref == PnoiseReference::Input && self.input_source.trim().is_empty() {
-            return Err(
-                "PNOISE input source must be specified for input-referred noise".to_string(),
-            );
-        }
         if !self.reltol.is_finite() || self.reltol <= 0.0 {
             return Err("PNOISE relative tolerance must be positive".to_string());
         }
@@ -2875,7 +3062,7 @@ pub fn run_pnoise_analysis_with_config(
         .map_err(|e| format!("Parse error: {}", e))?;
     if config.noise_ref == PnoiseReference::Input {
         let source_name = config.input_source.trim();
-        if !netlist_has_independent_source_named(&netlist, source_name) {
+        if !source_name.is_empty() && !netlist_has_independent_source_named(&netlist, source_name) {
             return Err(format!(
                 "PNOISE input source '{}' is not an independent voltage/current source in the netlist",
                 source_name
@@ -2966,13 +3153,7 @@ pub fn run_pnoise_analysis_with_config(
         "output-referred",
     )?;
 
-    let mut warnings = Vec::new();
-    if sideband_factor > 1 {
-        warnings.push(format!(
-            "PNOISE sideband folding used unweighted translated-frequency summation across {} sidebands",
-            sideband_factor
-        ));
-    }
+    let warnings = Vec::new();
 
     let mut output_noise = folded_output_noise.clone();
     let mut input_noise = None;
@@ -2985,30 +3166,17 @@ pub fn run_pnoise_analysis_with_config(
     match config.noise_ref {
         PnoiseReference::Output => {}
         PnoiseReference::Input => {
-            match compute_input_referred_pnoise(
+            let estimate = compute_input_referred_pnoise(
                 &engine,
-                netlist_text,
                 &netlist,
-                &dc_result.node_names,
                 output_idx,
                 output_ref_idx,
                 config,
-                &folded_output_noise,
-                &frequencies,
                 &translated_frequencies,
                 sideband_stride,
                 noise_temperature,
-            ) {
-                Ok((estimate, method_warning)) => {
-                    input_noise = Some(estimate);
-                    if let Some(warning) = method_warning {
-                        warnings.push(warning);
-                    }
-                }
-                Err(error) => {
-                    return Err(error);
-                }
-            }
+            )?;
+            input_noise = Some(estimate);
         }
         PnoiseReference::Phase => {
             let carrier_rms = estimate_carrier_rms_for_output(
@@ -3141,241 +3309,63 @@ fn fold_sideband_contributors(
 
 fn compute_input_referred_pnoise(
     engine: &Engine,
-    netlist_text: &str,
     netlist: &rspice_core::Netlist,
-    node_names: &[String],
     output_idx: usize,
     output_ref_idx: Option<usize>,
     config: &PnoiseRunConfig,
-    output_noise: &[Value],
-    frequencies: &[Value],
     translated_frequencies: &[Value],
     sideband_stride: usize,
     temperature: Value,
-) -> Result<(Vec<Value>, Option<String>), String> {
+) -> Result<Vec<Value>, String> {
     let fold_input_density = |core_results: &[NoiseResult]| -> Result<Vec<Value>, String> {
         fold_sideband_samples(
             &core_results
                 .iter()
                 .map(|point| point.input_referred_density.max(0.0))
                 .collect::<Vec<_>>(),
-            frequencies.len(),
+            translated_frequencies
+                .len()
+                .checked_div(sideband_stride)
+                .ok_or_else(|| "PNOISE input-referred folding encountered invalid stride".to_string())?,
             sideband_stride,
             "input-referred",
         )
     };
 
-    let configured_source = config.input_source.trim();
-    if !configured_source.is_empty() {
-        let core_results = engine
-            .run_noise_with_input_source(
-                netlist,
-                output_idx,
-                output_ref_idx,
-                configured_source,
-                translated_frequencies,
-                temperature,
-            )
-            .map_err(|error| {
-                format!(
-                    "PNOISE input source '{}' failed during source-referred noise evaluation: {}",
-                    configured_source, error
-                )
-            })?;
-        if let Some(message) = classify_pnoise_input_core_point_count(
-            Some(configured_source),
-            core_results.len(),
-            translated_frequencies.len(),
-        )? {
-            return Err(message);
-        }
-        return Ok((fold_input_density(&core_results)?, None));
-    }
+    let source_name = if config.input_source.trim().is_empty() {
+        infer_primary_source_name(netlist).ok_or_else(|| {
+            "PNOISE input-referred conversion requires an explicit input source or at least one inferable independent source".to_string()
+        })?
+    } else {
+        config.input_source.trim().to_string()
+    };
 
-    if let Some(source_name) = infer_primary_source_name(netlist) {
-        match engine.run_noise_with_input_source(
+    let core_results = engine
+        .run_noise_with_input_source(
             netlist,
             output_idx,
             output_ref_idx,
             &source_name,
             translated_frequencies,
             temperature,
-        ) {
-            Ok(core_results) => {
-                if let Some(warning) = classify_pnoise_input_core_point_count(
-                    None,
-                    core_results.len(),
-                    translated_frequencies.len(),
-                )? {
-                    let fallback = compute_input_referred_pnoise_from_tf(
-                        netlist_text,
-                        netlist,
-                        node_names,
-                        config,
-                        output_noise,
-                        frequencies,
-                    )?;
-                    return Ok((fallback, Some(warning)));
-                }
-                return Ok((fold_input_density(&core_results)?, None));
-            }
-            Err(error) => {
-                let fallback = compute_input_referred_pnoise_from_tf(
-                    netlist_text,
-                    netlist,
-                    node_names,
-                    config,
-                    output_noise,
-                    frequencies,
-                )?;
-                return Ok((
-                    fallback,
-                    Some(format!(
-                        "PNOISE input-referred conversion used TF fallback after core source '{}' path failed: {}",
-                        source_name, error
-                    )),
-                ));
-            }
-        }
-    }
+        )
+        .map_err(|error| {
+            format!(
+                "PNOISE input source '{}' failed during source-referred noise evaluation: {}",
+                source_name, error
+            )
+        })?;
 
-    let fallback = compute_input_referred_pnoise_from_tf(
-        netlist_text,
-        netlist,
-        node_names,
-        config,
-        output_noise,
-        frequencies,
-    )?;
-    Ok((
-        fallback,
-        Some(
-            "PNOISE input-referred conversion used TF fallback because no independent input source could be inferred"
-                .to_string(),
-        ),
-    ))
-}
-
-fn classify_pnoise_input_core_point_count(
-    explicit_source: Option<&str>,
-    actual_points: usize,
-    expected_points: usize,
-) -> Result<Option<String>, String> {
-    if actual_points == expected_points {
-        return Ok(None);
-    }
-
-    if let Some(source) = explicit_source {
+    if core_results.len() != translated_frequencies.len() {
         return Err(format!(
-            "PNOISE input source '{}' returned {} points during source-referred noise evaluation (expected {}); explicit input sources must not degrade to TF fallback",
-            source, actual_points, expected_points
+            "PNOISE input source '{}' returned {} translated points, expected {}",
+            source_name,
+            core_results.len(),
+            translated_frequencies.len()
         ));
     }
 
-    Ok(Some(format!(
-        "PNOISE input-referred conversion used TF fallback because core path returned {} points (expected {})",
-        actual_points, expected_points
-    )))
-}
-
-fn compute_input_referred_pnoise_from_tf(
-    netlist_text: &str,
-    netlist: &rspice_core::Netlist,
-    node_names: &[String],
-    config: &PnoiseRunConfig,
-    output_noise: &[Value],
-    frequencies: &[Value],
-) -> Result<Vec<Value>, String> {
-    let input_source = if config.input_source.trim().is_empty() {
-        infer_tf_run_config(netlist, node_names)?.input_source
-    } else {
-        config.input_source.trim().to_string()
-    };
-    let tf_config = TfRunConfig {
-        start_freq: config.start_freq,
-        stop_freq: config.stop_freq,
-        points_per_unit: config.points_per_unit,
-        sweep: config.sweep.as_tf_sweep(),
-        input_source,
-        output_node: config.output_node.trim().to_string(),
-        output_ref: config
-            .output_ref
-            .as_deref()
-            .map(str::trim)
-            .filter(|node| !node.is_empty() && !is_ground_like(node))
-            .map(ToString::to_string),
-        group_delay: false,
-        input_impedance: false,
-        output_impedance: false,
-    };
-    let tf_data = run_tf_analysis_with_config(netlist_text, &tf_config)?;
-    let gain_squared = transfer_gain_squared_at_frequencies(&tf_data, frequencies)?;
-    if gain_squared.len() != output_noise.len() {
-        return Err(format!(
-            "TF gain vector length {} does not match PNOISE vector length {}",
-            gain_squared.len(),
-            output_noise.len()
-        ));
-    }
-    Ok(output_noise
-        .iter()
-        .zip(gain_squared.iter())
-        .map(|(psd, gain_sq)| psd.max(0.0) / gain_sq.max(1e-30))
-        .collect())
-}
-
-fn transfer_gain_squared_at_frequencies(
-    tf_data: &TfData,
-    target_frequencies: &[Value],
-) -> Result<Vec<Value>, String> {
-    if tf_data.transfer.is_empty() || tf_data.frequencies.len() != tf_data.transfer.len() {
-        return Err("TF analysis returned an invalid transfer vector".to_string());
-    }
-    if target_frequencies.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    if tf_data.frequencies.len() == target_frequencies.len()
-        && tf_data
-            .frequencies
-            .iter()
-            .zip(target_frequencies.iter())
-            .all(|(lhs, rhs)| {
-                let scale = lhs.abs().max(rhs.abs()).max(1.0);
-                (lhs - rhs).abs() <= scale * 1e-9
-            })
-    {
-        return Ok(tf_data
-            .transfer
-            .iter()
-            .map(|gain| gain.norm_sqr().max(1e-30))
-            .collect());
-    }
-
-    Ok(target_frequencies
-        .iter()
-        .map(|target| {
-            let idx = nearest_frequency_index(&tf_data.frequencies, *target);
-            tf_data.transfer[idx].norm_sqr().max(1e-30)
-        })
-        .collect())
-}
-
-fn nearest_frequency_index(frequencies: &[Value], target: Value) -> usize {
-    let mut best_idx = 0;
-    let mut best_delta = frequencies
-        .first()
-        .map(|freq| (*freq - target).abs())
-        .unwrap_or(f64::INFINITY);
-
-    for (idx, freq) in frequencies.iter().enumerate().skip(1) {
-        let delta = (*freq - target).abs();
-        if delta < best_delta {
-            best_delta = delta;
-            best_idx = idx;
-        }
-    }
-    best_idx
+    fold_input_density(&core_results)
 }
 
 /// Run PNoise analysis using inferred/default settings.
@@ -8326,33 +8316,6 @@ C1 out 0 1n
     }
 
     #[test]
-    fn test_classify_pnoise_input_core_point_count_requires_exact_match_for_explicit_source() {
-        let err = classify_pnoise_input_core_point_count(Some("V1"), 5, 7)
-            .expect_err("explicit source mismatch should be a hard error");
-        assert!(err.contains("V1"));
-        assert!(err.contains("5"));
-        assert!(err.contains("7"));
-        assert!(err.contains("must not degrade to TF fallback"));
-    }
-
-    #[test]
-    fn test_classify_pnoise_input_core_point_count_returns_tf_fallback_warning_when_inferred() {
-        let warning = classify_pnoise_input_core_point_count(None, 4, 6)
-            .expect("inferred mismatch should not be a hard error")
-            .expect("inferred mismatch should produce fallback warning");
-        assert!(warning.contains("TF fallback"));
-        assert!(warning.contains("4"));
-        assert!(warning.contains("6"));
-    }
-
-    #[test]
-    fn test_classify_pnoise_input_core_point_count_accepts_exact_match() {
-        let classification = classify_pnoise_input_core_point_count(Some("V1"), 8, 8)
-            .expect("exact-match explicit source should be accepted");
-        assert!(classification.is_none());
-    }
-
-    #[test]
     fn test_run_pnoise_analysis_input_reference_rejects_unknown_input_source() {
         let netlist = "* pnoise input unknown source\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
         let cfg = PnoiseRunConfig {
@@ -8371,6 +8334,26 @@ C1 out 0 1n
             .expect_err("input-referred PNOISE should reject unknown explicit input source");
         assert!(err.contains("V_NOT_PRESENT"));
         assert!(err.contains("independent"));
+    }
+
+    #[test]
+    fn test_run_pnoise_analysis_input_reference_requires_inferable_source_when_unspecified() {
+        let netlist = "* pnoise missing source\nR1 out 0 1k\nC1 out 0 1n\n.end\n";
+        let cfg = PnoiseRunConfig {
+            output_node: "out".to_string(),
+            noise_ref: PnoiseReference::Input,
+            input_source: String::new(),
+            start_freq: 1e3,
+            stop_freq: 1e5,
+            points_per_unit: 3,
+            sweep: PnoiseFrequencySweep::Decade,
+            max_sideband: 0,
+            ..PnoiseRunConfig::default()
+        };
+
+        let err = run_pnoise_analysis_with_config(netlist, &cfg)
+            .expect_err("input-referred PNOISE should require explicit or inferable source");
+        assert!(err.contains("requires an explicit input source"));
     }
 
     #[test]
