@@ -1164,7 +1164,7 @@ mod tests {
         let program = make_program(vec![Instruction::PushConst(100.0), Instruction::Limexp]);
         let result = vm.execute(&program).unwrap();
         // Should be linearized above 40
-        assert!(result < std::f64::INFINITY);
+        assert!(result < f64::INFINITY);
         assert!(result > 40.0_f64.exp()); // Must be larger than exp(40)
     }
 
@@ -1289,10 +1289,12 @@ mod tests {
 
     #[test]
     fn test_context_vt_temperature_dependence() {
-        let mut ctx = VmContext::default();
+        let mut ctx = VmContext {
+            temperature: 300.0,
+            ..VmContext::default()
+        };
 
         // At 300K
-        ctx.temperature = 300.0;
         let vt_300 = ctx.vt();
 
         // At 400K
@@ -1441,8 +1443,10 @@ mod tests {
 
     #[test]
     fn test_execute_time() {
-        let mut ctx = VmContext::default();
-        ctx.time = 1.5e-9;
+        let mut ctx = VmContext {
+            time: 1.5e-9,
+            ..VmContext::default()
+        };
 
         let mut vm = Vm::new(&mut ctx);
         let program = make_program(vec![Instruction::PushTime]);
@@ -1453,8 +1457,10 @@ mod tests {
 
     #[test]
     fn test_execute_temperature() {
-        let mut ctx = VmContext::default();
-        ctx.temperature = 350.0;
+        let mut ctx = VmContext {
+            temperature: 350.0,
+            ..VmContext::default()
+        };
 
         let mut vm = Vm::new(&mut ctx);
         let program = make_program(vec![Instruction::PushTemperature]);
@@ -1508,10 +1514,10 @@ mod tests {
     #[test]
     fn test_context_set_variable() {
         let mut ctx = VmContext::default();
-        ctx.set_variable(2, 3.14);
+        ctx.set_variable(2, std::f64::consts::PI);
 
         assert_eq!(ctx.variables.len(), 3);
-        assert!((ctx.variables[2] - 3.14).abs() < 1e-10);
+        assert!((ctx.variables[2] - std::f64::consts::PI).abs() < 1e-10);
     }
 
     #[test]
@@ -1855,12 +1861,12 @@ mod tests {
     #[test]
     fn test_execute_push_variable() {
         let mut ctx = VmContext::new(2);
-        ctx.variables = vec![3.14, 2.71, 1.618];
+        ctx.variables = vec![std::f64::consts::PI, 2.71, 1.618];
 
         let mut vm = Vm::new(&mut ctx);
 
         let program = make_program(vec![Instruction::PushVariable(0)]);
-        assert!((vm.execute(&program).unwrap() - 3.14).abs() < 1e-10);
+        assert!((vm.execute(&program).unwrap() - std::f64::consts::PI).abs() < 1e-10);
 
         let program = make_program(vec![Instruction::PushVariable(1)]);
         assert!((vm.execute(&program).unwrap() - 2.71).abs() < 1e-10);
@@ -2257,7 +2263,7 @@ mod tests {
         // In DC analysis, idt returns previous accumulated value
         let mut ctx = VmContext::with_states(2, 1);
         ctx.set_timestep(0.0); // DC
-        ctx.state_values_prev[0] = 3.14;
+        ctx.state_values_prev[0] = std::f64::consts::PI;
 
         let mut vm = Vm::new(&mut ctx);
 
@@ -2267,8 +2273,8 @@ mod tests {
         ]);
         let result = vm.execute(&program).unwrap();
         assert!(
-            (result - 3.14).abs() < 1e-10,
-            "idt in DC should be prev value (3.14), got {result}"
+            (result - std::f64::consts::PI).abs() < 1e-10,
+            "idt in DC should be prev value (pi), got {result}"
         );
     }
 

@@ -710,7 +710,7 @@ fn test_device_parameter_modification() {
     let after = device.evaluate();
 
     // Both should produce valid results
-    assert!(!initial.is_empty() || !after.is_empty() || true);
+    assert!(!initial.is_empty() || !after.is_empty());
 }
 
 #[test]
@@ -1219,8 +1219,14 @@ fn test_parameter_boundary_clamping() {
 
     // Values should be clamped, so currents should be within expected range
     // I = V/r, so I should be between 0.001 (r=1000) and 0.1 (r=10)
-    assert!(i1 >= 0.001 && i1 <= 0.1, "Current with r below min: {i1}");
-    assert!(i2 >= 0.001 && i2 <= 0.1, "Current with r above max: {i2}");
+    assert!(
+        (0.001..=0.1).contains(&i1),
+        "Current with r below min: {i1}"
+    );
+    assert!(
+        (0.001..=0.1).contains(&i2),
+        "Current with r above max: {i2}"
+    );
 }
 
 /// Test very large voltage handling (convergence limexp)

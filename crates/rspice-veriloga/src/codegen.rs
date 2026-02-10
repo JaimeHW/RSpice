@@ -1005,7 +1005,7 @@ mod tests {
     fn test_instruction_variants() {
         // Test all instruction variants can be created
         let instructions = vec![
-            Instruction::PushConst(3.14),
+            Instruction::PushConst(std::f64::consts::PI),
             Instruction::PushParam(0),
             Instruction::PushVoltage(0, 1),
             Instruction::PushCurrent(0, 1),

@@ -1019,13 +1019,16 @@ mod tests {
         let conv = ExprConverter::new(&ctx);
 
         let num = Expression::Number(NumberLit {
-            value: 3.14,
-            raw: "3.14".into(),
+            value: std::f64::consts::PI,
+            raw: "3.141592653589793".into(),
             span: dummy_span(),
         });
 
         let result = conv.convert(&num).unwrap();
-        assert!(matches!(result, IrExpr::Const(v) if (v - 3.14).abs() < 1e-10));
+        assert!(matches!(
+            result,
+            IrExpr::Const(v) if (v - std::f64::consts::PI).abs() < 1e-10
+        ));
     }
 
     #[test]

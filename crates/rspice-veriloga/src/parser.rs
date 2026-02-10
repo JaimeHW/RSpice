@@ -1861,7 +1861,7 @@ mod tests {
         assert!(result.is_ok());
         let file = result.unwrap();
         if let Item::Module(m) = &file.items[0] {
-            assert!(m.variables.len() >= 1);
+            assert!(!m.variables.is_empty());
         }
     }
 }
