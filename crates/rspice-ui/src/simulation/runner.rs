@@ -327,14 +327,15 @@ fn run_simulation_thread(
                         stop_time: period,
                     })
                 }
-                AnalysisSpec::HarmonicBalance {
-                    tone1_freq,
-                    tone1_harmonics,
-                    ..
-                } => p.update_status(SimulationStatus::AcAnalysis {
-                    freq: *tone1_freq,
-                    stop_freq: *tone1_freq * (*tone1_harmonics).max(1) as f64,
-                }),
+                AnalysisSpec::HarmonicBalance { tones, .. } => {
+                    p.update_status(SimulationStatus::AcAnalysis {
+                        freq: tones.first().map(|tone| tone.frequency).unwrap_or(1.0),
+                        stop_freq: tones
+                            .iter()
+                            .map(|tone| tone.frequency * tone.harmonics.max(1) as f64)
+                            .fold(1.0, f64::max),
+                    })
+                }
                 AnalysisSpec::Pac => {
                     if let Some(pac) = &options.pac {
                         p.update_status(SimulationStatus::AcAnalysis {
@@ -822,10 +823,7 @@ fn run_spec_request(
             Ok(SimulationResult::Transient { time, waveforms })
         }
         AnalysisSpec::HarmonicBalance {
-            tone1_freq,
-            tone1_harmonics,
-            tone2_freq,
-            tone2_harmonics,
+            tones,
             reltol,
             abstol,
             max_iterations,
@@ -837,11 +835,17 @@ fn run_spec_request(
             source_stepping,
             verbose,
         } => {
+            let hb_tones: Vec<svc_runner::HbToneRunConfig> = tones
+                .into_iter()
+                .map(|tone| svc_runner::HbToneRunConfig {
+                    frequency: tone.frequency,
+                    harmonics: tone.harmonics,
+                    source: tone.source,
+                    name: tone.name,
+                })
+                .collect();
             let hb_cfg = svc_runner::HbRunConfig {
-                tone1_freq,
-                tone1_harmonics,
-                tone2_freq,
-                tone2_harmonics,
+                tones: hb_tones,
                 reltol,
                 abstol,
                 max_iterations,
@@ -2430,10 +2434,7 @@ C1 out 0 1n
         runner
             .start_spec(
                 AnalysisSpec::HarmonicBalance {
-                    tone1_freq: 1e6,
-                    tone1_harmonics: 5,
-                    tone2_freq: None,
-                    tone2_harmonics: 0,
+                    tones: vec![crate::simulation::multi_run::HbToneSpec::new(1e6, 5)],
                     reltol: 1e-6,
                     abstol: 1e-12,
                     max_iterations: 100,

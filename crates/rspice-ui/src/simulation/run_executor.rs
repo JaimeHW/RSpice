@@ -1058,10 +1058,7 @@ impl RunExecutor {
                 }
             }
             AnalysisSpec::HarmonicBalance {
-                tone1_freq,
-                tone1_harmonics,
-                tone2_freq,
-                tone2_harmonics,
+                tones,
                 reltol,
                 abstol,
                 max_iterations,
@@ -1073,11 +1070,17 @@ impl RunExecutor {
                 source_stepping,
                 verbose,
             } => {
+                let hb_tones: Vec<simulation_runner::HbToneRunConfig> = tones
+                    .iter()
+                    .map(|tone| simulation_runner::HbToneRunConfig {
+                        frequency: tone.frequency,
+                        harmonics: tone.harmonics,
+                        source: tone.source.clone(),
+                        name: tone.name.clone(),
+                    })
+                    .collect();
                 let hb_cfg = simulation_runner::HbRunConfig {
-                    tone1_freq: *tone1_freq,
-                    tone1_harmonics: *tone1_harmonics,
-                    tone2_freq: *tone2_freq,
-                    tone2_harmonics: *tone2_harmonics,
+                    tones: hb_tones,
                     reltol: *reltol,
                     abstol: *abstol,
                     max_iterations: *max_iterations,

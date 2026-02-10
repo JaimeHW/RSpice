@@ -235,6 +235,50 @@ pub struct SpPort {
     pub z0: Option<f64>,
 }
 
+/// Harmonic balance tone request used by pipeline execution.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HbToneSpec {
+    /// Tone frequency in Hz.
+    pub frequency: f64,
+    /// Number of harmonics requested for this tone.
+    pub harmonics: usize,
+    /// Optional independent source name this tone should drive.
+    pub source: Option<String>,
+    /// Optional label for display/debug.
+    pub name: Option<String>,
+}
+
+impl HbToneSpec {
+    pub fn new(frequency: f64, harmonics: usize) -> Self {
+        Self {
+            frequency,
+            harmonics,
+            source: None,
+            name: None,
+        }
+    }
+
+    pub fn with_source(mut self, source: impl Into<String>) -> Self {
+        let source = source.into();
+        self.source = if source.trim().is_empty() {
+            None
+        } else {
+            Some(source)
+        };
+        self
+    }
+
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        let name = name.into();
+        self.name = if name.trim().is_empty() {
+            None
+        } else {
+            Some(name)
+        };
+        self
+    }
+}
+
 /// Strongly-typed analysis request used by queue execution.
 ///
 /// This removes hidden/default execution parameters from the run executor.
@@ -286,10 +330,7 @@ pub enum AnalysisSpec {
     },
     /// Harmonic balance
     HarmonicBalance {
-        tone1_freq: f64,
-        tone1_harmonics: usize,
-        tone2_freq: Option<f64>,
-        tone2_harmonics: usize,
+        tones: Vec<HbToneSpec>,
         reltol: f64,
         abstol: f64,
         max_iterations: usize,
@@ -591,10 +632,7 @@ impl AnalysisSpec {
                 Ok(())
             }
             AnalysisSpec::HarmonicBalance {
-                tone1_freq,
-                tone1_harmonics,
-                tone2_freq,
-                tone2_harmonics,
+                tones,
                 reltol,
                 abstol,
                 max_iterations,
@@ -604,14 +642,16 @@ impl AnalysisSpec {
                 gmres_restart,
                 ..
             } => {
-                if *tone1_freq <= 0.0 {
-                    return Err("HB tone1_freq must be > 0".to_string());
+                if tones.is_empty() {
+                    return Err("HB must define at least one tone".to_string());
                 }
-                if *tone1_harmonics == 0 {
-                    return Err("HB tone1_harmonics must be > 0".to_string());
-                }
-                if tone2_freq.is_some() && *tone2_harmonics == 0 {
-                    return Err("HB tone2_harmonics must be > 0 when tone2_freq is set".to_string());
+                for (idx, tone) in tones.iter().enumerate() {
+                    if !tone.frequency.is_finite() || tone.frequency <= 0.0 {
+                        return Err(format!("HB tone {} frequency must be > 0", idx + 1));
+                    }
+                    if tone.harmonics == 0 {
+                        return Err(format!("HB tone {} harmonics must be > 0", idx + 1));
+                    }
                 }
                 if *reltol <= 0.0 {
                     return Err("HB reltol must be > 0".to_string());
@@ -1604,6 +1644,48 @@ mod tests {
             points_per_unit: 0,
             sweep: FrequencySweep::Decade,
             f2_over_f1: Some(1.0),
+        };
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn test_hb_tone_spec_builders() {
+        let tone = HbToneSpec::new(2.4e9, 7).with_source("VLO").with_name("LO");
+        assert!((tone.frequency - 2.4e9).abs() < 1e-6);
+        assert_eq!(tone.harmonics, 7);
+        assert_eq!(tone.source.as_deref(), Some("VLO"));
+        assert_eq!(tone.name.as_deref(), Some("LO"));
+    }
+
+    #[test]
+    fn test_analysis_spec_hb_validation() {
+        let valid = AnalysisSpec::HarmonicBalance {
+            tones: vec![HbToneSpec::new(1e9, 9), HbToneSpec::new(900e6, 5)],
+            reltol: 1e-6,
+            abstol: 1e-12,
+            max_iterations: 100,
+            damping: 0.8,
+            oversample: 2,
+            max_mixing_order: 5,
+            use_krylov: false,
+            gmres_restart: 30,
+            source_stepping: false,
+            verbose: false,
+        };
+        assert!(valid.validate().is_ok());
+
+        let invalid = AnalysisSpec::HarmonicBalance {
+            tones: vec![HbToneSpec::new(1e9, 0)],
+            reltol: 1e-6,
+            abstol: 1e-12,
+            max_iterations: 100,
+            damping: 0.8,
+            oversample: 2,
+            max_mixing_order: 5,
+            use_krylov: false,
+            gmres_restart: 30,
+            source_stepping: false,
+            verbose: false,
         };
         assert!(invalid.validate().is_err());
     }

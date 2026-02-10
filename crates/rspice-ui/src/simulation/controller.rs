@@ -24,7 +24,7 @@ use crate::simulation::config::{
     PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
 };
 use crate::simulation::multi_run::{
-    AnalysisPlan, AnalysisRunType, AnalysisSpec, FrequencySweep, OptimizationAlgorithm,
+    AnalysisPlan, AnalysisRunType, AnalysisSpec, FrequencySweep, HbToneSpec, OptimizationAlgorithm,
     OptimizationGoal, OptimizationVariable, SpPort,
 };
 use crate::simulation::runner::SpecExecutionOptions;
@@ -115,8 +115,8 @@ impl SimulationController {
             self.current_spec = None;
             state.simulation.status = "Aborted".to_string();
             state.push_sim_message(crate::common::app::ConsoleMessage::warning(
-                    "Simulation aborted by user",
-                ));
+                "Simulation aborted by user",
+            ));
         }
 
         // Poll for completion
@@ -1289,12 +1289,21 @@ impl SimulationController {
         let hb_cfg = hb_state
             .to_config()
             .map_err(|e| format!("invalid harmonic balance settings: {}", e))?;
-        let tone2 = hb_cfg.additional_tones.first();
+        let mut tones = Vec::with_capacity(1 + hb_cfg.additional_tones.len());
+        tones.push(
+            HbToneSpec::new(hb_cfg.fundamental_freq, hb_cfg.num_harmonics as usize)
+                .with_name("tone1"),
+        );
+        for (idx, tone) in hb_cfg.additional_tones.iter().enumerate() {
+            let label = if tone.name.trim().is_empty() {
+                format!("tone{}", idx + 2)
+            } else {
+                tone.name.clone()
+            };
+            tones.push(HbToneSpec::new(tone.frequency, tone.harmonics as usize).with_name(label));
+        }
         Ok(AnalysisSpec::HarmonicBalance {
-            tone1_freq: hb_cfg.fundamental_freq,
-            tone1_harmonics: hb_cfg.num_harmonics as usize,
-            tone2_freq: tone2.map(|tone| tone.frequency),
-            tone2_harmonics: tone2.map(|tone| tone.harmonics as usize).unwrap_or(0),
+            tones,
             reltol: hb_cfg.reltol,
             abstol: hb_cfg.abstol,
             max_iterations: hb_cfg.maxiter as usize,
@@ -2643,7 +2652,8 @@ impl SimulationController {
                     }
                 }
                 Err(e) => {
-                    state.push_sim_message(ConsoleMessage::error(format!("Analysis failed: {}", e)));
+                    state
+                        .push_sim_message(ConsoleMessage::error(format!("Analysis failed: {}", e)));
 
                     // Mark run as partially failed and add failed analysis entry
                     let failed_label = self
@@ -2731,15 +2741,15 @@ impl SimulationController {
                 for (node, voltage) in &dc_result.node_voltages {
                     log::info!("  V({}) = {:.6} V", node, voltage);
                     state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                            "V({}) = {:.6} V",
-                            node, voltage
-                        )));
+                        "V({}) = {:.6} V",
+                        node, voltage
+                    )));
                 }
 
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                        "DC OP: {} node voltages computed",
-                        dc_result.node_voltages.len()
-                    )));
+                    "DC OP: {} node voltages computed",
+                    dc_result.node_voltages.len()
+                )));
 
                 // Auto-show log panel so user sees results
                 state.panels.bottom_panel = true;
@@ -2763,10 +2773,10 @@ impl SimulationController {
                 self.populate_transient_post_views(state, time, waveforms);
 
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                        "Transient: {} points, {} waveforms",
-                        time.len(),
-                        waveforms.len()
-                    )));
+                    "Transient: {} points, {} waveforms",
+                    time.len(),
+                    waveforms.len()
+                )));
 
                 // Auto-show waveform panel for better visibility
                 state.panels.bottom_panel = true;
@@ -2795,10 +2805,10 @@ impl SimulationController {
                 self.populate_ac_post_views(state, frequencies, waveforms);
 
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                        "AC: {} points, {} waveforms",
-                        frequencies.len(),
-                        waveforms.len()
-                    )));
+                    "AC: {} points, {} waveforms",
+                    frequencies.len(),
+                    waveforms.len()
+                )));
 
                 state.panels.bottom_panel = true;
                 state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
@@ -2824,11 +2834,11 @@ impl SimulationController {
                 }
 
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                        "DC Sweep ({}): {} points, {} waveforms",
-                        sweep_var,
-                        sweep_values.len(),
-                        waveforms.len()
-                    )));
+                    "DC Sweep ({}): {} points, {} waveforms",
+                    sweep_var,
+                    sweep_values.len(),
+                    waveforms.len()
+                )));
 
                 state.panels.bottom_panel = true;
                 state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
@@ -2882,10 +2892,10 @@ impl SimulationController {
                 // Calculate integrated noise
                 let integrated: f64 = output_noise.iter().sum::<f64>().sqrt();
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                        "Noise: {} points, integrated output: {:.3e} V/√Hz",
-                        frequencies.len(),
-                        integrated
-                    )));
+                    "Noise: {} points, integrated output: {:.3e} V/√Hz",
+                    frequencies.len(),
+                    integrated
+                )));
 
                 state.panels.bottom_panel = true;
                 state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
@@ -2895,45 +2905,45 @@ impl SimulationController {
                 self.populate_pole_zero_view(state, poles, zeros, *gain);
                 // Pole-Zero: Display in console (and optionally s-plane plot)
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                        "Pole-Zero Analysis: DC gain = {:.4}",
-                        gain
-                    )));
+                    "Pole-Zero Analysis: DC gain = {:.4}",
+                    gain
+                )));
 
                 for (i, (re, im)) in poles.iter().enumerate() {
                     if im.abs() < 1e-10 {
                         // Real pole
                         let freq = re.abs() / (2.0 * std::f64::consts::PI);
                         state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                                "  Pole {}: {:.3e} rad/s ({:.3e} Hz)",
-                                i + 1,
-                                re,
-                                freq
-                            )));
+                            "  Pole {}: {:.3e} rad/s ({:.3e} Hz)",
+                            i + 1,
+                            re,
+                            freq
+                        )));
                     } else {
                         // Complex pole
                         state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                                "  Pole {}: {:.3e} ± j{:.3e} rad/s",
-                                i + 1,
-                                re,
-                                im.abs()
-                            )));
+                            "  Pole {}: {:.3e} ± j{:.3e} rad/s",
+                            i + 1,
+                            re,
+                            im.abs()
+                        )));
                     }
                 }
 
                 for (i, (re, im)) in zeros.iter().enumerate() {
                     if im.abs() < 1e-10 {
                         state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                                "  Zero {}: {:.3e} rad/s",
-                                i + 1,
-                                re
-                            )));
+                            "  Zero {}: {:.3e} rad/s",
+                            i + 1,
+                            re
+                        )));
                     } else {
                         state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                                "  Zero {}: {:.3e} ± j{:.3e} rad/s",
-                                i + 1,
-                                re,
-                                im.abs()
-                            )));
+                            "  Zero {}: {:.3e} ± j{:.3e} rad/s",
+                            i + 1,
+                            re,
+                            im.abs()
+                        )));
                     }
                 }
             }
@@ -2944,9 +2954,9 @@ impl SimulationController {
             } => {
                 // Sensitivity: Display in console as table
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                        "Sensitivity Analysis: {} parameters",
-                        sensitivities.len()
-                    )));
+                    "Sensitivity Analysis: {} parameters",
+                    sensitivities.len()
+                )));
 
                 // Sort by normalized sensitivity magnitude
                 let mut sorted: Vec<_> = normalized.iter().collect();
@@ -2959,12 +2969,12 @@ impl SimulationController {
                 for (param, norm_sens) in sorted.iter().take(10) {
                     if let Some(sens) = sensitivities.get(*param) {
                         state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                                "  {}: dV/d{} = {:.3e}, norm = {:.2}%",
-                                param,
-                                param,
-                                sens,
-                                **norm_sens * 100.0
-                            )));
+                            "  {}: dV/d{} = {:.3e}, norm = {:.2}%",
+                            param,
+                            param,
+                            sens,
+                            **norm_sens * 100.0
+                        )));
                     }
                 }
             }
@@ -2997,15 +3007,15 @@ impl SimulationController {
                 }
 
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                        "Monte Carlo: {}/{} runs converged ({} failed), all_converged={}",
-                        runs_completed, runs_requested, num_failures, all_converged
-                    )));
+                    "Monte Carlo: {}/{} runs converged ({} failed), all_converged={}",
+                    runs_completed, runs_requested, num_failures, all_converged
+                )));
 
                 for var in variables.iter().take(8) {
                     state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                            "  {}: mean={:.6e}, sigma={:.6e}, min={:.6e}, max={:.6e}",
-                            var.name, var.mean, var.std_dev, var.min, var.max
-                        )));
+                        "  {}: mean={:.6e}, sigma={:.6e}, min={:.6e}, max={:.6e}",
+                        var.name, var.mean, var.std_dev, var.min, var.max
+                    )));
                 }
 
                 state.panels.bottom_panel = true;
@@ -3033,12 +3043,12 @@ impl SimulationController {
                 }
 
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                        "Parametric ({}): {} points, {} waveforms, {} failed points",
-                        target,
-                        sweep_values.len(),
-                        waveforms.len(),
-                        num_failures
-                    )));
+                    "Parametric ({}): {} points, {} waveforms, {} failed points",
+                    target,
+                    sweep_values.len(),
+                    waveforms.len(),
+                    num_failures
+                )));
 
                 state.panels.bottom_panel = true;
                 state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
@@ -3061,11 +3071,11 @@ impl SimulationController {
                 }
 
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                        "Corner sweep: {} points, {} waveforms, {} failed corners",
-                        x_values.len(),
-                        waveforms.len(),
-                        num_failures
-                    )));
+                    "Corner sweep: {} points, {} waveforms, {} failed corners",
+                    x_values.len(),
+                    waveforms.len(),
+                    num_failures
+                )));
 
                 state.panels.bottom_panel = true;
                 state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
@@ -3088,10 +3098,10 @@ impl SimulationController {
 
                 state.simulation.reliability_results = device_results.clone();
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                        "Reliability: {} lifetime points, {} devices analyzed",
-                        years.len(),
-                        device_results.len()
-                    )));
+                    "Reliability: {} lifetime points, {} devices analyzed",
+                    years.len(),
+                    device_results.len()
+                )));
 
                 state.panels.bottom_panel = true;
                 state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
@@ -3115,16 +3125,16 @@ impl SimulationController {
                 }
 
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                        "Optimization: {} iterations, best cost {:.6e}, converged={}",
-                        iterations.len(),
-                        best_cost,
-                        converged
-                    )));
+                    "Optimization: {} iterations, best cost {:.6e}, converged={}",
+                    iterations.len(),
+                    best_cost,
+                    converged
+                )));
                 for (name, value) in best_variables.iter().take(8) {
                     state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                            "  {} = {:.6e}",
-                            name, value
-                        )));
+                        "  {} = {:.6e}",
+                        name, value
+                    )));
                 }
 
                 state.panels.bottom_panel = true;
@@ -3147,10 +3157,10 @@ impl SimulationController {
                 }
                 state.simulation.soa_violations = violations.clone();
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                        "SOA: {} sampled points, {} violations",
-                        time.len(),
-                        violations.len()
-                    )));
+                    "SOA: {} sampled points, {} violations",
+                    time.len(),
+                    violations.len()
+                )));
 
                 state.panels.bottom_panel = true;
                 state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
@@ -3158,8 +3168,8 @@ impl SimulationController {
 
             SimulationResult::Empty { .. } => {
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(
-                        "Analysis complete (no waveform data)".to_string(),
-                    ));
+                    "Analysis complete (no waveform data)".to_string(),
+                ));
             }
         }
 
@@ -3241,13 +3251,12 @@ impl SimulationController {
             );
             bode_data.add_response(response);
 
-            let nyquist_curve =
-                crate::analysis::nyquist::data::NyquistData::from_arrays(
-                    &name,
-                    frequencies,
-                    &waveform.y_values,
-                    imag,
-                );
+            let nyquist_curve = crate::analysis::nyquist::data::NyquistData::from_arrays(
+                &name,
+                frequencies,
+                &waveform.y_values,
+                imag,
+            );
             if loaded_nyquist {
                 state.nyquist_state.add_curve(nyquist_curve);
             } else {
@@ -3269,7 +3278,8 @@ impl SimulationController {
             bode_data.calculate_margins();
             state.bode_plot_state.load_data(bode_data);
         } else {
-            state.bode_plot_state
+            state
+                .bode_plot_state
                 .load_data(crate::analysis::bode::BodeData::new());
         }
     }
@@ -3302,7 +3312,8 @@ impl SimulationController {
         state.histogram_state.clear();
 
         for variable in variables {
-            if variable.histogram.is_empty() || variable.bin_edges.len() != variable.histogram.len() + 1
+            if variable.histogram.is_empty()
+                || variable.bin_edges.len() != variable.histogram.len() + 1
             {
                 continue;
             }
@@ -3372,7 +3383,8 @@ impl SimulationController {
         }
 
         let threshold = (v_min + v_max) * 0.5;
-        let edges = crate::analysis::eye_diagram::data::find_edges(&time[..n], &signal[..n], threshold);
+        let edges =
+            crate::analysis::eye_diagram::data::find_edges(&time[..n], &signal[..n], threshold);
         if edges.len() < 3 {
             return None;
         }
@@ -3458,9 +3470,7 @@ impl SimulationController {
             >= 2
     }
 
-    fn preferred_viewer_for_analysis(
-        analysis_type: AnalysisType,
-    ) -> crate::viewers::ActiveViewer {
+    fn preferred_viewer_for_analysis(analysis_type: AnalysisType) -> crate::viewers::ActiveViewer {
         match analysis_type {
             AnalysisType::DcOp => crate::viewers::ActiveViewer::Waveform,
             AnalysisType::DcSweep | AnalysisType::Transient | AnalysisType::Envelope => {
@@ -3470,9 +3480,7 @@ impl SimulationController {
             | AnalysisType::Disto
             | AnalysisType::Tf
             | AnalysisType::Pac
-            | AnalysisType::Pxf => {
-                crate::viewers::ActiveViewer::BodePlot
-            }
+            | AnalysisType::Pxf => crate::viewers::ActiveViewer::BodePlot,
             AnalysisType::Noise | AnalysisType::Pnoise => crate::viewers::ActiveViewer::BodePlot,
             AnalysisType::PoleZero => crate::viewers::ActiveViewer::PoleZero,
             AnalysisType::Sensitivity => crate::viewers::ActiveViewer::Waveform,
@@ -4175,10 +4183,7 @@ mod tests {
             .expect("HB spec should build");
         match spec {
             AnalysisSpec::HarmonicBalance {
-                tone1_freq,
-                tone1_harmonics,
-                tone2_freq,
-                tone2_harmonics,
+                tones,
                 reltol,
                 abstol,
                 max_iterations,
@@ -4190,10 +4195,11 @@ mod tests {
                 source_stepping,
                 verbose,
             } => {
-                assert!((tone1_freq - 1.2e9).abs() < 1e-3);
-                assert_eq!(tone1_harmonics, 11);
-                assert_eq!(tone2_freq, Some(900e6));
-                assert_eq!(tone2_harmonics, 5);
+                assert_eq!(tones.len(), 2);
+                assert!((tones[0].frequency - 1.2e9).abs() < 1e-3);
+                assert_eq!(tones[0].harmonics, 11);
+                assert!((tones[1].frequency - 900e6).abs() < 1e-3);
+                assert_eq!(tones[1].harmonics, 5);
                 assert!((reltol - 2e-6).abs() < 1e-18);
                 assert!((abstol - 1e-12).abs() < 1e-24);
                 assert_eq!(max_iterations, 175);
@@ -4566,7 +4572,10 @@ mod tests {
             .build_queue_from_plan(&state, &plan)
             .expect("disto queue should build");
         assert_eq!(queue.len(), 1);
-        assert!(queue[0].config.is_none(), "DISTO should execute via spec path");
+        assert!(
+            queue[0].config.is_none(),
+            "DISTO should execute via spec path"
+        );
         assert!(
             queue[0].analysis_line.starts_with(".disto "),
             "DISTO command should emit native DISTO command, got: {}",

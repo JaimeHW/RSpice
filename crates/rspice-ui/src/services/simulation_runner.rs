@@ -4655,12 +4655,49 @@ pub struct HbData {
 }
 
 /// Harmonic Balance run configuration passed from the simulation pipeline.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
+pub struct HbToneRunConfig {
+    pub frequency: Value,
+    pub harmonics: usize,
+    pub source: Option<String>,
+    pub name: Option<String>,
+}
+
+impl HbToneRunConfig {
+    pub fn new(frequency: Value, harmonics: usize) -> Self {
+        Self {
+            frequency,
+            harmonics,
+            source: None,
+            name: None,
+        }
+    }
+
+    pub fn with_source(mut self, source: impl Into<String>) -> Self {
+        let source = source.into();
+        self.source = if source.trim().is_empty() {
+            None
+        } else {
+            Some(source)
+        };
+        self
+    }
+
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        let name = name.into();
+        self.name = if name.trim().is_empty() {
+            None
+        } else {
+            Some(name)
+        };
+        self
+    }
+}
+
+/// Harmonic Balance run configuration passed from the simulation pipeline.
+#[derive(Debug, Clone)]
 pub struct HbRunConfig {
-    pub tone1_freq: Value,
-    pub tone1_harmonics: usize,
-    pub tone2_freq: Option<Value>,
-    pub tone2_harmonics: usize,
+    pub tones: Vec<HbToneRunConfig>,
     pub reltol: Value,
     pub abstol: Value,
     pub max_iterations: usize,
@@ -4676,10 +4713,7 @@ pub struct HbRunConfig {
 impl Default for HbRunConfig {
     fn default() -> Self {
         Self {
-            tone1_freq: 1e9,
-            tone1_harmonics: 9,
-            tone2_freq: None,
-            tone2_harmonics: 0,
+            tones: vec![HbToneRunConfig::new(1e9, 9)],
             reltol: 1e-6,
             abstol: 1e-12,
             max_iterations: 100,
@@ -4696,18 +4730,15 @@ impl Default for HbRunConfig {
 
 impl HbRunConfig {
     fn validate(&self) -> Result<(), String> {
-        if !self.tone1_freq.is_finite() || self.tone1_freq <= 0.0 {
-            return Err("HB tone1 frequency must be positive".to_string());
+        if self.tones.is_empty() {
+            return Err("HB requires at least one tone".to_string());
         }
-        if self.tone1_harmonics == 0 {
-            return Err("HB tone1 harmonics must be > 0".to_string());
-        }
-        if let Some(tone2) = self.tone2_freq {
-            if !tone2.is_finite() || tone2 <= 0.0 {
-                return Err("HB tone2 frequency must be positive".to_string());
+        for (idx, tone) in self.tones.iter().enumerate() {
+            if !tone.frequency.is_finite() || tone.frequency <= 0.0 {
+                return Err(format!("HB tone {} frequency must be positive", idx + 1));
             }
-            if self.tone2_harmonics == 0 {
-                return Err("HB tone2 harmonics must be > 0 when tone2 is enabled".to_string());
+            if tone.harmonics == 0 {
+                return Err(format!("HB tone {} harmonics must be > 0", idx + 1));
             }
         }
         if !self.reltol.is_finite() || self.reltol <= 0.0 {
@@ -4735,67 +4766,119 @@ impl HbRunConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct HbTwoToneLayout {
+#[derive(Debug, Clone)]
+struct HbMultiToneLayout {
     base_frequency: Value,
     max_harmonic: usize,
 }
 
-fn build_two_tone_hb_layout(
-    tone1_freq: Value,
-    tone2_freq: Value,
-    tone1_harmonics: usize,
-    tone2_harmonics: usize,
-) -> Result<HbTwoToneLayout, String> {
-    if !tone1_freq.is_finite() || tone1_freq <= 0.0 {
-        return Err("HB tone1 frequency must be positive".to_string());
+fn gcd_u64(mut a: u64, mut b: u64) -> u64 {
+    while b != 0 {
+        let tmp = b;
+        b = a % b;
+        a = tmp;
     }
-    if !tone2_freq.is_finite() || tone2_freq <= 0.0 {
-        return Err("HB tone2 frequency must be positive".to_string());
+    a
+}
+
+fn lcm_u64(a: u64, b: u64) -> Option<u64> {
+    if a == 0 || b == 0 {
+        return Some(0);
+    }
+    let gcd = gcd_u64(a, b).max(1);
+    (a / gcd).checked_mul(b)
+}
+
+fn build_multi_tone_hb_layout(
+    tones: &[HbToneRunConfig],
+    max_mixing_order: usize,
+) -> Result<HbMultiToneLayout, String> {
+    let first_tone = tones
+        .first()
+        .ok_or_else(|| "HB requires at least one tone".to_string())?;
+    if tones.len() == 1 {
+        return Ok(HbMultiToneLayout {
+            base_frequency: first_tone.frequency,
+            max_harmonic: first_tone.harmonics.max(1),
+        });
     }
 
-    let (lower_freq, upper_freq, tone1_is_lower) = if tone1_freq <= tone2_freq {
-        (tone1_freq, tone2_freq, true)
-    } else {
-        (tone2_freq, tone1_freq, false)
-    };
-    let ratio = upper_freq / lower_freq;
-    let (mut numerator, mut denominator) =
-        approximate_ratio_fraction(ratio, 24, 1e-6).ok_or_else(|| {
-            format!(
-                "HB tone ratio {} cannot be represented as a stable low-order rational ratio",
-                ratio
-            )
-        })?;
-    let gcd = gcd_u32(numerator, denominator).max(1);
-    numerator /= gcd;
-    denominator /= gcd;
+    let min_frequency = tones
+        .iter()
+        .map(|tone| tone.frequency)
+        .fold(Value::INFINITY, Value::min);
+    if !min_frequency.is_finite() || min_frequency <= 0.0 {
+        return Err("HB tone frequencies must be positive".to_string());
+    }
 
-    let lower_harmonic = denominator as usize;
-    let upper_harmonic = numerator as usize;
-    let tone1_harmonic = if tone1_is_lower {
-        lower_harmonic
-    } else {
-        upper_harmonic
-    };
-    let tone2_harmonic = if tone1_is_lower {
-        upper_harmonic
-    } else {
-        lower_harmonic
-    };
+    let mut reduced_fractions = Vec::with_capacity(tones.len());
+    for tone in tones {
+        let ratio = tone.frequency / min_frequency;
+        let (numerator, denominator) =
+            approximate_ratio_fraction(ratio, 48, 1e-6).ok_or_else(|| {
+                format!(
+                    "HB tone ratio {} cannot be represented as a stable low-order rational ratio",
+                    ratio
+                )
+            })?;
+        let numerator = numerator as u64;
+        let denominator = denominator as u64;
+        let gcd = gcd_u64(numerator, denominator).max(1);
+        reduced_fractions.push((numerator / gcd, denominator / gcd));
+    }
 
-    let base_frequency = tone1_freq / tone1_harmonic as Value;
-    let max_harmonic = (tone1_harmonic * tone1_harmonics.max(1))
-        .max(tone2_harmonic * tone2_harmonics.max(1))
-        .max(tone1_harmonic + tone2_harmonic);
-    if max_harmonic > 512 {
+    let mut common_denominator: u64 = 1;
+    for (_, denominator) in &reduced_fractions {
+        common_denominator = lcm_u64(common_denominator, *denominator)
+            .ok_or_else(|| "HB multi-tone ratio harmonization overflowed".to_string())?;
+    }
+    if common_denominator == 0 {
+        return Err("HB multi-tone ratio harmonization produced invalid denominator".to_string());
+    }
+
+    let base_frequency = min_frequency / common_denominator as Value;
+    let mut tone_harmonics = Vec::with_capacity(tones.len());
+    for (idx, (numerator, denominator)) in reduced_fractions.iter().enumerate() {
+        let scale = common_denominator
+            .checked_div(*denominator)
+            .ok_or_else(|| "HB tone denominator harmonization failed".to_string())?;
+        let harmonic = numerator
+            .checked_mul(scale)
+            .ok_or_else(|| "HB harmonic index overflowed".to_string())?;
+        let harmonic = harmonic as usize;
+        if harmonic == 0 {
+            return Err(format!("HB tone {} resolved to zero harmonic", idx + 1));
+        }
+        let mapped_frequency = base_frequency * harmonic as Value;
+        let rel_error =
+            (mapped_frequency - tones[idx].frequency).abs() / tones[idx].frequency.abs().max(1.0);
+        if rel_error > 1e-9 {
+            return Err(format!(
+                "HB tone {} cannot be mapped onto a stable commensurate harmonic basis",
+                idx + 1
+            ));
+        }
+        tone_harmonics.push(harmonic);
+    }
+
+    let mut max_harmonic = tones
+        .iter()
+        .zip(tone_harmonics.iter())
+        .map(|(tone, harmonic)| harmonic.saturating_mul(tone.harmonics.max(1)))
+        .max()
+        .unwrap_or(1);
+    if tones.len() > 1 {
+        let basis_peak = tone_harmonics.iter().copied().max().unwrap_or(1);
+        max_harmonic = max_harmonic.max(max_mixing_order.max(1).saturating_mul(basis_peak));
+    }
+    if max_harmonic > 2048 {
         return Err(format!(
             "HB multi-tone harmonic order {} exceeds supported practical limit",
             max_harmonic
         ));
     }
 
-    Ok(HbTwoToneLayout {
+    Ok(HbMultiToneLayout {
         base_frequency,
         max_harmonic,
     })
@@ -4815,23 +4898,35 @@ pub fn run_hb_analysis(netlist_text: &str, config: &HbRunConfig) -> Result<HbDat
 
     let engine = Engine::new(build_engine_config(&netlist, None));
 
-    // Build HB configuration.
-    let mut hb_config = if let Some(tone2) = config.tone2_freq {
-        let layout = build_two_tone_hb_layout(
-            config.tone1_freq,
-            tone2,
-            config.tone1_harmonics.max(1),
-            config.tone2_harmonics.max(1),
-        )?;
-        let mut cfg = HbConfig::new(layout.base_frequency).with_harmonics(layout.max_harmonic);
-        cfg.tones = vec![
-            HbTone::new(config.tone1_freq, config.tone1_harmonics.max(1)).with_name("tone1"),
-            HbTone::new(tone2, config.tone2_harmonics.max(1)).with_name("tone2"),
-        ];
-        cfg
-    } else {
-        HbConfig::new(config.tone1_freq).with_harmonics(config.tone1_harmonics)
-    };
+    let layout = build_multi_tone_hb_layout(&config.tones, config.max_mixing_order)?;
+    let mut hb_config = HbConfig::new(layout.base_frequency).with_harmonics(layout.max_harmonic);
+    hb_config.tones = config
+        .tones
+        .iter()
+        .enumerate()
+        .map(|(idx, tone)| {
+            let mut hb_tone = HbTone::new(tone.frequency, tone.harmonics.max(1));
+            if let Some(name) = tone
+                .name
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+            {
+                hb_tone = hb_tone.with_name(name.to_string());
+            } else {
+                hb_tone = hb_tone.with_name(format!("tone{}", idx + 1));
+            }
+            if let Some(source) = tone
+                .source
+                .as_deref()
+                .map(str::trim)
+                .filter(|source| !source.is_empty())
+            {
+                hb_tone = hb_tone.with_source(source.to_string());
+            }
+            hb_tone
+        })
+        .collect();
     hb_config = hb_config
         .with_tolerance(config.reltol)
         .with_max_iterations(config.max_iterations)
@@ -4850,13 +4945,8 @@ pub fn run_hb_analysis(netlist_text: &str, config: &HbRunConfig) -> Result<HbDat
         .map_err(|e| format!("HB error: {}", e))?;
 
     // Build fundamentals list
-    let mut fundamentals = vec![config.tone1_freq];
-    let mut harmonics_per_tone = vec![config.tone1_harmonics];
-
-    if let Some(f2) = config.tone2_freq {
-        fundamentals.push(f2);
-        harmonics_per_tone.push(config.tone2_harmonics);
-    }
+    let fundamentals = config.tones.iter().map(|tone| tone.frequency).collect();
+    let harmonics_per_tone = config.tones.iter().map(|tone| tone.harmonics).collect();
 
     // Extract DC operating point from spectral data
     let dc_voltages: Vec<(String, Value)> = hb_result
@@ -8049,8 +8139,7 @@ C1 out 0 1n
     fn test_run_hb_analysis_executes_for_driven_rc() {
         let netlist = "* hb\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
         let hb_cfg = HbRunConfig {
-            tone1_freq: 1e6,
-            tone1_harmonics: 5,
+            tones: vec![HbToneRunConfig::new(1e6, 5)],
             ..HbRunConfig::default()
         };
         let result =
@@ -8073,10 +8162,7 @@ C1 out 0 1n
     fn test_run_hb_analysis_executes_with_two_tone_layout() {
         let netlist = "* hb two-tone\nV1 in 0 DC 1 AC 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
         let hb_cfg = HbRunConfig {
-            tone1_freq: 2e6,
-            tone1_harmonics: 4,
-            tone2_freq: Some(3e6),
-            tone2_harmonics: 3,
+            tones: vec![HbToneRunConfig::new(2e6, 4), HbToneRunConfig::new(3e6, 3)],
             ..HbRunConfig::default()
         };
         let result = run_hb_analysis(netlist, &hb_cfg)
@@ -8099,11 +8185,104 @@ C1 out 0 1n
     }
 
     #[test]
+    fn test_run_hb_analysis_executes_with_three_tone_layout() {
+        let netlist = "* hb three-tone\nV1 in 0 DC 1 AC 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        let hb_cfg = HbRunConfig {
+            tones: vec![
+                HbToneRunConfig::new(2e6, 2),
+                HbToneRunConfig::new(3e6, 2),
+                HbToneRunConfig::new(5e6, 1),
+            ],
+            max_mixing_order: 4,
+            ..HbRunConfig::default()
+        };
+        let result = run_hb_analysis(netlist, &hb_cfg)
+            .expect("HB three-tone analysis should execute for commensurate tones");
+        assert_eq!(result.fundamentals, vec![2e6, 3e6, 5e6]);
+        assert_eq!(result.harmonics_per_tone, vec![2, 2, 1]);
+        assert!(result.converged);
+        assert!(
+            result.num_components >= 21,
+            "max_mixing_order should increase harmonic budget for three-tone solve"
+        );
+        let first_spectrum = result
+            .spectra
+            .first()
+            .expect("expected at least one HB spectrum");
+        assert!(
+            first_spectrum
+                .1
+                .iter()
+                .any(|(freq, _, _)| (*freq - 1e6).abs() < 1e-6),
+            "three-tone HB should use the derived 1 MHz basis frequency"
+        );
+    }
+
+    #[test]
+    fn test_run_hb_analysis_routes_source_filtered_tones() {
+        let netlist = "* hb source-routed\nVRF 1 0 DC 0 AC 1\nVLO 2 0 DC 0 AC 1\nR1 1 0 1k\nR2 2 0 1k\nC1 1 0 1n\nC2 2 0 1n\n.end\n";
+        let hb_cfg = HbRunConfig {
+            tones: vec![
+                HbToneRunConfig::new(2e6, 1)
+                    .with_name("rf")
+                    .with_source("VRF"),
+                HbToneRunConfig::new(3e6, 1)
+                    .with_name("lo")
+                    .with_source("VLO"),
+            ],
+            ..HbRunConfig::default()
+        };
+
+        let data = run_hb_analysis(netlist, &hb_cfg)
+            .expect("HB should route source-filtered tones to matching sources");
+        assert!(data.converged);
+
+        let magnitude_at = |spectrum: &[(Value, Value, Value)], target_freq: Value| -> Value {
+            spectrum
+                .iter()
+                .find(|(freq, _, _)| (*freq - target_freq).abs() < 1e-6)
+                .map(|(_, magnitude, _)| *magnitude)
+                .unwrap_or(0.0)
+        };
+
+        let vrf = data
+            .spectra
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("V(1)"))
+            .expect("expected V(1) spectrum")
+            .1
+            .as_slice();
+        let vlo = data
+            .spectra
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("V(2)"))
+            .expect("expected V(2) spectrum")
+            .1
+            .as_slice();
+
+        assert!(
+            magnitude_at(vrf, 2e6) > 0.9,
+            "VRF should be driven at 2 MHz"
+        );
+        assert!(
+            magnitude_at(vrf, 3e6) < 1e-9,
+            "VRF should not be driven at 3 MHz"
+        );
+        assert!(
+            magnitude_at(vlo, 3e6) > 0.9,
+            "VLO should be driven at 3 MHz"
+        );
+        assert!(
+            magnitude_at(vlo, 2e6) < 1e-9,
+            "VLO should not be driven at 2 MHz"
+        );
+    }
+
+    #[test]
     fn test_run_hb_analysis_rejects_invalid_runtime_controls() {
         let netlist = "* hb invalid\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
         let hb_cfg = HbRunConfig {
-            tone1_freq: 1e6,
-            tone1_harmonics: 5,
+            tones: vec![HbToneRunConfig::new(1e6, 5)],
             reltol: 0.0,
             ..HbRunConfig::default()
         };
