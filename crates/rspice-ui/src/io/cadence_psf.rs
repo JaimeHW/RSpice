@@ -506,12 +506,6 @@ fn parse_values(
         let _ = types
             .get(&signal.type_id)
             .ok_or_else(|| CadencePsfError::new(format!("missing type {}", signal.type_id)))?;
-        if is_windowed && type_contains_array(signal.type_id, types)? {
-            return Err(CadencePsfError::new(format!(
-                "windowed PSF array trace '{}' is not supported",
-                signal.name
-            )));
-        }
         let mut specs = Vec::new();
         collect_channel_specs_for_type(signal.type_id, types, "", &mut specs)?;
         if !specs.is_empty() {
@@ -588,7 +582,7 @@ fn parse_windowed_values(
     header: &HashMap<String, CadencePsfValue>,
     sweeps: &[SignalRef],
     flat_traces: &[SignalRef],
-    _types: &HashMap<u32, TypeDecl>,
+    types: &HashMap<u32, TypeDecl>,
     values: &mut HashMap<u32, Vec<SignalChannel>>,
 ) -> Result<(), CadencePsfError> {
     let window_size = header_usize(header, "PSF window size")?;
@@ -600,9 +594,11 @@ fn parse_windowed_values(
         .ok_or_else(|| CadencePsfError::new("windowed PSF has no sweep signal"))?;
 
     let mut offsets = HashMap::new();
+    let mut has_dynamic_arrays = HashMap::new();
     let mut offset = 0usize;
     for signal in flat_traces {
         offsets.insert(signal.id, offset);
+        has_dynamic_arrays.insert(signal.id, type_contains_array(signal.type_id, types)?);
         offset = offset
             .checked_add(window_size)
             .ok_or_else(|| CadencePsfError::new("windowed trace offset overflow"))?;
@@ -650,42 +646,65 @@ fn parse_windowed_values(
         let block = &cursor[..block_len];
 
         for signal in flat_traces {
-            let channels = values.get(&signal.id).ok_or_else(|| {
-                CadencePsfError::new(format!(
-                    "windowed PSF signal '{}' has no numeric channels",
-                    signal.name
-                ))
-            })?;
-            let sample_width = channel_sample_width(channels)?;
             let offset = *offsets
                 .get(&signal.id)
                 .ok_or_else(|| CadencePsfError::new("missing signal offset in windowed parser"))?;
-            let data_len = window_count
-                .checked_mul(sample_width)
-                .ok_or_else(|| CadencePsfError::new("windowed PSF data length overflow"))?;
-            let idx = if data_len > window_size {
-                offset
-            } else {
-                offset + (window_size - data_len)
-            };
-            if idx >= block.len() {
+            let end = offset
+                .checked_add(window_size)
+                .ok_or_else(|| CadencePsfError::new("windowed PSF signal range overflow"))?;
+            if end > block.len() {
                 return Err(CadencePsfError::new(
                     "windowed signal offset out of block bounds",
                 ));
             }
-            let mut trace_cursor = &block[idx..];
+            let segment = &block[offset..end];
 
-            let channels = values.get_mut(&signal.id).ok_or_else(|| {
-                CadencePsfError::new(format!("missing value vector for signal {}", signal.id))
-            })?;
-            for _ in 0..window_count {
-                for channel in channels.iter_mut() {
-                    match &mut channel.values {
-                        SignalValues::Real(vec) => vec.push(read_f64(&mut trace_cursor)?),
-                        SignalValues::Complex(vec) => {
-                            let re = read_f64(&mut trace_cursor)?;
-                            let im = read_f64(&mut trace_cursor)?;
-                            vec.push((re, im));
+            if *has_dynamic_arrays.get(&signal.id).ok_or_else(|| {
+                CadencePsfError::new("missing signal array/dynamic marker in windowed parser")
+            })? {
+                decode_windowed_dynamic_signal_samples(
+                    segment,
+                    signal,
+                    window_count,
+                    count,
+                    types,
+                    values,
+                )?;
+            } else {
+                let channels = values.get(&signal.id).ok_or_else(|| {
+                    CadencePsfError::new(format!(
+                        "windowed PSF signal '{}' has no numeric channels",
+                        signal.name
+                    ))
+                })?;
+                let sample_width = channel_sample_width(channels)?;
+                let data_len = window_count
+                    .checked_mul(sample_width)
+                    .ok_or_else(|| CadencePsfError::new("windowed PSF data length overflow"))?;
+                let idx = if data_len > window_size {
+                    0
+                } else {
+                    window_size - data_len
+                };
+                if idx >= segment.len() {
+                    return Err(CadencePsfError::new(
+                        "windowed signal offset out of block bounds",
+                    ));
+                }
+                let mut trace_cursor = &segment[idx..];
+
+                let channels = values.get_mut(&signal.id).ok_or_else(|| {
+                    CadencePsfError::new(format!("missing value vector for signal {}", signal.id))
+                })?;
+                for _ in 0..window_count {
+                    for channel in channels.iter_mut() {
+                        match &mut channel.values {
+                            SignalValues::Real(vec) => vec.push(read_f64(&mut trace_cursor)?),
+                            SignalValues::Complex(vec) => {
+                                let re = read_f64(&mut trace_cursor)?;
+                                let im = read_f64(&mut trace_cursor)?;
+                                vec.push((re, im));
+                            }
                         }
                     }
                 }
@@ -996,6 +1015,104 @@ fn pad_untouched_channels(
     Ok(())
 }
 
+fn find_windowed_dynamic_data_start(
+    segment: &[u8],
+    signal: &SignalRef,
+    window_count: usize,
+    types: &HashMap<u32, TypeDecl>,
+) -> Result<usize, CadencePsfError> {
+    let mut best_start = None;
+    let mut best_numeric_count = 0usize;
+
+    for start in 0..=segment.len() {
+        let mut cursor = &segment[start..];
+        let mut ok = true;
+        let mut numeric_count = 0usize;
+        for _ in 0..window_count {
+            match count_numeric_type_value(&mut cursor, signal.type_id, types) {
+                Ok(count) => {
+                    numeric_count = numeric_count.checked_add(count).ok_or_else(|| {
+                        CadencePsfError::new("windowed numeric sample count overflow")
+                    })?;
+                }
+                Err(_) => {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if ok && cursor.is_empty() {
+            match best_start {
+                None => {
+                    best_start = Some(start);
+                    best_numeric_count = numeric_count;
+                }
+                Some(current_best) => {
+                    if numeric_count > best_numeric_count
+                        || (numeric_count == best_numeric_count && start < current_best)
+                    {
+                        best_start = Some(start);
+                        best_numeric_count = numeric_count;
+                    }
+                }
+            }
+        }
+    }
+
+    best_start.ok_or_else(|| {
+        CadencePsfError::new(format!(
+            "unable to locate payload start for windowed array signal '{}'",
+            signal.name
+        ))
+    })
+}
+
+fn decode_windowed_dynamic_signal_samples(
+    segment: &[u8],
+    signal: &SignalRef,
+    window_count: usize,
+    point_offset: usize,
+    types: &HashMap<u32, TypeDecl>,
+    values: &mut HashMap<u32, Vec<SignalChannel>>,
+) -> Result<(), CadencePsfError> {
+    if window_count == 0 {
+        return Ok(());
+    }
+
+    let start = find_windowed_dynamic_data_start(segment, signal, window_count, types)?;
+    let mut cursor = &segment[start..];
+    for local_idx in 0..window_count {
+        let point_idx = point_offset
+            .checked_add(local_idx)
+            .ok_or_else(|| CadencePsfError::new("windowed sample point index overflow"))?;
+        let mut touched_channels = Vec::new();
+        read_type_value_with_numeric_visit(
+            &mut cursor,
+            signal.type_id,
+            types,
+            "",
+            &mut |suffix, sample| {
+                let channel_idx = push_named_channel(values, signal.id, suffix, sample, point_idx)?;
+                touched_channels.push(channel_idx);
+                Ok(())
+            },
+        )?;
+        let target_len = point_idx
+            .checked_add(1)
+            .ok_or_else(|| CadencePsfError::new("windowed channel length overflow"))?;
+        pad_untouched_channels(values, signal.id, target_len, &touched_channels)?;
+    }
+
+    if !cursor.is_empty() {
+        return Err(CadencePsfError::new(format!(
+            "windowed dynamic decode for signal '{}' left {} trailing byte(s)",
+            signal.name,
+            cursor.len()
+        )));
+    }
+    Ok(())
+}
+
 fn push_scalar_channel(
     values: &mut HashMap<u32, Vec<SignalChannel>>,
     signal_id: u32,
@@ -1036,6 +1153,77 @@ fn push_scalar_slice(
         (SignalValues::Complex(_), NumericSample::Real(_)) => Err(CadencePsfError::new(format!(
             "real sample written to complex channel '{}'",
             channel.suffix
+        ))),
+    }
+}
+
+fn count_numeric_type_value(
+    cursor: &mut &[u8],
+    type_id: u32,
+    types: &HashMap<u32, TypeDecl>,
+) -> Result<usize, CadencePsfError> {
+    let decl = types
+        .get(&type_id)
+        .ok_or_else(|| CadencePsfError::new(format!("missing type declaration {}", type_id)))?;
+    match &decl.kind {
+        TypeKind::Primitive(dtype) => count_numeric_data_type_value(cursor, *dtype),
+        TypeKind::Array { element_type } => {
+            let count = read_u32(cursor)? as usize;
+            let mut numeric_count = 0usize;
+            for _ in 0..count {
+                numeric_count = numeric_count
+                    .checked_add(count_numeric_data_type_value(cursor, *element_type)?)
+                    .ok_or_else(|| CadencePsfError::new("numeric sample count overflow"))?;
+            }
+            Ok(numeric_count)
+        }
+        TypeKind::Struct { members } => {
+            let mut numeric_count = 0usize;
+            for member_id in members {
+                numeric_count = numeric_count
+                    .checked_add(count_numeric_type_value(cursor, *member_id, types)?)
+                    .ok_or_else(|| CadencePsfError::new("numeric sample count overflow"))?;
+            }
+            Ok(numeric_count)
+        }
+    }
+}
+
+fn count_numeric_data_type_value(
+    cursor: &mut &[u8],
+    dtype: DataType,
+) -> Result<usize, CadencePsfError> {
+    match dtype {
+        DataType::Int8 => {
+            let _ = read_u8_padded(cursor)?;
+            Ok(1)
+        }
+        DataType::Int32 => {
+            let _ = read_i32(cursor)?;
+            Ok(1)
+        }
+        DataType::Real => {
+            let _ = read_f64(cursor)?;
+            Ok(1)
+        }
+        DataType::Complex => {
+            let _ = read_f64(cursor)?;
+            let _ = read_f64(cursor)?;
+            Ok(1)
+        }
+        DataType::String => {
+            let _ = parse_string(cursor)?;
+            Ok(0)
+        }
+        DataType::Array => Err(CadencePsfError::new(
+            "nested ARRAY element types are not supported in PSF parser",
+        )),
+        DataType::Struct => Err(CadencePsfError::new(
+            "array element type STRUCT is not supported in PSF parser",
+        )),
+        DataType::Other(other) => Err(CadencePsfError::new(format!(
+            "unsupported PSF signal data type {}",
+            other
         ))),
     }
 }
@@ -1822,6 +2010,494 @@ pub(crate) mod test_helpers {
         bytes
     }
 
+    pub(crate) fn build_windowed_real_psf() -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        let header_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let header_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_named_int(&mut bytes, "PSF sweep points", 2);
+        push_named_int(&mut bytes, "PSF traces", 1);
+        push_named_int(&mut bytes, "PSF window size", 24);
+        let header_end = bytes.len() as u32;
+        patch_u32(&mut bytes, header_eofs_pos, header_end);
+
+        let types_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let types_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        // Trace type: real scalar.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 1);
+        push_string(&mut bytes, "real");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 11);
+        // Sweep type: real scalar.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_string(&mut bytes, "real");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 11);
+        let types_end = bytes.len() as u32;
+        patch_u32(&mut bytes, types_eofs_pos, types_end);
+
+        let sweep_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let sweep_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 100, "time", 2);
+        let sweep_end = bytes.len() as u32;
+        patch_u32(&mut bytes, sweep_eofs_pos, sweep_end);
+
+        let trace_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let trace_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 200, "V(out)", 1);
+        let trace_end = bytes.len() as u32;
+        patch_u32(&mut bytes, trace_eofs_pos, trace_end);
+
+        let value_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let value_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+
+        push_u32(&mut bytes, 20);
+        push_u32(&mut bytes, 0);
+
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_f64(&mut bytes, 0.0);
+        push_f64(&mut bytes, 1.0);
+
+        let mut trace_payload = Vec::new();
+        push_f64(&mut trace_payload, 1.0);
+        push_f64(&mut trace_payload, 2.0);
+        push_windowed_trace_payload(&mut bytes, &trace_payload, 24);
+
+        let value_end = bytes.len() as u32;
+        patch_u32(&mut bytes, value_eofs_pos, value_end);
+
+        let toc_offset = bytes.len();
+        for (kind, start) in [
+            (0u32, header_start),
+            (1u32, types_start),
+            (2u32, sweep_start),
+            (3u32, trace_start),
+            (4u32, value_start),
+        ] {
+            push_u32(&mut bytes, kind);
+            push_u32(&mut bytes, start as u32);
+        }
+        bytes.extend_from_slice(&[0u8; 8]);
+        push_u32(&mut bytes, toc_offset as u32);
+        bytes
+    }
+
+    pub(crate) fn build_windowed_array_real_psf() -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        let header_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let header_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_named_int(&mut bytes, "PSF sweep points", 2);
+        push_named_int(&mut bytes, "PSF traces", 1);
+        push_named_int(&mut bytes, "PSF window size", 48);
+        let header_end = bytes.len() as u32;
+        patch_u32(&mut bytes, header_eofs_pos, header_end);
+
+        let types_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let types_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        // Trace type: array of real.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 1);
+        push_string(&mut bytes, "realarray");
+        push_u32(&mut bytes, 11);
+        push_u32(&mut bytes, 3);
+        // Sweep type: real scalar.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_string(&mut bytes, "real");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 11);
+        let types_end = bytes.len() as u32;
+        patch_u32(&mut bytes, types_eofs_pos, types_end);
+
+        let sweep_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let sweep_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 100, "time", 2);
+        let sweep_end = bytes.len() as u32;
+        patch_u32(&mut bytes, sweep_eofs_pos, sweep_end);
+
+        let trace_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let trace_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 200, "V(arr)", 1);
+        let trace_end = bytes.len() as u32;
+        patch_u32(&mut bytes, trace_eofs_pos, trace_end);
+
+        let value_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let value_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+
+        push_u32(&mut bytes, 20);
+        push_u32(&mut bytes, 0);
+
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_f64(&mut bytes, 0.0);
+        push_f64(&mut bytes, 1.0);
+
+        let mut trace_payload = Vec::new();
+        push_u32(&mut trace_payload, 2);
+        push_f64(&mut trace_payload, 1.0);
+        push_f64(&mut trace_payload, 2.0);
+        push_u32(&mut trace_payload, 2);
+        push_f64(&mut trace_payload, 1.5);
+        push_f64(&mut trace_payload, 2.5);
+        push_windowed_trace_payload(&mut bytes, &trace_payload, 48);
+
+        let value_end = bytes.len() as u32;
+        patch_u32(&mut bytes, value_eofs_pos, value_end);
+
+        let toc_offset = bytes.len();
+        for (kind, start) in [
+            (0u32, header_start),
+            (1u32, types_start),
+            (2u32, sweep_start),
+            (3u32, trace_start),
+            (4u32, value_start),
+        ] {
+            push_u32(&mut bytes, kind);
+            push_u32(&mut bytes, start as u32);
+        }
+        bytes.extend_from_slice(&[0u8; 8]);
+        push_u32(&mut bytes, toc_offset as u32);
+        bytes
+    }
+
+    pub(crate) fn build_windowed_array_complex_psf() -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        let header_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let header_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_named_int(&mut bytes, "PSF sweep points", 2);
+        push_named_int(&mut bytes, "PSF traces", 1);
+        push_named_int(&mut bytes, "PSF window size", 80);
+        let header_end = bytes.len() as u32;
+        patch_u32(&mut bytes, header_eofs_pos, header_end);
+
+        let types_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let types_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        // Trace type: array of complex.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 1);
+        push_string(&mut bytes, "complexarray");
+        push_u32(&mut bytes, 12);
+        push_u32(&mut bytes, 3);
+        // Sweep type: real scalar.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_string(&mut bytes, "real");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 11);
+        let types_end = bytes.len() as u32;
+        patch_u32(&mut bytes, types_eofs_pos, types_end);
+
+        let sweep_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let sweep_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 100, "time", 2);
+        let sweep_end = bytes.len() as u32;
+        patch_u32(&mut bytes, sweep_eofs_pos, sweep_end);
+
+        let trace_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let trace_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 200, "I(arr)", 1);
+        let trace_end = bytes.len() as u32;
+        patch_u32(&mut bytes, trace_eofs_pos, trace_end);
+
+        let value_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let value_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+
+        push_u32(&mut bytes, 20);
+        push_u32(&mut bytes, 0);
+
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_f64(&mut bytes, 0.0);
+        push_f64(&mut bytes, 1.0);
+
+        let mut trace_payload = Vec::new();
+        push_u32(&mut trace_payload, 2);
+        push_f64(&mut trace_payload, 1.0);
+        push_f64(&mut trace_payload, 0.25);
+        push_f64(&mut trace_payload, 2.0);
+        push_f64(&mut trace_payload, -0.5);
+        push_u32(&mut trace_payload, 2);
+        push_f64(&mut trace_payload, 1.5);
+        push_f64(&mut trace_payload, 0.125);
+        push_f64(&mut trace_payload, 2.5);
+        push_f64(&mut trace_payload, -0.75);
+        push_windowed_trace_payload(&mut bytes, &trace_payload, 80);
+
+        let value_end = bytes.len() as u32;
+        patch_u32(&mut bytes, value_eofs_pos, value_end);
+
+        let toc_offset = bytes.len();
+        for (kind, start) in [
+            (0u32, header_start),
+            (1u32, types_start),
+            (2u32, sweep_start),
+            (3u32, trace_start),
+            (4u32, value_start),
+        ] {
+            push_u32(&mut bytes, kind);
+            push_u32(&mut bytes, start as u32);
+        }
+        bytes.extend_from_slice(&[0u8; 8]);
+        push_u32(&mut bytes, toc_offset as u32);
+        bytes
+    }
+
+    pub(crate) fn build_windowed_struct_with_array_psf() -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        let header_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let header_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_named_int(&mut bytes, "PSF sweep points", 2);
+        push_named_int(&mut bytes, "PSF traces", 1);
+        push_named_int(&mut bytes, "PSF window size", 64);
+        let header_end = bytes.len() as u32;
+        patch_u32(&mut bytes, header_eofs_pos, header_end);
+
+        let types_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let types_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        // Root type: struct with scalar and array.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 1);
+        push_string(&mut bytes, "sigtype");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_string(&mut bytes, "gain");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 11);
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 3);
+        push_string(&mut bytes, "taps");
+        push_u32(&mut bytes, 11);
+        push_u32(&mut bytes, 3);
+        push_u32(&mut bytes, 18);
+        // Sweep type: real scalar.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 4);
+        push_string(&mut bytes, "real");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 11);
+        let types_end = bytes.len() as u32;
+        patch_u32(&mut bytes, types_eofs_pos, types_end);
+
+        let sweep_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let sweep_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 100, "time", 4);
+        let sweep_end = bytes.len() as u32;
+        patch_u32(&mut bytes, sweep_eofs_pos, sweep_end);
+
+        let trace_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let trace_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 200, "V(out)", 1);
+        let trace_end = bytes.len() as u32;
+        patch_u32(&mut bytes, trace_eofs_pos, trace_end);
+
+        let value_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let value_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+
+        push_u32(&mut bytes, 20);
+        push_u32(&mut bytes, 0);
+
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_f64(&mut bytes, 0.0);
+        push_f64(&mut bytes, 1.0);
+
+        let mut trace_payload = Vec::new();
+        push_f64(&mut trace_payload, 10.0);
+        push_u32(&mut trace_payload, 2);
+        push_f64(&mut trace_payload, 0.1);
+        push_f64(&mut trace_payload, 0.2);
+        push_f64(&mut trace_payload, 11.0);
+        push_u32(&mut trace_payload, 2);
+        push_f64(&mut trace_payload, 0.15);
+        push_f64(&mut trace_payload, 0.25);
+        push_windowed_trace_payload(&mut bytes, &trace_payload, 64);
+
+        let value_end = bytes.len() as u32;
+        patch_u32(&mut bytes, value_eofs_pos, value_end);
+
+        let toc_offset = bytes.len();
+        for (kind, start) in [
+            (0u32, header_start),
+            (1u32, types_start),
+            (2u32, sweep_start),
+            (3u32, trace_start),
+            (4u32, value_start),
+        ] {
+            push_u32(&mut bytes, kind);
+            push_u32(&mut bytes, start as u32);
+        }
+        bytes.extend_from_slice(&[0u8; 8]);
+        push_u32(&mut bytes, toc_offset as u32);
+        bytes
+    }
+
+    pub(crate) fn build_windowed_variable_length_array_psf() -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        let header_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let header_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_named_int(&mut bytes, "PSF sweep points", 2);
+        push_named_int(&mut bytes, "PSF traces", 1);
+        push_named_int(&mut bytes, "PSF window size", 48);
+        let header_end = bytes.len() as u32;
+        patch_u32(&mut bytes, header_eofs_pos, header_end);
+
+        let types_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let types_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        // Trace type: array of real.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 1);
+        push_string(&mut bytes, "realarray");
+        push_u32(&mut bytes, 11);
+        push_u32(&mut bytes, 3);
+        // Sweep type: real scalar.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_string(&mut bytes, "real");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 11);
+        let types_end = bytes.len() as u32;
+        patch_u32(&mut bytes, types_eofs_pos, types_end);
+
+        let sweep_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let sweep_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 100, "time", 2);
+        let sweep_end = bytes.len() as u32;
+        patch_u32(&mut bytes, sweep_eofs_pos, sweep_end);
+
+        let trace_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let trace_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 200, "V(arr)", 1);
+        let trace_end = bytes.len() as u32;
+        patch_u32(&mut bytes, trace_eofs_pos, trace_end);
+
+        let value_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let value_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+
+        push_u32(&mut bytes, 20);
+        push_u32(&mut bytes, 0);
+
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_f64(&mut bytes, 0.0);
+        push_f64(&mut bytes, 1.0);
+
+        let mut trace_payload = Vec::new();
+        push_u32(&mut trace_payload, 1);
+        push_f64(&mut trace_payload, 1.0);
+        push_u32(&mut trace_payload, 3);
+        push_f64(&mut trace_payload, 1.5);
+        push_f64(&mut trace_payload, 2.5);
+        push_f64(&mut trace_payload, 3.5);
+        push_windowed_trace_payload(&mut bytes, &trace_payload, 48);
+
+        let value_end = bytes.len() as u32;
+        patch_u32(&mut bytes, value_eofs_pos, value_end);
+
+        let toc_offset = bytes.len();
+        for (kind, start) in [
+            (0u32, header_start),
+            (1u32, types_start),
+            (2u32, sweep_start),
+            (3u32, trace_start),
+            (4u32, value_start),
+        ] {
+            push_u32(&mut bytes, kind);
+            push_u32(&mut bytes, start as u32);
+        }
+        bytes.extend_from_slice(&[0u8; 8]);
+        push_u32(&mut bytes, toc_offset as u32);
+        bytes
+    }
+
     fn build_simple_non_windowed_psf(sample_encoding: SampleEncoding) -> Vec<u8> {
         let mut bytes = Vec::new();
 
@@ -1971,6 +2647,19 @@ pub(crate) mod test_helpers {
         bytes.extend_from_slice(&[0u8; 3]);
     }
 
+    fn push_windowed_trace_payload(bytes: &mut Vec<u8>, payload: &[u8], window_size: usize) {
+        assert!(
+            payload.len() <= window_size,
+            "payload {} exceeds window_size {}",
+            payload.len(),
+            window_size
+        );
+        let mut window_block = vec![0u8; window_size];
+        let start = window_size - payload.len();
+        window_block[start..].copy_from_slice(payload);
+        bytes.extend_from_slice(&window_block);
+    }
+
     fn patch_u32(bytes: &mut [u8], offset: usize, value: u32) {
         bytes[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
     }
@@ -1980,10 +2669,12 @@ pub(crate) mod test_helpers {
 mod tests {
     use super::test_helpers::{
         build_non_windowed_array_complex_psf, build_non_windowed_array_real_psf,
-        build_non_windowed_complex_psf, build_non_windowed_int8_psf, build_non_windowed_int32_psf,
+        build_non_windowed_complex_psf, build_non_windowed_int32_psf, build_non_windowed_int8_psf,
         build_non_windowed_mixed_real_and_string_psf, build_non_windowed_real_psf,
         build_non_windowed_struct_psf, build_non_windowed_struct_with_array_psf,
-        build_non_windowed_variable_length_array_psf,
+        build_non_windowed_variable_length_array_psf, build_windowed_array_complex_psf,
+        build_windowed_array_real_psf, build_windowed_real_psf,
+        build_windowed_struct_with_array_psf, build_windowed_variable_length_array_psf,
     };
     use super::*;
 
@@ -2134,6 +2825,92 @@ mod tests {
     #[test]
     fn test_parse_non_windowed_variable_length_array_pads_missing_values() {
         let bytes = build_non_windowed_variable_length_array_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.sweeps[0].values, vec![0.0, 1.0]);
+        assert!(parsed.complex_signals.is_empty());
+        assert_eq!(parsed.real_signals.len(), 3);
+        assert_eq!(parsed.real_signals[0].name, "V(arr)[0]");
+        assert_eq!(parsed.real_signals[0].values, vec![1.0, 1.5]);
+        assert_eq!(parsed.real_signals[1].name, "V(arr)[1]");
+        assert!(parsed.real_signals[1].values[0].is_nan());
+        assert_eq!(parsed.real_signals[1].values[1], 2.5);
+        assert_eq!(parsed.real_signals[2].name, "V(arr)[2]");
+        assert!(parsed.real_signals[2].values[0].is_nan());
+        assert_eq!(parsed.real_signals[2].values[1], 3.5);
+    }
+
+    #[test]
+    fn test_parse_windowed_real_psf_binary() {
+        let bytes = build_windowed_real_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.sweeps[0].name, "time");
+        assert_eq!(parsed.sweeps[0].values, vec![0.0, 1.0]);
+        assert_eq!(parsed.real_signals.len(), 1);
+        assert_eq!(parsed.real_signals[0].name, "V(out)");
+        assert_eq!(parsed.real_signals[0].values, vec![1.0, 2.0]);
+        assert!(parsed.complex_signals.is_empty());
+    }
+
+    #[test]
+    fn test_parse_windowed_real_array_psf_binary() {
+        let bytes = build_windowed_array_real_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.sweeps[0].values, vec![0.0, 1.0]);
+        assert!(parsed.complex_signals.is_empty());
+        assert_eq!(parsed.real_signals.len(), 2);
+        assert_eq!(parsed.real_signals[0].name, "V(arr)[0]");
+        assert_eq!(parsed.real_signals[0].values, vec![1.0, 1.5]);
+        assert_eq!(parsed.real_signals[1].name, "V(arr)[1]");
+        assert_eq!(parsed.real_signals[1].values, vec![2.0, 2.5]);
+    }
+
+    #[test]
+    fn test_parse_windowed_complex_array_psf_binary() {
+        let bytes = build_windowed_array_complex_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.sweeps[0].values, vec![0.0, 1.0]);
+        assert!(parsed.real_signals.is_empty());
+        assert_eq!(parsed.complex_signals.len(), 2);
+        assert_eq!(parsed.complex_signals[0].name, "I(arr)[0]");
+        assert_eq!(
+            parsed.complex_signals[0].values,
+            vec![(1.0, 0.25), (1.5, 0.125)]
+        );
+        assert_eq!(parsed.complex_signals[1].name, "I(arr)[1]");
+        assert_eq!(
+            parsed.complex_signals[1].values,
+            vec![(2.0, -0.5), (2.5, -0.75)]
+        );
+    }
+
+    #[test]
+    fn test_parse_windowed_struct_with_array_psf_binary() {
+        let bytes = build_windowed_struct_with_array_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.sweeps[0].values, vec![0.0, 1.0]);
+        assert!(parsed.complex_signals.is_empty());
+        assert_eq!(parsed.real_signals.len(), 3);
+        assert_eq!(parsed.real_signals[0].name, "V(out).gain");
+        assert_eq!(parsed.real_signals[0].values, vec![10.0, 11.0]);
+        assert_eq!(parsed.real_signals[1].name, "V(out).taps[0]");
+        assert_eq!(parsed.real_signals[1].values, vec![0.1, 0.15]);
+        assert_eq!(parsed.real_signals[2].name, "V(out).taps[1]");
+        assert_eq!(parsed.real_signals[2].values, vec![0.2, 0.25]);
+    }
+
+    #[test]
+    fn test_parse_windowed_variable_length_array_pads_missing_values() {
+        let bytes = build_windowed_variable_length_array_psf();
         let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
 
         assert_eq!(parsed.sweeps.len(), 1);
