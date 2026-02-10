@@ -436,6 +436,10 @@ fn parse_command(
                 stop_freq,
             });
         }
+        ".DISTO" => {
+            let disto = parse_disto_command(stream, line_num, params)?;
+            analyses.push(disto);
+        }
         ".TRAN" => {
             let step = expect_value(stream, line_num, params)?;
             let stop = expect_value(stream, line_num, params)?;
@@ -2711,6 +2715,47 @@ fn parse_four_command(
     Ok((fundamental, outputs))
 }
 
+/// Parse .DISTO command: .DISTO DEC|LIN|OCT np fstart fstop [f2overf1]
+fn parse_disto_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<AnalysisCommand, ParseError> {
+    let var_str = expect_ident(stream, line_num)?;
+    let variation = match var_str.to_uppercase().as_str() {
+        "LIN" => FreqVariation::Lin,
+        "OCT" => FreqVariation::Oct,
+        "DEC" => FreqVariation::Dec,
+        _ => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Invalid .DISTO frequency variation '{}': expected LIN, OCT, or DEC",
+                    var_str
+                ),
+            });
+        }
+    };
+
+    let points = expect_value(stream, line_num, params)? as usize;
+    let start_freq = expect_value(stream, line_num, params)?;
+    let stop_freq = expect_value(stream, line_num, params)?;
+    let f2_over_f1 =
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            None
+        } else {
+            Some(expect_value(stream, line_num, params)?)
+        };
+
+    Ok(AnalysisCommand::Disto {
+        variation,
+        points,
+        start_freq,
+        stop_freq,
+        f2_over_f1,
+    })
+}
+
 /// Parse .NOISE command: .NOISE V(out[,ref]) Vsource DEC|LIN|OCT np fstart fstop
 fn parse_noise_command(
     stream: &mut TokenStream,
@@ -4057,6 +4102,68 @@ R1 1 0 1k
             }
             _ => panic!("Expected Noise command"),
         }
+    }
+
+    #[test]
+    fn test_parse_disto_with_f2_ratio() {
+        let netlist = r#"Disto Test
+.DISTO DEC 12 10 1MEG 1.5
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+
+        match &result.analyses[0] {
+            AnalysisCommand::Disto {
+                variation,
+                points,
+                start_freq,
+                stop_freq,
+                f2_over_f1,
+            } => {
+                assert_eq!(*variation, FreqVariation::Dec);
+                assert_eq!(*points, 12);
+                assert!((*start_freq - 10.0).abs() < 1e-12);
+                assert!((*stop_freq - 1e6).abs() < 1e-3);
+                assert_eq!(*f2_over_f1, Some(1.5));
+            }
+            _ => panic!("Expected Disto command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_disto_without_f2_ratio() {
+        let netlist = r#"Disto Test
+.DISTO LIN 50 1k 10k
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+
+        match &result.analyses[0] {
+            AnalysisCommand::Disto {
+                variation,
+                points,
+                start_freq,
+                stop_freq,
+                f2_over_f1,
+            } => {
+                assert_eq!(*variation, FreqVariation::Lin);
+                assert_eq!(*points, 50);
+                assert!((*start_freq - 1e3).abs() < 1e-9);
+                assert!((*stop_freq - 1e4).abs() < 1e-6);
+                assert!(f2_over_f1.is_none());
+            }
+            _ => panic!("Expected Disto command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_disto_invalid_variation() {
+        let netlist = r#"Disto Invalid
+.DISTO BAD 10 1 1MEG
+.END
+"#;
+        let err = parse_netlist(netlist).expect_err("expected invalid .DISTO variation");
+        assert!(err.to_string().contains("Invalid .DISTO frequency variation"));
     }
 
     #[test]

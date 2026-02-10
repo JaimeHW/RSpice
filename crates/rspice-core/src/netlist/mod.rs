@@ -8,7 +8,7 @@
 //! - Advanced elements (K, S, W, T)
 //! - Controlled sources (E, F, G, H, B)
 //! - XSPICE code models (A) with bracket port syntax
-//! - Analysis commands (.OP, .DC, .AC, .TRAN, .NOISE, .PZ, .SENS, .FOUR, .STEP, .MC, .TEMP)
+//! - Analysis commands (.OP, .DC, .AC, .DISTO, .TRAN, .NOISE, .PZ, .SENS, .FOUR, .STEP, .MC, .TEMP)
 //! - File inclusion (.INCLUDE, .LIB)
 //! - Subcircuits with parameter passing
 

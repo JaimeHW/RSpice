@@ -550,6 +550,15 @@ pub enum AnalysisCommand {
         stop_freq: Value,
     },
 
+    /// Distortion analysis: .DISTO DEC|LIN|OCT np fstart fstop [f2overf1]
+    Disto {
+        variation: FreqVariation,
+        points: usize,
+        start_freq: Value,
+        stop_freq: Value,
+        f2_over_f1: Option<Value>,
+    },
+
     /// Transient analysis: .TRAN tstep tstop [tstart [tmaxstep]]
     Tran {
         step: Value,
@@ -1017,6 +1026,31 @@ mod tests {
         };
         if let AnalysisCommand::Noise { points, .. } = noise {
             assert_eq!(points, 10);
+        }
+    }
+
+    #[test]
+    fn test_disto_analysis() {
+        let disto = AnalysisCommand::Disto {
+            variation: FreqVariation::Dec,
+            points: 12,
+            start_freq: 10.0,
+            stop_freq: 1e6,
+            f2_over_f1: Some(1.5),
+        };
+        if let AnalysisCommand::Disto {
+            variation,
+            points,
+            start_freq,
+            stop_freq,
+            f2_over_f1,
+        } = disto
+        {
+            assert_eq!(variation, FreqVariation::Dec);
+            assert_eq!(points, 12);
+            assert!((start_freq - 10.0).abs() < 1e-12);
+            assert!((stop_freq - 1e6).abs() < 1e-6);
+            assert_eq!(f2_over_f1, Some(1.5));
         }
     }
 
