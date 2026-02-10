@@ -3,10 +3,7 @@
 //! Async wrapper around rspice-core for running simulations from the GUI.
 
 use crate::output_spec::{
-    ac_output_value, collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
-    normalized_sensitivity, parse_output_spec, resolve_node_or_ground_index,
-    resolve_sensitivity_ac_frequency, run_ac_output_at_frequency, run_dc_output_sensitivity,
-    validate_sensitivity_output_spec, OutputSpec, OutputVoltageSpec,
+    OutputSpec, OutputVoltageSpec, ac_output_value, parse_output_spec, resolve_node_or_ground_index,
 };
 #[cfg(test)]
 use crate::simulation::reliability_engine::{ParamShift, ReliabilityResult, StressMetrics};
@@ -16,7 +13,7 @@ use rspice_core::analysis::{FourierAnalysis, FourierConfig};
 use rspice_core::engine::{Engine, SimulationConfig, TransientResult};
 use rspice_core::netlist::{AnalysisCommand, Element, ElementKind, StepSweep};
 use rspice_core::solver::SimulationResult as CoreSimulationResult;
-use rspice_core::{resolve_simulation_config, SimulationConfigOverrides, Value};
+use rspice_core::{SimulationConfigOverrides, Value, resolve_simulation_config};
 
 #[path = "simulation_runner/harmonic_basis.rs"]
 mod harmonic_basis;
@@ -40,6 +37,8 @@ mod pnoise_sideband;
 mod pole_zero;
 #[path = "simulation_runner/reliability.rs"]
 mod reliability;
+#[path = "simulation_runner/sensitivity.rs"]
+mod sensitivity;
 #[path = "simulation_runner/soa.rs"]
 mod soa;
 #[path = "simulation_runner/sparameter.rs"]
@@ -48,37 +47,38 @@ mod sparameter;
 mod sweeps;
 #[path = "simulation_runner/tf.rs"]
 mod tf;
-pub use dc_sweep::{run_dc_sweep, DcSweepData};
+pub use dc_sweep::{DcSweepData, run_dc_sweep};
 #[cfg(test)]
 use disto::interpolate_magnitude_at_for_tests;
-pub use disto::{run_disto_analysis, DistoData, DistoFrequencySweep, DistoRunConfig, DistoTrace};
-pub use monte_carlo::{run_monte_carlo_analysis, MonteCarloData, MonteCarloVariableData};
-pub use noise::{run_noise_analysis, NoiseData};
+pub use disto::{DistoData, DistoFrequencySweep, DistoRunConfig, DistoTrace, run_disto_analysis};
+pub use monte_carlo::{MonteCarloData, MonteCarloVariableData, run_monte_carlo_analysis};
+pub use noise::{NoiseData, run_noise_analysis};
 pub use optimization::{
-    run_optimization_analysis, run_optimization_analysis_with_config, OptimizationAlgorithmMode,
-    OptimizationData, OptimizationGoalMode, OptimizationRunConfig, OptimizationVariable,
+    OptimizationAlgorithmMode, OptimizationData, OptimizationGoalMode, OptimizationRunConfig,
+    OptimizationVariable, run_optimization_analysis, run_optimization_analysis_with_config,
 };
 pub use pnoise::{
-    run_pnoise_analysis, run_pnoise_analysis_with_config, PnoiseData, PnoiseFrequencySweep,
-    PnoiseReference, PnoiseRunConfig,
+    PnoiseData, PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig, run_pnoise_analysis,
+    run_pnoise_analysis_with_config,
 };
 #[cfg(test)]
 use pnoise_sideband::{build_pnoise_sideband_translated_frequencies, fold_sideband_samples};
-pub use pole_zero::{run_pole_zero_analysis, PoleZeroData};
+pub use pole_zero::{PoleZeroData, run_pole_zero_analysis};
 pub use reliability::{
-    run_reliability_analysis, run_reliability_analysis_with_config, ReliabilityData,
-    ReliabilityRunConfig,
+    ReliabilityData, ReliabilityRunConfig, run_reliability_analysis,
+    run_reliability_analysis_with_config,
 };
-pub use soa::{run_soa_analysis, run_soa_analysis_with_config, SoaData, SoaRunConfig};
+pub use sensitivity::{SensitivityData, run_sensitivity_analysis};
+pub use soa::{SoaData, SoaRunConfig, run_soa_analysis, run_soa_analysis_with_config};
 pub use sparameter::{
-    run_sparameter_analysis, SParameterData, SParameterPort, SParameterRunConfig, SParameterSweep,
+    SParameterData, SParameterPort, SParameterRunConfig, SParameterSweep, run_sparameter_analysis,
 };
 pub use sweeps::{
-    run_corner_analysis, run_corner_analysis_with_config, run_parametric_analysis,
-    run_parametric_analysis_with_config, CornerBaseMode, CornerData, CornerFrequencySweep,
-    CornerProcess, CornerRunConfig, ParametricData, TempRunConfig,
+    CornerBaseMode, CornerData, CornerFrequencySweep, CornerProcess, CornerRunConfig,
+    ParametricData, TempRunConfig, run_corner_analysis, run_corner_analysis_with_config,
+    run_parametric_analysis, run_parametric_analysis_with_config,
 };
-pub use tf::{run_tf_analysis, run_tf_analysis_with_config, TfData, TfFrequencySweep, TfRunConfig};
+pub use tf::{TfData, TfFrequencySweep, TfRunConfig, run_tf_analysis, run_tf_analysis_with_config};
 
 #[cfg(test)]
 fn inject_param_overrides(
@@ -775,117 +775,6 @@ fn normalize_waveform_node_name(raw: &str) -> String {
 }
 
 // =============================================================================
-// Sensitivity Analysis
-// =============================================================================
-
-/// Sensitivity analysis data
-#[derive(Debug, Clone)]
-pub struct SensitivityData {
-    /// Output variable that sensitivities are computed for
-    pub output_var: String,
-    /// (parameter_name, raw_sensitivity, normalized_sensitivity)
-    pub sensitivities: Vec<(String, Value, Value)>,
-}
-
-/// Run sensitivity analysis against all global netlist parameters.
-pub fn run_sensitivity_analysis(
-    netlist_text: &str,
-    output_var: &str,
-    ac_mode: bool,
-    frequency: Option<Value>,
-) -> Result<SensitivityData, String> {
-    let output_var = output_var.trim();
-    if output_var.is_empty() {
-        return Err("Sensitivity output_var is required".to_string());
-    }
-    let ac_frequency = resolve_sensitivity_ac_frequency(ac_mode, frequency)?;
-
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
-    let engine = Engine::new(build_engine_config(&netlist, None));
-
-    let circuit = engine.build_circuit(&netlist).map_err(|e| {
-        format!(
-            "Circuit build error (required for sensitivity output resolution): {}",
-            e
-        )
-    })?;
-    let dc_result = engine
-        .run_dc_op(&netlist)
-        .map_err(|e| format!("DC OP error (required for sensitivity): {}", e))?;
-
-    let output_spec =
-        parse_output_spec(output_var, &dc_result.node_names, &circuit).ok_or_else(|| {
-            format!(
-                "Sensitivity output '{}' could not be resolved to a node or branch",
-                output_var
-            )
-        })?;
-    validate_sensitivity_output_spec(&output_spec)?;
-
-    let nominal_output = if let Some(freq) = ac_frequency {
-        run_ac_output_at_frequency(&engine, &netlist, &output_spec, freq)
-            .map(|value| value.norm())?
-    } else {
-        dc_output_value(&dc_result, &output_spec)?
-    };
-
-    let params = collect_sensitivity_parameters(&netlist);
-
-    if params.is_empty() {
-        return Ok(SensitivityData {
-            output_var: output_var.to_string(),
-            sensitivities: Vec::new(),
-        });
-    }
-
-    let mut sensitivities = Vec::new();
-    let mut perturbed_netlist = netlist.clone();
-    for (name, value) in params {
-        if !value.is_finite() || value == 0.0 {
-            continue;
-        }
-
-        let raw = if let Some(freq) = ac_frequency {
-            let result = finite_difference_derivative(value, |candidate| {
-                perturbed_netlist.params.set(&name, candidate);
-                run_ac_output_at_frequency(&engine, &perturbed_netlist, &output_spec, freq)
-                    .map(|value| value.norm())
-            });
-            perturbed_netlist.params.set(&name, value);
-            result.map_err(|e| format!("Sensitivity error for parameter '{}': {}", name, e))?
-        } else if let OutputSpec::Voltage(vspec) = &output_spec {
-            run_dc_output_sensitivity(&engine, &netlist, *vspec, &name, value)
-                .map_err(|e| format!("Sensitivity error for parameter '{}': {}", name, e))?
-        } else {
-            let result = finite_difference_derivative(value, |candidate| {
-                perturbed_netlist.params.set(&name, candidate);
-                let dc_result = engine
-                    .run_dc_op(&perturbed_netlist)
-                    .map_err(|e| format!("DC OP error (perturbation): {}", e))?;
-                dc_output_value(&dc_result, &output_spec)
-            });
-            perturbed_netlist.params.set(&name, value);
-            result.map_err(|e| format!("Sensitivity error for parameter '{}': {}", name, e))?
-        };
-
-        let normalized = normalized_sensitivity(raw, value, nominal_output);
-        sensitivities.push((name, raw, normalized));
-    }
-
-    sensitivities.sort_by(|a, b| {
-        b.2.abs()
-            .partial_cmp(&a.2.abs())
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    Ok(SensitivityData {
-        output_var: output_var.to_string(),
-        sensitivities,
-    })
-}
-
-// =============================================================================
 // PSS (Periodic Steady State) Analysis
 // =============================================================================
 
@@ -1124,8 +1013,8 @@ fn run_pac_internal(
     netlist: &rspice_core::Netlist,
     config: &PacRunConfig,
 ) -> Result<PacInternalResult, String> {
-    use rspice_core::analysis::advanced::pac::{PacAnalyzer, PacConfig};
     use rspice_core::analysis::PssConfig;
+    use rspice_core::analysis::advanced::pac::{PacAnalyzer, PacConfig};
 
     config.validate()?;
 
@@ -2312,11 +2201,7 @@ fn sanitize_nonnegative(value: Value) -> Value {
 }
 
 fn sanitize_finite(value: Value) -> Value {
-    if value.is_finite() {
-        value
-    } else {
-        0.0
-    }
+    if value.is_finite() { value } else { 0.0 }
 }
 
 fn normalized_probe_participation(
@@ -2346,8 +2231,8 @@ pub fn run_pstb_analysis_with_config(
     netlist_text: &str,
     config: &PstbRunConfig,
 ) -> Result<PstbData, String> {
-    use rspice_core::analysis::advanced::pstb::{PstbAnalyzer, PstbConfig};
     use rspice_core::analysis::PssConfig;
+    use rspice_core::analysis::advanced::pstb::{PstbAnalyzer, PstbConfig};
 
     config.validate()?;
 
@@ -3078,10 +2963,12 @@ C1 out 0 1n
             .expect("sensitivity run should succeed");
         assert_eq!(result.output_var, "V(out)");
         assert!(!result.sensitivities.is_empty());
-        assert!(result
-            .sensitivities
-            .iter()
-            .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL")));
+        assert!(
+            result
+                .sensitivities
+                .iter()
+                .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL"))
+        );
     }
 
     #[test]
@@ -3091,14 +2978,18 @@ C1 out 0 1n
         let result = run_sensitivity_analysis(netlist, "V(out)", false, None)
             .expect("sensitivity run should succeed");
 
-        assert!(result
-            .sensitivities
-            .iter()
-            .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL")));
-        assert!(result
-            .sensitivities
-            .iter()
-            .all(|(name, _, _)| !name.starts_with("IC_") && !name.starts_with("NODESET_")));
+        assert!(
+            result
+                .sensitivities
+                .iter()
+                .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL"))
+        );
+        assert!(
+            result
+                .sensitivities
+                .iter()
+                .all(|(name, _, _)| !name.starts_with("IC_") && !name.starts_with("NODESET_"))
+        );
     }
 
     #[test]
@@ -3124,10 +3015,12 @@ C1 out 0 1n
         let result = run_sensitivity_analysis(netlist, "V(out,in)", false, None)
             .expect("differential sensitivity run should succeed");
         assert!(!result.sensitivities.is_empty());
-        assert!(result
-            .sensitivities
-            .iter()
-            .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite()));
+        assert!(
+            result
+                .sensitivities
+                .iter()
+                .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite())
+        );
     }
 
     #[test]
@@ -3155,10 +3048,12 @@ C1 out 0 1n
             .expect("current-output ac sensitivity should succeed");
         assert_eq!(result.output_var, "I(V1)");
         assert!(!result.sensitivities.is_empty());
-        assert!(result
-            .sensitivities
-            .iter()
-            .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite()));
+        assert!(
+            result
+                .sensitivities
+                .iter()
+                .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite())
+        );
     }
 
     #[test]
@@ -3257,10 +3152,12 @@ C1 out 0 1n
         assert_eq!(result.target, "PARAM RVAL");
         assert_eq!(result.sweep_values.len(), 4);
         assert_eq!(result.num_points, 4);
-        assert!(result
-            .voltages
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("V(out)")));
+        assert!(
+            result
+                .voltages
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
+        );
     }
 
     #[test]
@@ -3341,12 +3238,14 @@ C1 out 0 1n
             .expect("temperature sweep AC base mode should execute");
         assert_eq!(result.target, "TEMP");
         assert_eq!(result.num_points, 3);
-        assert!(result
-            .voltages
-            .iter()
-            .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
-                && values.len() == 3
-                && values.iter().all(|v| v.is_finite() && *v >= 0.0)));
+        assert!(
+            result
+                .voltages
+                .iter()
+                .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
+                    && values.len() == 3
+                    && values.iter().all(|v| v.is_finite() && *v >= 0.0))
+        );
     }
 
     #[test]
@@ -3367,10 +3266,12 @@ C1 out 0 1n
         assert_eq!(result.corner_labels.len(), 3);
         assert!(result.corner_labels[0].starts_with("TT_1.000000V_"));
         assert_eq!(result.num_points, 3);
-        assert!(result
-            .voltages
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("V(out)")));
+        assert!(
+            result
+                .voltages
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
+        );
     }
 
     #[test]
@@ -3404,10 +3305,12 @@ C1 out 0 1n
         assert_eq!(result.temperatures_c.len(), 8);
         assert_eq!(result.corner_labels.len(), 8);
         assert_eq!(result.num_failures, 0);
-        assert!(result
-            .corner_labels
-            .iter()
-            .any(|label| label.contains("FF_1.100000V_125.000000C")));
+        assert!(
+            result
+                .corner_labels
+                .iter()
+                .any(|label| label.contains("FF_1.100000V_125.000000C"))
+        );
     }
 
     #[test]
@@ -3497,12 +3400,14 @@ C1 out 0 1n
         assert_eq!(result.x_label, "Temperature");
         assert_eq!(result.x_unit, "C");
         assert_eq!(result.x_values, vec![-40.0, 25.0, 125.0]);
-        assert!(result
-            .voltages
-            .iter()
-            .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
-                && values.len() == 3
-                && values.iter().all(|v| v.is_finite() && *v >= 0.0)));
+        assert!(
+            result
+                .voltages
+                .iter()
+                .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
+                    && values.len() == 3
+                    && values.iter().all(|v| v.is_finite() && *v >= 0.0))
+        );
     }
 
     #[test]
@@ -3837,10 +3742,12 @@ C1 out 0 1n
         assert_eq!(result.input_sideband, 1);
         assert_eq!(result.output_sideband, 1);
         assert!(result.output_label.starts_with("V("));
-        assert!(result
-            .transfer
-            .iter()
-            .all(|value| value.re.is_finite() && value.im.is_finite()));
+        assert!(
+            result
+                .transfer
+                .iter()
+                .all(|value| value.re.is_finite() && value.im.is_finite())
+        );
         assert!(result.magnitude_db.iter().all(|value| value.is_finite()));
         assert!(result.phase_deg.iter().all(|value| value.is_finite()));
     }
@@ -3925,22 +3832,30 @@ C1 out 0 1n
         assert_eq!(result.transfer.len(), result.frequencies.len());
         assert_eq!(result.magnitude_db.len(), result.frequencies.len());
         assert_eq!(result.phase_deg.len(), result.frequencies.len());
-        assert!(result
-            .transfer
-            .iter()
-            .all(|value| value.re.is_finite() && value.im.is_finite()));
-        assert!(result
-            .group_delay
-            .as_ref()
-            .is_some_and(|curve| !curve.is_empty()));
-        assert!(result
-            .input_impedance
-            .as_ref()
-            .is_some_and(|curve| curve.iter().all(|value| value.re.is_finite())));
-        assert!(result
-            .output_impedance
-            .as_ref()
-            .is_some_and(|curve| curve.iter().all(|value| value.re.is_finite())));
+        assert!(
+            result
+                .transfer
+                .iter()
+                .all(|value| value.re.is_finite() && value.im.is_finite())
+        );
+        assert!(
+            result
+                .group_delay
+                .as_ref()
+                .is_some_and(|curve| !curve.is_empty())
+        );
+        assert!(
+            result
+                .input_impedance
+                .as_ref()
+                .is_some_and(|curve| curve.iter().all(|value| value.re.is_finite()))
+        );
+        assert!(
+            result
+                .output_impedance
+                .as_ref()
+                .is_some_and(|curve| curve.iter().all(|value| value.re.is_finite()))
+        );
     }
 
     #[test]
@@ -4009,9 +3924,11 @@ C1 out 0 1n
         assert_eq!(result.output_noise.len(), result.frequencies.len());
         assert_eq!(result.reference, PnoiseReference::Output);
         assert_eq!(result.sideband_factor, 7);
-        assert!(result
-            .total_output_noise
-            .is_some_and(|value| value.is_finite() && value >= 0.0));
+        assert!(
+            result
+                .total_output_noise
+                .is_some_and(|value| value.is_finite() && value >= 0.0)
+        );
     }
 
     #[test]
@@ -4098,14 +4015,18 @@ C1 out 0 1n
             .as_ref()
             .expect("input-referred mode should return an input-noise vector");
         assert_eq!(input_curve.len(), output_result.output_noise.len());
-        assert!(!input_result
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("TF fallback")));
-        assert!(!input_result
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("unity gain")));
+        assert!(
+            !input_result
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("TF fallback"))
+        );
+        assert!(
+            !input_result
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("unity gain"))
+        );
 
         let parsed = rspice_core::netlist::parse_netlist(netlist).expect("netlist should parse");
         let mut sim_config = build_engine_config(&parsed, None);
@@ -4226,10 +4147,12 @@ C1 out 0 1n
         };
         let result = run_pnoise_analysis_with_config(netlist, &cfg)
             .expect("sideband PNOISE input run should execute");
-        assert!(!result
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("TF fallback")));
+        assert!(
+            !result
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("TF fallback"))
+        );
 
         let input_curve = result
             .input_noise
@@ -4364,14 +4287,18 @@ C1 out 0 1n
             .expect("differential PNOISE output should execute");
         assert_eq!(result.output_noise.len(), result.frequencies.len());
         assert!(!result.contributors.is_empty());
-        assert!(result
-            .contributors
-            .iter()
-            .all(|(_, percentage)| percentage.is_finite() && *percentage >= 0.0));
-        assert!(!result
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("uncorrelated PSD summation")));
+        assert!(
+            result
+                .contributors
+                .iter()
+                .all(|(_, percentage)| percentage.is_finite() && *percentage >= 0.0)
+        );
+        assert!(
+            !result
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("uncorrelated PSD summation"))
+        );
     }
 
     #[test]
@@ -4511,27 +4438,37 @@ C1 out 0 1n
         assert_eq!(result.mode_indices.len(), result.mode_damping.len());
         assert_eq!(result.mode_indices.len(), result.mode_frequency_hz.len());
         assert_eq!(result.mode_indices.len(), result.stability_margin_db.len());
-        assert!(result
-            .probe_mode_participation
-            .iter()
-            .all(|value| value.is_finite() && *value >= 0.0 && *value <= 1.0));
-        assert!(result
-            .multiplier_magnitude
-            .iter()
-            .all(|value| value.is_finite() && *value >= 0.0));
-        assert!(result
-            .multiplier_phase_deg
-            .iter()
-            .all(|value| value.is_finite()));
+        assert!(
+            result
+                .probe_mode_participation
+                .iter()
+                .all(|value| value.is_finite() && *value >= 0.0 && *value <= 1.0)
+        );
+        assert!(
+            result
+                .multiplier_magnitude
+                .iter()
+                .all(|value| value.is_finite() && *value >= 0.0)
+        );
+        assert!(
+            result
+                .multiplier_phase_deg
+                .iter()
+                .all(|value| value.is_finite())
+        );
         assert!(result.mode_damping.iter().all(|value| value.is_finite()));
-        assert!(result
-            .mode_frequency_hz
-            .iter()
-            .all(|value| value.is_finite() && *value >= 0.0));
-        assert!(result
-            .stability_margin_db
-            .iter()
-            .all(|value| value.is_finite()));
+        assert!(
+            result
+                .mode_frequency_hz
+                .iter()
+                .all(|value| value.is_finite() && *value >= 0.0)
+        );
+        assert!(
+            result
+                .stability_margin_db
+                .iter()
+                .all(|value| value.is_finite())
+        );
         assert!(result.dominant_multiplier_magnitude.is_finite());
         assert!(result.min_stability_margin_db.is_finite());
         assert!(
