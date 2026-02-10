@@ -148,8 +148,14 @@ struct TypeDecl {
 #[derive(Debug, Clone)]
 enum TypeKind {
     Primitive(DataType),
-    Array { element_type: DataType },
+    Array { element_type_raw: u32 },
     Struct { members: Vec<u32> },
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ArrayElementType {
+    Primitive(DataType),
+    TypeRef(u32),
 }
 
 #[derive(Debug, Clone)]
@@ -388,7 +394,7 @@ fn parse_type_decl(
 
     let type_id = read_u32(cursor)?;
     let name = parse_string(cursor)?;
-    let array_type = DataType::from_u32(read_u32(cursor)?);
+    let array_type_raw = read_u32(cursor)?;
     let data_type = DataType::from_u32(read_u32(cursor)?);
     let kind = match data_type {
         DataType::Struct => {
@@ -404,7 +410,7 @@ fn parse_type_decl(
             TypeKind::Struct { members }
         }
         DataType::Array => TypeKind::Array {
-            element_type: array_type,
+            element_type_raw: array_type_raw,
         },
         other => TypeKind::Primitive(other),
     };
@@ -833,6 +839,32 @@ fn init_channels(specs: &[ChannelSpec]) -> Vec<SignalChannel> {
         .collect()
 }
 
+fn resolve_array_element_type(
+    element_type_raw: u32,
+    types: &HashMap<u32, TypeDecl>,
+) -> ArrayElementType {
+    if let Some(type_decl) = types.get(&element_type_raw) {
+        let raw_as_dtype = DataType::from_u32(element_type_raw);
+        match raw_as_dtype {
+            DataType::Int8
+            | DataType::Int32
+            | DataType::Real
+            | DataType::Complex
+            | DataType::String => match type_decl.kind {
+                TypeKind::Primitive(dtype) if dtype == raw_as_dtype => {
+                    ArrayElementType::Primitive(raw_as_dtype)
+                }
+                _ => ArrayElementType::TypeRef(element_type_raw),
+            },
+            DataType::Array | DataType::Struct | DataType::Other(_) => {
+                ArrayElementType::TypeRef(element_type_raw)
+            }
+        }
+    } else {
+        ArrayElementType::Primitive(DataType::from_u32(element_type_raw))
+    }
+}
+
 fn collect_channel_specs_for_type(
     type_id: u32,
     types: &HashMap<u32, TypeDecl>,
@@ -1167,12 +1199,16 @@ fn count_numeric_type_value(
         .ok_or_else(|| CadencePsfError::new(format!("missing type declaration {}", type_id)))?;
     match &decl.kind {
         TypeKind::Primitive(dtype) => count_numeric_data_type_value(cursor, *dtype),
-        TypeKind::Array { element_type } => {
+        TypeKind::Array { element_type_raw } => {
             let count = read_u32(cursor)? as usize;
             let mut numeric_count = 0usize;
             for _ in 0..count {
                 numeric_count = numeric_count
-                    .checked_add(count_numeric_data_type_value(cursor, *element_type)?)
+                    .checked_add(count_numeric_array_element_value(
+                        cursor,
+                        *element_type_raw,
+                        types,
+                    )?)
                     .ok_or_else(|| CadencePsfError::new("numeric sample count overflow"))?;
             }
             Ok(numeric_count)
@@ -1186,6 +1222,17 @@ fn count_numeric_type_value(
             }
             Ok(numeric_count)
         }
+    }
+}
+
+fn count_numeric_array_element_value(
+    cursor: &mut &[u8],
+    element_type_raw: u32,
+    types: &HashMap<u32, TypeDecl>,
+) -> Result<usize, CadencePsfError> {
+    match resolve_array_element_type(element_type_raw, types) {
+        ArrayElementType::Primitive(dtype) => count_numeric_data_type_value(cursor, dtype),
+        ArrayElementType::TypeRef(type_id) => count_numeric_type_value(cursor, type_id, types),
     }
 }
 
@@ -1216,10 +1263,10 @@ fn count_numeric_data_type_value(
             Ok(0)
         }
         DataType::Array => Err(CadencePsfError::new(
-            "nested ARRAY element types are not supported in PSF parser",
+            "array element descriptor resolved to ARRAY without a concrete type reference",
         )),
         DataType::Struct => Err(CadencePsfError::new(
-            "array element type STRUCT is not supported in PSF parser",
+            "array element descriptor resolved to STRUCT without a concrete type reference",
         )),
         DataType::Other(other) => Err(CadencePsfError::new(format!(
             "unsupported PSF signal data type {}",
@@ -1245,11 +1292,17 @@ where
         TypeKind::Primitive(dtype) => {
             read_data_type_value_with_numeric_visit(cursor, *dtype, prefix, on_numeric)
         }
-        TypeKind::Array { element_type } => {
+        TypeKind::Array { element_type_raw } => {
             let count = read_u32(cursor)? as usize;
             for idx in 0..count {
                 let next = format!("{}[{}]", prefix, idx);
-                read_data_type_value_with_numeric_visit(cursor, *element_type, &next, on_numeric)?;
+                read_array_element_value_with_numeric_visit(
+                    cursor,
+                    *element_type_raw,
+                    types,
+                    &next,
+                    on_numeric,
+                )?;
             }
             Ok(())
         }
@@ -1266,6 +1319,26 @@ where
                 read_type_value_with_numeric_visit(cursor, *member_id, types, &next, on_numeric)?;
             }
             Ok(())
+        }
+    }
+}
+
+fn read_array_element_value_with_numeric_visit<F>(
+    cursor: &mut &[u8],
+    element_type_raw: u32,
+    types: &HashMap<u32, TypeDecl>,
+    suffix: &str,
+    on_numeric: &mut F,
+) -> Result<(), CadencePsfError>
+where
+    F: FnMut(&str, NumericSample) -> Result<(), CadencePsfError>,
+{
+    match resolve_array_element_type(element_type_raw, types) {
+        ArrayElementType::Primitive(dtype) => {
+            read_data_type_value_with_numeric_visit(cursor, dtype, suffix, on_numeric)
+        }
+        ArrayElementType::TypeRef(type_id) => {
+            read_type_value_with_numeric_visit(cursor, type_id, types, suffix, on_numeric)
         }
     }
 }
@@ -1293,10 +1366,10 @@ where
             Ok(())
         }
         DataType::Array => Err(CadencePsfError::new(
-            "nested ARRAY element types are not supported in PSF parser",
+            "array element descriptor resolved to ARRAY without a concrete type reference",
         )),
         DataType::Struct => Err(CadencePsfError::new(
-            "array element type STRUCT is not supported in PSF parser",
+            "array element descriptor resolved to STRUCT without a concrete type reference",
         )),
         DataType::Other(other) => Err(CadencePsfError::new(format!(
             "unsupported PSF signal data type {}",
@@ -2498,6 +2571,462 @@ pub(crate) mod test_helpers {
         bytes
     }
 
+    pub(crate) fn build_non_windowed_array_of_struct_psf() -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        let header_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let header_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_named_int(&mut bytes, "PSF sweep points", 2);
+        let header_end = bytes.len() as u32;
+        patch_u32(&mut bytes, header_eofs_pos, header_end);
+
+        let types_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let types_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        // Top-level trace: array of struct(type_id=2).
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 1);
+        push_string(&mut bytes, "array_of_struct");
+        push_u32(&mut bytes, 2);
+        push_u32(&mut bytes, 3);
+        // Struct element type.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_string(&mut bytes, "elem");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 3);
+        push_string(&mut bytes, "dc");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 11);
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 4);
+        push_string(&mut bytes, "ac");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 12);
+        push_u32(&mut bytes, 18);
+        // Sweep type.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 5);
+        push_string(&mut bytes, "real");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 11);
+        let types_end = bytes.len() as u32;
+        patch_u32(&mut bytes, types_eofs_pos, types_end);
+
+        let sweep_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let sweep_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 100, "time", 5);
+        let sweep_end = bytes.len() as u32;
+        patch_u32(&mut bytes, sweep_eofs_pos, sweep_end);
+
+        let trace_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let trace_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 200, "V(out)", 1);
+        let trace_end = bytes.len() as u32;
+        patch_u32(&mut bytes, trace_eofs_pos, trace_end);
+
+        let value_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let value_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+
+        // Point 0
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_f64(&mut bytes, 0.0);
+        push_f64(&mut bytes, 0.0);
+        push_u32(&mut bytes, 2);
+        push_f64(&mut bytes, 1.0);
+        push_f64(&mut bytes, 2.0);
+        push_f64(&mut bytes, 0.5);
+        push_f64(&mut bytes, 1.1);
+        push_f64(&mut bytes, 2.1);
+        push_f64(&mut bytes, 0.6);
+
+        // Point 1
+        push_u32(&mut bytes, 1);
+        push_u32(&mut bytes, 0);
+        push_f64(&mut bytes, 1.0);
+        push_f64(&mut bytes, 0.0);
+        push_u32(&mut bytes, 2);
+        push_f64(&mut bytes, 1.5);
+        push_f64(&mut bytes, 2.5);
+        push_f64(&mut bytes, -0.2);
+        push_f64(&mut bytes, 1.6);
+        push_f64(&mut bytes, 2.6);
+        push_f64(&mut bytes, -0.3);
+
+        let value_end = bytes.len() as u32;
+        patch_u32(&mut bytes, value_eofs_pos, value_end);
+
+        let toc_offset = bytes.len();
+        for (kind, start) in [
+            (0u32, header_start),
+            (1u32, types_start),
+            (2u32, sweep_start),
+            (3u32, trace_start),
+            (4u32, value_start),
+        ] {
+            push_u32(&mut bytes, kind);
+            push_u32(&mut bytes, start as u32);
+        }
+        bytes.extend_from_slice(&[0u8; 8]);
+        push_u32(&mut bytes, toc_offset as u32);
+        bytes
+    }
+
+    pub(crate) fn build_non_windowed_nested_array_real_psf() -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        let header_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let header_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_named_int(&mut bytes, "PSF sweep points", 2);
+        let header_end = bytes.len() as u32;
+        patch_u32(&mut bytes, header_eofs_pos, header_end);
+
+        let types_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let types_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        // Top-level: array of type_id=2.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 1);
+        push_string(&mut bytes, "array2d");
+        push_u32(&mut bytes, 2);
+        push_u32(&mut bytes, 3);
+        // Inner type: array of real.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_string(&mut bytes, "inner");
+        push_u32(&mut bytes, 11);
+        push_u32(&mut bytes, 3);
+        // Sweep type.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 3);
+        push_string(&mut bytes, "real");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 11);
+        let types_end = bytes.len() as u32;
+        patch_u32(&mut bytes, types_eofs_pos, types_end);
+
+        let sweep_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let sweep_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 100, "time", 3);
+        let sweep_end = bytes.len() as u32;
+        patch_u32(&mut bytes, sweep_eofs_pos, sweep_end);
+
+        let trace_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let trace_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 200, "V(out)", 1);
+        let trace_end = bytes.len() as u32;
+        patch_u32(&mut bytes, trace_eofs_pos, trace_end);
+
+        let value_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let value_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+
+        // Point 0
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_f64(&mut bytes, 0.0);
+        push_f64(&mut bytes, 0.0);
+        push_u32(&mut bytes, 2);
+        push_u32(&mut bytes, 2);
+        push_f64(&mut bytes, 1.0);
+        push_f64(&mut bytes, 2.0);
+        push_u32(&mut bytes, 2);
+        push_f64(&mut bytes, 3.0);
+        push_f64(&mut bytes, 4.0);
+
+        // Point 1
+        push_u32(&mut bytes, 1);
+        push_u32(&mut bytes, 0);
+        push_f64(&mut bytes, 1.0);
+        push_f64(&mut bytes, 0.0);
+        push_u32(&mut bytes, 2);
+        push_u32(&mut bytes, 2);
+        push_f64(&mut bytes, 1.5);
+        push_f64(&mut bytes, 2.5);
+        push_u32(&mut bytes, 2);
+        push_f64(&mut bytes, 3.5);
+        push_f64(&mut bytes, 4.5);
+
+        let value_end = bytes.len() as u32;
+        patch_u32(&mut bytes, value_eofs_pos, value_end);
+
+        let toc_offset = bytes.len();
+        for (kind, start) in [
+            (0u32, header_start),
+            (1u32, types_start),
+            (2u32, sweep_start),
+            (3u32, trace_start),
+            (4u32, value_start),
+        ] {
+            push_u32(&mut bytes, kind);
+            push_u32(&mut bytes, start as u32);
+        }
+        bytes.extend_from_slice(&[0u8; 8]);
+        push_u32(&mut bytes, toc_offset as u32);
+        bytes
+    }
+
+    pub(crate) fn build_windowed_array_of_struct_psf() -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        let header_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let header_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_named_int(&mut bytes, "PSF sweep points", 2);
+        push_named_int(&mut bytes, "PSF traces", 1);
+        push_named_int(&mut bytes, "PSF window size", 128);
+        let header_end = bytes.len() as u32;
+        patch_u32(&mut bytes, header_eofs_pos, header_end);
+
+        let types_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let types_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        // Top-level trace: array of struct(type_id=2).
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 1);
+        push_string(&mut bytes, "array_of_struct");
+        push_u32(&mut bytes, 2);
+        push_u32(&mut bytes, 3);
+        // Struct element type.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_string(&mut bytes, "elem");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 3);
+        push_string(&mut bytes, "dc");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 11);
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 4);
+        push_string(&mut bytes, "ac");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 12);
+        push_u32(&mut bytes, 18);
+        // Sweep type.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 5);
+        push_string(&mut bytes, "real");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 11);
+        let types_end = bytes.len() as u32;
+        patch_u32(&mut bytes, types_eofs_pos, types_end);
+
+        let sweep_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let sweep_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 100, "time", 5);
+        let sweep_end = bytes.len() as u32;
+        patch_u32(&mut bytes, sweep_eofs_pos, sweep_end);
+
+        let trace_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let trace_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 200, "V(out)", 1);
+        let trace_end = bytes.len() as u32;
+        patch_u32(&mut bytes, trace_eofs_pos, trace_end);
+
+        let value_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let value_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+
+        push_u32(&mut bytes, 20);
+        push_u32(&mut bytes, 0);
+
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_f64(&mut bytes, 0.0);
+        push_f64(&mut bytes, 1.0);
+
+        let mut trace_payload = Vec::new();
+        push_u32(&mut trace_payload, 2);
+        push_f64(&mut trace_payload, 1.0);
+        push_f64(&mut trace_payload, 2.0);
+        push_f64(&mut trace_payload, 0.5);
+        push_f64(&mut trace_payload, 1.1);
+        push_f64(&mut trace_payload, 2.1);
+        push_f64(&mut trace_payload, 0.6);
+        push_u32(&mut trace_payload, 2);
+        push_f64(&mut trace_payload, 1.5);
+        push_f64(&mut trace_payload, 2.5);
+        push_f64(&mut trace_payload, -0.2);
+        push_f64(&mut trace_payload, 1.6);
+        push_f64(&mut trace_payload, 2.6);
+        push_f64(&mut trace_payload, -0.3);
+        push_windowed_trace_payload(&mut bytes, &trace_payload, 128);
+
+        let value_end = bytes.len() as u32;
+        patch_u32(&mut bytes, value_eofs_pos, value_end);
+
+        let toc_offset = bytes.len();
+        for (kind, start) in [
+            (0u32, header_start),
+            (1u32, types_start),
+            (2u32, sweep_start),
+            (3u32, trace_start),
+            (4u32, value_start),
+        ] {
+            push_u32(&mut bytes, kind);
+            push_u32(&mut bytes, start as u32);
+        }
+        bytes.extend_from_slice(&[0u8; 8]);
+        push_u32(&mut bytes, toc_offset as u32);
+        bytes
+    }
+
+    pub(crate) fn build_windowed_nested_array_real_psf() -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        let header_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let header_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_named_int(&mut bytes, "PSF sweep points", 2);
+        push_named_int(&mut bytes, "PSF traces", 1);
+        push_named_int(&mut bytes, "PSF window size", 112);
+        let header_end = bytes.len() as u32;
+        patch_u32(&mut bytes, header_eofs_pos, header_end);
+
+        let types_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let types_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        // Top-level: array of type_id=2.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 1);
+        push_string(&mut bytes, "array2d");
+        push_u32(&mut bytes, 2);
+        push_u32(&mut bytes, 3);
+        // Inner type: array of real.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_string(&mut bytes, "inner");
+        push_u32(&mut bytes, 11);
+        push_u32(&mut bytes, 3);
+        // Sweep type.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 3);
+        push_string(&mut bytes, "real");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 11);
+        let types_end = bytes.len() as u32;
+        patch_u32(&mut bytes, types_eofs_pos, types_end);
+
+        let sweep_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let sweep_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 100, "time", 3);
+        let sweep_end = bytes.len() as u32;
+        patch_u32(&mut bytes, sweep_eofs_pos, sweep_end);
+
+        let trace_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let trace_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 200, "V(out)", 1);
+        let trace_end = bytes.len() as u32;
+        patch_u32(&mut bytes, trace_eofs_pos, trace_end);
+
+        let value_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let value_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+
+        push_u32(&mut bytes, 20);
+        push_u32(&mut bytes, 0);
+
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_f64(&mut bytes, 0.0);
+        push_f64(&mut bytes, 1.0);
+
+        let mut trace_payload = Vec::new();
+        push_u32(&mut trace_payload, 2);
+        push_u32(&mut trace_payload, 2);
+        push_f64(&mut trace_payload, 1.0);
+        push_f64(&mut trace_payload, 2.0);
+        push_u32(&mut trace_payload, 2);
+        push_f64(&mut trace_payload, 3.0);
+        push_f64(&mut trace_payload, 4.0);
+        push_u32(&mut trace_payload, 2);
+        push_u32(&mut trace_payload, 2);
+        push_f64(&mut trace_payload, 1.5);
+        push_f64(&mut trace_payload, 2.5);
+        push_u32(&mut trace_payload, 2);
+        push_f64(&mut trace_payload, 3.5);
+        push_f64(&mut trace_payload, 4.5);
+        push_windowed_trace_payload(&mut bytes, &trace_payload, 112);
+
+        let value_end = bytes.len() as u32;
+        patch_u32(&mut bytes, value_eofs_pos, value_end);
+
+        let toc_offset = bytes.len();
+        for (kind, start) in [
+            (0u32, header_start),
+            (1u32, types_start),
+            (2u32, sweep_start),
+            (3u32, trace_start),
+            (4u32, value_start),
+        ] {
+            push_u32(&mut bytes, kind);
+            push_u32(&mut bytes, start as u32);
+        }
+        bytes.extend_from_slice(&[0u8; 8]);
+        push_u32(&mut bytes, toc_offset as u32);
+        bytes
+    }
+
     fn build_simple_non_windowed_psf(sample_encoding: SampleEncoding) -> Vec<u8> {
         let mut bytes = Vec::new();
 
@@ -2668,13 +3197,16 @@ pub(crate) mod test_helpers {
 #[cfg(test)]
 mod tests {
     use super::test_helpers::{
-        build_non_windowed_array_complex_psf, build_non_windowed_array_real_psf,
-        build_non_windowed_complex_psf, build_non_windowed_int32_psf, build_non_windowed_int8_psf,
-        build_non_windowed_mixed_real_and_string_psf, build_non_windowed_real_psf,
-        build_non_windowed_struct_psf, build_non_windowed_struct_with_array_psf,
-        build_non_windowed_variable_length_array_psf, build_windowed_array_complex_psf,
-        build_windowed_array_real_psf, build_windowed_real_psf,
-        build_windowed_struct_with_array_psf, build_windowed_variable_length_array_psf,
+        build_non_windowed_array_complex_psf, build_non_windowed_array_of_struct_psf,
+        build_non_windowed_array_real_psf, build_non_windowed_complex_psf,
+        build_non_windowed_int32_psf, build_non_windowed_int8_psf,
+        build_non_windowed_mixed_real_and_string_psf, build_non_windowed_nested_array_real_psf,
+        build_non_windowed_real_psf, build_non_windowed_struct_psf,
+        build_non_windowed_struct_with_array_psf, build_non_windowed_variable_length_array_psf,
+        build_windowed_array_complex_psf, build_windowed_array_of_struct_psf,
+        build_windowed_array_real_psf, build_windowed_nested_array_real_psf,
+        build_windowed_real_psf, build_windowed_struct_with_array_psf,
+        build_windowed_variable_length_array_psf,
     };
     use super::*;
 
@@ -2842,6 +3374,50 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_non_windowed_array_of_struct_psf_binary() {
+        let bytes = build_non_windowed_array_of_struct_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.sweeps[0].values, vec![0.0, 1.0]);
+        assert_eq!(parsed.real_signals.len(), 2);
+        assert_eq!(parsed.real_signals[0].name, "V(out)[0].dc");
+        assert_eq!(parsed.real_signals[0].values, vec![1.0, 1.5]);
+        assert_eq!(parsed.real_signals[1].name, "V(out)[1].dc");
+        assert_eq!(parsed.real_signals[1].values, vec![1.1, 1.6]);
+        assert_eq!(parsed.complex_signals.len(), 2);
+        assert_eq!(parsed.complex_signals[0].name, "V(out)[0].ac");
+        assert_eq!(
+            parsed.complex_signals[0].values,
+            vec![(2.0, 0.5), (2.5, -0.2)]
+        );
+        assert_eq!(parsed.complex_signals[1].name, "V(out)[1].ac");
+        assert_eq!(
+            parsed.complex_signals[1].values,
+            vec![(2.1, 0.6), (2.6, -0.3)]
+        );
+    }
+
+    #[test]
+    fn test_parse_non_windowed_nested_array_real_psf_binary() {
+        let bytes = build_non_windowed_nested_array_real_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.sweeps[0].values, vec![0.0, 1.0]);
+        assert!(parsed.complex_signals.is_empty());
+        assert_eq!(parsed.real_signals.len(), 4);
+        assert_eq!(parsed.real_signals[0].name, "V(out)[0][0]");
+        assert_eq!(parsed.real_signals[0].values, vec![1.0, 1.5]);
+        assert_eq!(parsed.real_signals[1].name, "V(out)[0][1]");
+        assert_eq!(parsed.real_signals[1].values, vec![2.0, 2.5]);
+        assert_eq!(parsed.real_signals[2].name, "V(out)[1][0]");
+        assert_eq!(parsed.real_signals[2].values, vec![3.0, 3.5]);
+        assert_eq!(parsed.real_signals[3].name, "V(out)[1][1]");
+        assert_eq!(parsed.real_signals[3].values, vec![4.0, 4.5]);
+    }
+
+    #[test]
     fn test_parse_windowed_real_psf_binary() {
         let bytes = build_windowed_real_psf();
         let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
@@ -2925,6 +3501,50 @@ mod tests {
         assert_eq!(parsed.real_signals[2].name, "V(arr)[2]");
         assert!(parsed.real_signals[2].values[0].is_nan());
         assert_eq!(parsed.real_signals[2].values[1], 3.5);
+    }
+
+    #[test]
+    fn test_parse_windowed_array_of_struct_psf_binary() {
+        let bytes = build_windowed_array_of_struct_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.sweeps[0].values, vec![0.0, 1.0]);
+        assert_eq!(parsed.real_signals.len(), 2);
+        assert_eq!(parsed.real_signals[0].name, "V(out)[0].dc");
+        assert_eq!(parsed.real_signals[0].values, vec![1.0, 1.5]);
+        assert_eq!(parsed.real_signals[1].name, "V(out)[1].dc");
+        assert_eq!(parsed.real_signals[1].values, vec![1.1, 1.6]);
+        assert_eq!(parsed.complex_signals.len(), 2);
+        assert_eq!(parsed.complex_signals[0].name, "V(out)[0].ac");
+        assert_eq!(
+            parsed.complex_signals[0].values,
+            vec![(2.0, 0.5), (2.5, -0.2)]
+        );
+        assert_eq!(parsed.complex_signals[1].name, "V(out)[1].ac");
+        assert_eq!(
+            parsed.complex_signals[1].values,
+            vec![(2.1, 0.6), (2.6, -0.3)]
+        );
+    }
+
+    #[test]
+    fn test_parse_windowed_nested_array_real_psf_binary() {
+        let bytes = build_windowed_nested_array_real_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.sweeps[0].values, vec![0.0, 1.0]);
+        assert!(parsed.complex_signals.is_empty());
+        assert_eq!(parsed.real_signals.len(), 4);
+        assert_eq!(parsed.real_signals[0].name, "V(out)[0][0]");
+        assert_eq!(parsed.real_signals[0].values, vec![1.0, 1.5]);
+        assert_eq!(parsed.real_signals[1].name, "V(out)[0][1]");
+        assert_eq!(parsed.real_signals[1].values, vec![2.0, 2.5]);
+        assert_eq!(parsed.real_signals[2].name, "V(out)[1][0]");
+        assert_eq!(parsed.real_signals[2].values, vec![3.0, 3.5]);
+        assert_eq!(parsed.real_signals[3].name, "V(out)[1][1]");
+        assert_eq!(parsed.real_signals[3].values, vec![4.0, 4.5]);
     }
 
     #[test]
