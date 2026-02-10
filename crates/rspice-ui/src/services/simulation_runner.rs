@@ -4654,6 +4654,87 @@ pub struct HbData {
     pub converged: bool,
 }
 
+/// Harmonic Balance run configuration passed from the simulation pipeline.
+#[derive(Debug, Clone, Copy)]
+pub struct HbRunConfig {
+    pub tone1_freq: Value,
+    pub tone1_harmonics: usize,
+    pub tone2_freq: Option<Value>,
+    pub tone2_harmonics: usize,
+    pub reltol: Value,
+    pub abstol: Value,
+    pub max_iterations: usize,
+    pub damping: Value,
+    pub oversample: usize,
+    pub max_mixing_order: usize,
+    pub use_krylov: bool,
+    pub gmres_restart: usize,
+    pub source_stepping: bool,
+    pub verbose: bool,
+}
+
+impl Default for HbRunConfig {
+    fn default() -> Self {
+        Self {
+            tone1_freq: 1e9,
+            tone1_harmonics: 9,
+            tone2_freq: None,
+            tone2_harmonics: 0,
+            reltol: 1e-6,
+            abstol: 1e-12,
+            max_iterations: 100,
+            damping: 1.0,
+            oversample: 2,
+            max_mixing_order: 5,
+            use_krylov: false,
+            gmres_restart: 30,
+            source_stepping: false,
+            verbose: false,
+        }
+    }
+}
+
+impl HbRunConfig {
+    fn validate(&self) -> Result<(), String> {
+        if !self.tone1_freq.is_finite() || self.tone1_freq <= 0.0 {
+            return Err("HB tone1 frequency must be positive".to_string());
+        }
+        if self.tone1_harmonics == 0 {
+            return Err("HB tone1 harmonics must be > 0".to_string());
+        }
+        if let Some(tone2) = self.tone2_freq {
+            if !tone2.is_finite() || tone2 <= 0.0 {
+                return Err("HB tone2 frequency must be positive".to_string());
+            }
+            if self.tone2_harmonics == 0 {
+                return Err("HB tone2 harmonics must be > 0 when tone2 is enabled".to_string());
+            }
+        }
+        if !self.reltol.is_finite() || self.reltol <= 0.0 {
+            return Err("HB reltol must be > 0".to_string());
+        }
+        if !self.abstol.is_finite() || self.abstol <= 0.0 {
+            return Err("HB abstol must be > 0".to_string());
+        }
+        if self.max_iterations == 0 {
+            return Err("HB max_iterations must be > 0".to_string());
+        }
+        if !self.damping.is_finite() || self.damping <= 0.0 || self.damping > 1.0 {
+            return Err("HB damping must be in (0, 1]".to_string());
+        }
+        if self.oversample == 0 {
+            return Err("HB oversample must be > 0".to_string());
+        }
+        if self.max_mixing_order == 0 {
+            return Err("HB max_mixing_order must be > 0".to_string());
+        }
+        if self.gmres_restart == 0 {
+            return Err("HB gmres_restart must be > 0".to_string());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct HbTwoToneLayout {
     base_frequency: Value,
@@ -4724,14 +4805,9 @@ fn build_two_tone_hb_layout(
 ///
 /// Solves for the steady-state response in the frequency domain,
 /// suitable for RF circuits with multiple tones.
-pub fn run_hb_analysis(
-    netlist_text: &str,
-    tone1_freq: Value,
-    tone1_harmonics: usize,
-    tone2_freq: Option<Value>,
-    tone2_harmonics: usize,
-) -> Result<HbData, String> {
+pub fn run_hb_analysis(netlist_text: &str, config: &HbRunConfig) -> Result<HbData, String> {
     use rspice_core::analysis::{HbConfig, HbTone};
+    config.validate()?;
 
     // Parse the netlist
     let netlist = rspice_core::netlist::parse_netlist(netlist_text)
@@ -4740,26 +4816,33 @@ pub fn run_hb_analysis(
     let engine = Engine::new(build_engine_config(&netlist, None));
 
     // Build HB configuration.
-    let hb_config = if let Some(tone2) = tone2_freq {
+    let mut hb_config = if let Some(tone2) = config.tone2_freq {
         let layout = build_two_tone_hb_layout(
-            tone1_freq,
+            config.tone1_freq,
             tone2,
-            tone1_harmonics.max(1),
-            tone2_harmonics.max(1),
+            config.tone1_harmonics.max(1),
+            config.tone2_harmonics.max(1),
         )?;
-        let mut cfg = HbConfig::new(layout.base_frequency)
-            .with_harmonics(layout.max_harmonic)
-            .with_tolerance(1e-6);
+        let mut cfg = HbConfig::new(layout.base_frequency).with_harmonics(layout.max_harmonic);
         cfg.tones = vec![
-            HbTone::new(tone1_freq, tone1_harmonics.max(1)).with_name("tone1"),
-            HbTone::new(tone2, tone2_harmonics.max(1)).with_name("tone2"),
+            HbTone::new(config.tone1_freq, config.tone1_harmonics.max(1)).with_name("tone1"),
+            HbTone::new(tone2, config.tone2_harmonics.max(1)).with_name("tone2"),
         ];
         cfg
     } else {
-        HbConfig::new(tone1_freq)
-            .with_harmonics(tone1_harmonics)
-            .with_tolerance(1e-6)
+        HbConfig::new(config.tone1_freq).with_harmonics(config.tone1_harmonics)
     };
+    hb_config = hb_config
+        .with_tolerance(config.reltol)
+        .with_max_iterations(config.max_iterations)
+        .with_damping(config.damping)
+        .with_oversample(config.oversample);
+    hb_config.abstol = config.abstol;
+    hb_config.max_mixing_order = config.max_mixing_order;
+    hb_config.use_krylov = config.use_krylov;
+    hb_config.gmres_restart = config.gmres_restart;
+    hb_config.source_stepping = config.source_stepping;
+    hb_config.verbose = config.verbose;
 
     // Run actual HB analysis
     let hb_result = engine
@@ -4767,12 +4850,12 @@ pub fn run_hb_analysis(
         .map_err(|e| format!("HB error: {}", e))?;
 
     // Build fundamentals list
-    let mut fundamentals = vec![tone1_freq];
-    let mut harmonics_per_tone = vec![tone1_harmonics];
+    let mut fundamentals = vec![config.tone1_freq];
+    let mut harmonics_per_tone = vec![config.tone1_harmonics];
 
-    if let Some(f2) = tone2_freq {
+    if let Some(f2) = config.tone2_freq {
         fundamentals.push(f2);
-        harmonics_per_tone.push(tone2_harmonics);
+        harmonics_per_tone.push(config.tone2_harmonics);
     }
 
     // Extract DC operating point from spectral data
@@ -7965,8 +8048,13 @@ C1 out 0 1n
     #[test]
     fn test_run_hb_analysis_executes_for_driven_rc() {
         let netlist = "* hb\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
-        let result = run_hb_analysis(netlist, 1e6, 5, None, 0)
-            .expect("HB analysis should execute for driven RC");
+        let hb_cfg = HbRunConfig {
+            tone1_freq: 1e6,
+            tone1_harmonics: 5,
+            ..HbRunConfig::default()
+        };
+        let result =
+            run_hb_analysis(netlist, &hb_cfg).expect("HB analysis should execute for driven RC");
         assert_eq!(result.fundamentals, vec![1e6]);
         assert_eq!(result.harmonics_per_tone, vec![5]);
         assert!(result.converged);
@@ -7984,7 +8072,14 @@ C1 out 0 1n
     #[test]
     fn test_run_hb_analysis_executes_with_two_tone_layout() {
         let netlist = "* hb two-tone\nV1 in 0 DC 1 AC 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
-        let result = run_hb_analysis(netlist, 2e6, 4, Some(3e6), 3)
+        let hb_cfg = HbRunConfig {
+            tone1_freq: 2e6,
+            tone1_harmonics: 4,
+            tone2_freq: Some(3e6),
+            tone2_harmonics: 3,
+            ..HbRunConfig::default()
+        };
+        let result = run_hb_analysis(netlist, &hb_cfg)
             .expect("HB two-tone analysis should execute for commensurate tones");
         assert_eq!(result.fundamentals, vec![2e6, 3e6]);
         assert_eq!(result.harmonics_per_tone, vec![4, 3]);
@@ -8001,6 +8096,20 @@ C1 out 0 1n
                 .any(|(freq, _, _)| (*freq - 1e6).abs() < 1e-6),
             "two-tone HB should use the derived 1 MHz basis frequency"
         );
+    }
+
+    #[test]
+    fn test_run_hb_analysis_rejects_invalid_runtime_controls() {
+        let netlist = "* hb invalid\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        let hb_cfg = HbRunConfig {
+            tone1_freq: 1e6,
+            tone1_harmonics: 5,
+            reltol: 0.0,
+            ..HbRunConfig::default()
+        };
+        let err = run_hb_analysis(netlist, &hb_cfg)
+            .expect_err("invalid HB runtime controls should be rejected");
+        assert!(err.contains("reltol"));
     }
 
     #[test]

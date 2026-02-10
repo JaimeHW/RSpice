@@ -826,15 +826,35 @@ fn run_spec_request(
             tone1_harmonics,
             tone2_freq,
             tone2_harmonics,
+            reltol,
+            abstol,
+            max_iterations,
+            damping,
+            oversample,
+            max_mixing_order,
+            use_krylov,
+            gmres_restart,
+            source_stepping,
+            verbose,
         } => {
-            let data = svc_runner::run_hb_analysis(
-                netlist,
+            let hb_cfg = svc_runner::HbRunConfig {
                 tone1_freq,
                 tone1_harmonics,
                 tone2_freq,
                 tone2_harmonics,
-            )
-            .map_err(SimulationError::InvalidConfig)?;
+                reltol,
+                abstol,
+                max_iterations,
+                damping,
+                oversample,
+                max_mixing_order,
+                use_krylov,
+                gmres_restart,
+                source_stepping,
+                verbose,
+            };
+            let data = svc_runner::run_hb_analysis(netlist, &hb_cfg)
+                .map_err(SimulationError::InvalidConfig)?;
 
             let waveforms: std::collections::HashMap<String, WaveformData> = data
                 .spectra
@@ -2414,6 +2434,16 @@ C1 out 0 1n
                     tone1_harmonics: 5,
                     tone2_freq: None,
                     tone2_harmonics: 0,
+                    reltol: 1e-6,
+                    abstol: 1e-12,
+                    max_iterations: 100,
+                    damping: 1.0,
+                    oversample: 2,
+                    max_mixing_order: 5,
+                    use_krylov: false,
+                    gmres_restart: 30,
+                    source_stepping: false,
+                    verbose: false,
                 },
                 netlist,
             )

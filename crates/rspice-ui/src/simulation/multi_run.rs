@@ -290,6 +290,16 @@ pub enum AnalysisSpec {
         tone1_harmonics: usize,
         tone2_freq: Option<f64>,
         tone2_harmonics: usize,
+        reltol: f64,
+        abstol: f64,
+        max_iterations: usize,
+        damping: f64,
+        oversample: usize,
+        max_mixing_order: usize,
+        use_krylov: bool,
+        gmres_restart: usize,
+        source_stepping: bool,
+        verbose: bool,
     },
     /// Transfer function
     Tf,
@@ -585,6 +595,14 @@ impl AnalysisSpec {
                 tone1_harmonics,
                 tone2_freq,
                 tone2_harmonics,
+                reltol,
+                abstol,
+                max_iterations,
+                damping,
+                oversample,
+                max_mixing_order,
+                gmres_restart,
+                ..
             } => {
                 if *tone1_freq <= 0.0 {
                     return Err("HB tone1_freq must be > 0".to_string());
@@ -594,6 +612,27 @@ impl AnalysisSpec {
                 }
                 if tone2_freq.is_some() && *tone2_harmonics == 0 {
                     return Err("HB tone2_harmonics must be > 0 when tone2_freq is set".to_string());
+                }
+                if *reltol <= 0.0 {
+                    return Err("HB reltol must be > 0".to_string());
+                }
+                if *abstol <= 0.0 {
+                    return Err("HB abstol must be > 0".to_string());
+                }
+                if *max_iterations == 0 {
+                    return Err("HB max_iterations must be > 0".to_string());
+                }
+                if !damping.is_finite() || *damping <= 0.0 || *damping > 1.0 {
+                    return Err("HB damping must be in (0, 1]".to_string());
+                }
+                if *oversample == 0 {
+                    return Err("HB oversample must be > 0".to_string());
+                }
+                if *max_mixing_order == 0 {
+                    return Err("HB max_mixing_order must be > 0".to_string());
+                }
+                if *gmres_restart == 0 {
+                    return Err("HB gmres_restart must be > 0".to_string());
                 }
                 Ok(())
             }

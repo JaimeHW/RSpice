@@ -1062,14 +1062,34 @@ impl RunExecutor {
                 tone1_harmonics,
                 tone2_freq,
                 tone2_harmonics,
+                reltol,
+                abstol,
+                max_iterations,
+                damping,
+                oversample,
+                max_mixing_order,
+                use_krylov,
+                gmres_restart,
+                source_stepping,
+                verbose,
             } => {
-                let hb_result = simulation_runner::run_hb_analysis(
-                    netlist,
-                    *tone1_freq,
-                    *tone1_harmonics,
-                    *tone2_freq,
-                    *tone2_harmonics,
-                );
+                let hb_cfg = simulation_runner::HbRunConfig {
+                    tone1_freq: *tone1_freq,
+                    tone1_harmonics: *tone1_harmonics,
+                    tone2_freq: *tone2_freq,
+                    tone2_harmonics: *tone2_harmonics,
+                    reltol: *reltol,
+                    abstol: *abstol,
+                    max_iterations: *max_iterations,
+                    damping: *damping,
+                    oversample: *oversample,
+                    max_mixing_order: *max_mixing_order,
+                    use_krylov: *use_krylov,
+                    gmres_restart: *gmres_restart,
+                    source_stepping: *source_stepping,
+                    verbose: *verbose,
+                };
+                let hb_result = simulation_runner::run_hb_analysis(netlist, &hb_cfg);
                 match hb_result {
                     Ok(data) => {
                         let waveforms = data

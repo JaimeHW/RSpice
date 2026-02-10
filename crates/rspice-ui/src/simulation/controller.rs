@@ -1295,6 +1295,19 @@ impl SimulationController {
             tone1_harmonics: hb_cfg.num_harmonics as usize,
             tone2_freq: tone2.map(|tone| tone.frequency),
             tone2_harmonics: tone2.map(|tone| tone.harmonics as usize).unwrap_or(0),
+            reltol: hb_cfg.reltol,
+            abstol: hb_cfg.abstol,
+            max_iterations: hb_cfg.maxiter as usize,
+            damping: hb_cfg.damping,
+            oversample: hb_cfg.oversample as usize,
+            max_mixing_order: hb_cfg.max_mixing_order as usize,
+            use_krylov: matches!(
+                hb_cfg.solver,
+                crate::simulation::dialog::hb::HbSolverType::Krylov
+            ),
+            gmres_restart: hb_cfg.gmres_restart as usize,
+            source_stepping: hb_cfg.source_stepping,
+            verbose: hb_cfg.verbose,
         })
     }
 
@@ -4142,13 +4155,20 @@ mod tests {
 
     #[test]
     fn test_build_analysis_spec_for_harmonic_balance_uses_dialog_configuration() {
-        use crate::simulation::dialog::hb::{HbConfig, HbToneConfig};
+        use crate::simulation::dialog::hb::{HbConfig, HbSolverType, HbToneConfig};
 
         let controller = SimulationController::new();
         let mut state = AppState::default();
         state.dialogs.hb_state = crate::simulation::dialog::hb::HbDialogState::from_config(
-            &HbConfig::new(1.2e9, 11).add_tone(HbToneConfig::new(900e6, 5)),
+            &HbConfig::new(1.2e9, 11)
+                .add_tone(HbToneConfig::new(900e6, 5))
+                .with_solver(HbSolverType::Krylov)
+                .with_oversample(6)
+                .with_tolerance(2e-6)
+                .with_source_stepping(true),
         );
+        state.dialogs.hb_state.maxiter = "175".to_string();
+        state.dialogs.hb_state.damping = "0.6".to_string();
 
         let spec = controller
             .build_analysis_spec_for_index(&state, 11)
@@ -4159,11 +4179,31 @@ mod tests {
                 tone1_harmonics,
                 tone2_freq,
                 tone2_harmonics,
+                reltol,
+                abstol,
+                max_iterations,
+                damping,
+                oversample,
+                max_mixing_order,
+                use_krylov,
+                gmres_restart,
+                source_stepping,
+                verbose,
             } => {
                 assert!((tone1_freq - 1.2e9).abs() < 1e-3);
                 assert_eq!(tone1_harmonics, 11);
                 assert_eq!(tone2_freq, Some(900e6));
                 assert_eq!(tone2_harmonics, 5);
+                assert!((reltol - 2e-6).abs() < 1e-18);
+                assert!((abstol - 1e-12).abs() < 1e-24);
+                assert_eq!(max_iterations, 175);
+                assert!((damping - 0.6).abs() < 1e-15);
+                assert_eq!(oversample, 6);
+                assert_eq!(max_mixing_order, 5);
+                assert!(use_krylov);
+                assert_eq!(gmres_restart, 30);
+                assert!(source_stepping);
+                assert!(!verbose);
             }
             other => panic!("expected harmonic balance spec, got {:?}", other),
         }
