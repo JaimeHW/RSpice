@@ -501,10 +501,17 @@ fn parse_values(
     }
 
     let flat_traces = flatten_traces(traces);
+    let is_windowed = header.contains_key("PSF window size");
     for signal in &flat_traces {
         let _ = types
             .get(&signal.type_id)
             .ok_or_else(|| CadencePsfError::new(format!("missing type {}", signal.type_id)))?;
+        if is_windowed && type_contains_array(signal.type_id, types)? {
+            return Err(CadencePsfError::new(format!(
+                "windowed PSF array trace '{}' is not supported",
+                signal.name
+            )));
+        }
         let mut specs = Vec::new();
         collect_channel_specs_for_type(signal.type_id, types, "", &mut specs)?;
         if !specs.is_empty() {
@@ -512,7 +519,7 @@ fn parse_values(
         }
     }
 
-    if header.contains_key("PSF window size") {
+    if is_windowed {
         parse_windowed_values(
             &file[entry.start + 8..end_of_section],
             header,
@@ -546,7 +553,7 @@ fn parse_non_windowed_values(
     let sweep_points = header_usize(header, "PSF sweep points")?;
     let sweep_id = sweeps.first().map(|s| s.id);
 
-    for _ in 0..sweep_points {
+    for point_idx in 0..sweep_points {
         let _point_idx = read_u32(&mut cursor)?;
         let _param_kind = read_u32(&mut cursor)?;
         let sweep_value = read_f64(&mut cursor)?;
@@ -556,30 +563,20 @@ fn parse_non_windowed_values(
 
         for signal in flat_traces {
             let _unused = read_f64(&mut cursor)?;
-            let mut channel_idx = 0usize;
-            let mut channels_opt = values.get_mut(&signal.id).map(Vec::as_mut_slice);
+            let mut touched_channels = Vec::new();
             read_type_value_with_numeric_visit(
                 &mut cursor,
                 signal.type_id,
                 types,
-                &mut |sample| {
-                    if let Some(channels) = channels_opt.as_deref_mut() {
-                        push_scalar_slice(channels, channel_idx, sample)?;
-                    }
-                    channel_idx += 1;
+                "",
+                &mut |suffix, sample| {
+                    let channel_idx =
+                        push_named_channel(values, signal.id, suffix, sample, point_idx)?;
+                    touched_channels.push(channel_idx);
                     Ok(())
                 },
             )?;
-            if let Some(channels) = channels_opt {
-                if channel_idx != channels.len() {
-                    return Err(CadencePsfError::new(format!(
-                        "decoded {} numeric field(s) but signal {} expects {}",
-                        channel_idx,
-                        signal.id,
-                        channels.len()
-                    )));
-                }
-            }
+            pad_untouched_channels(values, signal.id, point_idx + 1, &touched_channels)?;
         }
     }
 
@@ -797,6 +794,8 @@ fn parse_zero_pad(mut cursor: &[u8]) -> Result<&[u8], CadencePsfError> {
 fn qualify_signal_name(base: &str, suffix: &str) -> String {
     if suffix.is_empty() {
         base.to_string()
+    } else if suffix.starts_with('[') {
+        format!("{}{}", base, suffix)
     } else {
         format!("{}.{}", base, suffix)
     }
@@ -860,6 +859,27 @@ fn collect_channel_specs_for_type(
     Ok(())
 }
 
+fn type_contains_array(
+    type_id: u32,
+    types: &HashMap<u32, TypeDecl>,
+) -> Result<bool, CadencePsfError> {
+    let decl = types
+        .get(&type_id)
+        .ok_or_else(|| CadencePsfError::new(format!("missing type declaration {}", type_id)))?;
+    match &decl.kind {
+        TypeKind::Primitive(_) => Ok(false),
+        TypeKind::Array { .. } => Ok(true),
+        TypeKind::Struct { members } => {
+            for member_id in members {
+                if type_contains_array(*member_id, types)? {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        }
+    }
+}
+
 fn channel_sample_width(channels: &[SignalChannel]) -> Result<usize, CadencePsfError> {
     let mut width = 0usize;
     for channel in channels {
@@ -872,6 +892,108 @@ fn channel_sample_width(channels: &[SignalChannel]) -> Result<usize, CadencePsfE
             .ok_or_else(|| CadencePsfError::new("windowed PSF channel width overflow"))?;
     }
     Ok(width)
+}
+
+fn ensure_channel_length(values: &mut SignalValues, len: usize) {
+    match values {
+        SignalValues::Real(v) => {
+            while v.len() < len {
+                v.push(f64::NAN);
+            }
+        }
+        SignalValues::Complex(v) => {
+            while v.len() < len {
+                v.push((f64::NAN, f64::NAN));
+            }
+        }
+    }
+}
+
+fn channel_kind(values: &SignalValues) -> ChannelKind {
+    match values {
+        SignalValues::Real(_) => ChannelKind::Real,
+        SignalValues::Complex(_) => ChannelKind::Complex,
+    }
+}
+
+fn push_named_channel(
+    values: &mut HashMap<u32, Vec<SignalChannel>>,
+    signal_id: u32,
+    suffix: &str,
+    sample: NumericSample,
+    point_idx: usize,
+) -> Result<usize, CadencePsfError> {
+    let channels = values.entry(signal_id).or_default();
+    let sample_kind = match sample {
+        NumericSample::Real(_) => ChannelKind::Real,
+        NumericSample::Complex(_) => ChannelKind::Complex,
+    };
+    let channel_idx = channels.iter().position(|channel| channel.suffix == suffix);
+    let channel_idx = if let Some(idx) = channel_idx {
+        idx
+    } else {
+        let mut values = match sample_kind {
+            ChannelKind::Real => SignalValues::Real(Vec::new()),
+            ChannelKind::Complex => SignalValues::Complex(Vec::new()),
+        };
+        ensure_channel_length(&mut values, point_idx);
+        channels.push(SignalChannel {
+            suffix: suffix.to_string(),
+            values,
+        });
+        channels.len() - 1
+    };
+
+    let channel = channels.get_mut(channel_idx).ok_or_else(|| {
+        CadencePsfError::new(format!(
+            "missing channel index {} for signal {}",
+            channel_idx, signal_id
+        ))
+    })?;
+    if channel_kind(&channel.values) != sample_kind {
+        return Err(CadencePsfError::new(format!(
+            "channel '{}' for signal {} changed numeric kind",
+            channel.suffix, signal_id
+        )));
+    }
+    ensure_channel_length(&mut channel.values, point_idx);
+    match (&mut channel.values, sample) {
+        (SignalValues::Real(v), NumericSample::Real(value)) => v.push(value),
+        (SignalValues::Complex(v), NumericSample::Complex(value)) => v.push(value),
+        _ => {
+            return Err(CadencePsfError::new(
+                "internal mismatch while appending channel sample",
+            ));
+        }
+    }
+    Ok(channel_idx)
+}
+
+fn pad_untouched_channels(
+    values: &mut HashMap<u32, Vec<SignalChannel>>,
+    signal_id: u32,
+    target_len: usize,
+    touched_channels: &[usize],
+) -> Result<(), CadencePsfError> {
+    let Some(channels) = values.get_mut(&signal_id) else {
+        return Ok(());
+    };
+    let mut touched = vec![false; channels.len()];
+    for idx in touched_channels {
+        let entry = touched.get_mut(*idx).ok_or_else(|| {
+            CadencePsfError::new(format!(
+                "channel index {} out of range for signal {}",
+                idx, signal_id
+            ))
+        })?;
+        *entry = true;
+    }
+    for (idx, channel) in channels.iter_mut().enumerate() {
+        if !touched[idx] {
+            ensure_channel_length(&mut channel.values, target_len);
+        }
+    }
+    Ok(())
 }
 
 fn push_scalar_channel(
@@ -922,28 +1044,38 @@ fn read_type_value_with_numeric_visit<F>(
     cursor: &mut &[u8],
     type_id: u32,
     types: &HashMap<u32, TypeDecl>,
+    prefix: &str,
     on_numeric: &mut F,
 ) -> Result<(), CadencePsfError>
 where
-    F: FnMut(NumericSample) -> Result<(), CadencePsfError>,
+    F: FnMut(&str, NumericSample) -> Result<(), CadencePsfError>,
 {
     let decl = types
         .get(&type_id)
         .ok_or_else(|| CadencePsfError::new(format!("missing type declaration {}", type_id)))?;
     match &decl.kind {
         TypeKind::Primitive(dtype) => {
-            read_data_type_value_with_numeric_visit(cursor, *dtype, on_numeric)
+            read_data_type_value_with_numeric_visit(cursor, *dtype, prefix, on_numeric)
         }
         TypeKind::Array { element_type } => {
             let count = read_u32(cursor)? as usize;
-            for _ in 0..count {
-                read_data_type_value_with_numeric_visit(cursor, *element_type, on_numeric)?;
+            for idx in 0..count {
+                let next = format!("{}[{}]", prefix, idx);
+                read_data_type_value_with_numeric_visit(cursor, *element_type, &next, on_numeric)?;
             }
             Ok(())
         }
         TypeKind::Struct { members } => {
             for member_id in members {
-                read_type_value_with_numeric_visit(cursor, *member_id, types, on_numeric)?;
+                let member = types.get(member_id).ok_or_else(|| {
+                    CadencePsfError::new(format!("missing struct member type {}", member_id))
+                })?;
+                let next = if prefix.is_empty() {
+                    member.name.clone()
+                } else {
+                    format!("{}.{}", prefix, member.name)
+                };
+                read_type_value_with_numeric_visit(cursor, *member_id, types, &next, on_numeric)?;
             }
             Ok(())
         }
@@ -953,19 +1085,20 @@ where
 fn read_data_type_value_with_numeric_visit<F>(
     cursor: &mut &[u8],
     dtype: DataType,
+    suffix: &str,
     on_numeric: &mut F,
 ) -> Result<(), CadencePsfError>
 where
-    F: FnMut(NumericSample) -> Result<(), CadencePsfError>,
+    F: FnMut(&str, NumericSample) -> Result<(), CadencePsfError>,
 {
     match dtype {
-        DataType::Int8 => on_numeric(NumericSample::Real(read_u8_padded(cursor)? as f64)),
-        DataType::Int32 => on_numeric(NumericSample::Real(read_i32(cursor)? as f64)),
-        DataType::Real => on_numeric(NumericSample::Real(read_f64(cursor)?)),
+        DataType::Int8 => on_numeric(suffix, NumericSample::Real(read_u8_padded(cursor)? as f64)),
+        DataType::Int32 => on_numeric(suffix, NumericSample::Real(read_i32(cursor)? as f64)),
+        DataType::Real => on_numeric(suffix, NumericSample::Real(read_f64(cursor)?)),
         DataType::Complex => {
             let re = read_f64(cursor)?;
             let im = read_f64(cursor)?;
-            on_numeric(NumericSample::Complex((re, im)))
+            on_numeric(suffix, NumericSample::Complex((re, im)))
         }
         DataType::String => {
             let _ = parse_string(cursor)?;
@@ -1294,6 +1427,401 @@ pub(crate) mod test_helpers {
         bytes
     }
 
+    pub(crate) fn build_non_windowed_array_real_psf() -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        let header_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let header_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_named_int(&mut bytes, "PSF sweep points", 2);
+        let header_end = bytes.len() as u32;
+        patch_u32(&mut bytes, header_eofs_pos, header_end);
+
+        let types_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let types_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        // Top-level array trace type: real elements.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 1);
+        push_string(&mut bytes, "realarray");
+        push_u32(&mut bytes, 11);
+        push_u32(&mut bytes, 3);
+        // Sweep type: scalar real.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_string(&mut bytes, "real");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 11);
+        let types_end = bytes.len() as u32;
+        patch_u32(&mut bytes, types_eofs_pos, types_end);
+
+        let sweep_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let sweep_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 100, "time", 2);
+        let sweep_end = bytes.len() as u32;
+        patch_u32(&mut bytes, sweep_eofs_pos, sweep_end);
+
+        let trace_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let trace_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 200, "V(arr)", 1);
+        let trace_end = bytes.len() as u32;
+        patch_u32(&mut bytes, trace_eofs_pos, trace_end);
+
+        let value_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let value_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+
+        // Point 0
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_f64(&mut bytes, 0.0);
+        push_f64(&mut bytes, 0.0);
+        push_u32(&mut bytes, 2);
+        push_f64(&mut bytes, 1.0);
+        push_f64(&mut bytes, 2.0);
+
+        // Point 1
+        push_u32(&mut bytes, 1);
+        push_u32(&mut bytes, 0);
+        push_f64(&mut bytes, 1.0);
+        push_f64(&mut bytes, 0.0);
+        push_u32(&mut bytes, 2);
+        push_f64(&mut bytes, 1.5);
+        push_f64(&mut bytes, 2.5);
+
+        let value_end = bytes.len() as u32;
+        patch_u32(&mut bytes, value_eofs_pos, value_end);
+
+        let toc_offset = bytes.len();
+        for (kind, start) in [
+            (0u32, header_start),
+            (1u32, types_start),
+            (2u32, sweep_start),
+            (3u32, trace_start),
+            (4u32, value_start),
+        ] {
+            push_u32(&mut bytes, kind);
+            push_u32(&mut bytes, start as u32);
+        }
+        bytes.extend_from_slice(&[0u8; 8]);
+        push_u32(&mut bytes, toc_offset as u32);
+        bytes
+    }
+
+    pub(crate) fn build_non_windowed_array_complex_psf() -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        let header_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let header_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_named_int(&mut bytes, "PSF sweep points", 2);
+        let header_end = bytes.len() as u32;
+        patch_u32(&mut bytes, header_eofs_pos, header_end);
+
+        let types_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let types_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        // Top-level array trace type: complex elements.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 1);
+        push_string(&mut bytes, "complexarray");
+        push_u32(&mut bytes, 12);
+        push_u32(&mut bytes, 3);
+        // Sweep type: scalar real.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_string(&mut bytes, "real");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 11);
+        let types_end = bytes.len() as u32;
+        patch_u32(&mut bytes, types_eofs_pos, types_end);
+
+        let sweep_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let sweep_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 100, "time", 2);
+        let sweep_end = bytes.len() as u32;
+        patch_u32(&mut bytes, sweep_eofs_pos, sweep_end);
+
+        let trace_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let trace_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 200, "I(arr)", 1);
+        let trace_end = bytes.len() as u32;
+        patch_u32(&mut bytes, trace_eofs_pos, trace_end);
+
+        let value_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let value_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+
+        // Point 0
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_f64(&mut bytes, 0.0);
+        push_f64(&mut bytes, 0.0);
+        push_u32(&mut bytes, 2);
+        push_f64(&mut bytes, 1.0);
+        push_f64(&mut bytes, 0.25);
+        push_f64(&mut bytes, 2.0);
+        push_f64(&mut bytes, -0.5);
+
+        // Point 1
+        push_u32(&mut bytes, 1);
+        push_u32(&mut bytes, 0);
+        push_f64(&mut bytes, 1.0);
+        push_f64(&mut bytes, 0.0);
+        push_u32(&mut bytes, 2);
+        push_f64(&mut bytes, 1.5);
+        push_f64(&mut bytes, 0.125);
+        push_f64(&mut bytes, 2.5);
+        push_f64(&mut bytes, -0.75);
+
+        let value_end = bytes.len() as u32;
+        patch_u32(&mut bytes, value_eofs_pos, value_end);
+
+        let toc_offset = bytes.len();
+        for (kind, start) in [
+            (0u32, header_start),
+            (1u32, types_start),
+            (2u32, sweep_start),
+            (3u32, trace_start),
+            (4u32, value_start),
+        ] {
+            push_u32(&mut bytes, kind);
+            push_u32(&mut bytes, start as u32);
+        }
+        bytes.extend_from_slice(&[0u8; 8]);
+        push_u32(&mut bytes, toc_offset as u32);
+        bytes
+    }
+
+    pub(crate) fn build_non_windowed_struct_with_array_psf() -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        let header_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let header_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_named_int(&mut bytes, "PSF sweep points", 2);
+        let header_end = bytes.len() as u32;
+        patch_u32(&mut bytes, header_eofs_pos, header_end);
+
+        let types_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let types_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        // Root type: struct with scalar and array members.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 1);
+        push_string(&mut bytes, "sigtype");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        // gain: real scalar
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_string(&mut bytes, "gain");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 11);
+        // taps: real array
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 3);
+        push_string(&mut bytes, "taps");
+        push_u32(&mut bytes, 11);
+        push_u32(&mut bytes, 3);
+        push_u32(&mut bytes, 18);
+        // Sweep type: scalar real.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 4);
+        push_string(&mut bytes, "real");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 11);
+        let types_end = bytes.len() as u32;
+        patch_u32(&mut bytes, types_eofs_pos, types_end);
+
+        let sweep_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let sweep_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 100, "time", 4);
+        let sweep_end = bytes.len() as u32;
+        patch_u32(&mut bytes, sweep_eofs_pos, sweep_end);
+
+        let trace_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let trace_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 200, "V(out)", 1);
+        let trace_end = bytes.len() as u32;
+        patch_u32(&mut bytes, trace_eofs_pos, trace_end);
+
+        let value_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let value_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+
+        // Point 0
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_f64(&mut bytes, 0.0);
+        push_f64(&mut bytes, 0.0);
+        push_f64(&mut bytes, 10.0); // gain
+        push_u32(&mut bytes, 2); // taps count
+        push_f64(&mut bytes, 0.1);
+        push_f64(&mut bytes, 0.2);
+
+        // Point 1
+        push_u32(&mut bytes, 1);
+        push_u32(&mut bytes, 0);
+        push_f64(&mut bytes, 1.0);
+        push_f64(&mut bytes, 0.0);
+        push_f64(&mut bytes, 11.0); // gain
+        push_u32(&mut bytes, 2); // taps count
+        push_f64(&mut bytes, 0.15);
+        push_f64(&mut bytes, 0.25);
+
+        let value_end = bytes.len() as u32;
+        patch_u32(&mut bytes, value_eofs_pos, value_end);
+
+        let toc_offset = bytes.len();
+        for (kind, start) in [
+            (0u32, header_start),
+            (1u32, types_start),
+            (2u32, sweep_start),
+            (3u32, trace_start),
+            (4u32, value_start),
+        ] {
+            push_u32(&mut bytes, kind);
+            push_u32(&mut bytes, start as u32);
+        }
+        bytes.extend_from_slice(&[0u8; 8]);
+        push_u32(&mut bytes, toc_offset as u32);
+        bytes
+    }
+
+    pub(crate) fn build_non_windowed_variable_length_array_psf() -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        let header_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let header_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_named_int(&mut bytes, "PSF sweep points", 2);
+        let header_end = bytes.len() as u32;
+        patch_u32(&mut bytes, header_eofs_pos, header_end);
+
+        let types_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let types_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        // Top-level array trace type: real elements.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 1);
+        push_string(&mut bytes, "realarray");
+        push_u32(&mut bytes, 11);
+        push_u32(&mut bytes, 3);
+        // Sweep type: scalar real.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_string(&mut bytes, "real");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 11);
+        let types_end = bytes.len() as u32;
+        patch_u32(&mut bytes, types_eofs_pos, types_end);
+
+        let sweep_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let sweep_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 100, "time", 2);
+        let sweep_end = bytes.len() as u32;
+        patch_u32(&mut bytes, sweep_eofs_pos, sweep_end);
+
+        let trace_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let trace_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 200, "V(arr)", 1);
+        let trace_end = bytes.len() as u32;
+        patch_u32(&mut bytes, trace_eofs_pos, trace_end);
+
+        let value_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let value_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+
+        // Point 0: one array value.
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_f64(&mut bytes, 0.0);
+        push_f64(&mut bytes, 0.0);
+        push_u32(&mut bytes, 1);
+        push_f64(&mut bytes, 1.0);
+
+        // Point 1: three array values.
+        push_u32(&mut bytes, 1);
+        push_u32(&mut bytes, 0);
+        push_f64(&mut bytes, 1.0);
+        push_f64(&mut bytes, 0.0);
+        push_u32(&mut bytes, 3);
+        push_f64(&mut bytes, 1.5);
+        push_f64(&mut bytes, 2.5);
+        push_f64(&mut bytes, 3.5);
+
+        let value_end = bytes.len() as u32;
+        patch_u32(&mut bytes, value_eofs_pos, value_end);
+
+        let toc_offset = bytes.len();
+        for (kind, start) in [
+            (0u32, header_start),
+            (1u32, types_start),
+            (2u32, sweep_start),
+            (3u32, trace_start),
+            (4u32, value_start),
+        ] {
+            push_u32(&mut bytes, kind);
+            push_u32(&mut bytes, start as u32);
+        }
+        bytes.extend_from_slice(&[0u8; 8]);
+        push_u32(&mut bytes, toc_offset as u32);
+        bytes
+    }
+
     fn build_simple_non_windowed_psf(sample_encoding: SampleEncoding) -> Vec<u8> {
         let mut bytes = Vec::new();
 
@@ -1451,9 +1979,11 @@ pub(crate) mod test_helpers {
 #[cfg(test)]
 mod tests {
     use super::test_helpers::{
-        build_non_windowed_complex_psf, build_non_windowed_int32_psf, build_non_windowed_int8_psf,
+        build_non_windowed_array_complex_psf, build_non_windowed_array_real_psf,
+        build_non_windowed_complex_psf, build_non_windowed_int8_psf, build_non_windowed_int32_psf,
         build_non_windowed_mixed_real_and_string_psf, build_non_windowed_real_psf,
-        build_non_windowed_struct_psf,
+        build_non_windowed_struct_psf, build_non_windowed_struct_with_array_psf,
+        build_non_windowed_variable_length_array_psf,
     };
     use super::*;
 
@@ -1546,6 +2076,78 @@ mod tests {
         assert_eq!(parsed.real_signals[0].name, "V(out)");
         assert_eq!(parsed.real_signals[0].values, vec![1.25, 2.5]);
         assert!(parsed.complex_signals.is_empty());
+    }
+
+    #[test]
+    fn test_parse_non_windowed_real_array_psf_binary() {
+        let bytes = build_non_windowed_array_real_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.sweeps[0].values, vec![0.0, 1.0]);
+        assert!(parsed.complex_signals.is_empty());
+        assert_eq!(parsed.real_signals.len(), 2);
+        assert_eq!(parsed.real_signals[0].name, "V(arr)[0]");
+        assert_eq!(parsed.real_signals[0].values, vec![1.0, 1.5]);
+        assert_eq!(parsed.real_signals[1].name, "V(arr)[1]");
+        assert_eq!(parsed.real_signals[1].values, vec![2.0, 2.5]);
+    }
+
+    #[test]
+    fn test_parse_non_windowed_complex_array_psf_binary() {
+        let bytes = build_non_windowed_array_complex_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.sweeps[0].values, vec![0.0, 1.0]);
+        assert!(parsed.real_signals.is_empty());
+        assert_eq!(parsed.complex_signals.len(), 2);
+        assert_eq!(parsed.complex_signals[0].name, "I(arr)[0]");
+        assert_eq!(
+            parsed.complex_signals[0].values,
+            vec![(1.0, 0.25), (1.5, 0.125)]
+        );
+        assert_eq!(parsed.complex_signals[1].name, "I(arr)[1]");
+        assert_eq!(
+            parsed.complex_signals[1].values,
+            vec![(2.0, -0.5), (2.5, -0.75)]
+        );
+    }
+
+    #[test]
+    fn test_parse_non_windowed_struct_with_array_psf_binary() {
+        let bytes = build_non_windowed_struct_with_array_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.sweeps[0].values, vec![0.0, 1.0]);
+        assert!(parsed.complex_signals.is_empty());
+        assert_eq!(parsed.real_signals.len(), 3);
+        assert_eq!(parsed.real_signals[0].name, "V(out).gain");
+        assert_eq!(parsed.real_signals[0].values, vec![10.0, 11.0]);
+        assert_eq!(parsed.real_signals[1].name, "V(out).taps[0]");
+        assert_eq!(parsed.real_signals[1].values, vec![0.1, 0.15]);
+        assert_eq!(parsed.real_signals[2].name, "V(out).taps[1]");
+        assert_eq!(parsed.real_signals[2].values, vec![0.2, 0.25]);
+    }
+
+    #[test]
+    fn test_parse_non_windowed_variable_length_array_pads_missing_values() {
+        let bytes = build_non_windowed_variable_length_array_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.sweeps[0].values, vec![0.0, 1.0]);
+        assert!(parsed.complex_signals.is_empty());
+        assert_eq!(parsed.real_signals.len(), 3);
+        assert_eq!(parsed.real_signals[0].name, "V(arr)[0]");
+        assert_eq!(parsed.real_signals[0].values, vec![1.0, 1.5]);
+        assert_eq!(parsed.real_signals[1].name, "V(arr)[1]");
+        assert!(parsed.real_signals[1].values[0].is_nan());
+        assert_eq!(parsed.real_signals[1].values[1], 2.5);
+        assert_eq!(parsed.real_signals[2].name, "V(arr)[2]");
+        assert!(parsed.real_signals[2].values[0].is_nan());
+        assert_eq!(parsed.real_signals[2].values[1], 3.5);
     }
 
     #[test]
