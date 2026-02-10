@@ -646,78 +646,11 @@ impl PacConfig {
 // Harmonic Balance Analysis Configuration
 // =============================================================================
 
-/// Harmonic balance tone specification
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct HbToneSpec {
-    /// Tone frequency (Hz)
-    pub frequency: f64,
-    /// Number of harmonics for this tone
-    pub harmonics: u32,
-    /// Source name associated with this tone
-    pub source: String,
-}
+/// Canonical HB tone spec reused from the HB dialog/execution model.
+pub type HbToneSpec = crate::simulation::dialog::hb::HbToneConfig;
 
-impl Default for HbToneSpec {
-    fn default() -> Self {
-        Self {
-            frequency: 1e9,
-            harmonics: 7,
-            source: "V1".to_string(),
-        }
-    }
-}
-
-/// Harmonic balance analysis configuration
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct HbConfig {
-    /// Fundamental tones for multi-tone analysis
-    pub tones: Vec<HbToneSpec>,
-    /// Maximum order for intermodulation products
-    pub max_order: u32,
-    /// Convergence tolerance
-    pub tolerance: f64,
-    /// Maximum iterations
-    pub max_iterations: u32,
-    /// Use Krylov subspace solver for large problems
-    pub use_krylov: bool,
-    /// Oversample factor for accuracy
-    pub oversample: u32,
-}
-
-impl Default for HbConfig {
-    fn default() -> Self {
-        Self {
-            tones: vec![HbToneSpec::default()],
-            max_order: 7,
-            tolerance: 1e-6,
-            max_iterations: 200,
-            use_krylov: true,
-            oversample: 4,
-        }
-    }
-}
-
-impl HbConfig {
-    /// Generate HB SPICE command string
-    pub fn to_spice_string(&self) -> String {
-        // Format: .HB tone1_freq [tone2_freq ...] harmonics [options]
-        if self.tones.is_empty() {
-            return ".HB 1G 7".to_string(); // Default
-        }
-        let tones_str: Vec<String> = self
-            .tones
-            .iter()
-            .map(|t| format_engineering(t.frequency))
-            .collect();
-        format!(
-            ".HB {} {} ORDER={} TOL={}",
-            tones_str.join(" "),
-            self.tones.first().map(|t| t.harmonics).unwrap_or(7),
-            self.max_order,
-            self.tolerance
-        )
-    }
-}
+/// Canonical HB config reused from the HB dialog/execution model.
+pub type HbConfig = crate::simulation::dialog::hb::HbConfig;
 
 // =============================================================================
 // STB (Loop Stability) Analysis Configuration
@@ -1531,6 +1464,16 @@ mod tests {
             source2: None,
         };
         assert_eq!(dc.to_spice_string(), ".DC V1 0 5 100m");
+    }
+
+    #[test]
+    fn test_hb_config_reuses_dialog_model_for_spice_generation() {
+        let hb = HbConfig::new(1e9, 9)
+            .add_tone(HbToneSpec::new(900e6, 5).with_name("LO").with_source("VLO"));
+        let spice = hb.to_spice_string();
+        assert!(spice.starts_with(".hb "));
+        assert!(spice.contains("harmonics=9"));
+        assert!(spice.contains("tone2=900Meg"));
     }
 
     #[test]

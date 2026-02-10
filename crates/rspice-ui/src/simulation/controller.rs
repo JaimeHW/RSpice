@@ -1290,17 +1290,40 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid harmonic balance settings: {}", e))?;
         let mut tones = Vec::with_capacity(1 + hb_cfg.additional_tones.len());
-        tones.push(
+        let primary_name = if hb_cfg.fundamental_name.trim().is_empty() {
+            "tone1".to_string()
+        } else {
+            hb_cfg.fundamental_name.trim().to_string()
+        };
+        let mut primary_tone =
             HbToneSpec::new(hb_cfg.fundamental_freq, hb_cfg.num_harmonics as usize)
-                .with_name("tone1"),
-        );
+                .with_name(primary_name);
+        if let Some(source) = hb_cfg
+            .fundamental_source
+            .as_deref()
+            .map(str::trim)
+            .filter(|source| !source.is_empty())
+        {
+            primary_tone = primary_tone.with_source(source.to_string());
+        }
+        tones.push(primary_tone);
         for (idx, tone) in hb_cfg.additional_tones.iter().enumerate() {
             let label = if tone.name.trim().is_empty() {
                 format!("tone{}", idx + 2)
             } else {
                 tone.name.clone()
             };
-            tones.push(HbToneSpec::new(tone.frequency, tone.harmonics as usize).with_name(label));
+            let mut tone_spec =
+                HbToneSpec::new(tone.frequency, tone.harmonics as usize).with_name(label);
+            if let Some(source) = tone
+                .source
+                .as_deref()
+                .map(str::trim)
+                .filter(|source| !source.is_empty())
+            {
+                tone_spec = tone_spec.with_source(source.to_string());
+            }
+            tones.push(tone_spec);
         }
         Ok(AnalysisSpec::HarmonicBalance {
             tones,
@@ -4169,12 +4192,19 @@ mod tests {
         let mut state = AppState::default();
         state.dialogs.hb_state = crate::simulation::dialog::hb::HbDialogState::from_config(
             &HbConfig::new(1.2e9, 11)
-                .add_tone(HbToneConfig::new(900e6, 5))
+                .add_tone(
+                    HbToneConfig::new(900e6, 5)
+                        .with_name("LO")
+                        .with_source("VLO"),
+                )
+                .add_tone(HbToneConfig::new(2.1e9, 3).with_name("AUX"))
                 .with_solver(HbSolverType::Krylov)
                 .with_oversample(6)
                 .with_tolerance(2e-6)
                 .with_source_stepping(true),
         );
+        state.dialogs.hb_state.fundamental_name = "RF".to_string();
+        state.dialogs.hb_state.fundamental_source = "VRF".to_string();
         state.dialogs.hb_state.maxiter = "175".to_string();
         state.dialogs.hb_state.damping = "0.6".to_string();
 
@@ -4195,11 +4225,19 @@ mod tests {
                 source_stepping,
                 verbose,
             } => {
-                assert_eq!(tones.len(), 2);
+                assert_eq!(tones.len(), 3);
                 assert!((tones[0].frequency - 1.2e9).abs() < 1e-3);
                 assert_eq!(tones[0].harmonics, 11);
+                assert_eq!(tones[0].name.as_deref(), Some("RF"));
+                assert_eq!(tones[0].source.as_deref(), Some("VRF"));
                 assert!((tones[1].frequency - 900e6).abs() < 1e-3);
                 assert_eq!(tones[1].harmonics, 5);
+                assert_eq!(tones[1].name.as_deref(), Some("LO"));
+                assert_eq!(tones[1].source.as_deref(), Some("VLO"));
+                assert!((tones[2].frequency - 2.1e9).abs() < 1e-3);
+                assert_eq!(tones[2].harmonics, 3);
+                assert_eq!(tones[2].name.as_deref(), Some("AUX"));
+                assert!(tones[2].source.is_none());
                 assert!((reltol - 2e-6).abs() < 1e-18);
                 assert!((abstol - 1e-12).abs() < 1e-24);
                 assert_eq!(max_iterations, 175);

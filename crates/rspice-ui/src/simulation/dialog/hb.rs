@@ -19,13 +19,14 @@
 
 use super::options::parse_si_value;
 use egui::Ui;
+use serde::{Deserialize, Serialize};
 
 // =============================================================================
 // HB Solver Type
 // =============================================================================
 
 /// Solver type for Harmonic Balance
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HbSolverType {
     /// Standard Newton-Raphson
     #[default]
@@ -62,7 +63,7 @@ impl HbSolverType {
 // =============================================================================
 
 /// Configuration for a single tone in multi-tone HB
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HbToneConfig {
     /// Tone frequency (Hz)
     pub frequency: f64,
@@ -70,6 +71,8 @@ pub struct HbToneConfig {
     pub harmonics: u32,
     /// Tone name/label
     pub name: String,
+    /// Optional independent source name this tone should drive.
+    pub source: Option<String>,
 }
 
 impl HbToneConfig {
@@ -79,12 +82,24 @@ impl HbToneConfig {
             frequency,
             harmonics,
             name: String::new(),
+            source: None,
         }
     }
 
     /// Set tone name
     pub fn with_name(mut self, name: impl Into<String>) -> Self {
         self.name = name.into();
+        self
+    }
+
+    /// Set optional source routing for this tone.
+    pub fn with_source(mut self, source: impl Into<String>) -> Self {
+        let source = source.into();
+        self.source = if source.trim().is_empty() {
+            None
+        } else {
+            Some(source)
+        };
         self
     }
 }
@@ -95,6 +110,7 @@ impl Default for HbToneConfig {
             frequency: 1e9,
             harmonics: 9,
             name: String::new(),
+            source: None,
         }
     }
 }
@@ -106,12 +122,16 @@ impl Default for HbToneConfig {
 /// Harmonic Balance analysis configuration
 ///
 /// Commercial-grade configuration matching Cadence Spectre HB parameters.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HbConfig {
     /// Fundamental frequency (Hz) - primary tone
     pub fundamental_freq: f64,
     /// Number of harmonics (DC through Nth)
     pub num_harmonics: u32,
+    /// Optional primary tone name
+    pub fundamental_name: String,
+    /// Optional source routing for primary tone
+    pub fundamental_source: Option<String>,
     /// Additional tones for multi-tone analysis
     pub additional_tones: Vec<HbToneConfig>,
     /// Oversampling factor for FFT (anti-aliasing)
@@ -141,6 +161,8 @@ impl Default for HbConfig {
         Self {
             fundamental_freq: 1e9, // 1 GHz RF default
             num_harmonics: 9,      // DC through 9th harmonic
+            fundamental_name: "tone1".to_string(),
+            fundamental_source: None,
             additional_tones: Vec::new(),
             oversample: 2,       // 2x oversampling (Spectre default)
             max_mixing_order: 5, // Typical for 2-tone IMD
@@ -162,6 +184,8 @@ impl HbConfig {
         Self {
             fundamental_freq: fundamental,
             num_harmonics: harmonics,
+            fundamental_name: "tone1".to_string(),
+            fundamental_source: None,
             ..Default::default()
         }
     }
@@ -179,6 +203,11 @@ impl HbConfig {
         Self {
             fundamental_freq: fundamental,
             num_harmonics: harmonics,
+            fundamental_name: tones
+                .first()
+                .map(|tone| tone.name.clone())
+                .unwrap_or_else(|| "tone1".to_string()),
+            fundamental_source: tones.first().and_then(|tone| tone.source.clone()),
             additional_tones: additional,
             ..Default::default()
         }
@@ -217,6 +246,22 @@ impl HbConfig {
     /// Check if multi-tone
     pub fn is_multi_tone(&self) -> bool {
         !self.additional_tones.is_empty()
+    }
+
+    /// Primary tone as a full tone config.
+    pub fn primary_tone(&self) -> HbToneConfig {
+        let mut tone = HbToneConfig::new(self.fundamental_freq, self.num_harmonics);
+        tone.name = self.fundamental_name.clone();
+        tone.source = self.fundamental_source.clone();
+        tone
+    }
+
+    /// Get all tones (primary + additional) in execution order.
+    pub fn all_tones(&self) -> Vec<HbToneConfig> {
+        let mut tones = Vec::with_capacity(1 + self.additional_tones.len());
+        tones.push(self.primary_tone());
+        tones.extend(self.additional_tones.iter().cloned());
+        tones
     }
 
     /// Total number of spectral components per node
@@ -293,6 +338,11 @@ impl HbConfig {
         cmd
     }
 
+    /// Generate SPICE directive (state/simulation_command compatibility).
+    pub fn to_spice_string(&self) -> String {
+        self.to_spice()
+    }
+
     /// Validate configuration
     pub fn validate(&self) -> Result<(), String> {
         if self.fundamental_freq <= 0.0 {
@@ -301,6 +351,14 @@ impl HbConfig {
 
         if self.num_harmonics == 0 {
             return Err("Number of harmonics must be at least 1".to_string());
+        }
+        if self
+            .fundamental_source
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|name| name.is_empty())
+        {
+            return Err("Fundamental tone source cannot be empty".to_string());
         }
 
         if self.oversample == 0 {
@@ -327,6 +385,14 @@ impl HbConfig {
             if tone.harmonics == 0 {
                 return Err(format!("Tone {} harmonics must be at least 1", i + 2));
             }
+            if tone
+                .source
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|name| name.is_empty())
+            {
+                return Err(format!("Tone {} source cannot be empty", i + 2));
+            }
         }
 
         Ok(())
@@ -343,12 +409,40 @@ impl HbConfig {
 // =============================================================================
 
 /// Dialog state with string buffers for SI-prefix input
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HbToneDialogState {
+    /// Tone frequency buffer.
+    pub frequency: String,
+    /// Harmonics buffer.
+    pub harmonics: String,
+    /// Optional name.
+    pub name: String,
+    /// Optional source routing.
+    pub source: String,
+}
+
+impl HbToneDialogState {
+    fn from_tone_config(tone: &HbToneConfig) -> Self {
+        Self {
+            frequency: format_freq(tone.frequency),
+            harmonics: tone.harmonics.to_string(),
+            name: tone.name.clone(),
+            source: tone.source.clone().unwrap_or_default(),
+        }
+    }
+}
+
+/// Dialog state with string buffers for SI-prefix input
 #[derive(Debug, Clone, Default)]
 pub struct HbDialogState {
     /// Fundamental frequency buffer
     pub fundamental: String,
     /// Number of harmonics buffer
     pub harmonics: String,
+    /// Primary tone name buffer
+    pub fundamental_name: String,
+    /// Primary tone source buffer
+    pub fundamental_source: String,
     /// Oversample factor buffer
     pub oversample: String,
     /// Relative tolerance buffer
@@ -363,12 +457,8 @@ pub struct HbDialogState {
     pub solver_idx: usize,
     /// Source stepping enabled
     pub source_stepping: bool,
-    /// Multi-tone enabled
-    pub multi_tone_enabled: bool,
-    /// Second tone frequency buffer
-    pub tone2_freq: String,
-    /// Second tone harmonics buffer
-    pub tone2_harmonics: String,
+    /// Additional tone rows.
+    pub additional_tones: Vec<HbToneDialogState>,
     /// Initialized flag
     pub initialized: bool,
 }
@@ -379,6 +469,8 @@ impl HbDialogState {
         Self {
             fundamental: format_freq(config.fundamental_freq),
             harmonics: config.num_harmonics.to_string(),
+            fundamental_name: config.fundamental_name.clone(),
+            fundamental_source: config.fundamental_source.clone().unwrap_or_default(),
             oversample: config.oversample.to_string(),
             reltol: format!("{:.0e}", config.reltol),
             maxiter: config.maxiter.to_string(),
@@ -389,17 +481,11 @@ impl HbDialogState {
                 HbSolverType::Krylov => 1,
             },
             source_stepping: config.source_stepping,
-            multi_tone_enabled: !config.additional_tones.is_empty(),
-            tone2_freq: config
+            additional_tones: config
                 .additional_tones
-                .first()
-                .map(|t| format_freq(t.frequency))
-                .unwrap_or_else(|| "900Meg".to_string()),
-            tone2_harmonics: config
-                .additional_tones
-                .first()
-                .map(|t| t.harmonics.to_string())
-                .unwrap_or_else(|| "5".to_string()),
+                .iter()
+                .map(HbToneDialogState::from_tone_config)
+                .collect(),
             initialized: true,
         }
     }
@@ -439,6 +525,16 @@ impl HbDialogState {
         let mut config = HbConfig {
             fundamental_freq: fundamental,
             num_harmonics: harmonics,
+            fundamental_name: if self.fundamental_name.trim().is_empty() {
+                "tone1".to_string()
+            } else {
+                self.fundamental_name.trim().to_string()
+            },
+            fundamental_source: if self.fundamental_source.trim().is_empty() {
+                None
+            } else {
+                Some(self.fundamental_source.trim().to_string())
+            },
             additional_tones: Vec::new(),
             oversample,
             max_mixing_order: 5,
@@ -452,19 +548,32 @@ impl HbDialogState {
             verbose: false,
         };
 
-        if self.multi_tone_enabled {
-            let tone2_freq = parse_si_value(&self.tone2_freq)
-                .map_err(|e| format!("Invalid tone 2 frequency: {}", e))?;
-            let tone2_harm: u32 = self
-                .tone2_harmonics
-                .parse()
-                .map_err(|_| "Invalid tone 2 harmonics")?;
+        for (idx, tone) in self.additional_tones.iter().enumerate() {
+            let is_empty = tone.frequency.trim().is_empty()
+                && tone.harmonics.trim().is_empty()
+                && tone.name.trim().is_empty()
+                && tone.source.trim().is_empty();
+            if is_empty {
+                continue;
+            }
 
-            config.additional_tones.push(HbToneConfig {
-                frequency: tone2_freq,
-                harmonics: tone2_harm,
-                name: "LO".to_string(),
-            });
+            let freq = parse_si_value(&tone.frequency)
+                .map_err(|e| format!("Invalid tone {} frequency: {}", idx + 2, e))?;
+            let harm: u32 = tone
+                .harmonics
+                .parse()
+                .map_err(|_| format!("Invalid tone {} harmonics", idx + 2))?;
+
+            let mut tone_cfg =
+                HbToneConfig::new(freq, harm).with_name(if tone.name.trim().is_empty() {
+                    format!("tone{}", idx + 2)
+                } else {
+                    tone.name.trim().to_string()
+                });
+            if !tone.source.trim().is_empty() {
+                tone_cfg = tone_cfg.with_source(tone.source.trim().to_string());
+            }
+            config.additional_tones.push(tone_cfg);
         }
 
         config.validate()?;
@@ -515,6 +624,22 @@ impl HbDialogState {
                     );
                     ui.end_row();
 
+                    ui.label("Tone Name:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.fundamental_name)
+                            .desired_width(120.0)
+                            .hint_text("tone1"),
+                    );
+                    ui.end_row();
+
+                    ui.label("Source:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.fundamental_source)
+                            .desired_width(120.0)
+                            .hint_text("V1"),
+                    );
+                    ui.end_row();
+
                     ui.label("Oversample:");
                     ui.add(
                         egui::TextEdit::singleline(&mut self.oversample)
@@ -527,39 +652,66 @@ impl HbDialogState {
 
         ui.add_space(8.0);
 
-        // Multi-Tone (optional)
-        ui.checkbox(
-            &mut self.multi_tone_enabled,
-            "Multi-Tone (Mixer/Intermodulation)",
-        );
-        if self.multi_tone_enabled {
+        // Additional tones.
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Additional Tones").strong());
+                if ui.small_button("+ Add Tone").clicked() {
+                    self.additional_tones.push(HbToneDialogState {
+                        frequency: "900Meg".to_string(),
+                        harmonics: "5".to_string(),
+                        name: format!("tone{}", self.additional_tones.len() + 2),
+                        source: String::new(),
+                    });
+                }
+            });
             ui.add_space(4.0);
-            ui.group(|ui| {
-                ui.label(egui::RichText::new("Second Tone (LO)").strong());
-                ui.add_space(4.0);
 
-                egui::Grid::new("hb_tone2_grid")
-                    .num_columns(2)
-                    .spacing([20.0, 6.0])
-                    .show(ui, |ui| {
-                        ui.label("Frequency:");
+            if self.additional_tones.is_empty() {
+                ui.label(
+                    egui::RichText::new("No additional tones configured")
+                        .small()
+                        .weak(),
+                );
+            } else {
+                let mut remove_index = None;
+                for (idx, tone) in self.additional_tones.iter_mut().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Tone {}:", idx + 2));
+                        ui.label("F");
                         ui.add(
-                            egui::TextEdit::singleline(&mut self.tone2_freq)
-                                .desired_width(120.0)
+                            egui::TextEdit::singleline(&mut tone.frequency)
+                                .desired_width(80.0)
                                 .hint_text("900Meg"),
                         );
-                        ui.end_row();
-
-                        ui.label("Harmonics:");
+                        ui.label("H");
                         ui.add(
-                            egui::TextEdit::singleline(&mut self.tone2_harmonics)
-                                .desired_width(120.0)
+                            egui::TextEdit::singleline(&mut tone.harmonics)
+                                .desired_width(40.0)
                                 .hint_text("5"),
                         );
-                        ui.end_row();
+                        ui.label("Name");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut tone.name)
+                                .desired_width(70.0)
+                                .hint_text("LO"),
+                        );
+                        ui.label("Source");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut tone.source)
+                                .desired_width(70.0)
+                                .hint_text("VLO"),
+                        );
+                        if ui.small_button("Remove").clicked() {
+                            remove_index = Some(idx);
+                        }
                     });
-            });
-        }
+                }
+                if let Some(idx) = remove_index {
+                    self.additional_tones.remove(idx);
+                }
+            }
+        });
 
         ui.add_space(8.0);
 
@@ -689,6 +841,8 @@ mod tests {
         let cfg = HbConfig::default();
         assert_eq!(cfg.fundamental_freq, 1e9);
         assert_eq!(cfg.num_harmonics, 9);
+        assert_eq!(cfg.fundamental_name, "tone1");
+        assert!(cfg.fundamental_source.is_none());
         assert_eq!(cfg.oversample, 2);
         assert!(!cfg.is_multi_tone());
     }
@@ -710,6 +864,7 @@ mod tests {
 
         assert!(cfg.is_multi_tone());
         assert_eq!(cfg.fundamental_freq, 1e9);
+        assert_eq!(cfg.fundamental_name, "RF");
         assert_eq!(cfg.additional_tones.len(), 1);
     }
 
@@ -734,6 +889,15 @@ mod tests {
         assert!(cfg.is_multi_tone());
         assert_eq!(cfg.additional_tones.len(), 1);
         assert_eq!(cfg.additional_tones[0].frequency, 800e6);
+    }
+
+    #[test]
+    fn test_config_all_tones_includes_primary_and_additional() {
+        let cfg = HbConfig::new(1e9, 9).add_tone(HbToneConfig::new(800e6, 5).with_name("LO"));
+        let tones = cfg.all_tones();
+        assert_eq!(tones.len(), 2);
+        assert_eq!(tones[0].frequency, 1e9);
+        assert_eq!(tones[1].name, "LO");
     }
 
     // =========================================================================
@@ -834,6 +998,7 @@ mod tests {
         assert!(spice.contains("1G"));
         assert!(spice.contains("harmonics=9"));
         assert!(spice.contains("oversample=2"));
+        assert_eq!(cfg.to_spice_string(), spice);
     }
 
     #[test]
@@ -959,12 +1124,19 @@ mod tests {
         assert_eq!(tone.frequency, 2.4e9);
         assert_eq!(tone.harmonics, 7);
         assert!(tone.name.is_empty());
+        assert!(tone.source.is_none());
     }
 
     #[test]
     fn test_tone_config_with_name() {
         let tone = HbToneConfig::new(2.4e9, 7).with_name("WiFi");
         assert_eq!(tone.name, "WiFi");
+    }
+
+    #[test]
+    fn test_tone_config_with_source() {
+        let tone = HbToneConfig::new(2.4e9, 7).with_source("VLO");
+        assert_eq!(tone.source.as_deref(), Some("VLO"));
     }
 
     #[test]
@@ -988,6 +1160,8 @@ mod tests {
 
         assert_eq!(cfg.fundamental_freq, 1e9);
         assert_eq!(cfg.num_harmonics, 9);
+        assert_eq!(cfg.fundamental_name, "tone1");
+        assert!(cfg.fundamental_source.is_none());
         assert_eq!(cfg.oversample, 2);
         assert_eq!(cfg.solver, HbSolverType::Newton);
     }
@@ -1031,6 +1205,7 @@ mod tests {
         assert!(state.initialized);
         assert!(state.fundamental.contains("2.4G"));
         assert_eq!(state.harmonics, "15");
+        assert_eq!(state.fundamental_name, "tone1");
     }
 
     #[test]
@@ -1038,6 +1213,8 @@ mod tests {
         let mut state = HbDialogState::from_config(&HbConfig::default());
         state.fundamental = "1G".to_string();
         state.harmonics = "9".to_string();
+        state.fundamental_name = "RF".to_string();
+        state.fundamental_source = "VRF".to_string();
 
         let result = state.to_config();
         assert!(result.is_ok());
@@ -1045,6 +1222,8 @@ mod tests {
         let cfg = result.unwrap();
         assert_eq!(cfg.fundamental_freq, 1e9);
         assert_eq!(cfg.num_harmonics, 9);
+        assert_eq!(cfg.fundamental_name, "RF");
+        assert_eq!(cfg.fundamental_source.as_deref(), Some("VRF"));
     }
 
     #[test]
@@ -1059,9 +1238,12 @@ mod tests {
     #[test]
     fn test_dialog_state_multi_tone() {
         let mut state = HbDialogState::from_config(&HbConfig::default());
-        state.multi_tone_enabled = true;
-        state.tone2_freq = "800Meg".to_string();
-        state.tone2_harmonics = "5".to_string();
+        state.additional_tones.push(HbToneDialogState {
+            frequency: "800Meg".to_string(),
+            harmonics: "5".to_string(),
+            name: "LO".to_string(),
+            source: "VLO".to_string(),
+        });
 
         let result = state.to_config();
         assert!(result.is_ok());
@@ -1069,6 +1251,44 @@ mod tests {
         let cfg = result.unwrap();
         assert!(cfg.is_multi_tone());
         assert_eq!(cfg.additional_tones[0].frequency, 800e6);
+        assert_eq!(cfg.additional_tones[0].name, "LO");
+        assert_eq!(cfg.additional_tones[0].source.as_deref(), Some("VLO"));
+    }
+
+    #[test]
+    fn test_dialog_state_parses_multiple_additional_tones() {
+        let mut state = HbDialogState::from_config(&HbConfig::default());
+        state.additional_tones = vec![
+            HbToneDialogState {
+                frequency: "900Meg".to_string(),
+                harmonics: "5".to_string(),
+                name: "LO".to_string(),
+                source: "VLO".to_string(),
+            },
+            HbToneDialogState {
+                frequency: "2.1G".to_string(),
+                harmonics: "3".to_string(),
+                name: "AUX".to_string(),
+                source: String::new(),
+            },
+        ];
+
+        let cfg = state
+            .to_config()
+            .expect("multiple additional tones should parse");
+        assert_eq!(cfg.additional_tones.len(), 2);
+        assert!((cfg.additional_tones[0].frequency - 900e6).abs() < 1e-3);
+        assert_eq!(cfg.additional_tones[0].source.as_deref(), Some("VLO"));
+        assert!((cfg.additional_tones[1].frequency - 2.1e9).abs() < 1e-3);
+        assert!(cfg.additional_tones[1].source.is_none());
+    }
+
+    #[test]
+    fn test_dialog_state_skips_completely_empty_additional_row() {
+        let mut state = HbDialogState::from_config(&HbConfig::default());
+        state.additional_tones.push(HbToneDialogState::default());
+        let cfg = state.to_config().expect("empty tone row should be ignored");
+        assert!(cfg.additional_tones.is_empty());
     }
 
     #[test]
