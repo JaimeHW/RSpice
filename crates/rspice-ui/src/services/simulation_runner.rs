@@ -469,12 +469,16 @@ pub fn run_ac_analysis(
     Ok(AcData::from_results(results, &node_names))
 }
 
-/// Run DISTO analysis using transfer-based harmonic sideband estimation.
+/// Run DISTO analysis using nonlinear HB harmonic extraction.
 ///
-/// Primary execution uses nonlinear HB solves per sweep point and extracts
-/// distortion directly from harmonic spectra. If HB is unavailable for the
-/// circuit class, this falls back to linearized transfer-based estimation.
-pub fn run_disto_analysis(netlist_text: &str, config: &DistoRunConfig) -> Result<DistoData, String> {
+/// Primary execution solves HB per sweep point and extracts HD2/HD3/THD from
+/// harmonic spectra. When `f2_over_f1` is configured, it additionally performs
+/// commensurate two-tone HB and derives IMD2/IMD3 from nonlinear sidebands.
+/// If nonlinear HB is unavailable, this falls back to linearized AC estimates.
+pub fn run_disto_analysis(
+    netlist_text: &str,
+    config: &DistoRunConfig,
+) -> Result<DistoData, String> {
     config.validate()?;
 
     match run_disto_analysis_nonlinear_hb(netlist_text, config) {
@@ -494,11 +498,15 @@ fn run_disto_analysis_nonlinear_hb(
     netlist_text: &str,
     config: &DistoRunConfig,
 ) -> Result<DistoData, String> {
-    use rspice_core::analysis::HbConfig;
+    use rspice_core::analysis::{HbConfig, HbTone};
 
     let netlist = rspice_core::netlist::parse_netlist(netlist_text)
         .map_err(|e| format!("Parse error: {}", e))?;
     let engine = Engine::new(build_engine_config(&netlist, None));
+    let two_tone_plan = config
+        .f2_over_f1
+        .map(build_disto_two_tone_harmonic_plan)
+        .transpose()?;
 
     let frequencies = generate_freq_points(
         config.start_freq,
@@ -515,11 +523,29 @@ fn run_disto_analysis_nonlinear_hb(
         hd2_db: Vec<Value>,
         hd3_db: Vec<Value>,
         thd_percent: Vec<Value>,
+        imd2_db: Option<Vec<Value>>,
+        imd3_db: Option<Vec<Value>>,
     }
 
     let mut accumulators: Vec<(String, DistoAccum)> = Vec::new();
     for (point_idx, &freq) in frequencies.iter().enumerate() {
-        let hb_config = HbConfig::new(freq).with_harmonics(3).with_tolerance(1e-6);
+        let (hb_config, fundamental_harmonic) = if let Some(plan) = two_tone_plan {
+            let base_freq = freq / plan.tone1_harmonic as Value;
+            let mut hb_config = HbConfig::new(base_freq)
+                .with_harmonics(plan.max_harmonic)
+                .with_tolerance(1e-6);
+            hb_config.tones = vec![
+                HbTone::new(freq, 1).with_name("f1"),
+                HbTone::new(freq * plan.f2_over_f1, 1).with_name("f2"),
+            ];
+            (hb_config, plan.tone1_harmonic)
+        } else {
+            (
+                HbConfig::new(freq).with_harmonics(3).with_tolerance(1e-6),
+                1,
+            )
+        };
+
         let hb = engine
             .run_hb(&netlist, hb_config)
             .map_err(|e| format!("HB DISTO solve failed at {:.6e} Hz: {}", freq, e))?;
@@ -537,6 +563,8 @@ fn run_disto_analysis_nonlinear_hb(
                             hd2_db: Vec::with_capacity(frequencies.len()),
                             hd3_db: Vec::with_capacity(frequencies.len()),
                             thd_percent: Vec::with_capacity(frequencies.len()),
+                            imd2_db: two_tone_plan.map(|_| Vec::with_capacity(frequencies.len())),
+                            imd3_db: two_tone_plan.map(|_| Vec::with_capacity(frequencies.len())),
                         },
                     )
                 })
@@ -559,27 +587,12 @@ fn run_disto_analysis_nonlinear_hb(
                         freq, trace_name
                     )
                 })?;
-            let fund = spectrum
-                .coefficients
-                .get(1)
-                .copied()
-                .unwrap_or_else(|| Complex64::new(0.0, 0.0))
-                .norm()
-                .max(1e-30);
-            let h2 = spectrum
-                .coefficients
-                .get(2)
-                .copied()
-                .unwrap_or_else(|| Complex64::new(0.0, 0.0))
-                .norm()
-                .max(0.0);
-            let h3 = spectrum
-                .coefficients
-                .get(3)
-                .copied()
-                .unwrap_or_else(|| Complex64::new(0.0, 0.0))
-                .norm()
-                .max(0.0);
+            let fund =
+                hb_magnitude_at_harmonic(&spectrum.coefficients, fundamental_harmonic).max(1e-30);
+            let h2 =
+                hb_magnitude_at_harmonic(&spectrum.coefficients, 2 * fundamental_harmonic).max(0.0);
+            let h3 =
+                hb_magnitude_at_harmonic(&spectrum.coefficients, 3 * fundamental_harmonic).max(0.0);
 
             let r2 = h2 / fund;
             let r3 = h3 / fund;
@@ -587,6 +600,27 @@ fn run_disto_analysis_nonlinear_hb(
             acc.hd2_db.push(ratio_to_dbc(r2));
             acc.hd3_db.push(ratio_to_dbc(r3));
             acc.thd_percent.push((r2 * r2 + r3 * r3).sqrt() * 100.0);
+
+            if let Some(plan) = two_tone_plan {
+                let imd2_harmonics = [
+                    plan.tone2_harmonic.abs_diff(plan.tone1_harmonic),
+                    plan.tone1_harmonic + plan.tone2_harmonic,
+                ];
+                let imd3_harmonics = [
+                    (2 * plan.tone1_harmonic).abs_diff(plan.tone2_harmonic),
+                    (2 * plan.tone2_harmonic).abs_diff(plan.tone1_harmonic),
+                ];
+                let imd2_ratio =
+                    max_spectral_sideband_ratio(&spectrum.coefficients, &imd2_harmonics, fund);
+                let imd3_ratio =
+                    max_spectral_sideband_ratio(&spectrum.coefficients, &imd3_harmonics, fund);
+                if let Some(series) = acc.imd2_db.as_mut() {
+                    series.push(ratio_to_dbc(imd2_ratio));
+                }
+                if let Some(series) = acc.imd3_db.as_mut() {
+                    series.push(ratio_to_dbc(imd3_ratio));
+                }
+            }
         }
     }
 
@@ -594,7 +628,7 @@ fn run_disto_analysis_nonlinear_hb(
         return Err("DISTO produced no output traces".to_string());
     }
 
-    let mut traces: Vec<DistoTrace> = accumulators
+    let traces: Vec<DistoTrace> = accumulators
         .into_iter()
         .map(|(name, acc)| DistoTrace {
             name,
@@ -602,31 +636,136 @@ fn run_disto_analysis_nonlinear_hb(
             hd2_db: acc.hd2_db,
             hd3_db: acc.hd3_db,
             thd_percent: acc.thd_percent,
-            imd2_db: None,
-            imd3_db: None,
+            imd2_db: acc.imd2_db,
+            imd3_db: acc.imd3_db,
         })
         .collect();
-
-    let mut warnings = Vec::new();
-    if let Some(f2_over_f1) = config.f2_over_f1 {
-        let imd = compute_linearized_imd_sidebands(netlist_text, config, f2_over_f1)?;
-        for trace in &mut traces {
-            if let Some((imd2, imd3)) = imd.get(&trace.name) {
-                trace.imd2_db = Some(imd2.clone());
-                trace.imd3_db = Some(imd3.clone());
-            }
-        }
-        warnings.push(
-            "DISTO IMD2/IMD3 are estimated from linearized sideband transfer response; nonlinear two-tone HB solve is not yet enabled in this path."
-                .to_string(),
-        );
-    }
 
     Ok(DistoData {
         frequencies,
         traces,
-        warnings,
+        warnings: Vec::new(),
     })
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DistoTwoToneHarmonicPlan {
+    f2_over_f1: Value,
+    tone1_harmonic: usize,
+    tone2_harmonic: usize,
+    max_harmonic: usize,
+}
+
+fn build_disto_two_tone_harmonic_plan(
+    f2_over_f1: Value,
+) -> Result<DistoTwoToneHarmonicPlan, String> {
+    let (mut numerator, mut denominator) = approximate_ratio_fraction(f2_over_f1, 24, 1e-6)
+        .ok_or_else(|| {
+            format!(
+                "DISTO f2_over_f1={} cannot be represented as a stable low-order rational ratio",
+                f2_over_f1
+            )
+        })?;
+    let gcd = gcd_u32(numerator, denominator).max(1);
+    numerator /= gcd;
+    denominator /= gcd;
+
+    let tone1_harmonic = denominator as usize;
+    let tone2_harmonic = numerator as usize;
+    if tone2_harmonic <= tone1_harmonic {
+        return Err(format!(
+            "DISTO f2_over_f1={} must map to tone2 > tone1",
+            f2_over_f1
+        ));
+    }
+
+    let max_harmonic = (3 * tone1_harmonic)
+        .max(3 * tone2_harmonic)
+        .max(tone1_harmonic + tone2_harmonic)
+        .max((2 * tone1_harmonic).abs_diff(tone2_harmonic))
+        .max((2 * tone2_harmonic).abs_diff(tone1_harmonic));
+
+    if max_harmonic > 256 {
+        return Err(format!(
+            "DISTO two-tone HB harmonic order {} exceeds supported practical limit",
+            max_harmonic
+        ));
+    }
+
+    Ok(DistoTwoToneHarmonicPlan {
+        f2_over_f1,
+        tone1_harmonic,
+        tone2_harmonic,
+        max_harmonic,
+    })
+}
+
+fn approximate_ratio_fraction(
+    value: Value,
+    max_denominator: u32,
+    rel_tol: Value,
+) -> Option<(u32, u32)> {
+    if !value.is_finite() || value <= 0.0 || max_denominator == 0 {
+        return None;
+    }
+
+    let mut best: Option<(u32, u32, Value)> = None;
+    for denominator in 1..=max_denominator {
+        let numerator_f = (value * denominator as Value).round();
+        if !numerator_f.is_finite() || numerator_f <= 0.0 {
+            continue;
+        }
+        let numerator = numerator_f as u32;
+        if numerator == 0 {
+            continue;
+        }
+
+        let approximated = numerator as Value / denominator as Value;
+        let rel_error = ((approximated - value).abs() / value.abs().max(1.0)).abs();
+        if rel_error > rel_tol {
+            continue;
+        }
+
+        match best {
+            Some((_, _, current_error)) if rel_error >= current_error => {}
+            _ => best = Some((numerator, denominator, rel_error)),
+        }
+    }
+
+    best.map(|(numerator, denominator, _)| (numerator, denominator))
+}
+
+fn gcd_u32(mut a: u32, mut b: u32) -> u32 {
+    while b != 0 {
+        let tmp = b;
+        b = a % b;
+        a = tmp;
+    }
+    a
+}
+
+fn hb_magnitude_at_harmonic(coefficients: &[Complex64], harmonic: usize) -> Value {
+    coefficients
+        .get(harmonic)
+        .copied()
+        .unwrap_or_else(|| Complex64::new(0.0, 0.0))
+        .norm()
+}
+
+fn max_spectral_sideband_ratio(
+    coefficients: &[Complex64],
+    sideband_harmonics: &[usize],
+    fundamental: Value,
+) -> Value {
+    let mut best: Value = 0.0;
+    for &harmonic in sideband_harmonics {
+        if harmonic == 0 {
+            continue;
+        }
+        let magnitude = hb_magnitude_at_harmonic(coefficients, harmonic).max(0.0);
+        best = best.max(magnitude / fundamental.max(1e-30));
+    }
+    best
 }
 
 fn run_disto_analysis_linearized(
@@ -666,8 +805,12 @@ fn run_disto_analysis_linearized(
         let mut hd2_db = Vec::with_capacity(frequencies.len());
         let mut hd3_db = Vec::with_capacity(frequencies.len());
         let mut thd_percent = Vec::with_capacity(frequencies.len());
-        let mut imd2_db = config.f2_over_f1.map(|_| Vec::with_capacity(frequencies.len()));
-        let mut imd3_db = config.f2_over_f1.map(|_| Vec::with_capacity(frequencies.len()));
+        let mut imd2_db = config
+            .f2_over_f1
+            .map(|_| Vec::with_capacity(frequencies.len()));
+        let mut imd3_db = config
+            .f2_over_f1
+            .map(|_| Vec::with_capacity(frequencies.len()));
 
         for &f1 in &frequencies {
             let fund = interpolate_magnitude_at(&ac.frequencies, &magnitudes, f1)
@@ -725,55 +868,6 @@ fn run_disto_analysis_linearized(
     })
 }
 
-fn compute_linearized_imd_sidebands(
-    netlist_text: &str,
-    config: &DistoRunConfig,
-    f2_over_f1: Value,
-) -> Result<std::collections::HashMap<String, (Vec<Value>, Vec<Value>)>, String> {
-    let max_factor = (f2_over_f1 + 1.0)
-        .max((2.0 * f2_over_f1 - 1.0).abs())
-        .max((2.0 - f2_over_f1).abs())
-        .max((f2_over_f1 - 1.0).abs());
-    let ac = run_ac_analysis(
-        netlist_text,
-        config.start_freq,
-        config.stop_freq * max_factor,
-        config.points_per_unit,
-        config.sweep.keyword(),
-    )?;
-    let frequencies = generate_freq_points(
-        config.start_freq,
-        config.stop_freq,
-        config.points_per_unit,
-        config.sweep.keyword(),
-    );
-
-    let mut per_trace = std::collections::HashMap::new();
-    for (name, response) in &ac.responses {
-        let magnitudes: Vec<Value> = response.iter().map(|value| value.norm()).collect();
-        let mut imd2 = Vec::with_capacity(frequencies.len());
-        let mut imd3 = Vec::with_capacity(frequencies.len());
-        for &f1 in &frequencies {
-            let fund = interpolate_magnitude_at(&ac.frequencies, &magnitudes, f1)
-                .unwrap_or(0.0)
-                .max(1e-30);
-            let sidebands2 = [((f2_over_f1 - 1.0).abs() * f1), ((f2_over_f1 + 1.0) * f1)];
-            let sidebands3 = [
-                ((2.0 - f2_over_f1).abs() * f1),
-                ((2.0 * f2_over_f1 - 1.0).abs() * f1),
-            ];
-            let ratio2 = max_sideband_ratio(&ac.frequencies, &magnitudes, &sidebands2, fund)
-                .unwrap_or(0.0);
-            let ratio3 = max_sideband_ratio(&ac.frequencies, &magnitudes, &sidebands3, fund)
-                .unwrap_or(0.0);
-            imd2.push(ratio_to_dbc(ratio2));
-            imd3.push(ratio_to_dbc(ratio3));
-        }
-        per_trace.insert(name.clone(), (imd2, imd3));
-    }
-    Ok(per_trace)
-}
-
 fn magnitude_to_db(value: Value) -> Value {
     20.0 * value.max(1e-30).log10()
 }
@@ -822,7 +916,11 @@ fn interpolate_magnitude_at(
         return Some(magnitudes[0]);
     }
 
-    match frequencies.binary_search_by(|value| value.partial_cmp(&target).unwrap_or(std::cmp::Ordering::Less)) {
+    match frequencies.binary_search_by(|value| {
+        value
+            .partial_cmp(&target)
+            .unwrap_or(std::cmp::Ordering::Less)
+    }) {
         Ok(idx) => magnitudes.get(idx).copied(),
         Err(upper) => {
             if upper == 0 || upper >= frequencies.len() {
@@ -3326,7 +3424,9 @@ fn compute_input_referred_pnoise(
             translated_frequencies
                 .len()
                 .checked_div(sideband_stride)
-                .ok_or_else(|| "PNOISE input-referred folding encountered invalid stride".to_string())?,
+                .ok_or_else(|| {
+                    "PNOISE input-referred folding encountered invalid stride".to_string()
+                })?,
             sideband_stride,
             "input-referred",
         )
@@ -4554,6 +4654,72 @@ pub struct HbData {
     pub converged: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct HbTwoToneLayout {
+    base_frequency: Value,
+    max_harmonic: usize,
+}
+
+fn build_two_tone_hb_layout(
+    tone1_freq: Value,
+    tone2_freq: Value,
+    tone1_harmonics: usize,
+    tone2_harmonics: usize,
+) -> Result<HbTwoToneLayout, String> {
+    if !tone1_freq.is_finite() || tone1_freq <= 0.0 {
+        return Err("HB tone1 frequency must be positive".to_string());
+    }
+    if !tone2_freq.is_finite() || tone2_freq <= 0.0 {
+        return Err("HB tone2 frequency must be positive".to_string());
+    }
+
+    let (lower_freq, upper_freq, tone1_is_lower) = if tone1_freq <= tone2_freq {
+        (tone1_freq, tone2_freq, true)
+    } else {
+        (tone2_freq, tone1_freq, false)
+    };
+    let ratio = upper_freq / lower_freq;
+    let (mut numerator, mut denominator) =
+        approximate_ratio_fraction(ratio, 24, 1e-6).ok_or_else(|| {
+            format!(
+                "HB tone ratio {} cannot be represented as a stable low-order rational ratio",
+                ratio
+            )
+        })?;
+    let gcd = gcd_u32(numerator, denominator).max(1);
+    numerator /= gcd;
+    denominator /= gcd;
+
+    let lower_harmonic = denominator as usize;
+    let upper_harmonic = numerator as usize;
+    let tone1_harmonic = if tone1_is_lower {
+        lower_harmonic
+    } else {
+        upper_harmonic
+    };
+    let tone2_harmonic = if tone1_is_lower {
+        upper_harmonic
+    } else {
+        lower_harmonic
+    };
+
+    let base_frequency = tone1_freq / tone1_harmonic as Value;
+    let max_harmonic = (tone1_harmonic * tone1_harmonics.max(1))
+        .max(tone2_harmonic * tone2_harmonics.max(1))
+        .max(tone1_harmonic + tone2_harmonic);
+    if max_harmonic > 512 {
+        return Err(format!(
+            "HB multi-tone harmonic order {} exceeds supported practical limit",
+            max_harmonic
+        ));
+    }
+
+    Ok(HbTwoToneLayout {
+        base_frequency,
+        max_harmonic,
+    })
+}
+
 /// Run Harmonic Balance analysis
 ///
 /// Solves for the steady-state response in the frequency domain,
@@ -4563,9 +4729,9 @@ pub fn run_hb_analysis(
     tone1_freq: Value,
     tone1_harmonics: usize,
     tone2_freq: Option<Value>,
-    _tone2_harmonics: usize,
+    tone2_harmonics: usize,
 ) -> Result<HbData, String> {
-    use rspice_core::analysis::HbConfig;
+    use rspice_core::analysis::{HbConfig, HbTone};
 
     // Parse the netlist
     let netlist = rspice_core::netlist::parse_netlist(netlist_text)
@@ -4573,11 +4739,27 @@ pub fn run_hb_analysis(
 
     let engine = Engine::new(build_engine_config(&netlist, None));
 
-    // Build HB configuration
-    // Note: Multi-tone HB requires additional configuration - for now we focus on single tone
-    let hb_config = HbConfig::new(tone1_freq)
-        .with_harmonics(tone1_harmonics)
-        .with_tolerance(1e-6);
+    // Build HB configuration.
+    let hb_config = if let Some(tone2) = tone2_freq {
+        let layout = build_two_tone_hb_layout(
+            tone1_freq,
+            tone2,
+            tone1_harmonics.max(1),
+            tone2_harmonics.max(1),
+        )?;
+        let mut cfg = HbConfig::new(layout.base_frequency)
+            .with_harmonics(layout.max_harmonic)
+            .with_tolerance(1e-6);
+        cfg.tones = vec![
+            HbTone::new(tone1_freq, tone1_harmonics.max(1)).with_name("tone1"),
+            HbTone::new(tone2, tone2_harmonics.max(1)).with_name("tone2"),
+        ];
+        cfg
+    } else {
+        HbConfig::new(tone1_freq)
+            .with_harmonics(tone1_harmonics)
+            .with_tolerance(1e-6)
+    };
 
     // Run actual HB analysis
     let hb_result = engine
@@ -4590,7 +4772,7 @@ pub fn run_hb_analysis(
 
     if let Some(f2) = tone2_freq {
         fundamentals.push(f2);
-        harmonics_per_tone.push(_tone2_harmonics);
+        harmonics_per_tone.push(tone2_harmonics);
     }
 
     // Extract DC operating point from spectral data
@@ -4612,7 +4794,7 @@ pub fn run_hb_analysis(
 
         // For each harmonic coefficient
         for (h, coeff) in sv.coefficients.iter().enumerate() {
-            let freq = tone1_freq * h as Value;
+            let freq = hb_result.fundamental_freq * h as Value;
             let magnitude = coeff.norm();
             let phase_deg = coeff.arg().to_degrees();
             spectrum.push((freq, magnitude, phase_deg));
@@ -6877,7 +7059,10 @@ C1 out 0 1n
         let data = run_disto_analysis(netlist, &cfg).expect("DISTO should execute");
         assert!(!data.frequencies.is_empty());
         assert!(!data.traces.is_empty());
-        assert!(!data.warnings.is_empty());
+        assert!(
+            data.warnings.is_empty(),
+            "nonlinear HB DISTO path should not emit fallback warnings"
+        );
 
         let trace = &data.traces[0];
         assert_eq!(trace.fundamental_gain_db.len(), data.frequencies.len());
@@ -6908,6 +7093,53 @@ C1 out 0 1n
         let err = run_disto_analysis("* invalid\nV1 in 0 AC 1\nR1 in 0 1k\n.end\n", &cfg)
             .expect_err("f2 ratio <= 1 should fail validation");
         assert!(err.contains("f2_over_f1"));
+    }
+
+    #[test]
+    fn test_build_disto_two_tone_harmonic_plan_rational_ratio() {
+        let plan = build_disto_two_tone_harmonic_plan(1.5).expect("1.5 should map to 3/2");
+        assert_eq!(plan.tone1_harmonic, 2);
+        assert_eq!(plan.tone2_harmonic, 3);
+        assert!(plan.max_harmonic >= 9);
+    }
+
+    #[test]
+    fn test_build_disto_two_tone_harmonic_plan_rejects_unstable_ratio() {
+        let err = build_disto_two_tone_harmonic_plan(2f64.sqrt())
+            .expect_err("irrational ratio should not map to low-order harmonic basis");
+        assert!(err.contains("low-order rational"));
+    }
+
+    #[test]
+    fn test_run_disto_analysis_fallbacks_for_unstable_two_tone_ratio() {
+        let netlist = r#"
+* disto fallback ratio test
+V1 in 0 DC 1 AC 1
+R1 in out 1k
+C1 out 0 1n
+.end
+"#;
+        let cfg = DistoRunConfig {
+            start_freq: 1e3,
+            stop_freq: 1e5,
+            points_per_unit: 5,
+            sweep: DistoFrequencySweep::Decade,
+            f2_over_f1: Some(2f64.sqrt()),
+        };
+
+        let data = run_disto_analysis(netlist, &cfg).expect("DISTO should fallback when needed");
+        assert!(
+            data.warnings
+                .iter()
+                .any(|warning| warning.contains("linearized transfer-based fallback")),
+            "expected explicit nonlinear fallback warning"
+        );
+        assert!(
+            data.traces
+                .iter()
+                .all(|trace| trace.imd2_db.is_some() && trace.imd3_db.is_some()),
+            "linearized fallback should still produce IMD traces"
+        );
     }
 
     #[test]
@@ -7746,6 +7978,28 @@ C1 out 0 1n
                 .iter()
                 .any(|(_, spectrum)| !spectrum.is_empty()),
             "expected at least one non-empty HB spectrum"
+        );
+    }
+
+    #[test]
+    fn test_run_hb_analysis_executes_with_two_tone_layout() {
+        let netlist = "* hb two-tone\nV1 in 0 DC 1 AC 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
+        let result = run_hb_analysis(netlist, 2e6, 4, Some(3e6), 3)
+            .expect("HB two-tone analysis should execute for commensurate tones");
+        assert_eq!(result.fundamentals, vec![2e6, 3e6]);
+        assert_eq!(result.harmonics_per_tone, vec![4, 3]);
+        assert!(result.converged);
+        assert!(result.num_components >= 10);
+        let first_spectrum = result
+            .spectra
+            .first()
+            .expect("expected at least one HB spectrum");
+        assert!(
+            first_spectrum
+                .1
+                .iter()
+                .any(|(freq, _, _)| (*freq - 1e6).abs() < 1e-6),
+            "two-tone HB should use the derived 1 MHz basis frequency"
         );
     }
 
