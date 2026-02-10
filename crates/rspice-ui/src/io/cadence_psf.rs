@@ -512,6 +512,9 @@ fn parse_values(
         let _ = types
             .get(&signal.type_id)
             .ok_or_else(|| CadencePsfError::new(format!("missing type {}", signal.type_id)))?;
+        if type_contains_array(signal.type_id, types)? {
+            continue;
+        }
         let mut specs = Vec::new();
         collect_channel_specs_for_type(signal.type_id, types, "", &mut specs)?;
         if !specs.is_empty() {
@@ -552,6 +555,7 @@ fn parse_non_windowed_values(
 ) -> Result<(), CadencePsfError> {
     let sweep_points = header_usize(header, "PSF sweep points")?;
     let sweep_id = sweeps.first().map(|s| s.id);
+    let mut channel_index_cache = build_channel_index_cache(values);
 
     for point_idx in 0..sweep_points {
         let _point_idx = read_u32(&mut cursor)?;
@@ -570,8 +574,14 @@ fn parse_non_windowed_values(
                 types,
                 "",
                 &mut |suffix, sample| {
-                    let channel_idx =
-                        push_named_channel(values, signal.id, suffix, sample, point_idx)?;
+                    let channel_idx = push_named_channel_cached(
+                        values,
+                        &mut channel_index_cache,
+                        signal.id,
+                        suffix,
+                        sample,
+                        point_idx,
+                    )?;
                     touched_channels.push(channel_idx);
                     Ok(())
                 },
@@ -602,6 +612,7 @@ fn parse_windowed_values(
     let mut offsets = HashMap::new();
     let mut has_dynamic_arrays = HashMap::new();
     let mut offset = 0usize;
+    let mut channel_index_cache = build_channel_index_cache(values);
     for signal in flat_traces {
         offsets.insert(signal.id, offset);
         has_dynamic_arrays.insert(signal.id, type_contains_array(signal.type_id, types)?);
@@ -675,6 +686,7 @@ fn parse_windowed_values(
                     count,
                     types,
                     values,
+                    &mut channel_index_cache,
                 )?;
             } else {
                 let channels = values.get(&signal.id).ok_or_else(|| {
@@ -842,7 +854,8 @@ fn init_channels(specs: &[ChannelSpec]) -> Vec<SignalChannel> {
 fn resolve_array_element_type(
     element_type_raw: u32,
     types: &HashMap<u32, TypeDecl>,
-) -> ArrayElementType {
+    parent_type_id: Option<u32>,
+) -> Result<ArrayElementType, CadencePsfError> {
     if let Some(type_decl) = types.get(&element_type_raw) {
         let raw_as_dtype = DataType::from_u32(element_type_raw);
         match raw_as_dtype {
@@ -852,17 +865,76 @@ fn resolve_array_element_type(
             | DataType::Complex
             | DataType::String => match type_decl.kind {
                 TypeKind::Primitive(dtype) if dtype == raw_as_dtype => {
-                    ArrayElementType::Primitive(raw_as_dtype)
+                    Ok(ArrayElementType::Primitive(raw_as_dtype))
                 }
-                _ => ArrayElementType::TypeRef(element_type_raw),
+                _ => Ok(ArrayElementType::TypeRef(element_type_raw)),
             },
-            DataType::Array | DataType::Struct | DataType::Other(_) => {
-                ArrayElementType::TypeRef(element_type_raw)
-            }
+            DataType::Array => match type_decl.kind {
+                TypeKind::Array { .. } => Ok(ArrayElementType::TypeRef(element_type_raw)),
+                _ => resolve_implicit_composite_array_element(types, true, parent_type_id),
+            },
+            DataType::Struct => match type_decl.kind {
+                TypeKind::Struct { .. } => Ok(ArrayElementType::TypeRef(element_type_raw)),
+                _ => resolve_implicit_composite_array_element(types, false, parent_type_id),
+            },
+            DataType::Other(_) => Ok(ArrayElementType::TypeRef(element_type_raw)),
         }
     } else {
-        ArrayElementType::Primitive(DataType::from_u32(element_type_raw))
+        match DataType::from_u32(element_type_raw) {
+            DataType::Array => {
+                resolve_implicit_composite_array_element(types, true, parent_type_id)
+            }
+            DataType::Struct => {
+                resolve_implicit_composite_array_element(types, false, parent_type_id)
+            }
+            other => Ok(ArrayElementType::Primitive(other)),
+        }
     }
+}
+
+fn resolve_implicit_composite_array_element(
+    types: &HashMap<u32, TypeDecl>,
+    want_array: bool,
+    parent_type_id: Option<u32>,
+) -> Result<ArrayElementType, CadencePsfError> {
+    let mut candidates = Vec::new();
+    for (type_id, decl) in types {
+        if parent_type_id == Some(*type_id) {
+            continue;
+        }
+        match (&decl.kind, want_array) {
+            (TypeKind::Array { .. }, true) => candidates.push(*type_id),
+            (TypeKind::Struct { .. }, false) => candidates.push(*type_id),
+            _ => {}
+        }
+    }
+
+    if candidates.len() == 1 {
+        return Ok(ArrayElementType::TypeRef(candidates[0]));
+    }
+    if candidates.is_empty() {
+        return Err(CadencePsfError::new(if want_array {
+            "array element descriptor ARRAY has no resolvable array type declaration"
+        } else {
+            "array element descriptor STRUCT has no resolvable struct type declaration"
+        }));
+    }
+
+    candidates.sort_unstable();
+    Err(CadencePsfError::new(format!(
+        "{}",
+        if want_array {
+            format!(
+                "array element descriptor ARRAY is ambiguous across type ids {:?}",
+                candidates
+            )
+        } else {
+            format!(
+                "array element descriptor STRUCT is ambiguous across type ids {:?}",
+                candidates
+            )
+        }
+    )))
 }
 
 fn collect_channel_specs_for_type(
@@ -892,7 +964,15 @@ fn collect_channel_specs_for_type(
                 )));
             }
         },
-        TypeKind::Array { .. } => {}
+        TypeKind::Array { element_type_raw } => {
+            collect_channel_specs_for_array_element(
+                *element_type_raw,
+                types,
+                prefix,
+                specs,
+                Some(type_id),
+            )?;
+        }
         TypeKind::Struct { members } => {
             for member_id in members {
                 let member = types.get(member_id).ok_or_else(|| {
@@ -905,6 +985,46 @@ fn collect_channel_specs_for_type(
                 };
                 collect_channel_specs_for_type(*member_id, types, &next, specs)?;
             }
+        }
+    }
+    Ok(())
+}
+
+fn collect_channel_specs_for_array_element(
+    element_type_raw: u32,
+    types: &HashMap<u32, TypeDecl>,
+    prefix: &str,
+    specs: &mut Vec<ChannelSpec>,
+    parent_type_id: Option<u32>,
+) -> Result<(), CadencePsfError> {
+    match resolve_array_element_type(element_type_raw, types, parent_type_id)? {
+        ArrayElementType::Primitive(dtype) => {
+            match dtype {
+                DataType::Int8 | DataType::Int32 | DataType::Real => specs.push(ChannelSpec {
+                    suffix: prefix.to_string(),
+                    kind: ChannelKind::Real,
+                }),
+                DataType::Complex => specs.push(ChannelSpec {
+                    suffix: prefix.to_string(),
+                    kind: ChannelKind::Complex,
+                }),
+                DataType::String => {}
+                DataType::Array => return Err(CadencePsfError::new(
+                    "array element descriptor resolved to ARRAY without a concrete type reference",
+                )),
+                DataType::Struct => return Err(CadencePsfError::new(
+                    "array element descriptor resolved to STRUCT without a concrete type reference",
+                )),
+                DataType::Other(other) => {
+                    return Err(CadencePsfError::new(format!(
+                        "unsupported PSF signal data type {}",
+                        other
+                    )))
+                }
+            }
+        }
+        ArrayElementType::TypeRef(type_id) => {
+            collect_channel_specs_for_type(type_id, types, prefix, specs)?;
         }
     }
     Ok(())
@@ -965,6 +1085,47 @@ fn channel_kind(values: &SignalValues) -> ChannelKind {
         SignalValues::Real(_) => ChannelKind::Real,
         SignalValues::Complex(_) => ChannelKind::Complex,
     }
+}
+
+fn build_channel_index_cache(
+    values: &HashMap<u32, Vec<SignalChannel>>,
+) -> HashMap<u32, HashMap<String, usize>> {
+    let mut cache = HashMap::new();
+    for (signal_id, channels) in values {
+        let mut per_signal = HashMap::with_capacity(channels.len());
+        for (idx, channel) in channels.iter().enumerate() {
+            per_signal.insert(channel.suffix.clone(), idx);
+        }
+        cache.insert(*signal_id, per_signal);
+    }
+    cache
+}
+
+fn push_named_channel_cached(
+    values: &mut HashMap<u32, Vec<SignalChannel>>,
+    cache: &mut HashMap<u32, HashMap<String, usize>>,
+    signal_id: u32,
+    suffix: &str,
+    sample: NumericSample,
+    point_idx: usize,
+) -> Result<usize, CadencePsfError> {
+    if let Some(per_signal) = cache.get(&signal_id) {
+        if let Some(idx) = per_signal.get(suffix) {
+            let idx = *idx;
+            let channels = values.get_mut(&signal_id).ok_or_else(|| {
+                CadencePsfError::new(format!("missing value vector for signal {}", signal_id))
+            })?;
+            push_scalar_slice(channels.as_mut_slice(), idx, sample)?;
+            return Ok(idx);
+        }
+    }
+
+    let idx = push_named_channel(values, signal_id, suffix, sample, point_idx)?;
+    cache
+        .entry(signal_id)
+        .or_default()
+        .insert(suffix.to_string(), idx);
+    Ok(idx)
 }
 
 fn push_named_channel(
@@ -1106,6 +1267,7 @@ fn decode_windowed_dynamic_signal_samples(
     point_offset: usize,
     types: &HashMap<u32, TypeDecl>,
     values: &mut HashMap<u32, Vec<SignalChannel>>,
+    channel_index_cache: &mut HashMap<u32, HashMap<String, usize>>,
 ) -> Result<(), CadencePsfError> {
     if window_count == 0 {
         return Ok(());
@@ -1124,7 +1286,14 @@ fn decode_windowed_dynamic_signal_samples(
             types,
             "",
             &mut |suffix, sample| {
-                let channel_idx = push_named_channel(values, signal.id, suffix, sample, point_idx)?;
+                let channel_idx = push_named_channel_cached(
+                    values,
+                    channel_index_cache,
+                    signal.id,
+                    suffix,
+                    sample,
+                    point_idx,
+                )?;
                 touched_channels.push(channel_idx);
                 Ok(())
             },
@@ -1208,6 +1377,7 @@ fn count_numeric_type_value(
                         cursor,
                         *element_type_raw,
                         types,
+                        Some(type_id),
                     )?)
                     .ok_or_else(|| CadencePsfError::new("numeric sample count overflow"))?;
             }
@@ -1229,8 +1399,9 @@ fn count_numeric_array_element_value(
     cursor: &mut &[u8],
     element_type_raw: u32,
     types: &HashMap<u32, TypeDecl>,
+    parent_type_id: Option<u32>,
 ) -> Result<usize, CadencePsfError> {
-    match resolve_array_element_type(element_type_raw, types) {
+    match resolve_array_element_type(element_type_raw, types, parent_type_id)? {
         ArrayElementType::Primitive(dtype) => count_numeric_data_type_value(cursor, dtype),
         ArrayElementType::TypeRef(type_id) => count_numeric_type_value(cursor, type_id, types),
     }
@@ -1302,6 +1473,7 @@ where
                     types,
                     &next,
                     on_numeric,
+                    Some(type_id),
                 )?;
             }
             Ok(())
@@ -1329,11 +1501,12 @@ fn read_array_element_value_with_numeric_visit<F>(
     types: &HashMap<u32, TypeDecl>,
     suffix: &str,
     on_numeric: &mut F,
+    parent_type_id: Option<u32>,
 ) -> Result<(), CadencePsfError>
 where
     F: FnMut(&str, NumericSample) -> Result<(), CadencePsfError>,
 {
-    match resolve_array_element_type(element_type_raw, types) {
+    match resolve_array_element_type(element_type_raw, types, parent_type_id)? {
         ArrayElementType::Primitive(dtype) => {
             read_data_type_value_with_numeric_visit(cursor, dtype, suffix, on_numeric)
         }
@@ -3027,6 +3200,30 @@ pub(crate) mod test_helpers {
         bytes
     }
 
+    pub(crate) fn build_non_windowed_array_of_struct_bare_descriptor_psf() -> Vec<u8> {
+        let mut bytes = build_non_windowed_array_of_struct_psf();
+        patch_top_type_array_descriptor(&mut bytes, DataType::Struct.to_u32());
+        bytes
+    }
+
+    pub(crate) fn build_non_windowed_nested_array_real_bare_descriptor_psf() -> Vec<u8> {
+        let mut bytes = build_non_windowed_nested_array_real_psf();
+        patch_top_type_array_descriptor(&mut bytes, DataType::Array.to_u32());
+        bytes
+    }
+
+    pub(crate) fn build_windowed_array_of_struct_bare_descriptor_psf() -> Vec<u8> {
+        let mut bytes = build_windowed_array_of_struct_psf();
+        patch_top_type_array_descriptor(&mut bytes, DataType::Struct.to_u32());
+        bytes
+    }
+
+    pub(crate) fn build_windowed_nested_array_real_bare_descriptor_psf() -> Vec<u8> {
+        let mut bytes = build_windowed_nested_array_real_psf();
+        patch_top_type_array_descriptor(&mut bytes, DataType::Array.to_u32());
+        bytes
+    }
+
     fn build_simple_non_windowed_psf(sample_encoding: SampleEncoding) -> Vec<u8> {
         let mut bytes = Vec::new();
 
@@ -3189,6 +3386,36 @@ pub(crate) mod test_helpers {
         bytes.extend_from_slice(&window_block);
     }
 
+    fn patch_top_type_array_descriptor(bytes: &mut [u8], new_descriptor: u32) {
+        let toc = parse_toc(bytes).expect("fixture must contain valid TOC");
+        let entry = toc
+            .section(SectionKind::Type)
+            .expect("fixture must contain type section");
+
+        assert!(
+            entry.start + 16 <= bytes.len(),
+            "type section header must exist"
+        );
+        let block_type = peek_u32(&bytes[entry.start + 8..entry.start + 12]);
+        assert_eq!(block_type, 22, "type section must be block 22");
+
+        let mut idx = entry.start + 16;
+        assert_eq!(
+            peek_u32(&bytes[idx..idx + 4]),
+            16,
+            "first type item must be block 16"
+        );
+        idx += 4; // block
+        idx += 4; // type id
+
+        let name_len = peek_u32(&bytes[idx..idx + 4]) as usize;
+        idx += 4;
+        let name_pad = (4 - (name_len % 4)) % 4;
+        idx += name_len + name_pad;
+
+        patch_u32(bytes, idx, new_descriptor);
+    }
+
     fn patch_u32(bytes: &mut [u8], offset: usize, value: u32) {
         bytes[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
     }
@@ -3197,16 +3424,19 @@ pub(crate) mod test_helpers {
 #[cfg(test)]
 mod tests {
     use super::test_helpers::{
-        build_non_windowed_array_complex_psf, build_non_windowed_array_of_struct_psf,
-        build_non_windowed_array_real_psf, build_non_windowed_complex_psf,
-        build_non_windowed_int32_psf, build_non_windowed_int8_psf,
-        build_non_windowed_mixed_real_and_string_psf, build_non_windowed_nested_array_real_psf,
-        build_non_windowed_real_psf, build_non_windowed_struct_psf,
-        build_non_windowed_struct_with_array_psf, build_non_windowed_variable_length_array_psf,
-        build_windowed_array_complex_psf, build_windowed_array_of_struct_psf,
-        build_windowed_array_real_psf, build_windowed_nested_array_real_psf,
-        build_windowed_real_psf, build_windowed_struct_with_array_psf,
-        build_windowed_variable_length_array_psf,
+        build_non_windowed_array_complex_psf,
+        build_non_windowed_array_of_struct_bare_descriptor_psf,
+        build_non_windowed_array_of_struct_psf, build_non_windowed_array_real_psf,
+        build_non_windowed_complex_psf, build_non_windowed_int32_psf, build_non_windowed_int8_psf,
+        build_non_windowed_mixed_real_and_string_psf,
+        build_non_windowed_nested_array_real_bare_descriptor_psf,
+        build_non_windowed_nested_array_real_psf, build_non_windowed_real_psf,
+        build_non_windowed_struct_psf, build_non_windowed_struct_with_array_psf,
+        build_non_windowed_variable_length_array_psf, build_windowed_array_complex_psf,
+        build_windowed_array_of_struct_bare_descriptor_psf, build_windowed_array_of_struct_psf,
+        build_windowed_array_real_psf, build_windowed_nested_array_real_bare_descriptor_psf,
+        build_windowed_nested_array_real_psf, build_windowed_real_psf,
+        build_windowed_struct_with_array_psf, build_windowed_variable_length_array_psf,
     };
     use super::*;
 
@@ -3399,8 +3629,52 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_non_windowed_array_of_struct_bare_descriptor_psf_binary() {
+        let bytes = build_non_windowed_array_of_struct_bare_descriptor_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.sweeps[0].values, vec![0.0, 1.0]);
+        assert_eq!(parsed.real_signals.len(), 2);
+        assert_eq!(parsed.real_signals[0].name, "V(out)[0].dc");
+        assert_eq!(parsed.real_signals[0].values, vec![1.0, 1.5]);
+        assert_eq!(parsed.real_signals[1].name, "V(out)[1].dc");
+        assert_eq!(parsed.real_signals[1].values, vec![1.1, 1.6]);
+        assert_eq!(parsed.complex_signals.len(), 2);
+        assert_eq!(parsed.complex_signals[0].name, "V(out)[0].ac");
+        assert_eq!(
+            parsed.complex_signals[0].values,
+            vec![(2.0, 0.5), (2.5, -0.2)]
+        );
+        assert_eq!(parsed.complex_signals[1].name, "V(out)[1].ac");
+        assert_eq!(
+            parsed.complex_signals[1].values,
+            vec![(2.1, 0.6), (2.6, -0.3)]
+        );
+    }
+
+    #[test]
     fn test_parse_non_windowed_nested_array_real_psf_binary() {
         let bytes = build_non_windowed_nested_array_real_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.sweeps[0].values, vec![0.0, 1.0]);
+        assert!(parsed.complex_signals.is_empty());
+        assert_eq!(parsed.real_signals.len(), 4);
+        assert_eq!(parsed.real_signals[0].name, "V(out)[0][0]");
+        assert_eq!(parsed.real_signals[0].values, vec![1.0, 1.5]);
+        assert_eq!(parsed.real_signals[1].name, "V(out)[0][1]");
+        assert_eq!(parsed.real_signals[1].values, vec![2.0, 2.5]);
+        assert_eq!(parsed.real_signals[2].name, "V(out)[1][0]");
+        assert_eq!(parsed.real_signals[2].values, vec![3.0, 3.5]);
+        assert_eq!(parsed.real_signals[3].name, "V(out)[1][1]");
+        assert_eq!(parsed.real_signals[3].values, vec![4.0, 4.5]);
+    }
+
+    #[test]
+    fn test_parse_non_windowed_nested_array_real_bare_descriptor_psf_binary() {
+        let bytes = build_non_windowed_nested_array_real_bare_descriptor_psf();
         let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
 
         assert_eq!(parsed.sweeps.len(), 1);
@@ -3529,8 +3803,52 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_windowed_array_of_struct_bare_descriptor_psf_binary() {
+        let bytes = build_windowed_array_of_struct_bare_descriptor_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.sweeps[0].values, vec![0.0, 1.0]);
+        assert_eq!(parsed.real_signals.len(), 2);
+        assert_eq!(parsed.real_signals[0].name, "V(out)[0].dc");
+        assert_eq!(parsed.real_signals[0].values, vec![1.0, 1.5]);
+        assert_eq!(parsed.real_signals[1].name, "V(out)[1].dc");
+        assert_eq!(parsed.real_signals[1].values, vec![1.1, 1.6]);
+        assert_eq!(parsed.complex_signals.len(), 2);
+        assert_eq!(parsed.complex_signals[0].name, "V(out)[0].ac");
+        assert_eq!(
+            parsed.complex_signals[0].values,
+            vec![(2.0, 0.5), (2.5, -0.2)]
+        );
+        assert_eq!(parsed.complex_signals[1].name, "V(out)[1].ac");
+        assert_eq!(
+            parsed.complex_signals[1].values,
+            vec![(2.1, 0.6), (2.6, -0.3)]
+        );
+    }
+
+    #[test]
     fn test_parse_windowed_nested_array_real_psf_binary() {
         let bytes = build_windowed_nested_array_real_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.sweeps[0].values, vec![0.0, 1.0]);
+        assert!(parsed.complex_signals.is_empty());
+        assert_eq!(parsed.real_signals.len(), 4);
+        assert_eq!(parsed.real_signals[0].name, "V(out)[0][0]");
+        assert_eq!(parsed.real_signals[0].values, vec![1.0, 1.5]);
+        assert_eq!(parsed.real_signals[1].name, "V(out)[0][1]");
+        assert_eq!(parsed.real_signals[1].values, vec![2.0, 2.5]);
+        assert_eq!(parsed.real_signals[2].name, "V(out)[1][0]");
+        assert_eq!(parsed.real_signals[2].values, vec![3.0, 3.5]);
+        assert_eq!(parsed.real_signals[3].name, "V(out)[1][1]");
+        assert_eq!(parsed.real_signals[3].values, vec![4.0, 4.5]);
+    }
+
+    #[test]
+    fn test_parse_windowed_nested_array_real_bare_descriptor_psf_binary() {
+        let bytes = build_windowed_nested_array_real_bare_descriptor_psf();
         let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
 
         assert_eq!(parsed.sweeps.len(), 1);
