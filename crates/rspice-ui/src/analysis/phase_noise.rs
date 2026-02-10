@@ -138,7 +138,8 @@ impl PhaseNoiseData {
     pub fn min_phase_noise(&self) -> Option<(f64, f64)> {
         self.points
             .iter()
-            .min_by(|a, b| a.phase_noise.partial_cmp(&b.phase_noise).unwrap())
+            .filter(|point| point.offset_freq.is_finite() && point.phase_noise.is_finite())
+            .min_by(|a, b| a.phase_noise.total_cmp(&b.phase_noise))
             .map(|p| (p.offset_freq, p.phase_noise))
     }
 
@@ -327,6 +328,19 @@ mod tests {
         let (offset, pn) = data.min_phase_noise().unwrap();
         assert_eq!(offset, 1e6);
         assert_eq!(pn, -120.0);
+    }
+
+    #[test]
+    fn test_min_phase_noise_ignores_non_finite_values() {
+        let mut data = PhaseNoiseData::new(1e9, 0.0);
+        data.add_point(1e3, -80.0);
+        data.add_point(f64::NAN, -140.0);
+        data.add_point(1e6, f64::NAN);
+        data.add_point(1e5, -110.0);
+
+        let (offset, pn) = data.min_phase_noise().expect("finite points should exist");
+        assert_eq!(offset, 1e5);
+        assert_eq!(pn, -110.0);
     }
 
     #[test]

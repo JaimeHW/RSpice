@@ -591,8 +591,13 @@ impl DigitalBus {
 
     /// Get all value change times
     pub fn change_times(&self) -> Vec<f64> {
-        let mut times: Vec<f64> = self.signals.iter().flat_map(|s| s.edge_times()).collect();
-        times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let mut times: Vec<f64> = self
+            .signals
+            .iter()
+            .flat_map(|s| s.edge_times())
+            .filter(|time| time.is_finite())
+            .collect();
+        times.sort_by(f64::total_cmp);
         times.dedup();
         times
     }
@@ -686,5 +691,25 @@ mod tests {
 
         let binary = format!("{:0width$b}", value, width = width);
         assert_eq!(binary, "10101011");
+    }
+
+    #[test]
+    fn test_change_times_ignores_non_finite_edges() {
+        let signal = DigitalSignal {
+            name: "SIG".to_string(),
+            config: DigitalWaveformConfig::default(),
+            edges: vec![
+                DigitalEdge::new(2.0, LogicState::Low, LogicState::High),
+                DigitalEdge::new(f64::NAN, LogicState::High, LogicState::Low),
+                DigitalEdge::new(1.0, LogicState::Low, LogicState::High),
+                DigitalEdge::new(f64::INFINITY, LogicState::High, LogicState::Low),
+            ],
+            initial_state: LogicState::Low,
+            time_start: 0.0,
+            time_end: 3.0,
+        };
+
+        let bus = DigitalBus::new("BUS", vec![signal]);
+        assert_eq!(bus.change_times(), vec![1.0, 2.0]);
     }
 }
