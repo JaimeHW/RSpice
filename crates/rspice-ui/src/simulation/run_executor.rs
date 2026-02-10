@@ -704,6 +704,7 @@ impl RunExecutor {
                     points_per_unit: *points_per_unit,
                     sweep,
                     f2_over_f1: *f2_over_f1,
+                    allow_linearized_fallback: false,
                 };
                 match simulation_runner::run_disto_analysis(netlist, &cfg) {
                     Ok(data) => {

@@ -1063,6 +1063,7 @@ fn run_spec_request(
                 points_per_unit,
                 sweep,
                 f2_over_f1,
+                allow_linearized_fallback: false,
             };
             let data = svc_runner::run_disto_analysis(netlist, &cfg)
                 .map_err(SimulationError::InvalidConfig)?;

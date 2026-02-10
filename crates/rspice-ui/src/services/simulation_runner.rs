@@ -404,6 +404,8 @@ pub struct DistoRunConfig {
     pub sweep: DistoFrequencySweep,
     /// Optional secondary tone ratio for IMD estimates.
     pub f2_over_f1: Option<Value>,
+    /// Whether to allow linearized AC fallback when nonlinear HB DISTO is unavailable.
+    pub allow_linearized_fallback: bool,
 }
 
 impl DistoRunConfig {
@@ -489,7 +491,7 @@ pub fn run_ac_analysis(
 /// Primary execution solves HB per sweep point and extracts HD2/HD3/THD from
 /// harmonic spectra. When `f2_over_f1` is configured, it additionally performs
 /// commensurate two-tone HB and derives IMD2/IMD3 from nonlinear sidebands.
-/// If nonlinear HB is unavailable, this falls back to linearized AC estimates.
+/// Linearized AC fallback is only used when explicitly enabled.
 pub fn run_disto_analysis(
     netlist_text: &str,
     config: &DistoRunConfig,
@@ -499,6 +501,12 @@ pub fn run_disto_analysis(
     match run_disto_analysis_nonlinear_hb(netlist_text, config) {
         Ok(data) => Ok(data),
         Err(nonlinear_error) => {
+            if !config.allow_linearized_fallback {
+                return Err(format!(
+                    "DISTO nonlinear HB path failed ({}). Set allow_linearized_fallback=true to use the lower-fidelity linearized approximation.",
+                    nonlinear_error
+                ));
+            }
             let mut linearized = run_disto_analysis_linearized(netlist_text, config)?;
             linearized.warnings.push(format!(
                 "DISTO nonlinear HB path was unavailable ({}); used linearized transfer-based fallback.",
@@ -6465,6 +6473,7 @@ C1 out 0 1n
             points_per_unit: 8,
             sweep: DistoFrequencySweep::Decade,
             f2_over_f1: Some(1.5),
+            allow_linearized_fallback: false,
         };
 
         let data = run_disto_analysis(netlist, &cfg).expect("DISTO should execute");
@@ -6500,6 +6509,7 @@ C1 out 0 1n
             points_per_unit: 8,
             sweep: DistoFrequencySweep::Decade,
             f2_over_f1: Some(1.0),
+            allow_linearized_fallback: false,
         };
         let err = run_disto_analysis("* invalid\nV1 in 0 AC 1\nR1 in 0 1k\n.end\n", &cfg)
             .expect_err("f2 ratio <= 1 should fail validation");
@@ -6554,6 +6564,7 @@ C1 out 0 1n
             points_per_unit: 5,
             sweep: DistoFrequencySweep::Decade,
             f2_over_f1: Some(2f64.sqrt()),
+            allow_linearized_fallback: true,
         };
 
         let data = run_disto_analysis(netlist, &cfg).expect("DISTO should fallback when needed");
@@ -6569,6 +6580,30 @@ C1 out 0 1n
                 .all(|trace| trace.imd2_db.is_some() && trace.imd3_db.is_some()),
             "linearized fallback should still produce IMD traces"
         );
+    }
+
+    #[test]
+    fn test_run_disto_analysis_unstable_two_tone_ratio_errors_without_fallback() {
+        let netlist = r#"
+* disto strict ratio test
+V1 in 0 DC 1 AC 1
+R1 in out 1k
+C1 out 0 1n
+.end
+"#;
+        let cfg = DistoRunConfig {
+            start_freq: 1e3,
+            stop_freq: 1e5,
+            points_per_unit: 5,
+            sweep: DistoFrequencySweep::Decade,
+            f2_over_f1: Some(2f64.sqrt()),
+            allow_linearized_fallback: false,
+        };
+
+        let err = run_disto_analysis(netlist, &cfg)
+            .expect_err("DISTO should fail in strict mode when HB ratio mapping is unstable");
+        assert!(err.contains("allow_linearized_fallback=true"));
+        assert!(err.contains("nonlinear HB path failed"));
     }
 
     #[test]
