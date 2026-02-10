@@ -1,5 +1,5 @@
-use rspice_core::Value;
 use rspice_core::analysis::noise::NoiseResult;
+use rspice_core::Value;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
