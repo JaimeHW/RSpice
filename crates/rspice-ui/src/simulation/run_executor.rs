@@ -1098,10 +1098,26 @@ impl RunExecutor {
                         let waveforms = data
                             .spectra
                             .into_iter()
-                            .map(|(name, spectrum)| {
+                            .flat_map(|(name, spectrum)| {
                                 let x: Vec<f64> = spectrum.iter().map(|(f, _, _)| *f).collect();
-                                let y: Vec<f64> = spectrum.iter().map(|(_, m, _)| *m).collect();
-                                MappedWaveform::frequency_domain(name, x, y, "Magnitude")
+                                let magnitude: Vec<f64> =
+                                    spectrum.iter().map(|(_, m, _)| *m).collect();
+                                let phase: Vec<f64> =
+                                    spectrum.iter().map(|(_, _, phase)| *phase).collect();
+                                vec![
+                                    MappedWaveform::frequency_domain(
+                                        format!("{} Magnitude", name),
+                                        x.clone(),
+                                        magnitude,
+                                        "Magnitude",
+                                    ),
+                                    MappedWaveform::frequency_domain(
+                                        format!("{} Phase", name),
+                                        x,
+                                        phase,
+                                        "Phase",
+                                    ),
+                                ]
                             })
                             .collect();
 
