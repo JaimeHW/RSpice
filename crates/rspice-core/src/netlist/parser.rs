@@ -7,7 +7,7 @@
 //! - Subcircuit definitions and instances
 
 use super::expr::eval_expression;
-use super::lexer::{LexError, TokenKind, TokenStream, tokenize};
+use super::lexer::{tokenize, LexError, TokenKind, TokenStream};
 use super::xspice_parser;
 use super::{
     AnalysisCommand, Element, ElementKind, FreqVariation, InitialCondition, ModelDef,
@@ -125,10 +125,15 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
     let initial_conditions: Vec<InitialCondition> = params
         .all_params()
         .iter()
-        .filter(|(k, _)| k.starts_with("IC_"))
-        .map(|(k, v)| InitialCondition {
-            node: k.strip_prefix("IC_").unwrap().to_string(),
-            voltage: *v,
+        .filter_map(|(k, v)| {
+            let node = k.strip_prefix("IC_")?;
+            if node.is_empty() {
+                return None;
+            }
+            Some(InitialCondition {
+                node: node.to_string(),
+                voltage: *v,
+            })
         })
         .collect();
 
@@ -149,10 +154,33 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
 }
 
 fn strip_inline_semicolon_comment(line: &str) -> &str {
-    match line.find(';') {
-        Some(idx) => &line[..idx],
-        None => line,
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut escaped = false;
+
+    for (idx, ch) in line.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+
+        match ch {
+            '\\' if in_single_quote || in_double_quote => {
+                escaped = true;
+            }
+            '\'' if !in_double_quote => {
+                in_single_quote = !in_single_quote;
+            }
+            '"' if !in_single_quote => {
+                in_double_quote = !in_double_quote;
+            }
+            ';' if !in_single_quote && !in_double_quote => {
+                return &line[..idx];
+            }
+            _ => {}
+        }
     }
+    line
 }
 
 fn parse_veriloga_directive(line: &str) -> Option<VerilogAInclude> {
@@ -2740,12 +2768,11 @@ fn parse_disto_command(
     let points = expect_value(stream, line_num, params)? as usize;
     let start_freq = expect_value(stream, line_num, params)?;
     let stop_freq = expect_value(stream, line_num, params)?;
-    let f2_over_f1 =
-        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-            None
-        } else {
-            Some(expect_value(stream, line_num, params)?)
-        };
+    let f2_over_f1 = if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        None
+    } else {
+        Some(expect_value(stream, line_num, params)?)
+    };
 
     Ok(AnalysisCommand::Disto {
         variation,
@@ -3605,6 +3632,27 @@ R1 1 0 1k ; load resistor
     }
 
     #[test]
+    fn test_strip_inline_semicolon_comment_preserves_quoted_semicolons() {
+        let line = r#"V1 1 0 PWL FILE="stim;ulus.csv" ; trailing comment"#;
+        let stripped = strip_inline_semicolon_comment(line);
+        assert_eq!(stripped, r#"V1 1 0 PWL FILE="stim;ulus.csv" "#);
+    }
+
+    #[test]
+    fn test_strip_inline_semicolon_comment_preserves_single_quoted_semicolons() {
+        let line = r#".VERILOGA 'models;rf.va' mod1 ; trailing comment"#;
+        let stripped = strip_inline_semicolon_comment(line);
+        assert_eq!(stripped, r#".VERILOGA 'models;rf.va' mod1 "#);
+    }
+
+    #[test]
+    fn test_strip_inline_semicolon_comment_handles_escaped_quotes() {
+        let line = ".PARAM A=\"quoted \\\";\\\" token\" ; trailing";
+        let stripped = strip_inline_semicolon_comment(line);
+        assert_eq!(stripped, ".PARAM A=\"quoted \\\";\\\" token\" ");
+    }
+
+    #[test]
     fn test_parse_pwl() {
         let netlist = r#"PWL Test
 V1 1 0 PWL(0 0 1u 5 2u 0)
@@ -4163,7 +4211,9 @@ R1 1 0 1k
 .END
 "#;
         let err = parse_netlist(netlist).expect_err("expected invalid .DISTO variation");
-        assert!(err.to_string().contains("Invalid .DISTO frequency variation"));
+        assert!(err
+            .to_string()
+            .contains("Invalid .DISTO frequency variation"));
     }
 
     #[test]
@@ -4251,10 +4301,9 @@ R1 1 0 1k
 .END
 "#;
         let err = parse_netlist(netlist).expect_err("expected .MC distribution parse error");
-        assert!(
-            err.to_string()
-                .contains("expected GAUSS, UNIFORM, or WORSTCASE")
-        );
+        assert!(err
+            .to_string()
+            .contains("expected GAUSS, UNIFORM, or WORSTCASE"));
     }
 
     #[test]
@@ -4420,6 +4469,19 @@ R1 1 0 1k
     }
 
     #[test]
+    fn test_parse_ic_ignores_empty_ic_param_suffix() {
+        let netlist = r#"IC Empty Suffix Test
+.PARAM IC_=5
+.PARAM IC_NODE=2.5
+.END
+"#;
+        let result = parse_netlist(netlist).expect("netlist should parse");
+        assert_eq!(result.initial_conditions.len(), 1);
+        assert_eq!(result.initial_conditions[0].node, "NODE");
+        assert!((result.initial_conditions[0].voltage - 2.5).abs() < 1e-10);
+    }
+
+    #[test]
     fn test_parse_veriloga_directive() {
         let netlist = r#"Verilog-A Test
 .VERILOGA resistor.va
@@ -4533,6 +4595,25 @@ R1 1 0 1k
     }
 
     #[test]
+    fn test_parse_veriloga_with_semicolon_in_quoted_path() {
+        let netlist = r#"VA Semicolon Path
+.VERILOGA "models/rf;mixer.va" mixer ; keep path semicolon
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+
+        assert_eq!(result.veriloga_includes.len(), 1);
+        assert_eq!(
+            result.veriloga_includes[0].file_path.to_string_lossy(),
+            "models/rf;mixer.va"
+        );
+        assert_eq!(
+            result.veriloga_includes[0].model_name.as_deref(),
+            Some("mixer")
+        );
+    }
+
+    #[test]
     fn test_parse_veriloga_with_single_quoted_path() {
         let netlist = r#"VA Single Quote Path
 .VA 'pdk/models/va mos.va'
@@ -4546,6 +4627,22 @@ R1 1 0 1k
             "pdk/models/va mos.va"
         );
         assert!(result.veriloga_includes[0].model_name.is_none());
+    }
+
+    #[test]
+    fn test_parse_pwl_file_with_semicolon_in_quoted_path() {
+        let netlist = r#"PWL FILE Semicolon Path Test
+V1 1 0 PWL FILE="stim;ulus.csv" ; trailing comment
+.END
+"#;
+        let result = parse_netlist(netlist).unwrap();
+
+        match &result.elements[0].kind {
+            ElementKind::VoltageSource(SourceSpec::PwlFile { path, .. }) => {
+                assert_eq!(path, "stim;ulus.csv");
+            }
+            other => panic!("Expected PWL file source, got {:?}", other),
+        }
     }
 
     #[test]
