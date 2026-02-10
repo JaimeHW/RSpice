@@ -695,6 +695,10 @@ fn parse_windowed_values(
                         signal.name
                     ))
                 })?;
+                if channels.is_empty() {
+                    // Opaque/unsupported scalar payload for this trace: skip segment.
+                    continue;
+                }
                 let sample_width = channel_sample_width(channels)?;
                 let data_len = window_count
                     .checked_mul(sample_width)
@@ -957,12 +961,7 @@ fn collect_channel_specs_for_type(
                 kind: ChannelKind::Complex,
             }),
             DataType::String | DataType::Array | DataType::Struct => {}
-            DataType::Other(other) => {
-                return Err(CadencePsfError::new(format!(
-                    "unsupported PSF signal data type {}",
-                    other
-                )));
-            }
+            DataType::Other(_) => {}
         },
         TypeKind::Array { element_type_raw } => {
             collect_channel_specs_for_array_element(
@@ -1015,12 +1014,7 @@ fn collect_channel_specs_for_array_element(
                 DataType::Struct => return Err(CadencePsfError::new(
                     "array element descriptor resolved to STRUCT without a concrete type reference",
                 )),
-                DataType::Other(other) => {
-                    return Err(CadencePsfError::new(format!(
-                        "unsupported PSF signal data type {}",
-                        other
-                    )))
-                }
+                DataType::Other(_) => {}
             }
         }
         ArrayElementType::TypeRef(type_id) => {
@@ -1439,10 +1433,10 @@ fn count_numeric_data_type_value(
         DataType::Struct => Err(CadencePsfError::new(
             "array element descriptor resolved to STRUCT without a concrete type reference",
         )),
-        DataType::Other(other) => Err(CadencePsfError::new(format!(
-            "unsupported PSF signal data type {}",
-            other
-        ))),
+        DataType::Other(_) => {
+            skip_opaque_scalar(cursor)?;
+            Ok(0)
+        }
     }
 }
 
@@ -1544,11 +1538,19 @@ where
         DataType::Struct => Err(CadencePsfError::new(
             "array element descriptor resolved to STRUCT without a concrete type reference",
         )),
-        DataType::Other(other) => Err(CadencePsfError::new(format!(
-            "unsupported PSF signal data type {}",
-            other
-        ))),
+        DataType::Other(_) => {
+            skip_opaque_scalar(cursor)?;
+            Ok(())
+        }
     }
+}
+
+fn skip_opaque_scalar(cursor: &mut &[u8]) -> Result<(), CadencePsfError> {
+    // Unknown scalar kinds in some PSF variants are commonly encoded as aligned
+    // 32-bit words. Consume one word so known signals in the same dataset can
+    // still be decoded.
+    let _ = read_u32(cursor)?;
+    Ok(())
 }
 
 fn parse_string(cursor: &mut &[u8]) -> Result<String, CadencePsfError> {
@@ -1635,6 +1637,7 @@ pub(crate) mod test_helpers {
         Complex,
         Int8,
         Int32,
+        UnknownWord,
     }
 
     impl SampleEncoding {
@@ -1644,6 +1647,7 @@ pub(crate) mod test_helpers {
                 Self::Complex => 12,
                 Self::Int8 => 1,
                 Self::Int32 => 5,
+                Self::UnknownWord => 99,
             }
         }
     }
@@ -1662,6 +1666,10 @@ pub(crate) mod test_helpers {
 
     pub(crate) fn build_non_windowed_int32_psf() -> Vec<u8> {
         build_simple_non_windowed_psf(SampleEncoding::Int32)
+    }
+
+    pub(crate) fn build_non_windowed_unknown_word_psf() -> Vec<u8> {
+        build_simple_non_windowed_psf(SampleEncoding::UnknownWord)
     }
 
     pub(crate) fn build_non_windowed_struct_psf() -> Vec<u8> {
@@ -3334,6 +3342,11 @@ pub(crate) mod test_helpers {
                 1 => push_i32(bytes, -2),
                 _ => unreachable!("test helper has exactly two samples"),
             },
+            SampleEncoding::UnknownWord => match sample_idx {
+                0 => push_u32(bytes, 0xDEAD_BEEF),
+                1 => push_u32(bytes, 0xC001_D00D),
+                _ => unreachable!("test helper has exactly two samples"),
+            },
         }
     }
 
@@ -3431,6 +3444,7 @@ mod tests {
         build_non_windowed_mixed_real_and_string_psf,
         build_non_windowed_nested_array_real_bare_descriptor_psf,
         build_non_windowed_nested_array_real_psf, build_non_windowed_real_psf,
+        build_non_windowed_unknown_word_psf,
         build_non_windowed_struct_psf, build_non_windowed_struct_with_array_psf,
         build_non_windowed_variable_length_array_psf, build_windowed_array_complex_psf,
         build_windowed_array_of_struct_bare_descriptor_psf, build_windowed_array_of_struct_psf,
@@ -3496,6 +3510,17 @@ mod tests {
         assert_eq!(parsed.real_signals.len(), 1);
         assert_eq!(parsed.real_signals[0].name, "V(out)");
         assert_eq!(parsed.real_signals[0].values, vec![1024.0, -2.0]);
+    }
+
+    #[test]
+    fn test_parse_non_windowed_unknown_scalar_type_is_ignored() {
+        let bytes = build_non_windowed_unknown_word_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.sweeps[0].values, vec![0.0, 1.0]);
+        assert!(parsed.real_signals.is_empty());
+        assert!(parsed.complex_signals.is_empty());
     }
 
     #[test]
