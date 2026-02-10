@@ -14,6 +14,11 @@ pub struct HbTone {
     pub num_harmonics: usize,
     /// Tone name (for identification in results)
     pub name: String,
+    /// Optional source name filter.
+    ///
+    /// When set, this tone only drives independent sources with a matching name.
+    /// When omitted, the tone is broadcast to all AC-capable independent sources.
+    pub source_name: Option<String>,
 }
 
 impl HbTone {
@@ -23,12 +28,24 @@ impl HbTone {
             frequency,
             num_harmonics,
             name: format!("f{:.3e}", frequency),
+            source_name: None,
         }
     }
 
     /// Set the tone name
     pub fn with_name(mut self, name: impl Into<String>) -> Self {
         self.name = name.into();
+        self
+    }
+
+    /// Set the independent source name this tone should drive.
+    pub fn with_source(mut self, source_name: impl Into<String>) -> Self {
+        let source_name = source_name.into();
+        self.source_name = if source_name.trim().is_empty() {
+            None
+        } else {
+            Some(source_name)
+        };
         self
     }
 }
@@ -340,5 +357,12 @@ mod config_tests {
         assert_eq!(tone.name, "WiFi");
         assert_eq!(tone.frequency, 2.4e9);
         assert_eq!(tone.num_harmonics, 7);
+        assert!(tone.source_name.is_none());
+    }
+
+    #[test]
+    fn test_tone_with_source() {
+        let tone = HbTone::new(1.0e9, 5).with_source("VLO");
+        assert_eq!(tone.source_name.as_deref(), Some("VLO"));
     }
 }

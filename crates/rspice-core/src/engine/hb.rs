@@ -100,6 +100,28 @@ struct HbCurrentSwitchControl {
     control_current_bias: Value,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct HbDriveTone {
+    harmonic: usize,
+    source_filter: Option<String>,
+}
+
+impl HbDriveTone {
+    fn broadcast(harmonic: usize) -> Self {
+        Self {
+            harmonic,
+            source_filter: None,
+        }
+    }
+
+    fn matches_source(&self, source_name: &str) -> bool {
+        match &self.source_filter {
+            None => true,
+            Some(filter) => filter.eq_ignore_ascii_case(source_name),
+        }
+    }
+}
+
 impl Engine {
     /// Run Harmonic Balance analysis
     ///
@@ -160,7 +182,8 @@ impl Engine {
             return Err(HbError::UnsupportedNonlinearDevices(summary).into());
         }
         let has_supported_nonlinear = Self::hb_has_supported_nonlinear_devices(&circuit, num_nodes);
-        let ac_harmonics = Self::hb_collect_ac_harmonics(&config)?;
+        let drive_tones = Self::hb_collect_drive_tones(&config)?;
+        Self::hb_validate_drive_tone_sources(&circuit, &drive_tones)?;
 
         // Create solver
         let mut solver = HbSolver::new(config.clone(), num_nodes);
@@ -174,11 +197,11 @@ impl Engine {
         self.hb_stamp_capacitors(&circuit, &mut solver);
         self.hb_stamp_inductors(&circuit, &mut solver);
         if has_supported_nonlinear {
-            self.hb_stamp_voltage_sources_norton(&circuit, &mut solver, &ac_harmonics);
+            self.hb_stamp_voltage_sources_norton(&circuit, &mut solver, &drive_tones);
         } else {
-            self.hb_stamp_voltage_sources(&circuit, &mut solver, &ac_harmonics);
+            self.hb_stamp_voltage_sources(&circuit, &mut solver, &drive_tones);
         }
-        self.hb_stamp_current_sources(&circuit, &mut solver, &ac_harmonics);
+        self.hb_stamp_current_sources(&circuit, &mut solver, &drive_tones);
         if has_supported_nonlinear {
             self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
         }
@@ -238,9 +261,9 @@ impl Engine {
         node_names
     }
 
-    fn hb_collect_ac_harmonics(config: &HbConfig) -> Result<Vec<usize>, SimulationError> {
+    fn hb_collect_drive_tones(config: &HbConfig) -> Result<Vec<HbDriveTone>, SimulationError> {
         if config.tones.is_empty() {
-            return Ok(vec![1]);
+            return Ok(vec![HbDriveTone::broadcast(1)]);
         }
 
         if !config.fundamental_freq.is_finite() || config.fundamental_freq <= 0.0 {
@@ -250,7 +273,7 @@ impl Engine {
             .into());
         }
 
-        let mut harmonics = BTreeSet::new();
+        let mut tones: BTreeSet<(usize, Option<String>)> = BTreeSet::new();
         for tone in &config.tones {
             if !tone.frequency.is_finite() || tone.frequency <= 0.0 {
                 return Err(HbError::InvalidConfig(format!(
@@ -288,14 +311,67 @@ impl Engine {
                 ))
                 .into());
             }
-            harmonics.insert(harmonic);
+            let source_filter = tone
+                .source_name
+                .as_ref()
+                .map(|name| name.trim())
+                .filter(|name| !name.is_empty())
+                .map(|name| name.to_ascii_lowercase());
+            tones.insert((harmonic, source_filter));
         }
 
-        if harmonics.is_empty() {
-            Ok(vec![1])
+        let collected: Vec<HbDriveTone> = tones
+            .into_iter()
+            .map(|(harmonic, source_filter)| HbDriveTone {
+                harmonic,
+                source_filter,
+            })
+            .collect();
+        if collected.is_empty() {
+            Ok(vec![HbDriveTone::broadcast(1)])
         } else {
-            Ok(harmonics.into_iter().collect())
+            Ok(collected)
         }
+    }
+
+    fn hb_validate_drive_tone_sources(
+        circuit: &CircuitData,
+        drive_tones: &[HbDriveTone],
+    ) -> Result<(), SimulationError> {
+        for tone in drive_tones {
+            let Some(source_filter) = tone.source_filter.as_deref() else {
+                continue;
+            };
+            let present_in_voltage = circuit
+                .voltage_sources
+                .names
+                .iter()
+                .any(|name| source_filter.eq_ignore_ascii_case(name));
+            let present_in_current = circuit
+                .current_sources
+                .names
+                .iter()
+                .any(|name| source_filter.eq_ignore_ascii_case(name));
+            if !(present_in_voltage || present_in_current) {
+                return Err(HbError::InvalidConfig(format!(
+                    "HB tone source '{}' is not present in circuit independent sources",
+                    source_filter
+                ))
+                .into());
+            }
+        }
+        Ok(())
+    }
+
+    fn hb_drive_harmonics_for_source(drive_tones: &[HbDriveTone], source_name: &str) -> Vec<usize> {
+        let mut harmonics: Vec<usize> = drive_tones
+            .iter()
+            .filter(|tone| tone.matches_source(source_name))
+            .map(|tone| tone.harmonic)
+            .collect();
+        harmonics.sort_unstable();
+        harmonics.dedup();
+        harmonics
     }
 
     fn hb_has_supported_nonlinear_devices(circuit: &CircuitData, num_nodes: usize) -> bool {
@@ -618,7 +694,7 @@ impl Engine {
         &self,
         circuit: &CircuitData,
         solver: &mut HbSolver,
-        ac_harmonics: &[usize],
+        drive_tones: &[HbDriveTone],
     ) {
         for i in 0..circuit.voltage_sources.len() {
             let np = circuit.voltage_sources.node_pos[i];
@@ -636,12 +712,19 @@ impl Engine {
                 .get(i)
                 .copied()
                 .unwrap_or(0.0);
-            if ac_mag.abs() <= 1e-30 {
+            let source_name = circuit
+                .voltage_sources
+                .names
+                .get(i)
+                .map(|name| name.as_str())
+                .unwrap_or("");
+            let harmonics = Self::hb_drive_harmonics_for_source(drive_tones, source_name);
+            if ac_mag.abs() <= 1e-30 || harmonics.is_empty() {
                 solver.add_voltage_source_branch(np, nn, dc);
                 continue;
             }
 
-            let harmonic_terms: Vec<(usize, Value, Value)> = ac_harmonics
+            let harmonic_terms: Vec<(usize, Value, Value)> = harmonics
                 .iter()
                 .copied()
                 .map(|harmonic| (harmonic, ac_mag, ac_phase))
@@ -659,7 +742,7 @@ impl Engine {
         &self,
         circuit: &CircuitData,
         solver: &mut HbSolver,
-        ac_harmonics: &[usize],
+        drive_tones: &[HbDriveTone],
     ) {
         for i in 0..circuit.voltage_sources.len() {
             let np = circuit.voltage_sources.node_pos[i];
@@ -677,6 +760,13 @@ impl Engine {
                 .get(i)
                 .copied()
                 .unwrap_or(0.0);
+            let source_name = circuit
+                .voltage_sources
+                .names
+                .get(i)
+                .map(|name| name.as_str())
+                .unwrap_or("");
+            let harmonics = Self::hb_drive_harmonics_for_source(drive_tones, source_name);
 
             self.hb_stamp_admittance(solver, np, nn, HB_NORTON_G, true);
 
@@ -689,13 +779,13 @@ impl Engine {
             }
 
             let i_ac = ac_mag * HB_NORTON_G;
-            if i_ac.abs() > 1e-30 {
-                for harmonic in ac_harmonics {
+            if i_ac.abs() > 1e-30 && !harmonics.is_empty() {
+                for harmonic in harmonics {
                     if np > 0 {
-                        solver.add_harmonic_source(np - 1, *harmonic, -i_ac, ac_phase);
+                        solver.add_harmonic_source(np - 1, harmonic, -i_ac, ac_phase);
                     }
                     if nn > 0 {
-                        solver.add_harmonic_source(nn - 1, *harmonic, i_ac, ac_phase);
+                        solver.add_harmonic_source(nn - 1, harmonic, i_ac, ac_phase);
                     }
                 }
             }
@@ -711,7 +801,7 @@ impl Engine {
         &self,
         circuit: &CircuitData,
         solver: &mut HbSolver,
-        ac_harmonics: &[usize],
+        drive_tones: &[HbDriveTone],
     ) {
         for i in 0..circuit.current_sources.len() {
             let np = circuit.current_sources.node_pos[i];
@@ -739,16 +829,23 @@ impl Engine {
                 .get(i)
                 .copied()
                 .unwrap_or(0.0);
+            let source_name = circuit
+                .current_sources
+                .names
+                .get(i)
+                .map(|name| name.as_str())
+                .unwrap_or("");
+            let harmonics = Self::hb_drive_harmonics_for_source(drive_tones, source_name);
 
             if ac_mag.abs() > 1e-30 {
-                for harmonic in ac_harmonics {
+                for harmonic in harmonics {
                     if np > 0 {
                         // Current leaves at + terminal.
-                        solver.add_harmonic_source(np - 1, *harmonic, -ac_mag, ac_phase);
+                        solver.add_harmonic_source(np - 1, harmonic, -ac_mag, ac_phase);
                     }
                     if nn > 0 {
                         // Current enters at - terminal.
-                        solver.add_harmonic_source(nn - 1, *harmonic, ac_mag, ac_phase);
+                        solver.add_harmonic_source(nn - 1, harmonic, ac_mag, ac_phase);
                     }
                 }
             }
@@ -2833,6 +2930,79 @@ C1 2 0 1n
         assert!(
             v1.magnitude(1) < 1e-9,
             "no source energy should be stamped at harmonic 1 for this configuration"
+        );
+    }
+
+    #[test]
+    fn test_run_hb_multi_tone_source_filters_route_tones_to_matching_sources() {
+        use crate::Netlist;
+
+        let netlist_str = "* Source-filtered multi-tone
+VRF 1 0 DC 0 AC 1
+VLO 2 0 DC 0 AC 1
+R1 1 0 1k
+R2 2 0 1k
+C1 1 0 1n
+C2 2 0 1n
+.END";
+        let netlist = Netlist::parse(netlist_str).expect("netlist should parse");
+        let engine = Engine::default();
+
+        let mut config = HbConfig::new(1e6).with_harmonics(8).with_tolerance(1e-6);
+        config.tones = vec![
+            HbTone::new(2e6, 1).with_name("rf").with_source("VRF"),
+            HbTone::new(3e6, 1).with_name("lo").with_source("VLO"),
+        ];
+
+        let result = engine
+            .run_hb(&netlist, config)
+            .expect("HB source-filtered multi-tone solve should succeed");
+        assert!(result.converged);
+
+        let vrf = result
+            .result
+            .get_node_voltage("1")
+            .expect("node 1 should exist in HB result");
+        let vlo = result
+            .result
+            .get_node_voltage("2")
+            .expect("node 2 should exist in HB result");
+
+        assert!(vrf.magnitude(2) > 0.9, "VRF should be driven at harmonic 2");
+        assert!(
+            vrf.magnitude(3) < 1e-9,
+            "VRF should not be driven at harmonic 3"
+        );
+        assert!(vlo.magnitude(3) > 0.9, "VLO should be driven at harmonic 3");
+        assert!(
+            vlo.magnitude(2) < 1e-9,
+            "VLO should not be driven at harmonic 2"
+        );
+    }
+
+    #[test]
+    fn test_run_hb_rejects_unknown_tone_source_filter() {
+        use crate::Netlist;
+
+        let netlist_str = "* Unknown tone source filter
+V1 1 0 DC 0 AC 1
+R1 1 0 1k
+C1 1 0 1n
+.END";
+        let netlist = Netlist::parse(netlist_str).expect("netlist should parse");
+        let engine = Engine::default();
+
+        let mut config = HbConfig::new(1e6).with_harmonics(4).with_tolerance(1e-6);
+        config.tones = vec![HbTone::new(2e6, 1).with_name("rf").with_source("V_MISSING")];
+
+        let err = engine
+            .run_hb(&netlist, config)
+            .expect_err("unknown tone source filter should fail");
+        assert!(
+            err.to_string()
+                .contains("not present in circuit independent sources"),
+            "expected unknown source validation error, got: {}",
+            err
         );
     }
 
