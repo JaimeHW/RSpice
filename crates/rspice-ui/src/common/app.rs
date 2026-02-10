@@ -1021,7 +1021,8 @@ impl RSpiceApp {
     /// Internal: Actually create a new schematic (after confirmation)
     fn do_file_new(&mut self) {
         self.state.schematic = SchematicState::default();
-        self.state.push_user_message(ConsoleMessage::info("Created new schematic"));
+        self.state
+            .push_user_message(ConsoleMessage::info("Created new schematic"));
     }
 
     /// Request to open a schematic (prompts to save if dirty)
@@ -1045,17 +1046,22 @@ impl RSpiceApp {
             Ok(path) => match load_schematic(&path) {
                 Ok(schematic) => {
                     self.state.schematic = schematic;
-                    self.state.push_user_message(ConsoleMessage::info(format!("Opened: {}", path.display())));
+                    self.state.push_user_message(ConsoleMessage::info(format!(
+                        "Opened: {}",
+                        path.display()
+                    )));
                 }
                 Err(e) => {
-                    self.state.push_user_message(ConsoleMessage::error(format!("Failed to open: {}", e)));
+                    self.state
+                        .push_user_message(ConsoleMessage::error(format!("Failed to open: {}", e)));
                 }
             },
             Err(SchematicIoError::Cancelled) => {
                 // User cancelled - no message needed
             }
             Err(e) => {
-                self.state.push_user_message(ConsoleMessage::error(format!("Open failed: {}", e)));
+                self.state
+                    .push_user_message(ConsoleMessage::error(format!("Open failed: {}", e)));
             }
         }
     }
@@ -1112,10 +1118,14 @@ impl RSpiceApp {
             match save_schematic(&self.state.schematic, path) {
                 Ok(()) => {
                     self.state.schematic.is_dirty = false;
-                    self.state.push_user_message(ConsoleMessage::info(format!("Saved: {}", path.display())));
+                    self.state.push_user_message(ConsoleMessage::info(format!(
+                        "Saved: {}",
+                        path.display()
+                    )));
                 }
                 Err(e) => {
-                    self.state.push_user_message(ConsoleMessage::error(format!("Save failed: {}", e)));
+                    self.state
+                        .push_user_message(ConsoleMessage::error(format!("Save failed: {}", e)));
                 }
             }
         } else {
@@ -1141,17 +1151,22 @@ impl RSpiceApp {
                 Ok(()) => {
                     self.state.schematic.current_file = Some(path.clone());
                     self.state.schematic.is_dirty = false;
-                    self.state.push_user_message(ConsoleMessage::info(format!("Saved: {}", path.display())));
+                    self.state.push_user_message(ConsoleMessage::info(format!(
+                        "Saved: {}",
+                        path.display()
+                    )));
                 }
                 Err(e) => {
-                    self.state.push_user_message(ConsoleMessage::error(format!("Save failed: {}", e)));
+                    self.state
+                        .push_user_message(ConsoleMessage::error(format!("Save failed: {}", e)));
                 }
             },
             Err(SchematicIoError::Cancelled) => {
                 // User cancelled - no message needed
             }
             Err(e) => {
-                self.state.push_user_message(ConsoleMessage::error(format!("Save As failed: {}", e)));
+                self.state
+                    .push_user_message(ConsoleMessage::error(format!("Save As failed: {}", e)));
             }
         }
     }
@@ -1165,10 +1180,12 @@ impl RSpiceApp {
                 .map(|s| s.to_string())
                 .unwrap_or_default();
             if self.state.schematic.undo() {
-                self.state.push_user_message(ConsoleMessage::info(format!("Undo: {}", desc)));
+                self.state
+                    .push_user_message(ConsoleMessage::info(format!("Undo: {}", desc)));
             }
         } else {
-            self.state.push_user_message(ConsoleMessage::info("Nothing to undo"));
+            self.state
+                .push_user_message(ConsoleMessage::info("Nothing to undo"));
         }
     }
 
@@ -1181,10 +1198,12 @@ impl RSpiceApp {
                 .map(|s| s.to_string())
                 .unwrap_or_default();
             if self.state.schematic.redo() {
-                self.state.push_user_message(ConsoleMessage::info(format!("Redo: {}", desc)));
+                self.state
+                    .push_user_message(ConsoleMessage::info(format!("Redo: {}", desc)));
             }
         } else {
-            self.state.push_user_message(ConsoleMessage::info("Nothing to redo"));
+            self.state
+                .push_user_message(ConsoleMessage::info("Nothing to redo"));
         }
     }
 
@@ -2065,7 +2084,9 @@ impl RSpiceApp {
                                         &opts,
                                     );
                                 self.state.dialogs.simulation_options_errors.clear();
-                                self.state.push_user_message(ConsoleMessage::info("Simulation options updated"));
+                                self.state.push_user_message(ConsoleMessage::info(
+                                    "Simulation options updated",
+                                ));
                                 if ok_clicked {
                                     close_requested = true;
                                 }
@@ -2693,9 +2714,9 @@ impl eframe::App for RSpiceApp {
 
                 if !add_ok {
                     self.state.push_user_message(ConsoleMessage::error(format!(
-                            "Failed to add Verilog-A model '{}' to library '{}'",
-                            module.name, VERILOGA_LIBRARY_NAME
-                        )));
+                        "Failed to add Verilog-A model '{}' to library '{}'",
+                        module.name, VERILOGA_LIBRARY_NAME
+                    )));
                 } else {
                     log::info!(
                         "Registered Verilog-A model '{}' with {} terminals and {} parameters",
@@ -2704,10 +2725,10 @@ impl eframe::App for RSpiceApp {
                         module.parameters.len()
                     );
                     self.state.push_user_message(ConsoleMessage::info(format!(
-                            "Verilog-A model '{}' added to library with terminals: {}",
-                            module.name,
-                            module.ports.join(", ")
-                        )));
+                        "Verilog-A model '{}' added to library with terminals: {}",
+                        module.name,
+                        module.ports.join(", ")
+                    )));
                 }
 
                 if let Some(compiled_model) = compiled_artifact {
@@ -2724,7 +2745,8 @@ impl eframe::App for RSpiceApp {
                                 )));
                         }
                         Err(err) => {
-                            self.state.push_user_message(ConsoleMessage::warning(format!(
+                            self.state
+                                .push_user_message(ConsoleMessage::warning(format!(
                                     "Verilog-A compile cache registration failed for '{}': {}",
                                     module.name, err
                                 )));
@@ -2739,7 +2761,8 @@ impl eframe::App for RSpiceApp {
 
                 if let Err(err) = save_global_veriloga_library(&self.state.library_manager) {
                     log::warn!("Failed to persist global Verilog-A library: {}", err);
-                    self.state.push_user_message(ConsoleMessage::warning(format!(
+                    self.state
+                        .push_user_message(ConsoleMessage::warning(format!(
                             "Failed to persist Verilog-A library: {}",
                             err
                         )));
@@ -2770,14 +2793,15 @@ impl eframe::App for RSpiceApp {
                             self.state.pdk_config = config;
                             let _ = self.state.pdk_config.save();
                             self.state.push_user_message(ConsoleMessage::info(format!(
-                                    "PDK settings applied: {} libraries loaded",
-                                    count
-                                )));
+                                "PDK settings applied: {} libraries loaded",
+                                count
+                            )));
                         }
                         Err(errors) => {
                             self.state.pdk_config = config;
                             let _ = self.state.pdk_config.save();
-                            self.state.push_user_message(ConsoleMessage::warning(format!(
+                            self.state
+                                .push_user_message(ConsoleMessage::warning(format!(
                                     "PDK settings applied with {} errors",
                                     errors.len()
                                 )));
@@ -2800,28 +2824,28 @@ impl eframe::App for RSpiceApp {
                             let _ = self.state.pdk_config.save();
 
                             self.state.push_user_message(ConsoleMessage::info(format!(
-                                    "Loaded library '{}' from {}",
-                                    lib_name,
-                                    path.display()
-                                )));
+                                "Loaded library '{}' from {}",
+                                lib_name,
+                                path.display()
+                            )));
 
                             // Log model count
                             if let Some(lib) =
                                 self.state.model_library_manager.get_library(&lib_name)
                             {
                                 self.state.push_user_message(ConsoleMessage::info(format!(
-                                        "  {} models, {} corners available",
-                                        lib.model_count(),
-                                        lib.corner_count()
-                                    )));
+                                    "  {} models, {} corners available",
+                                    lib.model_count(),
+                                    lib.corner_count()
+                                )));
                             }
                         }
                         Err(err) => {
                             self.state.push_user_message(ConsoleMessage::error(format!(
-                                    "Failed to load {}: {}",
-                                    path.display(),
-                                    err
-                                )));
+                                "Failed to load {}: {}",
+                                path.display(),
+                                err
+                            )));
                         }
                     }
                 }
@@ -3437,9 +3461,9 @@ impl eframe::App for RSpiceApp {
                     if let Some(lib) = self.state.library_manager.get_library_mut(&library) {
                         lib.add_cell(cell);
                         self.state.push_user_message(ConsoleMessage::info(format!(
-                                "Created cell '{}' in library '{}'",
-                                name, library
-                            )));
+                            "Created cell '{}' in library '{}'",
+                            name, library
+                        )));
                         should_close = true;
                         persist_global_veriloga = library == VERILOGA_LIBRARY_NAME;
                     } else {
@@ -3452,7 +3476,8 @@ impl eframe::App for RSpiceApp {
             if persist_global_veriloga {
                 if let Err(err) = save_global_veriloga_library(&self.state.library_manager) {
                     log::warn!("Failed to persist global Verilog-A library: {}", err);
-                    self.state.push_user_message(ConsoleMessage::warning(format!(
+                    self.state
+                        .push_user_message(ConsoleMessage::warning(format!(
                             "Failed to persist Verilog-A library: {}",
                             err
                         )));
@@ -3590,9 +3615,9 @@ impl eframe::App for RSpiceApp {
                                     self.state.dialogs.new_view_type,
                                 ));
                                 self.state.push_user_message(ConsoleMessage::info(format!(
-                                        "Created view '{}' in cell '{}'",
-                                        view_name, cell
-                                    )));
+                                    "Created view '{}' in cell '{}'",
+                                    view_name, cell
+                                )));
                                 should_close = true;
                                 persist_global_veriloga = library == VERILOGA_LIBRARY_NAME;
                             }
@@ -3604,7 +3629,8 @@ impl eframe::App for RSpiceApp {
             if persist_global_veriloga {
                 if let Err(err) = save_global_veriloga_library(&self.state.library_manager) {
                     log::warn!("Failed to persist global Verilog-A library: {}", err);
-                    self.state.push_user_message(ConsoleMessage::warning(format!(
+                    self.state
+                        .push_user_message(ConsoleMessage::warning(format!(
                             "Failed to persist Verilog-A library: {}",
                             err
                         )));
@@ -3625,15 +3651,16 @@ impl eframe::App for RSpiceApp {
                 deleted = lib.remove_cell(&cell_name);
                 if deleted {
                     self.state.push_user_message(ConsoleMessage::info(format!(
-                            "Deleted cell '{}' from library '{}'",
-                            cell_name, lib_name
-                        )));
+                        "Deleted cell '{}' from library '{}'",
+                        cell_name, lib_name
+                    )));
                 }
             }
             if deleted && lib_name == VERILOGA_LIBRARY_NAME {
                 if let Err(err) = save_global_veriloga_library(&self.state.library_manager) {
                     log::warn!("Failed to persist global Verilog-A library: {}", err);
-                    self.state.push_user_message(ConsoleMessage::warning(format!(
+                    self.state
+                        .push_user_message(ConsoleMessage::warning(format!(
                             "Failed to persist Verilog-A library: {}",
                             err
                         )));
@@ -3649,16 +3676,17 @@ impl eframe::App for RSpiceApp {
                     deleted = cell.remove_view(&view_name);
                     if deleted {
                         self.state.push_user_message(ConsoleMessage::info(format!(
-                                "Deleted view '{}' from cell '{}'",
-                                view_name, cell_name
-                            )));
+                            "Deleted view '{}' from cell '{}'",
+                            view_name, cell_name
+                        )));
                     }
                 }
             }
             if deleted && lib_name == VERILOGA_LIBRARY_NAME {
                 if let Err(err) = save_global_veriloga_library(&self.state.library_manager) {
                     log::warn!("Failed to persist global Verilog-A library: {}", err);
-                    self.state.push_user_message(ConsoleMessage::warning(format!(
+                    self.state
+                        .push_user_message(ConsoleMessage::warning(format!(
                             "Failed to persist Verilog-A library: {}",
                             err
                         )));
