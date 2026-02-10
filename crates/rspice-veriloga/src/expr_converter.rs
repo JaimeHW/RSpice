@@ -1549,10 +1549,9 @@ mod tests {
         let err = conv
             .convert(&expr)
             .expect_err("duplicate x values must fail");
-        assert!(
-            err.to_string()
-                .to_lowercase()
-                .contains("strictly monotonic")
-        );
+        assert!(err
+            .to_string()
+            .to_lowercase()
+            .contains("strictly monotonic"));
     }
 }

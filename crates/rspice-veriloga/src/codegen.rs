@@ -3,12 +3,12 @@
 //! Generates simulator-ready device models from IR.
 //! Produces bytecode programs for efficient simulation.
 
-use crate::CompilerOptions;
 use crate::ast::BinaryOp;
 use crate::error::{CodeGenError, CodeGenErrorKind, CompileError, CompileResult};
 use crate::ir::{BranchEquation, DerivativeWrt, DeviceIR, IrExpr, IrFunction};
 use crate::laplace::{Complex, StateSpaceFilter};
 use crate::semantic::AnalyzedFile;
+use crate::CompilerOptions;
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
@@ -205,7 +205,11 @@ impl LookupTable {
             Err(idx) => {
                 // Not found - idx is where it would be inserted
                 // So the interval is [idx-1, idx]
-                if idx == 0 { 0 } else { idx - 1 }
+                if idx == 0 {
+                    0
+                } else {
+                    idx - 1
+                }
             }
         }
     }

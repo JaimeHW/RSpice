@@ -463,9 +463,9 @@ impl Preprocessor {
         let rest = rest.trim();
 
         // Parse filename from "file" or <file>
-        let filename = if rest.starts_with('"') && rest.ends_with('"') {
-            &rest[1..rest.len() - 1]
-        } else if rest.starts_with('<') && rest.ends_with('>') {
+        let filename = if (rest.starts_with('"') && rest.ends_with('"'))
+            || (rest.starts_with('<') && rest.ends_with('>'))
+        {
             &rest[1..rest.len() - 1]
         } else {
             return Err(PreprocessorError::new(
@@ -620,7 +620,7 @@ impl Preprocessor {
         let mut current_arg = String::new();
         let mut paren_depth = 1;
 
-        while let Some(ch) = chars.next() {
+        for ch in chars.by_ref() {
             match ch {
                 '(' => {
                     paren_depth += 1;

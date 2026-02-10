@@ -7,12 +7,12 @@
 //! - Expression validation
 //! - Parameter range checking
 
-use crate::CompilerOptions;
 use crate::ast::*;
 use crate::disciplines::DisciplineDb;
 use crate::error::{CompileError, CompileResult, SemanticError, SemanticErrorKind};
 use crate::source::Span;
 use crate::types::{FunctionRegistry, ParameterRange as TypedParameterRange, ValueType};
+use crate::CompilerOptions;
 use smol_str::SmolStr;
 use std::collections::HashMap;
 
@@ -114,10 +114,10 @@ impl SymbolTable {
         }
     }
 
-    pub fn define(&mut self, symbol: Symbol) -> Result<(), Symbol> {
+    pub fn define(&mut self, symbol: Symbol) -> Result<(), Box<Symbol>> {
         let scope = &mut self.scopes[self.current];
         if scope.symbols.contains_key(&symbol.name) {
-            return Err(scope.symbols.get(&symbol.name).unwrap().clone());
+            return Err(Box::new(scope.symbols.get(&symbol.name).unwrap().clone()));
         }
         scope.symbols.insert(symbol.name.clone(), symbol);
         Ok(())

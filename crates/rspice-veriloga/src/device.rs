@@ -456,17 +456,14 @@ impl VerilogADevice {
             }
 
             for (jac_idx, jac_entry) in program.jacobian_programs.iter().enumerate() {
-                match vm.execute(&jac_entry.program) {
-                    Ok(value) => {
-                        entries.push(JacobianEntry {
-                            value,
-                            row: jac_entry.row.clone(),
-                            col: jac_entry.col.clone(),
-                            program_idx: prog_idx,
-                            jacobian_idx: jac_idx,
-                        });
-                    }
-                    Err(_) => {}
+                if let Ok(value) = vm.execute(&jac_entry.program) {
+                    entries.push(JacobianEntry {
+                        value,
+                        row: jac_entry.row.clone(),
+                        col: jac_entry.col.clone(),
+                        program_idx: prog_idx,
+                        jacobian_idx: jac_idx,
+                    });
                 }
             }
         }
@@ -546,11 +543,19 @@ impl VerilogADevice {
         match index {
             StampIndex::Terminal(t) => {
                 let node = node_mapping.get(*t).copied().unwrap_or(0);
-                if node > 0 { Some(node - 1) } else { None }
+                if node > 0 {
+                    Some(node - 1)
+                } else {
+                    None
+                }
             }
             StampIndex::Internal(i) => {
                 let node = internal_node_indices.get(*i).copied().unwrap_or(0);
-                if node > 0 { Some(node - 1) } else { None }
+                if node > 0 {
+                    Some(node - 1)
+                } else {
+                    None
+                }
             }
             StampIndex::Ground => None,
         }
@@ -587,10 +592,8 @@ impl VerilogADevice {
                 if pos_terminal.replace(terminal).is_some() {
                     return None;
                 }
-            } else if loc.sign > 0.0 {
-                if neg_terminal.replace(terminal).is_some() {
-                    return None;
-                }
+            } else if loc.sign > 0.0 && neg_terminal.replace(terminal).is_some() {
+                return None;
             }
         }
 

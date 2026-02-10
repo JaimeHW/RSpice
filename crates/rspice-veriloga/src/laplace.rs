@@ -103,7 +103,7 @@ impl StateSpaceFilter {
         if n == 0 {
             // Static gain only
             let gain = if denominator[0].abs() > 1e-15 {
-                numerator.get(0).copied().unwrap_or(1.0) / denominator[0]
+                numerator.first().copied().unwrap_or(1.0) / denominator[0]
             } else {
                 1.0
             };
@@ -345,10 +345,10 @@ impl StateSpaceFilter {
 
         // Build the system matrix (I - h*A)
         let mut mat = vec![vec![0.0; n]; n];
-        for i in 0..n {
-            for j in 0..n {
-                mat[i][j] = if i == j { 1.0 } else { 0.0 };
-                mat[i][j] -= h * self.a[i][j];
+        for (i, row) in mat.iter_mut().enumerate().take(n) {
+            for (j, cell) in row.iter_mut().enumerate().take(n) {
+                *cell = if i == j { 1.0 } else { 0.0 };
+                *cell -= h * self.a[i][j];
             }
         }
 
@@ -365,9 +365,9 @@ impl StateSpaceFilter {
             // Find pivot
             let mut max_row = k;
             let mut max_val = mat[k][k].abs();
-            for i in k + 1..n {
-                if mat[i][k].abs() > max_val {
-                    max_val = mat[i][k].abs();
+            for (i, row) in mat.iter().enumerate().skip(k + 1) {
+                if row[k].abs() > max_val {
+                    max_val = row[k].abs();
                     max_row = i;
                 }
             }
@@ -384,11 +384,12 @@ impl StateSpaceFilter {
                 continue;
             }
 
-            for i in k + 1..n {
-                let factor = mat[i][k] / pivot;
-                mat[i][k] = 0.0;
-                for j in k + 1..n {
-                    mat[i][j] -= factor * mat[k][j];
+            let pivot_row = mat[k].clone();
+            for (i, row) in mat.iter_mut().enumerate().skip(k + 1) {
+                let factor = row[k] / pivot;
+                row[k] = 0.0;
+                for (j, cell) in row.iter_mut().enumerate().skip(k + 1) {
+                    *cell -= factor * pivot_row[j];
                 }
                 rhs[i] -= factor * rhs[k];
             }
@@ -402,8 +403,8 @@ impl StateSpaceFilter {
                 continue;
             }
             let mut sum = rhs[i];
-            for j in i + 1..n {
-                sum -= mat[i][j] * self.state[j];
+            for (&mat_coeff, &state_coeff) in mat[i].iter().zip(self.state.iter()).skip(i + 1) {
+                sum -= mat_coeff * state_coeff;
             }
             self.state[i] = sum / pivot;
         }
@@ -458,7 +459,7 @@ impl StateSpaceFilter {
         jw_powers.push(Complex::real(1.0)); // (jw)^0
 
         for _ in 0..self.order {
-            let last = jw_powers.last().unwrap().clone();
+            let last = *jw_powers.last().unwrap();
             jw_powers.push(Complex::new(
                 last.re * jw.re - last.im * jw.im,
                 last.re * jw.im + last.im * jw.re,
@@ -528,7 +529,11 @@ impl LaplaceFilter {
                 // H(0) = N(0)/D(0) = numerator[last] / denominator[last]
                 let n0 = numerator.last().copied().unwrap_or(1.0);
                 let d0 = denominator.last().copied().unwrap_or(1.0);
-                if d0.abs() > 1e-15 { n0 / d0 } else { 1.0 }
+                if d0.abs() > 1e-15 {
+                    n0 / d0
+                } else {
+                    1.0
+                }
             }
         }
     }

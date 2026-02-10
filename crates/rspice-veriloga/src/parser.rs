@@ -582,11 +582,7 @@ impl<'a> Parser<'a> {
             _ => {
                 // Keywords might be used as variable names (e.g., voltage, current)
                 // Try to parse as assignment/contribution
-                if self.current().kind.is_keyword() {
-                    self.parse_assignment_or_contribution()
-                } else {
-                    self.parse_assignment_or_contribution()
-                }
+                self.parse_assignment_or_contribution()
             }
         }
     }
@@ -1463,7 +1459,7 @@ impl<'a> Parser<'a> {
 
     fn skip_directive(&mut self) -> Result<(), ParseError> {
         self.advance(); // Skip directive token
-        // Skip until newline (handled by lexer in practice)
+                        // Skip until newline (handled by lexer in practice)
         Ok(())
     }
 

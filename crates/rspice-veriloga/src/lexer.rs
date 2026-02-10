@@ -751,12 +751,10 @@ impl<'a> Lexer<'a> {
                 has_scale = true;
                 self.advance();
                 // Handle 'meg' specifically
-                if ch == 'm' || ch == 'M' {
-                    if self.peek_char() == Some('e') {
+                if (ch == 'm' || ch == 'M') && self.peek_char() == Some('e') {
+                    self.advance();
+                    if self.peek_char() == Some('g') {
                         self.advance();
-                        if self.peek_char() == Some('g') {
-                            self.advance();
-                        }
                     }
                 }
             }

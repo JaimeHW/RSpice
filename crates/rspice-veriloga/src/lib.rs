@@ -141,11 +141,6 @@ impl VerilogACompiler {
         Self { options }
     }
 
-    /// Create a compiler with default options
-    pub fn default() -> Self {
-        Self::new(CompilerOptions::default())
-    }
-
     /// Compile Verilog-A source code to a device model
     pub fn compile(&self, source: &str) -> CompileResult<CompiledModel> {
         // Phase 1: Lexical analysis
@@ -212,6 +207,12 @@ impl VerilogACompiler {
     pub fn compile_file(&self, path: &std::path::Path) -> CompileResult<CompiledModel> {
         self.compile_file_with_metadata(path)
             .map(|compiled| compiled.model)
+    }
+}
+
+impl Default for VerilogACompiler {
+    fn default() -> Self {
+        Self::new(CompilerOptions::default())
     }
 }
 

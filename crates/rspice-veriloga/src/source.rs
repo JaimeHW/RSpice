@@ -124,7 +124,7 @@ impl SourceInfo {
             .map(|&e| e as usize)
             .unwrap_or(self.content.len());
 
-        Some(self.content[start..end].trim_end_matches(|c| c == '\r' || c == '\n'))
+        Some(self.content[start..end].trim_end_matches(['\r', '\n']))
     }
 }
 
@@ -143,10 +143,9 @@ impl SourceMap {
 
     /// Add a source file to the map
     pub fn add_source(&self, _path: impl Into<PathBuf>, _content: impl Into<String>) -> SourceId {
-        let id = SourceId::new(self.next_id.fetch_add(1, Ordering::Relaxed));
         // Note: In production, this would need interior mutability (e.g., RwLock)
         // For now, we'll require mutable access
-        id
+        SourceId::new(self.next_id.fetch_add(1, Ordering::Relaxed))
     }
 
     /// Add a source file (requires mutable access)
