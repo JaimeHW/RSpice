@@ -449,7 +449,7 @@ impl TransientResultCompressed {
     /// This is how compressed waveforms are read - the stored points
     /// are the control points for piecewise linear interpolation.
     pub fn interpolate(&self, node: usize, time: Value) -> Option<Value> {
-        if node >= self.num_nodes || self.time.is_empty() {
+        if node >= self.num_nodes || self.time.is_empty() || !time.is_finite() {
             return None;
         }
 
@@ -465,18 +465,28 @@ impl TransientResultCompressed {
         }
 
         // Binary search for interval
-        let idx = match times.binary_search_by(|t| t.partial_cmp(&time).unwrap()) {
+        let idx = match times.binary_search_by(|t| t.total_cmp(&time)) {
             Ok(i) => return Some(values[i]),
             Err(i) => i - 1,
         };
+        if idx + 1 >= times.len() {
+            return Some(values[idx]);
+        }
 
         // Linear interpolation
         let t0 = times[idx];
         let t1 = times[idx + 1];
         let v0 = values[idx];
         let v1 = values[idx + 1];
+        let dt = t1 - t0;
+        if !dt.is_finite() || dt.abs() <= Value::EPSILON {
+            return Some(v0);
+        }
 
-        let frac = (time - t0) / (t1 - t0);
+        let frac = (time - t0) / dt;
+        if !frac.is_finite() {
+            return Some(v0);
+        }
         Some(v0 + frac * (v1 - v0))
     }
 
@@ -484,7 +494,7 @@ impl TransientResultCompressed {
     ///
     /// Useful for FFT or other analysis that requires uniform sampling.
     pub fn resample(&self, node: usize, num_points: usize) -> Option<(Vec<Value>, Vec<Value>)> {
-        if node >= self.num_nodes || self.time.is_empty() {
+        if node >= self.num_nodes || self.time.is_empty() || num_points < 2 {
             return None;
         }
 
@@ -690,5 +700,32 @@ mod tests {
         assert_eq!(values.len(), 5);
         assert!((times[0] - 0.0).abs() < 1e-10);
         assert!((times[4] - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_resample_rejects_too_few_points() {
+        let result = TransientResultCompressed {
+            time: vec![0.0, 1.0],
+            voltages: vec![vec![0.0, 1.0]],
+            num_nodes: 1,
+            compression_ratio: 1.0,
+            input_points: 2,
+        };
+
+        assert!(result.resample(0, 0).is_none());
+        assert!(result.resample(0, 1).is_none());
+    }
+
+    #[test]
+    fn test_interpolate_rejects_non_finite_query_time() {
+        let result = TransientResultCompressed {
+            time: vec![0.0, 1.0],
+            voltages: vec![vec![0.0, 1.0]],
+            num_nodes: 1,
+            compression_ratio: 1.0,
+            input_points: 2,
+        };
+
+        assert!(result.interpolate(0, f64::NAN).is_none());
     }
 }
