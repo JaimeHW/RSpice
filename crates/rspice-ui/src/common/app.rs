@@ -1425,7 +1425,7 @@ impl RSpiceApp {
                         });
                     ui.add_space(5.0);
                     ui.label(
-                        egui::RichText::new("Note: current DISTO metrics are linearized AC-response estimates.")
+                        egui::RichText::new("Note: DISTO uses nonlinear HB extraction when available and falls back to linearized AC estimates if HB is unsupported for the circuit.")
                             .size(11.0)
                             .weak(),
                     );
