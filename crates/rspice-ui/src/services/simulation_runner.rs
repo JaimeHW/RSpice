@@ -35,6 +35,8 @@ mod pnoise;
 mod pnoise_sideband;
 #[path = "simulation_runner/pole_zero.rs"]
 mod pole_zero;
+#[path = "simulation_runner/pss.rs"]
+mod pss;
 #[path = "simulation_runner/reliability.rs"]
 mod reliability;
 #[path = "simulation_runner/sensitivity.rs"]
@@ -64,6 +66,7 @@ pub use pnoise::{
 #[cfg(test)]
 use pnoise_sideband::{build_pnoise_sideband_translated_frequencies, fold_sideband_samples};
 pub use pole_zero::{PoleZeroData, run_pole_zero_analysis};
+pub use pss::{PssData, run_pss_analysis};
 pub use reliability::{
     ReliabilityData, ReliabilityRunConfig, run_reliability_analysis,
     run_reliability_analysis_with_config,
@@ -775,113 +778,6 @@ fn normalize_waveform_node_name(raw: &str) -> String {
 }
 
 // =============================================================================
-// PSS (Periodic Steady State) Analysis
-// =============================================================================
-
-/// PSS analysis data
-#[derive(Debug, Clone)]
-pub struct PssData {
-    /// Fundamental period found (seconds)
-    pub period: Value,
-    /// Fundamental frequency (Hz)
-    pub frequency: Value,
-    /// Time points within one period
-    pub time: Vec<Value>,
-    /// Periodic waveforms: (node_name, values)
-    pub waveforms: Vec<(String, Vec<Value>)>,
-    /// Harmonic content: (node_name, [(frequency, magnitude, phase_deg)])
-    pub harmonics: Vec<(String, Vec<(Value, Value, Value)>)>,
-    /// Whether solution converged
-    pub converged: bool,
-    /// Number of cycles to reach steady state
-    pub settling_cycles: usize,
-}
-
-/// Run PSS analysis
-///
-/// Finds the periodic steady-state solution of a circuit with autonomous
-/// or driven oscillations. Uses the shooting method with Newton iteration.
-pub fn run_pss_analysis(
-    netlist_text: &str,
-    fundamental_freq: Value,
-    num_harmonics: usize,
-    tolerance: Value,
-) -> Result<PssData, String> {
-    use rspice_core::analysis::PssConfig;
-
-    // Parse the netlist
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
-
-    // Create engine with appropriate tolerance
-    let mut sim_config = build_engine_config(&netlist, None);
-    sim_config.tolerance = tolerance;
-    let engine = Engine::new(sim_config);
-
-    // Build PSS configuration
-    let pss_config = PssConfig::new(fundamental_freq)
-        .with_harmonics(num_harmonics)
-        .with_tolerance(tolerance)
-        .with_max_iterations(50)
-        .with_tstab_periods(10);
-
-    // Run actual PSS analysis
-    let pss_result = engine
-        .run_pss(&netlist, pss_config)
-        .map_err(|e| format!("PSS error: {}", e))?;
-
-    // Extract results from engine output
-    let period = pss_result.period;
-    let frequency = 1.0 / period;
-
-    // Get time points from the result (PssAnalysisResult wraps PssResult)
-    let time = pss_result.result.time.clone();
-
-    // Build waveforms from PSS result
-    let mut waveforms: Vec<(String, Vec<Value>)> = Vec::new();
-    let node_names = &pss_result.result.node_names;
-
-    for (i, waveform) in pss_result.result.waveforms.iter().enumerate() {
-        let name = node_names
-            .get(i)
-            .cloned()
-            .unwrap_or_else(|| format!("n{}", i + 1));
-
-        if name == "0" || name.eq_ignore_ascii_case("gnd") {
-            continue;
-        }
-
-        // Extract per-period values from the PeriodicWaveform (values is a pub field)
-        let values: Vec<Value> = waveform.values.clone();
-        waveforms.push((format!("V({})", name), values));
-    }
-
-    // Extract harmonic content via FFT from the waveforms
-    let mut harmonics: Vec<(String, Vec<(Value, Value, Value)>)> = Vec::new();
-    for (name, waveform_values) in &waveforms {
-        let mut node_harmonics: Vec<(Value, Value, Value)> = Vec::new();
-
-        if !waveform_values.is_empty() {
-            // Compute FFT to get harmonic content
-            let fft_result = compute_fft_harmonics(waveform_values, frequency, num_harmonics);
-            node_harmonics = fft_result;
-        }
-
-        harmonics.push((name.clone(), node_harmonics));
-    }
-
-    Ok(PssData {
-        period,
-        frequency,
-        time,
-        waveforms,
-        harmonics,
-        converged: true, // Engine would have errored if not converged
-        settling_cycles: 10,
-    })
-}
-
-// =============================================================================
 // PAC (Periodic AC) Analysis
 // =============================================================================
 
@@ -1518,49 +1414,6 @@ fn resolve_pac_output_node(
     result
         .node_index(trimmed)
         .or_else(|| result.node_index(&normalize_pac_node_name(trimmed)))
-}
-
-/// Compute FFT harmonics from time-domain waveform
-fn compute_fft_harmonics(
-    waveform: &[Value],
-    fundamental_freq: Value,
-    num_harmonics: usize,
-) -> Vec<(Value, Value, Value)> {
-    use std::f64::consts::PI;
-
-    let n = waveform.len();
-    if n == 0 {
-        return vec![];
-    }
-
-    let mut harmonics = Vec::with_capacity(num_harmonics + 1);
-
-    // DC component (harmonic 0)
-    let dc = waveform.iter().sum::<Value>() / n as Value;
-    harmonics.push((0.0, dc, 0.0));
-
-    // Compute harmonics using DFT
-    for h in 1..=num_harmonics {
-        let freq = fundamental_freq * h as Value;
-        let mut real = 0.0;
-        let mut imag = 0.0;
-
-        for (i, &sample) in waveform.iter().enumerate() {
-            let phase = 2.0 * PI * h as Value * i as Value / n as Value;
-            real += sample * phase.cos();
-            imag -= sample * phase.sin();
-        }
-
-        real *= 2.0 / n as Value;
-        imag *= 2.0 / n as Value;
-
-        let magnitude = (real * real + imag * imag).sqrt();
-        let phase_deg = imag.atan2(real).to_degrees();
-
-        harmonics.push((freq, magnitude, phase_deg));
-    }
-
-    harmonics
 }
 
 // =============================================================================
