@@ -299,6 +299,26 @@ fn run_analysis(
                 quiet,
             )?;
         }
+        AnalysisCommand::Disto {
+            variation,
+            points,
+            start_freq,
+            stop_freq,
+            f2_over_f1,
+        } => {
+            run_disto(
+                engine,
+                netlist,
+                *variation,
+                *points,
+                *start_freq,
+                *stop_freq,
+                *f2_over_f1,
+                args,
+                verbose,
+                quiet,
+            )?;
+        }
         AnalysisCommand::Noise {
             output_node,
             reference_node,
@@ -384,6 +404,51 @@ fn run_analysis(
         }
     }
     Ok(())
+}
+
+/// Run distortion analysis.
+///
+/// The CLI currently executes a linearized frequency sweep for .DISTO inputs.
+/// Detailed harmonic/intermodulation metrics are available through the UI flow.
+fn run_disto(
+    engine: &Engine,
+    netlist: &Netlist,
+    variation: rspice_core::netlist::FreqVariation,
+    points: usize,
+    start_freq: f64,
+    stop_freq: f64,
+    f2_over_f1: Option<f64>,
+    args: &RunArgs,
+    verbose: bool,
+    quiet: bool,
+) -> Result<(), CliError> {
+    if let Some(ratio) = f2_over_f1 {
+        if !ratio.is_finite() || ratio <= 1.0 {
+            return Err(CliError::simulation_error_in(
+                format!(
+                    "Invalid .DISTO f2_over_f1 ratio '{}': expected a finite value > 1",
+                    ratio
+                ),
+                "DISTO",
+            ));
+        }
+    }
+
+    if verbose && !quiet {
+        match f2_over_f1 {
+            Some(ratio) => println!(
+                "DISTO note: using linearized AC sweep in CLI (f2/f1={:.6}); full IMD metrics are available in rspice-ui",
+                ratio
+            ),
+            None => println!(
+                "DISTO note: using linearized AC sweep in CLI; full harmonic/IMD metrics are available in rspice-ui"
+            ),
+        }
+    }
+
+    run_ac(
+        engine, netlist, variation, points, start_freq, stop_freq, args, verbose, quiet,
+    )
 }
 
 /// Run DC operating point analysis
@@ -1135,6 +1200,11 @@ fn run_monte_carlo_from_command(
                 tolerance: mc_cmd.relative_spread,
             }
         }
+        rspice_core::netlist::MonteCarloDistribution::WorstCase => {
+            rspice_core::analysis::Distribution::WorstCase {
+                tolerance: mc_cmd.relative_spread,
+            }
+        }
     };
     let parameter_filter = if mc_cmd.params.is_empty() {
         None
@@ -1816,6 +1886,7 @@ fn run_fourier(
 
 /// Parse output node specification (e.g., "V(out)", "V(3)", "out").
 /// Returns the positive node index only (reference defaults to ground).
+#[cfg(test)]
 fn parse_output_node(output: &str, resolver: &NodeResolver) -> Option<usize> {
     resolver.parse_voltage_probe(output).map(|(pos, _)| pos)
 }
@@ -2719,6 +2790,49 @@ mod tests {
     }
 
     #[test]
+    fn test_run_analysis_parsed_disto_command() {
+        let netlist = rspice_core::netlist::parse_netlist(
+            "* DISTO\nV1 in 0 AC 1\nR1 in out 1k\nC1 out 0 1n\n.end\n",
+        )
+        .expect("netlist should parse");
+        let analysis = AnalysisCommand::Disto {
+            variation: rspice_core::netlist::FreqVariation::Dec,
+            points: 5,
+            start_freq: 1.0,
+            stop_freq: 1e3,
+            f2_over_f1: Some(1.5),
+        };
+        let engine = Engine::default();
+        let args = make_default_run_args();
+        let config = Config::default();
+
+        run_analysis(&engine, &netlist, &analysis, &args, &config, false, true)
+            .expect("parsed .DISTO analysis should run");
+    }
+
+    #[test]
+    fn test_run_analysis_disto_invalid_f2_ratio_errors() {
+        let netlist = rspice_core::netlist::parse_netlist(
+            "* DISTO invalid\nV1 in 0 AC 1\nR1 in out 1k\nC1 out 0 1n\n.end\n",
+        )
+        .expect("netlist should parse");
+        let analysis = AnalysisCommand::Disto {
+            variation: rspice_core::netlist::FreqVariation::Dec,
+            points: 5,
+            start_freq: 1.0,
+            stop_freq: 1e3,
+            f2_over_f1: Some(1.0),
+        };
+        let engine = Engine::default();
+        let args = make_default_run_args();
+        let config = Config::default();
+
+        let err = run_analysis(&engine, &netlist, &analysis, &args, &config, false, true)
+            .expect_err("invalid f2_over_f1 should fail");
+        assert!(err.to_string().contains("f2_over_f1"));
+    }
+
+    #[test]
     fn test_run_analysis_noise_invalid_input_source_errors() {
         let netlist = rspice_core::netlist::parse_netlist(
             "* NOISE invalid source\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.end\n",
@@ -2761,6 +2875,27 @@ mod tests {
 
         run_analysis(&engine, &netlist, &analysis, &args, &config, false, true)
             .expect("parsed .MC analysis should run");
+    }
+
+    #[test]
+    fn test_run_analysis_parsed_monte_carlo_worst_case_command() {
+        let netlist = rspice_core::netlist::parse_netlist(
+            "* MC worstcase\n.PARAM RVAL=1k\nV1 in 0 1\nR1 in out {RVAL}\nR2 out 0 1k\n.MC 16 DIST WORSTCASE SPREAD 0.03 PARAMS RVAL\n.end\n",
+        )
+        .expect("netlist should parse");
+        let analysis = AnalysisCommand::MonteCarlo(rspice_core::netlist::MonteCarloCommand {
+            runs: 16,
+            seed: Some(11),
+            distribution: rspice_core::netlist::MonteCarloDistribution::WorstCase,
+            relative_spread: 0.03,
+            params: vec!["RVAL".to_string()],
+        });
+        let engine = Engine::default();
+        let args = make_default_run_args();
+        let config = Config::default();
+
+        run_analysis(&engine, &netlist, &analysis, &args, &config, false, true)
+            .expect("parsed worst-case .MC analysis should run");
     }
 
     #[test]
