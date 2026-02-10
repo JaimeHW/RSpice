@@ -362,6 +362,81 @@ impl AcData {
     }
 }
 
+/// Sweep type for DISTO analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DistoFrequencySweep {
+    Decade,
+    Octave,
+    Linear,
+}
+
+impl DistoFrequencySweep {
+    fn keyword(self) -> &'static str {
+        match self {
+            Self::Decade => "dec",
+            Self::Octave => "oct",
+            Self::Linear => "lin",
+        }
+    }
+}
+
+/// Explicit configuration for DISTO execution.
+#[derive(Debug, Clone)]
+pub struct DistoRunConfig {
+    pub start_freq: Value,
+    pub stop_freq: Value,
+    pub points_per_unit: usize,
+    pub sweep: DistoFrequencySweep,
+    /// Optional secondary tone ratio for IMD estimates.
+    pub f2_over_f1: Option<Value>,
+}
+
+impl DistoRunConfig {
+    fn validate(&self) -> Result<(), String> {
+        if !self.start_freq.is_finite() || self.start_freq <= 0.0 {
+            return Err("DISTO start frequency must be positive".to_string());
+        }
+        if !self.stop_freq.is_finite() || self.stop_freq <= self.start_freq {
+            return Err("DISTO stop frequency must be greater than start frequency".to_string());
+        }
+        if self.points_per_unit == 0 {
+            return Err("DISTO points per unit must be greater than zero".to_string());
+        }
+        if let Some(ratio) = self.f2_over_f1 {
+            if !ratio.is_finite() || ratio <= 1.0 {
+                return Err("DISTO f2_over_f1 must be finite and > 1".to_string());
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Per-trace DISTO output.
+#[derive(Debug, Clone)]
+pub struct DistoTrace {
+    pub name: String,
+    /// Fundamental transfer magnitude in dB.
+    pub fundamental_gain_db: Vec<Value>,
+    /// 2nd-harmonic estimate in dBc.
+    pub hd2_db: Vec<Value>,
+    /// 3rd-harmonic estimate in dBc.
+    pub hd3_db: Vec<Value>,
+    /// THD estimate in percent (from HD2/HD3).
+    pub thd_percent: Vec<Value>,
+    /// Optional IMD2 estimate in dBc when f2/f1 is configured.
+    pub imd2_db: Option<Vec<Value>>,
+    /// Optional IMD3 estimate in dBc when f2/f1 is configured.
+    pub imd3_db: Option<Vec<Value>>,
+}
+
+/// DISTO analysis output.
+#[derive(Debug, Clone)]
+pub struct DistoData {
+    pub frequencies: Vec<Value>,
+    pub traces: Vec<DistoTrace>,
+    pub warnings: Vec<String>,
+}
+
 /// Run AC small-signal analysis
 pub fn run_ac_analysis(
     netlist_text: &str,
@@ -392,6 +467,198 @@ pub fn run_ac_analysis(
         .map_err(|e| format!("AC analysis error: {}", e))?;
 
     Ok(AcData::from_results(results, &node_names))
+}
+
+/// Run DISTO analysis using transfer-based harmonic sideband estimation.
+///
+/// This computes distortion-oriented traces over frequency by combining:
+/// - Fundamental transfer magnitude at `f`
+/// - Harmonic sideband transfer magnitude at `2f` and `3f`
+/// - Optional IMD sidebands using `f2_over_f1`
+///
+/// The estimation is linearized and derived from AC transfer response.
+pub fn run_disto_analysis(netlist_text: &str, config: &DistoRunConfig) -> Result<DistoData, String> {
+    config.validate()?;
+
+    let f2_over_f1 = config.f2_over_f1.unwrap_or(2.0);
+    let max_factor = 3.0_f64
+        .max(f2_over_f1 + 1.0)
+        .max((2.0 * f2_over_f1 - 1.0).abs())
+        .max((2.0 - f2_over_f1).abs())
+        .max((f2_over_f1 - 1.0).abs());
+    let extended_stop = config.stop_freq * max_factor;
+
+    let ac = run_ac_analysis(
+        netlist_text,
+        config.start_freq,
+        extended_stop,
+        config.points_per_unit,
+        config.sweep.keyword(),
+    )?;
+
+    let frequencies = generate_freq_points(
+        config.start_freq,
+        config.stop_freq,
+        config.points_per_unit,
+        config.sweep.keyword(),
+    );
+    if frequencies.is_empty() {
+        return Err("DISTO sweep generated no frequency points".to_string());
+    }
+
+    let mut traces = Vec::with_capacity(ac.responses.len());
+    for (name, response) in &ac.responses {
+        let magnitudes: Vec<Value> = response.iter().map(|value| value.norm()).collect();
+        let mut fundamental_gain_db = Vec::with_capacity(frequencies.len());
+        let mut hd2_db = Vec::with_capacity(frequencies.len());
+        let mut hd3_db = Vec::with_capacity(frequencies.len());
+        let mut thd_percent = Vec::with_capacity(frequencies.len());
+        let mut imd2_db = config.f2_over_f1.map(|_| Vec::with_capacity(frequencies.len()));
+        let mut imd3_db = config.f2_over_f1.map(|_| Vec::with_capacity(frequencies.len()));
+
+        for &f1 in &frequencies {
+            let fund = interpolate_magnitude_at(&ac.frequencies, &magnitudes, f1)
+                .unwrap_or(0.0)
+                .max(1e-30);
+            let h2 = interpolate_magnitude_at(&ac.frequencies, &magnitudes, 2.0 * f1)
+                .unwrap_or(0.0)
+                .max(0.0);
+            let h3 = interpolate_magnitude_at(&ac.frequencies, &magnitudes, 3.0 * f1)
+                .unwrap_or(0.0)
+                .max(0.0);
+
+            let r2 = h2 / fund;
+            let r3 = h3 / fund;
+
+            fundamental_gain_db.push(magnitude_to_db(fund));
+            hd2_db.push(ratio_to_dbc(r2));
+            hd3_db.push(ratio_to_dbc(r3));
+            thd_percent.push((r2 * r2 + r3 * r3).sqrt() * 100.0);
+
+            if let Some(series) = imd2_db.as_mut() {
+                let sidebands = [((f2_over_f1 - 1.0).abs() * f1), ((f2_over_f1 + 1.0) * f1)];
+                let ratio = max_sideband_ratio(&ac.frequencies, &magnitudes, &sidebands, fund);
+                series.push(ratio_to_dbc(ratio.unwrap_or(0.0)));
+            }
+            if let Some(series) = imd3_db.as_mut() {
+                let sidebands = [
+                    ((2.0 - f2_over_f1).abs() * f1),
+                    ((2.0 * f2_over_f1 - 1.0).abs() * f1),
+                ];
+                let ratio = max_sideband_ratio(&ac.frequencies, &magnitudes, &sidebands, fund);
+                series.push(ratio_to_dbc(ratio.unwrap_or(0.0)));
+            }
+        }
+
+        traces.push(DistoTrace {
+            name: name.clone(),
+            fundamental_gain_db,
+            hd2_db,
+            hd3_db,
+            thd_percent,
+            imd2_db,
+            imd3_db,
+        });
+    }
+
+    if traces.is_empty() {
+        return Err("DISTO produced no output traces".to_string());
+    }
+
+    Ok(DistoData {
+        frequencies,
+        traces,
+        warnings: vec![
+            "DISTO uses linearized transfer-based HD/IMD estimates from AC response; nonlinear source/device distortion generation is not yet modeled.".to_string(),
+        ],
+    })
+}
+
+fn magnitude_to_db(value: Value) -> Value {
+    20.0 * value.max(1e-30).log10()
+}
+
+fn ratio_to_dbc(ratio: Value) -> Value {
+    20.0 * ratio.max(1e-30).log10()
+}
+
+fn max_sideband_ratio(
+    frequencies: &[Value],
+    magnitudes: &[Value],
+    sidebands: &[Value],
+    fundamental: Value,
+) -> Option<Value> {
+    let mut best: Option<Value> = None;
+    for &freq in sidebands {
+        if freq <= 0.0 {
+            continue;
+        }
+        let Some(mag) = interpolate_magnitude_at(frequencies, magnitudes, freq) else {
+            continue;
+        };
+        let ratio = mag.max(0.0) / fundamental.max(1e-30);
+        best = Some(match best {
+            Some(existing) => existing.max(ratio),
+            None => ratio,
+        });
+    }
+    best
+}
+
+fn interpolate_magnitude_at(
+    frequencies: &[Value],
+    magnitudes: &[Value],
+    target: Value,
+) -> Option<Value> {
+    if frequencies.len() != magnitudes.len() || frequencies.is_empty() || !target.is_finite() {
+        return None;
+    }
+    let first = *frequencies.first()?;
+    let last = *frequencies.last()?;
+    if target < first || target > last {
+        return None;
+    }
+    if frequencies.len() == 1 {
+        return Some(magnitudes[0]);
+    }
+
+    match frequencies.binary_search_by(|value| value.partial_cmp(&target).unwrap_or(std::cmp::Ordering::Less)) {
+        Ok(idx) => magnitudes.get(idx).copied(),
+        Err(upper) => {
+            if upper == 0 || upper >= frequencies.len() {
+                return None;
+            }
+            let lower = upper - 1;
+            let f0 = frequencies[lower];
+            let f1 = frequencies[upper];
+            let y0 = magnitudes[lower];
+            let y1 = magnitudes[upper];
+            if (f1 - f0).abs() <= f64::EPSILON {
+                return Some(y0);
+            }
+
+            let t = if f0 > 0.0 && f1 > 0.0 && target > 0.0 {
+                let l0 = f0.log10();
+                let l1 = f1.log10();
+                if (l1 - l0).abs() <= f64::EPSILON {
+                    0.0
+                } else {
+                    (target.log10() - l0) / (l1 - l0)
+                }
+            } else {
+                (target - f0) / (f1 - f0)
+            };
+            let t = t.clamp(0.0, 1.0);
+            if y0 > 0.0 && y1 > 0.0 {
+                let ly0 = y0.log10();
+                let ly1 = y1.log10();
+                if ly0.is_finite() && ly1.is_finite() {
+                    return Some(10.0_f64.powf(ly0 + (ly1 - ly0) * t));
+                }
+            }
+            Some(y0 + (y1 - y0) * t)
+        }
+    }
 }
 
 // =============================================================================
@@ -6588,6 +6855,69 @@ mod tests {
         assert!(freqs.len() >= 2);
         assert!((freqs[0] - 1.0).abs() < 1e-6);
         assert!((freqs[freqs.len() - 1] - 1000.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_interpolate_magnitude_at_log_frequency() {
+        let frequencies = vec![1.0, 10.0, 100.0];
+        let magnitudes = vec![1.0, 10.0, 100.0];
+        let mid = interpolate_magnitude_at(&frequencies, &magnitudes, 31.622776601683793)
+            .expect("interpolation should succeed");
+        assert!((mid - 31.622776601683793).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_run_disto_analysis_generates_harmonic_metrics() {
+        let netlist = r#"
+* disto transfer-estimation test
+V1 in 0 DC 1 AC 1
+R1 in out 1k
+C1 out 0 1n
+.end
+"#;
+
+        let cfg = DistoRunConfig {
+            start_freq: 1e3,
+            stop_freq: 1e6,
+            points_per_unit: 8,
+            sweep: DistoFrequencySweep::Decade,
+            f2_over_f1: Some(1.5),
+        };
+
+        let data = run_disto_analysis(netlist, &cfg).expect("DISTO should execute");
+        assert!(!data.frequencies.is_empty());
+        assert!(!data.traces.is_empty());
+        assert!(!data.warnings.is_empty());
+
+        let trace = &data.traces[0];
+        assert_eq!(trace.fundamental_gain_db.len(), data.frequencies.len());
+        assert_eq!(trace.hd2_db.len(), data.frequencies.len());
+        assert_eq!(trace.hd3_db.len(), data.frequencies.len());
+        assert_eq!(trace.thd_percent.len(), data.frequencies.len());
+        assert!(trace.imd2_db.is_some());
+        assert!(trace.imd3_db.is_some());
+        assert_eq!(
+            trace.imd2_db.as_ref().expect("imd2 should exist").len(),
+            data.frequencies.len()
+        );
+        assert_eq!(
+            trace.imd3_db.as_ref().expect("imd3 should exist").len(),
+            data.frequencies.len()
+        );
+    }
+
+    #[test]
+    fn test_run_disto_analysis_rejects_invalid_f2_ratio() {
+        let cfg = DistoRunConfig {
+            start_freq: 1e3,
+            stop_freq: 1e6,
+            points_per_unit: 8,
+            sweep: DistoFrequencySweep::Decade,
+            f2_over_f1: Some(1.0),
+        };
+        let err = run_disto_analysis("* invalid\nV1 in 0 AC 1\nR1 in 0 1k\n.end\n", &cfg)
+            .expect_err("f2 ratio <= 1 should fail validation");
+        assert!(err.contains("f2_over_f1"));
     }
 
     #[test]

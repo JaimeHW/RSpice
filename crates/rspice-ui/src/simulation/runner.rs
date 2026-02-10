@@ -298,6 +298,14 @@ fn run_simulation_thread(
                     freq: *start_freq,
                     stop_freq: *stop_freq,
                 }),
+                AnalysisSpec::Disto {
+                    start_freq,
+                    stop_freq,
+                    ..
+                } => p.update_status(SimulationStatus::AcAnalysis {
+                    freq: *start_freq,
+                    stop_freq: *stop_freq,
+                }),
                 AnalysisSpec::Noise {
                     start_freq,
                     stop_freq,
@@ -1004,6 +1012,122 @@ fn run_spec_request(
             );
             Ok(SimulationResult::Ac {
                 frequencies: data.frequencies,
+                waveforms,
+            })
+        }
+        AnalysisSpec::Disto {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+            f2_over_f1,
+        } => {
+            let sweep = match sweep {
+                crate::simulation::multi_run::FrequencySweep::Decade => {
+                    svc_runner::DistoFrequencySweep::Decade
+                }
+                crate::simulation::multi_run::FrequencySweep::Octave => {
+                    svc_runner::DistoFrequencySweep::Octave
+                }
+                crate::simulation::multi_run::FrequencySweep::Linear => {
+                    svc_runner::DistoFrequencySweep::Linear
+                }
+            };
+            let cfg = svc_runner::DistoRunConfig {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                sweep,
+                f2_over_f1,
+            };
+            let data = svc_runner::run_disto_analysis(netlist, &cfg)
+                .map_err(SimulationError::InvalidConfig)?;
+            let frequencies = data.frequencies;
+            let traces = data.traces;
+
+            let mut waveforms: std::collections::HashMap<String, WaveformData> =
+                std::collections::HashMap::new();
+            for trace in traces {
+                waveforms.insert(
+                    format!("{} Gain(dB)", trace.name),
+                    WaveformData {
+                        name: format!("{} Gain(dB)", trace.name),
+                        x_values: frequencies.clone(),
+                        y_values: trace.fundamental_gain_db,
+                        y_unit: "dB".to_string(),
+                        x_unit: "Hz".to_string(),
+                        is_complex: false,
+                        y_imag: None,
+                    },
+                );
+                waveforms.insert(
+                    format!("{} HD2(dBc)", trace.name),
+                    WaveformData {
+                        name: format!("{} HD2(dBc)", trace.name),
+                        x_values: frequencies.clone(),
+                        y_values: trace.hd2_db,
+                        y_unit: "dBc".to_string(),
+                        x_unit: "Hz".to_string(),
+                        is_complex: false,
+                        y_imag: None,
+                    },
+                );
+                waveforms.insert(
+                    format!("{} HD3(dBc)", trace.name),
+                    WaveformData {
+                        name: format!("{} HD3(dBc)", trace.name),
+                        x_values: frequencies.clone(),
+                        y_values: trace.hd3_db,
+                        y_unit: "dBc".to_string(),
+                        x_unit: "Hz".to_string(),
+                        is_complex: false,
+                        y_imag: None,
+                    },
+                );
+                waveforms.insert(
+                    format!("{} THD(%)", trace.name),
+                    WaveformData {
+                        name: format!("{} THD(%)", trace.name),
+                        x_values: frequencies.clone(),
+                        y_values: trace.thd_percent,
+                        y_unit: "%".to_string(),
+                        x_unit: "Hz".to_string(),
+                        is_complex: false,
+                        y_imag: None,
+                    },
+                );
+                if let Some(imd2) = trace.imd2_db {
+                    waveforms.insert(
+                        format!("{} IMD2(dBc)", trace.name),
+                        WaveformData {
+                            name: format!("{} IMD2(dBc)", trace.name),
+                            x_values: frequencies.clone(),
+                            y_values: imd2,
+                            y_unit: "dBc".to_string(),
+                            x_unit: "Hz".to_string(),
+                            is_complex: false,
+                            y_imag: None,
+                        },
+                    );
+                }
+                if let Some(imd3) = trace.imd3_db {
+                    waveforms.insert(
+                        format!("{} IMD3(dBc)", trace.name),
+                        WaveformData {
+                            name: format!("{} IMD3(dBc)", trace.name),
+                            x_values: frequencies.clone(),
+                            y_values: imd3,
+                            y_unit: "dBc".to_string(),
+                            x_unit: "Hz".to_string(),
+                            is_complex: false,
+                            y_imag: None,
+                        },
+                    );
+                }
+            }
+
+            Ok(SimulationResult::Ac {
+                frequencies,
                 waveforms,
             })
         }
@@ -1782,6 +1906,47 @@ C1 out 0 1n
                 assert!(!waveforms.is_empty());
             }
             other => panic!("Expected AC result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_runner_start_spec_disto_routes_through_spec_runner() {
+        let mut runner = SimulationRunner::new();
+        let netlist = r#"
+* DISTO routing test
+V1 in 0 DC 1 AC 1
+R1 in out 1k
+C1 out 0 1n
+.end
+"#
+        .to_string();
+
+        runner
+            .start_spec(
+                AnalysisSpec::Disto {
+                    start_freq: 1e3,
+                    stop_freq: 1e6,
+                    points_per_unit: 8,
+                    sweep: crate::simulation::multi_run::FrequencySweep::Decade,
+                    f2_over_f1: Some(1.5),
+                },
+                netlist,
+            )
+            .expect("DISTO spec should start");
+
+        let result = wait_for_result(&mut runner, Duration::from_secs(10));
+        assert!(result.is_some(), "Expected DISTO result");
+        let result = result.unwrap().expect("DISTO should succeed");
+        match result {
+            SimulationResult::Ac {
+                frequencies,
+                waveforms,
+            } => {
+                assert!(!frequencies.is_empty());
+                assert!(!waveforms.is_empty());
+                assert!(waveforms.keys().any(|name| name.contains("THD(%)")));
+            }
+            other => panic!("Expected AC-form DISTO result, got {:?}", other),
         }
     }
 

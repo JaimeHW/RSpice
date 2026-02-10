@@ -680,6 +680,113 @@ impl RunExecutor {
                     Err(e) => Err(e),
                 }
             }
+            AnalysisSpec::Disto {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                sweep,
+                f2_over_f1,
+            } => {
+                let sweep = match sweep {
+                    super::multi_run::FrequencySweep::Decade => {
+                        simulation_runner::DistoFrequencySweep::Decade
+                    }
+                    super::multi_run::FrequencySweep::Octave => {
+                        simulation_runner::DistoFrequencySweep::Octave
+                    }
+                    super::multi_run::FrequencySweep::Linear => {
+                        simulation_runner::DistoFrequencySweep::Linear
+                    }
+                };
+                let cfg = simulation_runner::DistoRunConfig {
+                    start_freq: *start_freq,
+                    stop_freq: *stop_freq,
+                    points_per_unit: *points_per_unit,
+                    sweep,
+                    f2_over_f1: *f2_over_f1,
+                };
+                match simulation_runner::run_disto_analysis(netlist, &cfg) {
+                    Ok(data) => {
+                        let frequencies = data.frequencies;
+                        let warnings = data.warnings;
+                        let traces = data.traces;
+
+                        let mut waveforms = Vec::new();
+                        let mut measurements = Vec::new();
+
+                        for trace in traces {
+                            let signal_name = trace.name.clone();
+                            waveforms.push(MappedWaveform::frequency_domain(
+                                format!("{} Gain(dB)", signal_name),
+                                frequencies.clone(),
+                                trace.fundamental_gain_db,
+                                "Gain",
+                            ));
+                            waveforms.push(MappedWaveform::frequency_domain(
+                                format!("{} HD2(dBc)", signal_name),
+                                frequencies.clone(),
+                                trace.hd2_db,
+                                "HD2",
+                            ));
+                            waveforms.push(MappedWaveform::frequency_domain(
+                                format!("{} HD3(dBc)", signal_name),
+                                frequencies.clone(),
+                                trace.hd3_db,
+                                "HD3",
+                            ));
+                            waveforms.push(MappedWaveform::frequency_domain(
+                                format!("{} THD(%)", signal_name),
+                                frequencies.clone(),
+                                trace.thd_percent.clone(),
+                                "THD",
+                            ));
+                            if let Some(imd2) = trace.imd2_db {
+                                waveforms.push(MappedWaveform::frequency_domain(
+                                    format!("{} IMD2(dBc)", signal_name),
+                                    frequencies.clone(),
+                                    imd2,
+                                    "IMD2",
+                                ));
+                            }
+                            if let Some(imd3) = trace.imd3_db {
+                                waveforms.push(MappedWaveform::frequency_domain(
+                                    format!("{} IMD3(dBc)", signal_name),
+                                    frequencies.clone(),
+                                    imd3,
+                                    "IMD3",
+                                ));
+                            }
+
+                            if let Some(max_thd) =
+                                trace.thd_percent.iter().copied().reduce(f64::max)
+                            {
+                                measurements.push(MappedMeasurement {
+                                    name: format!("max_thd_percent({})", signal_name),
+                                    meas_type: MeasurementType::Custom,
+                                    value: max_thd,
+                                    unit: "%".to_string(),
+                                    signal: signal_name,
+                                    status: MeasurementStatus::Success,
+                                });
+                            }
+                        }
+
+                        Ok(MappedResult {
+                            analysis_type: MappedAnalysisType::Disto,
+                            status: if warnings.is_empty() {
+                                ResultStatus::Success
+                            } else {
+                                ResultStatus::Warning
+                            },
+                            waveforms,
+                            measurements,
+                            warnings,
+                            ..Default::default()
+                        })
+                    }
+                    Err(e) => Err(e),
+                }
+            }
             AnalysisSpec::DcSweep {
                 source_name,
                 start,
@@ -2287,6 +2394,7 @@ impl RunExecutor {
             AnalysisRunType::DcOp => MappedAnalysisType::DcOp,
             AnalysisRunType::DcSweep => MappedAnalysisType::DcSweep,
             AnalysisRunType::Ac => MappedAnalysisType::Ac,
+            AnalysisRunType::Disto => MappedAnalysisType::Disto,
             AnalysisRunType::Transient => MappedAnalysisType::Transient,
             AnalysisRunType::Noise => MappedAnalysisType::Noise,
             AnalysisRunType::Tf => MappedAnalysisType::Tf,
@@ -2592,6 +2700,7 @@ mod tests {
             (AnalysisRunType::DcOp, MappedAnalysisType::DcOp),
             (AnalysisRunType::DcSweep, MappedAnalysisType::DcSweep),
             (AnalysisRunType::Ac, MappedAnalysisType::Ac),
+            (AnalysisRunType::Disto, MappedAnalysisType::Disto),
             (AnalysisRunType::Transient, MappedAnalysisType::Transient),
             (AnalysisRunType::Noise, MappedAnalysisType::Noise),
             (AnalysisRunType::PoleZero, MappedAnalysisType::PoleZero),
@@ -2866,6 +2975,42 @@ mod tests {
                 "run should fail for circuit/solver reasons, not missing spec"
             );
         }
+    }
+
+    #[test]
+    fn test_disto_analysis_with_spec_is_executed() {
+        let executor = RunExecutor::new();
+        let mut queue = RunQueue::new().with_netlist(
+            "* disto\nV1 in 0 DC 1 AC 1\nR1 in out 1k\nC1 out 0 1n\n.end\n",
+        );
+        queue.add_analysis(AnalysisSpec::Disto {
+            start_freq: 1e3,
+            stop_freq: 1e6,
+            points_per_unit: 8,
+            sweep: FrequencySweep::Decade,
+            f2_over_f1: Some(1.5),
+        });
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.total_runs, 1);
+        assert!(
+            result.errors.is_empty(),
+            "expected DISTO run to succeed, got errors: {:?}",
+            result.errors
+        );
+
+        let mapped = result
+            .results
+            .values()
+            .next()
+            .expect("expected mapped DISTO result");
+        assert_eq!(mapped.analysis_type, MappedAnalysisType::Disto);
+        assert!(mapped
+            .waveforms
+            .iter()
+            .any(|wf| wf.name.contains("THD(%)")));
+        assert!(!mapped.measurements.is_empty());
+        assert_eq!(mapped.status, ResultStatus::Warning);
     }
 
     #[test]

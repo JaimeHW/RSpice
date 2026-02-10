@@ -262,7 +262,7 @@ pub struct DialogState {
     pub new_view_type: crate::state::ViewType,
     /// New View validation error message
     pub new_view_error: Option<String>,
-    /// Active simulation tab (0=OP, 1=Tran, 2=AC, 3=DC, 4=Noise, 5=PZ, 6=Sens, 7=MC, 8=PSS, 9=STB, 10=Temp)
+    /// Active simulation tab (0=OP, 1=Tran, 2=AC, 3=DC, 4=Noise, 5=PZ, 6=Sens, 7=MC, 8=PSS, 9=STB, 10=Temp, 24=DISTO)
     pub sim_active_tab: usize,
     /// Set of enabled analysis indices
     pub enabled_analyses: std::collections::HashSet<usize>,
@@ -286,6 +286,8 @@ pub struct DialogState {
     pub ac_points: String,
     /// AC sweep type (0=decade, 1=octave, 2=linear)
     pub ac_sweep_type: usize,
+    /// DISTO secondary tone ratio (f2/f1), optional
+    pub disto_f2_over_f1: String,
     // --- DC Analysis ---
     /// DC source name
     pub dc_source: String,
@@ -1356,6 +1358,77 @@ impl RSpiceApp {
                                 });
                             ui.end_row();
                         });
+                });
+            }
+            24 => {
+                ui.heading("DISTO Analysis");
+                ui.add_space(5.0);
+                ui.label(
+                    egui::RichText::new(
+                        "Transfer-based harmonic/intermodulation distortion estimates versus frequency",
+                    )
+                    .weak(),
+                );
+                ui.add_space(15.0);
+                ui.group(|ui| {
+                    ui.label(egui::RichText::new("Frequency Sweep").strong());
+                    ui.add_space(5.0);
+                    egui::Grid::new("disto_grid")
+                        .num_columns(2)
+                        .spacing([20.0, 6.0])
+                        .show(ui, |ui| {
+                            ui.label("Start Frequency:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.state.dialogs.ac_fstart)
+                                    .desired_width(120.0),
+                            );
+                            ui.end_row();
+                            ui.label("Stop Frequency:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.state.dialogs.ac_fstop)
+                                    .desired_width(120.0),
+                            );
+                            ui.end_row();
+                            ui.label("Points/Decade:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.state.dialogs.ac_points)
+                                    .desired_width(120.0),
+                            );
+                            ui.end_row();
+                            ui.label("Sweep Type:");
+                            let sweep_types = ["Decade", "Octave", "Linear"];
+                            egui::ComboBox::from_id_salt("disto_sweep")
+                                .selected_text(sweep_types[self.state.dialogs.ac_sweep_type])
+                                .show_ui(ui, |ui| {
+                                    for (idx, name) in sweep_types.iter().enumerate() {
+                                        if ui
+                                            .selectable_label(
+                                                self.state.dialogs.ac_sweep_type == idx,
+                                                *name,
+                                            )
+                                            .clicked()
+                                        {
+                                            self.state.dialogs.ac_sweep_type = idx;
+                                        }
+                                    }
+                                });
+                            ui.end_row();
+                            ui.label("f2/f1 Ratio:");
+                            ui.add(
+                                egui::TextEdit::singleline(
+                                    &mut self.state.dialogs.disto_f2_over_f1,
+                                )
+                                .desired_width(120.0)
+                                .hint_text("auto"),
+                            );
+                            ui.end_row();
+                        });
+                    ui.add_space(5.0);
+                    ui.label(
+                        egui::RichText::new("Note: current DISTO metrics are linearized AC-response estimates.")
+                            .size(11.0)
+                            .weak(),
+                    );
                 });
             }
             3 => {
@@ -2774,6 +2847,7 @@ impl eframe::App for RSpiceApp {
                 self.state.dialogs.ac_fstart = "1".to_string();
                 self.state.dialogs.ac_fstop = "1G".to_string();
                 self.state.dialogs.ac_points = "101".to_string();
+                self.state.dialogs.disto_f2_over_f1 = "2.0".to_string();
                 // DC
                 self.state.dialogs.dc_source = "V1".to_string();
                 self.state.dialogs.dc_start = "0".to_string();
@@ -2896,6 +2970,7 @@ impl eframe::App for RSpiceApp {
                                                     (21, "Reliability"),
                                                     (22, "Optimization"),
                                                     (23, "Safety (SOA)"),
+                                                    (24, "DISTO"),
                                                 ],
                                             ),
                                         ];

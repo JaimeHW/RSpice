@@ -50,6 +50,8 @@ pub enum MappedAnalysisType {
     Transient,
     /// AC analysis
     Ac,
+    /// Distortion analysis
+    Disto,
     /// Noise analysis
     Noise,
     /// Transfer function

@@ -321,6 +321,7 @@ fn analysis_type_icon(analysis_type: AnalysisType) -> &'static str {
         AnalysisType::DcOp => "[OP]",
         AnalysisType::DcSweep => "[DC]",
         AnalysisType::Ac => "[AC]",
+        AnalysisType::Disto => "[DI]",
         AnalysisType::Transient => "[TR]",
         AnalysisType::Noise => "[NO]",
         AnalysisType::PoleZero => "[PZ]",
@@ -351,6 +352,7 @@ fn analysis_type_to_tab(analysis_type: AnalysisType) -> BottomPanelTab {
         AnalysisType::DcOp => BottomPanelTab::Log,
         AnalysisType::DcSweep => BottomPanelTab::Waveform,
         AnalysisType::Ac => BottomPanelTab::Waveform, // AC uses waveform viewer for now
+        AnalysisType::Disto => BottomPanelTab::Waveform,
         AnalysisType::Transient => BottomPanelTab::Waveform,
         AnalysisType::Noise => BottomPanelTab::Waveform,
         AnalysisType::PoleZero => BottomPanelTab::Waveform, // PoleZero uses waveform viewer for now
@@ -381,7 +383,11 @@ fn analysis_type_to_viewer(analysis_type: AnalysisType) -> ActiveViewer {
         AnalysisType::DcSweep | AnalysisType::Transient | AnalysisType::Envelope => {
             ActiveViewer::Waveform
         }
-        AnalysisType::Ac | AnalysisType::Tf | AnalysisType::Pac | AnalysisType::Pxf => {
+        AnalysisType::Ac
+        | AnalysisType::Disto
+        | AnalysisType::Tf
+        | AnalysisType::Pac
+        | AnalysisType::Pxf => {
             ActiveViewer::BodePlot
         }
         AnalysisType::Noise | AnalysisType::Pnoise => ActiveViewer::BodePlot,
@@ -415,6 +421,7 @@ mod tests {
             AnalysisType::DcOp,
             AnalysisType::DcSweep,
             AnalysisType::Ac,
+            AnalysisType::Disto,
             AnalysisType::Transient,
             AnalysisType::Noise,
             AnalysisType::PoleZero,
@@ -451,6 +458,7 @@ mod tests {
             AnalysisType::DcOp,
             AnalysisType::DcSweep,
             AnalysisType::Ac,
+            AnalysisType::Disto,
             AnalysisType::Transient,
             AnalysisType::Noise,
             AnalysisType::PoleZero,
@@ -492,6 +500,10 @@ mod tests {
     fn test_analysis_type_to_viewer_routes_specialized_views() {
         assert_eq!(
             analysis_type_to_viewer(AnalysisType::Ac),
+            ActiveViewer::BodePlot
+        );
+        assert_eq!(
+            analysis_type_to_viewer(AnalysisType::Disto),
             ActiveViewer::BodePlot
         );
         assert_eq!(

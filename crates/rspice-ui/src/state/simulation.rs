@@ -117,6 +117,8 @@ pub enum AnalysisType {
     DcSweep,
     /// AC small-signal frequency response analysis
     Ac,
+    /// Distortion analysis
+    Disto,
     /// Time-domain transient analysis
     Transient,
     /// Noise analysis - noise spectral density vs frequency
@@ -168,6 +170,7 @@ impl AnalysisType {
             AnalysisType::DcOp => "DC Operating Point",
             AnalysisType::DcSweep => "DC Sweep",
             AnalysisType::Ac => "AC Analysis",
+            AnalysisType::Disto => "DISTO",
             AnalysisType::Transient => "Transient",
             AnalysisType::Noise => "Noise",
             AnalysisType::PoleZero => "Pole-Zero",
@@ -198,6 +201,7 @@ impl AnalysisType {
             AnalysisType::DcOp => "DC",
             AnalysisType::DcSweep => "DCS",
             AnalysisType::Ac => "AC",
+            AnalysisType::Disto => "DIST",
             AnalysisType::Transient => "TR",
             AnalysisType::Noise => "NS",
             AnalysisType::PoleZero => "PZ",
@@ -232,6 +236,7 @@ impl AnalysisType {
             | AnalysisType::Envelope
             | AnalysisType::Soa => ("Time", "s", "Voltage", "V"),
             AnalysisType::Ac
+            | AnalysisType::Disto
             | AnalysisType::Noise
             | AnalysisType::Tf
             | AnalysisType::Pac
@@ -985,6 +990,7 @@ mod tests {
     fn test_analysis_type_display_names() {
         assert_eq!(AnalysisType::DcOp.display_name(), "DC Operating Point");
         assert_eq!(AnalysisType::Ac.display_name(), "AC Analysis");
+        assert_eq!(AnalysisType::Disto.display_name(), "DISTO");
         assert_eq!(AnalysisType::Transient.display_name(), "Transient");
         assert_eq!(AnalysisType::Noise.display_name(), "Noise");
         assert_eq!(AnalysisType::PoleZero.display_name(), "Pole-Zero");
@@ -1009,6 +1015,7 @@ mod tests {
     fn test_analysis_type_short_labels() {
         assert_eq!(AnalysisType::DcOp.short_label(), "DC");
         assert_eq!(AnalysisType::Ac.short_label(), "AC");
+        assert_eq!(AnalysisType::Disto.short_label(), "DIST");
         assert_eq!(AnalysisType::Transient.short_label(), "TR");
         assert_eq!(AnalysisType::Tf.short_label(), "TF");
         assert_eq!(AnalysisType::Pac.short_label(), "PAC");
@@ -1045,6 +1052,10 @@ mod tests {
     fn test_analysis_type_axis_info_for_hb_and_pss() {
         assert_eq!(
             AnalysisType::HarmonicBalance.axis_info(),
+            ("Frequency", "Hz", "Magnitude", "V")
+        );
+        assert_eq!(
+            AnalysisType::Disto.axis_info(),
             ("Frequency", "Hz", "Magnitude", "V")
         );
         assert_eq!(AnalysisType::Pss.axis_info(), ("Time", "s", "Voltage", "V"));

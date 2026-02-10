@@ -348,7 +348,7 @@ impl SimulationController {
         let mut indices: Vec<usize> = state.dialogs.enabled_analyses.iter().copied().collect();
         indices.sort_unstable();
         if indices.is_empty() {
-            indices.push(state.dialogs.sim_active_tab.min(23));
+            indices.push(state.dialogs.sim_active_tab.min(24));
         }
         indices
     }
@@ -358,6 +358,7 @@ impl SimulationController {
             0 => "DC Operating Point",
             1 => "Transient",
             2 => "AC",
+            24 => "DISTO",
             3 => "DC Sweep",
             4 => "Noise",
             5 => "Pole-Zero",
@@ -468,6 +469,7 @@ impl SimulationController {
         matches!(
             spec,
             AnalysisSpec::Tf
+                | AnalysisSpec::Disto { .. }
                 | AnalysisSpec::Pnoise
                 | AnalysisSpec::Pxf
                 | AnalysisSpec::Pstb
@@ -979,6 +981,7 @@ impl SimulationController {
                 )?,
                 sweep: Self::map_frequency_sweep(state.dialogs.ac_sweep_type),
             }),
+            24 => self.build_disto_spec(state),
             3 => {
                 let (source2, start2, stop2, step2) = if state.dialogs.dc_nested {
                     let source2 = state.dialogs.dc_source2.trim();
@@ -1192,6 +1195,7 @@ impl SimulationController {
             AnalysisSpec::Reliability { .. } => self.build_reliability_command(state),
             AnalysisSpec::Optimization { .. } => self.build_optimization_command(state),
             AnalysisSpec::Soa { .. } => self.build_soa_command(state),
+            AnalysisSpec::Disto { .. } => self.build_disto_command(state),
             AnalysisSpec::Pac => self.build_pac_command(state),
             AnalysisSpec::Pnoise => self.build_pnoise_command(state),
             AnalysisSpec::Pxf => self.build_pxf_command(state),
@@ -1463,6 +1467,19 @@ impl SimulationController {
         Ok(AnalysisSpec::Tf)
     }
 
+    fn build_disto_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
+        Ok(AnalysisSpec::Disto {
+            start_freq: parse_spice_value_checked(&state.dialogs.ac_fstart)
+                .map_err(|e| format!("invalid DISTO start frequency: {}", e))?,
+            stop_freq: parse_spice_value_checked(&state.dialogs.ac_fstop)
+                .map_err(|e| format!("invalid DISTO stop frequency: {}", e))?,
+            points_per_unit: Self::parse_positive_points(&state.dialogs.ac_points, "ac_points")?,
+            sweep: Self::map_frequency_sweep(state.dialogs.ac_sweep_type),
+            f2_over_f1: Self::parse_optional_spice_value(&state.dialogs.disto_f2_over_f1)
+                .map_err(|e| format!("invalid DISTO f2/f1 ratio: {}", e))?,
+        })
+    }
+
     fn build_monte_carlo_command(&self, state: &AppState) -> Result<String, String> {
         let mut mc_state = state.dialogs.mc_state.clone();
         mc_state.ensure_initialized();
@@ -1650,6 +1667,33 @@ impl SimulationController {
             .to_config()
             .map_err(|e| format!("invalid transfer-function settings: {}", e))?;
         Ok(xf_cfg.to_spice())
+    }
+
+    fn build_disto_command(&self, state: &AppState) -> Result<String, String> {
+        let spec = self.build_disto_spec(state)?;
+        if let AnalysisSpec::Disto {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+            f2_over_f1,
+        } = spec
+        {
+            let mut command = format!(
+                ".disto {} {} {} {}",
+                sweep.runner_keyword(),
+                points_per_unit,
+                start_freq,
+                stop_freq
+            );
+            if let Some(ratio) = f2_over_f1 {
+                command.push(' ');
+                command.push_str(&ratio.to_string());
+            }
+            Ok(command)
+        } else {
+            Err("failed to build DISTO command".to_string())
+        }
     }
 
     fn maybe_export_touchstone(
@@ -2127,6 +2171,7 @@ impl SimulationController {
             AnalysisRunType::DcOp => AnalysisType::DcOp,
             AnalysisRunType::DcSweep => AnalysisType::DcSweep,
             AnalysisRunType::Ac => AnalysisType::Ac,
+            AnalysisRunType::Disto => AnalysisType::Disto,
             AnalysisRunType::Transient => AnalysisType::Transient,
             AnalysisRunType::Noise => AnalysisType::Noise,
             AnalysisRunType::Tf => AnalysisType::Tf,
@@ -3386,7 +3431,11 @@ impl SimulationController {
             AnalysisType::DcSweep | AnalysisType::Transient | AnalysisType::Envelope => {
                 crate::viewers::ActiveViewer::Waveform
             }
-            AnalysisType::Ac | AnalysisType::Tf | AnalysisType::Pac | AnalysisType::Pxf => {
+            AnalysisType::Ac
+            | AnalysisType::Disto
+            | AnalysisType::Tf
+            | AnalysisType::Pac
+            | AnalysisType::Pxf => {
                 crate::viewers::ActiveViewer::BodePlot
             }
             AnalysisType::Noise | AnalysisType::Pnoise => crate::viewers::ActiveViewer::BodePlot,
@@ -4306,6 +4355,37 @@ mod tests {
     }
 
     #[test]
+    fn test_build_analysis_spec_for_disto_uses_dialog_configuration() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.ac_fstart = "10".to_string();
+        state.dialogs.ac_fstop = "10Meg".to_string();
+        state.dialogs.ac_points = "12".to_string();
+        state.dialogs.ac_sweep_type = 1; // octave
+        state.dialogs.disto_f2_over_f1 = "1.75".to_string();
+
+        let spec = controller
+            .build_analysis_spec_for_index(&state, 24)
+            .expect("DISTO spec should build");
+        match spec {
+            AnalysisSpec::Disto {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                sweep,
+                f2_over_f1,
+            } => {
+                assert!((start_freq - 10.0).abs() < 1e-12);
+                assert!((stop_freq - 10e6).abs() < 1e-6);
+                assert_eq!(points_per_unit, 12);
+                assert!(matches!(sweep, FrequencySweep::Octave));
+                assert_eq!(f2_over_f1, Some(1.75));
+            }
+            other => panic!("expected DISTO spec, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_build_queue_from_plan_uses_executable_optimization_command() {
         let controller = SimulationController::new();
         let mut state = AppState::default();
@@ -4354,6 +4434,39 @@ mod tests {
         assert!(
             !queue[0].analysis_line.trim_start().starts_with('*'),
             "soa command must not be commented out"
+        );
+    }
+
+    #[test]
+    fn test_build_queue_from_plan_routes_disto_via_spec_with_disto_command_line() {
+        let controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.dialogs.enabled_analyses.insert(24);
+        state.dialogs.ac_fstart = "1".to_string();
+        state.dialogs.ac_fstop = "1Meg".to_string();
+        state.dialogs.ac_points = "10".to_string();
+        state.dialogs.disto_f2_over_f1 = "1.5".to_string();
+
+        let plan = controller
+            .build_analysis_plan(&state)
+            .expect("disto plan should build");
+        assert_eq!(plan.analyses.len(), 1);
+        assert!(matches!(plan.analyses[0], AnalysisSpec::Disto { .. }));
+
+        let queue = controller
+            .build_queue_from_plan(&state, &plan)
+            .expect("disto queue should build");
+        assert_eq!(queue.len(), 1);
+        assert!(queue[0].config.is_none(), "DISTO should execute via spec path");
+        assert!(
+            queue[0].analysis_line.starts_with(".disto "),
+            "DISTO command should emit native DISTO command, got: {}",
+            queue[0].analysis_line
+        );
+        assert!(
+            queue[0].analysis_line.contains(" 1.5"),
+            "DISTO command should include optional f2/f1 ratio when set, got: {}",
+            queue[0].analysis_line
         );
     }
 
@@ -5188,6 +5301,16 @@ mod tests {
         let controller = SimulationController::new();
         let cases = [
             (AnalysisSpec::Tf, crate::state::AnalysisType::Tf),
+            (
+                AnalysisSpec::Disto {
+                    start_freq: 1e3,
+                    stop_freq: 1e6,
+                    points_per_unit: 10,
+                    sweep: FrequencySweep::Decade,
+                    f2_over_f1: Some(1.5),
+                },
+                crate::state::AnalysisType::Disto,
+            ),
             (AnalysisSpec::Pac, crate::state::AnalysisType::Pac),
             (AnalysisSpec::Pnoise, crate::state::AnalysisType::Pnoise),
             (AnalysisSpec::Pxf, crate::state::AnalysisType::Pxf),

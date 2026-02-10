@@ -321,6 +321,7 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
                     ("DC Operating Point", 0),
                     ("Transient", 1),
                     ("AC Analysis", 2),
+                    ("DISTO", 24),
                     ("DC Sweep", 3),
                     ("Noise", 4),
                     ("Pole-Zero", 5),

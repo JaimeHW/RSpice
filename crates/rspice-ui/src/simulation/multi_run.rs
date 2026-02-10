@@ -26,6 +26,8 @@ pub enum AnalysisRunType {
     DcSweep,
     /// AC analysis
     Ac,
+    /// Distortion analysis
+    Disto,
     /// Transient analysis
     Transient,
     /// Noise analysis
@@ -77,6 +79,7 @@ impl AnalysisRunType {
             AnalysisRunType::DcOp => "DC Operating Point",
             AnalysisRunType::DcSweep => "DC Sweep",
             AnalysisRunType::Ac => "AC Analysis",
+            AnalysisRunType::Disto => "DISTO",
             AnalysisRunType::Transient => "Transient",
             AnalysisRunType::Noise => "Noise",
             AnalysisRunType::Tf => "Transfer Function",
@@ -106,6 +109,7 @@ impl AnalysisRunType {
         matches!(
             self,
             AnalysisRunType::Ac
+                | AnalysisRunType::Disto
                 | AnalysisRunType::Noise
                 | AnalysisRunType::Tf
                 | AnalysisRunType::Sensitivity
@@ -133,6 +137,7 @@ impl AnalysisRunType {
             AnalysisRunType::Tf => 1,
             AnalysisRunType::DcSweep => 5,
             AnalysisRunType::Ac => 3,
+            AnalysisRunType::Disto => 7,
             AnalysisRunType::Transient => 10,
             AnalysisRunType::Noise => 5,
             AnalysisRunType::Sensitivity => 3,
@@ -254,6 +259,14 @@ pub enum AnalysisSpec {
         stop_freq: f64,
         points_per_unit: usize,
         sweep: FrequencySweep,
+    },
+    /// Distortion analysis
+    Disto {
+        start_freq: f64,
+        stop_freq: f64,
+        points_per_unit: usize,
+        sweep: FrequencySweep,
+        f2_over_f1: Option<f64>,
     },
     /// Transient analysis
     Transient { stop_time: f64, step_time: f64 },
@@ -385,6 +398,7 @@ impl AnalysisSpec {
             AnalysisSpec::DcOp => AnalysisRunType::DcOp,
             AnalysisSpec::DcSweep { .. } => AnalysisRunType::DcSweep,
             AnalysisSpec::Ac { .. } => AnalysisRunType::Ac,
+            AnalysisSpec::Disto { .. } => AnalysisRunType::Disto,
             AnalysisSpec::Transient { .. } => AnalysisRunType::Transient,
             AnalysisSpec::Noise { .. } => AnalysisRunType::Noise,
             AnalysisSpec::Pss { .. } => AnalysisRunType::Pss,
@@ -479,6 +493,32 @@ impl AnalysisSpec {
                 }
                 if *points_per_unit == 0 {
                     return Err("AC points_per_unit must be > 0".to_string());
+                }
+                Ok(())
+            }
+            AnalysisSpec::Disto {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                f2_over_f1,
+                ..
+            } => {
+                if *start_freq <= 0.0 {
+                    return Err("DISTO start_freq must be > 0".to_string());
+                }
+                if *stop_freq <= 0.0 {
+                    return Err("DISTO stop_freq must be > 0".to_string());
+                }
+                if *stop_freq <= *start_freq {
+                    return Err("DISTO stop_freq must be > start_freq".to_string());
+                }
+                if *points_per_unit == 0 {
+                    return Err("DISTO points_per_unit must be > 0".to_string());
+                }
+                if let Some(ratio) = f2_over_f1 {
+                    if !ratio.is_finite() || *ratio <= 1.0 {
+                        return Err("DISTO f2_over_f1 must be finite and > 1".to_string());
+                    }
                 }
                 Ok(())
             }
@@ -1466,6 +1506,7 @@ mod tests {
     fn test_run_type_display() {
         assert_eq!(AnalysisRunType::DcOp.display_name(), "DC Operating Point");
         assert_eq!(AnalysisRunType::Transient.display_name(), "Transient");
+        assert_eq!(AnalysisRunType::Disto.display_name(), "DISTO");
         assert_eq!(AnalysisRunType::Stb.display_name(), "STB");
         assert_eq!(AnalysisRunType::Pxf.display_name(), "PXF");
         assert_eq!(AnalysisRunType::Pstb.display_name(), "PSTB");
@@ -1477,6 +1518,7 @@ mod tests {
     #[test]
     fn test_run_type_requires_dc_op() {
         assert!(AnalysisRunType::Ac.requires_dc_op());
+        assert!(AnalysisRunType::Disto.requires_dc_op());
         assert!(AnalysisRunType::Noise.requires_dc_op());
         assert!(AnalysisRunType::Stb.requires_dc_op());
         assert!(AnalysisRunType::Reliability.requires_dc_op());
@@ -1501,6 +1543,28 @@ mod tests {
             start_freq: 0.0,
             stop_freq: 1.0,
             points_per_decade: 0,
+        };
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn test_analysis_spec_disto_validation() {
+        let valid = AnalysisSpec::Disto {
+            start_freq: 1.0,
+            stop_freq: 1e9,
+            points_per_unit: 12,
+            sweep: FrequencySweep::Decade,
+            f2_over_f1: Some(1.5),
+        };
+        assert!(valid.validate().is_ok());
+        assert_eq!(valid.run_type(), AnalysisRunType::Disto);
+
+        let invalid = AnalysisSpec::Disto {
+            start_freq: 0.0,
+            stop_freq: 1e9,
+            points_per_unit: 0,
+            sweep: FrequencySweep::Decade,
+            f2_over_f1: Some(1.0),
         };
         assert!(invalid.validate().is_err());
     }
