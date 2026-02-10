@@ -6,6 +6,10 @@
 use std::collections::HashMap;
 use std::fmt;
 
+#[path = "cadence_psf_type_meta.rs"]
+mod cadence_psf_type_meta;
+use cadence_psf_type_meta::TypeMetaCache;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum CadencePsfValue {
     Int(i64),
@@ -507,12 +511,16 @@ fn parse_values(
     }
 
     let flat_traces = flatten_traces(traces);
+    let mut type_meta = TypeMetaCache::default();
+    let mut signal_has_dynamic_arrays = HashMap::with_capacity(flat_traces.len());
     let is_windowed = header.contains_key("PSF window size");
     for signal in &flat_traces {
+        let has_dynamic_arrays = type_meta.contains_array(signal.type_id, types)?;
+        signal_has_dynamic_arrays.insert(signal.id, has_dynamic_arrays);
         let _ = types
             .get(&signal.type_id)
             .ok_or_else(|| CadencePsfError::new(format!("missing type {}", signal.type_id)))?;
-        if type_contains_array(signal.type_id, types)? {
+        if has_dynamic_arrays {
             continue;
         }
         let mut specs = Vec::new();
@@ -529,7 +537,9 @@ fn parse_values(
             sweeps,
             &flat_traces,
             types,
+            &signal_has_dynamic_arrays,
             &mut values,
+            &mut type_meta,
         )?;
     } else {
         parse_non_windowed_values(
@@ -599,7 +609,9 @@ fn parse_windowed_values(
     sweeps: &[SignalRef],
     flat_traces: &[SignalRef],
     types: &HashMap<u32, TypeDecl>,
+    signal_has_dynamic_arrays: &HashMap<u32, bool>,
     values: &mut HashMap<u32, Vec<SignalChannel>>,
+    type_meta: &mut TypeMetaCache,
 ) -> Result<(), CadencePsfError> {
     let window_size = header_usize(header, "PSF window size")?;
     let num_traces = header_usize(header, "PSF traces")?;
@@ -608,18 +620,15 @@ fn parse_windowed_values(
         .first()
         .map(|s| s.id)
         .ok_or_else(|| CadencePsfError::new("windowed PSF has no sweep signal"))?;
-
-    let mut offsets = HashMap::new();
-    let mut has_dynamic_arrays = HashMap::new();
-    let mut offset = 0usize;
-    let mut channel_index_cache = build_channel_index_cache(values);
-    for signal in flat_traces {
-        offsets.insert(signal.id, offset);
-        has_dynamic_arrays.insert(signal.id, type_contains_array(signal.type_id, types)?);
-        offset = offset
-            .checked_add(window_size)
-            .ok_or_else(|| CadencePsfError::new("windowed trace offset overflow"))?;
+    if num_traces != flat_traces.len() {
+        return Err(CadencePsfError::new(format!(
+            "windowed PSF trace count mismatch: header={}, decoded={}",
+            num_traces,
+            flat_traces.len()
+        )));
     }
+
+    let mut channel_index_cache = build_channel_index_cache(values);
 
     let initial_block = read_u32(&mut cursor)?;
     if initial_block != 20 {
@@ -645,6 +654,20 @@ fn parse_windowed_values(
         }
         let block_init = read_u32(&mut cursor)?;
         let window_count = (block_init & 0xffff) as usize;
+        if window_count == 0 {
+            return Err(CadencePsfError::new(
+                "windowed PSF encountered block with zero samples",
+            ));
+        }
+        let end_count = count
+            .checked_add(window_count)
+            .ok_or_else(|| CadencePsfError::new("windowed PSF sample count overflow"))?;
+        if end_count > sweep_points {
+            return Err(CadencePsfError::new(format!(
+                "windowed PSF block exceeds declared sweep points: block_end={}, declared={}",
+                end_count, sweep_points
+            )));
+        }
         for _ in 0..window_count {
             push_scalar_channel(
                 values,
@@ -662,10 +685,10 @@ fn parse_windowed_values(
         }
         let block = &cursor[..block_len];
 
-        for signal in flat_traces {
-            let offset = *offsets
-                .get(&signal.id)
-                .ok_or_else(|| CadencePsfError::new("missing signal offset in windowed parser"))?;
+        for (signal_idx, signal) in flat_traces.iter().enumerate() {
+            let offset = signal_idx
+                .checked_mul(window_size)
+                .ok_or_else(|| CadencePsfError::new("windowed trace offset overflow"))?;
             let end = offset
                 .checked_add(window_size)
                 .ok_or_else(|| CadencePsfError::new("windowed PSF signal range overflow"))?;
@@ -676,7 +699,7 @@ fn parse_windowed_values(
             }
             let segment = &block[offset..end];
 
-            if *has_dynamic_arrays.get(&signal.id).ok_or_else(|| {
+            if *signal_has_dynamic_arrays.get(&signal.id).ok_or_else(|| {
                 CadencePsfError::new("missing signal array/dynamic marker in windowed parser")
             })? {
                 decode_windowed_dynamic_signal_samples(
@@ -687,6 +710,7 @@ fn parse_windowed_values(
                     types,
                     values,
                     &mut channel_index_cache,
+                    type_meta,
                 )?;
             } else {
                 let channels = values.get(&signal.id).ok_or_else(|| {
@@ -734,7 +758,7 @@ fn parse_windowed_values(
         }
 
         cursor = &cursor[block_len..];
-        count += window_count;
+        count = end_count;
     }
 
     Ok(())
@@ -1024,27 +1048,6 @@ fn collect_channel_specs_for_array_element(
     Ok(())
 }
 
-fn type_contains_array(
-    type_id: u32,
-    types: &HashMap<u32, TypeDecl>,
-) -> Result<bool, CadencePsfError> {
-    let decl = types
-        .get(&type_id)
-        .ok_or_else(|| CadencePsfError::new(format!("missing type declaration {}", type_id)))?;
-    match &decl.kind {
-        TypeKind::Primitive(_) => Ok(false),
-        TypeKind::Array { .. } => Ok(true),
-        TypeKind::Struct { members } => {
-            for member_id in members {
-                if type_contains_array(*member_id, types)? {
-                    return Ok(true);
-                }
-            }
-            Ok(false)
-        }
-    }
-}
-
 fn channel_sample_width(channels: &[SignalChannel]) -> Result<usize, CadencePsfError> {
     let mut width = 0usize;
     for channel in channels {
@@ -1207,11 +1210,56 @@ fn find_windowed_dynamic_data_start(
     signal: &SignalRef,
     window_count: usize,
     types: &HashMap<u32, TypeDecl>,
+    type_meta: &mut TypeMetaCache,
 ) -> Result<usize, CadencePsfError> {
+    let min_per_sample = type_meta.min_encoded_size(signal.type_id, types)?;
+    let min_total = min_per_sample
+        .checked_mul(window_count)
+        .ok_or_else(|| CadencePsfError::new("windowed minimum data-size overflow"))?;
+    if min_total > segment.len() {
+        return Err(CadencePsfError::new(format!(
+            "windowed segment for signal '{}' is too short: min_required={}, actual={}",
+            signal.name,
+            min_total,
+            segment.len()
+        )));
+    }
+    let max_start = segment.len() - min_total;
+
+    let mut best_start = scan_dynamic_start_candidates(
+        segment,
+        signal,
+        window_count,
+        types,
+        (0..=max_start).step_by(4),
+    )?;
+    if best_start.is_none() {
+        best_start =
+            scan_dynamic_start_candidates(segment, signal, window_count, types, 0..=max_start)?;
+    }
+
+    best_start.map(|(start, _)| start).ok_or_else(|| {
+        CadencePsfError::new(format!(
+            "unable to locate payload start for windowed array signal '{}'",
+            signal.name
+        ))
+    })
+}
+
+fn scan_dynamic_start_candidates<I>(
+    segment: &[u8],
+    signal: &SignalRef,
+    window_count: usize,
+    types: &HashMap<u32, TypeDecl>,
+    starts: I,
+) -> Result<Option<(usize, usize)>, CadencePsfError>
+where
+    I: IntoIterator<Item = usize>,
+{
     let mut best_start = None;
     let mut best_numeric_count = 0usize;
 
-    for start in 0..=segment.len() {
+    for start in starts {
         let mut cursor = &segment[start..];
         let mut ok = true;
         let mut numeric_count = 0usize;
@@ -1246,12 +1294,7 @@ fn find_windowed_dynamic_data_start(
         }
     }
 
-    best_start.ok_or_else(|| {
-        CadencePsfError::new(format!(
-            "unable to locate payload start for windowed array signal '{}'",
-            signal.name
-        ))
-    })
+    Ok(best_start.map(|start| (start, best_numeric_count)))
 }
 
 fn decode_windowed_dynamic_signal_samples(
@@ -1262,12 +1305,13 @@ fn decode_windowed_dynamic_signal_samples(
     types: &HashMap<u32, TypeDecl>,
     values: &mut HashMap<u32, Vec<SignalChannel>>,
     channel_index_cache: &mut HashMap<u32, HashMap<String, usize>>,
+    type_meta: &mut TypeMetaCache,
 ) -> Result<(), CadencePsfError> {
     if window_count == 0 {
         return Ok(());
     }
 
-    let start = find_windowed_dynamic_data_start(segment, signal, window_count, types)?;
+    let start = find_windowed_dynamic_data_start(segment, signal, window_count, types, type_meta)?;
     let mut cursor = &segment[start..];
     for local_idx in 0..window_count {
         let point_idx = point_offset
@@ -2450,6 +2494,102 @@ pub(crate) mod test_helpers {
         bytes
     }
 
+    pub(crate) fn build_windowed_array_real_unaligned_payload_psf() -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        let header_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let header_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_named_int(&mut bytes, "PSF sweep points", 2);
+        push_named_int(&mut bytes, "PSF traces", 1);
+        // 50-byte windows intentionally force non-4-byte-aligned payload start.
+        push_named_int(&mut bytes, "PSF window size", 50);
+        let header_end = bytes.len() as u32;
+        patch_u32(&mut bytes, header_eofs_pos, header_end);
+
+        let types_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let types_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        // Trace type: array of real.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 1);
+        push_string(&mut bytes, "realarray");
+        push_u32(&mut bytes, 11);
+        push_u32(&mut bytes, 3);
+        // Sweep type: real scalar.
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_string(&mut bytes, "real");
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 11);
+        let types_end = bytes.len() as u32;
+        patch_u32(&mut bytes, types_eofs_pos, types_end);
+
+        let sweep_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let sweep_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 100, "time", 2);
+        let sweep_end = bytes.len() as u32;
+        patch_u32(&mut bytes, sweep_eofs_pos, sweep_end);
+
+        let trace_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 22);
+        let trace_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 16);
+        push_signal_ref(&mut bytes, 200, "V(arr)", 1);
+        let trace_end = bytes.len() as u32;
+        patch_u32(&mut bytes, trace_eofs_pos, trace_end);
+
+        let value_start = bytes.len();
+        push_u32(&mut bytes, 0);
+        let value_eofs_pos = bytes.len();
+        push_u32(&mut bytes, 0);
+
+        push_u32(&mut bytes, 20);
+        push_u32(&mut bytes, 0);
+
+        push_u32(&mut bytes, 16);
+        push_u32(&mut bytes, 2);
+        push_f64(&mut bytes, 0.0);
+        push_f64(&mut bytes, 1.0);
+
+        let mut trace_payload = Vec::new();
+        push_u32(&mut trace_payload, 2);
+        push_f64(&mut trace_payload, 1.0);
+        push_f64(&mut trace_payload, 2.0);
+        push_u32(&mut trace_payload, 2);
+        push_f64(&mut trace_payload, 1.5);
+        push_f64(&mut trace_payload, 2.5);
+        push_windowed_trace_payload(&mut bytes, &trace_payload, 50);
+
+        let value_end = bytes.len() as u32;
+        patch_u32(&mut bytes, value_eofs_pos, value_end);
+
+        let toc_offset = bytes.len();
+        for (kind, start) in [
+            (0u32, header_start),
+            (1u32, types_start),
+            (2u32, sweep_start),
+            (3u32, trace_start),
+            (4u32, value_start),
+        ] {
+            push_u32(&mut bytes, kind);
+            push_u32(&mut bytes, start as u32);
+        }
+        bytes.extend_from_slice(&[0u8; 8]);
+        push_u32(&mut bytes, toc_offset as u32);
+        bytes
+    }
+
     pub(crate) fn build_windowed_array_complex_psf() -> Vec<u8> {
         let mut bytes = Vec::new();
 
@@ -3444,15 +3584,76 @@ mod tests {
         build_non_windowed_mixed_real_and_string_psf,
         build_non_windowed_nested_array_real_bare_descriptor_psf,
         build_non_windowed_nested_array_real_psf, build_non_windowed_real_psf,
-        build_non_windowed_unknown_word_psf,
         build_non_windowed_struct_psf, build_non_windowed_struct_with_array_psf,
-        build_non_windowed_variable_length_array_psf, build_windowed_array_complex_psf,
-        build_windowed_array_of_struct_bare_descriptor_psf, build_windowed_array_of_struct_psf,
-        build_windowed_array_real_psf, build_windowed_nested_array_real_bare_descriptor_psf,
-        build_windowed_nested_array_real_psf, build_windowed_real_psf,
-        build_windowed_struct_with_array_psf, build_windowed_variable_length_array_psf,
+        build_non_windowed_unknown_word_psf, build_non_windowed_variable_length_array_psf,
+        build_windowed_array_complex_psf, build_windowed_array_of_struct_bare_descriptor_psf,
+        build_windowed_array_of_struct_psf, build_windowed_array_real_psf,
+        build_windowed_array_real_unaligned_payload_psf,
+        build_windowed_nested_array_real_bare_descriptor_psf, build_windowed_nested_array_real_psf,
+        build_windowed_real_psf, build_windowed_struct_with_array_psf,
+        build_windowed_variable_length_array_psf,
     };
     use super::*;
+
+    fn patch_header_int(bytes: &mut [u8], key: &str, value: u32) {
+        let toc = parse_toc(bytes).expect("fixture must contain valid TOC");
+        let entry = toc
+            .section(SectionKind::Header)
+            .expect("fixture must contain header section");
+        let mut idx = entry.start + 8;
+        while idx + 4 <= entry.end {
+            let block = peek_u32(&bytes[idx..idx + 4]);
+            idx += 4;
+            if !(33..=35).contains(&block) {
+                break;
+            }
+
+            let name_len = peek_u32(&bytes[idx..idx + 4]) as usize;
+            idx += 4;
+            let name_start = idx;
+            let name_end = name_start + name_len;
+            let name = std::str::from_utf8(&bytes[name_start..name_end]).unwrap_or_default();
+            let name_pad = (4 - (name_len % 4)) % 4;
+            idx = name_end + name_pad;
+
+            match block {
+                33 => {
+                    let value_len = peek_u32(&bytes[idx..idx + 4]) as usize;
+                    idx += 4;
+                    let value_pad = (4 - (value_len % 4)) % 4;
+                    idx += value_len + value_pad;
+                }
+                34 => {
+                    if name == key {
+                        bytes[idx..idx + 4].copy_from_slice(&value.to_be_bytes());
+                        return;
+                    }
+                    idx += 4;
+                }
+                35 => {
+                    idx += 8;
+                }
+                _ => unreachable!(),
+            }
+        }
+        panic!("header key '{}' not found in fixture", key);
+    }
+
+    fn patch_first_window_block_count(bytes: &mut [u8], window_count: u32) {
+        let toc = parse_toc(bytes).expect("fixture must contain valid TOC");
+        let entry = toc
+            .section(SectionKind::Value)
+            .expect("fixture must contain value section");
+        let mut idx = entry.start + 8;
+        assert_eq!(peek_u32(&bytes[idx..idx + 4]), 20);
+        idx += 4;
+        let zero_pad_len = peek_u32(&bytes[idx..idx + 4]) as usize;
+        idx += 4 + zero_pad_len;
+        assert_eq!(peek_u32(&bytes[idx..idx + 4]), 16);
+        idx += 4;
+        // block_init low 16-bits stores window_count in PSF payloads.
+        bytes[idx..idx + 4].copy_from_slice(&window_count.to_be_bytes());
+    }
 
     #[test]
     fn test_parse_non_windowed_real_psf_binary() {
@@ -3746,6 +3947,21 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_windowed_real_array_psf_binary_with_unaligned_payload_start() {
+        let bytes = build_windowed_array_real_unaligned_payload_psf();
+        let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
+
+        assert_eq!(parsed.sweeps.len(), 1);
+        assert_eq!(parsed.sweeps[0].values, vec![0.0, 1.0]);
+        assert!(parsed.complex_signals.is_empty());
+        assert_eq!(parsed.real_signals.len(), 2);
+        assert_eq!(parsed.real_signals[0].name, "V(arr)[0]");
+        assert_eq!(parsed.real_signals[0].values, vec![1.0, 1.5]);
+        assert_eq!(parsed.real_signals[1].name, "V(arr)[1]");
+        assert_eq!(parsed.real_signals[1].values, vec![2.0, 2.5]);
+    }
+
+    #[test]
     fn test_parse_windowed_complex_array_psf_binary() {
         let bytes = build_windowed_array_complex_psf();
         let parsed = parse_cadence_psf_binary(&bytes).expect("parse should succeed");
@@ -3888,6 +4104,31 @@ mod tests {
         assert_eq!(parsed.real_signals[2].values, vec![3.0, 3.5]);
         assert_eq!(parsed.real_signals[3].name, "V(out)[1][1]");
         assert_eq!(parsed.real_signals[3].values, vec![4.0, 4.5]);
+    }
+
+    #[test]
+    fn test_parse_windowed_rejects_trace_count_mismatch() {
+        let mut bytes = build_windowed_real_psf();
+        patch_header_int(&mut bytes, "PSF traces", 2);
+        let err = parse_cadence_psf_binary(&bytes).expect_err("mismatched trace count must fail");
+        assert!(err.to_string().contains("trace count mismatch"));
+    }
+
+    #[test]
+    fn test_parse_windowed_rejects_zero_sample_block() {
+        let mut bytes = build_windowed_real_psf();
+        patch_first_window_block_count(&mut bytes, 0);
+        let err = parse_cadence_psf_binary(&bytes).expect_err("zero-sample block must fail");
+        assert!(err.to_string().contains("zero samples"));
+    }
+
+    #[test]
+    fn test_parse_windowed_rejects_block_overshoot() {
+        let mut bytes = build_windowed_real_psf();
+        patch_first_window_block_count(&mut bytes, 3);
+        let err = parse_cadence_psf_binary(&bytes)
+            .expect_err("block larger than sweep-points declaration must fail");
+        assert!(err.to_string().contains("exceeds declared sweep points"));
     }
 
     #[test]
