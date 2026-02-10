@@ -12,7 +12,6 @@ use crate::output_spec::{
 use crate::simulation::reliability_engine::{ParamShift, ReliabilityResult, StressMetrics};
 use num_complex::Complex64;
 use rspice_core::analysis::ac::AcResult;
-use rspice_core::analysis::noise::NoiseResult;
 use rspice_core::analysis::{FourierAnalysis, FourierConfig};
 use rspice_core::engine::{Engine, SimulationConfig, TransientResult};
 use rspice_core::netlist::{AnalysisCommand, Element, ElementKind, StepSweep};
@@ -29,6 +28,8 @@ mod dc_sweep;
 mod disto;
 #[path = "simulation_runner/monte_carlo.rs"]
 mod monte_carlo;
+#[path = "simulation_runner/noise.rs"]
+mod noise;
 #[path = "simulation_runner/optimization.rs"]
 mod optimization;
 #[path = "simulation_runner/pnoise.rs"]
@@ -50,6 +51,7 @@ pub use dc_sweep::{run_dc_sweep, DcSweepData};
 use disto::interpolate_magnitude_at_for_tests;
 pub use disto::{run_disto_analysis, DistoData, DistoFrequencySweep, DistoRunConfig, DistoTrace};
 pub use monte_carlo::{run_monte_carlo_analysis, MonteCarloData, MonteCarloVariableData};
+pub use noise::{run_noise_analysis, NoiseData};
 pub use optimization::{
     run_optimization_analysis, run_optimization_analysis_with_config, OptimizationAlgorithmMode,
     OptimizationData, OptimizationGoalMode, OptimizationRunConfig, OptimizationVariable,
@@ -767,106 +769,6 @@ fn normalize_waveform_node_name(raw: &str) -> String {
         return trimmed[2..trimmed.len() - 1].trim().to_ascii_uppercase();
     }
     trimmed.to_ascii_uppercase()
-}
-
-// =============================================================================
-// Noise Analysis
-// =============================================================================
-
-/// Noise analysis data for spectral density plots
-#[derive(Debug, Clone)]
-pub struct NoiseData {
-    /// Frequency points (Hz)
-    pub frequencies: Vec<Value>,
-    /// Output noise spectral density (V²/Hz)
-    pub output_noise: Vec<Value>,
-    /// Total integrated output noise (V RMS)
-    pub total_output_noise: Value,
-    /// Noise contributions by device
-    pub contributions: Vec<(String, Value)>,
-    /// Number of frequency points
-    pub num_points: usize,
-}
-
-impl NoiseData {
-    /// Create from engine NoiseResult vector
-    pub fn from_results(results: Vec<NoiseResult>) -> Self {
-        let frequencies: Vec<Value> = results.iter().map(|r| r.frequency).collect();
-        let output_noise: Vec<Value> = results.iter().map(|r| r.output_noise_density).collect();
-        let num_points = frequencies.len();
-
-        // Integrate noise: approximate with trapezoidal rule
-        let total_output_noise = if frequencies.len() >= 2 {
-            let mut integrated = 0.0;
-            for i in 1..frequencies.len() {
-                let df = frequencies[i] - frequencies[i - 1];
-                let avg_noise = (output_noise[i] + output_noise[i - 1]) / 2.0;
-                integrated += avg_noise * df;
-            }
-            integrated.sqrt() // RMS = sqrt(integral of PSD)
-        } else {
-            0.0
-        };
-
-        // Summarize contributions from the first frequency point
-        let contributions = if let Some(first) = results.first() {
-            first
-                .contributions
-                .iter()
-                .map(|c| (c.device_name.clone(), c.percentage))
-                .collect()
-        } else {
-            vec![]
-        };
-
-        Self {
-            frequencies,
-            output_noise,
-            total_output_noise,
-            contributions,
-            num_points,
-        }
-    }
-}
-
-/// Run noise analysis  
-pub fn run_noise_analysis(
-    netlist_text: &str,
-    output_node: &str,
-    start_freq: Value,
-    stop_freq: Value,
-    points_per_decade: usize,
-    temperature: Value, // Kelvin, default 300K
-) -> Result<NoiseData, String> {
-    // Parse the netlist
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
-
-    // Create engine
-    let engine = Engine::new(build_engine_config(&netlist, None));
-
-    // Run DC OP to get node names and find output node index
-    let dc_result = engine
-        .run_dc_op(&netlist)
-        .map_err(|e| format!("DC OP error (required for noise): {}", e))?;
-
-    // Find output node index by name (case-insensitive)
-    let output_upper = output_node.to_uppercase();
-    let output_idx = dc_result
-        .node_names
-        .iter()
-        .position(|n| n.to_uppercase() == output_upper)
-        .ok_or_else(|| format!("Output node '{}' not found", output_node))?;
-
-    // Generate frequency points (always log-spaced for noise)
-    let frequencies = generate_freq_points(start_freq, stop_freq, points_per_decade, "dec");
-
-    // Run noise analysis
-    let results = engine
-        .run_noise(&netlist, output_idx, &frequencies, temperature)
-        .map_err(|e| format!("Noise analysis error: {}", e))?;
-
-    Ok(NoiseData::from_results(results))
 }
 
 // =============================================================================
