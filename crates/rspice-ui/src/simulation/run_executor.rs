@@ -2980,9 +2980,8 @@ mod tests {
     #[test]
     fn test_disto_analysis_with_spec_is_executed() {
         let executor = RunExecutor::new();
-        let mut queue = RunQueue::new().with_netlist(
-            "* disto\nV1 in 0 DC 1 AC 1\nR1 in out 1k\nC1 out 0 1n\n.end\n",
-        );
+        let mut queue = RunQueue::new()
+            .with_netlist("* disto\nV1 in 0 DC 1 AC 1\nR1 in out 1k\nC1 out 0 1n\n.end\n");
         queue.add_analysis(AnalysisSpec::Disto {
             start_freq: 1e3,
             stop_freq: 1e6,
@@ -3005,12 +3004,9 @@ mod tests {
             .next()
             .expect("expected mapped DISTO result");
         assert_eq!(mapped.analysis_type, MappedAnalysisType::Disto);
-        assert!(mapped
-            .waveforms
-            .iter()
-            .any(|wf| wf.name.contains("THD(%)")));
+        assert!(mapped.waveforms.iter().any(|wf| wf.name.contains("THD(%)")));
         assert!(!mapped.measurements.is_empty());
-        assert_eq!(mapped.status, ResultStatus::Warning);
+        assert_eq!(mapped.status, ResultStatus::Success);
     }
 
     #[test]
