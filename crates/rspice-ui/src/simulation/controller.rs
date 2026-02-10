@@ -288,11 +288,23 @@ impl SimulationController {
             }
         )));
 
-        // Use cached netlist
-        let netlist = self
-            .cached_netlist
-            .clone()
-            .expect("Netlist should be cached");
+        // Use cached netlist. If this is unexpectedly missing, fail gracefully
+        // instead of panicking so the UI can recover.
+        let Some(netlist) = self.cached_netlist.clone() else {
+            let message = format!(
+                "Internal error: missing cached netlist while starting {}",
+                analysis_name
+            );
+            log::error!("{}", message);
+            state.push_sim_message(ConsoleMessage::error(message));
+            if let Some(run) = state.simulation.active_run_mut() {
+                run.success = false;
+            }
+            self.pending_analyses.clear();
+            self.finish_simulation_batch(state);
+            state.simulation.status = "Error".to_string();
+            return;
+        };
 
         // Start the simulation
         let start_result = if let Some(cfg) = config {
@@ -329,6 +341,12 @@ impl SimulationController {
 
     /// Finish the simulation batch and clean up state
     fn finish_simulation_batch(&mut self, state: &mut AppState) {
+        let run_success = state
+            .simulation
+            .active_run()
+            .map(|run| run.success)
+            .unwrap_or(true);
+
         // Complete the run (syncs waveforms and selects first analysis)
         state.simulation.complete_run();
 
@@ -339,7 +357,11 @@ impl SimulationController {
         self.current_analysis_idx = 0;
         self.total_analyses = 0;
 
-        state.simulation.status = "Complete".to_string();
+        state.simulation.status = if run_success {
+            "Complete".to_string()
+        } else {
+            "Completed with errors".to_string()
+        };
 
         log::info!("Simulation batch completed");
     }
@@ -3680,6 +3702,53 @@ mod tests {
     fn test_controller_status_initial() {
         let controller = SimulationController::new();
         assert!(matches!(controller.status(), SimulationStatus::Idle));
+    }
+
+    #[test]
+    fn test_finish_simulation_batch_reports_failed_run_status() {
+        let mut controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.simulation.start_run().success = false;
+
+        controller.finish_simulation_batch(&mut state);
+
+        assert_eq!(state.simulation.status, "Completed with errors");
+    }
+
+    #[test]
+    fn test_start_next_analysis_without_cached_netlist_reports_error_instead_of_panicking() {
+        let mut controller = SimulationController::new();
+        let mut state = AppState::default();
+        state.simulation.start_run();
+
+        controller.total_analyses = 1;
+        controller.pending_analyses.push_back(QueuedAnalysis {
+            spec: AnalysisSpec::DcOp,
+            config: Some(AnalysisConfig::DcOp),
+            spec_options: SpecExecutionOptions::default(),
+            analysis_line: ".OP".to_string(),
+        });
+        controller.cached_netlist = None;
+
+        controller.start_next_analysis(&mut state);
+
+        assert_eq!(state.simulation.status, "Error");
+        assert!(controller.pending_analyses.is_empty());
+        assert!(
+            state
+                .console_messages
+                .iter()
+                .any(|msg| msg.message.contains("missing cached netlist")),
+            "expected a user-visible missing-netlist error message"
+        );
+        assert!(
+            state
+                .simulation
+                .active_run()
+                .map(|run| !run.success)
+                .unwrap_or(false),
+            "active run should be marked failed"
+        );
     }
 
     #[test]
