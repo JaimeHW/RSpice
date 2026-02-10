@@ -96,6 +96,7 @@ const HB_ZERO_SENSE_TOL: Value = 1e-12;
 struct HbCurrentSwitchControl {
     ctrl_pos: usize,
     ctrl_neg: usize,
+    control_current_bias: Value,
 }
 
 impl Engine {
@@ -270,7 +271,7 @@ impl Engine {
             .count();
         if unsupported_iswitch > 0 {
             kinds.push(format!(
-                "{} current switch(es) (requires control via static 0 V sensing source in HB)",
+                "{} current switch(es) (HB requires static control-source waveforms for ISwitch control branches)",
                 unsupported_iswitch
             ));
         }
@@ -281,16 +282,40 @@ impl Engine {
         }
     }
 
-    fn hb_source_spec_is_static_zero(spec: Option<&SourceSpec>) -> bool {
+    fn hb_extract_static_source_voltage(spec: Option<&SourceSpec>, fallback_dc: Value) -> Option<Value> {
         match spec {
-            None => true,
-            Some(SourceSpec::Dc(v)) => v.abs() <= HB_ZERO_SENSE_TOL,
+            None => Some(fallback_dc),
+            Some(SourceSpec::Dc(v)) => Some(*v),
             Some(SourceSpec::DcAc {
                 dc_value,
                 ac_magnitude,
                 ..
-            }) => dc_value.abs() <= HB_ZERO_SENSE_TOL && ac_magnitude.abs() <= HB_ZERO_SENSE_TOL,
-            _ => false,
+            }) if ac_magnitude.abs() <= HB_ZERO_SENSE_TOL => Some(*dc_value),
+            Some(SourceSpec::Ac { magnitude, .. }) if magnitude.abs() <= HB_ZERO_SENSE_TOL => {
+                Some(0.0)
+            }
+            Some(SourceSpec::Sin {
+                offset, amplitude, ..
+            }) if amplitude.abs() <= HB_ZERO_SENSE_TOL => Some(*offset),
+            Some(SourceSpec::Pulse { v1, v2, .. }) if (v2 - v1).abs() <= HB_ZERO_SENSE_TOL => {
+                Some(*v1)
+            }
+            Some(SourceSpec::Exp { v1, v2, .. }) if (v2 - v1).abs() <= HB_ZERO_SENSE_TOL => {
+                Some(*v1)
+            }
+            Some(SourceSpec::Pwl { points }) => {
+                let first = points.first().map(|(_, value)| *value)?;
+                if points
+                    .iter()
+                    .all(|(_, value)| (*value - first).abs() <= HB_ZERO_SENSE_TOL)
+                {
+                    Some(first)
+                } else {
+                    None
+                }
+            }
+            Some(SourceSpec::PwlFile { .. }) => None,
+            _ => None,
         }
     }
 
@@ -332,18 +357,20 @@ impl Engine {
             .source_specs
             .get(vsrc_idx)
             .and_then(|s| s.as_ref());
-        if dc.abs() > HB_ZERO_SENSE_TOL
-            || ac_mag.abs() > HB_ZERO_SENSE_TOL
-            || !Self::hb_source_spec_is_static_zero(spec)
-        {
+        if ac_mag.abs() > HB_ZERO_SENSE_TOL {
             return Err(());
         }
+        let static_voltage = Self::hb_extract_static_source_voltage(spec, dc).ok_or(())?;
 
         let ctrl_pos =
             Self::hb_node_to_solver_index(circuit.voltage_sources.node_pos[vsrc_idx], num_nodes);
         let ctrl_neg =
             Self::hb_node_to_solver_index(circuit.voltage_sources.node_neg[vsrc_idx], num_nodes);
-        Ok(HbCurrentSwitchControl { ctrl_pos, ctrl_neg })
+        Ok(HbCurrentSwitchControl {
+            ctrl_pos,
+            ctrl_neg,
+            control_current_bias: static_voltage * HB_NORTON_G,
+        })
     }
 
     #[inline]
@@ -443,7 +470,7 @@ impl Engine {
                 node_neg,
                 ctrl.ctrl_pos,
                 ctrl.ctrl_neg,
-                sw.it,
+                sw.it + ctrl.control_current_bias,
                 sw.ih,
                 sw.ron,
                 sw.roff,
@@ -1061,11 +1088,11 @@ mod tests {
     }
 
     #[test]
-    fn test_run_hb_rejects_unsupported_iswitch_control_source() {
+    fn test_run_hb_supports_iswitch_static_dc_control_source() {
         use crate::Netlist;
 
         let netlist_str = r#"
-            * ISwitch control source must be static 0V sensing source in HB
+            * ISwitch control source may use static DC sensing source in HB
             VCTRL ctrl 0 DC 0
             VSENSE nsense 0 DC 1
             IBIAS 0 out DC 1m
@@ -1081,19 +1108,35 @@ mod tests {
         let config = HbConfig::new(1e6).with_harmonics(3);
 
         let result = engine.run_hb(&netlist, config);
-        assert!(
-            result.is_err(),
-            "unsupported ISwitch control source should fail"
-        );
+        assert!(result.is_ok(), "static DC control source should be supported in HB");
+    }
+
+    #[test]
+    fn test_run_hb_rejects_iswitch_time_varying_control_source() {
+        use crate::Netlist;
+
+        let netlist_str = r#"
+            * Time-varying ISwitch control source remains unsupported in HB
+            VSENSE nsense 0 AC 1
+            IBIAS 0 out DC 1m
+            RLOAD out 0 1k
+            C1 out 0 1n
+            W1 out 0 VSENSE SMOD
+            .MODEL SMOD ISWITCH (IT=1m IH=0 RON=1 ROFF=1e9)
+            .END
+        "#;
+
+        let netlist = Netlist::parse(netlist_str).expect("Parse failed");
+        let engine = Engine::default();
+        let config = HbConfig::new(1e6).with_harmonics(3);
+
+        let result = engine.run_hb(&netlist, config);
+        assert!(result.is_err(), "time-varying control source should fail");
         let msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(msg.contains("current switch"), "expected current switch summary: {}", msg);
         assert!(
-            msg.contains("does not yet support"),
-            "expected unsupported device diagnostics: {}",
-            msg
-        );
-        assert!(
-            msg.contains("current switch"),
-            "expected current switch summary: {}",
+            msg.contains("static control-source waveforms"),
+            "expected static-waveform guidance in diagnostics: {}",
             msg
         );
     }
