@@ -70,7 +70,10 @@ impl FrequencyIndex {
         self.indices
             .iter()
             .zip(tone_frequencies.iter())
-            .map(|(&k, &f)| k as f64 * f)
+            .filter_map(|(&k, &f)| {
+                let term = k as f64 * f;
+                term.is_finite().then_some(term)
+            })
             .sum()
     }
 
@@ -151,7 +154,7 @@ impl FrequencyMap {
             .enumerate()
             .map(|(i, idx)| (i, idx.frequency(&self.tone_frequencies)))
             .collect();
-        indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        indexed.sort_by(|a, b| a.1.total_cmp(&b.1));
 
         let sorted_indices: Vec<_> = indexed
             .iter()
@@ -315,5 +318,24 @@ mod multi_tone_tests {
         let config = MultiToneConfig::new(vec![1e9, 2e9], 5);
         assert_eq!(config.num_tones(), 2);
         assert_eq!(config.max_order, 5);
+    }
+
+    #[test]
+    fn test_frequency_index_ignores_non_finite_tone_terms() {
+        let idx = FrequencyIndex {
+            indices: vec![2, 1, -1],
+        };
+        let freq = idx.frequency(&[1e9, f64::NAN, f64::INFINITY]);
+        assert!(freq.is_finite());
+        assert!((freq - 2e9).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_frequency_map_with_non_finite_tones_produces_finite_frequencies() {
+        let config = MultiToneConfig::new(vec![1e9, f64::NAN, f64::INFINITY], 2);
+        let map = FrequencyMap::new(&config);
+
+        assert!(!map.is_empty());
+        assert!(map.all_frequencies().iter().all(|freq| freq.is_finite()));
     }
 }
