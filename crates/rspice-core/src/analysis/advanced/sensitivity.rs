@@ -75,6 +75,11 @@ impl Sensitivity {
         } else {
             0.0
         };
+        let normalized = if normalized.is_finite() {
+            normalized
+        } else {
+            0.0
+        };
 
         Self {
             element: element.to_string(),
@@ -126,7 +131,21 @@ impl SensitivityResult {
     /// Get top N most sensitive elements by absolute normalized sensitivity
     pub fn top_sensitive(&self, n: usize) -> Vec<&Sensitivity> {
         let mut sorted: Vec<_> = self.sensitivities.iter().collect();
-        sorted.sort_by(|a, b| b.normalized.abs().partial_cmp(&a.normalized.abs()).unwrap());
+        sorted.sort_by(|a, b| {
+            let a_norm = if a.normalized.is_finite() {
+                a.normalized.abs()
+            } else {
+                f64::NEG_INFINITY
+            };
+            let b_norm = if b.normalized.is_finite() {
+                b.normalized.abs()
+            } else {
+                f64::NEG_INFINITY
+            };
+            b_norm
+                .total_cmp(&a_norm)
+                .then_with(|| a.element.cmp(&b.element))
+        });
         sorted.into_iter().take(n).collect()
     }
 
@@ -986,6 +1005,44 @@ mod tests {
 
         let top = result.top_sensitive(2);
         assert_eq!(top[0].element, "R1"); // R1 has larger |normalized|
+    }
+
+    #[test]
+    fn test_sensitivity_constructor_sanitizes_non_finite_normalized() {
+        let sens = Sensitivity::new(
+            "R1",
+            ElementType::Resistor,
+            "value",
+            f64::INFINITY,
+            1.0,
+            1.0,
+        );
+        assert_eq!(sens.normalized, 0.0);
+    }
+
+    #[test]
+    fn test_top_sensitive_demotes_non_finite_entries() {
+        let mut result = SensitivityResult::new("V(1)", 1.0);
+        result.add(Sensitivity {
+            element: "bad".to_string(),
+            element_type: ElementType::Resistor,
+            parameter: "value".to_string(),
+            nominal_value: 1.0,
+            absolute: f64::NAN,
+            normalized: f64::NAN,
+        });
+        result.add(Sensitivity::new(
+            "good",
+            ElementType::Resistor,
+            "value",
+            1_000.0,
+            1e-3,
+            1.0,
+        ));
+
+        let top = result.top_sensitive(1);
+        assert_eq!(top.len(), 1);
+        assert_eq!(top[0].element, "good");
     }
 
     /// Test differential output sensitivity.
