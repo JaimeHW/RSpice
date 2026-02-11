@@ -80,6 +80,27 @@ impl PeriodDetector {
         self
     }
 
+    fn has_valid_input_shape(time: &[Value], values: &[Value], min_len: usize) -> bool {
+        values.len() == time.len() && time.len() >= min_len
+    }
+
+    fn has_finite_samples(time: &[Value], values: &[Value], n: usize) -> bool {
+        time.iter()
+            .zip(values.iter())
+            .take(n)
+            .all(|(&t, &v)| t.is_finite() && v.is_finite())
+    }
+
+    fn has_strictly_increasing_time(time: &[Value], n: usize) -> bool {
+        time.windows(2)
+            .take(n.saturating_sub(1))
+            .all(|window| window[0].is_finite() && window[1].is_finite() && window[1] > window[0])
+    }
+
+    fn is_valid_period(&self, period: Value) -> bool {
+        period.is_finite() && period > 0.0 && period >= self.min_period && period <= self.max_period
+    }
+
     /// Detect period from waveform data using multiple methods
     ///
     /// # Arguments
@@ -89,7 +110,10 @@ impl PeriodDetector {
     /// # Returns
     /// Best period estimate with confidence
     pub fn detect(&self, time: &[Value], values: &[Value]) -> PeriodEstimate {
-        if time.len() < 4 || values.len() != time.len() {
+        if !Self::has_valid_input_shape(time, values, 4)
+            || !Self::has_finite_samples(time, values, time.len())
+            || !Self::has_strictly_increasing_time(time, time.len())
+        {
             return PeriodEstimate {
                 period: self.period_guess,
                 confidence: 0.0,
@@ -128,6 +152,18 @@ impl PeriodDetector {
             };
         }
 
+        let estimates: Vec<_> = estimates
+            .into_iter()
+            .filter(|estimate| self.is_valid_period(estimate.period))
+            .collect();
+        if estimates.is_empty() {
+            return PeriodEstimate {
+                period: self.period_guess,
+                confidence: 0.0,
+                method: EstimationMethod::ZeroCrossing,
+            };
+        }
+
         // Selection strategy:
         // 1. Prefer estimates close to the initial guess (within 2x)
         // 2. Among those, prefer estimates that multiple methods agree on
@@ -137,8 +173,11 @@ impl PeriodDetector {
         let near_guess: Vec<_> = estimates
             .iter()
             .filter(|e| {
+                if !self.period_guess.is_finite() || self.period_guess <= 0.0 {
+                    return false;
+                }
                 let ratio = e.period / self.period_guess;
-                ratio > 0.5 && ratio < 2.0
+                ratio.is_finite() && ratio > 0.5 && ratio < 2.0
             })
             .collect();
 
@@ -159,14 +198,17 @@ impl PeriodDetector {
             let agreement_count = candidates
                 .iter()
                 .filter(|other| {
+                    if !other.period.is_finite() || other.period <= 0.0 {
+                        return false;
+                    }
                     let ratio = candidate.period / other.period;
-                    ratio > 0.9 && ratio < 1.1
+                    ratio.is_finite() && ratio > 0.9 && ratio < 1.1
                 })
                 .count();
 
             // Score = confidence * agreement_bonus
             let agreement_bonus = 1.0 + (agreement_count as f64 - 1.0) * 0.5;
-            let score = candidate.confidence * agreement_bonus;
+            let score = (candidate.confidence * agreement_bonus).max(0.0);
 
             if score > best_score {
                 best_score = score;
@@ -179,8 +221,18 @@ impl PeriodDetector {
 
     /// Detect period via zero-crossing analysis
     pub fn detect_zero_crossing(&self, time: &[Value], values: &[Value]) -> Option<PeriodEstimate> {
+        if !Self::has_valid_input_shape(time, values, 2)
+            || !Self::has_finite_samples(time, values, time.len())
+            || !Self::has_strictly_increasing_time(time, time.len())
+        {
+            return None;
+        }
+
         // Find DC offset (mean value)
         let dc: Value = values.iter().sum::<Value>() / values.len() as f64;
+        if !dc.is_finite() {
+            return None;
+        }
 
         // Find zero crossings (relative to DC)
         let mut crossings = Vec::new();
@@ -194,8 +246,15 @@ impl PeriodDetector {
                 // Linear interpolation for precise crossing time
                 let t0 = time[i - 1];
                 let t1 = time[i];
-                let t_cross = t0 + (0.0 - v0) * (t1 - t0) / (v1 - v0);
-                crossings.push(t_cross);
+                let dt = t1 - t0;
+                let dv = v1 - v0;
+                if !dt.is_finite() || dt <= 0.0 || !dv.is_finite() || dv.abs() <= 1e-18 {
+                    continue;
+                }
+                let t_cross = t0 + (0.0 - v0) * dt / dv;
+                if t_cross.is_finite() {
+                    crossings.push(t_cross);
+                }
             }
         }
 
@@ -207,7 +266,7 @@ impl PeriodDetector {
         let mut periods: Vec<Value> = crossings
             .windows(2)
             .map(|w| w[1] - w[0])
-            .filter(|&p| p >= self.min_period && p <= self.max_period)
+            .filter(|&p| self.is_valid_period(p))
             .collect();
 
         if periods.is_empty() {
@@ -215,16 +274,22 @@ impl PeriodDetector {
         }
 
         // Use median for robustness against outliers
-        periods.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        periods.sort_by(f64::total_cmp);
         let median_period = periods[periods.len() / 2];
 
         // Calculate confidence based on consistency
         let mean_period: Value = periods.iter().sum::<Value>() / periods.len() as f64;
+        if !mean_period.is_finite() {
+            return None;
+        }
         let variance: Value = periods
             .iter()
             .map(|p| (p - mean_period).powi(2))
             .sum::<Value>()
             / periods.len() as f64;
+        if !variance.is_finite() {
+            return None;
+        }
         let std_dev = variance.sqrt();
 
         // Confidence decreases with higher relative std dev
@@ -243,12 +308,22 @@ impl PeriodDetector {
 
     /// Detect period via peak detection
     pub fn detect_peaks(&self, time: &[Value], values: &[Value]) -> Option<PeriodEstimate> {
+        if !Self::has_valid_input_shape(time, values, 3)
+            || !Self::has_finite_samples(time, values, time.len())
+            || !Self::has_strictly_increasing_time(time, time.len())
+        {
+            return None;
+        }
+
         // Find local maxima
         let mut peaks = Vec::new();
 
         for i in 1..(values.len() - 1) {
             if values[i] > values[i - 1] && values[i] > values[i + 1] {
-                peaks.push(time[i]);
+                let t = time[i];
+                if t.is_finite() {
+                    peaks.push(t);
+                }
             }
         }
 
@@ -260,7 +335,7 @@ impl PeriodDetector {
         let mut periods: Vec<Value> = peaks
             .windows(2)
             .map(|w| w[1] - w[0])
-            .filter(|&p| p >= self.min_period && p <= self.max_period)
+            .filter(|&p| self.is_valid_period(p))
             .collect();
 
         if periods.is_empty() {
@@ -268,16 +343,22 @@ impl PeriodDetector {
         }
 
         // Use median
-        periods.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        periods.sort_by(f64::total_cmp);
         let median_period = periods[periods.len() / 2];
 
         // Calculate confidence
         let mean_period: Value = periods.iter().sum::<Value>() / periods.len() as f64;
+        if !mean_period.is_finite() {
+            return None;
+        }
         let variance: Value = periods
             .iter()
             .map(|p| (p - mean_period).powi(2))
             .sum::<Value>()
             / periods.len() as f64;
+        if !variance.is_finite() {
+            return None;
+        }
         let std_dev = variance.sqrt();
 
         let confidence = if mean_period > 0.0 {
@@ -298,17 +379,40 @@ impl PeriodDetector {
     /// Uses parabolic interpolation for sub-bin frequency accuracy,
     /// as implemented in industry simulators.
     pub fn detect_fft(&self, time: &[Value], values: &[Value]) -> Option<PeriodEstimate> {
-        use rustfft::{FftPlanner, num_complex::Complex};
+        use rustfft::{num_complex::Complex, FftPlanner};
+
+        if !Self::has_valid_input_shape(time, values, 16) {
+            return None;
+        }
 
         let n = values.len().min(self.fft_size);
         if n < 16 {
+            return None;
+        }
+        if !Self::has_finite_samples(time, values, n)
+            || !Self::has_strictly_increasing_time(time, n)
+        {
+            return None;
+        }
+        if !self.min_period.is_finite()
+            || !self.max_period.is_finite()
+            || self.min_period <= 0.0
+            || self.max_period <= 0.0
+            || self.min_period > self.max_period
+        {
             return None;
         }
 
         // Estimate sample rate from the portion of data we're using
         // CRITICAL: Use time[n-1], not time[time.len()-1], since we only use first n samples
         let actual_duration = time[n - 1] - time[0];
+        if !actual_duration.is_finite() || actual_duration <= 0.0 {
+            return None;
+        }
         let sample_rate = (n as f64 - 1.0) / actual_duration;
+        if !sample_rate.is_finite() || sample_rate <= 0.0 {
+            return None;
+        }
 
         // Prepare FFT input (with Hann window for spectral leakage reduction)
         let mut buffer: Vec<Complex<f64>> = (0..n)
@@ -332,8 +436,16 @@ impl PeriodDetector {
 
         // Find peak in magnitude spectrum (excluding DC bin)
         let freq_resolution = sample_rate / fft_len as f64;
-        let min_bin = (1.0 / self.max_period / freq_resolution).ceil() as usize;
-        let max_bin = (1.0 / self.min_period / freq_resolution).floor() as usize;
+        if !freq_resolution.is_finite() || freq_resolution <= 0.0 {
+            return None;
+        }
+        let min_bin_f = (1.0 / self.max_period / freq_resolution).ceil();
+        let max_bin_f = (1.0 / self.min_period / freq_resolution).floor();
+        if !min_bin_f.is_finite() || !max_bin_f.is_finite() {
+            return None;
+        }
+        let min_bin = min_bin_f.max(1.0) as usize;
+        let max_bin = max_bin_f.max(1.0) as usize;
 
         let search_range = min_bin.max(1)..max_bin.min(fft_len / 2 - 1);
         if search_range.is_empty() {
@@ -342,8 +454,11 @@ impl PeriodDetector {
 
         let (peak_bin, peak_magnitude) = search_range
             .clone()
-            .map(|i| (i, magnitudes[i]))
-            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())?;
+            .filter_map(|i| {
+                let magnitude = magnitudes[i];
+                magnitude.is_finite().then_some((i, magnitude))
+            })
+            .max_by(|a, b| a.1.total_cmp(&b.1))?;
 
         // Parabolic interpolation for sub-bin frequency accuracy
         // Using 3-point quadratic interpolation (Jacobsen's method)
@@ -367,16 +482,35 @@ impl PeriodDetector {
         };
 
         let peak_freq = refined_bin * freq_resolution;
+        if !peak_freq.is_finite() || peak_freq <= 0.0 {
+            return None;
+        }
         let period = 1.0 / peak_freq;
+        if !self.is_valid_period(period) {
+            return None;
+        }
 
         // Confidence based on peak sharpness (ratio to average)
-        let avg_magnitude: f64 =
-            magnitudes[1..fft_len / 2].iter().sum::<f64>() / (fft_len / 2 - 1) as f64;
+        let (magnitude_sum, magnitude_count) = magnitudes[1..fft_len / 2]
+            .iter()
+            .filter(|value| value.is_finite())
+            .fold((0.0, 0usize), |(sum, count), &value| {
+                (sum + value, count + 1)
+            });
+        if magnitude_count == 0 {
+            return None;
+        }
+        let avg_magnitude = magnitude_sum / magnitude_count as f64;
 
         let confidence = if avg_magnitude > 0.0 {
             ((peak_magnitude / avg_magnitude - 1.0) / 10.0)
                 .min(1.0)
                 .max(0.0)
+        } else {
+            0.0
+        };
+        let confidence = if confidence.is_finite() {
+            confidence
         } else {
             0.0
         };
@@ -394,6 +528,13 @@ impl PeriodDetector {
         time: &[Value],
         values: &[Value],
     ) -> Option<PeriodEstimate> {
+        if !Self::has_valid_input_shape(time, values, 20)
+            || !Self::has_finite_samples(time, values, time.len())
+            || !Self::has_strictly_increasing_time(time, time.len())
+        {
+            return None;
+        }
+
         let n = values.len();
         if n < 20 {
             return None;
@@ -405,10 +546,18 @@ impl PeriodDetector {
 
         // Estimate sample period
         let sample_period = (time[n - 1] - time[0]) / (n - 1) as f64;
+        if !sample_period.is_finite() || sample_period <= 0.0 {
+            return None;
+        }
 
         // Compute lag range
-        let min_lag = (self.min_period / sample_period).ceil() as usize;
-        let max_lag = (self.max_period / sample_period).floor() as usize;
+        let min_lag = (self.min_period / sample_period).ceil();
+        let max_lag = (self.max_period / sample_period).floor();
+        if !min_lag.is_finite() || !max_lag.is_finite() {
+            return None;
+        }
+        let min_lag = min_lag.max(1.0) as usize;
+        let max_lag = max_lag.max(1.0) as usize;
 
         if min_lag >= max_lag || max_lag >= n {
             return None;
@@ -426,21 +575,24 @@ impl PeriodDetector {
             let r: Value = (0..(n - lag))
                 .map(|i| centered[i] * centered[i + lag])
                 .sum();
-            autocorr.push((lag, r / r0));
+            let normalized = r / r0;
+            if normalized.is_finite() {
+                autocorr.push((lag, normalized));
+            }
+        }
+        if autocorr.is_empty() {
+            return None;
         }
 
         // Find peak
-        let mut peak_lag = min_lag;
-        let mut peak_r = f64::NEG_INFINITY;
-
-        for (lag, r) in autocorr.iter() {
-            if *r > peak_r {
-                peak_r = *r;
-                peak_lag = *lag;
-            }
-        }
+        let (peak_lag, peak_r) = autocorr
+            .into_iter()
+            .max_by(|lhs, rhs| lhs.1.total_cmp(&rhs.1))?;
 
         let period = peak_lag as f64 * sample_period;
+        if !self.is_valid_period(period) {
+            return None;
+        }
         let confidence = peak_r.max(0.0).min(1.0);
 
         Some(PeriodEstimate {
@@ -461,6 +613,10 @@ impl PeriodDetector {
         state_start: &[Value],
         d_state_end_dt: &[Value],
     ) -> Value {
+        if !initial_period.is_finite() || initial_period <= 0.0 {
+            return self.min_period.max(0.0);
+        }
+
         // The residual is r(T) = x(T) - x(0)
         // We want dr/dT = dx/dT(T) = 0 at the saddle point
         // For autonomous circuits, dx/dT = f(x(T)) where f is the RHS
@@ -474,7 +630,7 @@ impl PeriodDetector {
             .map(|(e, s)| (e - s).powi(2))
             .sum();
 
-        if residual_norm_sq < 1e-20 {
+        if !residual_norm_sq.is_finite() || residual_norm_sq < 1e-20 {
             return initial_period; // Already converged
         }
 
@@ -488,18 +644,25 @@ impl PeriodDetector {
 
         let deriv_norm_sq: Value = d_state_end_dt.iter().map(|d| d * d).sum();
 
-        if deriv_norm_sq < 1e-20 {
+        if !deriv_norm_sq.is_finite() || deriv_norm_sq < 1e-20 {
             return initial_period;
         }
 
         // Newton update for period
         let delta_t = -residual_dot_deriv / deriv_norm_sq;
+        if !delta_t.is_finite() {
+            return initial_period;
+        }
 
         // Limit period change
         let max_change = initial_period * 0.1;
         let delta_t_limited = delta_t.clamp(-max_change, max_change);
 
-        (initial_period + delta_t_limited).max(self.min_period)
+        let refined = initial_period + delta_t_limited;
+        if !refined.is_finite() {
+            return initial_period.max(self.min_period);
+        }
+        refined.max(self.min_period)
     }
 }
 
@@ -673,5 +836,47 @@ mod tests {
 
         // Should still detect approximate period despite noise
         assert!((estimate.period - period).abs() < period * 0.1);
+    }
+
+    #[test]
+    fn test_peak_detection_short_input_returns_none() {
+        let detector = PeriodDetector::with_guess(1e-9);
+        let result = detector.detect_peaks(&[0.0, 1.0], &[0.0, 1.0]);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_fft_detection_rejects_zero_duration_timeline() {
+        let detector = PeriodDetector::with_guess(1e-9).with_fft_size(64);
+        let time = vec![0.0; 64];
+        let values: Vec<Value> = (0..64).map(|i| (i as f64).sin()).collect();
+        assert!(detector.detect_fft(&time, &values).is_none());
+    }
+
+    #[test]
+    fn test_detect_falls_back_when_samples_are_non_finite() {
+        let detector = PeriodDetector::with_guess(1e-6);
+        let time = vec![0.0, 1e-6, 2e-6, 3e-6];
+        let values = vec![0.0, 1.0, f64::NAN, -1.0];
+
+        let estimate = detector.detect(&time, &values);
+        assert!((estimate.period - 1e-6).abs() < 1e-18);
+        assert_eq!(estimate.confidence, 0.0);
+    }
+
+    #[test]
+    fn test_zero_crossing_rejects_non_monotonic_time() {
+        let detector = PeriodDetector::with_guess(1e-6);
+        let time = vec![0.0, 2e-6, 1e-6, 3e-6];
+        let values = vec![-1.0, 1.0, -1.0, 1.0];
+        assert!(detector.detect_zero_crossing(&time, &values).is_none());
+    }
+
+    #[test]
+    fn test_refine_period_handles_non_finite_initial_period() {
+        let detector = PeriodDetector::with_guess(1e-9);
+        let refined = detector.refine_period(f64::NAN, &[1.0, 0.0], &[0.0, 0.0], &[0.1, 0.1]);
+        assert!(refined.is_finite());
+        assert!(refined >= 0.0);
     }
 }
