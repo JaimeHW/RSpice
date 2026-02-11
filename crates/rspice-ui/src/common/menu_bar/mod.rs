@@ -9,18 +9,18 @@ use crate::common::app::AppState;
 use crate::common::export_workflow::ExportWorkflowIo;
 use crate::common::file_workflow::FileWorkflowIo;
 
-mod menu_bar_edit_menu;
-mod menu_bar_examples_menu;
-mod menu_bar_export_actions;
-mod menu_bar_file_actions;
-mod menu_bar_file_menu;
-mod menu_bar_help_menu;
-mod menu_bar_netlist_compat;
-mod menu_bar_simulate_menu;
-mod menu_bar_tools_menu;
-mod menu_bar_veriloga_cache;
-mod menu_bar_view_menu;
-mod menu_bar_waveform_export;
+mod edit_menu;
+mod examples_menu;
+mod export_actions;
+mod file_actions;
+mod file_menu;
+mod help_menu;
+mod netlist_compat;
+mod simulate_menu;
+mod tools_menu;
+mod veriloga_cache;
+mod view_menu;
+mod waveform_export;
 
 /// Render the menu bar
 pub(crate) fn render_menu_bar(
@@ -37,45 +37,45 @@ pub(crate) fn render_menu_bar(
         // FILE MENU
         // =====================================================================
         ui.menu_button("File", |ui| {
-            menu_bar_file_menu::render_file_menu(ui, state, file_workflow_io, export_workflow_io);
+            file_menu::render_file_menu(ui, state, file_workflow_io, export_workflow_io);
         });
 
         // =====================================================================
         // EDIT MENU
         // =====================================================================
         ui.menu_button("Edit", |ui| {
-            menu_bar_edit_menu::render_edit_menu(ui, state);
+            edit_menu::render_edit_menu(ui, state);
         });
         // =====================================================================
         // VIEW MENU
         // =====================================================================
         ui.menu_button("View", |ui| {
-            menu_bar_view_menu::render_view_menu(ui, state);
+            view_menu::render_view_menu(ui, state);
         });
         // =====================================================================
         // SIMULATE MENU
         // =====================================================================
         ui.menu_button("Simulate", |ui| {
-            menu_bar_simulate_menu::render_simulate_menu(ui, state, export_workflow_io);
+            simulate_menu::render_simulate_menu(ui, state, export_workflow_io);
         });
         // =====================================================================
         // TOOLS MENU
         // =====================================================================
         ui.menu_button("Tools", |ui| {
-            menu_bar_tools_menu::render_tools_menu(ui, state);
+            tools_menu::render_tools_menu(ui, state);
         });
         // =====================================================================
         // EXAMPLES MENU
         // =====================================================================
         ui.menu_button("Examples", |ui| {
-            menu_bar_examples_menu::render_examples_menu(ui, state);
+            examples_menu::render_examples_menu(ui, state);
         });
 
         // =====================================================================
         // HELP MENU
         // =====================================================================
         ui.menu_button("Help", |ui| {
-            menu_bar_help_menu::render_help_menu(ui, state);
+            help_menu::render_help_menu(ui, state);
         });
     });
 }

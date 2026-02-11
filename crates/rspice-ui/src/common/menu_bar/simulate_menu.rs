@@ -48,11 +48,11 @@ pub(super) fn render_simulate_menu(
     // Netlist menu
     ui.menu_button("Netlist", |ui| {
         if ui.button("View Netlist").clicked() {
-            super::menu_bar_export_actions::action_view_netlist(state);
+            super::export_actions::action_view_netlist(state);
             ui.close_menu();
         }
         if ui.button("Export SPICE Netlist...").clicked() {
-            super::menu_bar_export_actions::action_export_netlist_with_io(
+            super::export_actions::action_export_netlist_with_io(
                 state,
                 crate::io::NetlistFormat::Spice,
                 export_workflow_io,
@@ -60,7 +60,7 @@ pub(super) fn render_simulate_menu(
             ui.close_menu();
         }
         if ui.button("Export Spectre Netlist...").clicked() {
-            super::menu_bar_export_actions::action_export_netlist_with_io(
+            super::export_actions::action_export_netlist_with_io(
                 state,
                 crate::io::NetlistFormat::Spectre,
                 export_workflow_io,

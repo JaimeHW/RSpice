@@ -144,27 +144,26 @@ fn dispatch_file_menu_action(
             if require_save_confirmation_if_dirty(state, ConfirmationAction::FileNew) {
                 return;
             }
-            super::menu_bar_file_actions::action_file_new(state);
+            super::file_actions::action_file_new(state);
         }
         FileMenuAction::Open => {
             if require_save_confirmation_if_dirty(state, ConfirmationAction::FileOpen) {
                 return;
             }
-            super::menu_bar_file_actions::action_file_open_with_io(state, file_workflow_io);
+            super::file_actions::action_file_open_with_io(state, file_workflow_io);
         }
         FileMenuAction::Save => {
-            let _ = super::menu_bar_file_actions::action_file_save_with_io(state, file_workflow_io);
+            let _ = super::file_actions::action_file_save_with_io(state, file_workflow_io);
         }
         FileMenuAction::SaveAs => {
-            let _ =
-                super::menu_bar_file_actions::action_file_save_as_with_io(state, file_workflow_io);
+            let _ = super::file_actions::action_file_save_as_with_io(state, file_workflow_io);
         }
         FileMenuAction::ExportSvg => {
-            super::menu_bar_export_actions::action_export_svg_with_io(state, export_workflow_io)
+            super::export_actions::action_export_svg_with_io(state, export_workflow_io)
         }
         FileMenuAction::ExportPdf => open_pdf_export_dialog(state),
         FileMenuAction::ExportCsvWaveforms => {
-            super::menu_bar_waveform_export::action_export_csv_with_io(state, export_workflow_io)
+            super::waveform_export::action_export_csv_with_io(state, export_workflow_io)
         }
         FileMenuAction::ImportVerilogA => open_veriloga_import_dialog(state),
         FileMenuAction::OpenPreferences => open_preferences_dialog(state),
@@ -552,12 +551,7 @@ mod tests {
         state.dialogs.preferences = false;
         let export_io = MockFileMenuExportWorkflowIo::default();
 
-        dispatch_file_menu_action(
-            &mut state,
-            FileMenuAction::OpenPreferences,
-            &io,
-            &export_io,
-        );
+        dispatch_file_menu_action(&mut state, FileMenuAction::OpenPreferences, &io, &export_io);
 
         assert!(state.dialogs.preferences);
     }

@@ -32,7 +32,7 @@ pub(super) fn action_export_csv_with_io(
         filter_extensions: &["csv"],
     }) {
         Some(mut path) => {
-            super::menu_bar_file_actions::ensure_file_extension(&mut path, "csv");
+            super::file_actions::ensure_file_extension(&mut path, "csv");
 
             match io.write_waveform_csv(&prepared.dataset, &path) {
                 Ok(()) => {
@@ -412,10 +412,11 @@ mod tests {
         io.push_write_csv_result(Ok(()));
 
         let mut state = AppState::default();
-        state
-            .simulation
-            .waveforms
-            .push(waveform("V(out)", vec![0.0, 1.0, 2.0], vec![1.0, 2.0, 3.0]));
+        state.simulation.waveforms.push(waveform(
+            "V(out)",
+            vec![0.0, 1.0, 2.0],
+            vec![1.0, 2.0, 3.0],
+        ));
         state.simulation.waveforms.push(waveform(
             "I(V1)",
             vec![0.0, 1.0, 2.0],
@@ -469,10 +470,9 @@ mod tests {
 
         assert_eq!(io.write_csv_calls(), 1);
         assert!(
-            state
-                .console_messages
-                .iter()
-                .any(|message| message.message.contains("CSV export failed: permission denied")),
+            state.console_messages.iter().any(|message| message
+                .message
+                .contains("CSV export failed: permission denied")),
             "csv export write errors should be surfaced"
         );
     }

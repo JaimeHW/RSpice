@@ -30,7 +30,7 @@ pub(super) fn action_export_svg_with_io(
         filter_extensions: &["svg"],
     }) {
         Some(mut path) => {
-            super::menu_bar_file_actions::ensure_file_extension(&mut path, "svg");
+            super::file_actions::ensure_file_extension(&mut path, "svg");
 
             match io.write_text_file(&path, &svg_content) {
                 Ok(()) => {
@@ -98,7 +98,7 @@ pub(super) fn action_export_netlist_with_io(
         filter_extensions: &[extension],
     }) {
         Some(mut path) => {
-            super::menu_bar_file_actions::ensure_file_extension(&mut path, extension);
+            super::file_actions::ensure_file_extension(&mut path, extension);
 
             match io.write_text_file(&path, &netlist_content) {
                 Ok(()) => {
@@ -166,7 +166,7 @@ fn build_menu_netlist(state: &mut AppState, format: crate::io::NetlistFormat) ->
     let spice_netlist = generation.netlist;
     Some(match format {
         crate::io::NetlistFormat::Spectre => {
-            super::menu_bar_netlist_compat::spice_to_ahdl_compatible_netlist(&spice_netlist)
+            super::netlist_compat::spice_to_ahdl_compatible_netlist(&spice_netlist)
         }
         _ => spice_netlist,
     })
@@ -268,7 +268,7 @@ mod tests {
             _dataset: &crate::io::WaveformDataset,
             _path: &Path,
         ) -> Result<(), String> {
-            Err("unexpected write_waveform_csv call in menu_bar_export_actions tests".to_string())
+            Err("unexpected write_waveform_csv call in export_actions tests".to_string())
         }
     }
 

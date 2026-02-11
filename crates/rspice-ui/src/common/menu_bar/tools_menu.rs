@@ -16,23 +16,23 @@ pub(super) fn render_tools_menu(ui: &mut Ui, state: &mut AppState) {
         }
         ui.separator();
         if ui.button("Compile Cache Status").clicked() {
-            super::menu_bar_veriloga_cache::action_veriloga_cache_status(state);
+            super::veriloga_cache::action_veriloga_cache_status(state);
             ui.close_menu();
         }
         if ui.button("List Compile Cache Entries").clicked() {
-            super::menu_bar_veriloga_cache::action_veriloga_cache_list_entries(state);
+            super::veriloga_cache::action_veriloga_cache_list_entries(state);
             ui.close_menu();
         }
         if ui.button("Prune Compile Cache").clicked() {
-            super::menu_bar_veriloga_cache::action_veriloga_cache_prune(state);
+            super::veriloga_cache::action_veriloga_cache_prune(state);
             ui.close_menu();
         }
         if ui.button("Clear Compile Cache").clicked() {
-            super::menu_bar_veriloga_cache::action_veriloga_cache_clear(state);
+            super::veriloga_cache::action_veriloga_cache_clear(state);
             ui.close_menu();
         }
         if ui.button("Recompile Global Verilog-A Library").clicked() {
-            super::menu_bar_veriloga_cache::action_veriloga_recompile_library(state);
+            super::veriloga_cache::action_veriloga_recompile_library(state);
             ui.close_menu();
         }
     });

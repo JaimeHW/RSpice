@@ -88,7 +88,7 @@ fn load_help_example_shortcut(state: &mut AppState, shortcut: &str) -> bool {
         return false;
     };
 
-    super::menu_bar_examples_menu::load_named_example(state, mapped_example)
+    super::examples_menu::load_named_example(state, mapped_example)
 }
 
 fn check_for_updates(state: &mut AppState) {
