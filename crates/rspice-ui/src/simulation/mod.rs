@@ -15,9 +15,7 @@ pub mod netlist_viewer;
 pub mod optimizer;
 pub mod options_translator;
 pub mod reliability_engine;
-pub mod result_mapper;
 pub mod results;
-pub mod run_executor;
 pub mod runner;
 pub mod status;
 
@@ -37,9 +35,7 @@ pub use netlist_gen::{
     generate_netlist, generate_netlist_with_analysis, Net, NetlistGenerator, NetlistResult,
 };
 pub use options_translator::{EngineOptions, OptionsTranslator, PvtCorner};
-pub use result_mapper::{MappedResult, MappedWaveform, ResultMapper};
 pub use results::{SimulationResult, WaveformData};
-pub use run_executor::{ExecutionResult, ExecutionState, RunExecutor};
 pub use runner::SimulationRunner;
 pub use status::{SimulationProgress, SimulationStatus};
 
