@@ -393,7 +393,7 @@ impl SpectrumAnalysis {
             .map(|p| p.magnitude_db())
             .filter(|db| db.is_finite())
             .collect();
-        mags.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        mags.sort_by(|a, b| a.total_cmp(b));
 
         if mags.len() > 4 {
             let quarter = mags.len() / 4;
@@ -790,5 +790,34 @@ mod tests {
         // Only 1 harmonic (2nd at 800Hz) should be below Nyquist (500Hz)
         // Actually 2*400=800 > 500, so no harmonics should be detected
         assert!(analysis.harmonics.is_empty() || analysis.harmonics.len() <= 1);
+    }
+
+    #[test]
+    fn test_analysis_ignores_non_finite_bins_for_noise_floor() {
+        let fft = FftData {
+            name: "Test".to_string(),
+            points: vec![
+                FftPoint::new(0.0, 0.0, 0.0), // DC
+                FftPoint::new(100.0, 1.0, 0.0),
+                FftPoint::new(200.0, 0.01, 0.0),
+                FftPoint::new(300.0, 0.02, 0.0),
+                FftPoint::new(400.0, f64::NAN, 0.0),
+                FftPoint::new(500.0, f64::INFINITY, 0.0),
+                FftPoint::new(600.0, 0.03, 0.0),
+                FftPoint::new(700.0, 0.015, 0.0),
+                FftPoint::new(800.0, 0.005, 0.0),
+            ],
+            sample_rate: 2000.0,
+            fft_size: 16,
+            window: WindowFunction::Rectangular,
+        };
+
+        let analysis = SpectrumAnalysis::analyze(&fft, 5);
+        assert_eq!(analysis.fundamental_frequency, Some(100.0));
+        assert!(analysis
+            .noise_floor_db
+            .map(|db| db.is_finite())
+            .unwrap_or(false));
+        assert!(analysis.snr_db.map(|db| db.is_finite()).unwrap_or(false));
     }
 }
