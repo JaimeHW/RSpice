@@ -15,6 +15,8 @@ mod menu_bar_examples_menu;
 mod menu_bar_export_actions;
 #[path = "menu_bar_file_actions.rs"]
 mod menu_bar_file_actions;
+#[path = "menu_bar_help_menu.rs"]
+mod menu_bar_help_menu;
 #[path = "menu_bar_netlist_compat.rs"]
 mod menu_bar_netlist_compat;
 #[path = "menu_bar_simulate_menu.rs"]
@@ -131,91 +133,7 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
         // HELP MENU
         // =====================================================================
         ui.menu_button("Help", |ui| {
-            if ui.button("Keyboard Shortcuts    F1").clicked() {
-                state.dialogs.shortcuts_help = true;
-                ui.close_menu();
-            }
-
-            ui.separator();
-
-            // Documentation submenu
-            ui.menu_button("Documentation", |ui| {
-                if ui.button("User Guide").clicked() {
-                    state.push_user_message(crate::common::app::ConsoleMessage::info(
-                        "User Guide: See docs/user_guide.md",
-                    ));
-                    ui.close_menu();
-                }
-                if ui.button("SPICE Reference").clicked() {
-                    state.push_user_message(crate::common::app::ConsoleMessage::info(
-                        "SPICE Reference: See docs/spice_reference.md",
-                    ));
-                    ui.close_menu();
-                }
-                if ui.button("Analysis Guide").clicked() {
-                    state.push_user_message(crate::common::app::ConsoleMessage::info(
-                        "Analysis Guide: See docs/analysis_guide.md",
-                    ));
-                    ui.close_menu();
-                }
-                if ui.button("Model Library").clicked() {
-                    state.push_user_message(crate::common::app::ConsoleMessage::info(
-                        "Model Library: See docs/models.md",
-                    ));
-                    ui.close_menu();
-                }
-            });
-
-            // Examples submenu
-            ui.menu_button("Examples", |ui| {
-                if ui.button("RC Low-Pass Filter").clicked() {
-                    state.push_user_message(crate::common::app::ConsoleMessage::info(
-                        "Loading RC filter example...",
-                    ));
-                    ui.close_menu();
-                }
-                if ui.button("Inverter Chain").clicked() {
-                    state.push_user_message(crate::common::app::ConsoleMessage::info(
-                        "Loading inverter chain example...",
-                    ));
-                    ui.close_menu();
-                }
-                if ui.button("Operational Amplifier").clicked() {
-                    state.push_user_message(crate::common::app::ConsoleMessage::info(
-                        "Loading op-amp example...",
-                    ));
-                    ui.close_menu();
-                }
-                if ui.button("PLL Circuit").clicked() {
-                    state.push_user_message(crate::common::app::ConsoleMessage::info(
-                        "Loading PLL example...",
-                    ));
-                    ui.close_menu();
-                }
-            });
-
-            ui.separator();
-
-            if ui.button("Check for Updates...").clicked() {
-                state.push_user_message(crate::common::app::ConsoleMessage::info(
-                    "You are running the latest version",
-                ));
-                ui.close_menu();
-            }
-
-            if ui.button("Report Issue...").clicked() {
-                state.push_user_message(crate::common::app::ConsoleMessage::info(
-                    "Please report issues at: github.com/rspice/issues",
-                ));
-                ui.close_menu();
-            }
-
-            ui.separator();
-
-            if ui.button("About RSpice").clicked() {
-                state.dialogs.about = true;
-                ui.close_menu();
-            }
+            menu_bar_help_menu::render_help_menu(ui, state);
         });
     });
 }

@@ -16,7 +16,7 @@ pub(super) fn render_examples_menu(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
-fn load_named_example(state: &mut AppState, name: &str) -> bool {
+pub(super) fn load_named_example(state: &mut AppState, name: &str) -> bool {
     let Some(example) = EXAMPLES.iter().find(|example| example.name == name) else {
         state.push_user_message(ConsoleMessage::warning(format!(
             "Example '{}' is not registered",
