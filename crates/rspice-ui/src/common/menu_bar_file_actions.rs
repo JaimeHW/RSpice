@@ -1,109 +1,19 @@
 use crate::common::app::AppState;
 
 pub(super) fn action_file_new(state: &mut AppState) {
-    if state.schematic.is_dirty {
-        log::warn!("New schematic requested but current has unsaved changes");
-    }
-    state.schematic = crate::state::SchematicState::default();
-    state.push_user_message(crate::common::app::ConsoleMessage::info(
-        "Created new schematic",
-    ));
+    crate::common::file_workflow::create_new_schematic(state);
 }
 
 pub(super) fn action_file_open(state: &mut AppState) {
-    use crate::io::{load_schematic, show_open_dialog, SchematicIoError};
-
-    match show_open_dialog() {
-        Ok(path) => match load_schematic(&path) {
-            Ok(schematic) => {
-                state.schematic = schematic;
-                state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
-                    "Opened: {}",
-                    path.display()
-                )));
-            }
-            Err(e) => {
-                state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
-                    "Failed to open: {}",
-                    e
-                )));
-            }
-        },
-        Err(SchematicIoError::Cancelled) => {
-            // User cancelled - no message needed
-        }
-        Err(e) => {
-            state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
-                "Open failed: {}",
-                e
-            )));
-        }
-    }
+    crate::common::file_workflow::open_schematic_from_dialog(state);
 }
 
 pub(super) fn action_file_save(state: &mut AppState) {
-    use crate::io::save_schematic;
-
-    // If we have a current file path, save directly.
-    // Otherwise, show Save As dialog.
-    if let Some(ref path) = state.schematic.current_file.clone() {
-        match save_schematic(&state.schematic, path) {
-            Ok(()) => {
-                state.schematic.is_dirty = false;
-                state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
-                    "Saved: {}",
-                    path.display()
-                )));
-            }
-            Err(e) => {
-                state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
-                    "Save failed: {}",
-                    e
-                )));
-            }
-        }
-    } else {
-        action_file_save_as(state);
-    }
+    let _ = crate::common::file_workflow::save_schematic(state);
 }
 
 pub(super) fn action_file_save_as(state: &mut AppState) {
-    use crate::io::{save_schematic, show_save_dialog, SchematicIoError};
-
-    let default_name = state
-        .schematic
-        .current_file
-        .as_ref()
-        .and_then(|p| p.file_name())
-        .map(|n| n.to_string_lossy().to_string());
-
-    match show_save_dialog(default_name.as_deref()) {
-        Ok(path) => match save_schematic(&state.schematic, &path) {
-            Ok(()) => {
-                state.schematic.current_file = Some(path.clone());
-                state.schematic.is_dirty = false;
-                state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
-                    "Saved: {}",
-                    path.display()
-                )));
-            }
-            Err(e) => {
-                state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
-                    "Save failed: {}",
-                    e
-                )));
-            }
-        },
-        Err(SchematicIoError::Cancelled) => {
-            // User cancelled - no message needed
-        }
-        Err(e) => {
-            state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
-                "Save As failed: {}",
-                e
-            )));
-        }
-    }
+    let _ = crate::common::file_workflow::save_schematic_as(state);
 }
 
 pub(super) fn has_file_extension(path: &std::path::Path, expected_ext: &str) -> bool {

@@ -1,8 +1,8 @@
 use egui::Context;
 
 use super::{
-    app_shortcuts::{collect_shortcut_commands, ShortcutCommand, ShortcutInputSnapshot},
     BottomPanelTab, ConfirmationAction, ConfirmationResponse, ConsoleMessage, RSpiceApp,
+    app_shortcuts::{ShortcutCommand, ShortcutInputSnapshot, collect_shortcut_commands},
 };
 
 impl RSpiceApp {
@@ -136,9 +136,7 @@ impl RSpiceApp {
 
     /// Internal: Actually create a new schematic (after confirmation)
     pub(super) fn do_file_new(&mut self) {
-        self.state.schematic = crate::state::SchematicState::default();
-        self.state
-            .push_user_message(ConsoleMessage::info("Created new schematic"));
+        crate::common::file_workflow::create_new_schematic(&mut self.state);
     }
 
     /// Request to open a schematic (prompts to save if dirty)
@@ -156,30 +154,7 @@ impl RSpiceApp {
 
     /// Internal: Actually open a schematic (after confirmation)
     pub(super) fn do_file_open(&mut self) {
-        use crate::io::{load_schematic, show_open_dialog, SchematicIoError};
-
-        match show_open_dialog() {
-            Ok(path) => match load_schematic(&path) {
-                Ok(schematic) => {
-                    self.state.schematic = schematic;
-                    self.state.push_user_message(ConsoleMessage::info(format!(
-                        "Opened: {}",
-                        path.display()
-                    )));
-                }
-                Err(e) => {
-                    self.state
-                        .push_user_message(ConsoleMessage::error(format!("Failed to open: {}", e)));
-                }
-            },
-            Err(SchematicIoError::Cancelled) => {
-                // User cancelled - no message needed
-            }
-            Err(e) => {
-                self.state
-                    .push_user_message(ConsoleMessage::error(format!("Open failed: {}", e)));
-            }
-        }
+        crate::common::file_workflow::open_schematic_from_dialog(&mut self.state);
     }
 
     /// Handle user response to save confirmation dialog
@@ -227,71 +202,11 @@ impl RSpiceApp {
     }
 
     pub(super) fn action_file_save(&mut self) -> bool {
-        use crate::io::save_schematic;
-
-        // If we have a current file path, save directly
-        // Otherwise, show Save As dialog
-        if let Some(ref path) = self.state.schematic.current_file.clone() {
-            match save_schematic(&self.state.schematic, path) {
-                Ok(()) => {
-                    self.state.schematic.is_dirty = false;
-                    self.state.push_user_message(ConsoleMessage::info(format!(
-                        "Saved: {}",
-                        path.display()
-                    )));
-                    true
-                }
-                Err(e) => {
-                    self.state
-                        .push_user_message(ConsoleMessage::error(format!("Save failed: {}", e)));
-                    false
-                }
-            }
-        } else {
-            // No current file - do Save As
-            self.action_file_save_as()
-        }
+        crate::common::file_workflow::save_schematic(&mut self.state)
     }
 
     pub(super) fn action_file_save_as(&mut self) -> bool {
-        use crate::io::{save_schematic, show_save_dialog, SchematicIoError};
-
-        // Get default filename from current file or use "untitled"
-        let default_name = self
-            .state
-            .schematic
-            .current_file
-            .as_ref()
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().to_string());
-
-        match show_save_dialog(default_name.as_deref()) {
-            Ok(path) => match save_schematic(&self.state.schematic, &path) {
-                Ok(()) => {
-                    self.state.schematic.current_file = Some(path.clone());
-                    self.state.schematic.is_dirty = false;
-                    self.state.push_user_message(ConsoleMessage::info(format!(
-                        "Saved: {}",
-                        path.display()
-                    )));
-                    true
-                }
-                Err(e) => {
-                    self.state
-                        .push_user_message(ConsoleMessage::error(format!("Save failed: {}", e)));
-                    false
-                }
-            },
-            Err(SchematicIoError::Cancelled) => {
-                // User cancelled - no message needed
-                false
-            }
-            Err(e) => {
-                self.state
-                    .push_user_message(ConsoleMessage::error(format!("Save As failed: {}", e)));
-                false
-            }
-        }
+        crate::common::file_workflow::save_schematic_as(&mut self.state)
     }
 
     pub(super) fn action_edit_undo(&mut self) {

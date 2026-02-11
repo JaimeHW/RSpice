@@ -18,6 +18,7 @@
 
 pub mod app;
 pub mod examples;
+pub(crate) mod file_workflow;
 pub mod menu_bar;
 pub mod simulation_analysis_tabs;
 pub mod status_bar;
