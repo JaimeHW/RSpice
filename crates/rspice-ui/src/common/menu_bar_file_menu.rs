@@ -459,4 +459,67 @@ mod tests {
         assert_eq!(io.save_calls.get(), 0);
         assert!(state.schematic.is_dirty);
     }
+
+    #[test]
+    fn test_dispatch_file_menu_action_open_preferences_sets_dialog_visible() {
+        let io = MockFileMenuWorkflowIo::default();
+        let mut state = AppState::default();
+        state.dialogs.preferences = false;
+
+        dispatch_file_menu_action(&mut state, FileMenuAction::OpenPreferences, &io);
+
+        assert!(state.dialogs.preferences);
+    }
+
+    #[test]
+    fn test_dispatch_file_menu_action_import_veriloga_opens_dialog() {
+        let io = MockFileMenuWorkflowIo::default();
+        let mut state = AppState::default();
+        state.dialogs.veriloga_dialog.close();
+
+        dispatch_file_menu_action(&mut state, FileMenuAction::ImportVerilogA, &io);
+
+        assert!(state.dialogs.veriloga_dialog.open);
+    }
+
+    #[test]
+    fn test_dispatch_file_menu_action_export_pdf_sets_dialog_visible() {
+        let io = MockFileMenuWorkflowIo::default();
+        let mut state = AppState::default();
+        state.dialogs.pdf_export_dialog = false;
+
+        dispatch_file_menu_action(&mut state, FileMenuAction::ExportPdf, &io);
+
+        assert!(state.dialogs.pdf_export_dialog);
+    }
+
+    #[test]
+    fn test_dispatch_file_menu_action_exit_clean_requests_exit_immediately() {
+        let io = MockFileMenuWorkflowIo::default();
+        let mut state = AppState::default();
+        state.schematic.is_dirty = false;
+        state.exit_requested = false;
+
+        dispatch_file_menu_action(&mut state, FileMenuAction::Exit, &io);
+
+        assert!(state.exit_requested);
+        assert!(!state.dialogs.confirmation_dialog.visible);
+    }
+
+    #[test]
+    fn test_dispatch_file_menu_action_exit_dirty_defers_with_confirmation() {
+        let io = MockFileMenuWorkflowIo::default();
+        let mut state = AppState::default();
+        state.schematic.is_dirty = true;
+        state.exit_requested = false;
+
+        dispatch_file_menu_action(&mut state, FileMenuAction::Exit, &io);
+
+        assert!(!state.exit_requested);
+        assert!(state.dialogs.confirmation_dialog.visible);
+        assert_eq!(
+            state.dialogs.confirmation_dialog.pending_action,
+            Some(ConfirmationAction::Exit)
+        );
+    }
 }
