@@ -7,6 +7,8 @@ use egui::{menu, Ui};
 
 use crate::common::app::AppState;
 
+#[path = "menu_bar_netlist_compat.rs"]
+mod menu_bar_netlist_compat;
 #[path = "menu_bar_veriloga_cache.rs"]
 mod menu_bar_veriloga_cache;
 
@@ -1023,78 +1025,11 @@ fn build_menu_netlist(state: &mut AppState, format: crate::io::NetlistFormat) ->
 
     let spice_netlist = generation.netlist;
     Some(match format {
-        crate::io::NetlistFormat::Spectre => spice_to_spectre_compatible_netlist(&spice_netlist),
+        crate::io::NetlistFormat::Spectre => {
+            menu_bar_netlist_compat::spice_to_spectre_compatible_netlist(&spice_netlist)
+        }
         _ => spice_netlist,
     })
-}
-
-fn spice_to_spectre_compatible_netlist(spice_netlist: &str) -> String {
-    let mut ahdl_paths: Vec<String> = Vec::new();
-    let mut retained_lines: Vec<&str> = Vec::new();
-
-    for line in spice_netlist.lines() {
-        if let Some(path) = parse_veriloga_include_path(line) {
-            if !ahdl_paths.iter().any(|existing| existing == &path) {
-                ahdl_paths.push(path);
-            }
-            continue;
-        }
-        retained_lines.push(line);
-    }
-
-    if ahdl_paths.is_empty() {
-        return retained_lines.join("\n");
-    }
-
-    let mut output: Vec<String> = Vec::new();
-    let mut inserted_prefix = false;
-    for line in retained_lines {
-        let trimmed = line.trim();
-        if !inserted_prefix && !trimmed.is_empty() && !trimmed.starts_with('*') {
-            output.push("simulator lang=spectre".to_string());
-            for path in &ahdl_paths {
-                output.push(format!("ahdl_include {}", quote_netlist_path(path)));
-            }
-            output.push("simulator lang=spice".to_string());
-            inserted_prefix = true;
-        }
-        output.push(line.to_string());
-    }
-
-    if !inserted_prefix {
-        output.push("simulator lang=spectre".to_string());
-        for path in &ahdl_paths {
-            output.push(format!("ahdl_include {}", quote_netlist_path(path)));
-        }
-        output.push("simulator lang=spice".to_string());
-    }
-
-    output.join("\n")
-}
-
-fn parse_veriloga_include_path(line: &str) -> Option<String> {
-    let trimmed = line.trim_start();
-    let prefix = trimmed.get(..9)?;
-    if !prefix.eq_ignore_ascii_case(".veriloga") {
-        return None;
-    }
-
-    let rest = trimmed.get(9..)?.trim_start();
-    if rest.is_empty() {
-        return None;
-    }
-
-    if let Some(quoted) = rest.strip_prefix('"') {
-        let end = quoted.find('"')?;
-        return Some(quoted[..end].to_string());
-    }
-
-    rest.split_whitespace().next().map(ToString::to_string)
-}
-
-fn quote_netlist_path(path: &str) -> String {
-    let escaped = path.replace('"', "\\\"");
-    format!("\"{}\"", escaped)
 }
 
 // =============================================================================
@@ -1147,40 +1082,6 @@ mod tests {
         let mut path = std::path::PathBuf::from("results.txt");
         ensure_file_extension(&mut path, "csv");
         assert_eq!(path, std::path::PathBuf::from("results.csv"));
-    }
-
-    #[test]
-    fn test_parse_veriloga_include_path_handles_quoted_and_unquoted_paths() {
-        let quoted = r#".VERILOGA "C:/models/opamp.va" opamp"#;
-        let bare = ".veriloga C:/models/opamp.va";
-        let unrelated = ".include \"models.lib\"";
-
-        assert_eq!(
-            parse_veriloga_include_path(quoted),
-            Some("C:/models/opamp.va".to_string())
-        );
-        assert_eq!(
-            parse_veriloga_include_path(bare),
-            Some("C:/models/opamp.va".to_string())
-        );
-        assert_eq!(parse_veriloga_include_path(unrelated), None);
-    }
-
-    #[test]
-    fn test_spice_to_spectre_compatible_netlist_converts_veriloga_directives() {
-        let spice = r#"
-* Header
-.VERILOGA "C:/models/opamp.va" opamp
-R1 in out 1k
-.end
-"#;
-
-        let spectre = spice_to_spectre_compatible_netlist(spice);
-        assert!(spectre.contains("simulator lang=spectre"));
-        assert!(spectre.contains("ahdl_include \"C:/models/opamp.va\""));
-        assert!(spectre.contains("simulator lang=spice"));
-        assert!(spectre.contains("R1 in out 1k"));
-        assert!(!spectre.contains(".VERILOGA"));
     }
 
     #[test]
