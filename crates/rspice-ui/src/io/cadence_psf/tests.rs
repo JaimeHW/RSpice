@@ -16,6 +16,7 @@
         build_windowed_variable_length_array_psf,
     };
     use super::*;
+    use std::collections::HashMap;
 
     fn patch_header_int(bytes: &mut [u8], key: &str, value: u32) {
         let toc = parse_toc(bytes).expect("fixture must contain valid TOC");
@@ -563,4 +564,31 @@
                 || err.to_string().contains("truncated")
                 || err.to_string().contains("invalid")
         );
+    }
+
+    #[test]
+    fn test_header_usize_accepts_integral_real_values() {
+        let mut header = HashMap::new();
+        header.insert("PSF sweep points".to_string(), CadencePsfValue::Real(8.0));
+        assert_eq!(header_usize(&header, "PSF sweep points").unwrap(), 8);
+    }
+
+    #[test]
+    fn test_header_usize_rejects_non_finite_real_values() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut header = HashMap::new();
+            header.insert("PSF sweep points".to_string(), CadencePsfValue::Real(value));
+            let err = header_usize(&header, "PSF sweep points")
+                .expect_err("non-finite real header values must fail");
+            assert!(err.to_string().contains("must be finite"));
+        }
+    }
+
+    #[test]
+    fn test_header_usize_rejects_fractional_real_values() {
+        let mut header = HashMap::new();
+        header.insert("PSF sweep points".to_string(), CadencePsfValue::Real(2.5));
+        let err =
+            header_usize(&header, "PSF sweep points").expect_err("fractional counts must fail");
+        assert!(err.to_string().contains("integer count"));
     }

@@ -731,8 +731,39 @@ fn header_usize(
     key: &str,
 ) -> Result<usize, CadencePsfError> {
     match header.get(key) {
-        Some(CadencePsfValue::Int(v)) if *v >= 0 => Ok(*v as usize),
-        Some(CadencePsfValue::Real(v)) if *v >= 0.0 => Ok(*v as usize),
+        Some(CadencePsfValue::Int(v)) => usize::try_from(*v).map_err(|_| {
+            CadencePsfError::new(format!(
+                "header value '{}' must be a non-negative integer count",
+                key
+            ))
+        }),
+        Some(CadencePsfValue::Real(v)) => {
+            if !v.is_finite() {
+                return Err(CadencePsfError::new(format!(
+                    "header value '{}' must be finite",
+                    key
+                )));
+            }
+            if *v < 0.0 {
+                return Err(CadencePsfError::new(format!(
+                    "header value '{}' must be a non-negative integer count",
+                    key
+                )));
+            }
+            if v.fract() != 0.0 {
+                return Err(CadencePsfError::new(format!(
+                    "header value '{}' must be an integer count",
+                    key
+                )));
+            }
+            if *v > usize::MAX as f64 {
+                return Err(CadencePsfError::new(format!(
+                    "header value '{}' exceeds supported range",
+                    key
+                )));
+            }
+            Ok(*v as usize)
+        }
         Some(_) => Err(CadencePsfError::new(format!(
             "header value '{}' has non-numeric type",
             key
@@ -1144,7 +1175,6 @@ fn push_scalar_slice(
         ))),
     }
 }
-
 
 #[cfg(test)]
 #[path = "cadence_psf/test_helpers.rs"]
