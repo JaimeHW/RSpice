@@ -2,7 +2,7 @@ use super::*;
 
 impl JitCompiler {
     /// Compile a bytecode program to Cranelift IR, returning the result value
-    fn compile_expression(
+    pub(super) fn compile_expression(
         &self,
         builder: &mut FunctionBuilder,
         program: &BytecodeProgram,
@@ -651,5 +651,4 @@ impl JitCompiler {
         let call = builder.ins().call(func_ref, &[arg1, arg2]);
         Ok(builder.inst_results(call)[0])
     }
-}
 }

@@ -2,7 +2,7 @@ use super::*;
 
 impl JitCompiler {
     /// Import standard math functions
-    fn import_math_functions(
+    pub(super) fn import_math_functions(
         &self,
         module: &mut JITModule,
     ) -> JitResult<HashMap<&'static str, FuncId>> {
@@ -126,5 +126,4 @@ impl JitCompiler {
 
         Ok(funcs)
     }
-
 }

@@ -2,7 +2,7 @@ use super::*;
 
 impl JitCompiler {
     /// Compile all assignments into a single function
-    fn compile_assignments(
+    pub(super) fn compile_assignments(
         &self,
         module: &mut JITModule,
         ctx: &mut cranelift::prelude::codegen::Context,
@@ -64,7 +64,7 @@ impl JitCompiler {
     }
 
     /// Compile a single stamp program
-    fn compile_stamp(
+    pub(super) fn compile_stamp(
         &self,
         module: &mut JITModule,
         ctx: &mut cranelift::prelude::codegen::Context,
@@ -122,5 +122,4 @@ impl JitCompiler {
         ctx.clear();
         Ok(func_id)
     }
-
 }
