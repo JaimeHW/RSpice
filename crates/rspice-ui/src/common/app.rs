@@ -88,6 +88,9 @@ mod app_simulation_dialogs;
 #[path = "app_library_dialogs.rs"]
 mod app_library_dialogs;
 
+#[path = "app_help_dialogs.rs"]
+mod app_help_dialogs;
+
 /// Main application state container
 #[derive(Clone)]
 pub struct AppState {
@@ -1414,85 +1417,9 @@ impl eframe::App for RSpiceApp {
         // Simulation Options Dialog
         self.render_simulation_options_dialog(ctx);
 
-        // About Dialog
-        if self.state.dialogs.about {
-            egui::Window::new("About RSpice")
-                .collapsible(false)
-                .resizable(false)
-                .default_width(300.0)
-                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                .show(ctx, |ui| {
-                    ui.heading("RSpice");
-                    ui.label("Commercial-grade SPICE simulator");
-                    ui.add_space(10.0);
-                    ui.label("Version 0.1.0");
-                    ui.add_space(20.0);
-                    if ui.button("Close").clicked() {
-                        self.state.dialogs.about = false;
-                    }
-                });
-        }
-
-        // Waveform Calculator Dialog
-        if self.state.dialogs.waveform_calculator_dialog {
-            egui::Window::new("Calculator")
-                .open(&mut self.state.dialogs.waveform_calculator_dialog)
-                .default_width(400.0)
-                .show(ctx, |ui| {
-                    self.state.calculator_panel.show(ui, &self.state.simulation);
-                });
-        }
-
-        // Keyboard Shortcuts Help
-        if self.state.dialogs.shortcuts_help {
-            egui::Window::new("Keyboard Shortcuts")
-                .collapsible(false)
-                .resizable(true)
-                .default_width(400.0)
-                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                .show(ctx, |ui| {
-                    egui::Grid::new("shortcuts_grid")
-                        .num_columns(2)
-                        .spacing([40.0, 6.0])
-                        .show(ui, |ui| {
-                            ui.strong("File");
-                            ui.label("");
-                            ui.end_row();
-                            ui.label("Ctrl+N");
-                            ui.label("New schematic");
-                            ui.end_row();
-                            ui.label("Ctrl+O");
-                            ui.label("Open file");
-                            ui.end_row();
-                            ui.label("Ctrl+S");
-                            ui.label("Save");
-                            ui.end_row();
-
-                            ui.strong("Edit");
-                            ui.label("");
-                            ui.end_row();
-                            ui.label("Ctrl+Z");
-                            ui.label("Undo");
-                            ui.end_row();
-                            ui.label("Ctrl+Y");
-                            ui.label("Redo");
-                            ui.end_row();
-                            ui.label("Ctrl+C");
-                            ui.label("Copy");
-                            ui.end_row();
-                            ui.label("Ctrl+V");
-                            ui.label("Paste");
-                            ui.end_row();
-                            ui.label("Delete");
-                            ui.label("Delete selection");
-                            ui.end_row();
-                        });
-                    ui.add_space(10.0);
-                    if ui.button("Close").clicked() {
-                        self.state.dialogs.shortcuts_help = false;
-                    }
-                });
-        }
+        self.render_about_dialog(ctx);
+        self.render_waveform_calculator_dialog(ctx);
+        self.render_shortcuts_help_dialog(ctx);
 
         // Model Browser Dialog (standalone access from menu)
         // Reuses the existing model browser from the property editor
