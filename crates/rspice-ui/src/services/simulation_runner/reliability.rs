@@ -7,6 +7,28 @@ use rspice_core::netlist::{Element, ElementKind};
 use rspice_core::solver::SimulationResult as CoreSimulationResult;
 use rspice_core::Value;
 use std::collections::HashMap;
+use std::fmt;
+
+#[derive(Debug)]
+enum ReliabilityRunError {
+    InvalidConfig(&'static str),
+    Parse(String),
+    DcOperatingPoint(String),
+    NoStressedDevices,
+}
+
+impl fmt::Display for ReliabilityRunError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidConfig(message) => f.write_str(message),
+            Self::Parse(err) => write!(f, "Parse error: {err}"),
+            Self::DcOperatingPoint(err) => write!(f, "DC operating point error: {err}"),
+            Self::NoStressedDevices => f.write_str(
+                "Reliability analysis found no stressed semiconductor devices in the circuit",
+            ),
+        }
+    }
+}
 
 /// Explicit configuration for reliability analysis.
 #[derive(Debug, Clone)]
@@ -36,22 +58,30 @@ impl Default for ReliabilityRunConfig {
 }
 
 impl ReliabilityRunConfig {
-    pub(super) fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), ReliabilityRunError> {
         if self.target_years.is_empty() {
-            return Err("Reliability target years must not be empty".to_string());
+            return Err(ReliabilityRunError::InvalidConfig(
+                "Reliability target years must not be empty",
+            ));
         }
         if self
             .target_years
             .iter()
             .any(|years| !years.is_finite() || *years <= 0.0)
         {
-            return Err("Reliability target years must be finite and > 0".to_string());
+            return Err(ReliabilityRunError::InvalidConfig(
+                "Reliability target years must be finite and > 0",
+            ));
         }
         if !self.enable_hci && !self.enable_nbti && !self.enable_em {
-            return Err("Reliability requires at least one enabled mechanism".to_string());
+            return Err(ReliabilityRunError::InvalidConfig(
+                "Reliability requires at least one enabled mechanism",
+            ));
         }
         if !self.min_stress_voltage.is_finite() || self.min_stress_voltage < 0.0 {
-            return Err("Reliability min stress voltage must be finite and >= 0".to_string());
+            return Err(ReliabilityRunError::InvalidConfig(
+                "Reliability min stress voltage must be finite and >= 0",
+            ));
         }
         Ok(())
     }
@@ -76,6 +106,14 @@ pub fn run_reliability_analysis_with_config(
     netlist_text: &str,
     config: &ReliabilityRunConfig,
 ) -> Result<ReliabilityData, String> {
+    run_reliability_analysis_with_config_internal(netlist_text, config)
+        .map_err(|err| err.to_string())
+}
+
+fn run_reliability_analysis_with_config_internal(
+    netlist_text: &str,
+    config: &ReliabilityRunConfig,
+) -> Result<ReliabilityData, ReliabilityRunError> {
     config.validate()?;
 
     let mut years = config.target_years.clone();
@@ -83,13 +121,13 @@ pub fn run_reliability_analysis_with_config(
     years.dedup_by(|a, b| (*a - *b).abs() <= 1e-12);
 
     let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
+        .map_err(|e| ReliabilityRunError::Parse(e.to_string()))?;
     let sim_config = build_engine_config(&netlist, None);
     let temperature_k = sim_config.temperature;
     let engine = Engine::new(sim_config);
     let dc_result = engine
         .run_dc_op(&netlist)
-        .map_err(|e| format!("DC operating point error: {}", e))?;
+        .map_err(|e| ReliabilityRunError::DcOperatingPoint(e.to_string()))?;
 
     let node_voltages = build_node_voltage_lookup(&dc_result);
     let stress_data = extract_reliability_stress_data(
@@ -99,10 +137,7 @@ pub fn run_reliability_analysis_with_config(
         config.min_stress_voltage,
     );
     if stress_data.is_empty() {
-        return Err(
-            "Reliability analysis found no stressed semiconductor devices in the circuit"
-                .to_string(),
-        );
+        return Err(ReliabilityRunError::NoStressedDevices);
     }
 
     let reliability_engine = ReliabilityEngine::new();
@@ -265,4 +300,37 @@ pub(super) fn apply_reliability_mechanism_scaling_for_tests(
     config: &ReliabilityRunConfig,
 ) {
     apply_reliability_mechanism_scaling(results, config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_reliability_config_reports_typed_errors() {
+        let cfg = ReliabilityRunConfig {
+            enable_hci: false,
+            enable_nbti: false,
+            enable_em: false,
+            ..ReliabilityRunConfig::default()
+        };
+        assert!(matches!(
+            cfg.validate(),
+            Err(ReliabilityRunError::InvalidConfig(
+                "Reliability requires at least one enabled mechanism"
+            ))
+        ));
+    }
+
+    #[test]
+    fn test_internal_run_surfaces_parse_error_variant() {
+        let cfg = ReliabilityRunConfig::default();
+        let err = run_reliability_analysis_with_config_internal(
+            "Monte Carlo Invalid Runs\n.MC 0\n.END\n",
+            &cfg,
+        )
+        .expect_err("invalid MC command should fail netlist parse");
+        assert!(matches!(err, ReliabilityRunError::Parse(_)));
+        assert!(err.to_string().contains("Parse error"));
+    }
 }
