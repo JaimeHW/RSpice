@@ -434,6 +434,7 @@ mod tests {
             first_frame: false,
             symbol_library: None,
             simulation_controller: crate::simulation::SimulationController::new(),
+            file_workflow_io: Box::new(crate::common::file_workflow::NativeFileWorkflowIo),
         }
     }
 

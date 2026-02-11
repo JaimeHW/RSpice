@@ -1,8 +1,8 @@
 use egui::Context;
 
 use super::{
+    app_shortcuts::{collect_shortcut_commands, ShortcutCommand, ShortcutInputSnapshot},
     BottomPanelTab, ConfirmationAction, ConfirmationResponse, ConsoleMessage, RSpiceApp,
-    app_shortcuts::{ShortcutCommand, ShortcutInputSnapshot, collect_shortcut_commands},
 };
 
 impl RSpiceApp {
@@ -154,7 +154,8 @@ impl RSpiceApp {
 
     /// Internal: Actually open a schematic (after confirmation)
     pub(super) fn do_file_open(&mut self) {
-        crate::common::file_workflow::open_schematic_from_dialog(&mut self.state);
+        let (state, io) = (&mut self.state, self.file_workflow_io.as_ref());
+        crate::common::file_workflow::open_schematic_from_dialog_with_io(state, io);
     }
 
     /// Handle user response to save confirmation dialog
@@ -202,11 +203,13 @@ impl RSpiceApp {
     }
 
     pub(super) fn action_file_save(&mut self) -> bool {
-        crate::common::file_workflow::save_schematic(&mut self.state)
+        let (state, io) = (&mut self.state, self.file_workflow_io.as_ref());
+        crate::common::file_workflow::save_schematic_with_io(state, io)
     }
 
     pub(super) fn action_file_save_as(&mut self) -> bool {
-        crate::common::file_workflow::save_schematic_as(&mut self.state)
+        let (state, io) = (&mut self.state, self.file_workflow_io.as_ref());
+        crate::common::file_workflow::save_schematic_as_with_io(state, io)
     }
 
     pub(super) fn action_edit_undo(&mut self) {

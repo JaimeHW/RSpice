@@ -62,7 +62,7 @@ pub(crate) fn load_schematic_from_path(state: &mut AppState, path: &Path) -> boo
 pub(crate) fn load_schematic_from_path_with_io(
     state: &mut AppState,
     path: &Path,
-    io: &impl FileWorkflowIo,
+    io: &(impl FileWorkflowIo + ?Sized),
 ) -> bool {
     match io.load_schematic(path) {
         Ok(schematic) => {
@@ -83,7 +83,10 @@ pub(crate) fn open_schematic_from_dialog(state: &mut AppState) {
     open_schematic_from_dialog_with_io(state, &io);
 }
 
-pub(crate) fn open_schematic_from_dialog_with_io(state: &mut AppState, io: &impl FileWorkflowIo) {
+pub(crate) fn open_schematic_from_dialog_with_io(
+    state: &mut AppState,
+    io: &(impl FileWorkflowIo + ?Sized),
+) {
     match io.show_open_dialog() {
         Ok(path) => {
             let _ = load_schematic_from_path_with_io(state, &path, io);
@@ -113,7 +116,7 @@ pub(crate) fn save_schematic_to_path_with_io(
     state: &mut AppState,
     path: &Path,
     update_current_file: bool,
-    io: &impl FileWorkflowIo,
+    io: &(impl FileWorkflowIo + ?Sized),
 ) -> bool {
     match io.save_schematic(&state.schematic, path) {
         Ok(()) => {
@@ -139,7 +142,10 @@ pub(crate) fn save_schematic(state: &mut AppState) -> bool {
     save_schematic_with_io(state, &io)
 }
 
-pub(crate) fn save_schematic_with_io(state: &mut AppState, io: &impl FileWorkflowIo) -> bool {
+pub(crate) fn save_schematic_with_io(
+    state: &mut AppState,
+    io: &(impl FileWorkflowIo + ?Sized),
+) -> bool {
     if let Some(path) = state.schematic.current_file.clone() {
         save_schematic_to_path_with_io(state, &path, false, io)
     } else {
@@ -153,7 +159,10 @@ pub(crate) fn save_schematic_as(state: &mut AppState) -> bool {
     save_schematic_as_with_io(state, &io)
 }
 
-pub(crate) fn save_schematic_as_with_io(state: &mut AppState, io: &impl FileWorkflowIo) -> bool {
+pub(crate) fn save_schematic_as_with_io(
+    state: &mut AppState,
+    io: &(impl FileWorkflowIo + ?Sized),
+) -> bool {
     let default_name = state
         .schematic
         .current_file

@@ -31,8 +31,6 @@
 //! 2. Observable for efficient updates
 //! 3. Serializable for session recovery
 
-use std::sync::Arc;
-
 use egui::{Context, Frame, TopBottomPanel};
 
 use crate::state::{SchematicState, SimulationState};
@@ -240,6 +238,8 @@ pub struct RSpiceApp {
     pub symbol_library: Option<crate::schematic::symbols::SymbolLibrary>,
     /// Simulation controller for running analyses
     simulation_controller: crate::simulation::SimulationController,
+    /// File workflow IO backend (native in production, injectable in tests).
+    file_workflow_io: Box<dyn crate::common::file_workflow::FileWorkflowIo>,
 }
 
 impl RSpiceApp {
@@ -279,6 +279,7 @@ impl RSpiceApp {
             first_frame: true,
             symbol_library,
             simulation_controller: crate::simulation::SimulationController::new(),
+            file_workflow_io: Box::new(crate::common::file_workflow::NativeFileWorkflowIo),
         }
     }
 }
@@ -373,6 +374,14 @@ impl eframe::App for RSpiceApp {
 }
 
 impl RSpiceApp {
+    #[cfg(test)]
+    fn set_file_workflow_io_for_test(
+        &mut self,
+        io: Box<dyn crate::common::file_workflow::FileWorkflowIo>,
+    ) {
+        self.file_workflow_io = io;
+    }
+
     fn process_exit_request(&mut self, ctx: &Context) {
         if !self.state.exit_requested {
             return;
@@ -412,6 +421,123 @@ impl RSpiceApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::{Cell, RefCell};
+    use std::collections::VecDeque;
+    use std::path::{Path, PathBuf};
+    use std::rc::Rc;
+
+    #[derive(Default)]
+    struct MockAppFileWorkflowIo {
+        open_dialog_results: RefCell<VecDeque<Result<PathBuf, crate::io::SchematicIoError>>>,
+        save_dialog_results: RefCell<VecDeque<Result<PathBuf, crate::io::SchematicIoError>>>,
+        load_results:
+            RefCell<VecDeque<Result<crate::state::SchematicState, crate::io::SchematicIoError>>>,
+        save_results: RefCell<VecDeque<Result<(), crate::io::SchematicIoError>>>,
+        open_dialog_calls: Cell<usize>,
+        save_dialog_calls: Cell<usize>,
+        load_calls: Cell<usize>,
+        save_calls: Cell<usize>,
+        last_save_default_name: RefCell<Option<Option<String>>>,
+    }
+
+    impl MockAppFileWorkflowIo {
+        fn push_open_dialog_result(&self, result: Result<PathBuf, crate::io::SchematicIoError>) {
+            self.open_dialog_results.borrow_mut().push_back(result);
+        }
+
+        fn push_save_dialog_result(&self, result: Result<PathBuf, crate::io::SchematicIoError>) {
+            self.save_dialog_results.borrow_mut().push_back(result);
+        }
+
+        fn push_load_result(
+            &self,
+            result: Result<crate::state::SchematicState, crate::io::SchematicIoError>,
+        ) {
+            self.load_results.borrow_mut().push_back(result);
+        }
+
+        fn push_save_result(&self, result: Result<(), crate::io::SchematicIoError>) {
+            self.save_results.borrow_mut().push_back(result);
+        }
+
+        fn open_dialog_calls(&self) -> usize {
+            self.open_dialog_calls.get()
+        }
+
+        fn save_dialog_calls(&self) -> usize {
+            self.save_dialog_calls.get()
+        }
+
+        fn load_calls(&self) -> usize {
+            self.load_calls.get()
+        }
+
+        fn save_calls(&self) -> usize {
+            self.save_calls.get()
+        }
+
+        fn last_save_default_name(&self) -> Option<Option<String>> {
+            self.last_save_default_name.borrow().clone()
+        }
+    }
+
+    impl crate::common::file_workflow::FileWorkflowIo for Rc<MockAppFileWorkflowIo> {
+        fn show_open_dialog(&self) -> Result<PathBuf, crate::io::SchematicIoError> {
+            self.open_dialog_calls
+                .set(self.open_dialog_calls.get().saturating_add(1));
+            self.open_dialog_results
+                .borrow_mut()
+                .pop_front()
+                .expect("test must provide show_open_dialog result")
+        }
+
+        fn show_save_dialog(
+            &self,
+            default_name: Option<&str>,
+        ) -> Result<PathBuf, crate::io::SchematicIoError> {
+            self.save_dialog_calls
+                .set(self.save_dialog_calls.get().saturating_add(1));
+            *self.last_save_default_name.borrow_mut() =
+                Some(default_name.map(std::string::ToString::to_string));
+            self.save_dialog_results
+                .borrow_mut()
+                .pop_front()
+                .expect("test must provide show_save_dialog result")
+        }
+
+        fn load_schematic(
+            &self,
+            _path: &Path,
+        ) -> Result<crate::state::SchematicState, crate::io::SchematicIoError> {
+            self.load_calls.set(self.load_calls.get().saturating_add(1));
+            self.load_results
+                .borrow_mut()
+                .pop_front()
+                .expect("test must provide load_schematic result")
+        }
+
+        fn save_schematic(
+            &self,
+            _schematic: &crate::state::SchematicState,
+            _path: &Path,
+        ) -> Result<(), crate::io::SchematicIoError> {
+            self.save_calls.set(self.save_calls.get().saturating_add(1));
+            self.save_results
+                .borrow_mut()
+                .pop_front()
+                .expect("test must provide save_schematic result")
+        }
+    }
+
+    fn schematic_with_component(
+        kind: crate::state::ComponentType,
+        x: i32,
+        y: i32,
+    ) -> crate::state::SchematicState {
+        let mut schematic = crate::state::SchematicState::default();
+        schematic.add_component(kind, crate::state::Point::new(x, y));
+        schematic
+    }
 
     fn make_test_app() -> RSpiceApp {
         RSpiceApp {
@@ -419,6 +545,7 @@ mod tests {
             first_frame: false,
             symbol_library: None,
             simulation_controller: crate::simulation::SimulationController::new(),
+            file_workflow_io: Box::new(crate::common::file_workflow::NativeFileWorkflowIo),
         }
     }
 
@@ -891,6 +1018,162 @@ mod tests {
                 .iter()
                 .any(|msg| msg.message.contains("Save failed")),
             "failed save should emit an error message"
+        );
+    }
+
+    #[test]
+    fn test_confirmation_yes_file_open_with_save_as_cancelled_does_not_open() {
+        use crate::state::ComponentType;
+
+        let mut app = make_test_app();
+        app.state.schematic = schematic_with_component(ComponentType::Resistor, 10, 10);
+        app.state.schematic.is_dirty = true;
+        app.state.schematic.current_file = None;
+        app.state
+            .dialogs
+            .confirmation_dialog
+            .show(ConfirmationAction::FileOpen);
+
+        let io = Rc::new(MockAppFileWorkflowIo::default());
+        io.push_save_dialog_result(Err(crate::io::SchematicIoError::Cancelled));
+        app.set_file_workflow_io_for_test(Box::new(io.clone()));
+
+        app.handle_confirmation_response(ConfirmationResponse::Yes);
+
+        assert_eq!(io.save_dialog_calls(), 1);
+        assert_eq!(io.save_calls(), 0);
+        assert_eq!(io.open_dialog_calls(), 0);
+        assert_eq!(io.load_calls(), 0);
+        assert_eq!(app.state.schematic.components.len(), 1);
+        assert!(app.state.schematic.is_dirty);
+        assert!(!app.state.dialogs.confirmation_dialog.visible);
+        assert!(app
+            .state
+            .dialogs
+            .confirmation_dialog
+            .pending_action
+            .is_none());
+    }
+
+    #[test]
+    fn test_confirmation_yes_file_open_executes_after_save_as_success() {
+        use crate::state::ComponentType;
+
+        let mut app = make_test_app();
+        app.state.schematic = schematic_with_component(ComponentType::Resistor, 5, 5);
+        app.state.schematic.is_dirty = true;
+        app.state.schematic.current_file = None;
+        app.state
+            .dialogs
+            .confirmation_dialog
+            .show(ConfirmationAction::FileOpen);
+
+        let io = Rc::new(MockAppFileWorkflowIo::default());
+        io.push_save_dialog_result(Ok(PathBuf::from("saved-before-open.rsch")));
+        io.push_save_result(Ok(()));
+        io.push_open_dialog_result(Ok(PathBuf::from("opened-after-save.rsch")));
+        let mut loaded = schematic_with_component(ComponentType::Capacitor, 15, 15);
+        loaded.current_file = Some(PathBuf::from("opened-after-save.rsch"));
+        loaded.is_dirty = false;
+        io.push_load_result(Ok(loaded));
+        app.set_file_workflow_io_for_test(Box::new(io.clone()));
+
+        app.handle_confirmation_response(ConfirmationResponse::Yes);
+
+        assert_eq!(io.save_dialog_calls(), 1);
+        assert_eq!(io.save_calls(), 1);
+        assert_eq!(io.open_dialog_calls(), 1);
+        assert_eq!(io.load_calls(), 1);
+        assert_eq!(app.state.schematic.components.len(), 1);
+        assert_eq!(
+            app.state.schematic.components[0].kind,
+            ComponentType::Capacitor
+        );
+        assert_eq!(
+            app.state.schematic.current_file,
+            Some(PathBuf::from("opened-after-save.rsch"))
+        );
+        assert!(!app.state.schematic.is_dirty);
+        assert!(
+            app.state
+                .console_messages
+                .iter()
+                .any(|msg| msg.message.contains("Saved:")),
+            "save-before-open should emit save message"
+        );
+        assert!(
+            app.state
+                .console_messages
+                .iter()
+                .any(|msg| msg.message.contains("Opened:")),
+            "pending open should emit open message"
+        );
+    }
+
+    #[test]
+    fn test_action_file_open_uses_injected_file_workflow_backend() {
+        use crate::state::ComponentType;
+
+        let mut app = make_test_app();
+        app.state.schematic = schematic_with_component(ComponentType::Resistor, 1, 1);
+        app.state.schematic.is_dirty = false;
+
+        let io = Rc::new(MockAppFileWorkflowIo::default());
+        io.push_open_dialog_result(Ok(PathBuf::from("opened-by-action.rsch")));
+        let mut loaded = schematic_with_component(ComponentType::Inductor, 25, 25);
+        loaded.current_file = Some(PathBuf::from("opened-by-action.rsch"));
+        loaded.is_dirty = false;
+        io.push_load_result(Ok(loaded));
+        app.set_file_workflow_io_for_test(Box::new(io.clone()));
+
+        app.action_file_open();
+
+        assert_eq!(io.open_dialog_calls(), 1);
+        assert_eq!(io.load_calls(), 1);
+        assert_eq!(app.state.schematic.components.len(), 1);
+        assert_eq!(
+            app.state.schematic.components[0].kind,
+            ComponentType::Inductor
+        );
+    }
+
+    #[test]
+    fn test_action_file_save_uses_injected_file_workflow_backend() {
+        use crate::state::ComponentType;
+
+        let mut app = make_test_app();
+        app.state.schematic = schematic_with_component(ComponentType::Resistor, 3, 3);
+        app.state.schematic.current_file = Some(PathBuf::from("current-save-path.rsch"));
+        app.state.schematic.is_dirty = true;
+
+        let io = Rc::new(MockAppFileWorkflowIo::default());
+        io.push_save_result(Ok(()));
+        app.set_file_workflow_io_for_test(Box::new(io.clone()));
+
+        let saved = app.action_file_save();
+
+        assert!(saved);
+        assert_eq!(io.save_dialog_calls(), 0);
+        assert_eq!(io.save_calls(), 1);
+        assert!(!app.state.schematic.is_dirty);
+    }
+
+    #[test]
+    fn test_action_file_save_as_passes_current_filename_to_backend() {
+        let mut app = make_test_app();
+        app.state.schematic.current_file = Some(PathBuf::from("designs/my-cell.rsch"));
+
+        let io = Rc::new(MockAppFileWorkflowIo::default());
+        io.push_save_dialog_result(Err(crate::io::SchematicIoError::Cancelled));
+        app.set_file_workflow_io_for_test(Box::new(io.clone()));
+
+        let saved = app.action_file_save_as();
+
+        assert!(!saved);
+        assert_eq!(io.save_dialog_calls(), 1);
+        assert_eq!(
+            io.last_save_default_name(),
+            Some(Some("my-cell.rsch".to_string()))
         );
     }
 }
