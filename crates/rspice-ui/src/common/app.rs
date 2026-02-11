@@ -97,6 +97,9 @@ mod app_confirmation_dialog;
 #[path = "app_workspace_layout.rs"]
 mod app_workspace_layout;
 
+#[path = "app_veriloga_workflow.rs"]
+mod app_veriloga_workflow;
+
 /// Main application state container
 #[derive(Clone)]
 pub struct AppState {
@@ -377,150 +380,7 @@ impl eframe::App for RSpiceApp {
             }
         }
 
-        // Verilog-A Model Loading Dialog
-        let veriloga_result = crate::panels::render_veriloga_load_dialog(
-            ctx,
-            &mut self.state.dialogs.veriloga_dialog,
-        );
-        if veriloga_result == crate::panels::VerilogADialogResult::AddToLibrary {
-            if let Some(module) = self.state.dialogs.veriloga_dialog.compiled_module.clone() {
-                let compiled_artifact =
-                    self.state.dialogs.veriloga_dialog.compiled_artifact.clone();
-                let compiled_dependencies = self
-                    .state
-                    .dialogs
-                    .veriloga_dialog
-                    .compiled_dependencies
-                    .clone()
-                    .unwrap_or_default();
-                let source_path_text = module.source_path.to_string_lossy().to_string();
-                let serialized_ports =
-                    serde_json::to_string(&module.ports).unwrap_or_else(|_| module.ports.join(","));
-
-                // Create or get the global user Verilog-A library.
-                if self
-                    .state
-                    .library_manager
-                    .get_library(VERILOGA_LIBRARY_NAME)
-                    .is_none()
-                {
-                    let mut lib =
-                        crate::state::library_browser::Library::new(VERILOGA_LIBRARY_NAME);
-                    lib.read_only = false;
-                    self.state.library_manager.add_library(lib);
-                }
-
-                // Upsert cell/view metadata for robust placement + netlisting.
-                let mut add_ok = false;
-                if let Some(lib) = self
-                    .state
-                    .library_manager
-                    .get_library_mut(VERILOGA_LIBRARY_NAME)
-                {
-                    let mut cell = lib
-                        .get_cell(&module.name)
-                        .cloned()
-                        .unwrap_or_else(|| crate::state::library_browser::Cell::new(&module.name));
-                    cell.description = format!(
-                        "Verilog-A model with {} terminals: {}",
-                        module.ports.len(),
-                        module.ports.join(", ")
-                    );
-                    cell.category = "Verilog-A".to_string();
-                    cell.metadata
-                        .insert("veriloga.module".to_string(), module.name.clone());
-                    cell.metadata
-                        .insert("veriloga.source_path".to_string(), source_path_text.clone());
-                    cell.metadata
-                        .insert("veriloga.ports".to_string(), serialized_ports.clone());
-
-                    // Store parameter defaults in cell metadata for property/editor binding.
-                    for param in &module.parameters {
-                        cell.metadata
-                            .insert(format!("param_{}", param.name), param.default_value.clone());
-                    }
-
-                    let mut view = cell.get_view("veriloga").cloned().unwrap_or_else(|| {
-                        crate::state::library_browser::View::new(
-                            "veriloga",
-                            crate::state::library_browser::ViewType::VerilogA,
-                        )
-                    });
-                    view.view_type = crate::state::library_browser::ViewType::VerilogA;
-                    view.file_path = Some(module.source_path.clone());
-                    view.metadata
-                        .insert("veriloga.module".to_string(), module.name.clone());
-                    view.metadata
-                        .insert("veriloga.source_path".to_string(), source_path_text.clone());
-                    view.metadata
-                        .insert("veriloga.ports".to_string(), serialized_ports);
-                    cell.add_view(view);
-
-                    lib.add_cell(cell);
-                    add_ok = true;
-                }
-
-                if !add_ok {
-                    self.state.push_user_message(ConsoleMessage::error(format!(
-                        "Failed to add Verilog-A model '{}' to library '{}'",
-                        module.name, VERILOGA_LIBRARY_NAME
-                    )));
-                } else {
-                    log::info!(
-                        "Registered Verilog-A model '{}' with {} terminals and {} parameters",
-                        module.name,
-                        module.ports.len(),
-                        module.parameters.len()
-                    );
-                    self.state.push_user_message(ConsoleMessage::info(format!(
-                        "Verilog-A model '{}' added to library with terminals: {}",
-                        module.name,
-                        module.ports.join(", ")
-                    )));
-                }
-
-                if let Some(compiled_model) = compiled_artifact {
-                    match rspice_core::register_precompiled_veriloga_model_with_dependencies(
-                        &module.source_path,
-                        &compiled_dependencies,
-                        compiled_model,
-                    ) {
-                        Ok(()) => {
-                            self.state.push_user_message(ConsoleMessage::info(format!(
-                                    "Registered Verilog-A compile cache for '{}' ({} dependency file(s))",
-                                    module.name,
-                                    compiled_dependencies.len()
-                                )));
-                        }
-                        Err(err) => {
-                            self.state
-                                .push_user_message(ConsoleMessage::warning(format!(
-                                    "Verilog-A compile cache registration failed for '{}': {}",
-                                    module.name, err
-                                )));
-                        }
-                    }
-                } else {
-                    self.state.push_user_message(ConsoleMessage::warning(format!(
-                        "No compiled Verilog-A artifact available for '{}'; simulation will recompile if needed",
-                        module.name
-                    )));
-                }
-
-                if let Err(err) = save_global_veriloga_library(&self.state.library_manager) {
-                    log::warn!("Failed to persist global Verilog-A library: {}", err);
-                    self.state
-                        .push_user_message(ConsoleMessage::warning(format!(
-                            "Failed to persist Verilog-A library: {}",
-                            err
-                        )));
-                }
-            } else {
-                self.state.push_user_message(ConsoleMessage::warning(
-                    "No compiled Verilog-A module available to add".to_string(),
-                ));
-            }
-        }
+        self.process_veriloga_load_dialog(ctx);
 
         // Property Dialog (commercial-grade tabbed property editor)
         crate::panels::render_property_dialog(ctx, &mut self.state);
