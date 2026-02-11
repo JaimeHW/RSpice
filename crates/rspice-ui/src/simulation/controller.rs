@@ -3415,15 +3415,20 @@ impl SimulationController {
         let mut rising_times: Vec<f64> = edges
             .iter()
             .filter(|edge| edge.rising)
+            .filter(|edge| edge.time.is_finite())
             .map(|edge| edge.time)
             .collect();
-        rising_times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        rising_times.sort_by(|a, b| a.total_cmp(b));
 
         let edge_times: Vec<f64> = if rising_times.len() >= 3 {
             rising_times
         } else {
-            let mut all: Vec<f64> = edges.iter().map(|edge| edge.time).collect();
-            all.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let mut all: Vec<f64> = edges
+                .iter()
+                .map(|edge| edge.time)
+                .filter(|time| time.is_finite())
+                .collect();
+            all.sort_by(|a, b| a.total_cmp(b));
             all
         };
         if edge_times.len() < 3 {
@@ -3440,7 +3445,7 @@ impl SimulationController {
         if intervals.is_empty() {
             return None;
         }
-        intervals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        intervals.sort_by(|a, b| a.total_cmp(b));
         let median = intervals[intervals.len() / 2];
         (median.is_finite() && median > 0.0).then_some(median)
     }

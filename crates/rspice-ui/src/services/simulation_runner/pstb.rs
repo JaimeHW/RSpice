@@ -1,6 +1,6 @@
 use super::build_engine_config;
-use rspice_core::Value;
 use rspice_core::engine::Engine;
+use rspice_core::Value;
 /// Explicit configuration for PSTB execution.
 #[derive(Debug, Clone)]
 pub struct PstbRunConfig {
@@ -238,7 +238,11 @@ fn sanitize_nonnegative(value: Value) -> Value {
 }
 
 fn sanitize_finite(value: Value) -> Value {
-    if value.is_finite() { value } else { 0.0 }
+    if value.is_finite() {
+        value
+    } else {
+        0.0
+    }
 }
 
 fn normalized_probe_participation(
@@ -268,8 +272,8 @@ pub fn run_pstb_analysis_with_config(
     netlist_text: &str,
     config: &PstbRunConfig,
 ) -> Result<PstbData, String> {
-    use rspice_core::analysis::PssConfig;
     use rspice_core::analysis::advanced::pstb::{PstbAnalyzer, PstbConfig};
+    use rspice_core::analysis::PssConfig;
 
     config.validate()?;
 
@@ -365,7 +369,7 @@ pub fn run_pstb_analysis_with_config(
         .iter()
         .copied()
         .enumerate()
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .max_by(|(_, a), (_, b)| a.total_cmp(b))
         .map(|(idx, value)| (idx + 1, value))
         .unwrap_or((0, 0.0));
 

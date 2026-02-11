@@ -3,14 +3,14 @@ use super::pnoise_sideband::{
     fold_sideband_noise_results, resolve_pnoise_sideband_stride,
 };
 use super::{
-    PssData, build_engine_config, generate_freq_points, infer_primary_output_node,
+    build_engine_config, generate_freq_points, infer_primary_output_node,
     infer_primary_source_name, is_ground_like, netlist_has_independent_source_named,
-    normalize_voltage_signal_name, run_pss_analysis,
+    normalize_voltage_signal_name, run_pss_analysis, PssData,
 };
 use crate::output_spec::resolve_node_or_ground_index;
-use rspice_core::Value;
 use rspice_core::analysis::noise::NoiseResult;
 use rspice_core::engine::Engine;
+use rspice_core::Value;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -484,8 +484,13 @@ fn estimate_carrier_rms_for_node(pss_data: &PssData, output_node: &str) -> Optio
     {
         if let Some((_, magnitude, _)) = harmonics
             .iter()
-            .filter(|(frequency, magnitude, _)| *frequency > 0.0 && *magnitude > 0.0)
-            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .filter(|(frequency, magnitude, _)| {
+                frequency.is_finite()
+                    && *frequency > 0.0
+                    && magnitude.is_finite()
+                    && *magnitude > 0.0
+            })
+            .max_by(|a, b| a.1.total_cmp(&b.1))
         {
             return Some(*magnitude / 2.0_f64.sqrt());
         }

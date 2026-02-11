@@ -1,12 +1,12 @@
 //! Parametric and corner sweep runners.
 
 use super::{build_engine_config, generate_freq_points};
-use rspice_core::Value;
 use rspice_core::engine::{Engine, TransientResult};
 use rspice_core::netlist::{
     AnalysisCommand, ElementKind, SourceSpec, StepCommand, StepSweep, StepTarget,
 };
 use rspice_core::solver::SimulationResult as CoreSimulationResult;
+use rspice_core::Value;
 
 /// Parametric sweep data.
 #[derive(Debug, Clone)]
@@ -986,13 +986,9 @@ fn infer_nominal_supply_voltage(netlist: &rspice_core::Netlist) -> Option<Value>
     }
 
     if !ground_referenced.is_empty() {
-        return ground_referenced
-            .into_iter()
-            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        return ground_referenced.into_iter().max_by(|a, b| a.total_cmp(b));
     }
-    all_sources
-        .into_iter()
-        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+    all_sources.into_iter().max_by(|a, b| a.total_cmp(b))
 }
 
 fn is_ground_node(node: &str) -> bool {

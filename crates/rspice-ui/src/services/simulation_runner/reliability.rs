@@ -2,10 +2,10 @@ use super::build_engine_config;
 use crate::simulation::reliability_engine::{
     ParamShift, ReliabilityEngine, ReliabilityResult, StressMetrics,
 };
-use rspice_core::Value;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{Element, ElementKind};
 use rspice_core::solver::SimulationResult as CoreSimulationResult;
+use rspice_core::Value;
 use std::collections::HashMap;
 
 /// Explicit configuration for reliability analysis.
@@ -79,7 +79,7 @@ pub fn run_reliability_analysis_with_config(
     config.validate()?;
 
     let mut years = config.target_years.clone();
-    years.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    years.sort_by(|a, b| a.total_cmp(b));
     years.dedup_by(|a, b| (*a - *b).abs() <= 1e-12);
 
     let netlist = rspice_core::netlist::parse_netlist(netlist_text)

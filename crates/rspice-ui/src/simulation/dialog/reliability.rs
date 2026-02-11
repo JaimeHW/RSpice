@@ -124,7 +124,7 @@ impl ReliabilityDialogState {
     /// Convert UI state into typed config.
     pub fn to_config(&self) -> Result<ReliabilityConfig, String> {
         let mut years = parse_years_list(&self.years_csv)?;
-        years.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        years.sort_by(|a, b| a.total_cmp(b));
         years.dedup_by(|a, b| (*a - *b).abs() < 1e-12);
 
         let min_stress = parse_si_value(&self.min_stress_voltage)
