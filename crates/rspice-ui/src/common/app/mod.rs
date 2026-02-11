@@ -38,76 +38,57 @@ use crate::waveform::WaveformViewerState;
 
 use super::theme::RSpiceTheme;
 
-#[path = "app_shell_state.rs"]
 mod app_shell_state;
 pub use app_shell_state::{
     BottomPanelTab, ConfirmationAction, ConfirmationDialogState, ConfirmationResponse, PanelSizes,
     PanelVisibility,
 };
 
-#[path = "app_dialog_state.rs"]
 mod app_dialog_state;
 pub use app_dialog_state::DialogState;
 
-#[path = "app_serialization.rs"]
 mod app_serialization;
 #[cfg(test)]
 use app_serialization::{PanelSizesSer, PanelVisibilitySer};
 
-#[path = "app_console.rs"]
 mod app_console;
 pub use app_console::{ConsoleLevel, ConsoleMessage};
 
-#[path = "app_veriloga_library.rs"]
 mod app_veriloga_library;
 use app_veriloga_library::{
     restore_global_veriloga_library, save_global_veriloga_library, VERILOGA_LIBRARY_NAME,
 };
 
-#[path = "app_property_edit.rs"]
 mod app_property_edit;
 use app_property_edit::apply_component_property_edits;
 
-#[path = "app_modal_workflows.rs"]
 mod app_modal_workflows;
 
-#[path = "app_shortcuts.rs"]
 mod app_shortcuts;
 
-#[path = "app_actions.rs"]
 mod app_actions;
 
-#[path = "app_file_actions.rs"]
 mod app_file_actions;
 
-#[path = "app_icon_rail.rs"]
 mod app_icon_rail;
 
-#[path = "app_viewer_panels.rs"]
+mod app_simulation_analysis_options;
 mod app_viewer_panels;
 
-#[path = "app_simulation_dialogs.rs"]
 mod app_simulation_dialogs;
 
-#[path = "app_library_dialogs.rs"]
 mod app_library_dialogs;
 
-#[path = "app_help_dialogs.rs"]
 mod app_help_dialogs;
 
-#[path = "app_confirmation_dialog.rs"]
 mod app_confirmation_dialog;
 
-#[path = "app_workspace_layout.rs"]
 mod app_workspace_layout;
 
-#[path = "app_veriloga_workflow.rs"]
 mod app_veriloga_workflow;
 
-#[path = "app_pdk_workflow.rs"]
 mod app_pdk_workflow;
 
-#[path = "app_state_init.rs"]
 mod app_state_init;
 
 /// Main application state container

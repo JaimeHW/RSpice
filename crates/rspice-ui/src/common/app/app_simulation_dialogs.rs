@@ -1,11 +1,9 @@
 use super::{ConsoleMessage, RSpiceApp};
+use super::app_simulation_analysis_options;
 use egui::{Color32, Context};
 use std::collections::HashSet;
 
 use crate::common::simulation_analysis_tabs::SIMULATION_ANALYSIS_CATEGORIES;
-
-#[path = "app_simulation_analysis_options.rs"]
-mod app_simulation_analysis_options;
 
 fn set_default_if_blank(field: &mut String, default: &str) {
     if field.trim().is_empty() {
