@@ -395,6 +395,8 @@ impl VerilogADevice {
 
         let native = self.native_model.as_ref().unwrap();
 
+        self.context.clear_currents();
+
         // Build evaluation context
         let ctx = EvalContext {
             voltages: self.context.voltages.as_ptr(),
@@ -431,6 +433,12 @@ impl VerilogADevice {
         for i in 0..native.num_stamps {
             let value = native.evaluate_stamp(i, &ctx, &self.native_vars);
             stamp_values.push(value);
+            self.context.currents.push(value);
+            if let Some(program) = self.model.stamp_programs.get(i) {
+                if let Some((pos, neg)) = Self::infer_current_terminal_pair(program) {
+                    self.context.set_branch_current(pos, neg, value);
+                }
+            }
         }
 
         stamp_values

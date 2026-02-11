@@ -11,6 +11,37 @@ pub mod cranelift_jit;
 pub use cranelift_jit::{EvalContext, JitCompiler, JitError, JitResult, NativeModel};
 
 use crate::codegen::CompiledModel;
+#[cfg(feature = "native")]
+use crate::codegen::Instruction;
+
+#[cfg(feature = "native")]
+fn first_unsupported_instruction(model: &CompiledModel) -> Option<&'static str> {
+    for program in &model.assignment_programs {
+        for instruction in &program.program.instructions {
+            if matches!(instruction, Instruction::PushCurrent(_, _)) {
+                return Some("PushCurrent");
+            }
+        }
+    }
+
+    for stamp in &model.stamp_programs {
+        for instruction in &stamp.value_program.instructions {
+            if matches!(instruction, Instruction::PushCurrent(_, _)) {
+                return Some("PushCurrent");
+            }
+        }
+
+        for jacobian in &stamp.jacobian_programs {
+            for instruction in &jacobian.program.instructions {
+                if matches!(instruction, Instruction::PushCurrent(_, _)) {
+                    return Some("PushCurrent");
+                }
+            }
+        }
+    }
+
+    None
+}
 
 /// Try to compile a model to native code
 ///
@@ -18,6 +49,15 @@ use crate::codegen::CompiledModel;
 /// The caller should fall back to bytecode interpretation if this returns `None`.
 #[cfg(feature = "native")]
 pub fn try_compile_native(model: &CompiledModel) -> Option<NativeModel> {
+    if let Some(opcode) = first_unsupported_instruction(model) {
+        log::debug!(
+            "[JIT] Skipping native compilation for '{}': unsupported instruction {}",
+            model.name,
+            opcode
+        );
+        return None;
+    }
+
     log::debug!("[JIT] Compiling model '{}' with Cranelift...", model.name);
 
     match JitCompiler::new() {
@@ -105,7 +145,7 @@ mod tests {
         // Test evaluation
         let voltages = [1.0, 0.0]; // 1V across resistor
         let params = [0.001]; // 1mS conductance
-        let mut vars = [];
+        let vars = [];
 
         let ctx = EvalContext {
             voltages: voltages.as_ptr(),
@@ -214,6 +254,36 @@ mod tests {
             "Current should be {} but got {}",
             expected,
             current
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "native")]
+    fn test_jit_falls_back_for_push_current() {
+        let model = CompiledModel {
+            name: "requires_push_current".into(),
+            num_terminals: 2,
+            terminal_names: vec!["p".into(), "n".into()],
+            parameters: vec![],
+            num_variables: 0,
+            assignment_programs: vec![],
+            stamp_programs: vec![StampProgram {
+                stamp_locations: vec![],
+                value_program: BytecodeProgram {
+                    instructions: vec![Instruction::PushCurrent(0, 1)],
+                },
+                jacobian_programs: vec![],
+            }],
+            lookup_tables: vec![],
+            laplace_filters: vec![],
+            internal_nodes: 0,
+            branch_currents: 0,
+        };
+
+        let native = try_compile_native(&model);
+        assert!(
+            native.is_none(),
+            "PushCurrent must fall back to interpreter for correctness"
         );
     }
 }

@@ -626,8 +626,9 @@ impl JitCompiler {
                     stack.push(val);
                 }
                 Instruction::PushCurrent(_, _) => {
-                    // Placeholder - currents need circuit solution
-                    stack.push(builder.ins().f64const(0.0));
+                    return Err(JitError::Codegen(
+                        "Instruction PushCurrent is not supported in native JIT".into(),
+                    ));
                 }
 
                 // Binary operations
