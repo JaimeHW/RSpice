@@ -1,9 +1,14 @@
 use egui::Ui;
 
 use crate::common::app::{AppState, ConsoleMessage};
+use crate::common::export_workflow::ExportWorkflowIo;
 use crate::common::simulation_analysis_tabs;
 
-pub(super) fn render_simulate_menu(ui: &mut Ui, state: &mut AppState) {
+pub(super) fn render_simulate_menu(
+    ui: &mut Ui,
+    state: &mut AppState,
+    export_workflow_io: &(impl ExportWorkflowIo + ?Sized),
+) {
     // Quick run - uses currently selected analysis
     if ui.button("Run Simulation    F5").clicked() {
         start_simulation(state, None);
@@ -47,16 +52,18 @@ pub(super) fn render_simulate_menu(ui: &mut Ui, state: &mut AppState) {
             ui.close_menu();
         }
         if ui.button("Export SPICE Netlist...").clicked() {
-            super::menu_bar_export_actions::action_export_netlist(
+            super::menu_bar_export_actions::action_export_netlist_with_io(
                 state,
                 crate::io::NetlistFormat::Spice,
+                export_workflow_io,
             );
             ui.close_menu();
         }
         if ui.button("Export Spectre Netlist...").clicked() {
-            super::menu_bar_export_actions::action_export_netlist(
+            super::menu_bar_export_actions::action_export_netlist_with_io(
                 state,
                 crate::io::NetlistFormat::Spectre,
+                export_workflow_io,
             );
             ui.close_menu();
         }

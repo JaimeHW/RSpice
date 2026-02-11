@@ -243,6 +243,8 @@ pub struct RSpiceApp {
     simulation_controller: crate::simulation::SimulationController,
     /// File workflow IO backend (native in production, injectable in tests).
     file_workflow_io: Box<dyn crate::common::file_workflow::FileWorkflowIo>,
+    /// Export workflow IO backend (native in production, injectable in tests).
+    export_workflow_io: Box<dyn crate::common::export_workflow::ExportWorkflowIo>,
 }
 
 impl RSpiceApp {
@@ -283,6 +285,7 @@ impl RSpiceApp {
             symbol_library,
             simulation_controller: crate::simulation::SimulationController::new(),
             file_workflow_io: Box::new(crate::common::file_workflow::NativeFileWorkflowIo),
+            export_workflow_io: Box::new(crate::common::export_workflow::NativeExportWorkflowIo),
         }
     }
 }
@@ -312,8 +315,12 @@ impl eframe::App for RSpiceApp {
                     .inner_margin(egui::Margin::symmetric(8.0, 4.0)),
             )
             .show(ctx, |ui| {
-                let (state, file_workflow_io) = (&mut self.state, self.file_workflow_io.as_ref());
-                super::menu_bar::render_menu_bar(ui, state, file_workflow_io);
+                let (state, file_workflow_io, export_workflow_io) = (
+                    &mut self.state,
+                    self.file_workflow_io.as_ref(),
+                    self.export_workflow_io.as_ref(),
+                );
+                super::menu_bar::render_menu_bar(ui, state, file_workflow_io, export_workflow_io);
             });
 
         // =====================================================================
@@ -386,6 +393,7 @@ impl RSpiceApp {
             symbol_library: None,
             simulation_controller: crate::simulation::SimulationController::new(),
             file_workflow_io: Box::new(crate::common::file_workflow::NativeFileWorkflowIo),
+            export_workflow_io: Box::new(crate::common::export_workflow::NativeExportWorkflowIo),
         }
     }
 
@@ -395,6 +403,14 @@ impl RSpiceApp {
         io: Box<dyn crate::common::file_workflow::FileWorkflowIo>,
     ) {
         self.file_workflow_io = io;
+    }
+
+    #[cfg(test)]
+    fn set_export_workflow_io_for_test(
+        &mut self,
+        io: Box<dyn crate::common::export_workflow::ExportWorkflowIo>,
+    ) {
+        self.export_workflow_io = io;
     }
 
     fn process_exit_request(&mut self, ctx: &Context) {

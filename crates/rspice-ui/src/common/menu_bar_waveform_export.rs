@@ -1,9 +1,18 @@
 use crate::common::app::AppState;
+use crate::common::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
 const NO_RESULTS_MESSAGE: &str = "No simulation results to export. Run a simulation first.";
 const NO_SAMPLES_MESSAGE: &str = "No waveform samples available to export.";
 
 pub(super) fn action_export_csv(state: &mut AppState) {
+    let io = crate::common::export_workflow::NativeExportWorkflowIo;
+    action_export_csv_with_io(state, &io);
+}
+
+pub(super) fn action_export_csv_with_io(
+    state: &mut AppState,
+    io: &(impl ExportWorkflowIo + ?Sized),
+) {
     let prepared = match prepare_waveform_dataset(state) {
         Ok(prepared) => prepared,
         Err(message) => {
@@ -16,17 +25,16 @@ pub(super) fn action_export_csv(state: &mut AppState) {
         state.push_user_message(crate::common::app::ConsoleMessage::warning(warning.clone()));
     }
 
-    let dialog = rfd::FileDialog::new()
-        .add_filter("CSV Files", &["csv"])
-        .set_file_name("waveforms.csv")
-        .set_title("Export Waveform CSV");
-
-    match dialog.save_file() {
+    match io.show_save_dialog(SaveDialogConfig {
+        title: "Export Waveform CSV",
+        default_name: "waveforms.csv",
+        filter_name: "CSV Files",
+        filter_extensions: &["csv"],
+    }) {
         Some(mut path) => {
             super::menu_bar_file_actions::ensure_file_extension(&mut path, "csv");
 
-            let writer = crate::io::WaveformWriter::new(crate::io::WaveformFormat::Csv);
-            match writer.write(&prepared.dataset, &path) {
+            match io.write_waveform_csv(&prepared.dataset, &path) {
                 Ok(()) => {
                     state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
                         "Exported CSV: {} ({} signals, {} points)",
@@ -168,6 +176,103 @@ fn signal_type_from_waveform_name(name: &str) -> crate::io::SignalType {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::{Cell, RefCell};
+    use std::collections::VecDeque;
+    use std::path::{Path, PathBuf};
+    use std::rc::Rc;
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct SaveDialogConfigSnapshot {
+        title: String,
+        default_name: String,
+        filter_name: String,
+        filter_extensions: Vec<String>,
+    }
+
+    #[derive(Default)]
+    struct MockWaveformExportIo {
+        save_dialog_results: RefCell<VecDeque<Option<PathBuf>>>,
+        write_csv_results: RefCell<VecDeque<Result<(), String>>>,
+        save_dialog_calls: Cell<usize>,
+        write_csv_calls: Cell<usize>,
+        last_save_dialog_config: RefCell<Option<SaveDialogConfigSnapshot>>,
+        last_write_csv_path: RefCell<Option<PathBuf>>,
+        last_written_dataset: RefCell<Option<crate::io::WaveformDataset>>,
+    }
+
+    impl MockWaveformExportIo {
+        fn push_save_dialog_result(&self, result: Option<PathBuf>) {
+            self.save_dialog_results.borrow_mut().push_back(result);
+        }
+
+        fn push_write_csv_result(&self, result: Result<(), String>) {
+            self.write_csv_results.borrow_mut().push_back(result);
+        }
+
+        fn save_dialog_calls(&self) -> usize {
+            self.save_dialog_calls.get()
+        }
+
+        fn write_csv_calls(&self) -> usize {
+            self.write_csv_calls.get()
+        }
+
+        fn last_save_dialog_config(&self) -> Option<SaveDialogConfigSnapshot> {
+            self.last_save_dialog_config.borrow().clone()
+        }
+
+        fn last_write_csv_path(&self) -> Option<PathBuf> {
+            self.last_write_csv_path.borrow().clone()
+        }
+
+        fn last_written_dataset(&self) -> Option<crate::io::WaveformDataset> {
+            self.last_written_dataset.borrow().clone()
+        }
+    }
+
+    impl crate::common::export_workflow::ExportWorkflowIo for Rc<MockWaveformExportIo> {
+        fn show_save_dialog(
+            &self,
+            config: crate::common::export_workflow::SaveDialogConfig<'_>,
+        ) -> Option<PathBuf> {
+            self.save_dialog_calls
+                .set(self.save_dialog_calls.get().saturating_add(1));
+            *self.last_save_dialog_config.borrow_mut() = Some(SaveDialogConfigSnapshot {
+                title: config.title.to_string(),
+                default_name: config.default_name.to_string(),
+                filter_name: config.filter_name.to_string(),
+                filter_extensions: config
+                    .filter_extensions
+                    .iter()
+                    .map(|ext| (*ext).to_string())
+                    .collect(),
+            });
+            self.save_dialog_results
+                .borrow_mut()
+                .pop_front()
+                .expect("test must provide show_save_dialog result")
+        }
+
+        fn write_text_file(&self, _path: &Path, _contents: &str) -> Result<(), String> {
+            Err("unexpected write_text_file call in waveform export test".to_string())
+        }
+
+        fn write_waveform_csv(
+            &self,
+            dataset: &crate::io::WaveformDataset,
+            path: &Path,
+        ) -> Result<(), String> {
+            self.write_csv_calls
+                .set(self.write_csv_calls.get().saturating_add(1));
+            *self.last_write_csv_path.borrow_mut() = Some(path.to_path_buf());
+            *self.last_written_dataset.borrow_mut() = Some(dataset.clone());
+            self.write_csv_results
+                .borrow_mut()
+                .pop_front()
+                .expect("test must provide write_waveform_csv result")
+        }
+    }
+
     use crate::state::{AnalysisResult, AnalysisType, SimulationRun, WaveformData};
 
     fn waveform(name: &str, x: Vec<f64>, y: Vec<f64>) -> WaveformData {
@@ -261,5 +366,146 @@ mod tests {
         assert_eq!(prepared.warnings.len(), 1);
         assert!(prepared.warnings[0].contains("V(out)"));
         assert!(prepared.warnings[0].contains("x samples"));
+    }
+
+    #[test]
+    fn test_action_export_csv_with_io_warns_when_no_results_and_skips_dialog() {
+        let io = Rc::new(MockWaveformExportIo::default());
+        let mut state = AppState::default();
+
+        action_export_csv_with_io(&mut state, &io);
+
+        assert_eq!(io.save_dialog_calls(), 0);
+        assert_eq!(io.write_csv_calls(), 0);
+        assert!(
+            state
+                .console_messages
+                .iter()
+                .any(|message| message.message == NO_RESULTS_MESSAGE),
+            "missing-waveform export should produce a direct warning"
+        );
+    }
+
+    #[test]
+    fn test_action_export_csv_with_io_cancelled_dialog_skips_write() {
+        let io = Rc::new(MockWaveformExportIo::default());
+        io.push_save_dialog_result(None);
+
+        let mut state = AppState::default();
+        state
+            .simulation
+            .waveforms
+            .push(waveform("V(out)", vec![0.0, 1.0], vec![1.0, 2.0]));
+        let baseline_messages = state.console_messages.len();
+
+        action_export_csv_with_io(&mut state, &io);
+
+        assert_eq!(io.save_dialog_calls(), 1);
+        assert_eq!(io.write_csv_calls(), 0);
+        assert_eq!(state.console_messages.len(), baseline_messages);
+    }
+
+    #[test]
+    fn test_action_export_csv_with_io_success_writes_csv_and_logs_info() {
+        let io = Rc::new(MockWaveformExportIo::default());
+        io.push_save_dialog_result(Some(PathBuf::from("results/sweep")));
+        io.push_write_csv_result(Ok(()));
+
+        let mut state = AppState::default();
+        state
+            .simulation
+            .waveforms
+            .push(waveform("V(out)", vec![0.0, 1.0, 2.0], vec![1.0, 2.0, 3.0]));
+        state.simulation.waveforms.push(waveform(
+            "I(V1)",
+            vec![0.0, 1.0, 2.0],
+            vec![0.1, 0.2, 0.3],
+        ));
+
+        action_export_csv_with_io(&mut state, &io);
+
+        assert_eq!(io.save_dialog_calls(), 1);
+        assert_eq!(io.write_csv_calls(), 1);
+        assert_eq!(
+            io.last_save_dialog_config(),
+            Some(SaveDialogConfigSnapshot {
+                title: "Export Waveform CSV".to_string(),
+                default_name: "waveforms.csv".to_string(),
+                filter_name: "CSV Files".to_string(),
+                filter_extensions: vec!["csv".to_string()],
+            })
+        );
+        assert_eq!(
+            io.last_write_csv_path(),
+            Some(PathBuf::from("results/sweep.csv"))
+        );
+        let dataset = io
+            .last_written_dataset()
+            .expect("written dataset should be captured");
+        assert_eq!(dataset.signal_count(), 2);
+        assert_eq!(dataset.point_count(), 3);
+        assert!(
+            state
+                .console_messages
+                .iter()
+                .any(|message| message.message.contains("Exported CSV:")),
+            "successful csv export should log an informational summary"
+        );
+    }
+
+    #[test]
+    fn test_action_export_csv_with_io_write_error_logs_failure() {
+        let io = Rc::new(MockWaveformExportIo::default());
+        io.push_save_dialog_result(Some(PathBuf::from("results/fail.csv")));
+        io.push_write_csv_result(Err("permission denied".to_string()));
+
+        let mut state = AppState::default();
+        state
+            .simulation
+            .waveforms
+            .push(waveform("V(out)", vec![0.0, 1.0], vec![1.0, 2.0]));
+
+        action_export_csv_with_io(&mut state, &io);
+
+        assert_eq!(io.write_csv_calls(), 1);
+        assert!(
+            state
+                .console_messages
+                .iter()
+                .any(|message| message.message.contains("CSV export failed: permission denied")),
+            "csv export write errors should be surfaced"
+        );
+    }
+
+    #[test]
+    fn test_action_export_csv_with_io_emits_dataset_warnings_before_export() {
+        let io = Rc::new(MockWaveformExportIo::default());
+        io.push_save_dialog_result(Some(PathBuf::from("results/warn.csv")));
+        io.push_write_csv_result(Ok(()));
+
+        let mut state = AppState::default();
+        state
+            .simulation
+            .waveforms
+            .push(waveform("V(out)", vec![0.0, 1.0, 2.0], vec![1.0, 2.0]));
+        state
+            .simulation
+            .waveforms
+            .push(waveform("I(V1)", vec![0.0, 1.0], vec![0.1, 0.2]));
+
+        action_export_csv_with_io(&mut state, &io);
+
+        let warning_messages: Vec<&str> = state
+            .console_messages
+            .iter()
+            .filter(|message| message.level == crate::common::app::ConsoleLevel::Warning)
+            .map(|message| message.message.as_str())
+            .collect();
+        assert!(
+            warning_messages
+                .iter()
+                .any(|message| message.contains("V(out)") && message.contains("x samples")),
+            "xy mismatch warnings should be surfaced before export"
+        );
     }
 }
