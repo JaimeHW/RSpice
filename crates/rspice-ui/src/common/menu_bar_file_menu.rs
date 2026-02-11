@@ -1,6 +1,6 @@
 use egui::Ui;
 
-use crate::common::app::AppState;
+use crate::common::app::{AppState, ConfirmationAction};
 
 pub(super) fn render_file_menu(ui: &mut Ui, state: &mut AppState) {
     if ui.button("New").clicked() {
@@ -75,7 +75,14 @@ fn open_preferences_dialog(state: &mut AppState) {
 }
 
 fn request_exit(state: &mut AppState) {
-    state.exit_requested = true;
+    if state.schematic.is_dirty {
+        state
+            .dialogs
+            .confirmation_dialog
+            .show(ConfirmationAction::Exit);
+    } else {
+        state.exit_requested = true;
+    }
 }
 
 #[cfg(test)]
@@ -116,9 +123,33 @@ mod tests {
     fn test_request_exit_sets_managed_exit_flag() {
         let mut state = AppState::default();
         state.exit_requested = false;
+        state.schematic.is_dirty = false;
 
         request_exit(&mut state);
 
         assert!(state.exit_requested);
+        assert!(
+            !state.dialogs.confirmation_dialog.visible,
+            "clean exit path should not show save-confirmation dialog"
+        );
+    }
+
+    #[test]
+    fn test_request_exit_shows_confirmation_when_schematic_is_dirty() {
+        let mut state = AppState::default();
+        state.exit_requested = false;
+        state.schematic.is_dirty = true;
+
+        request_exit(&mut state);
+
+        assert!(
+            !state.exit_requested,
+            "dirty exit path should defer shutdown until confirmation completes"
+        );
+        assert!(state.dialogs.confirmation_dialog.visible);
+        assert_eq!(
+            state.dialogs.confirmation_dialog.pending_action,
+            Some(ConfirmationAction::Exit)
+        );
     }
 }
