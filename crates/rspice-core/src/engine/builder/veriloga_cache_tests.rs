@@ -1,3 +1,4 @@
+use super::veriloga_cache::*;
 use super::*;
 use std::fs;
 use std::sync::MutexGuard;
