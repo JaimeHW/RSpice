@@ -234,8 +234,18 @@ impl YieldAnalysisManager {
             return DistributionStats::default();
         }
 
-        if values.len() == 1 {
-            let value = values[0];
+        // Defensive filtering so direct callers cannot poison statistics with NaN/Inf.
+        let mut finite_values = values
+            .iter()
+            .copied()
+            .filter(|value| value.is_finite())
+            .collect::<Vec<_>>();
+        if finite_values.is_empty() {
+            return DistributionStats::default();
+        }
+
+        if finite_values.len() == 1 {
+            let value = finite_values[0];
             return DistributionStats {
                 count: 1,
                 mean: value,
@@ -250,25 +260,45 @@ impl YieldAnalysisManager {
             };
         }
 
-        let n = values.len() as f64;
-        let mean = values.iter().sum::<f64>() / n;
-        let variance = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (n - 1.0);
-        let std_dev = variance.sqrt();
-
-        let mut sorted_vals = values.to_vec();
-        sorted_vals.sort_by(f64::total_cmp);
-
-        let median = if values.len() % 2 == 0 {
-            (sorted_vals[values.len() / 2 - 1] + sorted_vals[values.len() / 2]) / 2.0
+        let n = finite_values.len() as f64;
+        let mean = finite_values.iter().sum::<f64>() / n;
+        let variance_num = finite_values
+            .iter()
+            .map(|value| (value - mean).powi(2))
+            .sum::<f64>();
+        let variance = variance_num / (n - 1.0);
+        let std_dev = if variance.is_finite() && variance > 0.0 {
+            variance.sqrt()
         } else {
-            sorted_vals[values.len() / 2]
+            0.0
         };
 
-        // Skewness and Kurtosis
+        finite_values.sort_by(f64::total_cmp);
+        let lower_mid = finite_values[(finite_values.len() - 1) / 2];
+        let upper_mid = finite_values[finite_values.len() / 2];
+        let median = (lower_mid + upper_mid) * 0.5;
+        let min = finite_values[0];
+        let max = finite_values[finite_values.len() - 1];
+
+        // Skewness and kurtosis remain centered moments around the mean.
         let (skewness, kurtosis) = if std_dev > 0.0 {
-            let m3 = values.iter().map(|v| (v - mean).powi(3)).sum::<f64>() / n;
-            let m4 = values.iter().map(|v| (v - mean).powi(4)).sum::<f64>() / n;
-            (m3 / std_dev.powi(3), (m4 / std_dev.powi(4)) - 3.0)
+            let m3 = finite_values
+                .iter()
+                .map(|value| (value - mean).powi(3))
+                .sum::<f64>()
+                / n;
+            let m4 = finite_values
+                .iter()
+                .map(|value| (value - mean).powi(4))
+                .sum::<f64>()
+                / n;
+            let skewness = m3 / std_dev.powi(3);
+            let kurtosis = (m4 / std_dev.powi(4)) - 3.0;
+            if skewness.is_finite() && kurtosis.is_finite() {
+                (skewness, kurtosis)
+            } else {
+                (0.0, 0.0)
+            }
         } else {
             (0.0, 0.0)
         };
@@ -278,22 +308,27 @@ impl YieldAnalysisManager {
         let mut cpk = None;
 
         if let (Some(lsl), Some(usl)) = (spec.min, spec.max) {
-            if std_dev > 0.0 {
+            if lsl.is_finite() && usl.is_finite() && usl > lsl && std_dev > 0.0 {
                 let cp_val = (usl - lsl) / (6.0 * std_dev);
-                cp = Some(cp_val);
+                if cp_val.is_finite() {
+                    cp = Some(cp_val);
+                }
 
                 let cpu = (usl - mean) / (3.0 * std_dev);
                 let cpl = (mean - lsl) / (3.0 * std_dev);
-                cpk = Some(cpu.min(cpl));
+                let cpk_val = cpu.min(cpl);
+                if cpk_val.is_finite() {
+                    cpk = Some(cpk_val);
+                }
             }
         }
 
         DistributionStats {
-            count: values.len(),
+            count: finite_values.len(),
             mean,
             std_dev,
-            min: *sorted_vals.first().unwrap(),
-            max: *sorted_vals.last().unwrap(),
+            min,
+            max,
             median,
             skewness,
             kurtosis,
@@ -430,5 +465,45 @@ mod tests {
         assert_eq!(gain.pass_count, 1);
         assert_eq!(gain.fail_count, 0);
         assert_eq!(gain.yield_percent, 100.0);
+    }
+
+    #[test]
+    fn test_calculate_stats_ignores_non_finite_samples() {
+        let manager = YieldAnalysisManager::new();
+        let spec = YieldSpec::range("gain", 0.0, 10.0, "dB");
+        let stats = manager.calculate_stats(&[1.0, f64::NAN, f64::INFINITY, 3.0], &spec);
+        assert_eq!(stats.count, 2);
+        assert!((stats.mean - 2.0).abs() < 1e-12);
+        assert_eq!(stats.min, 1.0);
+        assert_eq!(stats.max, 3.0);
+        assert_eq!(stats.median, 2.0);
+    }
+
+    #[test]
+    fn test_calculate_stats_returns_default_when_all_samples_non_finite() {
+        let manager = YieldAnalysisManager::new();
+        let spec = YieldSpec::range("gain", 0.0, 10.0, "dB");
+        let stats = manager.calculate_stats(&[f64::NAN, f64::INFINITY], &spec);
+        assert_eq!(stats.count, 0);
+        assert_eq!(stats.mean, 0.0);
+        assert!(stats.cp.is_none());
+        assert!(stats.cpk.is_none());
+    }
+
+    #[test]
+    fn test_calculate_stats_invalid_spec_limits_disable_capability_indices() {
+        let manager = YieldAnalysisManager::new();
+        let invalid_spec = YieldSpec {
+            target: "gain".to_string(),
+            limit_type: SpecLimitType::Range,
+            min: Some(5.0),
+            max: Some(5.0),
+            target_val: Some(5.0),
+            unit: "dB".to_string(),
+            weight: 1.0,
+        };
+        let stats = manager.calculate_stats(&[4.0, 5.0, 6.0], &invalid_spec);
+        assert!(stats.cp.is_none());
+        assert!(stats.cpk.is_none());
     }
 }
