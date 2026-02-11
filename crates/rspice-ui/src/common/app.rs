@@ -375,6 +375,17 @@ impl eframe::App for RSpiceApp {
 
 impl RSpiceApp {
     #[cfg(test)]
+    pub(super) fn new_for_tests(state: AppState) -> Self {
+        Self {
+            state,
+            first_frame: false,
+            symbol_library: None,
+            simulation_controller: crate::simulation::SimulationController::new(),
+            file_workflow_io: Box::new(crate::common::file_workflow::NativeFileWorkflowIo),
+        }
+    }
+
+    #[cfg(test)]
     fn set_file_workflow_io_for_test(
         &mut self,
         io: Box<dyn crate::common::file_workflow::FileWorkflowIo>,
@@ -540,13 +551,7 @@ mod tests {
     }
 
     fn make_test_app() -> RSpiceApp {
-        RSpiceApp {
-            state: AppState::default(),
-            first_frame: false,
-            symbol_library: None,
-            simulation_controller: crate::simulation::SimulationController::new(),
-            file_workflow_io: Box::new(crate::common::file_workflow::NativeFileWorkflowIo),
-        }
+        RSpiceApp::new_for_tests(AppState::default())
     }
 
     #[test]
@@ -1174,6 +1179,106 @@ mod tests {
         assert_eq!(
             io.last_save_default_name(),
             Some(Some("my-cell.rsch".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_confirmation_no_executes_pending_open_without_save_attempt() {
+        use crate::state::ComponentType;
+
+        let mut app = make_test_app();
+        app.state.schematic = schematic_with_component(ComponentType::Resistor, 7, 7);
+        app.state.schematic.is_dirty = true;
+        app.state
+            .dialogs
+            .confirmation_dialog
+            .show(ConfirmationAction::FileOpen);
+
+        let io = Rc::new(MockAppFileWorkflowIo::default());
+        io.push_open_dialog_result(Ok(PathBuf::from("opened-from-no.rsch")));
+        let mut loaded = schematic_with_component(ComponentType::Capacitor, 40, 40);
+        loaded.current_file = Some(PathBuf::from("opened-from-no.rsch"));
+        loaded.is_dirty = false;
+        io.push_load_result(Ok(loaded));
+        app.set_file_workflow_io_for_test(Box::new(io.clone()));
+
+        app.handle_confirmation_response(ConfirmationResponse::No);
+
+        assert_eq!(io.save_dialog_calls(), 0);
+        assert_eq!(io.save_calls(), 0);
+        assert_eq!(io.open_dialog_calls(), 1);
+        assert_eq!(io.load_calls(), 1);
+        assert_eq!(
+            app.state.schematic.components[0].kind,
+            ComponentType::Capacitor
+        );
+        assert!(!app.state.schematic.is_dirty);
+    }
+
+    #[test]
+    fn test_confirmation_cancel_skips_pending_open_action() {
+        use crate::state::ComponentType;
+
+        let mut app = make_test_app();
+        app.state.schematic = schematic_with_component(ComponentType::Resistor, 9, 9);
+        app.state.schematic.is_dirty = true;
+        app.state
+            .dialogs
+            .confirmation_dialog
+            .show(ConfirmationAction::FileOpen);
+
+        let io = Rc::new(MockAppFileWorkflowIo::default());
+        app.set_file_workflow_io_for_test(Box::new(io.clone()));
+
+        app.handle_confirmation_response(ConfirmationResponse::Cancel);
+
+        assert_eq!(io.save_dialog_calls(), 0);
+        assert_eq!(io.save_calls(), 0);
+        assert_eq!(io.open_dialog_calls(), 0);
+        assert_eq!(io.load_calls(), 0);
+        assert_eq!(
+            app.state.schematic.components[0].kind,
+            ComponentType::Resistor
+        );
+        assert!(app.state.schematic.is_dirty);
+    }
+
+    #[test]
+    fn test_confirmation_yes_file_open_save_as_error_does_not_open() {
+        use crate::state::ComponentType;
+
+        let mut app = make_test_app();
+        app.state.schematic = schematic_with_component(ComponentType::Resistor, 11, 11);
+        app.state.schematic.is_dirty = true;
+        app.state.schematic.current_file = None;
+        app.state
+            .dialogs
+            .confirmation_dialog
+            .show(ConfirmationAction::FileOpen);
+
+        let io = Rc::new(MockAppFileWorkflowIo::default());
+        io.push_save_dialog_result(Err(crate::io::SchematicIoError::Io(
+            "save-dialog-failure".to_string(),
+        )));
+        app.set_file_workflow_io_for_test(Box::new(io.clone()));
+
+        app.handle_confirmation_response(ConfirmationResponse::Yes);
+
+        assert_eq!(io.save_dialog_calls(), 1);
+        assert_eq!(io.save_calls(), 0);
+        assert_eq!(io.open_dialog_calls(), 0);
+        assert_eq!(io.load_calls(), 0);
+        assert_eq!(
+            app.state.schematic.components[0].kind,
+            ComponentType::Resistor
+        );
+        assert!(app.state.schematic.is_dirty);
+        assert!(
+            app.state
+                .console_messages
+                .iter()
+                .any(|msg| msg.message.contains("Save As failed")),
+            "save-as dialog failure should be surfaced to the user"
         );
     }
 }

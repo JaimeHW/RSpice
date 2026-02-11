@@ -429,13 +429,7 @@ mod tests {
     use crate::state::{Cell, Library, View, ViewType};
 
     fn make_test_app() -> RSpiceApp {
-        RSpiceApp {
-            state: super::super::AppState::default(),
-            first_frame: false,
-            symbol_library: None,
-            simulation_controller: crate::simulation::SimulationController::new(),
-            file_workflow_io: Box::new(crate::common::file_workflow::NativeFileWorkflowIo),
-        }
+        RSpiceApp::new_for_tests(super::super::AppState::default())
     }
 
     #[test]
