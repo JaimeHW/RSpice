@@ -1,7 +1,314 @@
-﻿use super::{ConsoleMessage, RSpiceApp};
+use super::{ConsoleMessage, RSpiceApp};
 use egui::{Color32, Context};
+use std::collections::HashSet;
+
+type AnalysisCategory = (&'static str, &'static [(usize, &'static str)]);
+
+const SIMULATION_ANALYSIS_CATEGORIES: &[AnalysisCategory] = &[
+    (
+        "Time & Frequency Domain",
+        &[
+            (1, "Transient"),
+            (2, "AC Analysis"),
+            (3, "DC Sweep"),
+            (0, "DC Operating Point"),
+            (4, "Noise"),
+        ],
+    ),
+    (
+        "Steady-State",
+        &[(8, "PSS (Periodic)"), (11, "Harmonic Balance")],
+    ),
+    (
+        "Periodic Small-Signal",
+        &[(13, "PAC"), (14, "PNoise"), (15, "PXF"), (16, "PSTB")],
+    ),
+    (
+        "Transfer & Stability",
+        &[
+            (5, "Pole-Zero"),
+            (6, "Sensitivity"),
+            (9, "Stability (STB)"),
+            (17, "Transfer Func (XF)"),
+        ],
+    ),
+    ("RF & S-Parameters", &[(12, "S-Parameter")]),
+    (
+        "Statistical & Sweep",
+        &[
+            (7, "Monte Carlo"),
+            (10, "Temperature"),
+            (18, "Corner"),
+            (19, "Envelope"),
+            (20, "Fourier"),
+        ],
+    ),
+    (
+        "Advanced",
+        &[
+            (21, "Reliability"),
+            (22, "Optimization"),
+            (23, "Safety (SOA)"),
+            (24, "DISTO"),
+        ],
+    ),
+];
+
+fn set_default_if_blank(field: &mut String, default: &str) {
+    if field.trim().is_empty() {
+        field.clear();
+        field.push_str(default);
+    }
+}
+
+fn toggle_enabled_analysis(enabled_analyses: &mut HashSet<usize>, index: usize) {
+    if !enabled_analyses.insert(index) {
+        enabled_analyses.remove(&index);
+    }
+}
 
 impl RSpiceApp {
+    pub(super) fn ensure_simulation_setup_defaults(&mut self) {
+        // Transient
+        set_default_if_blank(&mut self.state.dialogs.tran_stop, "1m");
+        set_default_if_blank(&mut self.state.dialogs.tran_step, "10n");
+        set_default_if_blank(&mut self.state.dialogs.tran_start, "0");
+        set_default_if_blank(&mut self.state.dialogs.tran_maxstep, "auto");
+        // AC
+        set_default_if_blank(&mut self.state.dialogs.ac_fstart, "1");
+        set_default_if_blank(&mut self.state.dialogs.ac_fstop, "1G");
+        set_default_if_blank(&mut self.state.dialogs.ac_points, "101");
+        set_default_if_blank(&mut self.state.dialogs.disto_f2_over_f1, "2.0");
+        // DC
+        set_default_if_blank(&mut self.state.dialogs.dc_source, "V1");
+        set_default_if_blank(&mut self.state.dialogs.dc_start, "0");
+        set_default_if_blank(&mut self.state.dialogs.dc_stop, "5");
+        set_default_if_blank(&mut self.state.dialogs.dc_step, "0.01");
+        set_default_if_blank(&mut self.state.dialogs.dc_source2, "V2");
+        set_default_if_blank(&mut self.state.dialogs.dc_start2, "0");
+        set_default_if_blank(&mut self.state.dialogs.dc_stop2, "3.3");
+        set_default_if_blank(&mut self.state.dialogs.dc_step2, "0.1");
+        // Noise
+        set_default_if_blank(&mut self.state.dialogs.noise_output, "out");
+        set_default_if_blank(&mut self.state.dialogs.noise_ref, "0");
+        set_default_if_blank(&mut self.state.dialogs.noise_input, "V1");
+        set_default_if_blank(&mut self.state.dialogs.noise_fstart, "1");
+        set_default_if_blank(&mut self.state.dialogs.noise_fstop, "100Meg");
+        // Pole-Zero
+        set_default_if_blank(&mut self.state.dialogs.pz_input, "in");
+        set_default_if_blank(&mut self.state.dialogs.pz_output, "out");
+        // Sensitivity
+        set_default_if_blank(&mut self.state.dialogs.sens_output, "V(out)");
+        // Monte Carlo
+        set_default_if_blank(&mut self.state.dialogs.mc_runs, "100");
+        set_default_if_blank(&mut self.state.dialogs.mc_seed, "0");
+        // PSS
+        set_default_if_blank(&mut self.state.dialogs.pss_fund, "1Meg");
+        set_default_if_blank(&mut self.state.dialogs.pss_harmonics, "10");
+        set_default_if_blank(&mut self.state.dialogs.pss_maxiter, "100");
+        // STB
+        set_default_if_blank(&mut self.state.dialogs.stb_probe, "istb");
+        set_default_if_blank(&mut self.state.dialogs.stb_fstart, "1");
+        set_default_if_blank(&mut self.state.dialogs.stb_fstop, "100Meg");
+        // Temperature
+        set_default_if_blank(&mut self.state.dialogs.temp_start, "-40");
+        set_default_if_blank(&mut self.state.dialogs.temp_stop, "125");
+        set_default_if_blank(&mut self.state.dialogs.temp_step, "25");
+    }
+
+    pub(super) fn render_simulation_setup_dialog(&mut self, ctx: &Context) {
+        if !self.state.dialogs.simulation_dialog {
+            return;
+        }
+
+        self.ensure_simulation_setup_defaults();
+
+        let mut dialog_open = self.state.dialogs.simulation_dialog;
+        let mut close_requested = false;
+
+        egui::Window::new("Simulation Setup")
+            .open(&mut dialog_open)
+            .collapsible(false)
+            .resizable(true)
+            .default_width(700.0)
+            .default_height(520.0)
+            .min_width(600.0)
+            .min_height(400.0)
+            .show(ctx, |ui| {
+                // Reserve space for footer action row.
+                let content_height = (ui.available_height() - 60.0).max(200.0);
+
+                ui.horizontal(|ui| {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(180.0, content_height),
+                        egui::Layout::top_down(egui::Align::LEFT),
+                        |ui| {
+                            ui.label(egui::RichText::new("Analyses").strong());
+                            ui.separator();
+
+                            egui::ScrollArea::vertical()
+                                .id_salt("sim_list")
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    let item_width = ui.available_width() - 4.0;
+                                    let item_height = 28.0;
+                                    let header_height = 26.0;
+
+                                    let selection_color = ui.visuals().selection.bg_fill;
+                                    let hover_color = ui.visuals().widgets.hovered.bg_fill;
+                                    let text_color = ui.visuals().text_color();
+                                    let dim_color = text_color.gamma_multiply(0.6);
+                                    let header_bg = ui.visuals().faint_bg_color;
+
+                                    for (category_name, analyses) in SIMULATION_ANALYSIS_CATEGORIES
+                                    {
+                                        let (header_rect, _) = ui.allocate_exact_size(
+                                            egui::vec2(item_width, header_height),
+                                            egui::Sense::hover(),
+                                        );
+                                        ui.painter().rect_filled(header_rect, 0.0, header_bg);
+                                        ui.painter().text(
+                                            header_rect.left_center() + egui::vec2(8.0, 0.0),
+                                            egui::Align2::LEFT_CENTER,
+                                            *category_name,
+                                            egui::FontId::proportional(11.0),
+                                            dim_color,
+                                        );
+
+                                        for &(idx, name) in *analyses {
+                                            let selected = self.state.dialogs.sim_active_tab == idx;
+                                            let enabled =
+                                                self.state.dialogs.enabled_analyses.contains(&idx);
+
+                                            let (rect, response) = ui.allocate_exact_size(
+                                                egui::vec2(item_width, item_height),
+                                                egui::Sense::click(),
+                                            );
+
+                                            if selected {
+                                                ui.painter().rect_filled(
+                                                    rect,
+                                                    4.0,
+                                                    selection_color,
+                                                );
+                                            } else if response.hovered() {
+                                                ui.painter().rect_filled(rect, 4.0, hover_color);
+                                            }
+
+                                            let checkbox_center =
+                                                rect.left_center() + egui::vec2(16.0, 0.0);
+                                            let box_size = 16.0;
+                                            let checkbox_rect = egui::Rect::from_center_size(
+                                                checkbox_center,
+                                                egui::vec2(box_size, box_size),
+                                            );
+
+                                            if enabled {
+                                                ui.painter().rect_filled(
+                                                    checkbox_rect,
+                                                    3.0,
+                                                    egui::Color32::from_rgb(80, 160, 80),
+                                                );
+                                                let check_color = egui::Color32::WHITE;
+                                                let s = box_size * 0.25;
+                                                let c = checkbox_center;
+                                                ui.painter().line_segment(
+                                                    [
+                                                        egui::pos2(c.x - s * 1.2, c.y),
+                                                        egui::pos2(c.x - s * 0.3, c.y + s * 0.9),
+                                                    ],
+                                                    egui::Stroke::new(2.0, check_color),
+                                                );
+                                                ui.painter().line_segment(
+                                                    [
+                                                        egui::pos2(c.x - s * 0.3, c.y + s * 0.9),
+                                                        egui::pos2(c.x + s * 1.2, c.y - s * 0.8),
+                                                    ],
+                                                    egui::Stroke::new(2.0, check_color),
+                                                );
+                                            } else {
+                                                ui.painter().rect_stroke(
+                                                    checkbox_rect,
+                                                    3.0,
+                                                    egui::Stroke::new(1.5, dim_color),
+                                                );
+                                            }
+
+                                            let text_col = if selected {
+                                                egui::Color32::WHITE
+                                            } else {
+                                                text_color
+                                            };
+                                            ui.painter().text(
+                                                rect.left_center() + egui::vec2(34.0, 0.0),
+                                                egui::Align2::LEFT_CENTER,
+                                                name,
+                                                egui::FontId::proportional(13.0),
+                                                text_col,
+                                            );
+
+                                            if response.clicked() {
+                                                let click_pos = response
+                                                    .interact_pointer_pos()
+                                                    .unwrap_or_default();
+                                                if checkbox_rect.contains(click_pos) {
+                                                    toggle_enabled_analysis(
+                                                        &mut self.state.dialogs.enabled_analyses,
+                                                        idx,
+                                                    );
+                                                } else {
+                                                    self.state.dialogs.sim_active_tab = idx;
+                                                }
+                                            }
+                                            if response.double_clicked() {
+                                                toggle_enabled_analysis(
+                                                    &mut self.state.dialogs.enabled_analyses,
+                                                    idx,
+                                                );
+                                            }
+                                        }
+
+                                        ui.add_space(4.0);
+                                    }
+                                });
+                        },
+                    );
+
+                    ui.separator();
+
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(480.0, content_height),
+                        egui::Layout::top_down(egui::Align::LEFT),
+                        |ui| {
+                            egui::ScrollArea::vertical()
+                                .id_salt("sim_opts")
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    self.render_analysis_options(ui);
+                                });
+                        },
+                    );
+                });
+
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(8.0);
+
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Cancel").clicked() {
+                            close_requested = true;
+                        }
+                        if ui.button("OK").clicked() {
+                            close_requested = true;
+                        }
+                    });
+                });
+            });
+
+        self.state.dialogs.simulation_dialog = dialog_open && !close_requested;
+    }
+
     /// Render the analysis options for the simulation dialog
     pub(super) fn render_analysis_options(&mut self, ui: &mut egui::Ui) {
         match self.state.dialogs.sim_active_tab {
@@ -828,5 +1135,75 @@ impl RSpiceApp {
             });
 
         self.state.dialogs.simulation_options = dialog_open && !close_requested;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    fn make_test_app() -> RSpiceApp {
+        RSpiceApp {
+            state: super::super::AppState::default(),
+            first_frame: false,
+            symbol_library: None,
+            simulation_controller: crate::simulation::SimulationController::new(),
+        }
+    }
+
+    #[test]
+    fn test_set_default_if_blank_updates_only_blank_values() {
+        let mut value = "   ".to_string();
+        set_default_if_blank(&mut value, "default");
+        assert_eq!(value, "default");
+
+        let mut existing = "keep".to_string();
+        set_default_if_blank(&mut existing, "default");
+        assert_eq!(existing, "keep");
+    }
+
+    #[test]
+    fn test_toggle_enabled_analysis_toggles_membership() {
+        let mut enabled = HashSet::new();
+        toggle_enabled_analysis(&mut enabled, 7);
+        assert!(enabled.contains(&7));
+        toggle_enabled_analysis(&mut enabled, 7);
+        assert!(!enabled.contains(&7));
+    }
+
+    #[test]
+    fn test_simulation_analysis_categories_have_unique_indices() {
+        let mut seen = HashSet::new();
+        for (category_name, analyses) in SIMULATION_ANALYSIS_CATEGORIES {
+            assert!(!category_name.trim().is_empty());
+            assert!(!analyses.is_empty());
+            for &(index, name) in *analyses {
+                assert!(!name.trim().is_empty());
+                assert!(
+                    seen.insert(index),
+                    "duplicate analysis index found in categories: {}",
+                    index
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_ensure_simulation_setup_defaults_fills_each_field_independently() {
+        let mut app = make_test_app();
+        app.state.dialogs.tran_stop = "5m".to_string();
+        app.state.dialogs.ac_points = "501".to_string();
+        app.state.dialogs.tran_step.clear();
+        app.state.dialogs.noise_input = "   ".to_string();
+        app.state.dialogs.temp_start.clear();
+
+        app.ensure_simulation_setup_defaults();
+
+        assert_eq!(app.state.dialogs.tran_stop, "5m");
+        assert_eq!(app.state.dialogs.ac_points, "501");
+        assert_eq!(app.state.dialogs.tran_step, "10n");
+        assert_eq!(app.state.dialogs.noise_input, "V1");
+        assert_eq!(app.state.dialogs.temp_start, "-40");
     }
 }
