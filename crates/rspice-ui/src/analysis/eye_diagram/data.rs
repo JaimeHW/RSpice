@@ -145,7 +145,7 @@ impl EyeData {
         let mean = all_values.iter().sum::<f64>() / n;
         let variance = all_values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n;
 
-        all_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        all_values.sort_by(|a, b| a.total_cmp(b));
 
         Some(AmplitudeStats {
             min: all_values.first().copied().unwrap_or(0.0),

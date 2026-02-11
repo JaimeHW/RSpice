@@ -89,8 +89,9 @@ impl FftResult {
             .magnitudes
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))?;
-        Some((self.frequencies[idx], *max_mag))
+            .filter(|(_, mag)| mag.is_finite())
+            .max_by(|(_, a), (_, b)| a.total_cmp(b))?;
+        Some((*self.frequencies.get(idx)?, *max_mag))
     }
 }
 
@@ -196,5 +197,33 @@ mod tests {
 
         assert!((WindowFunction::Hanning.apply(mid, n) - 1.0).abs() < 0.01);
         assert!((WindowFunction::Hamming.apply(mid, n) - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_peak_frequency_ignores_non_finite_magnitudes() {
+        let result = FftResult {
+            frequencies: vec![0.0, 1.0, 2.0, 3.0],
+            magnitudes: vec![f64::NAN, f64::INFINITY, 0.5, 0.8],
+            phases: vec![0.0; 4],
+            sample_rate: 4.0,
+            window: WindowFunction::Rectangular,
+        };
+
+        let (freq, mag) = result.peak_frequency().unwrap();
+        assert_eq!(freq, 3.0);
+        assert_eq!(mag, 0.8);
+    }
+
+    #[test]
+    fn test_peak_frequency_all_non_finite_returns_none() {
+        let result = FftResult {
+            frequencies: vec![0.0, 1.0, 2.0],
+            magnitudes: vec![f64::NAN, f64::INFINITY, f64::NEG_INFINITY],
+            phases: vec![0.0; 3],
+            sample_rate: 3.0,
+            window: WindowFunction::Rectangular,
+        };
+
+        assert!(result.peak_frequency().is_none());
     }
 }

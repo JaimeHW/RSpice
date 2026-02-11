@@ -392,7 +392,11 @@ pub fn align_waveforms_union(
     let mut merged_x: Vec<f64> = Vec::with_capacity(x1.len() + x2.len());
     merged_x.extend_from_slice(x1);
     merged_x.extend_from_slice(x2);
-    merged_x.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    merged_x.retain(|x| x.is_finite());
+    if merged_x.is_empty() {
+        return Err(InterpolationError::AlignmentFailed);
+    }
+    merged_x.sort_by(|a, b| a.total_cmp(b));
     merged_x.dedup_by(|a, b| (*a - *b).abs() < 1e-15);
 
     // Resample both waveforms onto merged grid
@@ -729,6 +733,31 @@ mod tests {
         // Both outputs should be same length
         assert_eq!(out_y1.len(), 6);
         assert_eq!(out_y2.len(), 6);
+    }
+
+    #[test]
+    fn test_align_waveforms_union_filters_non_finite_time_points() {
+        let x1 = vec![0.0, f64::NAN, 2.0];
+        let y1 = vec![0.0, 1.0, 2.0];
+        let x2 = vec![f64::INFINITY, 1.0, 3.0];
+        let y2 = vec![0.0, 2.0, 6.0];
+
+        let (merged_x, out_y1, out_y2) =
+            align_waveforms_union(&x1, &y1, &x2, &y2, InterpolationMethod::Linear).unwrap();
+        assert_eq!(merged_x, vec![0.0, 1.0, 2.0, 3.0]);
+        assert_eq!(out_y1.len(), merged_x.len());
+        assert_eq!(out_y2.len(), merged_x.len());
+    }
+
+    #[test]
+    fn test_align_waveforms_union_rejects_all_non_finite_time_points() {
+        let x1 = vec![f64::NAN, f64::INFINITY];
+        let y1 = vec![0.0, 0.0];
+        let x2 = vec![f64::NEG_INFINITY];
+        let y2 = vec![0.0];
+
+        let result = align_waveforms_union(&x1, &y1, &x2, &y2, InterpolationMethod::Linear);
+        assert!(matches!(result, Err(InterpolationError::AlignmentFailed)));
     }
 
     #[test]
