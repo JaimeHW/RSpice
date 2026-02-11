@@ -4,7 +4,7 @@
 
 use std::f64::consts::PI;
 
-use super::window::{WindowFunction, apply_window_copy, generate_window};
+use super::window::{apply_window_copy, generate_window, WindowFunction};
 
 // =============================================================================
 // FFT Point
@@ -253,15 +253,12 @@ impl FftData {
             return None;
         }
 
-        self.points[1..]
+        self.points
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| {
-                a.magnitude
-                    .partial_cmp(&b.magnitude)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .map(|(i, p)| (i + 1, p))
+            .skip(1)
+            .filter(|(_, point)| point.magnitude.is_finite())
+            .max_by(|(_, a), (_, b)| a.magnitude.total_cmp(&b.magnitude))
     }
 
     /// Find all peaks above threshold
@@ -595,6 +592,45 @@ mod tests {
         let (idx, p) = peak.unwrap();
         assert!(idx > 0); // Not DC
         assert!(p.magnitude > 0.1);
+    }
+
+    #[test]
+    fn test_fft_find_peak_ignores_non_finite_bins() {
+        let fft = FftData {
+            name: "Test".to_string(),
+            points: vec![
+                FftPoint::new(0.0, 0.1, 0.0), // DC
+                FftPoint::new(100.0, f64::NAN, 0.0),
+                FftPoint::new(200.0, f64::INFINITY, 0.0),
+                FftPoint::new(300.0, 2.0, 0.0),
+                FftPoint::new(400.0, 1.5, 0.0),
+            ],
+            sample_rate: 1000.0,
+            fft_size: 8,
+            window: WindowFunction::Rectangular,
+        };
+
+        let peak = fft.find_peak().expect("peak should be found");
+        assert_eq!(peak.0, 3);
+        assert!(approx_eq(peak.1.frequency, 300.0));
+    }
+
+    #[test]
+    fn test_fft_find_peak_all_non_finite_returns_none() {
+        let fft = FftData {
+            name: "Test".to_string(),
+            points: vec![
+                FftPoint::new(0.0, 0.1, 0.0), // DC
+                FftPoint::new(100.0, f64::NAN, 0.0),
+                FftPoint::new(200.0, f64::INFINITY, 0.0),
+                FftPoint::new(300.0, f64::NEG_INFINITY, 0.0),
+            ],
+            sample_rate: 1000.0,
+            fft_size: 8,
+            window: WindowFunction::Rectangular,
+        };
+
+        assert!(fft.find_peak().is_none());
     }
 
     #[test]
