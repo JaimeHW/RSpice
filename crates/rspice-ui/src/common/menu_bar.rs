@@ -5,7 +5,7 @@
 
 use egui::{menu, Ui};
 
-use crate::common::{app::AppState, simulation_analysis_tabs};
+use crate::common::app::AppState;
 
 #[path = "menu_bar_edit_menu.rs"]
 mod menu_bar_edit_menu;
@@ -17,6 +17,8 @@ mod menu_bar_file_actions;
 mod menu_bar_netlist_compat;
 #[path = "menu_bar_simulate_menu.rs"]
 mod menu_bar_simulate_menu;
+#[path = "menu_bar_tools_menu.rs"]
+mod menu_bar_tools_menu;
 #[path = "menu_bar_veriloga_cache.rs"]
 mod menu_bar_veriloga_cache;
 #[path = "menu_bar_view_menu.rs"]
@@ -114,153 +116,8 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
         // TOOLS MENU
         // =====================================================================
         ui.menu_button("Tools", |ui| {
-            // Verilog-A submenu
-            ui.menu_button("Verilog-A", |ui| {
-                if ui.button("Compile Module...").clicked() {
-                    // Open the Verilog-A import/compile dialog
-                    state.dialogs.veriloga_dialog.open();
-                    ui.close_menu();
-                }
-                if ui.button("Module Library...").clicked() {
-                    // Open library browser and select the veriloga library
-                    state.library_manager.select_library("veriloga");
-                    state.panels.project_browser = true;
-                    ui.close_menu();
-                }
-                ui.separator();
-                if ui.button("Compile Cache Status").clicked() {
-                    menu_bar_veriloga_cache::action_veriloga_cache_status(state);
-                    ui.close_menu();
-                }
-                if ui.button("List Compile Cache Entries").clicked() {
-                    menu_bar_veriloga_cache::action_veriloga_cache_list_entries(state);
-                    ui.close_menu();
-                }
-                if ui.button("Prune Compile Cache").clicked() {
-                    menu_bar_veriloga_cache::action_veriloga_cache_prune(state);
-                    ui.close_menu();
-                }
-                if ui.button("Clear Compile Cache").clicked() {
-                    menu_bar_veriloga_cache::action_veriloga_cache_clear(state);
-                    ui.close_menu();
-                }
-                if ui.button("Recompile Global Verilog-A Library").clicked() {
-                    menu_bar_veriloga_cache::action_veriloga_recompile_library(state);
-                    ui.close_menu();
-                }
-            });
-
-            if ui.button("Model Browser...").clicked() {
-                state.model_browser_state.open = true;
-                state.model_browser_state.browse_only = true;
-                ui.close_menu();
-            }
-
-            if ui.button("PDK Settings...").clicked() {
-                state.pdk_settings_dialog.open(state.pdk_config.clone());
-                ui.close_menu();
-            }
-
-            if ui.button("Optimization Engine...").clicked() {
-                state.dialogs.sim_active_tab = simulation_analysis_tabs::TAB_OPTIMIZATION;
-                state.dialogs.simulation_dialog = true;
-                ui.close_menu();
-            }
-
-            if ui.button("Automation Console").clicked() {
-                state.panels.script_console = true;
-                ui.close_menu();
-            }
-
-            ui.separator();
-
-            // Calculators submenu
-            ui.menu_button("Calculators", |ui| {
-                if ui.button("Unit Converter").clicked() {
-                    state.dialogs.unit_converter_dialog = true;
-                    ui.close_menu();
-                }
-                if ui.button("Filter Design").clicked() {
-                    state.dialogs.filter_calculator_dialog = true;
-                    ui.close_menu();
-                }
-                if ui.button("Impedance Matching").clicked() {
-                    state.dialogs.impedance_calculator_dialog = true;
-                    ui.close_menu();
-                }
-                if ui.button("S-Parameter Converter").clicked() {
-                    state.dialogs.sparam_converter_dialog = true;
-                    ui.close_menu();
-                }
-            });
-
-            ui.separator();
-
-            // Verification tools
-            if ui.button("Design Rule Check").clicked() {
-                // Run DRC on current schematic using the extraction bridge
-                let result = crate::services::drc::run_drc_check(&state.schematic);
-                let summary = result.summary();
-                let msg = if result.passed() {
-                    format!(
-                        "DRC passed: {} info, {} warnings",
-                        summary.info, summary.warnings
-                    )
-                } else {
-                    format!(
-                        "DRC found {} violations ({} errors, {} critical)",
-                        summary.total, summary.errors, summary.critical
-                    )
-                };
-                state.push_user_message(crate::common::app::ConsoleMessage::info(&msg));
-                state.dialogs.drc_results = Some(result);
-                state.dialogs.drc_dialog = true;
-                ui.close_menu();
-            }
-
-            if ui.button("Electrical Rule Check").clicked() {
-                // ERC is part of DRC - runs connectivity checks
-                let result = crate::services::drc::run_drc_check(&state.schematic);
-                let msg = if result.passed() {
-                    "ERC passed: No electrical rule violations".to_string()
-                } else {
-                    format!("ERC found {} violations", result.total_count())
-                };
-                state.push_user_message(crate::common::app::ConsoleMessage::info(&msg));
-                state.dialogs.drc_results = Some(result);
-                state.dialogs.drc_dialog = true;
-                ui.close_menu();
-            }
-
-            if ui.button("LVS Check").clicked() {
-                state.push_user_message(crate::common::app::ConsoleMessage::info(
-                    "LVS: Requires layout data (not available in schematic-only mode)",
-                ));
-                ui.close_menu();
-            }
-
-            ui.separator();
-
-            // Waveform tools
-            ui.menu_button("Waveform Tools", |ui| {
-                if ui.button("Calculator...").clicked() {
-                    state.dialogs.waveform_calculator_dialog = true;
-                    ui.close_menu();
-                }
-                if ui.button("Measurements...").clicked() {
-                    state.dialogs.measurements_panel = true;
-                    ui.close_menu();
-                }
-                if ui.button("Cross-Probe").clicked() {
-                    state.panels.signal_browser = true;
-                    state.push_user_message(crate::common::app::ConsoleMessage::info(
-                        "Cross-probe enabled",
-                    ));
-                    ui.close_menu();
-                }
-            });
+            menu_bar_tools_menu::render_tools_menu(ui, state);
         });
-
         // =====================================================================
         // EXAMPLES MENU
         // =====================================================================
