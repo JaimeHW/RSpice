@@ -9,29 +9,17 @@ use crate::common::app::AppState;
 use crate::common::export_workflow::ExportWorkflowIo;
 use crate::common::file_workflow::FileWorkflowIo;
 
-#[path = "menu_bar_edit_menu.rs"]
 mod menu_bar_edit_menu;
-#[path = "menu_bar_examples_menu.rs"]
 mod menu_bar_examples_menu;
-#[path = "menu_bar_export_actions.rs"]
 mod menu_bar_export_actions;
-#[path = "menu_bar_file_actions.rs"]
 mod menu_bar_file_actions;
-#[path = "menu_bar_file_menu.rs"]
 mod menu_bar_file_menu;
-#[path = "menu_bar_help_menu.rs"]
 mod menu_bar_help_menu;
-#[path = "menu_bar_netlist_compat.rs"]
 mod menu_bar_netlist_compat;
-#[path = "menu_bar_simulate_menu.rs"]
 mod menu_bar_simulate_menu;
-#[path = "menu_bar_tools_menu.rs"]
 mod menu_bar_tools_menu;
-#[path = "menu_bar_veriloga_cache.rs"]
 mod menu_bar_veriloga_cache;
-#[path = "menu_bar_view_menu.rs"]
 mod menu_bar_view_menu;
-#[path = "menu_bar_waveform_export.rs"]
 mod menu_bar_waveform_export;
 
 /// Render the menu bar
