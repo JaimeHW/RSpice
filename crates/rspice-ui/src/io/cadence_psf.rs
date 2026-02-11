@@ -249,9 +249,13 @@ fn parse_header(
     let mut cursor = &file[entry.start + 8..end_of_section];
     let mut header = HashMap::new();
     while cursor.len() > 4 {
+        if consume_zero_word_padding(&mut cursor) {
+            break;
+        }
         let (name, value) = parse_named_value(&mut cursor)?;
         header.insert(name, value);
     }
+    reject_non_zero_trailing_bytes("header", cursor, &[])?;
     Ok(header)
 }
 
@@ -274,8 +278,13 @@ fn parse_types(file: &[u8], entry: TocEntry) -> Result<HashMap<u32, TypeDecl>, C
     let mut cursor = &file[entry.start + 16..end_of_section];
     let mut types = HashMap::new();
     while cursor.len() > 4 {
+        if consume_zero_word_padding(&mut cursor) {
+            break;
+        }
         parse_type_decl(&mut cursor, &mut types)?;
     }
+    // Type payloads may end with a trailing struct-terminator word.
+    reject_non_zero_trailing_bytes("type", cursor, &[18])?;
 
     Ok(types)
 }
@@ -332,6 +341,9 @@ fn parse_sweeps(file: &[u8], entry: TocEntry) -> Result<Vec<SignalRef>, CadenceP
     let mut cursor = &file[entry.start + 8..end_of_section];
     let mut sweeps = Vec::new();
     while cursor.len() > 4 {
+        if consume_zero_word_padding(&mut cursor) {
+            break;
+        }
         let block = read_u32(&mut cursor)?;
         if block != 16 {
             return Err(CadencePsfError::new(format!(
@@ -341,6 +353,7 @@ fn parse_sweeps(file: &[u8], entry: TocEntry) -> Result<Vec<SignalRef>, CadenceP
         }
         sweeps.push(parse_signal_ref(&mut cursor)?);
     }
+    reject_non_zero_trailing_bytes("sweep", cursor, &[])?;
     Ok(sweeps)
 }
 
@@ -363,6 +376,9 @@ fn parse_traces(file: &[u8], entry: TocEntry) -> Result<Vec<TraceDef>, CadencePs
     let mut cursor = &file[entry.start + 16..end_of_section];
     let mut traces = Vec::new();
     while cursor.len() > 4 {
+        if consume_zero_word_padding(&mut cursor) {
+            break;
+        }
         let block = read_u32(&mut cursor)?;
         match block {
             16 => traces.push(TraceDef::Signal(parse_signal_ref(&mut cursor)?)),
@@ -375,6 +391,7 @@ fn parse_traces(file: &[u8], entry: TocEntry) -> Result<Vec<TraceDef>, CadencePs
             }
         }
     }
+    reject_non_zero_trailing_bytes("trace", cursor, &[])?;
 
     Ok(traces)
 }
@@ -781,6 +798,36 @@ fn parse_zero_pad(mut cursor: &[u8]) -> Result<&[u8], CadencePsfError> {
         return Err(CadencePsfError::new("zero-pad block truncated"));
     }
     Ok(&cursor[len..])
+}
+
+fn consume_zero_word_padding(cursor: &mut &[u8]) -> bool {
+    if cursor.len() < 4 || peek_u32(cursor) != 0 {
+        return false;
+    }
+    if cursor[4..].iter().all(|byte| *byte == 0) {
+        *cursor = &[];
+        return true;
+    }
+    false
+}
+
+fn reject_non_zero_trailing_bytes(
+    section_name: &str,
+    trailing: &[u8],
+    allowed_words: &[u32],
+) -> Result<(), CadencePsfError> {
+    if trailing.is_empty() || trailing.iter().all(|byte| *byte == 0) {
+        return Ok(());
+    }
+    if trailing.len() == 4 && allowed_words.contains(&peek_u32(trailing)) {
+        return Ok(());
+    }
+
+    Err(CadencePsfError::new(format!(
+        "{} section has unexpected non-zero trailing bytes ({})",
+        section_name,
+        trailing.len()
+    )))
 }
 
 fn qualify_signal_name(base: &str, suffix: &str) -> String {

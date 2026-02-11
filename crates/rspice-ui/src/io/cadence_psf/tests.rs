@@ -1,6 +1,5 @@
     use super::test_helpers::{
-        build_non_windowed_array_complex_psf,
-        build_non_windowed_array_of_struct_bare_descriptor_psf,
+        build_non_windowed_array_complex_psf, build_non_windowed_array_of_struct_bare_descriptor_psf,
         build_non_windowed_array_of_struct_psf, build_non_windowed_array_real_psf,
         build_non_windowed_complex_psf, build_non_windowed_int32_psf, build_non_windowed_int8_psf,
         build_non_windowed_mixed_real_and_string_psf,
@@ -76,6 +75,41 @@
         idx += 4;
         // block_init low 16-bits stores window_count in PSF payloads.
         bytes[idx..idx + 4].copy_from_slice(&window_count.to_be_bytes());
+    }
+
+    fn patch_section_end_offset(bytes: &mut [u8], kind: SectionKind, delta: i32) {
+        let toc = parse_toc(bytes).expect("fixture must contain valid TOC");
+        let entry = toc
+            .section(kind)
+            .expect("fixture must contain the requested section");
+        let end_offset_field = match kind {
+            SectionKind::Type | SectionKind::Trace => entry.start + 12,
+            _ => entry.start + 4,
+        };
+        let current = peek_u32(&bytes[end_offset_field..end_offset_field + 4]);
+        let patched = if delta >= 0 {
+            current
+                .checked_add(delta as u32)
+                .expect("end offset patch should not overflow")
+        } else {
+            current
+                .checked_sub(delta.unsigned_abs())
+                .expect("end offset patch should not underflow")
+        };
+        bytes[end_offset_field..end_offset_field + 4].copy_from_slice(&patched.to_be_bytes());
+    }
+
+    fn patch_section_trailing_word(bytes: &mut [u8], kind: SectionKind, trailing_word: u32) {
+        let toc = parse_toc(bytes).expect("fixture must contain valid TOC");
+        let entry = toc
+            .section(kind)
+            .expect("fixture must contain the requested section");
+        assert!(
+            entry.end + 4 <= bytes.len(),
+            "fixture must have room for one trailing word after section"
+        );
+        bytes[entry.end..entry.end + 4].copy_from_slice(&trailing_word.to_be_bytes());
+        patch_section_end_offset(bytes, kind, 4);
     }
 
     #[test]
@@ -567,6 +601,38 @@
     }
 
     #[test]
+    fn test_parse_rejects_non_zero_header_trailing_word() {
+        let mut bytes = build_non_windowed_real_psf();
+        patch_section_trailing_word(&mut bytes, SectionKind::Header, 0xDEADBEEF);
+
+        let err = parse_cadence_psf_binary(&bytes)
+            .expect_err("header with explicit non-zero trailing word must fail");
+
+        assert!(
+            err.to_string()
+                .contains("header section has unexpected non-zero trailing bytes"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_parse_rejects_non_zero_type_trailing_word() {
+        let mut bytes = build_non_windowed_real_psf();
+        patch_section_trailing_word(&mut bytes, SectionKind::Type, 0xCAFEBABE);
+
+        let err = parse_cadence_psf_binary(&bytes)
+            .expect_err("type with explicit non-zero trailing word must fail");
+
+        assert!(
+            err.to_string()
+                .contains("type section has unexpected non-zero trailing bytes"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
     fn test_parse_header_preserves_signed_int_values() {
         let mut bytes = build_non_windowed_real_psf();
         patch_header_int(&mut bytes, "PSF sweep points", -2);
@@ -616,7 +682,6 @@
     fn test_header_usize_rejects_fractional_real_values() {
         let mut header = HashMap::new();
         header.insert("PSF sweep points".to_string(), CadencePsfValue::Real(2.5));
-        let err =
-            header_usize(&header, "PSF sweep points").expect_err("fractional counts must fail");
+        let err = header_usize(&header, "PSF sweep points").expect_err("fractional counts must fail");
         assert!(err.to_string().contains("integer count"));
     }
