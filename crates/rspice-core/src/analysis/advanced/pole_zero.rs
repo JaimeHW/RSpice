@@ -77,7 +77,11 @@ impl Complex {
     /// ζ = -Re(p) / |p|
     pub fn damping_factor(&self) -> Value {
         let mag = self.magnitude();
-        if mag > 1e-15 { -self.re / mag } else { 0.0 }
+        if mag > 1e-15 {
+            -self.re / mag
+        } else {
+            0.0
+        }
     }
 
     /// Get time constant (for real pole)
@@ -175,8 +179,8 @@ impl PoleZeroResult {
     pub fn dominant_pole(&self) -> Option<&Complex> {
         self.poles
             .iter()
-            .filter(|p| p.re < 0.0) // Only stable poles
-            .min_by(|a, b| a.re.abs().partial_cmp(&b.re.abs()).unwrap())
+            .filter(|p| p.re.is_finite() && p.re < 0.0) // Only stable finite poles
+            .min_by(|a, b| a.re.abs().total_cmp(&b.re.abs()))
     }
 
     /// Check if system is stable (all poles have negative real parts)
@@ -191,14 +195,40 @@ impl PoleZeroResult {
 
     /// Sort poles by magnitude
     pub fn sort_poles_by_magnitude(&mut self) {
-        self.poles
-            .sort_by(|a, b| a.magnitude().partial_cmp(&b.magnitude()).unwrap());
+        self.poles.sort_by(|a, b| {
+            let a_mag = a.magnitude();
+            let b_mag = b.magnitude();
+            let a_mag = if a_mag.is_finite() {
+                a_mag
+            } else {
+                f64::INFINITY
+            };
+            let b_mag = if b_mag.is_finite() {
+                b_mag
+            } else {
+                f64::INFINITY
+            };
+            a_mag.total_cmp(&b_mag)
+        });
     }
 
     /// Sort zeros by magnitude
     pub fn sort_zeros_by_magnitude(&mut self) {
-        self.zeros
-            .sort_by(|a, b| a.magnitude().partial_cmp(&b.magnitude()).unwrap());
+        self.zeros.sort_by(|a, b| {
+            let a_mag = a.magnitude();
+            let b_mag = b.magnitude();
+            let a_mag = if a_mag.is_finite() {
+                a_mag
+            } else {
+                f64::INFINITY
+            };
+            let b_mag = if b_mag.is_finite() {
+                b_mag
+            } else {
+                f64::INFINITY
+            };
+            a_mag.total_cmp(&b_mag)
+        });
     }
 }
 
@@ -685,7 +715,19 @@ impl PoleZeroAnalyzer {
                 }
             }
         }
-        poles.sort_by(|a, b| a.re.partial_cmp(&b.re).unwrap_or(std::cmp::Ordering::Equal));
+        poles.sort_by(|a, b| {
+            let a_re = if a.re.is_finite() {
+                a.re
+            } else {
+                f64::INFINITY
+            };
+            let b_re = if b.re.is_finite() {
+                b.re
+            } else {
+                f64::INFINITY
+            };
+            a_re.total_cmp(&b_re)
+        });
         poles.dedup_by(|a, b| (a.re - b.re).abs() < 1e-6);
         poles
     }
@@ -732,9 +774,27 @@ impl PoleZeroAnalyzer {
 
     fn dedup_and_sort_roots(&self, roots: &mut Vec<Complex>) {
         roots.sort_by(|a, b| {
-            a.re.partial_cmp(&b.re)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.im.partial_cmp(&b.im).unwrap_or(std::cmp::Ordering::Equal))
+            let a_re = if a.re.is_finite() {
+                a.re
+            } else {
+                f64::INFINITY
+            };
+            let b_re = if b.re.is_finite() {
+                b.re
+            } else {
+                f64::INFINITY
+            };
+            let a_im = if a.im.is_finite() {
+                a.im
+            } else {
+                f64::INFINITY
+            };
+            let b_im = if b.im.is_finite() {
+                b.im
+            } else {
+                f64::INFINITY
+            };
+            a_re.total_cmp(&b_re).then_with(|| a_im.total_cmp(&b_im))
         });
         roots.dedup_by(|a, b| Self::is_same_root(a, b, 1e-8));
     }
@@ -1084,6 +1144,39 @@ mod tests {
     }
 
     #[test]
+    fn test_dominant_pole_ignores_non_finite_real_parts() {
+        let mut result = PoleZeroResult::new("in", "out");
+        result.add_pole(Complex::new(f64::NAN, 0.0));
+        result.add_pole(Complex::new(-500.0, 0.0));
+        result.add_pole(Complex::new(-20.0, 0.0));
+
+        let dominant = result.dominant_pole().expect("finite dominant pole");
+        assert!((dominant.re - (-20.0)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_sort_by_magnitude_demotes_non_finite_entries() {
+        let mut result = PoleZeroResult::new("in", "out");
+        result.add_pole(Complex::new(f64::NAN, 0.0));
+        result.add_pole(Complex::new(-100.0, 0.0));
+        result.add_pole(Complex::new(-10.0, 0.0));
+        result.add_zero(Complex::new(f64::INFINITY, 0.0));
+        result.add_zero(Complex::new(-5.0, 0.0));
+        result.add_zero(Complex::new(-50.0, 0.0));
+
+        result.sort_poles_by_magnitude();
+        result.sort_zeros_by_magnitude();
+
+        assert!((result.poles[0].re - (-10.0)).abs() < 1e-12);
+        assert!((result.poles[1].re - (-100.0)).abs() < 1e-12);
+        assert!(!result.poles[2].re.is_finite());
+
+        assert!((result.zeros[0].re - (-5.0)).abs() < 1e-12);
+        assert!((result.zeros[1].re - (-50.0)).abs() < 1e-12);
+        assert!(!result.zeros[2].re.is_finite());
+    }
+
+    #[test]
     fn test_complex_pole_pairs() {
         let mut result = PoleZeroResult::new("in", "out");
 
@@ -1193,12 +1286,10 @@ mod tests {
         let result = analyzer.analyze(&config);
 
         assert_eq!(result.poles.len(), 2);
-        assert!(
-            result
-                .poles
-                .iter()
-                .all(|p| (p.re + 2.0).abs() < 1e-6 && (p.im.abs() - 10.0).abs() < 1e-5)
-        );
+        assert!(result
+            .poles
+            .iter()
+            .all(|p| (p.re + 2.0).abs() < 1e-6 && (p.im.abs() - 10.0).abs() < 1e-5));
     }
 
     #[test]
@@ -1251,12 +1342,10 @@ mod tests {
             "expected zero near -1.5, got {:?}",
             result.zeros
         );
-        assert!(
-            !result
-                .zeros
-                .iter()
-                .any(|z| (z.re + 3.0).abs() < 1e-3 && z.im.abs() < 1e-3)
-        );
+        assert!(!result
+            .zeros
+            .iter()
+            .any(|z| (z.re + 3.0).abs() < 1e-3 && z.im.abs() < 1e-3));
     }
 
     #[test]
