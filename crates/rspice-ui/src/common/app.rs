@@ -38,7 +38,6 @@
 //! 2. Observable for efficient updates
 //! 3. Serializable for session recovery
 
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use egui::{
@@ -70,6 +69,12 @@ use app_serialization::{PanelSizesSer, PanelVisibilitySer};
 #[path = "app_console.rs"]
 mod app_console;
 pub use app_console::{ConsoleLevel, ConsoleMessage};
+
+#[path = "app_veriloga_library.rs"]
+mod app_veriloga_library;
+use app_veriloga_library::{
+    restore_global_veriloga_library, save_global_veriloga_library, VERILOGA_LIBRARY_NAME,
+};
 
 /// Main application state container
 #[derive(Clone)]
@@ -221,68 +226,6 @@ impl AppState {
         self.console_messages.clear();
         self.log_buffer.clear();
     }
-}
-
-const VERILOGA_LIBRARY_NAME: &str = "veriloga";
-const VERILOGA_LIBRARY_CONFIG_FILE: &str = "veriloga_library.json";
-const VERILOGA_LIBRARY_FORMAT_VERSION: u32 = 1;
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct PersistedVerilogALibrary {
-    version: u32,
-    library: crate::state::Library,
-}
-
-fn global_veriloga_library_path() -> PathBuf {
-    dirs::config_dir()
-        .or_else(dirs::home_dir)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("rspice")
-        .join(VERILOGA_LIBRARY_CONFIG_FILE)
-}
-
-fn load_global_veriloga_library() -> Option<crate::state::Library> {
-    let path = global_veriloga_library_path();
-    if !path.exists() {
-        return None;
-    }
-
-    let text = std::fs::read_to_string(&path).ok()?;
-    let parsed: PersistedVerilogALibrary = serde_json::from_str(&text).ok()?;
-    if parsed.version != VERILOGA_LIBRARY_FORMAT_VERSION {
-        return None;
-    }
-    Some(parsed.library)
-}
-
-fn save_global_veriloga_library(
-    library_manager: &crate::state::LibraryManager,
-) -> Result<(), String> {
-    let Some(library) = library_manager.get_library(VERILOGA_LIBRARY_NAME) else {
-        return Ok(());
-    };
-
-    let path = global_veriloga_library_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-
-    let persisted = PersistedVerilogALibrary {
-        version: VERILOGA_LIBRARY_FORMAT_VERSION,
-        library: library.clone(),
-    };
-    let json = serde_json::to_string_pretty(&persisted).map_err(|e| e.to_string())?;
-    std::fs::write(path, json).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-fn restore_global_veriloga_library(library_manager: &mut crate::state::LibraryManager) {
-    let Some(mut library) = load_global_veriloga_library() else {
-        return;
-    };
-    library.name = VERILOGA_LIBRARY_NAME.to_string();
-    library.read_only = false;
-    library_manager.add_library(library);
 }
 
 fn apply_component_property_edits(
