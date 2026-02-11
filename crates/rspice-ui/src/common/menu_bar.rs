@@ -7,6 +7,8 @@ use egui::{menu, Ui};
 
 use crate::common::{app::AppState, simulation_analysis_tabs};
 
+#[path = "menu_bar_edit_menu.rs"]
+mod menu_bar_edit_menu;
 #[path = "menu_bar_export_actions.rs"]
 mod menu_bar_export_actions;
 #[path = "menu_bar_file_actions.rs"]
@@ -94,89 +96,8 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
         // EDIT MENU
         // =====================================================================
         ui.menu_button("Edit", |ui| {
-            if ui.button("Undo        Ctrl+Z").clicked() {
-                if state.schematic.can_undo() {
-                    let desc = state
-                        .schematic
-                        .undo_description()
-                        .unwrap_or("action")
-                        .to_string();
-                    if state.schematic.undo() {
-                        state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
-                            "Undo: {}",
-                            desc
-                        )));
-                    }
-                } else {
-                    state.push_user_message(crate::common::app::ConsoleMessage::info(
-                        "Nothing to undo",
-                    ));
-                }
-                ui.close_menu();
-            }
-            if ui.button("Redo        Ctrl+Y").clicked() {
-                if state.schematic.can_redo() {
-                    let desc = state
-                        .schematic
-                        .redo_description()
-                        .unwrap_or("action")
-                        .to_string();
-                    if state.schematic.redo() {
-                        state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
-                            "Redo: {}",
-                            desc
-                        )));
-                    }
-                } else {
-                    state.push_user_message(crate::common::app::ConsoleMessage::info(
-                        "Nothing to redo",
-                    ));
-                }
-                ui.close_menu();
-            }
-
-            ui.separator();
-
-            if ui.button("Cut         Ctrl+X").clicked() {
-                state.schematic.copy_selection();
-                state.schematic.delete_selection();
-                ui.close_menu();
-            }
-            if ui.button("Copy        Ctrl+C").clicked() {
-                state.schematic.copy_selection();
-                ui.close_menu();
-            }
-            if ui.button("Paste       Ctrl+V").clicked() {
-                use crate::state::Point;
-                state.schematic.paste_at(Point::new(200, 200));
-                ui.close_menu();
-            }
-            if ui.button("Delete      Del").clicked() {
-                state.schematic.delete_selection();
-                ui.close_menu();
-            }
-
-            ui.separator();
-
-            if ui.button("Select All  Ctrl+A").clicked() {
-                state.schematic.selection.clear();
-                for comp in &state.schematic.components {
-                    state.schematic.selection.select_component(comp.id);
-                }
-                for wire in &state.schematic.wires {
-                    state.schematic.selection.select_wire(wire.id);
-                }
-                ui.close_menu();
-            }
-
-            if ui.button("Duplicate   Ctrl+D").clicked() {
-                use crate::state::Point;
-                state.schematic.copy_selection();
-                state.schematic.paste_at(Point::new(220, 220));
-                ui.close_menu();
-            }
+            menu_bar_edit_menu::render_edit_menu(ui, state);
         });
-
         // =====================================================================
         // VIEW MENU
         // =====================================================================
