@@ -100,6 +100,9 @@ mod app_workspace_layout;
 #[path = "app_veriloga_workflow.rs"]
 mod app_veriloga_workflow;
 
+#[path = "app_pdk_workflow.rs"]
+mod app_pdk_workflow;
+
 /// Main application state container
 #[derive(Clone)]
 pub struct AppState {
@@ -385,86 +388,7 @@ impl eframe::App for RSpiceApp {
         // Property Dialog (commercial-grade tabbed property editor)
         crate::panels::render_property_dialog(ctx, &mut self.state);
 
-        // PDK Settings Dialog
-        {
-            let result =
-                crate::panels::render_pdk_settings_dialog(ctx, &mut self.state.pdk_settings_dialog);
-            match result {
-                crate::panels::PdkSettingsDialogResult::Applied(config) => {
-                    // Load models from the updated PDK configuration
-                    match self
-                        .state
-                        .model_library_manager
-                        .load_from_pdk_config(&config)
-                    {
-                        Ok(count) => {
-                            self.state.pdk_config = config;
-                            let _ = self.state.pdk_config.save();
-                            self.state.push_user_message(ConsoleMessage::info(format!(
-                                "PDK settings applied: {} libraries loaded",
-                                count
-                            )));
-                        }
-                        Err(errors) => {
-                            self.state.pdk_config = config;
-                            let _ = self.state.pdk_config.save();
-                            self.state
-                                .push_user_message(ConsoleMessage::warning(format!(
-                                    "PDK settings applied with {} errors",
-                                    errors.len()
-                                )));
-                            for err in errors {
-                                self.state.push_user_message(ConsoleMessage::error(err));
-                            }
-                        }
-                    }
-                }
-                crate::panels::PdkSettingsDialogResult::LoadFile(path) => {
-                    // Load a single model file
-                    match self
-                        .state
-                        .model_library_manager
-                        .load_library_file(&path, None)
-                    {
-                        Ok(lib_name) => {
-                            // Track in recent files
-                            self.state.pdk_config.add_recent_file(&path);
-                            let _ = self.state.pdk_config.save();
-
-                            self.state.push_user_message(ConsoleMessage::info(format!(
-                                "Loaded library '{}' from {}",
-                                lib_name,
-                                path.display()
-                            )));
-
-                            // Log model count
-                            if let Some(lib) =
-                                self.state.model_library_manager.get_library(&lib_name)
-                            {
-                                self.state.push_user_message(ConsoleMessage::info(format!(
-                                    "  {} models, {} corners available",
-                                    lib.model_count(),
-                                    lib.corner_count()
-                                )));
-                            }
-                        }
-                        Err(err) => {
-                            self.state.push_user_message(ConsoleMessage::error(format!(
-                                "Failed to load {}: {}",
-                                path.display(),
-                                err
-                            )));
-                        }
-                    }
-                }
-                crate::panels::PdkSettingsDialogResult::Cancelled => {
-                    // User cancelled - no action needed
-                }
-                crate::panels::PdkSettingsDialogResult::None => {
-                    // Dialog still open, no action
-                }
-            }
-        }
+        self.process_pdk_settings_dialog(ctx);
 
         self.render_simulation_setup_dialog(ctx);
 
