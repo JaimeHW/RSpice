@@ -581,6 +581,33 @@
     }
 
     #[test]
+    fn test_parse_non_windowed_rejects_trace_count_mismatch() {
+        let mut header = HashMap::new();
+        header.insert("PSF sweep points".to_string(), CadencePsfValue::Int(0));
+        header.insert("PSF traces".to_string(), CadencePsfValue::Int(2));
+
+        let sweeps = Vec::new();
+        let flat_traces = vec![SignalRef {
+            id: 1,
+            name: "V(out)".to_string(),
+            type_id: DataType::Real.to_u32(),
+        }];
+        let types = HashMap::new();
+        let mut values = HashMap::new();
+
+        let err = parse_non_windowed_values(
+            &[],
+            &header,
+            &sweeps,
+            &flat_traces,
+            &types,
+            &mut values,
+        )
+        .expect_err("mismatched trace count must fail");
+        assert!(err.to_string().contains("trace count mismatch"));
+    }
+
+    #[test]
     fn test_parse_windowed_rejects_trace_count_mismatch() {
         let mut bytes = build_windowed_real_psf();
         patch_header_int(&mut bytes, "PSF traces", 2);

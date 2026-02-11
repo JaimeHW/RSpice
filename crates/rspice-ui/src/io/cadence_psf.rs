@@ -479,6 +479,16 @@ fn parse_non_windowed_values<'a>(
     values: &mut HashMap<u32, Vec<SignalChannel>>,
 ) -> Result<&'a [u8], CadencePsfError> {
     let sweep_points = header_usize(header, "PSF sweep points")?;
+    if header.contains_key("PSF traces") {
+        let num_traces = header_usize(header, "PSF traces")?;
+        if num_traces != flat_traces.len() {
+            return Err(CadencePsfError::new(format!(
+                "non-windowed PSF trace count mismatch: header={}, decoded={}",
+                num_traces,
+                flat_traces.len()
+            )));
+        }
+    }
     let sweep_id = sweeps.first().map(|s| s.id);
     let mut channel_index_cache = build_channel_index_cache(values);
 
