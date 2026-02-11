@@ -18,7 +18,7 @@
     use super::*;
     use std::collections::HashMap;
 
-    fn patch_header_int(bytes: &mut [u8], key: &str, value: u32) {
+    fn patch_header_int(bytes: &mut [u8], key: &str, value: i32) {
         let toc = parse_toc(bytes).expect("fixture must contain valid TOC");
         let entry = toc
             .section(SectionKind::Header)
@@ -567,10 +567,38 @@
     }
 
     #[test]
+    fn test_parse_header_preserves_signed_int_values() {
+        let mut bytes = build_non_windowed_real_psf();
+        patch_header_int(&mut bytes, "PSF sweep points", -2);
+
+        let toc = parse_toc(&bytes).expect("fixture must contain valid TOC");
+        let header = parse_header(
+            &bytes,
+            toc.section(SectionKind::Header)
+                .expect("fixture must contain header section"),
+        )
+        .expect("header parse should succeed");
+
+        assert_eq!(
+            header.get("PSF sweep points"),
+            Some(&CadencePsfValue::Int(-2))
+        );
+    }
+
+    #[test]
     fn test_header_usize_accepts_integral_real_values() {
         let mut header = HashMap::new();
         header.insert("PSF sweep points".to_string(), CadencePsfValue::Real(8.0));
         assert_eq!(header_usize(&header, "PSF sweep points").unwrap(), 8);
+    }
+
+    #[test]
+    fn test_header_usize_rejects_negative_int_values() {
+        let mut header = HashMap::new();
+        header.insert("PSF sweep points".to_string(), CadencePsfValue::Int(-1));
+        let err = header_usize(&header, "PSF sweep points")
+            .expect_err("negative integer header counts must fail");
+        assert!(err.to_string().contains("non-negative integer count"));
     }
 
     #[test]

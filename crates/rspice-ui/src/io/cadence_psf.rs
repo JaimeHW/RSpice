@@ -703,7 +703,7 @@ fn parse_named_value(cursor: &mut &[u8]) -> Result<(String, CadencePsfValue), Ca
     let name = parse_string(cursor)?;
     let value = match block {
         33 => CadencePsfValue::Text(parse_string(cursor)?),
-        34 => CadencePsfValue::Int(read_u32(cursor)? as i64),
+        34 => CadencePsfValue::Int(read_i32(cursor)? as i64),
         35 => CadencePsfValue::Real(read_f64(cursor)?),
         other => {
             return Err(CadencePsfError::new(format!(
