@@ -6,6 +6,7 @@
 //!
 //! Follows commercial EDA conventions (particularly Cadence Virtuoso):
 //! - R: Rotate
+//! - Shift+R: Place Resistor
 //! - H: Mirror Horizontal  
 //! - Y: Mirror Vertical (since V is Voltage source)
 //! - E: Edit Properties
@@ -110,7 +111,7 @@ pub enum ShortcutCommand {
     // -------------------------------------------------------------------------
     // Transform Commands (no modifiers, schematic mode only)
     // -------------------------------------------------------------------------
-    /// Rotate selection/preview 90° CW (R) - when something selected
+    /// Rotate selection/preview 90-degree CW (R)
     Rotate,
     /// Mirror horizontal - flip about Y axis (H)
     MirrorHorizontal,
@@ -207,7 +208,7 @@ impl ShortcutCommand {
             Self::ToolSelect => "S",
             Self::ToolWire => "W",
             Self::ToolProbe => "P",
-            Self::PlaceResistor => "R",
+            Self::PlaceResistor => "Shift+R",
             Self::PlaceCapacitor => "C",
             Self::PlaceInductor => "L",
             Self::PlaceVoltageSource => "V",
@@ -393,6 +394,14 @@ fn process_function_key_shortcuts(ctx: &Context) -> Option<ShortcutCommand> {
 }
 
 /// Process schematic-specific shortcuts (no modifiers)
+fn resolve_r_shortcut(shift_pressed: bool) -> ShortcutCommand {
+    if shift_pressed {
+        ShortcutCommand::PlaceResistor
+    } else {
+        ShortcutCommand::Rotate
+    }
+}
+
 fn process_schematic_shortcuts_impl(
     ctx: &Context,
     _shortcut_ctx: ShortcutContext,
@@ -414,10 +423,9 @@ fn process_schematic_shortcuts_impl(
             return Some(ShortcutCommand::ToolProbe);
         }
 
-        // R key: Rotate if selection, otherwise (could place resistor in future)
+        // R key: rotate by default, Shift+R places resistor.
         if i.key_pressed(Key::R) {
-            // Always rotate (R for resistor uses menu/toolbar)
-            return Some(ShortcutCommand::Rotate);
+            return Some(resolve_r_shortcut(i.modifiers.shift));
         }
 
         // Transform shortcuts
@@ -593,8 +601,15 @@ mod tests {
         assert_eq!(ShortcutCommand::FileNew.shortcut_string(), "Ctrl+N");
         assert_eq!(ShortcutCommand::EditCopy.shortcut_string(), "Ctrl+C");
         assert_eq!(ShortcutCommand::ToolWire.shortcut_string(), "W");
+        assert_eq!(ShortcutCommand::PlaceResistor.shortcut_string(), "Shift+R");
         assert_eq!(ShortcutCommand::Rotate.shortcut_string(), "R");
         assert_eq!(ShortcutCommand::Cancel.shortcut_string(), "Escape");
+    }
+
+    #[test]
+    fn test_resolve_r_shortcut_behavior() {
+        assert_eq!(resolve_r_shortcut(false), ShortcutCommand::Rotate);
+        assert_eq!(resolve_r_shortcut(true), ShortcutCommand::PlaceResistor);
     }
 
     #[test]
