@@ -8,7 +8,6 @@ use rspice_core::netlist::{
 use rspice_core::solver::SimulationResult as CoreSimulationResult;
 use rspice_core::Value;
 
-#[path = "sweep_points.rs"]
 mod sweep_points;
 use sweep_points::{expand_step_sweep_values, extract_temp_points};
 
