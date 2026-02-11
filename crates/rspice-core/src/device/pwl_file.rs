@@ -35,6 +35,8 @@ pub enum PwlFileError {
     EmptyData,
     /// Time values not monotonically increasing
     NonMonotonic,
+    /// Non-finite time/value data encountered
+    NonFiniteData,
 }
 
 impl std::fmt::Display for PwlFileError {
@@ -45,6 +47,7 @@ impl std::fmt::Display for PwlFileError {
             PwlFileError::WavError(s) => write!(f, "WAV error: {}", s),
             PwlFileError::EmptyData => write!(f, "No data points found"),
             PwlFileError::NonMonotonic => write!(f, "Time values must be monotonically increasing"),
+            PwlFileError::NonFiniteData => write!(f, "Time/value data must be finite"),
         }
     }
 }
@@ -89,6 +92,9 @@ impl PwlWaveform {
         let mut values = Vec::with_capacity(points.len());
 
         for (t, v) in points {
+            if !t.is_finite() || !v.is_finite() {
+                return Err(PwlFileError::NonFiniteData);
+            }
             if !times.is_empty() && t <= *times.last().unwrap() {
                 return Err(PwlFileError::NonMonotonic);
             }
@@ -125,22 +131,41 @@ impl PwlWaveform {
     ///
     /// Uses binary search for O(log n) performance on large waveforms.
     pub fn value_at(&self, time: Value) -> Value {
+        let scaled_start = self.values[0] * self.value_scale + self.value_offset;
+        let scaled_end = self.values.last().copied().unwrap_or(self.values[0]) * self.value_scale
+            + self.value_offset;
+
+        if !time.is_finite() {
+            return if time.is_sign_positive() {
+                scaled_end
+            } else {
+                scaled_start
+            };
+        }
+        if !self.time_scale.is_finite() || self.time_scale.abs() <= Value::EPSILON {
+            return scaled_start;
+        }
+
         // Apply time scaling and offset
         let t = (time - self.time_offset) / self.time_scale;
+        if !t.is_finite() {
+            return if t.is_sign_positive() {
+                scaled_end
+            } else {
+                scaled_start
+            };
+        }
 
         // Handle edge cases
         if t <= self.times[0] {
-            return self.values[0] * self.value_scale + self.value_offset;
+            return scaled_start;
         }
         if t >= *self.times.last().unwrap() {
-            return self.values.last().unwrap() * self.value_scale + self.value_offset;
+            return scaled_end;
         }
 
         // Binary search for the interval
-        match self
-            .times
-            .binary_search_by(|probe| probe.partial_cmp(&t).unwrap())
-        {
+        match self.times.binary_search_by(|probe| probe.total_cmp(&t)) {
             Ok(idx) => {
                 // Exact match
                 self.values[idx] * self.value_scale + self.value_offset
@@ -152,7 +177,14 @@ impl PwlWaveform {
                 let v0 = self.values[idx - 1];
                 let v1 = self.values[idx];
 
-                let frac = (t - t0) / (t1 - t0);
+                let dt = t1 - t0;
+                if !dt.is_finite() || dt.abs() <= Value::EPSILON {
+                    return v0 * self.value_scale + self.value_offset;
+                }
+                let frac = (t - t0) / dt;
+                if !frac.is_finite() {
+                    return v0 * self.value_scale + self.value_offset;
+                }
                 let v = v0 + frac * (v1 - v0);
                 v * self.value_scale + self.value_offset
             }
@@ -209,6 +241,9 @@ pub fn load_csv<P: AsRef<Path>>(path: P) -> Result<Vec<(Value, Value)>, PwlFileE
         if parts.len() >= 2 {
             match (parts[0].parse::<f64>(), parts[1].parse::<f64>()) {
                 (Ok(time), Ok(value)) => {
+                    if !time.is_finite() || !value.is_finite() {
+                        return Err(PwlFileError::NonFiniteData);
+                    }
                     points.push((time, value));
                 }
                 _ => {
@@ -408,6 +443,13 @@ mod tests {
     }
 
     #[test]
+    fn test_pwl_waveform_non_finite_data_rejected() {
+        let points = vec![(0.0, 0.0), (f64::NAN, 1.0)];
+        let result = PwlWaveform::new(points);
+        assert!(matches!(result, Err(PwlFileError::NonFiniteData)));
+    }
+
+    #[test]
     fn test_pwl_interpolation() {
         let points = vec![(0.0, 0.0), (1.0, 10.0), (2.0, 5.0)];
         let waveform = PwlWaveform::new(points).unwrap();
@@ -442,6 +484,23 @@ mod tests {
 
         // At t=2.0, scaled time is 1.0, value is 1.0*5.0+1.0 = 6.0
         assert!((waveform.value_at(2.0) - 6.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_pwl_value_at_handles_non_finite_query_time() {
+        let points = vec![(0.0, 10.0), (1.0, 20.0)];
+        let waveform = PwlWaveform::new(points).unwrap();
+        assert!((waveform.value_at(f64::NEG_INFINITY) - 10.0).abs() < 1e-10);
+        assert!((waveform.value_at(f64::INFINITY) - 20.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_pwl_value_at_handles_invalid_time_scale() {
+        let points = vec![(0.0, 10.0), (1.0, 20.0)];
+        let waveform = PwlWaveform::new(points)
+            .unwrap()
+            .with_scaling(0.0, 1.0, 0.0, 0.0);
+        assert!((waveform.value_at(0.5) - 10.0).abs() < 1e-10);
     }
 
     #[test]

@@ -242,6 +242,10 @@ impl BreakpointManager {
 
     /// Add a breakpoint at the given time
     pub fn add(&mut self, time: Value) {
+        if !time.is_finite() {
+            return;
+        }
+
         // Check if already exists (within tolerance)
         for &bp in &self.breakpoints {
             if (bp - time).abs() < self.tolerance {
@@ -250,10 +254,7 @@ impl BreakpointManager {
         }
 
         // Insert in sorted order
-        match self
-            .breakpoints
-            .binary_search_by(|t| t.partial_cmp(&time).unwrap())
-        {
+        match self.breakpoints.binary_search_by(|t| t.total_cmp(&time)) {
             Ok(_) => {} // Already exists
             Err(pos) => self.breakpoints.insert(pos, time),
         }
@@ -437,6 +438,18 @@ mod tests {
 
         let bps = mgr.in_interval(0.5e-9, 2.5e-9);
         assert_eq!(bps.len(), 2);
+    }
+
+    #[test]
+    fn test_breakpoint_manager_ignores_non_finite_breakpoints() {
+        let mut mgr = BreakpointManager::new();
+        mgr.add(1.0e-9);
+        mgr.add(f64::NAN);
+        mgr.add(f64::INFINITY);
+        mgr.add(-f64::INFINITY);
+
+        let bps = mgr.in_interval(0.0, 2.0e-9);
+        assert_eq!(bps, vec![1.0e-9]);
     }
 
     #[test]
