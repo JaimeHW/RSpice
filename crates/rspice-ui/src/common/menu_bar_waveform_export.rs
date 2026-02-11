@@ -23,7 +23,7 @@ pub(super) fn action_export_csv(state: &mut AppState) {
 
     match dialog.save_file() {
         Some(mut path) => {
-            super::ensure_file_extension(&mut path, "csv");
+            super::menu_bar_file_actions::ensure_file_extension(&mut path, "csv");
 
             let writer = crate::io::WaveformWriter::new(crate::io::WaveformFormat::Csv);
             match writer.write(&prepared.dataset, &path) {

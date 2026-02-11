@@ -7,6 +7,8 @@ use egui::{menu, Ui};
 
 use crate::common::app::AppState;
 
+#[path = "menu_bar_file_actions.rs"]
+mod menu_bar_file_actions;
 #[path = "menu_bar_netlist_compat.rs"]
 mod menu_bar_netlist_compat;
 #[path = "menu_bar_veriloga_cache.rs"]
@@ -25,22 +27,22 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
         // =====================================================================
         ui.menu_button("File", |ui| {
             if ui.button("New").clicked() {
-                action_file_new(state);
+                menu_bar_file_actions::action_file_new(state);
                 ui.close_menu();
             }
             if ui.button("Open...").clicked() {
-                action_file_open(state);
+                menu_bar_file_actions::action_file_open(state);
                 ui.close_menu();
             }
 
             ui.separator();
 
             if ui.button("Save").clicked() {
-                action_file_save(state);
+                menu_bar_file_actions::action_file_save(state);
                 ui.close_menu();
             }
             if ui.button("Save As...").clicked() {
-                action_file_save_as(state);
+                menu_bar_file_actions::action_file_save_as(state);
                 ui.close_menu();
             }
 
@@ -676,126 +678,6 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
 // Action Handlers (for menu-specific logic)
 // =============================================================================
 
-fn action_file_new(state: &mut AppState) {
-    if state.schematic.is_dirty {
-        log::warn!("New schematic requested but current has unsaved changes");
-    }
-    state.schematic = crate::state::SchematicState::default();
-    state.push_user_message(crate::common::app::ConsoleMessage::info(
-        "Created new schematic",
-    ));
-}
-
-fn action_file_open(state: &mut AppState) {
-    use crate::io::{load_schematic, show_open_dialog, SchematicIoError};
-
-    match show_open_dialog() {
-        Ok(path) => match load_schematic(&path) {
-            Ok(schematic) => {
-                state.schematic = schematic;
-                state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
-                    "Opened: {}",
-                    path.display()
-                )));
-            }
-            Err(e) => {
-                state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
-                    "Failed to open: {}",
-                    e
-                )));
-            }
-        },
-        Err(SchematicIoError::Cancelled) => {
-            // User cancelled - no message needed
-        }
-        Err(e) => {
-            state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
-                "Open failed: {}",
-                e
-            )));
-        }
-    }
-}
-
-fn action_file_save(state: &mut AppState) {
-    use crate::io::{save_schematic, SchematicIoError};
-
-    // If we have a current file path, save directly
-    // Otherwise, show Save As dialog
-    if let Some(ref path) = state.schematic.current_file.clone() {
-        match save_schematic(&state.schematic, path) {
-            Ok(()) => {
-                state.schematic.is_dirty = false;
-                state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
-                    "Saved: {}",
-                    path.display()
-                )));
-            }
-            Err(e) => {
-                state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
-                    "Save failed: {}",
-                    e
-                )));
-            }
-        }
-    } else {
-        // No current file - do Save As
-        action_file_save_as(state);
-    }
-}
-
-fn action_file_save_as(state: &mut AppState) {
-    use crate::io::{save_schematic, show_save_dialog, SchematicIoError};
-
-    // Get default filename from current file or use "untitled"
-    let default_name = state
-        .schematic
-        .current_file
-        .as_ref()
-        .and_then(|p| p.file_name())
-        .map(|n| n.to_string_lossy().to_string());
-
-    match show_save_dialog(default_name.as_deref()) {
-        Ok(path) => match save_schematic(&state.schematic, &path) {
-            Ok(()) => {
-                state.schematic.current_file = Some(path.clone());
-                state.schematic.is_dirty = false;
-                state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
-                    "Saved: {}",
-                    path.display()
-                )));
-            }
-            Err(e) => {
-                state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
-                    "Save failed: {}",
-                    e
-                )));
-            }
-        },
-        Err(SchematicIoError::Cancelled) => {
-            // User cancelled - no message needed
-        }
-        Err(e) => {
-            state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
-                "Save As failed: {}",
-                e
-            )));
-        }
-    }
-}
-
-fn has_file_extension(path: &std::path::Path, expected_ext: &str) -> bool {
-    path.extension()
-        .and_then(std::ffi::OsStr::to_str)
-        .is_some_and(|ext| ext.eq_ignore_ascii_case(expected_ext))
-}
-
-fn ensure_file_extension(path: &mut std::path::PathBuf, expected_ext: &str) {
-    if !has_file_extension(path, expected_ext) {
-        path.set_extension(expected_ext);
-    }
-}
-
 fn action_export_svg(state: &mut AppState) {
     use crate::schematic::export::{export_to_svg, SvgExportConfig};
 
@@ -821,7 +703,7 @@ fn action_export_svg(state: &mut AppState) {
     match dialog.save_file() {
         Some(mut path) => {
             // Ensure .svg extension
-            ensure_file_extension(&mut path, "svg");
+            menu_bar_file_actions::ensure_file_extension(&mut path, "svg");
 
             match std::fs::write(&path, &svg_content) {
                 Ok(()) => {
@@ -882,7 +764,7 @@ fn action_export_netlist(state: &mut AppState, format: crate::io::NetlistFormat)
     match dialog.save_file() {
         Some(mut path) => {
             // Ensure correct extension
-            ensure_file_extension(&mut path, format.extension());
+            menu_bar_file_actions::ensure_file_extension(&mut path, format.extension());
 
             match std::fs::write(&path, &netlist_content) {
                 Ok(()) => {
@@ -968,50 +850,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_action_file_new_clears_schematic() {
-        let mut state = AppState::default();
-
-        // Add a component using correct API
-        use crate::state::{Component, ComponentType, Point};
-        let comp = Component::new(1, ComponentType::Resistor, Point::new(100, 100))
-            .with_name_value("R1", "1k");
-        state.schematic.components.push(comp);
-        assert!(!state.schematic.components.is_empty());
-
-        // New schematic
-        action_file_new(&mut state);
-
-        assert!(state.schematic.components.is_empty());
-        assert!(!state.console_messages.is_empty());
-    }
-
-    #[test]
-    fn test_has_file_extension_case_insensitive() {
-        assert!(has_file_extension(
-            std::path::Path::new("schematic.SVG"),
-            "svg"
-        ));
-        assert!(!has_file_extension(
-            std::path::Path::new("schematic.raw"),
-            "svg"
-        ));
-    }
-
-    #[test]
-    fn test_ensure_file_extension_appends_missing_extension() {
-        let mut path = std::path::PathBuf::from("waveforms");
-        ensure_file_extension(&mut path, "csv");
-        assert_eq!(path, std::path::PathBuf::from("waveforms.csv"));
-    }
-
-    #[test]
-    fn test_ensure_file_extension_replaces_mismatched_extension() {
-        let mut path = std::path::PathBuf::from("results.txt");
-        ensure_file_extension(&mut path, "csv");
-        assert_eq!(path, std::path::PathBuf::from("results.csv"));
-    }
-
-    #[test]
     fn test_action_view_netlist_uses_generated_schematic_netlist() {
         let mut state = AppState::default();
         use crate::state::{Component, ComponentType, Point};
@@ -1030,9 +868,4 @@ mod tests {
             "legacy placeholder node names must not appear"
         );
     }
-
-    // NOTE: action_file_open, action_file_save, and action_file_save_as
-    // cannot be tested here because they open native file dialogs which
-    // would block in a headless test environment. The underlying I/O
-    // functions are thoroughly tested in io::schematic_io::tests.
 }
