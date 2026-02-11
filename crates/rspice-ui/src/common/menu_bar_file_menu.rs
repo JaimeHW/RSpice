@@ -1,6 +1,7 @@
 use egui::Ui;
 
 use crate::common::app::{AppState, ConfirmationAction};
+use crate::common::file_workflow::FileWorkflowIo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FileMenuAction {
@@ -16,24 +17,28 @@ enum FileMenuAction {
     Exit,
 }
 
-pub(super) fn render_file_menu(ui: &mut Ui, state: &mut AppState) {
+pub(super) fn render_file_menu(
+    ui: &mut Ui,
+    state: &mut AppState,
+    file_workflow_io: &(impl FileWorkflowIo + ?Sized),
+) {
     if ui.button("New").clicked() {
-        dispatch_file_menu_action(state, FileMenuAction::New);
+        dispatch_file_menu_action(state, FileMenuAction::New, file_workflow_io);
         ui.close_menu();
     }
     if ui.button("Open...").clicked() {
-        dispatch_file_menu_action(state, FileMenuAction::Open);
+        dispatch_file_menu_action(state, FileMenuAction::Open, file_workflow_io);
         ui.close_menu();
     }
 
     ui.separator();
 
     if ui.button("Save").clicked() {
-        dispatch_file_menu_action(state, FileMenuAction::Save);
+        dispatch_file_menu_action(state, FileMenuAction::Save, file_workflow_io);
         ui.close_menu();
     }
     if ui.button("Save As...").clicked() {
-        dispatch_file_menu_action(state, FileMenuAction::SaveAs);
+        dispatch_file_menu_action(state, FileMenuAction::SaveAs, file_workflow_io);
         ui.close_menu();
     }
 
@@ -41,22 +46,22 @@ pub(super) fn render_file_menu(ui: &mut Ui, state: &mut AppState) {
 
     ui.menu_button("Export", |ui| {
         if ui.button("SVG...").clicked() {
-            dispatch_file_menu_action(state, FileMenuAction::ExportSvg);
+            dispatch_file_menu_action(state, FileMenuAction::ExportSvg, file_workflow_io);
             ui.close_menu();
         }
         if ui.button("PDF...").clicked() {
-            dispatch_file_menu_action(state, FileMenuAction::ExportPdf);
+            dispatch_file_menu_action(state, FileMenuAction::ExportPdf, file_workflow_io);
             ui.close_menu();
         }
         if ui.button("CSV (Waveforms)...").clicked() {
-            dispatch_file_menu_action(state, FileMenuAction::ExportCsvWaveforms);
+            dispatch_file_menu_action(state, FileMenuAction::ExportCsvWaveforms, file_workflow_io);
             ui.close_menu();
         }
     });
 
     ui.menu_button("Import", |ui| {
         if ui.button("Verilog-A Model...").clicked() {
-            dispatch_file_menu_action(state, FileMenuAction::ImportVerilogA);
+            dispatch_file_menu_action(state, FileMenuAction::ImportVerilogA, file_workflow_io);
             ui.close_menu();
         }
     });
@@ -64,19 +69,23 @@ pub(super) fn render_file_menu(ui: &mut Ui, state: &mut AppState) {
     ui.separator();
 
     if ui.button("Preferences...").clicked() {
-        dispatch_file_menu_action(state, FileMenuAction::OpenPreferences);
+        dispatch_file_menu_action(state, FileMenuAction::OpenPreferences, file_workflow_io);
         ui.close_menu();
     }
 
     ui.separator();
 
     if ui.button("Exit").clicked() {
-        dispatch_file_menu_action(state, FileMenuAction::Exit);
+        dispatch_file_menu_action(state, FileMenuAction::Exit, file_workflow_io);
         ui.close_menu();
     }
 }
 
-fn dispatch_file_menu_action(state: &mut AppState, action: FileMenuAction) {
+fn dispatch_file_menu_action(
+    state: &mut AppState,
+    action: FileMenuAction,
+    file_workflow_io: &(impl FileWorkflowIo + ?Sized),
+) {
     match action {
         FileMenuAction::New => {
             if require_save_confirmation_if_dirty(state, ConfirmationAction::FileNew) {
@@ -88,10 +97,15 @@ fn dispatch_file_menu_action(state: &mut AppState, action: FileMenuAction) {
             if require_save_confirmation_if_dirty(state, ConfirmationAction::FileOpen) {
                 return;
             }
-            super::menu_bar_file_actions::action_file_open(state);
+            super::menu_bar_file_actions::action_file_open_with_io(state, file_workflow_io);
         }
-        FileMenuAction::Save => super::menu_bar_file_actions::action_file_save(state),
-        FileMenuAction::SaveAs => super::menu_bar_file_actions::action_file_save_as(state),
+        FileMenuAction::Save => {
+            let _ = super::menu_bar_file_actions::action_file_save_with_io(state, file_workflow_io);
+        }
+        FileMenuAction::SaveAs => {
+            let _ =
+                super::menu_bar_file_actions::action_file_save_as_with_io(state, file_workflow_io);
+        }
         FileMenuAction::ExportSvg => super::menu_bar_export_actions::action_export_svg(state),
         FileMenuAction::ExportPdf => open_pdf_export_dialog(state),
         FileMenuAction::ExportCsvWaveforms => {
@@ -133,6 +147,89 @@ fn request_exit(state: &mut AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::{Cell, RefCell};
+    use std::collections::VecDeque;
+    use std::path::{Path, PathBuf};
+
+    #[derive(Default)]
+    struct MockFileMenuWorkflowIo {
+        open_dialog_results: RefCell<VecDeque<Result<PathBuf, crate::io::SchematicIoError>>>,
+        save_dialog_results: RefCell<VecDeque<Result<PathBuf, crate::io::SchematicIoError>>>,
+        load_results:
+            RefCell<VecDeque<Result<crate::state::SchematicState, crate::io::SchematicIoError>>>,
+        save_results: RefCell<VecDeque<Result<(), crate::io::SchematicIoError>>>,
+        open_dialog_calls: Cell<usize>,
+        save_dialog_calls: Cell<usize>,
+        load_calls: Cell<usize>,
+        save_calls: Cell<usize>,
+    }
+
+    impl MockFileMenuWorkflowIo {
+        fn push_open_dialog_result(&self, result: Result<PathBuf, crate::io::SchematicIoError>) {
+            self.open_dialog_results.borrow_mut().push_back(result);
+        }
+
+        fn push_save_dialog_result(&self, result: Result<PathBuf, crate::io::SchematicIoError>) {
+            self.save_dialog_results.borrow_mut().push_back(result);
+        }
+
+        fn push_load_result(
+            &self,
+            result: Result<crate::state::SchematicState, crate::io::SchematicIoError>,
+        ) {
+            self.load_results.borrow_mut().push_back(result);
+        }
+
+        fn push_save_result(&self, result: Result<(), crate::io::SchematicIoError>) {
+            self.save_results.borrow_mut().push_back(result);
+        }
+    }
+
+    impl FileWorkflowIo for MockFileMenuWorkflowIo {
+        fn show_open_dialog(&self) -> Result<PathBuf, crate::io::SchematicIoError> {
+            self.open_dialog_calls
+                .set(self.open_dialog_calls.get().saturating_add(1));
+            self.open_dialog_results
+                .borrow_mut()
+                .pop_front()
+                .expect("test must provide show_open_dialog result")
+        }
+
+        fn show_save_dialog(
+            &self,
+            _default_name: Option<&str>,
+        ) -> Result<PathBuf, crate::io::SchematicIoError> {
+            self.save_dialog_calls
+                .set(self.save_dialog_calls.get().saturating_add(1));
+            self.save_dialog_results
+                .borrow_mut()
+                .pop_front()
+                .expect("test must provide show_save_dialog result")
+        }
+
+        fn load_schematic(
+            &self,
+            _path: &Path,
+        ) -> Result<crate::state::SchematicState, crate::io::SchematicIoError> {
+            self.load_calls.set(self.load_calls.get().saturating_add(1));
+            self.load_results
+                .borrow_mut()
+                .pop_front()
+                .expect("test must provide load_schematic result")
+        }
+
+        fn save_schematic(
+            &self,
+            _schematic: &crate::state::SchematicState,
+            _path: &Path,
+        ) -> Result<(), crate::io::SchematicIoError> {
+            self.save_calls.set(self.save_calls.get().saturating_add(1));
+            self.save_results
+                .borrow_mut()
+                .pop_front()
+                .expect("test must provide save_schematic result")
+        }
+    }
 
     #[test]
     fn test_open_pdf_export_dialog_sets_visibility() {
@@ -239,8 +336,9 @@ mod tests {
             Point::new(100, 100),
         ));
         let component_count_before = state.schematic.components.len();
+        let io = MockFileMenuWorkflowIo::default();
 
-        dispatch_file_menu_action(&mut state, FileMenuAction::New);
+        dispatch_file_menu_action(&mut state, FileMenuAction::New, &io);
 
         assert_eq!(state.schematic.components.len(), component_count_before);
         assert!(state.dialogs.confirmation_dialog.visible);
@@ -261,8 +359,9 @@ mod tests {
             ComponentType::Resistor,
             Point::new(100, 100),
         ));
+        let io = MockFileMenuWorkflowIo::default();
 
-        dispatch_file_menu_action(&mut state, FileMenuAction::New);
+        dispatch_file_menu_action(&mut state, FileMenuAction::New, &io);
 
         assert!(state.schematic.components.is_empty());
         assert!(
@@ -286,8 +385,9 @@ mod tests {
             Point::new(100, 100),
         ));
         let component_count_before = state.schematic.components.len();
+        let io = MockFileMenuWorkflowIo::default();
 
-        dispatch_file_menu_action(&mut state, FileMenuAction::Open);
+        dispatch_file_menu_action(&mut state, FileMenuAction::Open, &io);
 
         assert_eq!(state.schematic.components.len(), component_count_before);
         assert!(state.dialogs.confirmation_dialog.visible);
@@ -295,5 +395,68 @@ mod tests {
             state.dialogs.confirmation_dialog.pending_action,
             Some(ConfirmationAction::FileOpen)
         );
+    }
+
+    #[test]
+    fn test_dispatch_file_menu_action_open_clean_executes_injected_open_flow() {
+        use crate::state::{ComponentType, Point};
+
+        let io = MockFileMenuWorkflowIo::default();
+        io.push_open_dialog_result(Ok(PathBuf::from("menu-dispatch-open.rsch")));
+        let mut loaded = crate::state::SchematicState::default();
+        loaded.add_component(ComponentType::Capacitor, Point::new(12, 34));
+        loaded.current_file = Some(PathBuf::from("menu-dispatch-open.rsch"));
+        loaded.is_dirty = false;
+        io.push_load_result(Ok(loaded));
+
+        let mut state = AppState::default();
+        state.schematic.is_dirty = false;
+
+        dispatch_file_menu_action(&mut state, FileMenuAction::Open, &io);
+
+        assert_eq!(io.open_dialog_calls.get(), 1);
+        assert_eq!(io.load_calls.get(), 1);
+        assert_eq!(state.schematic.components.len(), 1);
+        assert_eq!(state.schematic.components[0].kind, ComponentType::Capacitor);
+    }
+
+    #[test]
+    fn test_dispatch_file_menu_action_save_without_current_file_uses_save_as_path() {
+        use crate::state::{ComponentType, Point};
+
+        let io = MockFileMenuWorkflowIo::default();
+        io.push_save_dialog_result(Ok(PathBuf::from("menu-save-as-target.rsch")));
+        io.push_save_result(Ok(()));
+
+        let mut state = AppState::default();
+        state.schematic.is_dirty = true;
+        state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(1, 1));
+
+        dispatch_file_menu_action(&mut state, FileMenuAction::Save, &io);
+
+        assert_eq!(io.save_dialog_calls.get(), 1);
+        assert_eq!(io.save_calls.get(), 1);
+        assert_eq!(
+            state.schematic.current_file,
+            Some(PathBuf::from("menu-save-as-target.rsch"))
+        );
+        assert!(!state.schematic.is_dirty);
+    }
+
+    #[test]
+    fn test_dispatch_file_menu_action_save_as_cancel_keeps_dirty_state() {
+        let io = MockFileMenuWorkflowIo::default();
+        io.push_save_dialog_result(Err(crate::io::SchematicIoError::Cancelled));
+
+        let mut state = AppState::default();
+        state.schematic.is_dirty = true;
+
+        dispatch_file_menu_action(&mut state, FileMenuAction::SaveAs, &io);
+
+        assert_eq!(io.save_dialog_calls.get(), 1);
+        assert_eq!(io.save_calls.get(), 0);
+        assert!(state.schematic.is_dirty);
     }
 }

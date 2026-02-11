@@ -312,7 +312,8 @@ impl eframe::App for RSpiceApp {
                     .inner_margin(egui::Margin::symmetric(8.0, 4.0)),
             )
             .show(ctx, |ui| {
-                super::menu_bar::render_menu_bar(ui, &mut self.state);
+                let (state, file_workflow_io) = (&mut self.state, self.file_workflow_io.as_ref());
+                super::menu_bar::render_menu_bar(ui, state, file_workflow_io);
             });
 
         // =====================================================================

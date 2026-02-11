@@ -6,6 +6,7 @@
 use egui::{menu, Ui};
 
 use crate::common::app::AppState;
+use crate::common::file_workflow::FileWorkflowIo;
 
 #[path = "menu_bar_edit_menu.rs"]
 mod menu_bar_edit_menu;
@@ -33,7 +34,11 @@ mod menu_bar_view_menu;
 mod menu_bar_waveform_export;
 
 /// Render the menu bar
-pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
+pub(crate) fn render_menu_bar(
+    ui: &mut Ui,
+    state: &mut AppState,
+    file_workflow_io: &(impl FileWorkflowIo + ?Sized),
+) {
     // Add spacing between menu items for a cleaner look
     ui.spacing_mut().item_spacing.x = 8.0;
 
@@ -42,7 +47,7 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
         // FILE MENU
         // =====================================================================
         ui.menu_button("File", |ui| {
-            menu_bar_file_menu::render_file_menu(ui, state);
+            menu_bar_file_menu::render_file_menu(ui, state, file_workflow_io);
         });
 
         // =====================================================================
