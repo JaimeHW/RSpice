@@ -16,55 +16,31 @@ use rspice_core::netlist::{Element, ElementKind, StepSweep};
 use rspice_core::solver::SimulationResult as CoreSimulationResult;
 use rspice_core::{SimulationConfigOverrides, Value, resolve_simulation_config};
 
-#[path = "simulation_runner/harmonic_basis.rs"]
 mod harmonic_basis;
 use harmonic_basis::{build_disto_two_tone_harmonic_plan, build_multi_tone_hb_layout};
 
-#[path = "simulation_runner/ac.rs"]
 mod ac;
-#[path = "simulation_runner/dc_sweep.rs"]
 mod dc_sweep;
-#[path = "simulation_runner/disto.rs"]
 mod disto;
-#[path = "simulation_runner/envelope_fourier.rs"]
 mod envelope_fourier;
-#[path = "simulation_runner/hb.rs"]
 mod hb;
-#[path = "simulation_runner/helpers.rs"]
 mod helpers;
-#[path = "simulation_runner/monte_carlo.rs"]
 mod monte_carlo;
-#[path = "simulation_runner/noise.rs"]
 mod noise;
-#[path = "simulation_runner/optimization.rs"]
 mod optimization;
-#[path = "simulation_runner/pac_pxf.rs"]
 mod pac_pxf;
-#[path = "simulation_runner/pnoise.rs"]
 mod pnoise;
-#[path = "simulation_runner/pnoise_sideband.rs"]
 mod pnoise_sideband;
-#[path = "simulation_runner/pole_zero.rs"]
 mod pole_zero;
-#[path = "simulation_runner/pss.rs"]
 mod pss;
-#[path = "simulation_runner/pstb.rs"]
 mod pstb;
-#[path = "simulation_runner/reliability.rs"]
 mod reliability;
-#[path = "simulation_runner/sensitivity.rs"]
 mod sensitivity;
-#[path = "simulation_runner/soa.rs"]
 mod soa;
-#[path = "simulation_runner/sparameter.rs"]
 mod sparameter;
-#[path = "simulation_runner/stb.rs"]
 mod stb;
-#[path = "simulation_runner/sweeps.rs"]
 mod sweeps;
-#[path = "simulation_runner/tf.rs"]
 mod tf;
-#[path = "simulation_runner/transient.rs"]
 mod transient;
 pub use ac::{AcData, run_ac_analysis};
 pub use dc_sweep::{DcSweepData, run_dc_sweep};
@@ -211,5 +187,4 @@ fn build_engine_config(
 // =============================================================================
 
 #[cfg(test)]
-#[path = "simulation_runner/tests.rs"]
 mod tests;
