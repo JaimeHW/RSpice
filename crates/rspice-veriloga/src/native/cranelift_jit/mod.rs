@@ -101,7 +101,7 @@ pub struct EvalContext {
 /// # Safety
 /// This function is called from JIT-compiled code with valid pointers
 #[unsafe(export_name = "rspice_table_lookup")]
-pub extern "C" fn rspice_table_lookup(
+pub unsafe extern "C" fn rspice_table_lookup(
     tables_ptr: *const crate::codegen::LookupTable,
     tables_len: usize,
     table_id: usize,
@@ -122,7 +122,7 @@ pub extern "C" fn rspice_table_lookup(
 /// # Safety
 /// This function is called from JIT-compiled code with valid pointers
 #[unsafe(export_name = "rspice_limit")]
-pub extern "C" fn rspice_limit(
+pub unsafe extern "C" fn rspice_limit(
     state_prev: *const f64,
     state_idx: usize,
     new_value: f64,
@@ -173,7 +173,7 @@ pub extern "C" fn rspice_limexp(x: f64) -> f64 {
 /// # Safety
 /// This function is called from JIT-compiled code with valid pointers
 #[unsafe(export_name = "rspice_laplace_step")]
-pub extern "C" fn rspice_laplace_step(
+pub unsafe extern "C" fn rspice_laplace_step(
     filters_ptr: *mut crate::laplace::StateSpaceFilter,
     filters_len: usize,
     filter_id: usize,

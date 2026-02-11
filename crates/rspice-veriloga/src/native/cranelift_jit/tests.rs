@@ -65,7 +65,7 @@ fn laplace_step_test(
     timestep: f64,
 ) -> f64 {
     // This wrapper provides a test-friendly interface to the JIT helper function
-    rspice_laplace_step(filters_ptr, filters_len, filter_id, input, timestep)
+    unsafe { rspice_laplace_step(filters_ptr, filters_len, filter_id, input, timestep) }
 }
 
 #[test]
