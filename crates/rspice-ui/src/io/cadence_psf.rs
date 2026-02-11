@@ -1232,3 +1232,7 @@ pub(crate) mod test_helpers;
 #[cfg(test)]
 #[path = "cadence_psf/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cadence_psf/malformed_tests.rs"]
+mod malformed_tests;
