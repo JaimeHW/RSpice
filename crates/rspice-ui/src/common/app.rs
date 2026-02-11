@@ -77,6 +77,9 @@ mod app_shortcuts;
 #[path = "app_actions.rs"]
 mod app_actions;
 
+#[path = "app_file_actions.rs"]
+mod app_file_actions;
+
 #[path = "app_icon_rail.rs"]
 mod app_icon_rail;
 
