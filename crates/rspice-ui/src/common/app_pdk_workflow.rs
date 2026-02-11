@@ -4,9 +4,20 @@ use egui::Context;
 
 use super::{AppState, ConsoleMessage, RSpiceApp};
 
-fn persist_pdk_config(state: &mut AppState, config: crate::state::pdk_config::PdkConfig) {
+fn persist_pdk_config(
+    state: &mut AppState,
+    config: crate::state::pdk_config::PdkConfig,
+) -> Result<(), String> {
     state.pdk_config = config;
-    let _ = state.pdk_config.save();
+    state.pdk_config.save().map_err(|err| err.to_string())
+}
+
+fn emit_pdk_save_warning(state: &mut AppState, operation: &str, error: impl AsRef<str>) {
+    state.push_user_message(ConsoleMessage::warning(format!(
+        "PDK configuration {} but could not be persisted: {}",
+        operation,
+        error.as_ref()
+    )));
 }
 
 fn emit_pdk_apply_messages(state: &mut AppState, load_result: Result<usize, Vec<String>>) {
@@ -36,7 +47,9 @@ fn emit_pdk_file_load_success_message(
     library_stats: Option<(usize, usize)>,
 ) {
     state.pdk_config.add_recent_file(path);
-    let _ = state.pdk_config.save();
+    if let Err(err) = state.pdk_config.save() {
+        emit_pdk_save_warning(state, "was updated", err.to_string());
+    }
 
     state.push_user_message(ConsoleMessage::info(format!(
         "Loaded library '{}' from {}",
@@ -70,7 +83,9 @@ impl RSpiceApp {
                     .state
                     .model_library_manager
                     .load_from_pdk_config(&config);
-                persist_pdk_config(&mut self.state, config);
+                if let Err(err) = persist_pdk_config(&mut self.state, config) {
+                    emit_pdk_save_warning(&mut self.state, "was applied", err);
+                }
                 emit_pdk_apply_messages(&mut self.state, load_result);
             }
             crate::panels::PdkSettingsDialogResult::LoadFile(path) => {
@@ -207,6 +222,25 @@ mod tests {
         assert_eq!(
             state.console_messages[0].message,
             "Failed to load models/missing.lib: file not found".to_string()
+        );
+    }
+
+    #[test]
+    fn test_emit_pdk_save_warning_message_contains_operation_context() {
+        let mut state = AppState::default();
+        state.clear_primary_log();
+
+        emit_pdk_save_warning(&mut state, "was applied", "permission denied");
+
+        assert_eq!(state.console_messages.len(), 1);
+        assert_eq!(
+            state.console_messages[0].level,
+            super::super::ConsoleLevel::Warning
+        );
+        assert_eq!(
+            state.console_messages[0].message,
+            "PDK configuration was applied but could not be persisted: permission denied"
+                .to_string()
         );
     }
 }
