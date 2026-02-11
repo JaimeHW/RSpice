@@ -94,11 +94,7 @@ pub(super) fn render_view_menu(ui: &mut Ui, state: &mut AppState) {
     ui.menu_button("Specialized Viewers", |ui| {
         for viewer in ActiveViewer::all() {
             let is_active = state.active_viewer == *viewer;
-            let label = if is_active {
-                format!("âœ“ {}", viewer.name())
-            } else {
-                format!("  {}", viewer.name())
-            };
+            let label = checkmark_label(is_active, viewer.name());
 
             if ui.button(&label).clicked() {
                 activate_specialized_viewer(state, *viewer);
@@ -110,9 +106,9 @@ pub(super) fn render_view_menu(ui: &mut Ui, state: &mut AppState) {
 
 fn checkmark_label(enabled: bool, label: &str) -> String {
     if enabled {
-        format!("âœ“ {}", label)
+        format!("[x] {}", label)
     } else {
-        format!("  {}", label)
+        format!("[ ] {}", label)
     }
 }
 
@@ -178,6 +174,18 @@ mod tests {
                 .iter()
                 .any(|msg| msg.message.contains("Switched to Eye Diagram viewer")),
             "expected viewer-switch message"
+        );
+    }
+
+    #[test]
+    fn test_checkmark_label_formats_ascii_state_prefixes() {
+        assert_eq!(
+            checkmark_label(true, "Signal Browser"),
+            "[x] Signal Browser"
+        );
+        assert_eq!(
+            checkmark_label(false, "Signal Browser"),
+            "[ ] Signal Browser"
         );
     }
 }
