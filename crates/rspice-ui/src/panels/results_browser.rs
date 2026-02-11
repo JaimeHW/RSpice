@@ -15,9 +15,9 @@
 
 use egui::{CollapsingHeader, RichText, Ui};
 
-use crate::common::app::{AppState, BottomPanelTab};
+use crate::common::analysis_navigation;
+use crate::common::app::AppState;
 use crate::state::AnalysisType;
-use crate::viewers::ActiveViewer;
 
 // =============================================================================
 // Public API
@@ -130,8 +130,9 @@ pub fn render_results_browser(ui: &mut Ui, state: &mut AppState) {
 
                     // Switch to appropriate viewer tab
                     state.panels.bottom_panel = true;
-                    state.panels.active_bottom_tab = analysis_type_to_tab(analysis_type);
-                    state.active_viewer = analysis_type_to_viewer(analysis_type);
+                    state.panels.active_bottom_tab =
+                        analysis_navigation::preferred_bottom_tab(analysis_type);
+                    state.active_viewer = analysis_navigation::preferred_viewer(analysis_type);
                 }
             }
         });
@@ -270,7 +271,7 @@ fn render_analysis(
     };
 
     // Build analysis label with type icon
-    let type_icon = analysis_type_icon(analysis.analysis_type);
+    let type_icon = analysis_navigation::analysis_icon(analysis.analysis_type);
     let status_icon = if analysis.success { "" } else { " ⚠" };
     let data_icon = if analysis.has_data { "" } else { " (no data)" };
 
@@ -309,99 +310,6 @@ fn render_analysis(
     ));
 
     response
-}
-
-// =============================================================================
-// Helper Functions
-// =============================================================================
-
-/// Get icon for analysis type (using ASCII-safe abbreviations)
-fn analysis_type_icon(analysis_type: AnalysisType) -> &'static str {
-    match analysis_type {
-        AnalysisType::DcOp => "[OP]",
-        AnalysisType::DcSweep => "[DC]",
-        AnalysisType::Ac => "[AC]",
-        AnalysisType::Disto => "[DI]",
-        AnalysisType::Transient => "[TR]",
-        AnalysisType::Noise => "[NO]",
-        AnalysisType::PoleZero => "[PZ]",
-        AnalysisType::Tf => "[TF]",
-        AnalysisType::Sensitivity => "[SN]",
-        AnalysisType::Pac => "[PAC]",
-        AnalysisType::Pnoise => "[PN]",
-        AnalysisType::Pxf => "[PXF]",
-        AnalysisType::Pstb => "[PSB]",
-        AnalysisType::Stb => "[STB]",
-        AnalysisType::MonteCarlo => "[MC]",
-        AnalysisType::Parametric => "[PA]",
-        AnalysisType::Corner => "[CR]",
-        AnalysisType::Reliability => "[REL]",
-        AnalysisType::Optimization => "[OPT]",
-        AnalysisType::Soa => "[SOA]",
-        AnalysisType::SParameter => "[SP]",
-        AnalysisType::Envelope => "[ENV]",
-        AnalysisType::Fourier => "[FOU]",
-        AnalysisType::HarmonicBalance => "[HB]",
-        AnalysisType::Pss => "[PS]",
-    }
-}
-
-/// Map analysis type to appropriate bottom panel tab
-fn analysis_type_to_tab(analysis_type: AnalysisType) -> BottomPanelTab {
-    match analysis_type {
-        AnalysisType::DcOp => BottomPanelTab::Log,
-        AnalysisType::DcSweep => BottomPanelTab::Waveform,
-        AnalysisType::Ac => BottomPanelTab::Waveform, // AC uses waveform viewer for now
-        AnalysisType::Disto => BottomPanelTab::Waveform,
-        AnalysisType::Transient => BottomPanelTab::Waveform,
-        AnalysisType::Noise => BottomPanelTab::Waveform,
-        AnalysisType::PoleZero => BottomPanelTab::Waveform, // PoleZero uses waveform viewer for now
-        AnalysisType::Tf => BottomPanelTab::Waveform,
-        AnalysisType::Sensitivity => BottomPanelTab::Waveform,
-        AnalysisType::Pac => BottomPanelTab::Waveform,
-        AnalysisType::Pnoise => BottomPanelTab::Waveform,
-        AnalysisType::Pxf => BottomPanelTab::Waveform,
-        AnalysisType::Pstb => BottomPanelTab::Waveform,
-        AnalysisType::Stb => BottomPanelTab::Waveform,
-        AnalysisType::MonteCarlo => BottomPanelTab::Waveform,
-        AnalysisType::Parametric => BottomPanelTab::Waveform,
-        AnalysisType::Corner => BottomPanelTab::Waveform,
-        AnalysisType::Reliability => BottomPanelTab::Waveform,
-        AnalysisType::Optimization => BottomPanelTab::Waveform,
-        AnalysisType::Soa => BottomPanelTab::Waveform,
-        AnalysisType::SParameter => BottomPanelTab::Waveform,
-        AnalysisType::Envelope => BottomPanelTab::Waveform,
-        AnalysisType::Fourier => BottomPanelTab::Waveform,
-        AnalysisType::HarmonicBalance => BottomPanelTab::Waveform,
-        AnalysisType::Pss => BottomPanelTab::Waveform,
-    }
-}
-
-fn analysis_type_to_viewer(analysis_type: AnalysisType) -> ActiveViewer {
-    match analysis_type {
-        AnalysisType::DcOp => ActiveViewer::Waveform,
-        AnalysisType::DcSweep | AnalysisType::Transient | AnalysisType::Envelope => {
-            ActiveViewer::Waveform
-        }
-        AnalysisType::Ac
-        | AnalysisType::Disto
-        | AnalysisType::Tf
-        | AnalysisType::Pac
-        | AnalysisType::Pxf => ActiveViewer::BodePlot,
-        AnalysisType::Noise | AnalysisType::Pnoise => ActiveViewer::BodePlot,
-        AnalysisType::PoleZero => ActiveViewer::PoleZero,
-        AnalysisType::Sensitivity => ActiveViewer::Waveform,
-        AnalysisType::Pstb | AnalysisType::Stb => ActiveViewer::Nyquist,
-        AnalysisType::MonteCarlo | AnalysisType::Corner | AnalysisType::Parametric => {
-            ActiveViewer::Histogram
-        }
-        AnalysisType::Reliability | AnalysisType::Optimization | AnalysisType::Soa => {
-            ActiveViewer::Waveform
-        }
-        AnalysisType::SParameter => ActiveViewer::SmithChart,
-        AnalysisType::Fourier => ActiveViewer::Fft,
-        AnalysisType::HarmonicBalance | AnalysisType::Pss => ActiveViewer::Waveform,
-    }
 }
 
 // =============================================================================
@@ -444,7 +352,7 @@ mod tests {
         ];
 
         for t in types {
-            let icon = analysis_type_icon(t);
+            let icon = analysis_navigation::analysis_icon(t);
             assert!(!icon.is_empty(), "Missing icon for {:?}", t);
         }
     }
@@ -482,43 +390,43 @@ mod tests {
 
         for t in types {
             // Just verify it doesn't panic
-            let _ = analysis_type_to_tab(t);
+            let _ = analysis_navigation::preferred_bottom_tab(t);
         }
     }
 
     #[test]
     fn test_analysis_type_to_tab_routes_dcop_to_log() {
         assert_eq!(
-            analysis_type_to_tab(AnalysisType::DcOp),
-            BottomPanelTab::Log
+            analysis_navigation::preferred_bottom_tab(AnalysisType::DcOp),
+            crate::common::app::BottomPanelTab::Log
         );
     }
 
     #[test]
     fn test_analysis_type_to_viewer_routes_specialized_views() {
         assert_eq!(
-            analysis_type_to_viewer(AnalysisType::Ac),
-            ActiveViewer::BodePlot
+            analysis_navigation::preferred_viewer(AnalysisType::Ac),
+            crate::viewers::ActiveViewer::BodePlot
         );
         assert_eq!(
-            analysis_type_to_viewer(AnalysisType::Disto),
-            ActiveViewer::BodePlot
+            analysis_navigation::preferred_viewer(AnalysisType::Disto),
+            crate::viewers::ActiveViewer::BodePlot
         );
         assert_eq!(
-            analysis_type_to_viewer(AnalysisType::SParameter),
-            ActiveViewer::SmithChart
+            analysis_navigation::preferred_viewer(AnalysisType::SParameter),
+            crate::viewers::ActiveViewer::SmithChart
         );
         assert_eq!(
-            analysis_type_to_viewer(AnalysisType::Fourier),
-            ActiveViewer::Fft
+            analysis_navigation::preferred_viewer(AnalysisType::Fourier),
+            crate::viewers::ActiveViewer::Fft
         );
         assert_eq!(
-            analysis_type_to_viewer(AnalysisType::PoleZero),
-            ActiveViewer::PoleZero
+            analysis_navigation::preferred_viewer(AnalysisType::PoleZero),
+            crate::viewers::ActiveViewer::PoleZero
         );
         assert_eq!(
-            analysis_type_to_viewer(AnalysisType::MonteCarlo),
-            ActiveViewer::Histogram
+            analysis_navigation::preferred_viewer(AnalysisType::MonteCarlo),
+            crate::viewers::ActiveViewer::Histogram
         );
     }
 }

@@ -17,6 +17,7 @@
 //! - Theme provides consistent styling across all components
 
 pub mod app;
+pub mod analysis_navigation;
 pub mod examples;
 pub(crate) mod export_workflow;
 pub(crate) mod file_workflow;

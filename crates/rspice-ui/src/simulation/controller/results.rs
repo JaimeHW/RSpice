@@ -1048,31 +1048,6 @@ impl SimulationController {
     pub(super) fn preferred_viewer_for_analysis(
         analysis_type: AnalysisType,
     ) -> crate::viewers::ActiveViewer {
-        match analysis_type {
-            AnalysisType::DcOp => crate::viewers::ActiveViewer::Waveform,
-            AnalysisType::DcSweep | AnalysisType::Transient | AnalysisType::Envelope => {
-                crate::viewers::ActiveViewer::Waveform
-            }
-            AnalysisType::Ac
-            | AnalysisType::Disto
-            | AnalysisType::Tf
-            | AnalysisType::Pac
-            | AnalysisType::Pxf => crate::viewers::ActiveViewer::BodePlot,
-            AnalysisType::Noise | AnalysisType::Pnoise => crate::viewers::ActiveViewer::BodePlot,
-            AnalysisType::PoleZero => crate::viewers::ActiveViewer::PoleZero,
-            AnalysisType::Sensitivity => crate::viewers::ActiveViewer::Waveform,
-            AnalysisType::Pstb | AnalysisType::Stb => crate::viewers::ActiveViewer::Nyquist,
-            AnalysisType::MonteCarlo | AnalysisType::Corner | AnalysisType::Parametric => {
-                crate::viewers::ActiveViewer::Histogram
-            }
-            AnalysisType::Reliability | AnalysisType::Optimization | AnalysisType::Soa => {
-                crate::viewers::ActiveViewer::Waveform
-            }
-            AnalysisType::SParameter => crate::viewers::ActiveViewer::SmithChart,
-            AnalysisType::Fourier => crate::viewers::ActiveViewer::Fft,
-            AnalysisType::HarmonicBalance | AnalysisType::Pss => {
-                crate::viewers::ActiveViewer::Waveform
-            }
-        }
+        crate::common::analysis_navigation::preferred_viewer(analysis_type)
     }
 }
