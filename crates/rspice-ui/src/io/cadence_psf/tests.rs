@@ -112,6 +112,23 @@
         patch_section_end_offset(bytes, kind, 4);
     }
 
+    fn inject_value_section_trailing_word(bytes: &mut Vec<u8>, trailing_word: u32) {
+        let old_toc_offset = peek_u32(&bytes[bytes.len() - 4..]) as usize;
+        assert!(
+            old_toc_offset <= bytes.len() - 4,
+            "invalid TOC offset in fixture"
+        );
+
+        bytes.splice(old_toc_offset..old_toc_offset, trailing_word.to_be_bytes());
+
+        let new_toc_offset = old_toc_offset + 4;
+        let toc_offset_field = bytes.len() - 4;
+        bytes[toc_offset_field..toc_offset_field + 4]
+            .copy_from_slice(&(new_toc_offset as u32).to_be_bytes());
+
+        patch_section_end_offset(bytes.as_mut_slice(), SectionKind::Value, 4);
+    }
+
     #[test]
     fn test_parse_non_windowed_real_psf_binary() {
         let bytes = build_non_windowed_real_psf();
@@ -627,6 +644,38 @@
         assert!(
             err.to_string()
                 .contains("type section has unexpected non-zero trailing bytes"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_parse_rejects_non_zero_value_trailing_word_non_windowed() {
+        let mut bytes = build_non_windowed_real_psf();
+        inject_value_section_trailing_word(&mut bytes, 0xBADDCAFE);
+
+        let err = parse_cadence_psf_binary(&bytes)
+            .expect_err("non-windowed value section with trailing non-zero word must fail");
+
+        assert!(
+            err.to_string()
+                .contains("value section has unexpected non-zero trailing bytes"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_parse_rejects_non_zero_value_trailing_word_windowed() {
+        let mut bytes = build_windowed_real_psf();
+        inject_value_section_trailing_word(&mut bytes, 0xFEEDFACE);
+
+        let err = parse_cadence_psf_binary(&bytes)
+            .expect_err("windowed value section with trailing non-zero word must fail");
+
+        assert!(
+            err.to_string()
+                .contains("value section has unexpected non-zero trailing bytes"),
             "unexpected error: {}",
             err
         );

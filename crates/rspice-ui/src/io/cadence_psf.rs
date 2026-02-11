@@ -444,7 +444,7 @@ fn parse_values(
     }
 
     if is_windowed {
-        parse_windowed_values(
+        let trailing = parse_windowed_values(
             &file[entry.start + 8..end_of_section],
             header,
             sweeps,
@@ -454,8 +454,9 @@ fn parse_values(
             &mut values,
             &mut type_meta,
         )?;
+        reject_non_zero_trailing_bytes("value", trailing, &[])?;
     } else {
-        parse_non_windowed_values(
+        let trailing = parse_non_windowed_values(
             &file[entry.start + 8..end_of_section],
             header,
             sweeps,
@@ -463,19 +464,20 @@ fn parse_values(
             types,
             &mut values,
         )?;
+        reject_non_zero_trailing_bytes("value", trailing, &[])?;
     }
 
     Ok(values)
 }
 
-fn parse_non_windowed_values(
-    mut cursor: &[u8],
+fn parse_non_windowed_values<'a>(
+    mut cursor: &'a [u8],
     header: &HashMap<String, CadencePsfValue>,
     sweeps: &[SignalRef],
     flat_traces: &[SignalRef],
     types: &HashMap<u32, TypeDecl>,
     values: &mut HashMap<u32, Vec<SignalChannel>>,
-) -> Result<(), CadencePsfError> {
+) -> Result<&'a [u8], CadencePsfError> {
     let sweep_points = header_usize(header, "PSF sweep points")?;
     let sweep_id = sweeps.first().map(|s| s.id);
     let mut channel_index_cache = build_channel_index_cache(values);
@@ -513,11 +515,11 @@ fn parse_non_windowed_values(
         }
     }
 
-    Ok(())
+    Ok(cursor)
 }
 
-fn parse_windowed_values(
-    mut cursor: &[u8],
+fn parse_windowed_values<'a>(
+    mut cursor: &'a [u8],
     header: &HashMap<String, CadencePsfValue>,
     sweeps: &[SignalRef],
     flat_traces: &[SignalRef],
@@ -525,7 +527,7 @@ fn parse_windowed_values(
     signal_has_dynamic_arrays: &HashMap<u32, bool>,
     values: &mut HashMap<u32, Vec<SignalChannel>>,
     type_meta: &mut TypeMetaCache,
-) -> Result<(), CadencePsfError> {
+) -> Result<&'a [u8], CadencePsfError> {
     let window_size = header_usize(header, "PSF window size")?;
     let num_traces = header_usize(header, "PSF traces")?;
     let sweep_points = header_usize(header, "PSF sweep points")?;
@@ -674,7 +676,7 @@ fn parse_windowed_values(
         count = end_count;
     }
 
-    Ok(())
+    Ok(cursor)
 }
 
 fn parse_group_signals(cursor: &mut &[u8]) -> Result<Vec<SignalRef>, CadencePsfError> {
