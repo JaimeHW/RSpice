@@ -5,7 +5,7 @@
 
 use egui::{menu, Ui};
 
-use crate::common::app::AppState;
+use crate::common::{app::AppState, simulation_analysis_tabs};
 
 #[path = "menu_bar_export_actions.rs"]
 mod menu_bar_export_actions;
@@ -333,22 +333,7 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
 
             // Run Analysis submenu for quick access to specific analyses
             ui.menu_button("Run Analysis", |ui| {
-                let analyses = [
-                    ("DC Operating Point", 0),
-                    ("Transient", 1),
-                    ("AC Analysis", 2),
-                    ("DISTO", 24),
-                    ("DC Sweep", 3),
-                    ("Noise", 4),
-                    ("Pole-Zero", 5),
-                    ("Sensitivity", 6),
-                    ("Monte Carlo", 7),
-                    ("PSS", 8),
-                    ("Stability (STB)", 9),
-                    ("Temperature Sweep", 10),
-                    ("Reliability (Aging)", 21),
-                ];
-                for (name, tab) in analyses {
+                for &(name, tab) in simulation_analysis_tabs::QUICK_RUN_ANALYSES {
                     if ui.button(name).clicked() {
                         state.dialogs.sim_active_tab = tab;
                         if state.schematic.components.is_empty() {
@@ -468,7 +453,7 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
             }
 
             if ui.button("Optimization Engine...").clicked() {
-                state.dialogs.sim_active_tab = 22; // Optimizer tab
+                state.dialogs.sim_active_tab = simulation_analysis_tabs::TAB_OPTIMIZATION;
                 state.dialogs.simulation_dialog = true;
                 ui.close_menu();
             }

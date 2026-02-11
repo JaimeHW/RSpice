@@ -2,60 +2,10 @@ use super::{ConsoleMessage, RSpiceApp};
 use egui::{Color32, Context};
 use std::collections::HashSet;
 
+use crate::common::simulation_analysis_tabs::SIMULATION_ANALYSIS_CATEGORIES;
+
 #[path = "app_simulation_analysis_options.rs"]
 mod app_simulation_analysis_options;
-
-type AnalysisCategory = (&'static str, &'static [(usize, &'static str)]);
-
-const SIMULATION_ANALYSIS_CATEGORIES: &[AnalysisCategory] = &[
-    (
-        "Time & Frequency Domain",
-        &[
-            (1, "Transient"),
-            (2, "AC Analysis"),
-            (3, "DC Sweep"),
-            (0, "DC Operating Point"),
-            (4, "Noise"),
-        ],
-    ),
-    (
-        "Steady-State",
-        &[(8, "PSS (Periodic)"), (11, "Harmonic Balance")],
-    ),
-    (
-        "Periodic Small-Signal",
-        &[(13, "PAC"), (14, "PNoise"), (15, "PXF"), (16, "PSTB")],
-    ),
-    (
-        "Transfer & Stability",
-        &[
-            (5, "Pole-Zero"),
-            (6, "Sensitivity"),
-            (9, "Stability (STB)"),
-            (17, "Transfer Func (XF)"),
-        ],
-    ),
-    ("RF & S-Parameters", &[(12, "S-Parameter")]),
-    (
-        "Statistical & Sweep",
-        &[
-            (7, "Monte Carlo"),
-            (10, "Temperature"),
-            (18, "Corner"),
-            (19, "Envelope"),
-            (20, "Fourier"),
-        ],
-    ),
-    (
-        "Advanced",
-        &[
-            (21, "Reliability"),
-            (22, "Optimization"),
-            (23, "Safety (SOA)"),
-            (24, "DISTO"),
-        ],
-    ),
-];
 
 fn set_default_if_blank(field: &mut String, default: &str) {
     if field.trim().is_empty() {

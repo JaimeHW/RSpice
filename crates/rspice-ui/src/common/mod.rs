@@ -19,6 +19,7 @@
 pub mod app;
 pub mod examples;
 pub mod menu_bar;
+pub mod simulation_analysis_tabs;
 pub mod status_bar;
 pub mod theme;
 
