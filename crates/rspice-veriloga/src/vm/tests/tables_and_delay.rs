@@ -308,6 +308,7 @@ fn test_absdelay_zero_delay() {
 #[test]
 fn test_absdelay_with_buffer() {
     let mut ctx = VmContext::new(2);
+    ctx.analysis_type = 2; // transient
     ctx.time = 2.0;
 
     // Pre-populate delay buffer
@@ -366,6 +367,7 @@ fn test_absdelay_negative_delay() {
 #[test]
 fn test_absdelay_interpolation() {
     let mut ctx = VmContext::new(2);
+    ctx.analysis_type = 2; // transient
     ctx.time = 3.0;
 
     let mut buffer = DelayBuffer::new(10);

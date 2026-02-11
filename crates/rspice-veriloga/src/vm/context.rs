@@ -1,4 +1,4 @@
-use super::filters::DelayBuffer;
+use super::filters::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
 use crate::codegen::LookupTable;
 use crate::laplace::StateSpaceFilter;
 
@@ -32,6 +32,12 @@ pub struct VmContext {
     /// Delay buffers for absdelay function
     /// Each buffer stores (time, value) pairs for interpolation
     pub delay_buffers: Vec<DelayBuffer>,
+    /// Transition filters for `transition(...)` state
+    pub transition_filters: Vec<TransitionFilter>,
+    /// Slew filters for `slew(...)` state
+    pub slew_filters: Vec<SlewFilter>,
+    /// Cross detectors for `cross(...)` state
+    pub cross_detectors: Vec<CrossDetector>,
     /// Current analysis type (0=dc, 1=ac, 2=tran, 3=noise)
     pub analysis_type: u8,
     /// Laplace state-space filters
@@ -54,6 +60,9 @@ impl Default for VmContext {
             timestep: 0.0,
             lookup_tables: Vec::new(),
             delay_buffers: Vec::new(),
+            transition_filters: Vec::new(),
+            slew_filters: Vec::new(),
+            cross_detectors: Vec::new(),
             analysis_type: 0, // DC by default
             laplace_filters: Vec::new(),
         }
@@ -77,6 +86,9 @@ impl VmContext {
             timestep: 0.0,
             lookup_tables: Vec::new(),
             delay_buffers: Vec::new(),
+            transition_filters: Vec::new(),
+            slew_filters: Vec::new(),
+            cross_detectors: Vec::new(),
             analysis_type: 0,
             laplace_filters: Vec::new(),
         }
@@ -98,6 +110,9 @@ impl VmContext {
             timestep: 0.0,
             lookup_tables: Vec::new(),
             delay_buffers: Vec::new(),
+            transition_filters: Vec::new(),
+            slew_filters: Vec::new(),
+            cross_detectors: Vec::new(),
             analysis_type: 0,
             laplace_filters: Vec::new(),
         }
@@ -119,6 +134,9 @@ impl VmContext {
             timestep: 0.0,
             lookup_tables: Vec::new(),
             delay_buffers: Vec::new(),
+            transition_filters: Vec::new(),
+            slew_filters: Vec::new(),
+            cross_detectors: Vec::new(),
             analysis_type: 0,
             laplace_filters: Vec::new(),
         }
@@ -138,6 +156,28 @@ impl VmContext {
     pub fn allocate_states(&mut self, count: usize) {
         self.state_values.resize(count, 0.0);
         self.state_values_prev.resize(count, 0.0);
+    }
+
+    /// Allocate delay buffers used by `absdelay(...)`.
+    pub fn allocate_delay_buffers(&mut self, count: usize) {
+        self.delay_buffers.resize_with(count, DelayBuffer::default);
+    }
+
+    /// Allocate transition filters used by `transition(...)`.
+    pub fn allocate_transition_filters(&mut self, count: usize) {
+        self.transition_filters
+            .resize_with(count, TransitionFilter::default);
+    }
+
+    /// Allocate slew filters used by `slew(...)`.
+    pub fn allocate_slew_filters(&mut self, count: usize) {
+        self.slew_filters.resize_with(count, SlewFilter::default);
+    }
+
+    /// Allocate cross detectors used by `cross(...)`.
+    pub fn allocate_cross_detectors(&mut self, count: usize) {
+        self.cross_detectors
+            .resize_with(count, CrossDetector::default);
     }
 
     /// Clear cached branch current values.

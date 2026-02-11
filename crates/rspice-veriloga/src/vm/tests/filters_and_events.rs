@@ -47,6 +47,100 @@ fn test_transition_vm_dc() {
     );
 }
 
+#[test]
+fn test_transition_vm_transient_ramps_over_rise_time() {
+    let mut ctx = VmContext::new(2);
+    ctx.analysis_type = 2; // transient
+
+    ctx.time = 0.0;
+    let result_t0 = Vm::new(&mut ctx)
+        .execute(&make_program(vec![
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(1.0),
+            Instruction::TransitionState(0),
+        ]))
+        .unwrap();
+    assert!((result_t0 - 0.0).abs() < 1e-12);
+
+    ctx.time = 0.5;
+    let result_t05 = Vm::new(&mut ctx)
+        .execute(&make_program(vec![
+            Instruction::PushConst(10.0),
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(1.0),
+            Instruction::TransitionState(0),
+        ]))
+        .unwrap();
+    assert!((result_t05 - 0.0).abs() < 1e-12);
+
+    ctx.time = 1.0;
+    let result_t10 = Vm::new(&mut ctx)
+        .execute(&make_program(vec![
+            Instruction::PushConst(10.0),
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(1.0),
+            Instruction::TransitionState(0),
+        ]))
+        .unwrap();
+    assert!((result_t10 - 5.0).abs() < 1e-12);
+
+    ctx.time = 1.5;
+    let result_t15 = Vm::new(&mut ctx)
+        .execute(&make_program(vec![
+            Instruction::PushConst(10.0),
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(1.0),
+            Instruction::TransitionState(0),
+        ]))
+        .unwrap();
+    assert!((result_t15 - 10.0).abs() < 1e-12);
+}
+
+#[test]
+fn test_transition_vm_transient_uses_independent_filter_ids() {
+    let mut ctx = VmContext::new(2);
+    ctx.analysis_type = 2; // transient
+
+    ctx.time = 0.0;
+    let _ = Vm::new(&mut ctx)
+        .execute(&make_program(vec![
+            Instruction::PushConst(10.0),
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(1.0),
+            Instruction::TransitionState(0),
+        ]))
+        .unwrap();
+
+    ctx.time = 0.5;
+    let filter0 = Vm::new(&mut ctx)
+        .execute(&make_program(vec![
+            Instruction::PushConst(10.0),
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(1.0),
+            Instruction::TransitionState(0),
+        ]))
+        .unwrap();
+    let filter1 = Vm::new(&mut ctx)
+        .execute(&make_program(vec![
+            Instruction::PushConst(10.0),
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(1.0),
+            Instruction::TransitionState(1),
+        ]))
+        .unwrap();
+
+    assert!((filter0 - 5.0).abs() < 1e-12);
+    assert!((filter1 - 0.0).abs() < 1e-12);
+}
+
 // ========================================================================
 // Slew Filter Tests
 // ========================================================================
@@ -101,6 +195,41 @@ fn test_slew_vm_dc() {
     ]);
     let result = Vm::new(&mut ctx).execute(&program).unwrap();
     assert!((result - 50.0).abs() < 1e-12, "DC slew: input passthrough");
+}
+
+#[test]
+fn test_slew_vm_transient_limits_slope_over_time() {
+    let mut ctx = VmContext::new(2);
+    ctx.analysis_type = 2; // transient
+
+    let positive = make_program(vec![
+        Instruction::PushConst(100.0),
+        Instruction::PushConst(10.0),
+        Instruction::PushConst(10.0),
+        Instruction::SlewState(0),
+    ]);
+
+    ctx.time = 0.0;
+    let t0 = Vm::new(&mut ctx).execute(&positive).unwrap();
+    assert!((t0 - 0.0).abs() < 1e-12);
+
+    ctx.time = 1.0;
+    let t1 = Vm::new(&mut ctx).execute(&positive).unwrap();
+    assert!((t1 - 10.0).abs() < 1e-12);
+
+    ctx.time = 2.0;
+    let t2 = Vm::new(&mut ctx).execute(&positive).unwrap();
+    assert!((t2 - 20.0).abs() < 1e-12);
+
+    let negative = make_program(vec![
+        Instruction::PushConst(-100.0),
+        Instruction::PushConst(10.0),
+        Instruction::PushConst(10.0),
+        Instruction::SlewState(0),
+    ]);
+    ctx.time = 3.0;
+    let t3 = Vm::new(&mut ctx).execute(&negative).unwrap();
+    assert!((t3 - 10.0).abs() < 1e-12);
 }
 
 // ========================================================================
@@ -165,6 +294,69 @@ fn test_cross_vm_dc() {
     ]);
     let result = Vm::new(&mut ctx).execute(&program).unwrap();
     assert!((result - 0.0).abs() < 1e-12, "DC cross: always 0");
+}
+
+#[test]
+fn test_cross_vm_transient_detects_rising_and_falling_edges() {
+    let mut ctx = VmContext::new(2);
+    ctx.analysis_type = 2; // transient
+
+    let rising = |value: f64| {
+        make_program(vec![
+            Instruction::PushConst(value),
+            Instruction::PushConst(1.0),
+            Instruction::CrossState(0),
+        ])
+    };
+    let falling = |value: f64| {
+        make_program(vec![
+            Instruction::PushConst(value),
+            Instruction::PushConst(-1.0),
+            Instruction::CrossState(0),
+        ])
+    };
+
+    ctx.time = 0.0;
+    let t0 = Vm::new(&mut ctx).execute(&rising(-1.0)).unwrap();
+    assert!((t0 - 0.0).abs() < 1e-12);
+
+    ctx.time = 1.0;
+    let t1 = Vm::new(&mut ctx).execute(&rising(1.0)).unwrap();
+    assert!((t1 - 1.0).abs() < 1e-12);
+
+    ctx.time = 2.0;
+    let t2 = Vm::new(&mut ctx).execute(&rising(2.0)).unwrap();
+    assert!((t2 - 0.0).abs() < 1e-12);
+
+    ctx.time = 3.0;
+    let t3 = Vm::new(&mut ctx).execute(&falling(-1.0)).unwrap();
+    assert!((t3 - 1.0).abs() < 1e-12);
+}
+
+#[test]
+fn test_cross_vm_transient_direction_zero_detects_both_edges() {
+    let mut ctx = VmContext::new(2);
+    ctx.analysis_type = 2; // transient
+
+    let both = |value: f64| {
+        make_program(vec![
+            Instruction::PushConst(value),
+            Instruction::PushConst(0.0),
+            Instruction::CrossState(0),
+        ])
+    };
+
+    ctx.time = 0.0;
+    let t0 = Vm::new(&mut ctx).execute(&both(-1.0)).unwrap();
+    assert!((t0 - 0.0).abs() < 1e-12);
+
+    ctx.time = 1.0;
+    let t1 = Vm::new(&mut ctx).execute(&both(1.0)).unwrap();
+    assert!((t1 - 1.0).abs() < 1e-12);
+
+    ctx.time = 2.0;
+    let t2 = Vm::new(&mut ctx).execute(&both(-1.0)).unwrap();
+    assert!((t2 - 1.0).abs() < 1e-12);
 }
 
 // ========================================================================

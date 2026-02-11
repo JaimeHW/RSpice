@@ -270,17 +270,22 @@ impl<'a> Vm<'a> {
                 let delay_time = self.pop()?;
                 let current_value = self.pop()?;
                 let current_time = self.context.time;
+                let is_transient = self.context.analysis_type == 2;
 
-                // Get or create the delay buffer
-                // Note: In practice, delay_buffers should be pre-allocated
-                // For DC analysis, absdelay returns current value (no delay)
-                let result = if delay_time <= 0.0 || current_time == 0.0 {
+                if self.context.delay_buffers.len() <= *buffer_id {
+                    self.context
+                        .delay_buffers
+                        .resize_with(*buffer_id + 1, Default::default);
+                }
+
+                if is_transient {
+                    self.context.delay_buffers[*buffer_id].record(current_time, current_value);
+                }
+
+                let result = if !is_transient || delay_time <= 0.0 {
                     current_value
-                } else if let Some(buffer) = self.context.delay_buffers.get(*buffer_id) {
-                    buffer.get_delayed(current_time, delay_time)
                 } else {
-                    // Buffer not found - return current value
-                    current_value
+                    self.context.delay_buffers[*buffer_id].get_delayed(current_time, delay_time)
                 };
 
                 self.stack.push(result);
@@ -288,20 +293,30 @@ impl<'a> Vm<'a> {
 
             // TransitionState: piecewise-linear signal smoothing
             // Stack: [expr, delay, rise_time, fall_time] -> [filtered]
-            Instruction::TransitionState(_filter_id) => {
+            Instruction::TransitionState(filter_id) => {
                 let fall_time = self.pop()?;
                 let rise_time = self.pop()?;
-                let _delay = self.pop()?;
+                let delay = self.pop()?;
                 let input = self.pop()?;
-                let _time = self.context.time;
+                let time = self.context.time;
+                let is_transient = self.context.analysis_type == 2;
 
-                // For DC analysis or when times are 0, use instantaneous
-                let result = if rise_time <= 0.0 && fall_time <= 0.0 {
+                let result = if !is_transient {
                     input
                 } else {
-                    // Simplified: in steady-state, output equals input
-                    // Full implementation would use TransitionFilter state
-                    input
+                    if self.context.transition_filters.len() <= *filter_id {
+                        self.context
+                            .transition_filters
+                            .resize_with(*filter_id + 1, Default::default);
+                    }
+                    let filter = &mut self.context.transition_filters[*filter_id];
+                    filter.update(
+                        input,
+                        time,
+                        delay.max(0.0),
+                        rise_time.max(0.0),
+                        fall_time.max(0.0),
+                    )
                 };
 
                 self.stack.push(result);
@@ -309,17 +324,33 @@ impl<'a> Vm<'a> {
 
             // SlewState: slew rate limiting
             // Stack: [expr, max_pos_slew, max_neg_slew] -> [limited]
-            Instruction::SlewState(_filter_id) => {
+            Instruction::SlewState(filter_id) => {
                 let max_neg_slew = self.pop()?;
                 let max_pos_slew = self.pop()?;
                 let input = self.pop()?;
+                let time = self.context.time;
+                let is_transient = self.context.analysis_type == 2;
 
-                // For DC analysis or infinite slew, pass through
-                let result = if max_pos_slew.is_infinite() && max_neg_slew.is_infinite() {
+                let result = if !is_transient {
                     input
                 } else {
-                    // Simplified: in steady-state, output equals input
-                    input
+                    if self.context.slew_filters.len() <= *filter_id {
+                        self.context
+                            .slew_filters
+                            .resize_with(*filter_id + 1, Default::default);
+                    }
+                    let filter = &mut self.context.slew_filters[*filter_id];
+                    let max_pos = if max_pos_slew.is_finite() && max_pos_slew > 0.0 {
+                        max_pos_slew
+                    } else {
+                        f64::INFINITY
+                    };
+                    let max_neg = if max_neg_slew.is_finite() && max_neg_slew > 0.0 {
+                        max_neg_slew
+                    } else {
+                        f64::INFINITY
+                    };
+                    filter.update(input, time, max_pos, max_neg)
                 };
 
                 self.stack.push(result);
@@ -327,19 +358,29 @@ impl<'a> Vm<'a> {
 
             // CrossState: threshold crossing detection
             // Stack: [expr, direction] -> [0 or 1]
-            Instruction::CrossState(_detector_id) => {
+            Instruction::CrossState(detector_id) => {
                 let direction = self.pop()?;
                 let value = self.pop()?;
-
-                // For DC analysis, cross never fires
-                // Returns 1.0 only during transient when crossing occurs
-                let result = if self.context.time == 0.0 {
-                    0.0
+                let time = self.context.time;
+                let direction = if direction > 0.5 {
+                    1
+                } else if direction < -0.5 {
+                    -1
                 } else {
-                    // Simplified: DC returns 0
-                    let _ = (value, direction);
-                    0.0
+                    0
                 };
+                let is_transient = self.context.analysis_type == 2;
+
+                if self.context.cross_detectors.len() <= *detector_id {
+                    self.context
+                        .cross_detectors
+                        .resize_with(*detector_id + 1, Default::default);
+                }
+                let detector = &mut self.context.cross_detectors[*detector_id];
+                let crossed = detector.update(value, time, direction);
+
+                // Cross events only trigger in transient analysis.
+                let result = if is_transient { crossed } else { 0.0 };
 
                 self.stack.push(result);
             }
