@@ -180,7 +180,7 @@ pub fn parse_cadence_psf_binary(data: &[u8]) -> Result<ParsedCadencePsfBinary, C
     let types = parse_types(data, toc.section(SectionKind::Type)?)?;
     let sweeps = parse_sweeps(data, toc.section(SectionKind::Sweep)?)?;
     let traces = parse_traces(data, toc.section(SectionKind::Trace)?)?;
-    let signal_values = parse_values(
+    let mut signal_values = parse_values(
         data,
         toc.section(SectionKind::Value)?,
         &header,
@@ -194,18 +194,16 @@ pub fn parse_cadence_psf_binary(data: &[u8]) -> Result<ParsedCadencePsfBinary, C
     let mut complex_signals = Vec::new();
 
     for signal in flat_traces {
-        if let Some(channels) = signal_values.get(&signal.id) {
+        if let Some(channels) = signal_values.remove(&signal.id) {
             for channel in channels {
                 let name = qualify_signal_name(&signal.name, &channel.suffix);
-                match &channel.values {
-                    SignalValues::Real(values) => real_signals.push(NamedRealSignal {
-                        name,
-                        values: values.clone(),
-                    }),
-                    SignalValues::Complex(values) => complex_signals.push(NamedComplexSignal {
-                        name,
-                        values: values.clone(),
-                    }),
+                match channel.values {
+                    SignalValues::Real(values) => {
+                        real_signals.push(NamedRealSignal { name, values })
+                    }
+                    SignalValues::Complex(values) => {
+                        complex_signals.push(NamedComplexSignal { name, values })
+                    }
                 }
             }
         }
@@ -213,12 +211,12 @@ pub fn parse_cadence_psf_binary(data: &[u8]) -> Result<ParsedCadencePsfBinary, C
 
     let mut sweep_signals = Vec::new();
     for sweep in &sweeps {
-        if let Some(channels) = signal_values.get(&sweep.id) {
+        if let Some(channels) = signal_values.remove(&sweep.id) {
             for channel in channels {
-                if let SignalValues::Real(values) = &channel.values {
+                if let SignalValues::Real(values) = channel.values {
                     sweep_signals.push(NamedRealSignal {
                         name: qualify_signal_name(&sweep.name, &channel.suffix),
-                        values: values.clone(),
+                        values,
                     });
                 }
             }
@@ -412,13 +410,14 @@ fn parse_values(
         return Err(CadencePsfError::new("invalid value section end offset"));
     }
 
+    let sweep_points = header_usize(header, "PSF sweep points")?;
     let mut values: HashMap<u32, Vec<SignalChannel>> = HashMap::new();
     for sweep in sweeps {
         values.insert(
             sweep.id,
             vec![SignalChannel {
                 suffix: String::new(),
-                values: SignalValues::Real(Vec::new()),
+                values: SignalValues::Real(Vec::with_capacity(sweep_points)),
             }],
         );
     }
@@ -439,7 +438,7 @@ fn parse_values(
         let mut specs = Vec::new();
         collect_channel_specs_for_type(signal.type_id, types, "", &mut specs)?;
         if !specs.is_empty() {
-            values.insert(signal.id, init_channels(&specs));
+            values.insert(signal.id, init_channels(&specs, sweep_points));
         }
     }
 
@@ -858,14 +857,14 @@ fn qualify_signal_name(base: &str, suffix: &str) -> String {
     }
 }
 
-fn init_channels(specs: &[ChannelSpec]) -> Vec<SignalChannel> {
+fn init_channels(specs: &[ChannelSpec], capacity_hint: usize) -> Vec<SignalChannel> {
     specs
         .iter()
         .map(|spec| SignalChannel {
             suffix: spec.suffix.clone(),
             values: match spec.kind {
-                ChannelKind::Real => SignalValues::Real(Vec::new()),
-                ChannelKind::Complex => SignalValues::Complex(Vec::new()),
+                ChannelKind::Real => SignalValues::Real(Vec::with_capacity(capacity_hint)),
+                ChannelKind::Complex => SignalValues::Complex(Vec::with_capacity(capacity_hint)),
             },
         })
         .collect()
