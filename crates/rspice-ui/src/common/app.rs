@@ -106,6 +106,9 @@ mod app_veriloga_workflow;
 #[path = "app_pdk_workflow.rs"]
 mod app_pdk_workflow;
 
+#[path = "app_state_init.rs"]
+mod app_state_init;
+
 /// Main application state container
 #[derive(Clone)]
 pub struct AppState {
@@ -177,44 +180,7 @@ pub struct AppState {
 
 impl Default for AppState {
     fn default() -> Self {
-        Self {
-            schematic: SchematicState::default(),
-            simulation: SimulationState::default(),
-            panels: PanelVisibility::default(),
-            panel_sizes: PanelSizes::default(),
-            dialogs: DialogState::default(),
-            theme: RSpiceTheme::dark(),
-            console_messages: Vec::new(),
-            log_buffer: crate::panels::LogBuffer::default(),
-            log_panel_state: crate::panels::LogPanelState::default(),
-            property_editor: crate::properties::dialog::PropertyEditorState::default(),
-            script_console: crate::panels::ScriptConsoleState::default(),
-            active_viewer: crate::viewers::ActiveViewer::default(),
-            waveform_viewer: WaveformViewerState::default(),
-            library_manager: crate::state::LibraryManager::with_primitives(),
-            pending_delete_cell: None,
-            pending_delete_view: None,
-            tabbed_property_dialog: crate::properties::TabbedPropertyDialogState::default(),
-            property_registry: crate::state::PropertyRegistry::new(),
-            calculator_panel: crate::panels::calculator::CalculatorPanel::new(),
-            op_annotation_renderer: crate::schematic::op_annotation::OpAnnotationRenderer::new(),
-            pdk_settings_dialog: crate::panels::PdkSettingsDialogState::new(),
-            pdk_config: crate::state::pdk_config::PdkConfig::load_or_default(),
-            model_library_manager: {
-                let mut mgr = crate::state::model_library::ModelLibraryManager::new();
-                mgr.load_builtin_models();
-                mgr
-            },
-            model_browser_state: crate::properties::model_browser::ModelBrowserState::default(),
-            exit_requested: false,
-            pole_zero_state: crate::analysis::pole_zero::PoleZeroState::default(),
-            bode_plot_state: crate::analysis::bode::BodePlotState::default(),
-            nyquist_state: crate::analysis::nyquist::NyquistState::default(),
-            eye_diagram_state: crate::analysis::eye_diagram::EyeDiagramState::default(),
-            fft_state: crate::analysis::fft::FftState::default(),
-            smith_chart_state: crate::analysis::smith_chart::SmithChartState::default(),
-            histogram_state: crate::analysis::histogram::HistogramState::default(),
-        }
+        app_state_init::default_app_state()
     }
 }
 
