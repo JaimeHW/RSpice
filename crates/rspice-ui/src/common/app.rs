@@ -357,6 +357,7 @@ impl eframe::App for RSpiceApp {
         self.process_new_cell_dialog(ctx);
         self.process_new_view_dialog(ctx);
         self.process_pending_library_deletions();
+        self.process_exit_request(ctx);
     }
 
     /// Save state on exit
@@ -372,6 +373,15 @@ impl eframe::App for RSpiceApp {
 }
 
 impl RSpiceApp {
+    fn process_exit_request(&mut self, ctx: &Context) {
+        if !self.state.exit_requested {
+            return;
+        }
+
+        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        self.state.exit_requested = false;
+    }
+
     /// Toggle the bottom panel visibility
     pub fn toggle_bottom_panel(&mut self) {
         self.state.panels.bottom_panel = !self.state.panels.bottom_panel;
@@ -692,6 +702,34 @@ mod tests {
         assert!(
             !state.exit_requested,
             "Exit should not be requested by default"
+        );
+    }
+
+    #[test]
+    fn test_process_exit_request_noop_when_not_requested() {
+        let mut app = make_test_app();
+        app.state.exit_requested = false;
+        let ctx = Context::default();
+
+        app.process_exit_request(&ctx);
+
+        assert!(
+            !app.state.exit_requested,
+            "exit flag should remain false when no exit was requested"
+        );
+    }
+
+    #[test]
+    fn test_process_exit_request_clears_flag_after_dispatch() {
+        let mut app = make_test_app();
+        app.state.exit_requested = true;
+        let ctx = Context::default();
+
+        app.process_exit_request(&ctx);
+
+        assert!(
+            !app.state.exit_requested,
+            "exit flag should be cleared after close command dispatch"
         );
     }
 

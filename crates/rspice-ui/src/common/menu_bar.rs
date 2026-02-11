@@ -15,6 +15,8 @@ mod menu_bar_examples_menu;
 mod menu_bar_export_actions;
 #[path = "menu_bar_file_actions.rs"]
 mod menu_bar_file_actions;
+#[path = "menu_bar_file_menu.rs"]
+mod menu_bar_file_menu;
 #[path = "menu_bar_help_menu.rs"]
 mod menu_bar_help_menu;
 #[path = "menu_bar_netlist_compat.rs"]
@@ -40,62 +42,7 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
         // FILE MENU
         // =====================================================================
         ui.menu_button("File", |ui| {
-            if ui.button("New").clicked() {
-                menu_bar_file_actions::action_file_new(state);
-                ui.close_menu();
-            }
-            if ui.button("Open...").clicked() {
-                menu_bar_file_actions::action_file_open(state);
-                ui.close_menu();
-            }
-
-            ui.separator();
-
-            if ui.button("Save").clicked() {
-                menu_bar_file_actions::action_file_save(state);
-                ui.close_menu();
-            }
-            if ui.button("Save As...").clicked() {
-                menu_bar_file_actions::action_file_save_as(state);
-                ui.close_menu();
-            }
-
-            ui.separator();
-
-            ui.menu_button("Export", |ui| {
-                if ui.button("SVG...").clicked() {
-                    menu_bar_export_actions::action_export_svg(state);
-                    ui.close_menu();
-                }
-                if ui.button("PDF...").clicked() {
-                    state.dialogs.pdf_export_dialog = true;
-                    ui.close_menu();
-                }
-                if ui.button("CSV (Waveforms)...").clicked() {
-                    menu_bar_waveform_export::action_export_csv(state);
-                    ui.close_menu();
-                }
-            });
-
-            ui.menu_button("Import", |ui| {
-                if ui.button("Verilog-A Model...").clicked() {
-                    state.dialogs.veriloga_dialog.open();
-                    ui.close_menu();
-                }
-            });
-
-            ui.separator();
-
-            if ui.button("Preferences...").clicked() {
-                state.dialogs.preferences = true;
-                ui.close_menu();
-            }
-
-            ui.separator();
-
-            if ui.button("Exit").clicked() {
-                std::process::exit(0);
-            }
+            menu_bar_file_menu::render_file_menu(ui, state);
         });
 
         // =====================================================================
