@@ -170,11 +170,32 @@ impl EnvelopeSignal {
         if self.time.is_empty() {
             return (Vec::new(), Vec::new());
         }
+        if samples_per_carrier_cycle == 0 {
+            return (Vec::new(), Vec::new());
+        }
+        if !self.carrier_freq.is_finite() || self.carrier_freq <= 0.0 {
+            return (Vec::new(), Vec::new());
+        }
 
         let duration = self.duration();
+        if !duration.is_finite() || duration < 0.0 {
+            return (Vec::new(), Vec::new());
+        }
+
         let carrier_period = 1.0 / self.carrier_freq;
+        if !carrier_period.is_finite() || carrier_period <= 0.0 {
+            return (Vec::new(), Vec::new());
+        }
         let dt = carrier_period / samples_per_carrier_cycle as Value;
-        let num_samples = (duration / dt) as usize + 1;
+        if !dt.is_finite() || dt <= 0.0 {
+            return (Vec::new(), Vec::new());
+        }
+
+        let samples = duration / dt;
+        if !samples.is_finite() || samples < 0.0 || samples > (usize::MAX - 1) as Value {
+            return (Vec::new(), Vec::new());
+        }
+        let num_samples = samples as usize + 1;
 
         let mut time = Vec::with_capacity(num_samples);
         let mut values = Vec::with_capacity(num_samples);
@@ -1061,6 +1082,66 @@ mod tests {
 
         assert!(!t_out.is_empty());
         assert_eq!(t_out.len(), v_out.len());
+    }
+
+    #[test]
+    fn test_reconstruct_waveform_rejects_zero_samples_per_cycle() {
+        let signal = EnvelopeSignal::from_data(
+            vec![0.0, 1e-6],
+            vec![Complex64::new(1.0, 0.0), Complex64::new(1.0, 0.0)],
+            1e6,
+        );
+
+        let (t_out, v_out) = signal.reconstruct_waveform(0);
+        assert!(t_out.is_empty());
+        assert!(v_out.is_empty());
+    }
+
+    #[test]
+    fn test_reconstruct_waveform_rejects_non_positive_carrier_frequency() {
+        let signal = EnvelopeSignal::from_data(
+            vec![0.0, 1e-6],
+            vec![Complex64::new(1.0, 0.0), Complex64::new(1.0, 0.0)],
+            0.0,
+        );
+        let (t_out, v_out) = signal.reconstruct_waveform(16);
+        assert!(t_out.is_empty());
+        assert!(v_out.is_empty());
+
+        let signal_neg = EnvelopeSignal::from_data(
+            vec![0.0, 1e-6],
+            vec![Complex64::new(1.0, 0.0), Complex64::new(1.0, 0.0)],
+            -1e6,
+        );
+        let (t_out_neg, v_out_neg) = signal_neg.reconstruct_waveform(16);
+        assert!(t_out_neg.is_empty());
+        assert!(v_out_neg.is_empty());
+    }
+
+    #[test]
+    fn test_reconstruct_waveform_rejects_non_finite_carrier_frequency() {
+        let signal = EnvelopeSignal::from_data(
+            vec![0.0, 1e-6],
+            vec![Complex64::new(1.0, 0.0), Complex64::new(1.0, 0.0)],
+            f64::INFINITY,
+        );
+
+        let (t_out, v_out) = signal.reconstruct_waveform(16);
+        assert!(t_out.is_empty());
+        assert!(v_out.is_empty());
+    }
+
+    #[test]
+    fn test_reconstruct_waveform_rejects_non_finite_duration() {
+        let signal = EnvelopeSignal::from_data(
+            vec![0.0, f64::INFINITY],
+            vec![Complex64::new(1.0, 0.0), Complex64::new(1.0, 0.0)],
+            1e6,
+        );
+
+        let (t_out, v_out) = signal.reconstruct_waveform(16);
+        assert!(t_out.is_empty());
+        assert!(v_out.is_empty());
     }
 
     #[test]
