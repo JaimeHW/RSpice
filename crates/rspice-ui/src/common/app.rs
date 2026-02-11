@@ -76,6 +76,10 @@ use app_veriloga_library::{
     restore_global_veriloga_library, save_global_veriloga_library, VERILOGA_LIBRARY_NAME,
 };
 
+#[path = "app_property_edit.rs"]
+mod app_property_edit;
+use app_property_edit::apply_component_property_edits;
+
 /// Main application state container
 #[derive(Clone)]
 pub struct AppState {
@@ -226,40 +230,6 @@ impl AppState {
         self.console_messages.clear();
         self.log_buffer.clear();
     }
-}
-
-fn apply_component_property_edits(
-    state: &mut AppState,
-    id: u64,
-    props: crate::properties::dialog::EditedProperties,
-) -> bool {
-    let (old_name, changed) = match state.schematic.components.iter().find(|c| c.id == id) {
-        Some(comp) => (
-            comp.name.clone(),
-            comp.name != props.name || comp.value != props.value,
-        ),
-        None => return false,
-    };
-    if !changed {
-        return false;
-    }
-
-    let description = if old_name.is_empty() {
-        format!("Edit properties for component {}", id)
-    } else {
-        format!("Edit properties for {}", old_name)
-    };
-    let new_name = props.name;
-    let new_value = props.value;
-
-    state.schematic.with_undo(description, move |schematic| {
-        if let Some(comp) = schematic.components.iter_mut().find(|c| c.id == id) {
-            comp.name = new_name;
-            comp.value = new_value;
-            schematic.is_dirty = true;
-            schematic.bump_topology_version();
-        }
-    })
 }
 
 // =============================================================================
@@ -3465,8 +3435,6 @@ impl RSpiceApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::properties::dialog::EditedProperties;
-    use crate::state::{Component, ComponentType, Point};
 
     #[test]
     fn test_app_state_default() {
@@ -3488,77 +3456,6 @@ mod tests {
             BottomPanelTab::Log,
             "Log tab should be active by default"
         );
-    }
-
-    #[test]
-    fn test_apply_component_property_edits_creates_undo_and_restores_on_undo() {
-        let mut state = AppState::default();
-        state.schematic.components.push(
-            Component::new(1, ComponentType::Resistor, Point::new(100, 100))
-                .with_name_value("R1", "1k"),
-        );
-
-        let changed = apply_component_property_edits(
-            &mut state,
-            1,
-            EditedProperties {
-                name: "R2".to_string(),
-                value: "2k".to_string(),
-                model: String::new(),
-                parameters: Vec::new(),
-            },
-        );
-        assert!(changed, "property edit should create an undo checkpoint");
-        assert!(state.schematic.is_dirty);
-        assert!(state.schematic.can_undo());
-        assert_eq!(
-            state.schematic.undo_description(),
-            Some("Edit properties for R1")
-        );
-
-        let updated = state
-            .schematic
-            .components
-            .iter()
-            .find(|c| c.id == 1)
-            .expect("component should remain present");
-        assert_eq!(updated.name, "R2");
-        assert_eq!(updated.value, "2k");
-
-        assert!(
-            state.schematic.undo(),
-            "undo should restore original properties"
-        );
-        let restored = state
-            .schematic
-            .components
-            .iter()
-            .find(|c| c.id == 1)
-            .expect("component should still be present after undo");
-        assert_eq!(restored.name, "R1");
-        assert_eq!(restored.value, "1k");
-    }
-
-    #[test]
-    fn test_apply_component_property_edits_noop_when_values_unchanged() {
-        let mut state = AppState::default();
-        state.schematic.components.push(
-            Component::new(1, ComponentType::Resistor, Point::new(100, 100))
-                .with_name_value("R1", "1k"),
-        );
-
-        let changed = apply_component_property_edits(
-            &mut state,
-            1,
-            EditedProperties {
-                name: "R1".to_string(),
-                value: "1k".to_string(),
-                model: String::new(),
-                parameters: Vec::new(),
-            },
-        );
-        assert!(!changed, "no-op edits should not create undo entries");
-        assert!(!state.schematic.can_undo());
     }
 
     #[test]
