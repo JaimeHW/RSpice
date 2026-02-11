@@ -506,13 +506,20 @@ impl AcTransferResult {
         }
 
         // Find peak
-        let (peak_idx, peak_db) = self
+        let Some((peak_idx, peak_db)) = self
             .points
             .iter()
             .enumerate()
-            .map(|(i, p)| (i, p.magnitude_db))
-            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-            .unwrap_or((0, 0.0));
+            .filter_map(|(idx, point)| {
+                point
+                    .magnitude_db
+                    .is_finite()
+                    .then_some((idx, point.magnitude_db))
+            })
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+        else {
+            return;
+        };
 
         self.peak_gain_db = Some(peak_db);
         self.peak_frequency = Some(self.points[peak_idx].frequency);
@@ -559,13 +566,31 @@ impl AcTransferResult {
         for i in (1..before_idx).rev() {
             let db0 = self.points[i - 1].magnitude_db;
             let db1 = self.points[i].magnitude_db;
+            let f0_raw = self.points[i - 1].frequency;
+            let f1_raw = self.points[i].frequency;
+            if !db0.is_finite()
+                || !db1.is_finite()
+                || !f0_raw.is_finite()
+                || !f1_raw.is_finite()
+                || f0_raw <= 0.0
+                || f1_raw <= 0.0
+            {
+                continue;
+            }
 
             if (db0 <= threshold && db1 > threshold) || (db0 >= threshold && db1 < threshold) {
+                let denom = db1 - db0;
+                if denom.abs() < 1e-15 {
+                    continue;
+                }
                 // Interpolate
-                let f0 = self.points[i - 1].frequency.log10();
-                let f1 = self.points[i].frequency.log10();
-                let alpha = (threshold - db0) / (db1 - db0);
-                return Some(10.0_f64.powf(f0 + alpha * (f1 - f0)));
+                let f0 = f0_raw.log10();
+                let f1 = f1_raw.log10();
+                let alpha = (threshold - db0) / denom;
+                let crossing = 10.0_f64.powf(f0 + alpha * (f1 - f0));
+                if crossing.is_finite() {
+                    return Some(crossing);
+                }
             }
         }
         None
@@ -576,13 +601,31 @@ impl AcTransferResult {
         for i in after_idx..self.points.len() - 1 {
             let db0 = self.points[i].magnitude_db;
             let db1 = self.points[i + 1].magnitude_db;
+            let f0_raw = self.points[i].frequency;
+            let f1_raw = self.points[i + 1].frequency;
+            if !db0.is_finite()
+                || !db1.is_finite()
+                || !f0_raw.is_finite()
+                || !f1_raw.is_finite()
+                || f0_raw <= 0.0
+                || f1_raw <= 0.0
+            {
+                continue;
+            }
 
             if (db0 >= threshold && db1 < threshold) || (db0 <= threshold && db1 > threshold) {
+                let denom = db1 - db0;
+                if denom.abs() < 1e-15 {
+                    continue;
+                }
                 // Interpolate
-                let f0 = self.points[i].frequency.log10();
-                let f1 = self.points[i + 1].frequency.log10();
-                let alpha = (threshold - db0) / (db1 - db0);
-                return Some(10.0_f64.powf(f0 + alpha * (f1 - f0)));
+                let f0 = f0_raw.log10();
+                let f1 = f1_raw.log10();
+                let alpha = (threshold - db0) / denom;
+                let crossing = 10.0_f64.powf(f0 + alpha * (f1 - f0));
+                if crossing.is_finite() {
+                    return Some(crossing);
+                }
             }
         }
         None
@@ -593,12 +636,30 @@ impl AcTransferResult {
         for i in 0..self.points.len() - 1 {
             let db0 = self.points[i].magnitude_db;
             let db1 = self.points[i + 1].magnitude_db;
+            let f0_raw = self.points[i].frequency;
+            let f1_raw = self.points[i + 1].frequency;
+            if !db0.is_finite()
+                || !db1.is_finite()
+                || !f0_raw.is_finite()
+                || !f1_raw.is_finite()
+                || f0_raw <= 0.0
+                || f1_raw <= 0.0
+            {
+                continue;
+            }
 
             if (db0 >= 0.0 && db1 < 0.0) || (db0 <= 0.0 && db1 > 0.0) {
-                let f0 = self.points[i].frequency.log10();
-                let f1 = self.points[i + 1].frequency.log10();
-                let alpha = (0.0 - db0) / (db1 - db0);
-                return Some(10.0_f64.powf(f0 + alpha * (f1 - f0)));
+                let denom = db1 - db0;
+                if denom.abs() < 1e-15 {
+                    continue;
+                }
+                let f0 = f0_raw.log10();
+                let f1 = f1_raw.log10();
+                let alpha = (0.0 - db0) / denom;
+                let crossing = 10.0_f64.powf(f0 + alpha * (f1 - f0));
+                if crossing.is_finite() {
+                    return Some(crossing);
+                }
             }
         }
         None
@@ -606,14 +667,35 @@ impl AcTransferResult {
 
     /// Get phase at specific frequency (interpolated)
     fn phase_at_frequency(&self, freq: Value) -> Option<Value> {
+        if !freq.is_finite() || freq <= 0.0 {
+            return None;
+        }
         for i in 0..self.points.len() - 1 {
             if self.points[i].frequency <= freq && self.points[i + 1].frequency >= freq {
-                let f0 = self.points[i].frequency.log10();
-                let f1 = self.points[i + 1].frequency.log10();
+                let f0_raw = self.points[i].frequency;
+                let f1_raw = self.points[i + 1].frequency;
                 let p0 = self.points[i].phase_deg;
                 let p1 = self.points[i + 1].phase_deg;
-                let alpha = (freq.log10() - f0) / (f1 - f0);
-                return Some(p0 + alpha * (p1 - p0));
+                if !f0_raw.is_finite()
+                    || !f1_raw.is_finite()
+                    || !p0.is_finite()
+                    || !p1.is_finite()
+                    || f0_raw <= 0.0
+                    || f1_raw <= 0.0
+                {
+                    continue;
+                }
+                let f0 = f0_raw.log10();
+                let f1 = f1_raw.log10();
+                let denom = f1 - f0;
+                if denom.abs() < 1e-15 {
+                    continue;
+                }
+                let alpha = (freq.log10() - f0) / denom;
+                let phase = p0 + alpha * (p1 - p0);
+                if phase.is_finite() {
+                    return Some(phase);
+                }
             }
         }
         None
@@ -1225,6 +1307,79 @@ mod tests {
 
         // Should not panic on empty
         assert!(result.peak_frequency.is_none());
+    }
+
+    #[test]
+    fn test_compute_characteristics_ignores_non_finite_points() {
+        let mut result = AcTransferResult::new("out", "Vin");
+        result.points = vec![
+            AcTransferPoint {
+                frequency: 500.0,
+                transfer: Complex64::new(0.0, 0.0),
+                magnitude: 0.0,
+                magnitude_db: f64::NAN,
+                phase_rad: f64::NAN,
+                phase_deg: f64::NAN,
+            },
+            AcTransferPoint {
+                frequency: 1e3,
+                transfer: Complex64::new(1.0, 0.0),
+                magnitude: 1.0,
+                magnitude_db: 0.0,
+                phase_rad: 0.0,
+                phase_deg: 0.0,
+            },
+            AcTransferPoint {
+                frequency: 2e3,
+                transfer: Complex64::new(0.8, 0.0),
+                magnitude: 0.8,
+                magnitude_db: -2.0,
+                phase_rad: -0.2,
+                phase_deg: -11.5,
+            },
+            AcTransferPoint {
+                frequency: 4e3,
+                transfer: Complex64::new(0.5, 0.0),
+                magnitude: 0.5,
+                magnitude_db: -6.0,
+                phase_rad: -0.3,
+                phase_deg: -17.2,
+            },
+        ];
+
+        result.compute_characteristics();
+        assert_eq!(result.peak_frequency, Some(1e3));
+        assert_eq!(result.peak_gain_db, Some(0.0));
+        assert!(result.cutoff_high.is_some());
+    }
+
+    #[test]
+    fn test_compute_characteristics_all_non_finite_points() {
+        let mut result = AcTransferResult::new("out", "Vin");
+        result.points = vec![
+            AcTransferPoint {
+                frequency: f64::NAN,
+                transfer: Complex64::new(0.0, 0.0),
+                magnitude: 0.0,
+                magnitude_db: f64::NAN,
+                phase_rad: f64::NAN,
+                phase_deg: f64::NAN,
+            },
+            AcTransferPoint {
+                frequency: f64::INFINITY,
+                transfer: Complex64::new(0.0, 0.0),
+                magnitude: 0.0,
+                magnitude_db: f64::NEG_INFINITY,
+                phase_rad: f64::NAN,
+                phase_deg: f64::NAN,
+            },
+        ];
+
+        result.compute_characteristics();
+        assert!(result.peak_frequency.is_none());
+        assert!(result.peak_gain_db.is_none());
+        assert!(result.cutoff_low.is_none());
+        assert!(result.cutoff_high.is_none());
     }
 
     #[test]
