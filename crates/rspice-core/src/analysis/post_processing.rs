@@ -188,15 +188,33 @@ impl SfdrResult {
         let signal_idx = signal_indices
             .iter()
             .max_by(|a, b| {
-                magnitudes_db[**a]
-                    .partial_cmp(&magnitudes_db[**b])
-                    .unwrap_or(std::cmp::Ordering::Equal)
+                let lhs = magnitudes_db[**a];
+                let rhs = magnitudes_db[**b];
+                let lhs = if lhs.is_finite() {
+                    lhs
+                } else {
+                    f64::NEG_INFINITY
+                };
+                let rhs = if rhs.is_finite() {
+                    rhs
+                } else {
+                    f64::NEG_INFINITY
+                };
+                lhs.total_cmp(&rhs)
             })
             .copied()
             .unwrap_or(0);
 
-        let signal_level = magnitudes_db.get(signal_idx).copied().unwrap_or(0.0);
-        let actual_signal_freq = frequencies.get(signal_idx).copied().unwrap_or(signal_freq);
+        let signal_level = magnitudes_db
+            .get(signal_idx)
+            .copied()
+            .filter(|level| level.is_finite())
+            .unwrap_or(0.0);
+        let actual_signal_freq = frequencies
+            .get(signal_idx)
+            .copied()
+            .filter(|freq| freq.is_finite())
+            .unwrap_or(signal_freq);
 
         // Find all spurs (exclude DC and signal region)
         let mut spurs: Vec<(Value, Value)> = Vec::new();
@@ -205,6 +223,9 @@ impl SfdrResult {
 
         for (i, mag) in magnitudes_db.iter().enumerate() {
             let freq = frequencies[i];
+            if !freq.is_finite() || !mag.is_finite() {
+                continue;
+            }
             // Exclude DC bin and signal region
             if freq.abs() < frequencies.get(1).copied().unwrap_or(1.0) {
                 continue;
@@ -216,7 +237,7 @@ impl SfdrResult {
         }
 
         // Sort by level (descending)
-        spurs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        spurs.sort_by(|a, b| b.1.total_cmp(&a.1));
 
         let (spur_freq, spur_level) = spurs.first().copied().unwrap_or((0.0, -200.0));
 
@@ -372,6 +393,14 @@ impl GroupDelayResult {
         let mut delays = Vec::with_capacity(n - 1);
 
         for i in 0..n - 1 {
+            if !frequencies[i].is_finite()
+                || !frequencies[i + 1].is_finite()
+                || !phases[i].is_finite()
+                || !phases[i + 1].is_finite()
+            {
+                continue;
+            }
+
             let df = frequencies[i + 1] - frequencies[i];
             if df.abs() < 1e-15 {
                 continue;
@@ -388,6 +417,9 @@ impl GroupDelayResult {
 
             // τ = -dφ/(2π·df)
             let tau = -dphi / (2.0 * PI * df);
+            if !tau.is_finite() {
+                continue;
+            }
 
             result_freqs.push((frequencies[i] + frequencies[i + 1]) / 2.0);
             delays.push(tau);
@@ -406,7 +438,7 @@ impl GroupDelayResult {
         let max_idx = delays
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .max_by(|(_, a), (_, b)| a.total_cmp(b))
             .map(|(i, _)| i)
             .unwrap_or(0);
 
@@ -624,6 +656,22 @@ mod tests {
         assert_eq!(result.sfdr_db, 0.0);
     }
 
+    #[test]
+    fn test_sfdr_ignores_non_finite_bins() {
+        let frequencies = vec![0.0, 1_000.0, 2_000.0, f64::NAN, 3_000.0];
+        let magnitudes = vec![-90.0, 0.0, -65.0, -10.0, f64::INFINITY];
+
+        let result = SfdrResult::from_spectrum(&frequencies, &magnitudes, 1_000.0, 200.0);
+
+        assert!(result.signal_level_db.is_finite());
+        assert!(result.spur_level_db.is_finite());
+        assert!(result.sfdr_db.is_finite());
+        assert!(result
+            .spurs
+            .iter()
+            .all(|(f, l)| f.is_finite() && l.is_finite()));
+    }
+
     // =========================================================================
     // IMD Tests
     // =========================================================================
@@ -699,6 +747,18 @@ mod tests {
     fn test_group_delay_empty() {
         let result = GroupDelayResult::from_phase_data(&[], &[]);
         assert!(result.frequencies.is_empty());
+    }
+
+    #[test]
+    fn test_group_delay_skips_non_finite_phase_points() {
+        let frequencies = vec![1e3, 2e3, 3e3, 4e3, 5e3];
+        let phases = vec![0.0, -0.2, f64::NAN, -0.8, -1.0];
+
+        let result = GroupDelayResult::from_phase_data(&frequencies, &phases);
+        assert!(!result.delays.is_empty());
+        assert!(result.delays.iter().all(|delay| delay.is_finite()));
+        assert!(result.max_delay.is_finite());
+        assert!(result.max_delay_freq.is_finite());
     }
 
     // =========================================================================
