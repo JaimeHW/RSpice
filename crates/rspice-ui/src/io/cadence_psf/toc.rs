@@ -1,6 +1,6 @@
 use super::binary_io::peek_u32;
 use super::CadencePsfError;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum SectionKind {
@@ -72,15 +72,28 @@ pub(super) fn parse_toc(data: &[u8]) -> Result<Toc, CadencePsfError> {
     }
 
     let mut starts: Vec<(SectionKind, usize)> = Vec::new();
+    let mut seen_kinds = HashSet::new();
     let num_entries = toc_bytes / 8;
     for i in 0..num_entries {
         let base = toc_offset + i * 8;
         let kind = SectionKind::from_u32(peek_u32(&data[base..base + 4]))?;
+        if !seen_kinds.insert(kind) {
+            return Err(CadencePsfError::new(format!(
+                "duplicate TOC entry for section {:?}",
+                kind
+            )));
+        }
         let start = peek_u32(&data[base + 4..base + 8]) as usize;
         if start >= data.len() {
             return Err(CadencePsfError::new(format!(
                 "TOC entry start {} out of range",
                 start
+            )));
+        }
+        if start >= toc_offset {
+            return Err(CadencePsfError::new(format!(
+                "TOC entry start {} overlaps TOC table at offset {}",
+                start, toc_offset
             )));
         }
         starts.push((kind, start));
@@ -124,10 +137,6 @@ pub(super) fn parse_toc(data: &[u8]) -> Result<Toc, CadencePsfError> {
 mod tests {
     use super::*;
 
-    fn push_u32(bytes: &mut Vec<u8>, value: u32) {
-        bytes.extend_from_slice(&value.to_be_bytes());
-    }
-
     fn build_payload(entries: &[(u32, u32)], toc_offset: usize) -> Vec<u8> {
         let toc_bytes = entries.len() * 8;
         let total_len = toc_offset + toc_bytes + 12;
@@ -145,8 +154,6 @@ mod tests {
     #[test]
     fn test_parse_toc_valid_layout_resolves_required_sections() {
         let toc_offset = 20usize;
-        let mut entries = Vec::new();
-        push_u32(&mut entries, 0);
         let payload = build_payload(&[(0, 0), (1, 4), (2, 8), (3, 12), (4, 16)], toc_offset);
         let toc = parse_toc(&payload).expect("valid TOC should parse");
         let header = toc
@@ -159,7 +166,6 @@ mod tests {
         assert_eq!(header.end, 4);
         assert_eq!(value.start, 16);
         assert_eq!(value.end, payload.len());
-        assert_eq!(entries.len(), 4);
     }
 
     #[test]
@@ -188,5 +194,19 @@ mod tests {
         let payload = build_payload(&[(0, 0), (1, 4), (2, 8), (3, 12)], 20);
         let err = parse_toc(&payload).expect_err("missing sections must fail");
         assert!(err.to_string().contains("missing required"));
+    }
+
+    #[test]
+    fn test_parse_toc_rejects_duplicate_section_kind() {
+        let payload = build_payload(&[(0, 0), (0, 2), (1, 4), (2, 8), (3, 12), (4, 16)], 24);
+        let err = parse_toc(&payload).expect_err("duplicate section kind must fail");
+        assert!(err.to_string().contains("duplicate TOC entry"));
+    }
+
+    #[test]
+    fn test_parse_toc_rejects_section_start_overlapping_toc_table() {
+        let payload = build_payload(&[(0, 0), (1, 4), (2, 8), (3, 12), (4, 25)], 20);
+        let err = parse_toc(&payload).expect_err("section start in TOC table must fail");
+        assert!(err.to_string().contains("overlaps TOC table"));
     }
 }
