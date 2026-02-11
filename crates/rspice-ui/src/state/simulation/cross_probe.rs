@@ -1,0 +1,71 @@
+use super::*;
+
+/// Bidirectional mapping between schematic grid points and SPICE net names.
+///
+/// This enables professional-grade cross-probing between schematic and waveform viewer:
+/// - Click on schematic wire → find corresponding waveform
+/// - Click on waveform → highlight corresponding wire on schematic
+///
+/// The mapping is populated during netlist generation and persists until the next
+/// simulation run or schematic modification.
+#[derive(Debug, Clone, Default)]
+pub struct CrossProbeMapping {
+    /// Grid point to net name lookup (e.g., Point(280, 200) → "NET3")
+    /// Enables: click on wire → find net name → find waveform
+    pub point_to_net: HashMap<Point, String>,
+
+    /// Net name to grid points lookup (e.g., "NET3" → [Point(280, 200), ...])
+    /// Enables: select waveform → highlight all connected wire segments
+    pub net_to_points: HashMap<String, Vec<Point>>,
+
+    /// Version counter - incremented when mapping is updated
+    /// Used to detect when probe cache needs refresh
+    pub version: u64,
+}
+
+impl CrossProbeMapping {
+    /// Create a new empty mapping
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Update mapping from netlist generation result
+    pub fn update(
+        &mut self,
+        point_to_net: HashMap<Point, String>,
+        net_to_points: HashMap<String, Vec<Point>>,
+    ) {
+        self.point_to_net = point_to_net;
+        self.net_to_points = net_to_points;
+        self.version += 1;
+    }
+
+    /// Clear the mapping
+    pub fn clear(&mut self) {
+        self.point_to_net.clear();
+        self.net_to_points.clear();
+        self.version += 1;
+    }
+
+    /// Look up net name for a grid point
+    ///
+    /// Returns None if the point is not on a net (e.g., empty space)
+    pub fn net_at(&self, point: Point) -> Option<&String> {
+        self.point_to_net.get(&point)
+    }
+
+    /// Look up all grid points for a net name
+    ///
+    /// Returns empty slice if net not found
+    pub fn points_for_net(&self, net_name: &str) -> &[Point] {
+        self.net_to_points
+            .get(net_name)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Check if mapping is populated
+    pub fn is_populated(&self) -> bool {
+        !self.point_to_net.is_empty()
+    }
+}
