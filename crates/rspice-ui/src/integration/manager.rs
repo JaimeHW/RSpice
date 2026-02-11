@@ -12,7 +12,9 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
+
+use super::lock::{read_lock, write_lock};
 
 // =============================================================================
 // Component Identification
@@ -221,7 +223,7 @@ impl ComponentManager {
 
     /// Generate next ID
     fn next_id(&self) -> ComponentId {
-        let mut id = self.next_id.write().unwrap();
+        let mut id = write_lock(&self.next_id, "ComponentManager::next_id");
         let current = *id;
         *id += 1;
         ComponentId(current)
@@ -236,7 +238,7 @@ impl ComponentManager {
         let id = self.next_id();
         let info = ComponentInfo::new(id, name, comp_type);
 
-        let mut components = self.components.write().unwrap();
+        let mut components = write_lock(&self.components, "ComponentManager::register");
         components.insert(id, info);
 
         Some(id)
@@ -250,7 +252,10 @@ impl ComponentManager {
     ) -> Option<ComponentId> {
         // Check if singleton already exists
         {
-            let singletons = self.singletons.read().unwrap();
+            let singletons = read_lock(
+                &self.singletons,
+                "ComponentManager::register_singleton(singletons-read)",
+            );
             if let Some(&existing_id) = singletons.get(&comp_type) {
                 return Some(existing_id);
             }
@@ -259,10 +264,16 @@ impl ComponentManager {
         let id = self.next_id();
         let info = ComponentInfo::new(id, name, comp_type).as_singleton();
 
-        let mut components = self.components.write().unwrap();
+        let mut components = write_lock(
+            &self.components,
+            "ComponentManager::register_singleton(components-write)",
+        );
         components.insert(id, info);
 
-        let mut singletons = self.singletons.write().unwrap();
+        let mut singletons = write_lock(
+            &self.singletons,
+            "ComponentManager::register_singleton(singletons-write)",
+        );
         singletons.insert(comp_type, id);
 
         Some(id)
@@ -270,13 +281,13 @@ impl ComponentManager {
 
     /// Get component by ID
     pub fn get(&self, id: ComponentId) -> Option<ComponentInfo> {
-        let components = self.components.read().unwrap();
+        let components = read_lock(&self.components, "ComponentManager::get");
         components.get(&id).cloned()
     }
 
     /// Get singleton by type
     pub fn get_singleton(&self, comp_type: ComponentType) -> Option<ComponentInfo> {
-        let singletons = self.singletons.read().unwrap();
+        let singletons = read_lock(&self.singletons, "ComponentManager::get_singleton");
         if let Some(&id) = singletons.get(&comp_type) {
             return self.get(id);
         }
@@ -285,7 +296,7 @@ impl ComponentManager {
 
     /// Update component state
     pub fn set_state(&self, id: ComponentId, state: ComponentState) {
-        let mut components = self.components.write().unwrap();
+        let mut components = write_lock(&self.components, "ComponentManager::set_state");
         if let Some(info) = components.get_mut(&id) {
             info.set_state(state);
         }
@@ -314,22 +325,28 @@ impl ComponentManager {
 
         // Remove from singletons if applicable
         {
-            let components = self.components.read().unwrap();
+            let components = read_lock(
+                &self.components,
+                "ComponentManager::destroy(components-read-for-singleton)",
+            );
             if let Some(info) = components.get(&id) {
                 if info.singleton {
-                    let mut singletons = self.singletons.write().unwrap();
+                    let mut singletons = write_lock(
+                        &self.singletons,
+                        "ComponentManager::destroy(singletons-write)",
+                    );
                     singletons.remove(&info.comp_type);
                 }
             }
         }
 
-        let mut components = self.components.write().unwrap();
+        let mut components = write_lock(&self.components, "ComponentManager::destroy(components)");
         components.remove(&id);
     }
 
     /// Get all components of type
     pub fn get_by_type(&self, comp_type: ComponentType) -> Vec<ComponentInfo> {
-        let components = self.components.read().unwrap();
+        let components = read_lock(&self.components, "ComponentManager::get_by_type");
         components
             .values()
             .filter(|c| c.comp_type == comp_type)
@@ -339,7 +356,7 @@ impl ComponentManager {
 
     /// Get all active components
     pub fn get_active(&self) -> Vec<ComponentInfo> {
-        let components = self.components.read().unwrap();
+        let components = read_lock(&self.components, "ComponentManager::get_active");
         components
             .values()
             .filter(|c| c.state == ComponentState::Active)
@@ -349,13 +366,13 @@ impl ComponentManager {
 
     /// Get component count
     pub fn count(&self) -> usize {
-        let components = self.components.read().unwrap();
+        let components = read_lock(&self.components, "ComponentManager::count");
         components.len()
     }
 
     /// Check if dependencies are met
     pub fn dependencies_met(&self, id: ComponentId) -> bool {
-        let components = self.components.read().unwrap();
+        let components = read_lock(&self.components, "ComponentManager::dependencies_met");
         if let Some(info) = components.get(&id) {
             for dep_type in &info.dependencies {
                 let found = components
@@ -378,6 +395,7 @@ impl ComponentManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     // =========================================================================
     // ComponentId Tests
@@ -532,5 +550,44 @@ mod tests {
 
         let active = manager.get_active();
         assert_eq!(active.len(), 1);
+    }
+
+    #[test]
+    fn test_manager_recovers_from_poisoned_next_id_lock() {
+        let manager = Arc::new(ComponentManager::new());
+        let poison_manager = manager.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = poison_manager
+                .next_id
+                .write()
+                .expect("next_id lock should be writable before poison");
+            panic!("intentional lock poison for manager next_id");
+        })
+        .join();
+
+        let id = manager
+            .register("PostPoison", ComponentType::Custom)
+            .expect("register should recover from poisoned id lock");
+        assert!(id.value() > 0);
+        assert_eq!(manager.count(), 1);
+    }
+
+    #[test]
+    fn test_manager_recovers_from_poisoned_component_store_lock() {
+        let manager = Arc::new(ComponentManager::new());
+        let poison_manager = manager.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = poison_manager
+                .components
+                .write()
+                .expect("components lock should be writable before poison");
+            panic!("intentional lock poison for manager component map");
+        })
+        .join();
+
+        let id = manager
+            .register("Recovered", ComponentType::Custom)
+            .expect("register should recover from poisoned component map lock");
+        assert!(manager.get(id).is_some());
     }
 }

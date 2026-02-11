@@ -10,6 +10,7 @@
 //! - `state_sync` - Synchronized state across views
 
 pub mod event_bus;
+mod lock;
 pub mod manager;
 pub mod state_sync;
 

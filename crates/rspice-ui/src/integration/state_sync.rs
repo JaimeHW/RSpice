@@ -12,11 +12,16 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
+
+use super::lock::{read_lock, write_lock};
 
 // =============================================================================
 // Sync State Container
 // =============================================================================
+
+type SyncListener<T> = Arc<dyn Fn(&T) + Send + Sync>;
 
 /// A synchronized state value
 #[derive(Clone)]
@@ -24,19 +29,19 @@ pub struct SyncState<T> {
     /// Current value
     value: Arc<RwLock<T>>,
     /// Change listeners
-    listeners: Arc<RwLock<Vec<Box<dyn Fn(&T) + Send + Sync>>>>,
+    listeners: Arc<RwLock<Vec<SyncListener<T>>>>,
     /// Version counter
-    version: Arc<RwLock<u64>>,
+    version: Arc<AtomicU64>,
 }
 
 impl<T: std::fmt::Debug> std::fmt::Debug for SyncState<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let value = self.value.read().ok();
-        let version = self.version.read().ok();
-        let listener_count = self.listeners.read().map(|l| l.len()).unwrap_or(0);
+        let value = read_lock(&self.value, "SyncState::fmt(value)");
+        let version = self.version.load(Ordering::Relaxed);
+        let listener_count = read_lock(&self.listeners, "SyncState::fmt(listeners)").len();
 
         f.debug_struct("SyncState")
-            .field("value", &value)
+            .field("value", &*value)
             .field("version", &version)
             .field("listener_count", &listener_count)
             .finish()
@@ -49,13 +54,13 @@ impl<T: Clone + Send + Sync + 'static> SyncState<T> {
         Self {
             value: Arc::new(RwLock::new(initial)),
             listeners: Arc::new(RwLock::new(Vec::new())),
-            version: Arc::new(RwLock::new(0)),
+            version: Arc::new(AtomicU64::new(0)),
         }
     }
 
     /// Get current value
     pub fn get(&self) -> T {
-        let val = self.value.read().unwrap();
+        let val = read_lock(&self.value, "SyncState::get");
         val.clone()
     }
 
@@ -63,15 +68,12 @@ impl<T: Clone + Send + Sync + 'static> SyncState<T> {
     pub fn set(&self, new_value: T) {
         // Update value
         {
-            let mut val = self.value.write().unwrap();
+            let mut val = write_lock(&self.value, "SyncState::set(value)");
             *val = new_value;
         }
 
         // Increment version
-        {
-            let mut ver = self.version.write().unwrap();
-            *ver += 1;
-        }
+        self.version.fetch_add(1, Ordering::Relaxed);
 
         // Notify listeners
         self.notify();
@@ -83,22 +85,18 @@ impl<T: Clone + Send + Sync + 'static> SyncState<T> {
         F: FnOnce(&mut T),
     {
         {
-            let mut val = self.value.write().unwrap();
+            let mut val = write_lock(&self.value, "SyncState::update(value)");
             f(&mut *val);
         }
 
-        {
-            let mut ver = self.version.write().unwrap();
-            *ver += 1;
-        }
+        self.version.fetch_add(1, Ordering::Relaxed);
 
         self.notify();
     }
 
     /// Get current version
     pub fn version(&self) -> u64 {
-        let ver = self.version.read().unwrap();
-        *ver
+        self.version.load(Ordering::Relaxed)
     }
 
     /// Add change listener
@@ -106,23 +104,25 @@ impl<T: Clone + Send + Sync + 'static> SyncState<T> {
     where
         F: Fn(&T) + Send + Sync + 'static,
     {
-        let mut listeners = self.listeners.write().unwrap();
-        listeners.push(Box::new(listener));
+        let mut listeners = write_lock(&self.listeners, "SyncState::on_change(listeners)");
+        listeners.push(Arc::new(listener));
     }
 
     /// Notify all listeners
     fn notify(&self) {
-        let val = self.value.read().unwrap();
-        let listeners = self.listeners.read().unwrap();
+        // Snapshot listener list and value before invoking callbacks to avoid lock re-entrancy
+        // deadlocks when listeners mutate state or listener registrations.
+        let val = self.get();
+        let listeners = read_lock(&self.listeners, "SyncState::notify(listeners)").clone();
 
-        for listener in listeners.iter() {
-            listener(&*val);
+        for listener in listeners {
+            listener(&val);
         }
     }
 
     /// Clear all listeners
     pub fn clear_listeners(&self) {
-        let mut listeners = self.listeners.write().unwrap();
+        let mut listeners = write_lock(&self.listeners, "SyncState::clear_listeners");
         listeners.clear();
     }
 }
@@ -390,6 +390,59 @@ mod tests {
         state.clear_listeners();
         state.set(2);
         assert_eq!(counter.load(Ordering::SeqCst), 1); // No increment
+    }
+
+    #[test]
+    fn test_sync_state_listener_can_reenter_state_update() {
+        let state = SyncState::new(0_u64);
+        let state_clone = state.clone();
+
+        state.on_change(move |value| {
+            if *value == 1 {
+                state_clone.set(2);
+            }
+        });
+
+        state.set(1);
+
+        assert_eq!(state.get(), 2);
+        assert_eq!(state.version(), 2);
+    }
+
+    #[test]
+    fn test_sync_state_listener_can_clear_listeners_during_callback() {
+        let state = SyncState::new(0_u64);
+        let state_clone = state.clone();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_clone = calls.clone();
+
+        state.on_change(move |_| {
+            calls_clone.fetch_add(1, Ordering::SeqCst);
+            state_clone.clear_listeners();
+        });
+
+        state.set(1);
+        state.set(2);
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn test_sync_state_recovers_from_poisoned_value_lock() {
+        let state = SyncState::new(7_i32);
+        let poison_state = state.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = poison_state
+                .value
+                .write()
+                .expect("value lock should be writable before poison");
+            panic!("intentional lock poison for recovery test");
+        })
+        .join();
+
+        assert_eq!(state.get(), 7);
+        state.set(11);
+        assert_eq!(state.get(), 11);
     }
 
     // =========================================================================

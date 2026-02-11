@@ -11,9 +11,10 @@
 //! - Event filtering and grouping
 
 use serde::{Deserialize, Serialize};
-use std::any::{Any, TypeId};
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock, Weak};
+use std::collections::{HashMap, VecDeque};
+use std::sync::RwLock;
+
+use super::lock::{read_lock, write_lock};
 
 // =============================================================================
 // Event Types
@@ -264,7 +265,7 @@ pub struct EventBus {
     /// Next handler ID
     next_id: RwLock<u64>,
     /// Event history (for debugging)
-    history: RwLock<Vec<Event>>,
+    history: RwLock<VecDeque<Event>>,
     /// Max history size
     max_history: usize,
     /// Whether to record history
@@ -283,7 +284,7 @@ impl EventBus {
         Self {
             handlers: RwLock::new(Vec::new()),
             next_id: RwLock::new(1),
-            history: RwLock::new(Vec::new()),
+            history: RwLock::new(VecDeque::new()),
             max_history: 100,
             record_history: false,
         }
@@ -295,37 +296,64 @@ impl EventBus {
         self
     }
 
-    /// Register a handler
-    pub fn subscribe(&self, handler: HandlerFn) -> u64 {
-        let mut id_lock = self.next_id.write().unwrap();
+    fn insert_handler_sorted(handlers: &mut Vec<EventHandler>, registration: EventHandler) {
+        let idx = handlers.partition_point(|handler| handler.priority >= registration.priority);
+        handlers.insert(idx, registration);
+    }
+
+    /// Register a handler with explicit priority (higher priorities run first).
+    pub fn subscribe_with_priority(&self, priority: i32, handler: HandlerFn) -> u64 {
+        let mut id_lock = write_lock(&self.next_id, "EventBus::subscribe_with_priority(next_id)");
         let id = *id_lock;
         *id_lock += 1;
 
-        let registration = EventHandler::new(id, handler);
-
-        let mut handlers = self.handlers.write().unwrap();
-        handlers.push(registration);
-
+        let registration = EventHandler::new(id, handler).with_priority(priority);
+        let mut handlers = write_lock(
+            &self.handlers,
+            "EventBus::subscribe_with_priority(handlers)",
+        );
+        Self::insert_handler_sorted(&mut handlers, registration);
         id
+    }
+
+    /// Register handler for specific event types and explicit priority.
+    pub fn subscribe_to_with_priority(
+        &self,
+        types: &[EventType],
+        priority: i32,
+        handler: HandlerFn,
+    ) -> u64 {
+        let mut id_lock = write_lock(
+            &self.next_id,
+            "EventBus::subscribe_to_with_priority(next_id)",
+        );
+        let id = *id_lock;
+        *id_lock += 1;
+
+        let registration = EventHandler::new(id, handler)
+            .with_priority(priority)
+            .for_events(types);
+        let mut handlers = write_lock(
+            &self.handlers,
+            "EventBus::subscribe_to_with_priority(handlers)",
+        );
+        Self::insert_handler_sorted(&mut handlers, registration);
+        id
+    }
+
+    /// Register a handler
+    pub fn subscribe(&self, handler: HandlerFn) -> u64 {
+        self.subscribe_with_priority(0, handler)
     }
 
     /// Register handler for specific event types
     pub fn subscribe_to(&self, types: &[EventType], handler: HandlerFn) -> u64 {
-        let mut id_lock = self.next_id.write().unwrap();
-        let id = *id_lock;
-        *id_lock += 1;
-
-        let registration = EventHandler::new(id, handler).for_events(types);
-
-        let mut handlers = self.handlers.write().unwrap();
-        handlers.push(registration);
-
-        id
+        self.subscribe_to_with_priority(types, 0, handler)
     }
 
     /// Unsubscribe handler
     pub fn unsubscribe(&self, handler_id: u64) {
-        let mut handlers = self.handlers.write().unwrap();
+        let mut handlers = write_lock(&self.handlers, "EventBus::unsubscribe");
         handlers.retain(|h| h.id != handler_id);
     }
 
@@ -333,21 +361,16 @@ impl EventBus {
     pub fn publish(&self, event: Event) {
         // Record history
         if self.record_history {
-            let mut history = self.history.write().unwrap();
-            history.push(event.clone());
+            let mut history = write_lock(&self.history, "EventBus::publish(history)");
+            history.push_back(event.clone());
             if history.len() > self.max_history {
-                history.remove(0);
+                history.pop_front();
             }
         }
 
         // Dispatch to handlers
-        let handlers = self.handlers.read().unwrap();
-
-        // Sort by priority (higher first)
-        let mut sorted: Vec<_> = handlers.iter().collect();
-        sorted.sort_by(|a, b| b.priority.cmp(&a.priority));
-
-        for handler in sorted {
+        let handlers = read_lock(&self.handlers, "EventBus::publish(handlers)");
+        for handler in handlers.iter() {
             if !event.is_consumed() {
                 handler.invoke(&event);
             }
@@ -375,19 +398,19 @@ impl EventBus {
 
     /// Clear history
     pub fn clear_history(&self) {
-        let mut history = self.history.write().unwrap();
+        let mut history = write_lock(&self.history, "EventBus::clear_history");
         history.clear();
     }
 
     /// Get history
     pub fn history(&self) -> Vec<Event> {
-        let history = self.history.read().unwrap();
-        history.clone()
+        let history = read_lock(&self.history, "EventBus::history");
+        history.iter().cloned().collect()
     }
 
     /// Get handler count
     pub fn handler_count(&self) -> usize {
-        let handlers = self.handlers.read().unwrap();
+        let handlers = read_lock(&self.handlers, "EventBus::handler_count");
         handlers.len()
     }
 }
@@ -399,6 +422,7 @@ impl EventBus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     // =========================================================================
@@ -554,5 +578,83 @@ mod tests {
         bus.publish_progress(50);
 
         assert_eq!(counter.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn test_bus_subscribe_with_priority_dispatches_high_to_low() {
+        let bus = EventBus::new();
+        let call_order = Arc::new(RwLock::new(Vec::<&'static str>::new()));
+        let low_order = call_order.clone();
+        let mid_order = call_order.clone();
+        let high_order = call_order.clone();
+
+        bus.subscribe_with_priority(
+            -10,
+            Box::new(move |_| {
+                low_order
+                    .write()
+                    .expect("call-order lock should be writable")
+                    .push("low");
+            }),
+        );
+        bus.subscribe_with_priority(
+            0,
+            Box::new(move |_| {
+                mid_order
+                    .write()
+                    .expect("call-order lock should be writable")
+                    .push("mid");
+            }),
+        );
+        bus.subscribe_with_priority(
+            10,
+            Box::new(move |_| {
+                high_order
+                    .write()
+                    .expect("call-order lock should be writable")
+                    .push("high");
+            }),
+        );
+
+        bus.publish(Event::new(EventType::Custom, EventSource::system()));
+
+        let call_order = call_order
+            .read()
+            .expect("call-order lock should be readable")
+            .clone();
+        assert_eq!(call_order, vec!["high", "mid", "low"]);
+    }
+
+    #[test]
+    fn test_bus_history_trim_keeps_most_recent_events() {
+        let mut bus = EventBus::new().with_history(true);
+        bus.max_history = 2;
+
+        bus.publish(Event::new(EventType::Custom, EventSource::system()).with_message("one"));
+        bus.publish(Event::new(EventType::Custom, EventSource::system()).with_message("two"));
+        bus.publish(Event::new(EventType::Custom, EventSource::system()).with_message("three"));
+
+        let history = bus.history();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].data.message.as_deref(), Some("two"));
+        assert_eq!(history[1].data.message.as_deref(), Some("three"));
+    }
+
+    #[test]
+    fn test_bus_recovers_from_poisoned_next_id_lock() {
+        let bus = Arc::new(EventBus::new());
+        let poison_bus = bus.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = poison_bus
+                .next_id
+                .write()
+                .expect("next_id lock should be writable before poison");
+            panic!("intentional lock poison for event bus next_id");
+        })
+        .join();
+
+        let id = bus.subscribe(Box::new(|_| {}));
+        assert!(id > 0);
+        assert_eq!(bus.handler_count(), 1);
     }
 }
