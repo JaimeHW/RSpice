@@ -8,7 +8,7 @@
 
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
+    Arc, Mutex, MutexGuard,
 };
 use std::thread::{self, JoinHandle};
 
@@ -91,17 +91,21 @@ impl SimulationRunner {
 
     /// Get current status
     pub fn status(&self) -> SimulationStatus {
-        self.progress.lock().unwrap().status.clone()
+        lock_progress(&self.progress, "SimulationRunner::status")
+            .status
+            .clone()
     }
 
     /// Get current progress percentage (0.0 to 1.0)
     pub fn progress_fraction(&self) -> Option<f32> {
-        self.progress.lock().unwrap().status.progress()
+        lock_progress(&self.progress, "SimulationRunner::progress_fraction")
+            .status
+            .progress()
     }
 
     /// Get full progress information
     pub fn progress(&self) -> SimulationProgress {
-        self.progress.lock().unwrap().clone()
+        lock_progress(&self.progress, "SimulationRunner::progress").clone()
     }
 
     /// Get last successful result
@@ -189,7 +193,7 @@ impl SimulationRunner {
         // Reset state
         self.abort_flag.store(false, Ordering::SeqCst);
         {
-            let mut progress = self.progress.lock().unwrap();
+            let mut progress = lock_progress(&self.progress, "SimulationRunner::start_request");
             *progress = SimulationProgress::new();
         }
 
@@ -216,6 +220,22 @@ impl SimulationRunner {
     }
 }
 
+fn lock_progress<'a>(
+    progress: &'a Arc<Mutex<SimulationProgress>>,
+    context: &str,
+) -> MutexGuard<'a, SimulationProgress> {
+    match progress.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            log::warn!(
+                "Recovered poisoned simulation-progress lock in runner ({})",
+                context
+            );
+            poisoned.into_inner()
+        }
+    }
+}
+
 /// Simulation execution in background thread
 ///
 /// Runs the actual rspice-core simulation engine.
@@ -229,13 +249,13 @@ fn run_simulation_thread(
 
     // Update status: parsing
     {
-        let mut p = progress.lock().unwrap();
+        let mut p = lock_progress(&progress, "run_simulation_thread(parse)");
         p.update_status(SimulationStatus::Parsing);
     }
 
     // Check for abort
     if abort_flag.load(Ordering::SeqCst) {
-        let mut p = progress.lock().unwrap();
+        let mut p = lock_progress(&progress, "run_simulation_thread(abort-after-parse)");
         p.abort();
         return Err(SimulationError::Aborted);
     }
@@ -245,20 +265,20 @@ fn run_simulation_thread(
 
     // Update status: building
     {
-        let mut p = progress.lock().unwrap();
+        let mut p = lock_progress(&progress, "run_simulation_thread(build)");
         p.update_status(SimulationStatus::Building);
     }
 
     // Check for abort
     if abort_flag.load(Ordering::SeqCst) {
-        let mut p = progress.lock().unwrap();
+        let mut p = lock_progress(&progress, "run_simulation_thread(abort-after-build)");
         p.abort();
         return Err(SimulationError::Aborted);
     }
 
     // Update status based on analysis type
     {
-        let mut p = progress.lock().unwrap();
+        let mut p = lock_progress(&progress, "run_simulation_thread(status-by-analysis)");
         match &request {
             SimulationRequest::Config(config) => match config {
                 AnalysisConfig::DcOp => p.update_status(SimulationStatus::DcOperatingPoint),
@@ -435,7 +455,7 @@ fn run_simulation_thread(
 
     // Check for abort
     if abort_flag.load(Ordering::SeqCst) {
-        let mut p = progress.lock().unwrap();
+        let mut p = lock_progress(&progress, "run_simulation_thread(abort-before-execute)");
         p.abort();
         return Err(SimulationError::Aborted);
     }
@@ -463,7 +483,7 @@ fn run_simulation_thread(
 
     // Mark complete
     {
-        let mut p = progress.lock().unwrap();
+        let mut p = lock_progress(&progress, "run_simulation_thread(complete)");
         p.complete();
     }
 
@@ -1769,6 +1789,23 @@ mod tests {
     fn test_runner_default() {
         let runner = SimulationRunner::default();
         assert!(!runner.is_running());
+    }
+
+    #[test]
+    fn test_runner_recovers_from_poisoned_progress_mutex() {
+        let runner = SimulationRunner::new();
+        let poisoned_progress = Arc::clone(&runner.progress);
+        let _ = thread::spawn(move || {
+            let _guard = poisoned_progress
+                .lock()
+                .expect("progress mutex should lock before poison");
+            panic!("intentional poison for runner progress mutex");
+        })
+        .join();
+
+        assert!(matches!(runner.status(), SimulationStatus::Idle));
+        assert!(runner.progress_fraction().is_none());
+        assert!(matches!(runner.progress().status, SimulationStatus::Idle));
     }
 
     #[test]
