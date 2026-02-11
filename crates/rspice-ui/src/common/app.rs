@@ -8,22 +8,15 @@
 //! The layout mirrors the Dioxus version for consistency:
 //!
 //! ```text
-//! â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-//! â”‚ Menu Bar (File, Edit, View, Simulate, Tools, Help)            â”‚
-//! â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤
-//! â”‚ Toolbar (Simulation controls, zoom, etc.)                      â”‚
-//! â”œâ”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”¤
-//! â”‚  â”‚ Project      â”‚                                        â”‚    â”‚
-//! â”‚ Iâ”‚ Browser      â”‚     Schematic Editor                   â”‚ P  â”‚
-//! â”‚ Câ”‚ (Library/    â”‚     (GPU-rendered via wgpu)            â”‚ r  â”‚
-//! â”‚ Oâ”‚  Cell/View)  â”‚                                        â”‚ o  â”‚
-//! â”‚ Nâ”‚              â”‚                                        â”‚ p  â”‚
-//! â”‚  â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤ s  â”‚
-//! â”‚ Râ”‚               Waveform Viewer (resizable)             â”‚    â”‚
-//! â”‚ Aâ”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤â”€â”€â”€â”€â”¤
-//! â”‚ Iâ”‚               Log (resizable)                     â”‚    â”‚
-//! â”‚ Lâ”‚                                                       â”‚    â”‚
-//! â””â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”˜
+//! +------------------------------------------------------------------+
+//! | Menu Bar (File, Edit, View, Simulate, Tools, Help)              |
+//! +------------------------------------------------------------------+
+//! | Toolbar (simulation controls, zoom, etc.)                        |
+//! +------------------------------------------------------------------+
+//! | Icon Rail | Project Browser | Schematic Editor | Properties      |
+//! |           |                 | + Waveform Viewer  |               |
+//! |           |                 | + Log Panel        |               |
+//! +------------------------------------------------------------------+
 //! ```
 //!
 //! # State Management
@@ -757,7 +750,7 @@ impl eframe::App for RSpiceApp {
                     ui.horizontal(|ui| {
                         ui.add_space(10.0);
                         ui.label(
-                            RichText::new("âš ")
+                            RichText::new("Ã¢Å¡Â ")
                                 .size(28.0)
                                 .color(egui::Color32::from_rgb(255, 191, 0)),
                         );
@@ -1440,7 +1433,7 @@ impl eframe::App for RSpiceApp {
 
         // Waveform Calculator Dialog
         if self.state.dialogs.waveform_calculator_dialog {
-            egui::Window::new("ðŸ§® Calculator")
+            egui::Window::new("Ã°Å¸Â§Â® Calculator")
                 .open(&mut self.state.dialogs.waveform_calculator_dialog)
                 .default_width(400.0)
                 .show(ctx, |ui| {
@@ -1515,7 +1508,7 @@ impl eframe::App for RSpiceApp {
             let mut should_create = false;
             let mut persist_global_veriloga = false;
 
-            egui::Window::new("ðŸ“¦ Create New Cell")
+            egui::Window::new("Ã°Å¸â€œÂ¦ Create New Cell")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(400.0)
@@ -1588,22 +1581,22 @@ impl eframe::App for RSpiceApp {
                     ui.indent("views_indent", |ui| {
                         ui.checkbox(
                             &mut self.state.dialogs.new_cell_create_schematic,
-                            "ðŸ“‹ Schematic",
+                            "Ã°Å¸â€œâ€¹ Schematic",
                         );
                         ui.checkbox(
                             &mut self.state.dialogs.new_cell_create_symbol,
-                            "ðŸ”² Symbol",
+                            "Ã°Å¸â€Â² Symbol",
                         );
                         ui.checkbox(
                             &mut self.state.dialogs.new_cell_create_testbench,
-                            "ðŸ§ª Testbench",
+                            "Ã°Å¸Â§Âª Testbench",
                         );
                     });
 
                     // Error message display
                     if let Some(ref error) = self.state.dialogs.new_cell_error {
                         ui.add_space(4.0);
-                        ui.colored_label(egui::Color32::RED, format!("âš  {}", error));
+                        ui.colored_label(egui::Color32::RED, format!("Ã¢Å¡Â  {}", error));
                     }
 
                     ui.add_space(8.0);
@@ -1709,7 +1702,7 @@ impl eframe::App for RSpiceApp {
             let mut should_create = false;
             let mut persist_global_veriloga = false;
 
-            egui::Window::new("ðŸ“ Create New View")
+            egui::Window::new("Ã°Å¸â€œÂ Create New View")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(350.0)
@@ -1765,7 +1758,7 @@ impl eframe::App for RSpiceApp {
                     // Error message display
                     if let Some(ref error) = self.state.dialogs.new_view_error {
                         ui.add_space(4.0);
-                        ui.colored_label(egui::Color32::RED, format!("âš  {}", error));
+                        ui.colored_label(egui::Color32::RED, format!("Ã¢Å¡Â  {}", error));
                     }
 
                     ui.add_space(8.0);
