@@ -1,6 +1,75 @@
 use super::build_engine_config;
 use rspice_core::engine::Engine;
 use rspice_core::Value;
+use std::fmt;
+
+#[derive(Debug)]
+enum PstbRunError {
+    InvalidConfig(&'static str),
+    Parse(String),
+    CircuitBuild(String),
+    Pss(String),
+    ProbeNotFound {
+        probe: String,
+        available: String,
+    },
+    ProbeNotInductor {
+        probe: String,
+        branch_ordinal: usize,
+        available: String,
+    },
+    EmptyMonodromy,
+    NonSquareMonodromy,
+    ProbeStateOutOfRange {
+        probe: String,
+        state_index: usize,
+        monodromy_dim: usize,
+    },
+    NoFloquetMultipliers,
+}
+
+impl fmt::Display for PstbRunError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidConfig(message) => f.write_str(message),
+            Self::Parse(err) => write!(f, "Parse error: {err}"),
+            Self::CircuitBuild(err) => write!(f, "PSTB prerequisite circuit-build error: {err}"),
+            Self::Pss(err) => write!(f, "PSTB prerequisite PSS error: {err}"),
+            Self::ProbeNotFound { probe, available } => write!(
+                f,
+                "PSTB probe '{}' was not found in branch-capable elements. Available branches: {}",
+                probe, available
+            ),
+            Self::ProbeNotInductor {
+                probe,
+                branch_ordinal,
+                available,
+            } => write!(
+                f,
+                "PSTB probe '{}' resolved to branch ordinal {} but is not an inductor probe. \
+PSTB currently supports dynamic inductor-current probes only. Available inductor probes: {}",
+                probe, branch_ordinal, available
+            ),
+            Self::EmptyMonodromy => {
+                f.write_str("PSTB prerequisite PSS returned an empty monodromy matrix")
+            }
+            Self::NonSquareMonodromy => {
+                f.write_str("PSTB prerequisite PSS returned a non-square monodromy matrix")
+            }
+            Self::ProbeStateOutOfRange {
+                probe,
+                state_index,
+                monodromy_dim,
+            } => write!(
+                f,
+                "PSTB probe '{}' maps to reactive state {} but monodromy dimension is {}",
+                probe, state_index, monodromy_dim
+            ),
+            Self::NoFloquetMultipliers => f.write_str("PSTB produced no Floquet multipliers"),
+        }
+    }
+}
+
 /// Explicit configuration for PSTB execution.
 #[derive(Debug, Clone)]
 pub struct PstbRunConfig {
@@ -32,30 +101,46 @@ impl Default for PstbRunConfig {
 }
 
 impl PstbRunConfig {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), PstbRunError> {
         if !self.pss_fundamental_freq.is_finite() || self.pss_fundamental_freq <= 0.0 {
-            return Err("PSTB requires a positive PSS fundamental frequency".to_string());
+            return Err(PstbRunError::InvalidConfig(
+                "PSTB requires a positive PSS fundamental frequency",
+            ));
         }
         if self.pss_num_harmonics == 0 {
-            return Err("PSTB requires at least one PSS harmonic".to_string());
+            return Err(PstbRunError::InvalidConfig(
+                "PSTB requires at least one PSS harmonic",
+            ));
         }
         if !self.pss_tolerance.is_finite() || self.pss_tolerance <= 0.0 {
-            return Err("PSTB requires a positive PSS tolerance".to_string());
+            return Err(PstbRunError::InvalidConfig(
+                "PSTB requires a positive PSS tolerance",
+            ));
         }
         if self.probe_instance.trim().is_empty() {
-            return Err("PSTB probe instance must be specified".to_string());
+            return Err(PstbRunError::InvalidConfig(
+                "PSTB probe instance must be specified",
+            ));
         }
         if self.max_harmonics == 0 {
-            return Err("PSTB max harmonics must be greater than zero".to_string());
+            return Err(PstbRunError::InvalidConfig(
+                "PSTB max harmonics must be greater than zero",
+            ));
         }
         if self.num_multipliers == 0 {
-            return Err("PSTB number of multipliers must be greater than zero".to_string());
+            return Err(PstbRunError::InvalidConfig(
+                "PSTB number of multipliers must be greater than zero",
+            ));
         }
         if !self.stability_threshold.is_finite() || self.stability_threshold <= 0.0 {
-            return Err("PSTB stability threshold must be positive".to_string());
+            return Err(PstbRunError::InvalidConfig(
+                "PSTB stability threshold must be positive",
+            ));
         }
         if !self.eigenvalue_tolerance.is_finite() || self.eigenvalue_tolerance <= 0.0 {
-            return Err("PSTB eigenvalue tolerance must be positive".to_string());
+            return Err(PstbRunError::InvalidConfig(
+                "PSTB eigenvalue tolerance must be positive",
+            ));
         }
         Ok(())
     }
@@ -184,14 +269,14 @@ fn available_inductor_probe_names(circuit: &rspice_core::circuit::CircuitData) -
 fn resolve_pstb_probe(
     circuit: &rspice_core::circuit::CircuitData,
     probe_instance: &str,
-) -> Result<ResolvedPstbProbe, String> {
+) -> Result<ResolvedPstbProbe, PstbRunError> {
     let probe_name = probe_instance.trim();
     let branch_ordinal = circuit.get_branch_by_name(probe_name).ok_or_else(|| {
         let available = format_branch_name_list(&available_branch_names(circuit));
-        format!(
-            "PSTB probe '{}' was not found in branch-capable elements. Available branches: {}",
-            probe_name, available
-        )
+        PstbRunError::ProbeNotFound {
+            probe: probe_name.to_string(),
+            available,
+        }
     })? as usize;
 
     let inductor_index = circuit
@@ -201,11 +286,11 @@ fn resolve_pstb_probe(
         .position(|branch| *branch == branch_ordinal)
         .ok_or_else(|| {
             let available = format_branch_name_list(&available_inductor_probe_names(circuit));
-            format!(
-                "PSTB probe '{}' resolved to branch ordinal {} but is not an inductor probe. \
-PSTB currently supports dynamic inductor-current probes only. Available inductor probes: {}",
-                probe_name, branch_ordinal, available
-            )
+            PstbRunError::ProbeNotInductor {
+                probe: probe_name.to_string(),
+                branch_ordinal,
+                available,
+            }
         })?;
 
     let state_index = circuit.capacitors.len() + inductor_index;
@@ -246,7 +331,7 @@ fn sanitize_finite(value: Value) -> Value {
 }
 
 fn normalized_probe_participation(
-    eigenvector: Option<&Vec<num_complex::Complex64>>,
+    eigenvector: Option<&[num_complex::Complex64]>,
     state_index: usize,
 ) -> Value {
     let Some(vector) = eigenvector else {
@@ -272,20 +357,27 @@ pub fn run_pstb_analysis_with_config(
     netlist_text: &str,
     config: &PstbRunConfig,
 ) -> Result<PstbData, String> {
+    run_pstb_analysis_with_config_internal(netlist_text, config).map_err(|err| err.to_string())
+}
+
+fn run_pstb_analysis_with_config_internal(
+    netlist_text: &str,
+    config: &PstbRunConfig,
+) -> Result<PstbData, PstbRunError> {
     use rspice_core::analysis::advanced::pstb::{PstbAnalyzer, PstbConfig};
     use rspice_core::analysis::PssConfig;
 
     config.validate()?;
 
     let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
+        .map_err(|e| PstbRunError::Parse(e.to_string()))?;
 
     let mut sim_config = build_engine_config(&netlist, None);
     sim_config.tolerance = config.pss_tolerance;
     let engine = Engine::new(sim_config);
     let circuit = engine
         .build_circuit(&netlist)
-        .map_err(|e| format!("PSTB prerequisite circuit-build error: {}", e))?;
+        .map_err(|e| PstbRunError::CircuitBuild(e.to_string()))?;
     let probe = resolve_pstb_probe(&circuit, &config.probe_instance)?;
 
     let pss_harmonics = config.pss_num_harmonics.max(config.max_harmonics);
@@ -296,10 +388,10 @@ pub fn run_pstb_analysis_with_config(
         .with_tstab_periods(10);
     let pss_result = engine
         .run_pss(&netlist, pss_config)
-        .map_err(|e| format!("PSTB prerequisite PSS error: {}", e))?;
+        .map_err(|e| PstbRunError::Pss(e.to_string()))?;
 
     if pss_result.monodromy.is_empty() {
-        return Err("PSTB prerequisite PSS returned an empty monodromy matrix".to_string());
+        return Err(PstbRunError::EmptyMonodromy);
     }
     let monodromy_dim = pss_result.monodromy.len();
     if pss_result
@@ -307,13 +399,14 @@ pub fn run_pstb_analysis_with_config(
         .iter()
         .any(|row| row.len() != monodromy_dim)
     {
-        return Err("PSTB prerequisite PSS returned a non-square monodromy matrix".to_string());
+        return Err(PstbRunError::NonSquareMonodromy);
     }
     if probe.state_index >= monodromy_dim {
-        return Err(format!(
-            "PSTB probe '{}' maps to reactive state {} but monodromy dimension is {}",
-            probe.canonical_name, probe.state_index, monodromy_dim
-        ));
+        return Err(PstbRunError::ProbeStateOutOfRange {
+            probe: probe.canonical_name.clone(),
+            state_index: probe.state_index,
+            monodromy_dim,
+        });
     }
 
     let probe_row = &pss_result.monodromy[probe.state_index];
@@ -336,13 +429,14 @@ pub fn run_pstb_analysis_with_config(
     let mut analyzer = PstbAnalyzer::new(pstb_config);
     let pstb_result = analyzer.analyze_monodromy(&pss_result.monodromy, pss_result.period);
 
-    let mut mode_indices = Vec::new();
-    let mut probe_mode_participation = Vec::new();
-    let mut multiplier_magnitude = Vec::new();
-    let mut multiplier_phase_deg = Vec::new();
-    let mut mode_damping = Vec::new();
-    let mut mode_frequency_hz = Vec::new();
-    let mut stability_margin_db = Vec::new();
+    let retained_modes = pstb_result.multipliers.len().min(config.num_multipliers);
+    let mut mode_indices = Vec::with_capacity(retained_modes);
+    let mut probe_mode_participation = Vec::with_capacity(retained_modes);
+    let mut multiplier_magnitude = Vec::with_capacity(retained_modes);
+    let mut multiplier_phase_deg = Vec::with_capacity(retained_modes);
+    let mut mode_damping = Vec::with_capacity(retained_modes);
+    let mut mode_frequency_hz = Vec::with_capacity(retained_modes);
+    let mut stability_margin_db = Vec::with_capacity(retained_modes);
 
     for (idx, multiplier) in pstb_result
         .multipliers
@@ -352,18 +446,18 @@ pub fn run_pstb_analysis_with_config(
     {
         mode_indices.push((idx + 1) as Value);
         probe_mode_participation.push(sanitize_nonnegative(normalized_probe_participation(
-            multiplier.eigenvector.as_ref(),
+            multiplier.eigenvector.as_deref(),
             probe.state_index,
         )));
-        multiplier_magnitude.push(multiplier.magnitude());
-        multiplier_phase_deg.push(multiplier.phase_degrees());
-        mode_damping.push(multiplier.damping());
-        mode_frequency_hz.push(multiplier.natural_frequency());
+        multiplier_magnitude.push(sanitize_nonnegative(multiplier.magnitude()));
+        multiplier_phase_deg.push(sanitize_finite(multiplier.phase_degrees()));
+        mode_damping.push(sanitize_finite(multiplier.damping()));
+        mode_frequency_hz.push(sanitize_nonnegative(multiplier.natural_frequency()));
         stability_margin_db.push(sanitize_db(multiplier.stability_margin_db()));
     }
 
     if mode_indices.is_empty() {
-        return Err("PSTB produced no Floquet multipliers".to_string());
+        return Err(PstbRunError::NoFloquetMultipliers);
     }
     let (dominant_probe_mode, dominant_probe_mode_participation) = probe_mode_participation
         .iter()
@@ -404,4 +498,86 @@ pub fn run_pstb_analysis_with_config(
 pub fn run_pstb_analysis(netlist_text: &str) -> Result<PstbData, String> {
     let cfg = PstbRunConfig::default();
     run_pstb_analysis_with_config(netlist_text, &cfg)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use num_complex::Complex64;
+
+    #[test]
+    fn test_validate_config_rejects_invalid_fields() {
+        let invalid_freq = PstbRunConfig {
+            pss_fundamental_freq: 0.0,
+            ..PstbRunConfig::default()
+        };
+        assert!(matches!(
+            invalid_freq.validate(),
+            Err(PstbRunError::InvalidConfig(
+                "PSTB requires a positive PSS fundamental frequency"
+            ))
+        ));
+
+        let invalid_probe = PstbRunConfig {
+            probe_instance: "   ".to_string(),
+            ..PstbRunConfig::default()
+        };
+        assert!(matches!(
+            invalid_probe.validate(),
+            Err(PstbRunError::InvalidConfig(
+                "PSTB probe instance must be specified"
+            ))
+        ));
+    }
+
+    #[test]
+    fn test_normalize_branch_name_list_sorts_and_deduplicates_case_insensitively() {
+        let normalized = normalize_branch_name_list(vec![
+            "vsrc".to_string(),
+            "LPROBE".to_string(),
+            "lprobe".to_string(),
+            "Ccvs0".to_string(),
+        ]);
+        assert_eq!(normalized, vec!["Ccvs0", "LPROBE", "vsrc"]);
+    }
+
+    #[test]
+    fn test_format_branch_name_list_truncates_after_limit() {
+        let names = (0..15).map(|idx| format!("X{idx}")).collect::<Vec<_>>();
+        let formatted = format_branch_name_list(&names);
+        assert!(formatted.contains("X0"));
+        assert!(formatted.contains("X11"));
+        assert!(formatted.contains("+3 more"));
+    }
+
+    #[test]
+    fn test_normalized_probe_participation_bounds_and_invalid_paths() {
+        let vec = vec![Complex64::new(3.0, 4.0), Complex64::new(0.0, 0.0)];
+        let participation = normalized_probe_participation(Some(&vec), 0);
+        assert!((participation - 1.0).abs() < 1e-12);
+
+        assert_eq!(normalized_probe_participation(Some(&vec), 3), 0.0);
+        assert_eq!(normalized_probe_participation(None, 0), 0.0);
+
+        let non_finite = vec![Complex64::new(f64::NAN, 0.0)];
+        assert_eq!(normalized_probe_participation(Some(&non_finite), 0), 0.0);
+    }
+
+    #[test]
+    fn test_sanitize_db_clamps_non_finite_values() {
+        assert_eq!(sanitize_db(f64::INFINITY), 300.0);
+        assert_eq!(sanitize_db(f64::NEG_INFINITY), -300.0);
+        assert_eq!(sanitize_db(f64::NAN).abs(), 300.0);
+        assert_eq!(sanitize_db(12.5), 12.5);
+    }
+
+    #[test]
+    fn test_internal_run_surfaces_parse_error_variant() {
+        let cfg = PstbRunConfig::default();
+        let err =
+            run_pstb_analysis_with_config_internal("Monte Carlo Invalid Runs\n.MC 0\n.END\n", &cfg)
+                .expect_err("invalid value token should produce parse error");
+        assert!(matches!(err, PstbRunError::Parse(_)));
+        assert!(err.to_string().contains("Parse error"));
+    }
 }
