@@ -1,4 +1,5 @@
 use super::*;
+use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
 
 fn make_program(instructions: Vec<Instruction>) -> BytecodeProgram {
     BytecodeProgram { instructions }
@@ -272,10 +273,8 @@ fn test_stack_underflow() {
 
 #[test]
 fn test_context_vt_temperature_dependence() {
-    let mut ctx = VmContext {
-        temperature: 300.0,
-        ..VmContext::default()
-    };
+    let mut ctx = VmContext::default();
+    ctx.temperature = 300.0;
 
     // At 300K
     let vt_300 = ctx.vt();
@@ -426,10 +425,8 @@ fn test_execute_tan() {
 
 #[test]
 fn test_execute_time() {
-    let mut ctx = VmContext {
-        time: 1.5e-9,
-        ..VmContext::default()
-    };
+    let mut ctx = VmContext::default();
+    ctx.time = 1.5e-9;
 
     let mut vm = Vm::new(&mut ctx);
     let program = make_program(vec![Instruction::PushTime]);
@@ -440,10 +437,8 @@ fn test_execute_time() {
 
 #[test]
 fn test_execute_temperature() {
-    let mut ctx = VmContext {
-        temperature: 350.0,
-        ..VmContext::default()
-    };
+    let mut ctx = VmContext::default();
+    ctx.temperature = 350.0;
 
     let mut vm = Vm::new(&mut ctx);
     let program = make_program(vec![Instruction::PushTemperature]);
