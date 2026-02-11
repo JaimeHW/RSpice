@@ -70,6 +70,9 @@ use app_veriloga_library::{
 mod app_property_edit;
 use app_property_edit::apply_component_property_edits;
 
+#[path = "app_modal_workflows.rs"]
+mod app_modal_workflows;
+
 #[path = "app_shortcuts.rs"]
 mod app_shortcuts;
 
@@ -365,23 +368,7 @@ impl eframe::App for RSpiceApp {
 
         self.render_confirmation_dialog(ctx);
 
-        // Component Properties Dialog
-
-        {
-            use crate::properties::dialog::{render_properties_dialog, PropertiesDialogResult};
-            let result = render_properties_dialog(ctx, &mut self.state.property_editor);
-            match result {
-                PropertiesDialogResult::Apply(id, props) => {
-                    let _ = apply_component_property_edits(&mut self.state, id, props);
-                }
-                PropertiesDialogResult::Cancel => {
-                    // Dialog was cancelled, nothing to do
-                }
-                PropertiesDialogResult::None => {
-                    // Dialog still open or not shown
-                }
-            }
-        }
+        self.process_component_properties_dialog(ctx);
 
         self.process_veriloga_load_dialog(ctx);
 
@@ -399,16 +386,7 @@ impl eframe::App for RSpiceApp {
         self.render_waveform_calculator_dialog(ctx);
         self.render_shortcuts_help_dialog(ctx);
 
-        // Model Browser Dialog (standalone access from menu)
-        // Reuses the existing model browser from the property editor
-        {
-            use crate::properties::model_browser::render_model_browser;
-            let _ = render_model_browser(
-                ctx,
-                &mut self.state.model_browser_state,
-                &self.state.model_library_manager,
-            );
-        }
+        self.process_model_browser_dialog(ctx);
 
         self.process_new_cell_dialog(ctx);
         self.process_new_view_dialog(ctx);
