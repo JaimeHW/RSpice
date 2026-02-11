@@ -23,4 +23,5 @@
 pub mod dialog_state;
 
 // Re-export key types for convenience
-pub use dialog_state::{AnalysisDialogState, DialogState, DialogVisibility, InteractionState};
+pub use dialog_state::{AnalysisDialogState, DialogVisibility, InteractionState};
+pub use dialog_state::DialogState as UiDialogState;

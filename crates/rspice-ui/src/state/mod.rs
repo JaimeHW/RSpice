@@ -50,15 +50,3 @@ pub use simulation::{
     OperatingPointValue, SimulationRun, SimulationState, WaveformData,
 };
 pub use viewport::{BoundingBox, Viewport, VisibilityFilter};
-
-// Re-export from domain modules for backward compatibility
-#[allow(unused_imports)]
-pub use crate::analysis::fft::{compute_fft, FftResult, WindowFunction};
-#[allow(unused_imports)]
-pub use crate::waveform::math::eval_expression;
-
-// Re-export simulation utilities from their module
-pub use crate::services::simulation_runner::{
-    run_simulation, run_simulation_with_options, SimulationResult, SimulationStats,
-};
-pub use crate::simulation::{generate_netlist, NetlistGenerator, NetlistResult};
