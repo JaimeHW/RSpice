@@ -80,6 +80,10 @@ use app_veriloga_library::{
 mod app_property_edit;
 use app_property_edit::apply_component_property_edits;
 
+#[path = "app_shortcuts.rs"]
+mod app_shortcuts;
+use app_shortcuts::{collect_shortcut_commands, ShortcutCommand, ShortcutInputSnapshot};
+
 /// Main application state container
 #[derive(Clone)]
 pub struct AppState {
@@ -292,133 +296,86 @@ impl RSpiceApp {
 
     /// Handle keyboard shortcuts
     fn handle_shortcuts(&mut self, ctx: &Context) {
-        // File shortcuts
-        if ctx.input(|i| i.key_pressed(Key::N) && i.modifiers.ctrl) {
-            self.action_file_new();
+        let has_focus = ctx.memory(|memory| memory.focused().is_some());
+        let snapshot = ctx.input(|input| ShortcutInputSnapshot::from_input_state(input, has_focus));
+        for command in collect_shortcut_commands(&snapshot) {
+            self.execute_shortcut_command(command);
         }
-        if ctx.input(|i| i.key_pressed(Key::O) && i.modifiers.ctrl) {
-            self.action_file_open();
-        }
-        if ctx.input(|i| i.key_pressed(Key::S) && i.modifiers.ctrl) {
-            self.action_file_save();
-        }
+    }
 
-        // Edit shortcuts
-        if ctx.input(|i| i.key_pressed(Key::Z) && i.modifiers.ctrl && !i.modifiers.shift) {
-            self.action_edit_undo();
-        }
-        if ctx.input(|i| i.key_pressed(Key::Y) && i.modifiers.ctrl)
-            || ctx.input(|i| i.key_pressed(Key::Z) && i.modifiers.ctrl && i.modifiers.shift)
-        {
-            self.action_edit_redo();
-        }
-        if ctx.input(|i| i.key_pressed(Key::C) && i.modifiers.ctrl) {
-            self.action_edit_copy();
-        }
-        if ctx.input(|i| i.key_pressed(Key::V) && i.modifiers.ctrl) {
-            self.action_edit_paste();
-        }
-        if ctx.input(|i| i.key_pressed(Key::X) && i.modifiers.ctrl) {
-            self.action_edit_cut();
-        }
-        if ctx.input(|i| i.key_pressed(Key::Delete)) {
-            self.action_edit_delete();
-        }
-        if ctx.input(|i| i.key_pressed(Key::A) && i.modifiers.ctrl) {
-            self.action_edit_select_all();
-        }
+    fn execute_shortcut_command(&mut self, command: ShortcutCommand) {
+        use crate::state::{ComponentType, Tool};
 
-        // View shortcuts
-        if ctx.input(|i| i.key_pressed(Key::L) && i.modifiers.ctrl && i.modifiers.shift) {
-            self.toggle_panel_browser();
-        }
-        if ctx.input(|i| i.key_pressed(Key::Backtick) && i.modifiers.ctrl) {
-            self.toggle_panel_log_new();
-        }
-
-        // Help shortcuts
-        if ctx.input(|i| i.key_pressed(Key::F1)) {
-            self.state.dialogs.shortcuts_help = true;
-        }
-
-        // Tool switching shortcuts (no modifiers - for schematic editing)
-        // Only active when not typing in a text field
-        let has_focus = ctx.memory(|m| m.focused().is_some());
-        if !has_focus {
-            use crate::state::{ComponentType, Tool};
-
-            // Select tool
-            if ctx.input(|i| i.key_pressed(Key::S) && !i.modifiers.ctrl) {
+        match command {
+            ShortcutCommand::FileNew => self.action_file_new(),
+            ShortcutCommand::FileOpen => self.action_file_open(),
+            ShortcutCommand::FileSave => self.action_file_save(),
+            ShortcutCommand::EditUndo => self.action_edit_undo(),
+            ShortcutCommand::EditRedo => self.action_edit_redo(),
+            ShortcutCommand::EditCopy => self.action_edit_copy(),
+            ShortcutCommand::EditPaste => self.action_edit_paste(),
+            ShortcutCommand::EditCut => self.action_edit_cut(),
+            ShortcutCommand::EditDelete => self.action_edit_delete(),
+            ShortcutCommand::EditSelectAll => self.action_edit_select_all(),
+            ShortcutCommand::ToggleBrowserPanel => self.toggle_panel_browser(),
+            ShortcutCommand::ToggleLogPanel => self.toggle_panel_log_new(),
+            ShortcutCommand::ShowShortcutsHelp => {
+                self.state.dialogs.shortcuts_help = true;
+            }
+            ShortcutCommand::ToolSelect => {
                 self.state.schematic.tool = Tool::Select;
             }
-            // Wire tool
-            if ctx.input(|i| i.key_pressed(Key::W) && !i.modifiers.ctrl) {
+            ShortcutCommand::ToolWire => {
                 self.state.schematic.tool = Tool::Wire;
             }
-            // Ground
-            if ctx.input(|i| i.key_pressed(Key::G) && !i.modifiers.ctrl) {
+            ShortcutCommand::PlaceGround => {
                 self.state.schematic.tool = Tool::Place(ComponentType::Ground);
             }
-            // Voltage source
-            if ctx.input(|i| i.key_pressed(Key::V) && !i.modifiers.ctrl) {
+            ShortcutCommand::PlaceVoltageSource => {
                 self.state.schematic.tool = Tool::Place(ComponentType::VoltageSource);
             }
-            // Current source
-            if ctx.input(|i| i.key_pressed(Key::I) && !i.modifiers.ctrl) {
+            ShortcutCommand::PlaceCurrentSource => {
                 self.state.schematic.tool = Tool::Place(ComponentType::CurrentSource);
             }
-            // Capacitor
-            if ctx.input(|i| i.key_pressed(Key::C) && !i.modifiers.ctrl) {
+            ShortcutCommand::PlaceCapacitor => {
                 self.state.schematic.tool = Tool::Place(ComponentType::Capacitor);
             }
-            // Inductor
-            if ctx.input(|i| i.key_pressed(Key::L) && !i.modifiers.ctrl && !i.modifiers.shift) {
+            ShortcutCommand::PlaceInductor => {
                 self.state.schematic.tool = Tool::Place(ComponentType::Inductor);
             }
-            // Diode
-            if ctx.input(|i| i.key_pressed(Key::D) && !i.modifiers.ctrl) {
+            ShortcutCommand::PlaceDiode => {
                 self.state.schematic.tool = Tool::Place(ComponentType::Diode);
             }
-            // NMOS
-            if ctx.input(|i| i.key_pressed(Key::M) && !i.modifiers.ctrl) {
+            ShortcutCommand::PlaceNmos => {
                 self.state.schematic.tool = Tool::Place(ComponentType::Nmos);
             }
-            // NPN BJT
-            if ctx.input(|i| i.key_pressed(Key::Q) && !i.modifiers.ctrl) {
+            ShortcutCommand::PlaceNpnBjt => {
                 self.state.schematic.tool = Tool::Place(ComponentType::NpnBjt);
             }
-            // Probe tool
-            if ctx.input(|i| i.key_pressed(Key::P) && !i.modifiers.ctrl) {
+            ShortcutCommand::ToolProbe => {
                 self.state.schematic.tool = Tool::Probe;
             }
-            // Resistor (Shift+R)
-            if ctx.input(|i| i.key_pressed(Key::R) && i.modifiers.shift && !i.modifiers.ctrl) {
+            ShortcutCommand::PlaceResistor => {
                 self.state.schematic.tool = Tool::Place(ComponentType::Resistor);
             }
-            // Rotate preview/selection (R key without shift)
-            if ctx.input(|i| i.key_pressed(Key::R) && !i.modifiers.ctrl && !i.modifiers.shift) {
-                // Rotate preview rotation for component placement
+            ShortcutCommand::RotateSelectionOrPreview => {
                 self.state.schematic.preview_rotation =
                     self.state.schematic.preview_rotation.rotate_cw();
-                // Also rotate selected components
                 if !self.state.schematic.selection.is_empty() {
                     self.state.schematic.rotate_selection();
                 }
             }
-            // Mirror horizontal (H key) - Cadence Virtuoso convention
-            if ctx.input(|i| i.key_pressed(Key::H) && !i.modifiers.ctrl) {
+            ShortcutCommand::MirrorSelectionHorizontal => {
                 if !self.state.schematic.selection.is_empty() {
                     self.state.schematic.mirror_selection_h();
                 }
             }
-            // Mirror vertical (Y key) - since V is voltage source
-            if ctx.input(|i| i.key_pressed(Key::Y) && !i.modifiers.ctrl) {
+            ShortcutCommand::MirrorSelectionVertical => {
                 if !self.state.schematic.selection.is_empty() {
                     self.state.schematic.mirror_selection_v();
                 }
             }
-            // Edit properties (E key) - Cadence Virtuoso convention
-            if ctx.input(|i| i.key_pressed(Key::E) && !i.modifiers.ctrl) {
+            ShortcutCommand::OpenPropertiesEditor => {
                 if let Some(comp_id) = self.state.schematic.selection.single_component() {
                     if let Some(comp) = self
                         .state
@@ -430,23 +387,20 @@ impl RSpiceApp {
                         let props = crate::properties::dialog::EditedProperties {
                             name: comp.name.clone(),
                             value: comp.value.clone(),
-                            model: String::new(), // Component doesn't have model field yet
+                            model: String::new(),
                             parameters: vec![],
                         };
                         self.state.property_editor.open_for(comp_id, props);
                     }
                 }
             }
-            // Escape to cancel/deselect
-            if ctx.input(|i| i.key_pressed(Key::Escape)) {
-                // Cancel property editor if open
+            ShortcutCommand::EscapeCancel => {
                 if self.state.property_editor.open {
                     self.state.property_editor.cancel();
                 } else {
                     self.state.schematic.tool = Tool::Select;
                     self.state.schematic.cancel_wire();
                     self.state.schematic.selection.clear();
-                    // Cancel box selection
                     self.state.schematic.selection_rect.cancel();
                 }
             }
