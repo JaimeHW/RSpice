@@ -113,11 +113,9 @@ pub fn export_to_csv(traces: &[TraceData], options: &ExportOptions) -> String {
     let _max_len = visible_traces.iter().map(|t| t.len()).max().unwrap_or(0);
 
     // Use the first visible trace as the time reference
-    let time_trace = visible_traces.first();
-    if time_trace.is_none() {
+    let Some(time_trace) = visible_traces.first() else {
         return output;
-    }
-    let time_trace = time_trace.unwrap();
+    };
 
     // Data rows
     for i in 0..time_trace.len() {
@@ -227,7 +225,9 @@ pub fn export_to_spice_raw(traces: &[TraceData], title: &str) -> String {
     output.push_str("Values:\n");
 
     // Data
-    let time_trace = visible_traces.first().unwrap();
+    let Some(time_trace) = visible_traces.first() else {
+        return String::new();
+    };
     for i in 0..time_trace.len() {
         output.push_str(&format!("{}\t{:.12e}", i, time_trace.x[i]));
         for trace in &visible_traces {
