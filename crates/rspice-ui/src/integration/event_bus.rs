@@ -195,7 +195,7 @@ impl EventSource {
 // =============================================================================
 
 /// Handler function type
-pub type HandlerFn = Box<dyn Fn(&Event) + Send + Sync>;
+pub type HandlerFn = Box<dyn Fn(&mut Event) + Send + Sync>;
 
 /// Event handler registration
 pub struct EventHandler {
@@ -247,7 +247,7 @@ impl EventHandler {
     }
 
     /// Invoke handler
-    pub fn invoke(&self, event: &Event) {
+    pub fn invoke(&self, event: &mut Event) {
         if self.active && self.handles(event.event_type) {
             (self.handler)(event);
         }
@@ -359,6 +359,8 @@ impl EventBus {
 
     /// Publish an event
     pub fn publish(&self, event: Event) {
+        let mut event = event;
+
         // Record history
         if self.record_history {
             let mut history = write_lock(&self.history, "EventBus::publish(history)");
@@ -372,7 +374,7 @@ impl EventBus {
         let handlers = read_lock(&self.handlers, "EventBus::publish(handlers)");
         for handler in handlers.iter() {
             if !event.is_consumed() {
-                handler.invoke(&event);
+                handler.invoke(&mut event);
             }
         }
     }
@@ -422,8 +424,8 @@ impl EventBus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     // =========================================================================
     // Event Tests
@@ -578,6 +580,30 @@ mod tests {
         bus.publish_progress(50);
 
         assert_eq!(counter.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn test_bus_publish_stops_after_event_consume() {
+        let bus = EventBus::new();
+        let counter = Arc::new(AtomicUsize::new(0));
+        let counter_clone = counter.clone();
+
+        bus.subscribe_with_priority(
+            10,
+            Box::new(|event| {
+                event.consume();
+            }),
+        );
+        bus.subscribe_with_priority(
+            0,
+            Box::new(move |_| {
+                counter_clone.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
+
+        bus.publish(Event::new(EventType::Custom, EventSource::system()));
+
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
     }
 
     #[test]
