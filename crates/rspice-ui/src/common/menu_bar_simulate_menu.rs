@@ -1,0 +1,176 @@
+use egui::Ui;
+
+use crate::common::app::{AppState, ConsoleMessage};
+use crate::common::simulation_analysis_tabs;
+
+pub(super) fn render_simulate_menu(ui: &mut Ui, state: &mut AppState) {
+    // Quick run - uses currently selected analysis
+    if ui.button("Run Simulation    F5").clicked() {
+        start_simulation(state, None);
+        ui.close_menu();
+    }
+
+    // Run Analysis submenu for quick access to specific analyses
+    ui.menu_button("Run Analysis", |ui| {
+        for &(name, tab) in simulation_analysis_tabs::QUICK_RUN_ANALYSES {
+            if ui.button(name).clicked() {
+                state.dialogs.sim_active_tab = tab;
+                start_simulation(state, Some(name));
+                ui.close_menu();
+            }
+        }
+    });
+
+    if ui.button("Stop Simulation").clicked() {
+        stop_simulation(state);
+        ui.close_menu();
+    }
+
+    ui.separator();
+
+    if ui.button("Setup...     Ctrl+Shift+S").clicked() {
+        state.dialogs.simulation_dialog = true;
+        ui.close_menu();
+    }
+
+    if ui.button("Options...").clicked() {
+        open_simulation_options(state);
+        ui.close_menu();
+    }
+
+    ui.separator();
+
+    // Netlist menu
+    ui.menu_button("Netlist", |ui| {
+        if ui.button("View Netlist").clicked() {
+            super::menu_bar_export_actions::action_view_netlist(state);
+            ui.close_menu();
+        }
+        if ui.button("Export SPICE Netlist...").clicked() {
+            super::menu_bar_export_actions::action_export_netlist(
+                state,
+                crate::io::NetlistFormat::Spice,
+            );
+            ui.close_menu();
+        }
+        if ui.button("Export Spectre Netlist...").clicked() {
+            super::menu_bar_export_actions::action_export_netlist(
+                state,
+                crate::io::NetlistFormat::Spectre,
+            );
+            ui.close_menu();
+        }
+    });
+}
+
+fn start_simulation(state: &mut AppState, analysis_name: Option<&str>) {
+    log::info!(
+        "Run button clicked! Components: {}",
+        state.schematic.components.len()
+    );
+
+    if state.schematic.components.is_empty() {
+        state.push_user_message(ConsoleMessage::warning(
+            "No circuit to simulate. Add components first.",
+        ));
+        return;
+    }
+
+    log::info!("Setting trigger_simulation = true");
+    state.simulation.trigger_simulation = true;
+    match analysis_name {
+        Some(name) => state.push_user_message(ConsoleMessage::info(format!(
+            "Starting {} analysis...",
+            name
+        ))),
+        None => state.push_user_message(ConsoleMessage::info("Simulation started...")),
+    }
+}
+
+fn stop_simulation(state: &mut AppState) {
+    state.simulation.is_running = false;
+    state.push_user_message(ConsoleMessage::warning("Simulation stopped"));
+}
+
+fn open_simulation_options(state: &mut AppState) {
+    state.dialogs.simulation_options_state =
+        crate::simulation::dialog::OptionsDialogState::from_options(
+            &state.dialogs.simulation_options_config,
+        );
+    state.dialogs.simulation_options_errors.clear();
+    state.dialogs.simulation_options = true;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{Component, ComponentType, Point};
+
+    #[test]
+    fn test_start_simulation_warns_when_empty_schematic() {
+        let mut state = AppState::default();
+
+        start_simulation(&mut state, None);
+
+        assert!(!state.simulation.trigger_simulation);
+        assert!(
+            state
+                .console_messages
+                .iter()
+                .any(|msg| msg.message.contains("No circuit to simulate")),
+            "expected missing-circuit warning"
+        );
+    }
+
+    #[test]
+    fn test_start_simulation_sets_trigger_and_analysis_message() {
+        let mut state = AppState::default();
+        state.schematic.components.push(
+            Component::new(1, ComponentType::Resistor, Point::new(10, 10))
+                .with_name_value("R1", "1k"),
+        );
+
+        start_simulation(&mut state, Some("AC Analysis"));
+
+        assert!(state.simulation.trigger_simulation);
+        assert!(
+            state
+                .console_messages
+                .iter()
+                .any(|msg| msg.message.contains("Starting AC Analysis analysis")),
+            "expected analysis-start message"
+        );
+    }
+
+    #[test]
+    fn test_stop_simulation_clears_running_state() {
+        let mut state = AppState::default();
+        state.simulation.is_running = true;
+
+        stop_simulation(&mut state);
+
+        assert!(!state.simulation.is_running);
+        assert!(
+            state
+                .console_messages
+                .iter()
+                .any(|msg| msg.message.contains("Simulation stopped")),
+            "expected stop confirmation message"
+        );
+    }
+
+    #[test]
+    fn test_open_simulation_options_opens_dialog_and_clears_errors() {
+        let mut state = AppState::default();
+        state
+            .dialogs
+            .simulation_options_errors
+            .push("bad option".to_string());
+        state.dialogs.simulation_options = false;
+
+        open_simulation_options(&mut state);
+
+        assert!(state.dialogs.simulation_options);
+        assert!(state.dialogs.simulation_options_errors.is_empty());
+    }
+}

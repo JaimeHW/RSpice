@@ -13,6 +13,8 @@ mod menu_bar_export_actions;
 mod menu_bar_file_actions;
 #[path = "menu_bar_netlist_compat.rs"]
 mod menu_bar_netlist_compat;
+#[path = "menu_bar_simulate_menu.rs"]
+mod menu_bar_simulate_menu;
 #[path = "menu_bar_veriloga_cache.rs"]
 mod menu_bar_veriloga_cache;
 #[path = "menu_bar_waveform_export.rs"]
@@ -311,96 +313,8 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
         // SIMULATE MENU
         // =====================================================================
         ui.menu_button("Simulate", |ui| {
-            // Quick run - uses currently selected analysis
-            if ui.button("▶ Run Simulation    F5").clicked() {
-                log::info!(
-                    "Run button clicked! Components: {}",
-                    state.schematic.components.len()
-                );
-                if state.schematic.components.is_empty() {
-                    state.push_user_message(crate::common::app::ConsoleMessage::warning(
-                        "No circuit to simulate. Add components first.",
-                    ));
-                } else {
-                    log::info!("Setting trigger_simulation = true");
-                    state.simulation.trigger_simulation = true;
-                    state.push_user_message(crate::common::app::ConsoleMessage::info(
-                        "Simulation started...",
-                    ));
-                }
-                ui.close_menu();
-            }
-
-            // Run Analysis submenu for quick access to specific analyses
-            ui.menu_button("Run Analysis", |ui| {
-                for &(name, tab) in simulation_analysis_tabs::QUICK_RUN_ANALYSES {
-                    if ui.button(name).clicked() {
-                        state.dialogs.sim_active_tab = tab;
-                        if state.schematic.components.is_empty() {
-                            state.push_user_message(crate::common::app::ConsoleMessage::warning(
-                                "No circuit to simulate. Add components first.",
-                            ));
-                        } else {
-                            state.push_user_message(crate::common::app::ConsoleMessage::info(
-                                format!("Starting {} analysis...", name),
-                            ));
-                            state.simulation.trigger_simulation = true;
-                        }
-                        ui.close_menu();
-                    }
-                }
-            });
-
-            if ui.button("⏹ Stop Simulation").clicked() {
-                state.simulation.is_running = false;
-                state.push_user_message(crate::common::app::ConsoleMessage::warning(
-                    "Simulation stopped",
-                ));
-                ui.close_menu();
-            }
-
-            ui.separator();
-
-            if ui.button("Setup...     Ctrl+Shift+S").clicked() {
-                state.dialogs.simulation_dialog = true;
-                ui.close_menu();
-            }
-
-            if ui.button("Options...").clicked() {
-                state.dialogs.simulation_options_state =
-                    crate::simulation::dialog::OptionsDialogState::from_options(
-                        &state.dialogs.simulation_options_config,
-                    );
-                state.dialogs.simulation_options_errors.clear();
-                state.dialogs.simulation_options = true;
-                ui.close_menu();
-            }
-
-            ui.separator();
-
-            // Netlist menu
-            ui.menu_button("Netlist", |ui| {
-                if ui.button("View Netlist").clicked() {
-                    menu_bar_export_actions::action_view_netlist(state);
-                    ui.close_menu();
-                }
-                if ui.button("Export SPICE Netlist...").clicked() {
-                    menu_bar_export_actions::action_export_netlist(
-                        state,
-                        crate::io::NetlistFormat::Spice,
-                    );
-                    ui.close_menu();
-                }
-                if ui.button("Export Spectre Netlist...").clicked() {
-                    menu_bar_export_actions::action_export_netlist(
-                        state,
-                        crate::io::NetlistFormat::Spectre,
-                    );
-                    ui.close_menu();
-                }
-            });
+            menu_bar_simulate_menu::render_simulate_menu(ui, state);
         });
-
         // =====================================================================
         // TOOLS MENU
         // =====================================================================
