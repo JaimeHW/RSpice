@@ -19,7 +19,7 @@
 //! the device will automatically compile to native code for maximum performance.
 //! Falls back gracefully to the bytecode VM interpreter otherwise.
 
-use crate::codegen::{CompiledModel, StampIndex};
+use crate::codegen::{CompiledModel, Instruction, StampIndex};
 use crate::vm::{Vm, VmContext};
 use smol_str::SmolStr;
 
@@ -123,6 +123,7 @@ impl VerilogADevice {
             context.set_param(i, param.default);
         }
         context.variables.resize(model.num_variables, 0.0);
+        Self::preallocate_vm_runtime_state(&mut context, &model);
 
         // Attempt native compilation (if feature enabled)
         #[cfg(feature = "native")]
@@ -143,6 +144,67 @@ impl VerilogADevice {
         };
         device.rebuild_matrix_indices();
         device
+    }
+
+    /// Preallocate interpreter runtime state vectors from bytecode instruction IDs.
+    ///
+    /// This avoids repeated dynamic growth during simulation hot paths and ensures
+    /// stateful operators have stable dedicated slots.
+    fn preallocate_vm_runtime_state(context: &mut VmContext, model: &CompiledModel) {
+        #[inline]
+        fn update_max(max_slot: &mut Option<usize>, idx: usize) {
+            *max_slot = Some(max_slot.map_or(idx, |prev| prev.max(idx)));
+        }
+
+        let mut max_state = None;
+        let mut max_delay_buffer = None;
+        let mut max_transition_filter = None;
+        let mut max_slew_filter = None;
+        let mut max_cross_detector = None;
+
+        let mut scan_program = |program: &crate::codegen::BytecodeProgram| {
+            for instruction in &program.instructions {
+                match instruction {
+                    Instruction::DdtState(idx)
+                    | Instruction::IdtState(idx)
+                    | Instruction::LimitState(idx) => update_max(&mut max_state, *idx),
+                    Instruction::AbsDelayState(idx) => update_max(&mut max_delay_buffer, *idx),
+                    Instruction::TransitionState(idx) => {
+                        update_max(&mut max_transition_filter, *idx)
+                    }
+                    Instruction::SlewState(idx) => update_max(&mut max_slew_filter, *idx),
+                    Instruction::CrossState(idx) => update_max(&mut max_cross_detector, *idx),
+                    _ => {}
+                }
+            }
+        };
+
+        for assignment in &model.assignment_programs {
+            scan_program(&assignment.program);
+        }
+
+        for stamp in &model.stamp_programs {
+            scan_program(&stamp.value_program);
+            for jac in &stamp.jacobian_programs {
+                scan_program(&jac.program);
+            }
+        }
+
+        if let Some(max_idx) = max_state {
+            context.allocate_states(max_idx + 1);
+        }
+        if let Some(max_idx) = max_delay_buffer {
+            context.allocate_delay_buffers(max_idx + 1);
+        }
+        if let Some(max_idx) = max_transition_filter {
+            context.allocate_transition_filters(max_idx + 1);
+        }
+        if let Some(max_idx) = max_slew_filter {
+            context.allocate_slew_filters(max_idx + 1);
+        }
+        if let Some(max_idx) = max_cross_detector {
+            context.allocate_cross_detectors(max_idx + 1);
+        }
     }
 
     /// Attempt to compile the model to native code using Cranelift JIT
@@ -1076,6 +1138,80 @@ mod tests {
             internal_nodes: 0,
             branch_currents: 0,
         }
+    }
+
+    fn create_stateful_slots_model() -> CompiledModel {
+        let value_program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushConst(1.0),
+                Instruction::DdtState(3),
+                Instruction::PushConst(2.0),
+                Instruction::LimitState(2),
+                Instruction::PushConst(5.0),
+                Instruction::PushConst(1.0e-9),
+                Instruction::AbsDelayState(4),
+                Instruction::PushConst(10.0),
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(1.0e-9),
+                Instruction::PushConst(1.0e-9),
+                Instruction::TransitionState(5),
+                Instruction::PushConst(10.0),
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(1.0),
+                Instruction::SlewState(6),
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(0.0),
+                Instruction::CrossState(7),
+            ],
+        };
+
+        CompiledModel {
+            name: "stateful_slots".into(),
+            num_terminals: 2,
+            terminal_names: vec!["p".into(), "n".into()],
+            parameters: vec![],
+            num_variables: 0,
+            assignment_programs: vec![],
+            stamp_programs: vec![StampProgram {
+                stamp_locations: vec![StampLocation {
+                    row: StampIndex::Terminal(0),
+                    col: StampIndex::Ground,
+                    sign: 1.0,
+                }],
+                value_program,
+                jacobian_programs: vec![],
+            }],
+            lookup_tables: vec![],
+            internal_nodes: 0,
+            branch_currents: 0,
+            laplace_filters: vec![],
+        }
+    }
+
+    #[test]
+    fn test_runtime_state_preallocation_from_instruction_ids() {
+        let model = create_stateful_slots_model();
+        let device = VerilogADevice::new("X1", model, &[1, 0]);
+
+        assert_eq!(device.context.state_values.len(), 4);
+        assert_eq!(device.context.state_values_prev.len(), 4);
+        assert_eq!(device.context.delay_buffers.len(), 5);
+        assert_eq!(device.context.transition_filters.len(), 6);
+        assert_eq!(device.context.slew_filters.len(), 7);
+        assert_eq!(device.context.cross_detectors.len(), 8);
+    }
+
+    #[test]
+    fn test_runtime_state_preallocation_is_empty_for_stateless_model() {
+        let model = create_simple_resistor_model();
+        let device = VerilogADevice::new("R1", model, &[1, 0]);
+
+        assert!(device.context.state_values.is_empty());
+        assert!(device.context.state_values_prev.is_empty());
+        assert!(device.context.delay_buffers.is_empty());
+        assert!(device.context.transition_filters.is_empty());
+        assert!(device.context.slew_filters.is_empty());
+        assert!(device.context.cross_detectors.is_empty());
     }
 
     #[test]
