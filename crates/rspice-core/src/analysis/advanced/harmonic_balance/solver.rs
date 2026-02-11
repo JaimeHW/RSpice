@@ -9,11 +9,11 @@ use std::f64::consts::PI;
 use super::config::HbConfig;
 use super::fft::HbFft;
 use super::result::{HbResult, SpectralVoltage};
-use crate::Value;
 #[cfg(feature = "veriloga")]
 use crate::device::veriloga::VerilogADevice;
 use crate::solver::convergence::{PseudoTransient, SourceStepper};
 use crate::solver::limit_pn_voltage;
+use crate::Value;
 
 /// Error types specific to Harmonic Balance solver
 #[derive(Debug, Clone)]
@@ -2443,7 +2443,19 @@ impl HbSolver {
         let reference_node = ground_conductance
             .iter()
             .enumerate()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| {
+                let a_val = if a.1.is_finite() {
+                    *a.1
+                } else {
+                    f64::NEG_INFINITY
+                };
+                let b_val = if b.1.is_finite() {
+                    *b.1
+                } else {
+                    f64::NEG_INFINITY
+                };
+                a_val.total_cmp(&b_val)
+            })
             .map(|(i, _)| i)
             .unwrap_or(n - 1);
 
@@ -3633,6 +3645,21 @@ mod solver_tests {
     }
 
     #[test]
+    fn test_initialize_diode_voltages_ignores_non_finite_ground_conductance() {
+        let config = HbConfig::new(1e9).with_harmonics(1);
+        let mut solver = HbSolver::new(config, 2);
+        solver.g_matrix.push((0, 0, f64::NAN));
+        solver.g_matrix.push((1, 1, 1e-3));
+
+        let mut state = HbSolverState::new(2, 1);
+        solver.initialize_diode_voltages(&mut state);
+
+        assert!(state.x[0][0].re.is_finite());
+        assert!(state.x[1][0].re.is_finite());
+        assert!((state.x[1][0].re - 0.0).abs() < 1e-12);
+    }
+
+    #[test]
     fn test_add_stamps() {
         let config = HbConfig::new(1e9);
         let mut solver = HbSolver::new(config, 2);
@@ -4214,7 +4241,7 @@ mod solver_tests {
         solver.add_conductance(0, 0, 0.01);
         // 1k resistor between nodes 0 and 1 (full MNA stamp)
         solver.add_resistor(0, 1, 1000.0); // G = 0.001
-        // 1pF capacitor at node 1
+                                           // 1pF capacitor at node 1
         solver.add_capacitance(1, 1, 1e-12);
 
         let state = HbSolverState::new(2, 2);
@@ -4754,7 +4781,11 @@ mod solver_tests {
                 // Use absolute tolerance for near-zero values, relative for larger
                 let rel_diff = if scale < abs_tol {
                     // Both values are near zero - check absolute difference
-                    if diff < abs_tol { 0.0 } else { diff / abs_tol }
+                    if diff < abs_tol {
+                        0.0
+                    } else {
+                        diff / abs_tol
+                    }
                 } else {
                     diff / scale
                 };
@@ -5071,7 +5102,7 @@ mod solver_tests {
         solver.set_dc_source(2, 1e-3); // Current into drain
         solver.add_conductance(1, 1, 1.0); // Gate conductance to ground (G=1S)
         solver.add_conductance(3, 3, 1.0); // Source grounded
-        // NMOS: drain=2, gate=1, source=3, bulk=3, kp=200µA/V², vth=0.5V
+                                           // NMOS: drain=2, gate=1, source=3, bulk=3, kp=200µA/V², vth=0.5V
         solver.add_nmos(2, 1, 3, 3, 2e-4, 0.5);
         for n in 0..4 {
             solver.add_conductance(n, n, 1e-9);
@@ -5108,7 +5139,7 @@ mod solver_tests {
 
         // Use add_resistor for proper MNA stamp: 100 ohm base resistor to ground
         solver.add_resistor(1, 3, 100.0); // Base to ground: G = 0.01S
-        // 100 ohm collector resistor to ground
+                                          // 100 ohm collector resistor to ground
         solver.add_resistor(2, 3, 100.0); // Collector to ground: G = 0.01S
 
         // Ground node (large conductance to clamp)
