@@ -246,7 +246,11 @@ impl Waveform {
         if self.time.len() < 2 {
             return 0.0;
         }
-        (self.time.len() - 1) as Value / self.duration()
+        let duration = self.duration();
+        if !duration.is_finite() || duration <= 0.0 {
+            return 0.0;
+        }
+        (self.time.len() - 1) as Value / duration
     }
 
     /// Get value at index
@@ -1263,6 +1267,24 @@ mod tests {
 
         let sr = wf.sample_rate();
         assert!((sr - 1e9).abs() / 1e9 < 0.01);
+    }
+
+    #[test]
+    fn test_sample_rate_zero_duration_returns_zero() {
+        let time = vec![1.0, 1.0, 1.0];
+        let values = vec![0.0, 1.0, 2.0];
+        let wf = Waveform::new(&time, &values);
+
+        assert_eq!(wf.sample_rate(), 0.0);
+    }
+
+    #[test]
+    fn test_sample_rate_non_finite_duration_returns_zero() {
+        let time = vec![0.0, f64::INFINITY];
+        let values = vec![0.0, 1.0];
+        let wf = Waveform::new(&time, &values);
+
+        assert_eq!(wf.sample_rate(), 0.0);
     }
 
     #[test]
