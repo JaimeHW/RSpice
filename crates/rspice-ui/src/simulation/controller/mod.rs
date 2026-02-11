@@ -31,7 +31,11 @@ use crate::simulation::runner::SpecExecutionOptions;
 use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
 use crate::state::{AnalysisResult, AnalysisType, DcOpResult, OperatingPointValue};
 
-mod analysis_spec;
+mod analysis_commands;
+mod analysis_helpers;
+mod analysis_plan;
+mod analysis_run_config;
+mod analysis_spec_build;
 mod results_convert;
 mod results_post;
 mod results_update;
