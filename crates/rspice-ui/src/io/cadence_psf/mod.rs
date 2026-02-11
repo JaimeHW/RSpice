@@ -6,21 +6,17 @@
 use std::collections::HashMap;
 use std::fmt;
 
-#[path = "cadence_psf_type_meta.rs"]
 mod cadence_psf_type_meta;
 use cadence_psf_type_meta::TypeMetaCache;
 
-#[path = "cadence_psf/binary_io.rs"]
 mod binary_io;
 use binary_io::{
     parse_string, peek_u32, read_f64, read_i32, read_u32, read_u8_padded, skip_opaque_scalar,
 };
 
-#[path = "cadence_psf/toc.rs"]
 mod toc;
 use toc::{parse_toc, SectionKind, Toc, TocEntry};
 
-#[path = "cadence_psf/value_decode.rs"]
 mod value_decode;
 use value_decode::{decode_windowed_dynamic_signal_samples, read_type_value_with_numeric_visit};
 
@@ -1233,13 +1229,10 @@ fn push_scalar_slice(
 }
 
 #[cfg(test)]
-#[path = "cadence_psf/test_helpers.rs"]
 pub(crate) mod test_helpers;
 
 #[cfg(test)]
-#[path = "cadence_psf/tests.rs"]
 mod tests;
 
 #[cfg(test)]
-#[path = "cadence_psf/malformed_tests.rs"]
 mod malformed_tests;
