@@ -62,6 +62,11 @@ pub use app_shell_state::{
 mod app_dialog_state;
 pub use app_dialog_state::DialogState;
 
+#[path = "app_serialization.rs"]
+mod app_serialization;
+#[cfg(test)]
+use app_serialization::{PanelSizesSer, PanelVisibilitySer};
+
 /// Main application state container
 #[derive(Clone)]
 pub struct AppState {
@@ -3559,138 +3564,6 @@ impl RSpiceApp {
     /// Render the Histogram panel (Monte Carlo/corners)
     fn render_histogram_panel(&mut self, ui: &mut Ui) {
         crate::analysis::histogram::render_histogram_panel(ui, &mut self.state);
-    }
-}
-
-// =============================================================================
-// Serialization
-// =============================================================================
-
-impl serde::Serialize for AppState {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        // Serialize minimal state needed for session recovery
-        use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("AppState", 2)?;
-        state.serialize_field("panels", &PanelVisibilitySer::from(&self.panels))?;
-        state.serialize_field("panel_sizes", &PanelSizesSer::from(&self.panel_sizes))?;
-        state.end()
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for AppState {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        // Deserialize minimal state and use defaults for the rest
-        #[derive(serde::Deserialize)]
-        struct AppStateDe {
-            panels: PanelVisibilitySer,
-            panel_sizes: PanelSizesSer,
-        }
-
-        let de = AppStateDe::deserialize(deserializer)?;
-        Ok(Self {
-            panels: de.panels.into(),
-            panel_sizes: de.panel_sizes.into(),
-            ..Default::default()
-        })
-    }
-}
-
-// Serialization helpers
-#[derive(serde::Serialize, serde::Deserialize)]
-struct PanelVisibilitySer {
-    project_browser: bool,
-    #[serde(default)]
-    results_browser: bool,
-    properties: bool,
-    #[serde(default = "default_bottom_panel")]
-    bottom_panel: bool,
-    #[serde(default)]
-    active_bottom_tab: usize, // Serialize as index for backwards compat
-    #[serde(default)]
-    smith_chart: bool,
-    #[serde(default)]
-    signal_browser: bool,
-    #[serde(default)]
-    script_console: bool,
-}
-
-fn default_bottom_panel() -> bool {
-    true
-}
-
-impl From<&PanelVisibility> for PanelVisibilitySer {
-    fn from(p: &PanelVisibility) -> Self {
-        Self {
-            project_browser: p.project_browser,
-            results_browser: p.results_browser,
-            properties: p.properties,
-            bottom_panel: p.bottom_panel,
-            active_bottom_tab: match p.active_bottom_tab {
-                BottomPanelTab::Waveform => 1,
-                BottomPanelTab::Log => 2,
-                BottomPanelTab::Automation => 3,
-            },
-            smith_chart: p.smith_chart,
-            signal_browser: p.signal_browser,
-            script_console: p.script_console,
-        }
-    }
-}
-
-impl From<PanelVisibilitySer> for PanelVisibility {
-    fn from(s: PanelVisibilitySer) -> Self {
-        Self {
-            project_browser: s.project_browser,
-            results_browser: s.results_browser,
-            properties: s.properties,
-            bottom_panel: s.bottom_panel,
-            active_bottom_tab: match s.active_bottom_tab {
-                0 => BottomPanelTab::Log, // Backwards-compat: old sessions used index 0 for Console.
-                1 => BottomPanelTab::Waveform,
-                2 => BottomPanelTab::Log,
-                3 => BottomPanelTab::Automation,
-                _ => BottomPanelTab::Log,
-            },
-            smith_chart: s.smith_chart,
-            signal_browser: s.signal_browser,
-            script_console: s.script_console,
-        }
-    }
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct PanelSizesSer {
-    waveform_height: f32,
-    console_height: f32,
-    browser_width: f32,
-    properties_width: f32,
-}
-
-impl From<&PanelSizes> for PanelSizesSer {
-    fn from(p: &PanelSizes) -> Self {
-        Self {
-            waveform_height: p.waveform_height,
-            console_height: p.console_height,
-            browser_width: p.browser_width,
-            properties_width: p.properties_width,
-        }
-    }
-}
-
-impl From<PanelSizesSer> for PanelSizes {
-    fn from(s: PanelSizesSer) -> Self {
-        Self {
-            waveform_height: s.waveform_height,
-            console_height: s.console_height,
-            browser_width: s.browser_width,
-            properties_width: s.properties_width,
-        }
     }
 }
 
