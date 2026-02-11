@@ -8,6 +8,10 @@ use rspice_core::netlist::{
 use rspice_core::solver::SimulationResult as CoreSimulationResult;
 use rspice_core::Value;
 
+#[path = "sweep_points.rs"]
+mod sweep_points;
+use sweep_points::{expand_step_sweep_values, extract_temp_points};
+
 /// Parametric sweep data.
 #[derive(Debug, Clone)]
 pub struct ParametricData {
@@ -60,7 +64,7 @@ pub fn run_parametric_analysis(netlist_text: &str) -> Result<ParametricData, Str
         })
         .ok_or_else(|| "Parametric analysis requires a .STEP command in the netlist".to_string())?;
 
-    let values = expand_step_sweep_values(&step_cmd.sweep)?;
+    let values = expand_step_sweep_values(&step_cmd.sweep).map_err(|err| err.to_string())?;
     if values.is_empty() {
         return Err("Parametric analysis has no sweep points to execute".to_string());
     }
@@ -1050,152 +1054,9 @@ fn run_temperature_sweep(
     Ok(results)
 }
 
-fn expand_step_sweep_values(sweep: &StepSweep) -> Result<Vec<Value>, String> {
-    const MAX_SWEEP_POINTS: usize = 1_000_000;
-
-    match sweep {
-        StepSweep::Linear { start, stop, step } => {
-            if !start.is_finite() || !stop.is_finite() || !step.is_finite() {
-                return Err("Parametric linear sweep requires finite start/stop/step".to_string());
-            }
-            if *step == 0.0 {
-                return Err("Parametric linear sweep step cannot be zero".to_string());
-            }
-            if (stop - start).signum() != step.signum() && (stop - start).abs() > 0.0 {
-                return Err(
-                    "Parametric linear sweep step direction must match start/stop".to_string(),
-                );
-            }
-
-            if (stop - start).abs() == 0.0 {
-                return Ok(vec![*start]);
-            }
-
-            let mut values = Vec::new();
-            let mut current = *start;
-            let tolerance = (step.abs() * 1e-12).max((start.abs().max(stop.abs())) * 1e-12);
-
-            if *step > 0.0 {
-                while current <= *stop + tolerance {
-                    values.push(current);
-                    if values.len() > MAX_SWEEP_POINTS {
-                        return Err(
-                            "Parametric sweep exceeds maximum supported point count".to_string()
-                        );
-                    }
-                    current += *step;
-                }
-            } else {
-                while current >= *stop - tolerance {
-                    values.push(current);
-                    if values.len() > MAX_SWEEP_POINTS {
-                        return Err(
-                            "Parametric sweep exceeds maximum supported point count".to_string()
-                        );
-                    }
-                    current += *step;
-                }
-            }
-
-            if values.is_empty() {
-                return Err("Parametric linear sweep produced no points".to_string());
-            }
-
-            Ok(values)
-        }
-        StepSweep::Decade {
-            points_per_decade,
-            start,
-            stop,
-        } => {
-            if *points_per_decade == 0 {
-                return Err("Parametric decade sweep points_per_decade must be > 0".to_string());
-            }
-            if !start.is_finite() || !stop.is_finite() || *start <= 0.0 || *stop <= 0.0 {
-                return Err(
-                    "Parametric decade sweep requires positive finite start/stop".to_string(),
-                );
-            }
-            let start_log = start.log10();
-            let stop_log = stop.log10();
-            let span = (stop_log - start_log).abs();
-            let total_points = (span * (*points_per_decade as f64)).ceil() as usize + 1;
-            if total_points > MAX_SWEEP_POINTS {
-                return Err("Parametric sweep exceeds maximum supported point count".to_string());
-            }
-            let denom = (total_points - 1).max(1) as f64;
-            Ok((0..total_points)
-                .map(|i| {
-                    let t = i as f64 / denom;
-                    let log_value = start_log + (stop_log - start_log) * t;
-                    10.0_f64.powf(log_value)
-                })
-                .collect())
-        }
-        StepSweep::Octave {
-            points_per_octave,
-            start,
-            stop,
-        } => {
-            if *points_per_octave == 0 {
-                return Err("Parametric octave sweep points_per_octave must be > 0".to_string());
-            }
-            if !start.is_finite() || !stop.is_finite() || *start <= 0.0 || *stop <= 0.0 {
-                return Err(
-                    "Parametric octave sweep requires positive finite start/stop".to_string(),
-                );
-            }
-            let start_log = start.log2();
-            let stop_log = stop.log2();
-            let span = (stop_log - start_log).abs();
-            let total_points = (span * (*points_per_octave as f64)).ceil() as usize + 1;
-            if total_points > MAX_SWEEP_POINTS {
-                return Err("Parametric sweep exceeds maximum supported point count".to_string());
-            }
-            let denom = (total_points - 1).max(1) as f64;
-            Ok((0..total_points)
-                .map(|i| {
-                    let t = i as f64 / denom;
-                    let log_value = start_log + (stop_log - start_log) * t;
-                    2.0_f64.powf(log_value)
-                })
-                .collect())
-        }
-        StepSweep::List(values) => {
-            if values.is_empty() {
-                return Err("Parametric LIST sweep requires at least one value".to_string());
-            }
-            if values.iter().any(|value| !value.is_finite()) {
-                return Err("Parametric LIST sweep requires finite values".to_string());
-            }
-            Ok(values.clone())
-        }
-    }
-}
-
-fn extract_temp_points(netlist: &rspice_core::Netlist) -> Vec<Value> {
-    let mut temperatures: Vec<Value> = Vec::new();
-    for analysis in &netlist.analyses {
-        if let AnalysisCommand::Temp {
-            temperatures: temps,
-        } = analysis
-        {
-            for &temp in temps {
-                if !temperatures
-                    .iter()
-                    .any(|existing| (*existing - temp).abs() < 1e-15)
-                {
-                    temperatures.push(temp);
-                }
-            }
-        }
-    }
-    temperatures
-}
-
 #[cfg(test)]
 pub(super) fn expand_step_sweep_values_for_tests(sweep: &StepSweep) -> Result<Vec<Value>, String> {
-    expand_step_sweep_values(sweep)
+    expand_step_sweep_values(sweep).map_err(|err| err.to_string())
 }
 
 #[cfg(test)]
