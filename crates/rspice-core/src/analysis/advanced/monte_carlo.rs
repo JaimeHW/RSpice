@@ -228,6 +228,20 @@ pub struct VariableStatistics {
 impl VariableStatistics {
     /// Create from samples
     pub fn from_samples(name: &str, samples: Vec<Value>, num_bins: usize) -> Self {
+        let samples: Vec<Value> = samples.into_iter().filter(|v| v.is_finite()).collect();
+        if samples.is_empty() {
+            return Self {
+                name: name.to_string(),
+                samples,
+                mean: 0.0,
+                std_dev: 0.0,
+                min: 0.0,
+                max: 0.0,
+                histogram: vec![0],
+                bin_edges: vec![0.0, 0.0],
+            };
+        }
+
         let n = samples.len() as Value;
 
         // Mean
@@ -263,19 +277,33 @@ impl VariableStatistics {
         min: Value,
         max: Value,
     ) -> (Vec<usize>, Vec<Value>) {
+        if num_bins == 0 {
+            return (vec![samples.len()], vec![min, max]);
+        }
+
         let range = max - min;
-        if range <= 0.0 || num_bins == 0 {
+        if !range.is_finite() || range <= 0.0 || !min.is_finite() || !max.is_finite() {
             return (vec![samples.len()], vec![min, max]);
         }
 
         let bin_width = range / num_bins as Value;
+        if !bin_width.is_finite() || bin_width <= 0.0 {
+            return (vec![samples.len()], vec![min, max]);
+        }
         let mut histogram = vec![0usize; num_bins];
         let bin_edges: Vec<Value> = (0..=num_bins)
             .map(|i| min + (i as Value) * bin_width)
             .collect();
 
         for &sample in samples {
-            let bin = ((sample - min) / bin_width).floor() as usize;
+            if !sample.is_finite() {
+                continue;
+            }
+            let bin_position = ((sample - min) / bin_width).floor();
+            if !bin_position.is_finite() {
+                continue;
+            }
+            let bin = bin_position.max(0.0) as usize;
             let bin = bin.min(num_bins - 1);
             histogram[bin] += 1;
         }
@@ -285,13 +313,22 @@ impl VariableStatistics {
 
     /// Get percentile value (0-100)
     pub fn percentile(&self, pct: Value) -> Value {
-        if self.samples.is_empty() {
+        if !pct.is_finite() {
             return 0.0;
         }
 
-        let mut sorted = self.samples.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let mut sorted: Vec<Value> = self
+            .samples
+            .iter()
+            .copied()
+            .filter(|value| value.is_finite())
+            .collect();
+        if sorted.is_empty() {
+            return 0.0;
+        }
+        sorted.sort_by(f64::total_cmp);
 
+        let pct = pct.clamp(0.0, 100.0);
         let idx = ((pct / 100.0) * (sorted.len() - 1) as Value).floor() as usize;
         sorted[idx.min(sorted.len() - 1)]
     }
@@ -996,6 +1033,41 @@ mod tests {
 
         // Should return 0 for empty samples
         assert_eq!(stats.percentile(50.0), 0.0);
+    }
+
+    #[test]
+    fn test_non_finite_samples_are_filtered_from_statistics() {
+        let stats = VariableStatistics::from_samples(
+            "mixed",
+            vec![1.0, f64::NAN, 2.0, f64::INFINITY, 3.0, f64::NEG_INFINITY],
+            3,
+        );
+
+        assert_eq!(stats.samples.len(), 3);
+        assert!((stats.mean - 2.0).abs() < 1e-12);
+        assert!((stats.min - 1.0).abs() < 1e-12);
+        assert!((stats.max - 3.0).abs() < 1e-12);
+        assert_eq!(stats.histogram.iter().sum::<usize>(), 3);
+    }
+
+    #[test]
+    fn test_percentile_ignores_non_finite_samples() {
+        let stats = VariableStatistics::from_samples(
+            "mixed",
+            vec![10.0, f64::NAN, 20.0, f64::INFINITY, 30.0],
+            3,
+        );
+
+        assert!((stats.percentile(50.0) - 20.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_percentile_bounds_and_non_finite_request() {
+        let stats = VariableStatistics::from_samples("values", vec![1.0, 2.0, 3.0, 4.0], 4);
+
+        assert_eq!(stats.percentile(f64::NAN), 0.0);
+        assert!((stats.percentile(-10.0) - 1.0).abs() < 1e-12);
+        assert!((stats.percentile(150.0) - 4.0).abs() < 1e-12);
     }
 
     /// Test single sample statistics.
