@@ -20,6 +20,7 @@ pub mod waveform_io;
 
 // Re-exports
 pub use binary_io::{PsfHeader, PsfReader, PsfWriter};
+pub use cadence_psf::{parse_cadence_psf_binary, CadencePsfError, ParsedCadencePsfBinary};
 pub use lib_parser::{
     IncludeDirective, IncludeType, LibrarySection, ModelDef, ParamValue, ParsedLibrary,
     SubcircuitDef,
