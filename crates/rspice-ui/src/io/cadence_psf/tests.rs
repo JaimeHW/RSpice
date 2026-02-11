@@ -761,3 +761,17 @@
         let err = header_usize(&header, "PSF sweep points").expect_err("fractional counts must fail");
         assert!(err.to_string().contains("integer count"));
     }
+
+    #[test]
+    fn test_parse_zero_pad_accepts_all_zero_bytes() {
+        let tail = parse_zero_pad(&[0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0xAB])
+            .expect("all-zero pad bytes must be accepted");
+        assert_eq!(tail, &[0xAB]);
+    }
+
+    #[test]
+    fn test_parse_zero_pad_rejects_non_zero_bytes() {
+        let err = parse_zero_pad(&[0x00, 0x00, 0x00, 0x03, 0x00, 0x01, 0x00])
+            .expect_err("non-zero pad bytes must fail");
+        assert!(err.to_string().contains("non-zero bytes"));
+    }

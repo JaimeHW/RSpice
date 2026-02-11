@@ -809,7 +809,13 @@ fn parse_zero_pad(mut cursor: &[u8]) -> Result<&[u8], CadencePsfError> {
     if cursor.len() < len {
         return Err(CadencePsfError::new("zero-pad block truncated"));
     }
-    Ok(&cursor[len..])
+    let (pad, tail) = cursor.split_at(len);
+    if pad.iter().any(|byte| *byte != 0) {
+        return Err(CadencePsfError::new(
+            "zero-pad block contains non-zero bytes",
+        ));
+    }
+    Ok(tail)
 }
 
 fn consume_zero_word_padding(cursor: &mut &[u8]) -> bool {
