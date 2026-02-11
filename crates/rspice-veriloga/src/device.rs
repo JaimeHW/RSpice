@@ -45,7 +45,6 @@ pub struct VerilogADevice {
     /// Number of internal nodes in this device
     num_internal_nodes: usize,
     /// Pre-computed matrix indices for O(1) stamping
-    #[allow(dead_code)]
     matrix_indices: MatrixIndices,
     /// Native compiled model (if compilation succeeded)
     #[cfg(feature = "native")]
@@ -65,10 +64,10 @@ unsafe impl Sync for VerilogADevice {}
 /// Pre-computed matrix indices for fast stamping
 #[derive(Debug, Clone, Default)]
 pub struct MatrixIndices {
-    /// (row, col, program_idx, jacobian_idx) for each Jacobian entry
-    pub jacobian: Vec<JacobianIndex>,
-    /// (node, sign) for RHS contributions
-    pub rhs: Vec<RhsIndex>,
+    /// Jacobian mappings grouped per stamp program.
+    pub jacobian: Vec<Vec<JacobianIndex>>,
+    /// RHS mappings grouped per stamp program.
+    pub rhs: Vec<Vec<RhsIndex>>,
 }
 
 /// Single Jacobian matrix entry index
@@ -125,26 +124,25 @@ impl VerilogADevice {
         }
         context.variables.resize(model.num_variables, 0.0);
 
-        // Build matrix indices (will be set during circuit linking)
-        let matrix_indices = MatrixIndices::default();
-
         // Attempt native compilation (if feature enabled)
         #[cfg(feature = "native")]
         let (native_model, native_vars) = Self::try_native_compile(&model);
 
-        Self {
+        let mut device = Self {
             name: name.into(),
             model,
             context,
             node_mapping,
             internal_node_indices: vec![0; num_internal_nodes],
             num_internal_nodes,
-            matrix_indices,
+            matrix_indices: MatrixIndices::default(),
             #[cfg(feature = "native")]
             native_model,
             #[cfg(feature = "native")]
             native_vars,
-        }
+        };
+        device.rebuild_matrix_indices();
+        device
     }
 
     /// Attempt to compile the model to native code using Cranelift JIT
@@ -245,6 +243,7 @@ impl VerilogADevice {
                 self.internal_node_indices[i] = idx;
             }
         }
+        self.rebuild_matrix_indices();
     }
 
     /// Get the circuit node index for an internal node
@@ -257,21 +256,13 @@ impl VerilogADevice {
     /// Returns one entry per stamp program; each program entry contains
     /// `(node_index, sign)` pairs for non-ground RHS rows.
     pub fn mapped_rhs_rows(&self) -> Vec<Vec<(usize, f64)>> {
-        self.model
-            .stamp_programs
+        self.matrix_indices
+            .rhs
             .iter()
-            .map(|program| {
-                program
-                    .stamp_locations
+            .map(|entries| {
+                entries
                     .iter()
-                    .filter_map(|loc| {
-                        Self::index_to_node(
-                            &loc.row,
-                            &self.node_mapping,
-                            &self.internal_node_indices,
-                        )
-                        .map(|row| (row, loc.sign))
-                    })
+                    .filter_map(|entry| entry.node.map(|node| (node, entry.sign)))
                     .collect()
             })
             .collect()
@@ -282,30 +273,56 @@ impl VerilogADevice {
     /// Returns one entry per stamp program; each program entry contains
     /// `(row, col)` locations for each Jacobian program where `None` means ground.
     pub fn mapped_jacobian_locations(&self) -> Vec<Vec<(Option<usize>, Option<usize>)>> {
-        self.model
-            .stamp_programs
+        self.matrix_indices
+            .jacobian
             .iter()
-            .map(|program| {
-                program
-                    .jacobian_programs
-                    .iter()
-                    .map(|jac| {
-                        (
-                            Self::index_to_node(
-                                &jac.row,
-                                &self.node_mapping,
-                                &self.internal_node_indices,
-                            ),
-                            Self::index_to_node(
-                                &jac.col,
-                                &self.node_mapping,
-                                &self.internal_node_indices,
-                            ),
-                        )
-                    })
-                    .collect()
-            })
+            .map(|entries| entries.iter().map(|entry| (entry.row, entry.col)).collect())
             .collect()
+    }
+
+    /// Recompute cached matrix/RHS node mappings after topology changes.
+    fn rebuild_matrix_indices(&mut self) {
+        let mut rhs = vec![Vec::new(); self.model.stamp_programs.len()];
+        let mut jacobian = vec![Vec::new(); self.model.stamp_programs.len()];
+
+        for (program_idx, program) in self.model.stamp_programs.iter().enumerate() {
+            rhs[program_idx] = program
+                .stamp_locations
+                .iter()
+                .map(|loc| RhsIndex {
+                    node: Self::index_to_node(
+                        &loc.row,
+                        &self.node_mapping,
+                        &self.internal_node_indices,
+                    ),
+                    sign: loc.sign,
+                    program_idx,
+                })
+                .collect();
+
+            jacobian[program_idx] = program
+                .jacobian_programs
+                .iter()
+                .enumerate()
+                .map(|(jacobian_idx, jac_entry)| JacobianIndex {
+                    row: Self::index_to_node(
+                        &jac_entry.row,
+                        &self.node_mapping,
+                        &self.internal_node_indices,
+                    ),
+                    col: Self::index_to_node(
+                        &jac_entry.col,
+                        &self.node_mapping,
+                        &self.internal_node_indices,
+                    ),
+                    program_idx,
+                    jacobian_idx,
+                    sign: 1.0,
+                })
+                .collect();
+        }
+
+        self.matrix_indices = MatrixIndices { jacobian, rhs };
     }
 
     /// Update terminal voltages from circuit solution
@@ -392,7 +409,7 @@ impl VerilogADevice {
 
     /// Build a native evaluation context snapshot.
     #[cfg(feature = "native")]
-    fn native_eval_context(&self) -> crate::native::EvalContext {
+    fn native_eval_context(&mut self) -> crate::native::EvalContext {
         crate::native::EvalContext {
             voltages: self.context.voltages.as_ptr(),
             internal_voltages: self.context.internal_voltages.as_ptr(),
@@ -420,7 +437,7 @@ impl VerilogADevice {
             laplace_filters: if self.model.laplace_filters.is_empty() {
                 std::ptr::null_mut()
             } else {
-                self.model.laplace_filters.as_ptr() as *mut _
+                self.model.laplace_filters.as_mut_ptr()
             },
             laplace_filters_len: self.model.laplace_filters.len(),
         }
@@ -429,7 +446,7 @@ impl VerilogADevice {
     /// Evaluate using Cranelift JIT compiled code
     #[cfg(feature = "native")]
     fn evaluate_native(&mut self) -> Vec<f64> {
-        let native = self.native_model.as_ref().unwrap();
+        let native = std::sync::Arc::clone(self.native_model.as_ref().unwrap());
 
         self.context.clear_currents();
         // Pre-reserve so currents pointer remains stable across stamp pushes.
@@ -527,15 +544,14 @@ impl VerilogADevice {
         // Extract disjoint fields to satisfy borrow checker
         let context = &mut self.context;
         let model = &self.model;
-        let node_mapping = &self.node_mapping;
-        let internal_node_indices = &self.internal_node_indices;
+        let matrix_indices = &self.matrix_indices;
 
         context.clear_currents();
 
         let mut vm = Vm::new(context);
         Self::execute_assignment_programs(&mut vm, model);
 
-        for program in &model.stamp_programs {
+        for (program_idx, program) in model.stamp_programs.iter().enumerate() {
             // Compute the branch current/value
             let value = match vm.execute(&program.value_program) {
                 Ok(v) => v,
@@ -548,25 +564,23 @@ impl VerilogADevice {
             }
 
             // Stamp RHS contributions
-            for loc in &program.stamp_locations {
-                let row_node = Self::index_to_node(&loc.row, node_mapping, internal_node_indices);
-                if let Some(row) = row_node {
-                    rhs_add(row, loc.sign * value);
+            for entry in &matrix_indices.rhs[program_idx] {
+                if let Some(row) = entry.node {
+                    rhs_add(row, entry.sign * value);
                 }
             }
 
             // Stamp Jacobian entries
-            for jac in &program.jacobian_programs {
-                let deriv = match vm.execute(&jac.program) {
+            for jacobian_entry in &matrix_indices.jacobian[program_idx] {
+                let deriv = match vm
+                    .execute(&program.jacobian_programs[jacobian_entry.jacobian_idx].program)
+                {
                     Ok(v) => v,
                     Err(_) => continue,
                 };
 
-                let row_node = Self::index_to_node(&jac.row, node_mapping, internal_node_indices);
-                let col_node = Self::index_to_node(&jac.col, node_mapping, internal_node_indices);
-
-                if let (Some(row), Some(col)) = (row_node, col_node) {
-                    matrix_add(row, col, deriv);
+                if let (Some(row), Some(col)) = (jacobian_entry.row, jacobian_entry.col) {
+                    matrix_add(row, col, jacobian_entry.sign * deriv);
                 }
             }
         }
@@ -805,6 +819,42 @@ mod tests {
                 }],
                 value_program,
                 jacobian_programs: vec![],
+            }],
+            lookup_tables: vec![],
+            internal_nodes: 1,
+            branch_currents: 0,
+            laplace_filters: vec![],
+        }
+    }
+
+    fn create_internal_stamp_model() -> CompiledModel {
+        let value_program = BytecodeProgram {
+            instructions: vec![Instruction::PushConst(1.0)],
+        };
+
+        let jacobian_program = BytecodeProgram {
+            instructions: vec![Instruction::PushConst(2.0)],
+        };
+
+        CompiledModel {
+            name: "internal_stamp".into(),
+            num_terminals: 1,
+            terminal_names: vec!["p".into()],
+            parameters: vec![],
+            num_variables: 0,
+            assignment_programs: vec![],
+            stamp_programs: vec![StampProgram {
+                stamp_locations: vec![StampLocation {
+                    row: StampIndex::Internal(0),
+                    col: StampIndex::Ground,
+                    sign: 1.0,
+                }],
+                value_program,
+                jacobian_programs: vec![JacEntry {
+                    row: StampIndex::Internal(0),
+                    col: StampIndex::Terminal(0),
+                    program: jacobian_program,
+                }],
             }],
             lookup_tables: vec![],
             internal_nodes: 1,
@@ -1401,6 +1451,49 @@ mod tests {
         assert_eq!(device.internal_node_index(0), Some(5));
         assert_eq!(device.internal_node_index(1), None); // Only 1 internal node
         assert_eq!(device.internal_node_index(999), None);
+    }
+
+    #[test]
+    fn test_matrix_indices_refresh_after_internal_node_rewire() {
+        let model = create_internal_stamp_model();
+        let mut device = VerilogADevice::new("X1", model, &[1]);
+
+        // Internal node is unassigned at first.
+        assert_eq!(device.mapped_rhs_rows()[0], Vec::<(usize, f64)>::new());
+        assert_eq!(device.mapped_jacobian_locations()[0][0], (None, Some(0)));
+
+        // Rewire internal node and verify cached mappings refresh.
+        device.set_internal_node_indices(&[3]);
+        assert_eq!(device.mapped_rhs_rows()[0], vec![(2, 1.0)]);
+        assert_eq!(device.mapped_jacobian_locations()[0][0], (Some(2), Some(0)));
+    }
+
+    #[test]
+    fn test_stamp_uses_refreshed_internal_mappings() {
+        let model = create_internal_stamp_model();
+        let mut device = VerilogADevice::new("X1", model, &[1]);
+
+        let mut rhs = Vec::new();
+        device.set_internal_node_indices(&[3]);
+        device.stamp(
+            &[1.0, 0.0, 0.0],
+            |_, _, _| {},
+            |row, value| {
+                rhs.push((row, value));
+            },
+        );
+        assert_eq!(rhs, vec![(2, 1.0)]);
+
+        rhs.clear();
+        device.set_internal_node_indices(&[4]);
+        device.stamp(
+            &[1.0, 0.0, 0.0, 0.0],
+            |_, _, _| {},
+            |row, value| {
+                rhs.push((row, value));
+            },
+        );
+        assert_eq!(rhs, vec![(3, 1.0)]);
     }
 
     #[test]
