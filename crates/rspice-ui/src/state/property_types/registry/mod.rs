@@ -1,6 +1,5 @@
 use super::*;
 
-#[path = "registry_components.rs"]
 mod registry_components;
 
 impl PropertyRegistry {
