@@ -4,6 +4,25 @@ use egui::Context;
 
 use super::{save_global_veriloga_library, ConsoleMessage, RSpiceApp, VERILOGA_LIBRARY_NAME};
 
+struct CompiledVerilogaPayload {
+    module: crate::panels::CompiledModuleInfo,
+    artifact: Option<rspice_veriloga::CompiledModel>,
+    dependencies: Vec<PathBuf>,
+}
+
+fn take_compiled_veriloga_payload(
+    dialog: &mut crate::panels::VerilogALoadDialogState,
+) -> Option<CompiledVerilogaPayload> {
+    let module = dialog.compiled_module.take()?;
+    let artifact = dialog.compiled_artifact.take();
+    let dependencies = dialog.compiled_dependencies.take().unwrap_or_default();
+    Some(CompiledVerilogaPayload {
+        module,
+        artifact,
+        dependencies,
+    })
+}
+
 fn serialize_veriloga_ports(ports: &[String]) -> String {
     serde_json::to_string(ports).unwrap_or_else(|_| ports.join(","))
 }
@@ -81,20 +100,16 @@ impl RSpiceApp {
             return;
         }
 
-        let Some(module) = self.state.dialogs.veriloga_dialog.compiled_module.clone() else {
+        let Some(payload) = take_compiled_veriloga_payload(&mut self.state.dialogs.veriloga_dialog)
+        else {
             self.state.push_user_message(ConsoleMessage::warning(
                 "No compiled Verilog-A module available to add".to_string(),
             ));
             return;
         };
-        let compiled_artifact = self.state.dialogs.veriloga_dialog.compiled_artifact.clone();
-        let compiled_dependencies = self
-            .state
-            .dialogs
-            .veriloga_dialog
-            .compiled_dependencies
-            .clone()
-            .unwrap_or_default();
+        let module = payload.module;
+        let compiled_artifact = payload.artifact;
+        let compiled_dependencies = payload.dependencies;
 
         let source_path_text = module.source_path.to_string_lossy().to_string();
         let serialized_ports = serialize_veriloga_ports(&module.ports);
@@ -204,6 +219,30 @@ mod tests {
     fn test_serialize_veriloga_ports_as_json() {
         let ports = vec!["in".to_string(), "out".to_string()];
         assert_eq!(serialize_veriloga_ports(&ports), "[\"in\",\"out\"]");
+    }
+
+    #[test]
+    fn test_take_compiled_veriloga_payload_clears_dialog_state() {
+        let mut dialog = crate::panels::VerilogALoadDialogState::default();
+        dialog.compiled_module = Some(test_module("clear_me"));
+        dialog.compiled_dependencies = Some(vec![PathBuf::from("models/opamp.va")]);
+
+        let payload = take_compiled_veriloga_payload(&mut dialog).unwrap();
+        assert_eq!(payload.module.name, "clear_me".to_string());
+        assert_eq!(payload.dependencies, vec![PathBuf::from("models/opamp.va")]);
+
+        assert!(dialog.compiled_module.is_none());
+        assert!(dialog.compiled_artifact.is_none());
+        assert!(dialog.compiled_dependencies.is_none());
+    }
+
+    #[test]
+    fn test_take_compiled_veriloga_payload_without_module_returns_none() {
+        let mut dialog = crate::panels::VerilogALoadDialogState::default();
+        dialog.compiled_dependencies = Some(vec![PathBuf::from("unused.va")]);
+
+        assert!(take_compiled_veriloga_payload(&mut dialog).is_none());
+        assert!(dialog.compiled_dependencies.is_some());
     }
 
     #[test]
