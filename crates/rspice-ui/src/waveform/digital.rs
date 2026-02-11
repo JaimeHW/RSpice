@@ -339,23 +339,45 @@ impl DigitalSignal {
             };
         }
 
-        let time_start = times[0];
-        let time_end = *times.last().unwrap_or(&0.0);
+        let samples: Vec<(f64, f64)> = times
+            .iter()
+            .copied()
+            .zip(voltages.iter().copied())
+            .filter(|(time, voltage)| time.is_finite() && voltage.is_finite())
+            .collect();
+
+        if samples.is_empty() {
+            return Self {
+                name: name.to_string(),
+                config: config.clone(),
+                edges: vec![],
+                initial_state: LogicState::Unknown,
+                time_start: 0.0,
+                time_end: 0.0,
+            };
+        }
+
+        let time_start = samples[0].0;
+        let time_end = samples.last().map(|(time, _)| *time).unwrap_or(time_start);
 
         // Determine initial state
-        let initial_state = LogicState::from_voltage(voltages[0], config);
+        let initial_state = LogicState::from_voltage(samples[0].1, config);
 
         // Find edges using hysteresis
         let mut edges = Vec::new();
         let mut current_state = initial_state;
         let mut last_transition_time = time_start;
+        let mut prev_time = time_start;
 
-        for i in 1..times.len() {
-            let new_state = Self::evaluate_with_hysteresis(voltages[i], current_state, config);
+        for &(edge_time, voltage) in samples.iter().skip(1) {
+            if edge_time <= prev_time {
+                continue;
+            }
+            prev_time = edge_time;
+
+            let new_state = Self::evaluate_with_hysteresis(voltage, current_state, config);
 
             if new_state != current_state {
-                let edge_time = times[i];
-
                 // Apply glitch filter
                 if config.min_pulse_width > 0.0 {
                     let pulse_duration = edge_time - last_transition_time;
@@ -637,6 +659,34 @@ mod tests {
         assert_eq!(signal.edges.len(), 4);
         assert!(signal.edges[0].is_rising());
         assert!(signal.edges[1].is_falling());
+    }
+
+    #[test]
+    fn test_digital_signal_from_analog_ignores_non_finite_samples() {
+        let config = DigitalWaveformConfig::cmos_3v3();
+        let times = vec![0.0, 1.0, f64::NAN, 2.0];
+        let voltages = vec![0.0, 3.3, 0.0, 0.0];
+
+        let signal = DigitalSignal::from_analog("CLK", &times, &voltages, &config);
+
+        assert_eq!(signal.time_start, 0.0);
+        assert_eq!(signal.time_end, 2.0);
+        assert_eq!(signal.edges.len(), 2);
+        assert!(signal.edges.iter().all(|edge| edge.time.is_finite()));
+    }
+
+    #[test]
+    fn test_digital_signal_from_analog_all_non_finite_returns_empty_signal() {
+        let config = DigitalWaveformConfig::cmos_3v3();
+        let times = vec![f64::NAN, f64::INFINITY];
+        let voltages = vec![f64::NAN, 1.0];
+
+        let signal = DigitalSignal::from_analog("CLK", &times, &voltages, &config);
+
+        assert!(signal.edges.is_empty());
+        assert_eq!(signal.initial_state, LogicState::Unknown);
+        assert_eq!(signal.time_start, 0.0);
+        assert_eq!(signal.time_end, 0.0);
     }
 
     #[test]
