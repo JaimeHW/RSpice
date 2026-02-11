@@ -1,7 +1,9 @@
 use egui::Context;
 
-use super::RSpiceApp;
-use crate::ui::shortcuts::{ShortcutCategory, ShortcutCommand};
+use super::{
+    app_shortcuts::{ShortcutCategory, ShortcutCommand},
+    RSpiceApp,
+};
 
 fn shortcut_help_row(command: ShortcutCommand) -> (&'static str, &'static str) {
     (command.shortcut_string(), command.display_name())
@@ -10,7 +12,7 @@ fn shortcut_help_row(command: ShortcutCommand) -> (&'static str, &'static str) {
 fn total_shortcut_help_rows() -> usize {
     ShortcutCategory::ALL
         .iter()
-        .map(|category| category.shortcuts().len())
+        .map(|category| category.commands().len())
         .sum()
 }
 
@@ -75,7 +77,7 @@ impl RSpiceApp {
                                 .num_columns(2)
                                 .spacing([40.0, 6.0])
                                 .show(ui, |ui| {
-                                    for command in category.shortcuts() {
+                                    for command in category.commands() {
                                         let (shortcut, display_name) = shortcut_help_row(*command);
                                         ui.label(shortcut);
                                         ui.label(display_name);
@@ -109,7 +111,7 @@ mod tests {
     fn test_total_shortcut_help_rows_matches_registry() {
         let expected: usize = ShortcutCategory::ALL
             .iter()
-            .map(|category| category.shortcuts().len())
+            .map(|category| category.commands().len())
             .sum();
         assert_eq!(total_shortcut_help_rows(), expected);
         assert!(total_shortcut_help_rows() > 0);
@@ -118,7 +120,7 @@ mod tests {
     #[test]
     fn test_shortcut_help_rows_have_non_empty_text() {
         for category in ShortcutCategory::ALL {
-            for command in category.shortcuts() {
+            for command in category.commands() {
                 let (shortcut, display_name) = shortcut_help_row(*command);
                 assert!(!shortcut.trim().is_empty());
                 assert!(!display_name.trim().is_empty());
@@ -130,7 +132,7 @@ mod tests {
     fn test_shortcut_help_commands_are_unique_across_categories() {
         let mut seen = HashSet::new();
         for category in ShortcutCategory::ALL {
-            for command in category.shortcuts() {
+            for command in category.commands() {
                 assert!(
                     seen.insert(*command),
                     "shortcut command {:?} appears in multiple categories",

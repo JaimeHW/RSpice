@@ -1,6 +1,6 @@
 use egui::{InputState, Key, Modifiers};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum ShortcutCommand {
     FileNew,
     FileOpen,
@@ -32,6 +32,195 @@ pub(super) enum ShortcutCommand {
     MirrorSelectionVertical,
     OpenPropertiesEditor,
     EscapeCancel,
+}
+
+impl ShortcutCommand {
+    pub(super) const ALL: [ShortcutCommand; 30] = [
+        ShortcutCommand::FileNew,
+        ShortcutCommand::FileOpen,
+        ShortcutCommand::FileSave,
+        ShortcutCommand::EditUndo,
+        ShortcutCommand::EditRedo,
+        ShortcutCommand::EditCopy,
+        ShortcutCommand::EditPaste,
+        ShortcutCommand::EditCut,
+        ShortcutCommand::EditDelete,
+        ShortcutCommand::EditSelectAll,
+        ShortcutCommand::ToggleBrowserPanel,
+        ShortcutCommand::ToggleLogPanel,
+        ShortcutCommand::ShowShortcutsHelp,
+        ShortcutCommand::ToolSelect,
+        ShortcutCommand::ToolWire,
+        ShortcutCommand::PlaceGround,
+        ShortcutCommand::PlaceVoltageSource,
+        ShortcutCommand::PlaceCurrentSource,
+        ShortcutCommand::PlaceCapacitor,
+        ShortcutCommand::PlaceInductor,
+        ShortcutCommand::PlaceDiode,
+        ShortcutCommand::PlaceNmos,
+        ShortcutCommand::PlaceNpnBjt,
+        ShortcutCommand::ToolProbe,
+        ShortcutCommand::PlaceResistor,
+        ShortcutCommand::RotateSelectionOrPreview,
+        ShortcutCommand::MirrorSelectionHorizontal,
+        ShortcutCommand::MirrorSelectionVertical,
+        ShortcutCommand::OpenPropertiesEditor,
+        ShortcutCommand::EscapeCancel,
+    ];
+
+    pub(super) fn display_name(self) -> &'static str {
+        match self {
+            ShortcutCommand::FileNew => "New",
+            ShortcutCommand::FileOpen => "Open",
+            ShortcutCommand::FileSave => "Save",
+            ShortcutCommand::EditUndo => "Undo",
+            ShortcutCommand::EditRedo => "Redo",
+            ShortcutCommand::EditCopy => "Copy",
+            ShortcutCommand::EditPaste => "Paste",
+            ShortcutCommand::EditCut => "Cut",
+            ShortcutCommand::EditDelete => "Delete",
+            ShortcutCommand::EditSelectAll => "Select All",
+            ShortcutCommand::ToggleBrowserPanel => "Toggle Browser",
+            ShortcutCommand::ToggleLogPanel => "Toggle Log",
+            ShortcutCommand::ShowShortcutsHelp => "Shortcuts Help",
+            ShortcutCommand::ToolSelect => "Select Tool",
+            ShortcutCommand::ToolWire => "Wire Tool",
+            ShortcutCommand::PlaceGround => "Place Ground",
+            ShortcutCommand::PlaceVoltageSource => "Place Voltage Source",
+            ShortcutCommand::PlaceCurrentSource => "Place Current Source",
+            ShortcutCommand::PlaceCapacitor => "Place Capacitor",
+            ShortcutCommand::PlaceInductor => "Place Inductor",
+            ShortcutCommand::PlaceDiode => "Place Diode",
+            ShortcutCommand::PlaceNmos => "Place NMOS",
+            ShortcutCommand::PlaceNpnBjt => "Place NPN BJT",
+            ShortcutCommand::ToolProbe => "Probe Tool",
+            ShortcutCommand::PlaceResistor => "Place Resistor",
+            ShortcutCommand::RotateSelectionOrPreview => "Rotate",
+            ShortcutCommand::MirrorSelectionHorizontal => "Mirror Horizontal",
+            ShortcutCommand::MirrorSelectionVertical => "Mirror Vertical",
+            ShortcutCommand::OpenPropertiesEditor => "Edit Properties",
+            ShortcutCommand::EscapeCancel => "Cancel",
+        }
+    }
+
+    pub(super) fn shortcut_string(self) -> &'static str {
+        match self {
+            ShortcutCommand::FileNew => "Ctrl+N",
+            ShortcutCommand::FileOpen => "Ctrl+O",
+            ShortcutCommand::FileSave => "Ctrl+S",
+            ShortcutCommand::EditUndo => "Ctrl+Z",
+            ShortcutCommand::EditRedo => "Ctrl+Y / Ctrl+Shift+Z",
+            ShortcutCommand::EditCopy => "Ctrl+C",
+            ShortcutCommand::EditPaste => "Ctrl+V",
+            ShortcutCommand::EditCut => "Ctrl+X",
+            ShortcutCommand::EditDelete => "Delete",
+            ShortcutCommand::EditSelectAll => "Ctrl+A",
+            ShortcutCommand::ToggleBrowserPanel => "Ctrl+Shift+L",
+            ShortcutCommand::ToggleLogPanel => "Ctrl+`",
+            ShortcutCommand::ShowShortcutsHelp => "F1",
+            ShortcutCommand::ToolSelect => "S",
+            ShortcutCommand::ToolWire => "W",
+            ShortcutCommand::PlaceGround => "G",
+            ShortcutCommand::PlaceVoltageSource => "V",
+            ShortcutCommand::PlaceCurrentSource => "I",
+            ShortcutCommand::PlaceCapacitor => "C",
+            ShortcutCommand::PlaceInductor => "L",
+            ShortcutCommand::PlaceDiode => "D",
+            ShortcutCommand::PlaceNmos => "M",
+            ShortcutCommand::PlaceNpnBjt => "Q",
+            ShortcutCommand::ToolProbe => "P",
+            ShortcutCommand::PlaceResistor => "Shift+R",
+            ShortcutCommand::RotateSelectionOrPreview => "R",
+            ShortcutCommand::MirrorSelectionHorizontal => "H",
+            ShortcutCommand::MirrorSelectionVertical => "Y",
+            ShortcutCommand::OpenPropertiesEditor => "E",
+            ShortcutCommand::EscapeCancel => "Escape",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ShortcutCategory {
+    File,
+    Edit,
+    View,
+    Tools,
+    ComponentPlacement,
+    Transform,
+    General,
+}
+
+impl ShortcutCategory {
+    pub(super) const ALL: [ShortcutCategory; 7] = [
+        ShortcutCategory::File,
+        ShortcutCategory::Edit,
+        ShortcutCategory::View,
+        ShortcutCategory::Tools,
+        ShortcutCategory::ComponentPlacement,
+        ShortcutCategory::Transform,
+        ShortcutCategory::General,
+    ];
+
+    pub(super) fn display_name(self) -> &'static str {
+        match self {
+            ShortcutCategory::File => "File",
+            ShortcutCategory::Edit => "Edit",
+            ShortcutCategory::View => "View",
+            ShortcutCategory::Tools => "Tools",
+            ShortcutCategory::ComponentPlacement => "Component Placement",
+            ShortcutCategory::Transform => "Transform",
+            ShortcutCategory::General => "General",
+        }
+    }
+
+    pub(super) fn commands(self) -> &'static [ShortcutCommand] {
+        match self {
+            ShortcutCategory::File => &[
+                ShortcutCommand::FileNew,
+                ShortcutCommand::FileOpen,
+                ShortcutCommand::FileSave,
+            ],
+            ShortcutCategory::Edit => &[
+                ShortcutCommand::EditUndo,
+                ShortcutCommand::EditRedo,
+                ShortcutCommand::EditCopy,
+                ShortcutCommand::EditPaste,
+                ShortcutCommand::EditCut,
+                ShortcutCommand::EditDelete,
+                ShortcutCommand::EditSelectAll,
+            ],
+            ShortcutCategory::View => &[
+                ShortcutCommand::ToggleBrowserPanel,
+                ShortcutCommand::ToggleLogPanel,
+            ],
+            ShortcutCategory::Tools => &[
+                ShortcutCommand::ToolSelect,
+                ShortcutCommand::ToolWire,
+                ShortcutCommand::ToolProbe,
+            ],
+            ShortcutCategory::ComponentPlacement => &[
+                ShortcutCommand::PlaceResistor,
+                ShortcutCommand::PlaceGround,
+                ShortcutCommand::PlaceVoltageSource,
+                ShortcutCommand::PlaceCurrentSource,
+                ShortcutCommand::PlaceCapacitor,
+                ShortcutCommand::PlaceInductor,
+                ShortcutCommand::PlaceDiode,
+                ShortcutCommand::PlaceNmos,
+                ShortcutCommand::PlaceNpnBjt,
+            ],
+            ShortcutCategory::Transform => &[
+                ShortcutCommand::RotateSelectionOrPreview,
+                ShortcutCommand::MirrorSelectionHorizontal,
+                ShortcutCommand::MirrorSelectionVertical,
+            ],
+            ShortcutCategory::General => &[
+                ShortcutCommand::OpenPropertiesEditor,
+                ShortcutCommand::EscapeCancel,
+                ShortcutCommand::ShowShortcutsHelp,
+            ],
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -208,6 +397,7 @@ pub(super) fn collect_shortcut_commands(snapshot: &ShortcutInputSnapshot) -> Vec
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     fn mods(ctrl: bool, shift: bool) -> Modifiers {
         Modifiers {
@@ -304,5 +494,32 @@ mod tests {
 
         let with_shift = commands(&[Key::L], true, true, false);
         assert!(with_shift.contains(&ShortcutCommand::ToggleBrowserPanel));
+    }
+
+    #[test]
+    fn test_shortcut_metadata_is_non_empty_for_all_commands() {
+        for command in ShortcutCommand::ALL {
+            assert!(!command.display_name().trim().is_empty());
+            assert!(!command.shortcut_string().trim().is_empty());
+        }
+    }
+
+    #[test]
+    fn test_shortcut_categories_cover_all_commands_exactly_once() {
+        let mut seen = HashSet::new();
+        for category in ShortcutCategory::ALL {
+            let commands = category.commands();
+            assert!(!commands.is_empty());
+            for command in commands {
+                assert!(
+                    seen.insert(*command),
+                    "command {:?} appears in more than one category",
+                    command
+                );
+            }
+        }
+
+        let all_commands: HashSet<_> = ShortcutCommand::ALL.into_iter().collect();
+        assert_eq!(seen, all_commands);
     }
 }
