@@ -11,6 +11,8 @@ use crate::common::app::AppState;
 mod menu_bar_netlist_compat;
 #[path = "menu_bar_veriloga_cache.rs"]
 mod menu_bar_veriloga_cache;
+#[path = "menu_bar_waveform_export.rs"]
+mod menu_bar_waveform_export;
 
 /// Render the menu bar
 pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
@@ -54,7 +56,7 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
                     ui.close_menu();
                 }
                 if ui.button("CSV (Waveforms)...").clicked() {
-                    action_export_csv(state);
+                    menu_bar_waveform_export::action_export_csv(state);
                     ui.close_menu();
                 }
             });
@@ -831,81 +833,6 @@ fn action_export_svg(state: &mut AppState) {
                 Err(e) => {
                     state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
                         "SVG export failed: {}",
-                        e
-                    )));
-                }
-            }
-        }
-        None => {
-            // User cancelled - no message needed
-        }
-    }
-}
-
-fn action_export_csv(state: &mut AppState) {
-    use crate::io::{SignalType, WaveformDataset, WaveformFormat, WaveformSignal, WaveformWriter};
-
-    // Check if we have simulation results to export
-    if state.simulation.waveforms.is_empty() {
-        state.push_user_message(crate::common::app::ConsoleMessage::warning(
-            "No simulation results to export. Run a simulation first.",
-        ));
-        return;
-    }
-
-    // Convert simulation waveforms to WaveformDataset
-    let mut dataset = WaveformDataset::new("Simulation Results");
-
-    // Use the X axis from the first waveform (assuming all share the same time axis)
-    if let Some(first_wf) = state.simulation.waveforms.first() {
-        let mut time_signal = WaveformSignal::new("time", SignalType::Time);
-        for &t in &first_wf.x {
-            time_signal.push(t);
-        }
-        dataset.set_x(time_signal);
-    }
-
-    // Add all waveform signals
-    for wf in &state.simulation.waveforms {
-        let sig_type = if wf.name.starts_with("V(") || wf.name.starts_with("v(") {
-            SignalType::Voltage
-        } else if wf.name.starts_with("I(") || wf.name.starts_with("i(") {
-            SignalType::Current
-        } else {
-            SignalType::Unknown
-        };
-
-        let mut signal = WaveformSignal::new(&wf.name, sig_type);
-        for &value in &wf.y {
-            signal.push(value);
-        }
-        dataset.add_signal(signal);
-    }
-
-    // Show save dialog for CSV
-    let dialog = rfd::FileDialog::new()
-        .add_filter("CSV Files", &["csv"])
-        .set_file_name("waveforms.csv")
-        .set_title("Export Waveform CSV");
-
-    match dialog.save_file() {
-        Some(mut path) => {
-            // Ensure .csv extension
-            ensure_file_extension(&mut path, "csv");
-
-            let writer = WaveformWriter::new(WaveformFormat::Csv);
-            match writer.write(&dataset, &path) {
-                Ok(()) => {
-                    state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
-                        "Exported CSV: {} ({} signals, {} points)",
-                        path.display(),
-                        dataset.signal_count(),
-                        dataset.point_count()
-                    )));
-                }
-                Err(e) => {
-                    state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
-                        "CSV export failed: {}",
                         e
                     )));
                 }
