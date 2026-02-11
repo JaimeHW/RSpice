@@ -1,281 +1,6 @@
 use super::*;
 
 impl SimulationController {
-    pub(super) fn convert_to_analysis_result(
-        &self,
-        sim_result: &crate::simulation::SimulationResult,
-        config: &AnalysisConfig,
-    ) -> AnalysisResult {
-        let analysis_type = self.config_to_analysis_type(config);
-        let label = self.analysis_name(config).to_string();
-        self.convert_to_analysis_result_with_metadata(sim_result, analysis_type, &label)
-    }
-
-    pub(super) fn convert_to_analysis_result_with_metadata(
-        &self,
-        sim_result: &crate::simulation::SimulationResult,
-        analysis_type: AnalysisType,
-        label: &str,
-    ) -> AnalysisResult {
-        use crate::simulation::SimulationResult;
-        use crate::state::WaveformData;
-
-        match sim_result {
-            SimulationResult::DcOp(dc_result) => {
-                // Convert engine DcOpResult to state DcOpResult
-                let mut node_voltages = Vec::new();
-                for (name, value) in &dc_result.node_voltages {
-                    node_voltages.push(OperatingPointValue {
-                        name: format!("V({})", name),
-                        value: *value,
-                        unit: "V".to_string(),
-                    });
-                }
-
-                let mut branch_currents = Vec::new();
-                for (name, value) in &dc_result.branch_currents {
-                    branch_currents.push(OperatingPointValue {
-                        name: format!("I({})", name),
-                        value: *value,
-                        unit: "A".to_string(),
-                    });
-                }
-
-                let state_dc_op = DcOpResult {
-                    node_voltages,
-                    branch_currents,
-                    power_dissipation: Vec::new(),
-                };
-
-                AnalysisResult::new(1, analysis_type, label.to_string()).with_dc_op(state_dc_op)
-            }
-
-            SimulationResult::Transient { time, waveforms } => {
-                let wf_data: Vec<WaveformData> = waveforms
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, (name, wf))| {
-                        WaveformData::new(
-                            name.clone(),
-                            time.clone(),
-                            wf.y_values.clone(),
-                            Self::color_for_index(idx),
-                        )
-                    })
-                    .collect();
-                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
-            }
-
-            SimulationResult::Ac {
-                frequencies,
-                waveforms,
-            } => {
-                // For AC analysis, store magnitude (not raw complex values)
-                let wf_data: Vec<WaveformData> = waveforms
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, (name, wf))| {
-                        WaveformData::new(
-                            format!("|{}|", name),
-                            frequencies.clone(),
-                            wf.magnitude(),
-                            Self::color_for_index(idx),
-                        )
-                    })
-                    .collect();
-                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
-            }
-
-            SimulationResult::DcSweep {
-                sweep_var: _,
-                sweep_values,
-                waveforms,
-            } => {
-                let wf_data: Vec<WaveformData> = waveforms
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, (name, wf))| {
-                        WaveformData::new(
-                            name.clone(),
-                            sweep_values.clone(),
-                            wf.y_values.clone(),
-                            Self::color_for_index(idx),
-                        )
-                    })
-                    .collect();
-                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
-            }
-
-            SimulationResult::Noise {
-                frequencies,
-                output_noise,
-                ..
-            } => {
-                let wf_data = vec![WaveformData::new(
-                    "onoise".to_string(),
-                    frequencies.clone(),
-                    output_noise.clone(),
-                    Self::color_for_index(0),
-                )];
-                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
-            }
-
-            SimulationResult::PoleZero { .. } => {
-                // Pole-Zero results are displayed in console, not as waveforms
-                AnalysisResult::new(1, analysis_type, label.to_string())
-            }
-
-            SimulationResult::Sensitivity { .. } => {
-                // Sensitivity results are displayed in console, not as waveforms
-                AnalysisResult::new(1, analysis_type, label.to_string())
-            }
-
-            SimulationResult::MonteCarlo { variables, .. } => {
-                let wf_data: Vec<WaveformData> = variables
-                    .iter()
-                    .filter_map(|var| {
-                        if var.histogram.is_empty() || var.bin_edges.len() < 2 {
-                            return None;
-                        }
-                        let x: Vec<f64> = var
-                            .bin_edges
-                            .windows(2)
-                            .map(|window| (window[0] + window[1]) * 0.5)
-                            .collect();
-                        let y: Vec<f64> = var.histogram.iter().map(|count| *count as f64).collect();
-                        Some(WaveformData::new(
-                            format!("hist({})", var.name),
-                            x,
-                            y,
-                            Self::color_for_index(0),
-                        ))
-                    })
-                    .collect();
-                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
-            }
-
-            SimulationResult::Parametric {
-                sweep_values,
-                waveforms,
-                ..
-            } => {
-                let wf_data: Vec<WaveformData> = waveforms
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, (name, wf))| {
-                        WaveformData::new(
-                            name.clone(),
-                            sweep_values.clone(),
-                            wf.y_values.clone(),
-                            Self::color_for_index(idx),
-                        )
-                    })
-                    .collect();
-                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
-            }
-
-            SimulationResult::Corner {
-                x_values,
-                waveforms,
-                ..
-            } => {
-                let wf_data: Vec<WaveformData> = waveforms
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, (name, wf))| {
-                        WaveformData::new(
-                            name.clone(),
-                            x_values.clone(),
-                            wf.y_values.clone(),
-                            Self::color_for_index(idx),
-                        )
-                    })
-                    .collect();
-                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
-            }
-
-            SimulationResult::Reliability {
-                years, waveforms, ..
-            } => {
-                let wf_data: Vec<WaveformData> = waveforms
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, (name, wf))| {
-                        WaveformData::new(
-                            name.clone(),
-                            years.clone(),
-                            wf.y_values.clone(),
-                            Self::color_for_index(idx),
-                        )
-                    })
-                    .collect();
-                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
-            }
-
-            SimulationResult::Optimization {
-                iterations,
-                waveforms,
-                ..
-            } => {
-                let wf_data: Vec<WaveformData> = waveforms
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, (name, wf))| {
-                        WaveformData::new(
-                            name.clone(),
-                            iterations.clone(),
-                            wf.y_values.clone(),
-                            Self::color_for_index(idx),
-                        )
-                    })
-                    .collect();
-                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
-            }
-
-            SimulationResult::Soa {
-                time, waveforms, ..
-            } => {
-                let wf_data: Vec<WaveformData> = waveforms
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, (name, wf))| {
-                        WaveformData::new(
-                            name.clone(),
-                            time.clone(),
-                            wf.y_values.clone(),
-                            Self::color_for_index(idx),
-                        )
-                    })
-                    .collect();
-                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
-            }
-
-            SimulationResult::Empty { .. } => {
-                AnalysisResult::new(1, analysis_type, label.to_string())
-            }
-        }
-    }
-
-    /// Get color for waveform trace by index
-    pub(super) fn color_for_index(idx: usize) -> String {
-        const COLORS: &[&str] = &[
-            "#3B82F6", // Blue
-            "#10B981", // Green
-            "#F97316", // Orange
-            "#8B5CF6", // Purple
-            "#EC4899", // Pink
-            "#EAB308", // Yellow
-            "#14B8A6", // Teal
-            "#EF4444", // Red
-        ];
-        COLORS[idx % COLORS.len()].to_string()
-    }
-
-    /// Poll for simulation completion
-    ///
-    /// Checks if the current analysis has completed. On success, adds result
-    /// to the run and starts the next queued analysis. When all analyses are
-
     pub(super) fn update_waveforms(
         &self,
         state: &mut AppState,
@@ -283,18 +8,6 @@ impl SimulationController {
     ) {
         use crate::simulation::SimulationResult;
         use crate::state::WaveformData;
-
-        // Color palette for commercial-grade visualization
-        const COLORS: &[&str] = &[
-            "#3B82F6", // Blue
-            "#10B981", // Green
-            "#F97316", // Orange
-            "#8B5CF6", // Purple
-            "#EC4899", // Pink
-            "#EAB308", // Yellow
-            "#14B8A6", // Teal
-            "#EF4444", // Red
-        ];
 
         // Clear previous waveforms
         state.simulation.waveforms.clear();
@@ -331,7 +44,7 @@ impl SimulationController {
                 let time_vec: Vec<f64> = time.clone();
 
                 for (idx, (name, wf_data)) in waveforms.iter().enumerate() {
-                    let color = COLORS[idx % COLORS.len()].to_string();
+                    let color = Self::color_for_index(idx);
                     let waveform = WaveformData::new(
                         name.clone(),
                         time_vec.clone(),
@@ -364,7 +77,7 @@ impl SimulationController {
                 for (idx, (name, wf_data)) in waveforms.iter().enumerate() {
                     // Magnitude trace - use magnitude() for complex data, not raw real values
                     let mag_name = format!("|{}|", name);
-                    let color = COLORS[idx % COLORS.len()].to_string();
+                    let color = Self::color_for_index(idx);
 
                     // For AC analysis, use the magnitude of complex waveform data
                     let magnitude = wf_data.magnitude();
@@ -393,7 +106,7 @@ impl SimulationController {
                 let x_vec: Vec<f64> = sweep_values.clone();
 
                 for (idx, (name, wf_data)) in waveforms.iter().enumerate() {
-                    let color = COLORS[idx % COLORS.len()].to_string();
+                    let color = Self::color_for_index(idx);
                     let waveform = WaveformData::new(
                         name.clone(),
                         x_vec.clone(),
@@ -429,7 +142,7 @@ impl SimulationController {
                         "onoise".to_string(),
                         freq_vec.clone(),
                         output_noise.clone(),
-                        COLORS[0].to_string(),
+                        Self::color_for_index(0),
                     );
                     state.simulation.waveforms.push(waveform);
                 }
@@ -441,7 +154,7 @@ impl SimulationController {
                             "inoise".to_string(),
                             freq_vec.clone(),
                             inoise.clone(),
-                            COLORS[1].to_string(),
+                            Self::color_for_index(1),
                         );
                         state.simulation.waveforms.push(waveform);
                     }
@@ -449,7 +162,7 @@ impl SimulationController {
 
                 // Per-source contributions
                 for (idx, (source, values)) in contributors.iter().enumerate() {
-                    let color = COLORS[(idx + 2) % COLORS.len()].to_string();
+                    let color = Self::color_for_index(idx + 2);
                     let waveform = WaveformData::new(
                         format!("noise({})", source),
                         freq_vec.clone(),
@@ -571,7 +284,7 @@ impl SimulationController {
                         format!("hist({})", var.name),
                         x,
                         y,
-                        COLORS[idx % COLORS.len()].to_string(),
+                        Self::color_for_index(idx),
                     );
                     state.simulation.waveforms.push(waveform);
                 }
@@ -607,7 +320,7 @@ impl SimulationController {
                         name.clone(),
                         sweep_values.clone(),
                         wf_data.y_values.clone(),
-                        COLORS[idx % COLORS.len()].to_string(),
+                        Self::color_for_index(idx),
                     );
                     state.simulation.waveforms.push(waveform);
                 }
@@ -635,7 +348,7 @@ impl SimulationController {
                         name.clone(),
                         x_values.clone(),
                         wf_data.y_values.clone(),
-                        COLORS[idx % COLORS.len()].to_string(),
+                        Self::color_for_index(idx),
                     );
                     state.simulation.waveforms.push(waveform);
                 }
@@ -661,7 +374,7 @@ impl SimulationController {
                         name.clone(),
                         years.clone(),
                         wf_data.y_values.clone(),
-                        COLORS[idx % COLORS.len()].to_string(),
+                        Self::color_for_index(idx),
                     );
                     state.simulation.waveforms.push(waveform);
                 }
@@ -689,7 +402,7 @@ impl SimulationController {
                         name.clone(),
                         iterations.clone(),
                         wf_data.y_values.clone(),
-                        COLORS[idx % COLORS.len()].to_string(),
+                        Self::color_for_index(idx),
                     );
                     state.simulation.waveforms.push(waveform);
                 }
@@ -721,7 +434,7 @@ impl SimulationController {
                         name.clone(),
                         time.clone(),
                         wf_data.y_values.clone(),
-                        COLORS[idx % COLORS.len()].to_string(),
+                        Self::color_for_index(idx),
                     );
                     state.simulation.waveforms.push(waveform);
                 }
@@ -750,107 +463,6 @@ impl SimulationController {
                 .simulation
                 .node_to_waveform
                 .insert(wf.name.clone(), idx);
-        }
-    }
-
-    fn populate_transient_post_views(
-        &self,
-        state: &mut AppState,
-        time: &[f64],
-        waveforms: &std::collections::HashMap<String, crate::simulation::WaveformData>,
-    ) {
-        let Some((_name, waveform)) = Self::primary_waveform(waveforms, time.len()) else {
-            return;
-        };
-
-        if let Some(bit_period) = Self::estimate_ui_period(time, &waveform.y_values) {
-            let eye_data = crate::analysis::eye_diagram::data::EyeDataBuilder::new()
-                .bit_period(bit_period)
-                .ui_count(2)
-                .skip_initial(2)
-                .build(time, &waveform.y_values);
-            if eye_data.trace_count() > 0 {
-                state.eye_diagram_state.load_data(eye_data);
-            }
-        }
-
-        if let Some((samples, sample_rate)) =
-            Self::downsample_for_fft(time, &waveform.y_values, 4096)
-        {
-            let fft_data = crate::analysis::fft::FftData::from_time_domain(
-                &format!("FFT({})", waveform.name),
-                &samples,
-                sample_rate,
-                state.fft_state.window,
-            );
-            if !fft_data.is_empty() {
-                state.fft_state.load_data(fft_data);
-            }
-        }
-    }
-
-    fn populate_ac_post_views(
-        &self,
-        state: &mut AppState,
-        frequencies: &[f64],
-        waveforms: &std::collections::HashMap<String, crate::simulation::WaveformData>,
-    ) {
-        let mut bode_data = crate::analysis::bode::BodeData::new();
-        state.nyquist_state.clear();
-        state.smith_chart_state.clear_traces();
-
-        let mut names: Vec<_> = waveforms.keys().cloned().collect();
-        names.sort();
-        let mut loaded_nyquist = false;
-        for name in names {
-            let Some(waveform) = waveforms.get(&name) else {
-                continue;
-            };
-            let Some(imag) = waveform.y_imag.as_ref() else {
-                continue;
-            };
-            if waveform.y_values.len() != frequencies.len() || imag.len() != frequencies.len() {
-                continue;
-            }
-
-            let response = crate::analysis::bode::data::FrequencyResponse::from_complex_arrays(
-                &name,
-                frequencies,
-                &waveform.y_values,
-                imag,
-            );
-            bode_data.add_response(response);
-
-            let nyquist_curve = crate::analysis::nyquist::data::NyquistData::from_arrays(
-                &name,
-                frequencies,
-                &waveform.y_values,
-                imag,
-            );
-            if loaded_nyquist {
-                state.nyquist_state.add_curve(nyquist_curve);
-            } else {
-                state.nyquist_state.load_data(nyquist_curve);
-                loaded_nyquist = true;
-            }
-
-            if Self::is_sparameter_trace_name(&name) {
-                state.smith_chart_state.load_sparam_data(
-                    &name,
-                    frequencies,
-                    &waveform.y_values,
-                    imag,
-                );
-            }
-        }
-
-        if bode_data.response_count() > 0 {
-            bode_data.calculate_margins();
-            state.bode_plot_state.load_data(bode_data);
-        } else {
-            state
-                .bode_plot_state
-                .load_data(crate::analysis::bode::BodeData::new());
         }
     }
 
@@ -915,139 +527,5 @@ impl SimulationController {
                 state.histogram_state.add_histogram(histogram);
             }
         }
-    }
-
-    fn primary_waveform<'a>(
-        waveforms: &'a std::collections::HashMap<String, crate::simulation::WaveformData>,
-        expected_len: usize,
-    ) -> Option<(&'a str, &'a crate::simulation::WaveformData)> {
-        let mut names: Vec<_> = waveforms.keys().cloned().collect();
-        names.sort();
-        for name in names {
-            let Some(waveform) = waveforms.get(&name) else {
-                continue;
-            };
-            if waveform.y_values.len() == expected_len {
-                return Some((waveform.name.as_str(), waveform));
-            }
-        }
-        None
-    }
-
-    fn estimate_ui_period(time: &[f64], signal: &[f64]) -> Option<f64> {
-        let n = time.len().min(signal.len());
-        if n < 8 {
-            return None;
-        }
-
-        let mut v_min = f64::INFINITY;
-        let mut v_max = f64::NEG_INFINITY;
-        for &v in signal.iter().take(n) {
-            if v.is_finite() {
-                v_min = v_min.min(v);
-                v_max = v_max.max(v);
-            }
-        }
-        if !v_min.is_finite() || !v_max.is_finite() || (v_max - v_min) <= 0.0 {
-            return None;
-        }
-
-        let threshold = (v_min + v_max) * 0.5;
-        let edges =
-            crate::analysis::eye_diagram::data::find_edges(&time[..n], &signal[..n], threshold);
-        if edges.len() < 3 {
-            return None;
-        }
-
-        let mut rising_times: Vec<f64> = edges
-            .iter()
-            .filter(|edge| edge.rising)
-            .filter(|edge| edge.time.is_finite())
-            .map(|edge| edge.time)
-            .collect();
-        rising_times.sort_by(|a, b| a.total_cmp(b));
-
-        let edge_times: Vec<f64> = if rising_times.len() >= 3 {
-            rising_times
-        } else {
-            let mut all: Vec<f64> = edges
-                .iter()
-                .map(|edge| edge.time)
-                .filter(|time| time.is_finite())
-                .collect();
-            all.sort_by(|a, b| a.total_cmp(b));
-            all
-        };
-        if edge_times.len() < 3 {
-            return None;
-        }
-
-        let mut intervals = Vec::with_capacity(edge_times.len().saturating_sub(1));
-        for pair in edge_times.windows(2) {
-            let dt = pair[1] - pair[0];
-            if dt.is_finite() && dt > 0.0 {
-                intervals.push(dt);
-            }
-        }
-        if intervals.is_empty() {
-            return None;
-        }
-        intervals.sort_by(|a, b| a.total_cmp(b));
-        let median = intervals[intervals.len() / 2];
-        (median.is_finite() && median > 0.0).then_some(median)
-    }
-
-    fn downsample_for_fft(
-        time: &[f64],
-        signal: &[f64],
-        max_points: usize,
-    ) -> Option<(Vec<f64>, f64)> {
-        let n = time.len().min(signal.len());
-        if n < 16 || max_points < 16 {
-            return None;
-        }
-        let step = (n / max_points).max(1);
-
-        let mut values = Vec::with_capacity((n / step) + 1);
-        let mut times = Vec::with_capacity((n / step) + 1);
-        for idx in (0..n).step_by(step) {
-            let t = time[idx];
-            let y = signal[idx];
-            if t.is_finite() && y.is_finite() {
-                times.push(t);
-                values.push(y);
-            }
-        }
-        if values.len() < 16 {
-            return None;
-        }
-
-        let duration = times[times.len() - 1] - times[0];
-        if !duration.is_finite() || duration <= 0.0 {
-            return None;
-        }
-        let sample_rate = (values.len().saturating_sub(1) as f64) / duration;
-        if !sample_rate.is_finite() || sample_rate <= 0.0 {
-            return None;
-        }
-        Some((values, sample_rate))
-    }
-
-    fn is_sparameter_trace_name(name: &str) -> bool {
-        let normalized = name.trim_matches('|').to_ascii_uppercase();
-        if !normalized.starts_with('S') {
-            return false;
-        }
-        normalized[1..]
-            .chars()
-            .filter(|ch| ch.is_ascii_digit())
-            .count()
-            >= 2
-    }
-
-    pub(super) fn preferred_viewer_for_analysis(
-        analysis_type: AnalysisType,
-    ) -> crate::viewers::ActiveViewer {
-        crate::common::analysis_navigation::preferred_viewer(analysis_type)
     }
 }

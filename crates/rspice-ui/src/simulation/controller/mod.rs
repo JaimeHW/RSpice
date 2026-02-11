@@ -32,7 +32,9 @@ use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
 use crate::state::{AnalysisResult, AnalysisType, DcOpResult, OperatingPointValue};
 
 mod analysis_spec;
-mod results;
+mod results_convert;
+mod results_post;
+mod results_update;
 mod spice_value;
 mod touchstone;
 
