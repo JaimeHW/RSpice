@@ -54,6 +54,9 @@ use app_serialization::{PanelSizesSer, PanelVisibilitySer};
 mod app_console;
 pub use app_console::{ConsoleLevel, ConsoleMessage};
 
+mod app_interaction_state;
+pub use app_interaction_state::{DragType, InteractionState};
+
 mod app_veriloga_library;
 use app_veriloga_library::{
     restore_global_veriloga_library, save_global_veriloga_library, VERILOGA_LIBRARY_NAME,

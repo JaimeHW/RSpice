@@ -264,7 +264,7 @@ pub fn render_schematic_view(
                         Some((wire_grid_pos.x, wire_grid_pos.y));
                     state.dialogs.interaction.drag.start(
                         (wire_grid_pos.x, wire_grid_pos.y),
-                        crate::ui::dialog_state::interaction::DragType::WireVertex,
+                        crate::common::app::DragType::WireVertex,
                     );
                 }
                 // Priority 2: Check if there's a component at the drag start position

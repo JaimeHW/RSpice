@@ -15,10 +15,9 @@
 //! - `panels/` - Side panels (project browser, properties)
 //! - `properties/` - Property editing and design variables
 //! - `common/` - Shared components (menu bar, status bar, theme)
-//! - `viewers/` - Integrated multi-view displays
+//! - `viewers/` - Specialized viewer selection
 //! - `services/` - Backend services (file I/O, simulation runner)
 //! - `state/` - Application state management
-//! - `ui/` - Dialog state and shortcuts
 //! - `utils/` - Utility functions
 
 // Suppress warnings during development
@@ -72,9 +71,6 @@ pub mod integration;
 
 /// Application state management
 pub mod state;
-
-/// Dialog state and keyboard shortcuts
-pub mod ui;
 
 /// Utility functions and helpers
 pub mod utils;

@@ -253,7 +253,7 @@ pub struct DialogState {
 
     // --- Runtime Interaction State ---
     /// Runtime interaction state for drag, hover, etc.
-    pub interaction: crate::ui::dialog_state::InteractionState,
+    pub interaction: super::InteractionState,
 
     // --- Save Confirmation Dialog ---
     /// State for save confirmation modal (unsaved changes warning)
