@@ -2,14 +2,9 @@
 //!
 //! Integrated and specialized viewers for simulation results.
 //!
-//! - `integrated` - Combined multi-view viewer with synchronized cursors
-//! - `results_browser` - Hierarchical tree browser for simulation outputs
+//! - `active_viewer` - Specialized viewer selector for waveform panel
 
-pub mod integrated;
-pub mod results_browser;
+pub mod active_viewer;
 
 // Re-export main types
-pub use integrated::{
-    ActiveViewer, AnalysisTab, IntegratedViewerState, SimulationConfigs, ViewerStates,
-};
-pub use results_browser::{ResultNode, ResultNodeType, ResultsBrowserTree};
+pub use active_viewer::ActiveViewer;
