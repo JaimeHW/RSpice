@@ -144,19 +144,20 @@ fn dispatch_file_menu_action(
             if require_save_confirmation_if_dirty(state, ConfirmationAction::FileNew) {
                 return;
             }
-            super::file_actions::action_file_new(state);
+            crate::common::file_actions::action_file_new(state);
         }
         FileMenuAction::Open => {
             if require_save_confirmation_if_dirty(state, ConfirmationAction::FileOpen) {
                 return;
             }
-            super::file_actions::action_file_open_with_io(state, file_workflow_io);
+            crate::common::file_actions::action_file_open_with_io(state, file_workflow_io);
         }
         FileMenuAction::Save => {
-            let _ = super::file_actions::action_file_save_with_io(state, file_workflow_io);
+            let _ = crate::common::file_actions::action_file_save_with_io(state, file_workflow_io);
         }
         FileMenuAction::SaveAs => {
-            let _ = super::file_actions::action_file_save_as_with_io(state, file_workflow_io);
+            let _ =
+                crate::common::file_actions::action_file_save_as_with_io(state, file_workflow_io);
         }
         FileMenuAction::ExportSvg => {
             super::export_actions::action_export_svg_with_io(state, export_workflow_io)

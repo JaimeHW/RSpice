@@ -32,7 +32,7 @@ pub(super) fn action_export_csv_with_io(
         filter_extensions: &["csv"],
     }) {
         Some(mut path) => {
-            super::file_actions::ensure_file_extension(&mut path, "csv");
+            crate::common::file_actions::ensure_file_extension(&mut path, "csv");
 
             match io.write_waveform_csv(&prepared.dataset, &path) {
                 Ok(()) => {

@@ -30,7 +30,7 @@ pub(super) fn action_export_svg_with_io(
         filter_extensions: &["svg"],
     }) {
         Some(mut path) => {
-            super::file_actions::ensure_file_extension(&mut path, "svg");
+            crate::common::file_actions::ensure_file_extension(&mut path, "svg");
 
             match io.write_text_file(&path, &svg_content) {
                 Ok(()) => {
@@ -98,7 +98,7 @@ pub(super) fn action_export_netlist_with_io(
         filter_extensions: &[extension],
     }) {
         Some(mut path) => {
-            super::file_actions::ensure_file_extension(&mut path, extension);
+            crate::common::file_actions::ensure_file_extension(&mut path, extension);
 
             match io.write_text_file(&path, &netlist_content) {
                 Ok(()) => {

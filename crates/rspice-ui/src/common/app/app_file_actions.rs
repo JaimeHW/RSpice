@@ -16,7 +16,7 @@ impl RSpiceApp {
 
     /// Internal: Actually create a new schematic (after confirmation)
     pub(super) fn do_file_new(&mut self) {
-        crate::common::file_workflow::create_new_schematic(&mut self.state);
+        crate::common::file_actions::action_file_new(&mut self.state);
     }
 
     /// Request to open a schematic (prompts to save if dirty)
@@ -35,7 +35,7 @@ impl RSpiceApp {
     /// Internal: Actually open a schematic (after confirmation)
     pub(super) fn do_file_open(&mut self) {
         let (state, io) = (&mut self.state, self.file_workflow_io.as_ref());
-        crate::common::file_workflow::open_schematic_from_dialog_with_io(state, io);
+        crate::common::file_actions::action_file_open_with_io(state, io);
     }
 
     /// Handle user response to save confirmation dialog
@@ -84,11 +84,11 @@ impl RSpiceApp {
 
     pub(super) fn action_file_save(&mut self) -> bool {
         let (state, io) = (&mut self.state, self.file_workflow_io.as_ref());
-        crate::common::file_workflow::save_schematic_with_io(state, io)
+        crate::common::file_actions::action_file_save_with_io(state, io)
     }
 
     pub(super) fn action_file_save_as(&mut self) -> bool {
         let (state, io) = (&mut self.state, self.file_workflow_io.as_ref());
-        crate::common::file_workflow::save_schematic_as_with_io(state, io)
+        crate::common::file_actions::action_file_save_as_with_io(state, io)
     }
 }

@@ -12,7 +12,6 @@ use crate::common::file_workflow::FileWorkflowIo;
 mod edit_menu;
 mod examples_menu;
 mod export_actions;
-mod file_actions;
 mod file_menu;
 mod help_menu;
 mod netlist_compat;
