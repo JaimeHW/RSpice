@@ -1247,6 +1247,13 @@ impl AnalysisRun {
         self.status = RunStatus::Skipped;
     }
 
+    /// Mark as skipped with explicit reason and timestamp
+    pub fn skip_with_reason(&mut self, reason: impl Into<String>, timestamp: u64) {
+        self.status = RunStatus::Skipped;
+        self.error = Some(reason.into());
+        self.end_time = Some(timestamp);
+    }
+
     /// Get elapsed time in seconds
     pub fn elapsed(&self) -> Option<u64> {
         match (self.start_time, self.end_time) {
@@ -1449,20 +1456,26 @@ impl RunQueue {
 
             // Skip dependent runs if stop_on_error
             if self.stop_on_error {
-                self.skip_dependents(id);
+                self.skip_dependents(id, timestamp);
             }
         }
     }
 
     /// Skip all runs that depend on the given ID
-    fn skip_dependents(&mut self, failed_id: u64) {
+    fn skip_dependents(&mut self, failed_id: u64, timestamp: u64) {
         let mut to_skip: VecDeque<u64> = VecDeque::new();
         to_skip.push_back(failed_id);
 
         while let Some(id) = to_skip.pop_front() {
             for run in &mut self.runs {
                 if run.dependencies.contains(&id) && run.status == RunStatus::Pending {
-                    run.skip();
+                    run.skip_with_reason(
+                        format!(
+                            "Skipped because dependency run {} did not complete successfully",
+                            id
+                        ),
+                        timestamp,
+                    );
                     to_skip.push_back(run.id);
                 }
             }

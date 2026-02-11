@@ -259,6 +259,7 @@ impl RunExecutor {
     pub fn execute(&self, queue: &mut RunQueue) -> ExecutionResult {
         let start = Instant::now();
         let mut result = ExecutionResult::default();
+        self.progress.store(0, Ordering::SeqCst);
 
         result.state.total_runs = queue.len();
         result.state.status = ExecutionStatus::Running;
@@ -268,10 +269,22 @@ impl RunExecutor {
         } else {
             self.execute_parallel(queue, &start, &mut result);
         }
+        self.finalize_queue_state(queue, &start, &mut result);
 
         // Final state
         if result.state.status == ExecutionStatus::Running {
-            if result.state.failed_runs > 0 {
+            let has_incomplete_runs = queue
+                .runs()
+                .iter()
+                .any(|run| matches!(run.status, RunStatus::Pending | RunStatus::Running));
+            let skipped_runs = queue.count_by_status(RunStatus::Skipped);
+            if has_incomplete_runs {
+                result.state.status = if queue.paused {
+                    ExecutionStatus::Paused
+                } else {
+                    ExecutionStatus::Error
+                };
+            } else if result.state.failed_runs > 0 || skipped_runs > 0 {
                 result.state.status = ExecutionStatus::CompletedWithErrors;
             } else {
                 result.state.status = ExecutionStatus::Completed;
@@ -323,9 +336,21 @@ impl RunExecutor {
                 .collect();
 
             for run_id in finished_ids {
-                let handle = running
-                    .remove(&run_id)
-                    .expect("finished run handle must exist");
+                let Some(handle) = running.remove(&run_id) else {
+                    let run_name = queue
+                        .get(run_id)
+                        .map(|run| run.name.clone())
+                        .unwrap_or_else(|| format!("run-{}", run_id));
+                    self.record_run_completion(
+                        queue,
+                        start,
+                        result,
+                        run_id,
+                        run_name,
+                        Err("internal executor error: finished run handle missing".to_string()),
+                    );
+                    continue;
+                };
                 let outcome = handle.join().unwrap_or_else(|_| ParallelRunOutcome {
                     run_id,
                     run_name: queue
@@ -465,6 +490,107 @@ impl RunExecutor {
             .store(result.state.completed_runs, Ordering::SeqCst);
         result.state.elapsed_seconds = start.elapsed().as_secs_f64();
         result.state.update_eta();
+    }
+
+    fn finalize_queue_state(
+        &self,
+        queue: &mut RunQueue,
+        start: &Instant,
+        result: &mut ExecutionResult,
+    ) {
+        self.skip_blocked_pending_runs(queue);
+
+        for run in queue
+            .runs()
+            .iter()
+            .filter(|run| run.status == RunStatus::Skipped)
+        {
+            let default = format!(
+                "Run '{}' was skipped because dependencies were not satisfied",
+                run.name
+            );
+            result
+                .errors
+                .entry(run.id)
+                .or_insert_with(|| run.error.clone().unwrap_or(default));
+        }
+
+        result.state.completed_runs = queue
+            .runs()
+            .iter()
+            .filter(|run| run.status.is_done())
+            .count();
+        result.state.failed_runs = queue.count_by_status(RunStatus::Failed);
+        self.progress
+            .store(result.state.completed_runs, Ordering::SeqCst);
+        result.state.elapsed_seconds = start.elapsed().as_secs_f64();
+        result.state.update_eta();
+    }
+
+    fn skip_blocked_pending_runs(&self, queue: &mut RunQueue) {
+        let run_statuses: HashMap<u64, RunStatus> = queue
+            .runs()
+            .iter()
+            .map(|run| (run.id, run.status))
+            .collect();
+        let blocked: Vec<(u64, String)> = queue
+            .runs()
+            .iter()
+            .filter(|run| run.status == RunStatus::Pending)
+            .filter_map(|run| {
+                Self::blocked_dependency_reason(run, &run_statuses).map(|reason| (run.id, reason))
+            })
+            .collect();
+
+        if blocked.is_empty() {
+            return;
+        }
+
+        let now = Self::now();
+        for (run_id, reason) in blocked {
+            if let Some(run) = queue.get_mut(run_id) {
+                run.skip_with_reason(reason, now);
+            }
+        }
+    }
+
+    fn blocked_dependency_reason(
+        run: &AnalysisRun,
+        run_statuses: &HashMap<u64, RunStatus>,
+    ) -> Option<String> {
+        let blockers: Vec<String> = run
+            .dependencies
+            .iter()
+            .filter_map(|dependency_id| match run_statuses.get(dependency_id) {
+                None => Some(format!("dependency run {} is missing", dependency_id)),
+                Some(status) if status.is_success() => None,
+                Some(status) => Some(format!(
+                    "dependency run {} ended with status {}",
+                    dependency_id,
+                    Self::run_status_label(*status)
+                )),
+            })
+            .collect();
+
+        if blockers.is_empty() {
+            None
+        } else {
+            Some(format!(
+                "Blocked by unresolved dependencies: {}",
+                blockers.join(", ")
+            ))
+        }
+    }
+
+    fn run_status_label(status: RunStatus) -> &'static str {
+        match status {
+            RunStatus::Pending => "Pending",
+            RunStatus::Running => "Running",
+            RunStatus::Completed => "Completed",
+            RunStatus::Failed => "Failed",
+            RunStatus::Cancelled => "Cancelled",
+            RunStatus::Skipped => "Skipped",
+        }
     }
 
     /// Execute a single run item
@@ -2927,12 +3053,89 @@ mod tests {
                 .status,
             RunStatus::Skipped
         );
-        let err = result
-            .errors
-            .values()
-            .next()
-            .expect("expected a failure message");
-        assert!(err.contains("missing AnalysisSpec"));
+        assert!(
+            result
+                .errors
+                .values()
+                .any(|err| err.contains("missing AnalysisSpec")),
+            "expected an AnalysisSpec validation failure in errors: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn test_execute_parallel_stop_on_error_false_still_skips_blocked_dependents() {
+        let executor = RunExecutor::new().with_parallel(3);
+        let mut queue = RunQueue::new().with_netlist("* fail deps\nV1 in 0 1\nR1 in out 1k\n");
+        queue.stop_on_error = false;
+
+        let failing = queue.add(AnalysisRunType::Ac); // Missing AnalysisSpec by design
+        let blocked = queue.add(AnalysisRunType::DcOp);
+        queue
+            .get_mut(blocked)
+            .expect("blocked run must exist")
+            .dependencies
+            .push(failing);
+        let independent = queue.add(AnalysisRunType::DcOp);
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.total_runs, 3);
+        assert_eq!(result.state.failed_runs, 1);
+        assert_eq!(result.state.completed_runs, 3);
+        assert_eq!(result.state.status, ExecutionStatus::CompletedWithErrors);
+        assert_eq!(
+            queue.get(failing).expect("failing run must exist").status,
+            RunStatus::Failed
+        );
+        assert_eq!(
+            queue.get(blocked).expect("blocked run must exist").status,
+            RunStatus::Skipped
+        );
+        assert_eq!(
+            queue
+                .get(independent)
+                .expect("independent run must exist")
+                .status,
+            RunStatus::Completed
+        );
+        assert!(
+            result
+                .errors
+                .get(&blocked)
+                .expect("blocked run should emit an error")
+                .contains("Blocked by unresolved dependencies"),
+            "blocked dependent should include unresolved-dependency error text"
+        );
+    }
+
+    #[test]
+    fn test_execute_marks_missing_dependency_as_skipped_error() {
+        let executor = RunExecutor::new();
+        let mut queue = RunQueue::new().with_netlist("* dep gap\nV1 in 0 1\nR1 in out 1k\n");
+        let blocked = queue.add(AnalysisRunType::DcOp);
+        queue
+            .get_mut(blocked)
+            .expect("blocked run must exist")
+            .dependencies
+            .push(999_999);
+
+        let result = executor.execute(&mut queue);
+        assert_eq!(result.state.total_runs, 1);
+        assert_eq!(result.state.failed_runs, 0);
+        assert_eq!(result.state.completed_runs, 1);
+        assert_eq!(result.state.status, ExecutionStatus::CompletedWithErrors);
+        assert_eq!(
+            queue.get(blocked).expect("blocked run must exist").status,
+            RunStatus::Skipped
+        );
+        assert!(
+            result
+                .errors
+                .get(&blocked)
+                .expect("missing dependency should be reported")
+                .contains("missing"),
+            "missing dependency should be part of reported skip reason"
+        );
     }
 
     #[test]
