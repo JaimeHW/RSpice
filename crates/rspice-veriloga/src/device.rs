@@ -123,6 +123,7 @@ impl VerilogADevice {
         for (i, param) in model.parameters.iter().enumerate() {
             context.set_param(i, param.default);
         }
+        context.variables.resize(model.num_variables, 0.0);
 
         // Build matrix indices (will be set during circuit linking)
         let matrix_indices = MatrixIndices::default();
@@ -367,6 +368,7 @@ impl VerilogADevice {
         self.context.clear_currents();
 
         let mut vm = Vm::new(&mut self.context);
+        Self::execute_assignment_programs(&mut vm, &self.model);
         let mut currents = Vec::with_capacity(self.model.stamp_programs.len());
 
         for program in &self.model.stamp_programs {
@@ -456,6 +458,20 @@ impl VerilogADevice {
         stamp_values
     }
 
+    /// Execute assignment programs and update VM variable storage.
+    fn execute_assignment_programs(vm: &mut Vm<'_>, model: &CompiledModel) {
+        if vm.context.variables.len() < model.num_variables {
+            vm.context.variables.resize(model.num_variables, 0.0);
+        }
+
+        for assignment in &model.assignment_programs {
+            let value = vm.execute(&assignment.program).unwrap_or(0.0);
+            if assignment.var_index < vm.context.variables.len() {
+                vm.context.variables[assignment.var_index] = value;
+            }
+        }
+    }
+
     /// Compute Jacobian entries
     ///
     /// Returns (value, row_terminal, col_terminal, is_current) for each derivative.
@@ -466,6 +482,7 @@ impl VerilogADevice {
         context.clear_currents();
 
         let mut vm = Vm::new(context);
+        Self::execute_assignment_programs(&mut vm, model);
         let mut entries = Vec::new();
 
         for (prog_idx, program) in model.stamp_programs.iter().enumerate() {
@@ -516,6 +533,7 @@ impl VerilogADevice {
         context.clear_currents();
 
         let mut vm = Vm::new(context);
+        Self::execute_assignment_programs(&mut vm, model);
 
         for program in &model.stamp_programs {
             // Compute the branch current/value
@@ -867,6 +885,62 @@ mod tests {
         }
     }
 
+    fn create_assignment_variable_model() -> CompiledModel {
+        // T0 = V(p, n) * 2; I = g * T0
+        let assignment_program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushVoltage(0, 1),
+                Instruction::PushConst(2.0),
+                Instruction::Mul,
+            ],
+        };
+
+        let value_program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushParam(0),
+                Instruction::PushVariable(0),
+                Instruction::Mul,
+            ],
+        };
+
+        CompiledModel {
+            name: "assignment_var_model".into(),
+            num_terminals: 2,
+            terminal_names: vec!["p".into(), "n".into()],
+            parameters: vec![CompiledParameter {
+                name: "g".into(),
+                default: 1.0e-3,
+                min: Some(0.0),
+                max: None,
+            }],
+            num_variables: 1,
+            assignment_programs: vec![crate::codegen::AssignmentProgram {
+                var_index: 0,
+                program: assignment_program,
+            }],
+            stamp_programs: vec![StampProgram {
+                stamp_locations: vec![
+                    StampLocation {
+                        row: StampIndex::Terminal(0),
+                        col: StampIndex::Ground,
+                        sign: -1.0,
+                    },
+                    StampLocation {
+                        row: StampIndex::Terminal(1),
+                        col: StampIndex::Ground,
+                        sign: 1.0,
+                    },
+                ],
+                value_program,
+                jacobian_programs: vec![],
+            }],
+            lookup_tables: vec![],
+            internal_nodes: 0,
+            branch_currents: 0,
+            laplace_filters: vec![],
+        }
+    }
+
     fn create_diode_model() -> CompiledModel {
         // I = Is * (exp(V/Vt) - 1)
         let value_program = BytecodeProgram {
@@ -1045,6 +1119,19 @@ mod tests {
         assert_eq!(currents.len(), 2);
         assert!((currents[0] - 2.0e-3).abs() < 1e-12);
         assert!((currents[1] - 4.0e-3).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_interpreter_executes_assignment_programs_before_stamps() {
+        let model = create_assignment_variable_model();
+        let mut device = VerilogADevice::new("X1", model, &[1, 2]);
+        device.update_voltages(&[3.0, 1.0]); // V(p,n)=2V => T0=4 => I=4e-3
+
+        let currents = device.evaluate_interpreter();
+        assert_eq!(currents.len(), 1);
+        assert!((currents[0] - 4.0e-3).abs() < 1e-12);
+        assert_eq!(device.context.variables.len(), 1);
+        assert!((device.context.variables[0] - 4.0).abs() < 1e-12);
     }
 
     #[test]
