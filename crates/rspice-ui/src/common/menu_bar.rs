@@ -9,6 +9,8 @@ use crate::common::app::AppState;
 
 #[path = "menu_bar_edit_menu.rs"]
 mod menu_bar_edit_menu;
+#[path = "menu_bar_examples_menu.rs"]
+mod menu_bar_examples_menu;
 #[path = "menu_bar_export_actions.rs"]
 mod menu_bar_export_actions;
 #[path = "menu_bar_file_actions.rs"]
@@ -122,22 +124,7 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
         // EXAMPLES MENU
         // =====================================================================
         ui.menu_button("Examples", |ui| {
-            use crate::common::examples::{load_example, EXAMPLES};
-
-            for example in EXAMPLES {
-                if ui
-                    .button(example.name)
-                    .on_hover_text(example.description)
-                    .clicked()
-                {
-                    load_example(example.name, &mut state.schematic);
-                    state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
-                        "Loaded example: {} ({})",
-                        example.name, example.category
-                    )));
-                    ui.close_menu();
-                }
-            }
+            menu_bar_examples_menu::render_examples_menu(ui, state);
         });
 
         // =====================================================================
