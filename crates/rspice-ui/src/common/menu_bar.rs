@@ -3,7 +3,7 @@
 //! Provides a professional menu bar matching the Dioxus version
 //! with File, Edit, View, Simulate, Tools, and Help menus.
 
-use egui::{menu, Ui};
+use egui::{Ui, menu};
 
 use crate::common::app::AppState;
 
@@ -554,7 +554,7 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
         // EXAMPLES MENU
         // =====================================================================
         ui.menu_button("Examples", |ui| {
-            use crate::common::examples::{load_example, EXAMPLES};
+            use crate::common::examples::{EXAMPLES, load_example};
 
             for example in EXAMPLES {
                 if ui
@@ -680,7 +680,7 @@ fn action_file_new(state: &mut AppState) {
 }
 
 fn action_file_open(state: &mut AppState) {
-    use crate::io::{load_schematic, show_open_dialog, SchematicIoError};
+    use crate::io::{SchematicIoError, load_schematic, show_open_dialog};
 
     match show_open_dialog() {
         Ok(path) => match load_schematic(&path) {
@@ -711,7 +711,7 @@ fn action_file_open(state: &mut AppState) {
 }
 
 fn action_file_save(state: &mut AppState) {
-    use crate::io::{save_schematic, SchematicIoError};
+    use crate::io::{SchematicIoError, save_schematic};
 
     // If we have a current file path, save directly
     // Otherwise, show Save As dialog
@@ -738,7 +738,7 @@ fn action_file_save(state: &mut AppState) {
 }
 
 fn action_file_save_as(state: &mut AppState) {
-    use crate::io::{save_schematic, show_save_dialog, SchematicIoError};
+    use crate::io::{SchematicIoError, save_schematic, show_save_dialog};
 
     // Get default filename from current file or use "untitled"
     let default_name = state
@@ -777,8 +777,20 @@ fn action_file_save_as(state: &mut AppState) {
     }
 }
 
+fn has_file_extension(path: &std::path::Path, expected_ext: &str) -> bool {
+    path.extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .is_some_and(|ext| ext.eq_ignore_ascii_case(expected_ext))
+}
+
+fn ensure_file_extension(path: &mut std::path::PathBuf, expected_ext: &str) {
+    if !has_file_extension(path, expected_ext) {
+        path.set_extension(expected_ext);
+    }
+}
+
 fn action_export_svg(state: &mut AppState) {
-    use crate::schematic::export::{export_to_svg, SvgExportConfig};
+    use crate::schematic::export::{SvgExportConfig, export_to_svg};
 
     // Generate SVG content
     let config = SvgExportConfig::default();
@@ -802,9 +814,7 @@ fn action_export_svg(state: &mut AppState) {
     match dialog.save_file() {
         Some(mut path) => {
             // Ensure .svg extension
-            if path.extension().is_none() || path.extension().unwrap() != "svg" {
-                path.set_extension("svg");
-            }
+            ensure_file_extension(&mut path, "svg");
 
             match std::fs::write(&path, &svg_content) {
                 Ok(()) => {
@@ -876,9 +886,7 @@ fn action_export_csv(state: &mut AppState) {
     match dialog.save_file() {
         Some(mut path) => {
             // Ensure .csv extension
-            if path.extension().is_none() || path.extension().unwrap() != "csv" {
-                path.set_extension("csv");
-            }
+            ensure_file_extension(&mut path, "csv");
 
             let writer = WaveformWriter::new(WaveformFormat::Csv);
             match writer.write(&dataset, &path) {
@@ -942,10 +950,7 @@ fn action_export_netlist(state: &mut AppState, format: crate::io::NetlistFormat)
     match dialog.save_file() {
         Some(mut path) => {
             // Ensure correct extension
-            let ext = format.extension();
-            if path.extension().is_none() || path.extension().unwrap() != ext {
-                path.set_extension(ext);
-            }
+            ensure_file_extension(&mut path, format.extension());
 
             match std::fs::write(&path, &netlist_content) {
                 Ok(()) => {
@@ -1419,6 +1424,32 @@ mod tests {
     }
 
     #[test]
+    fn test_has_file_extension_case_insensitive() {
+        assert!(has_file_extension(
+            std::path::Path::new("schematic.SVG"),
+            "svg"
+        ));
+        assert!(!has_file_extension(
+            std::path::Path::new("schematic.raw"),
+            "svg"
+        ));
+    }
+
+    #[test]
+    fn test_ensure_file_extension_appends_missing_extension() {
+        let mut path = std::path::PathBuf::from("waveforms");
+        ensure_file_extension(&mut path, "csv");
+        assert_eq!(path, std::path::PathBuf::from("waveforms.csv"));
+    }
+
+    #[test]
+    fn test_ensure_file_extension_replaces_mismatched_extension() {
+        let mut path = std::path::PathBuf::from("results.txt");
+        ensure_file_extension(&mut path, "csv");
+        assert_eq!(path, std::path::PathBuf::from("results.csv"));
+    }
+
+    #[test]
     fn test_action_veriloga_cache_status_emits_console_message() {
         with_temp_cache_env("status", || {
             let mut state = AppState::default();
@@ -1446,10 +1477,12 @@ mod tests {
     fn test_action_veriloga_recompile_library_without_library_warns() {
         let mut state = AppState::default();
         action_veriloga_recompile_library(&mut state);
-        assert!(state
-            .console_messages
-            .iter()
-            .any(|msg| msg.message.contains("No global 'veriloga' library found")));
+        assert!(
+            state
+                .console_messages
+                .iter()
+                .any(|msg| msg.message.contains("No global 'veriloga' library found"))
+        );
     }
 
     #[test]
