@@ -17,6 +17,8 @@ mod menu_bar_netlist_compat;
 mod menu_bar_simulate_menu;
 #[path = "menu_bar_veriloga_cache.rs"]
 mod menu_bar_veriloga_cache;
+#[path = "menu_bar_view_menu.rs"]
+mod menu_bar_view_menu;
 #[path = "menu_bar_waveform_export.rs"]
 mod menu_bar_waveform_export;
 
@@ -179,136 +181,8 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
         // VIEW MENU
         // =====================================================================
         ui.menu_button("View", |ui| {
-            if ui.button("Zoom In     Ctrl++").clicked() {
-                state.schematic.zoom = (state.schematic.zoom * 1.25).min(4.0);
-                ui.close_menu();
-            }
-            if ui.button("Zoom Out    Ctrl+-").clicked() {
-                state.schematic.zoom = (state.schematic.zoom / 1.25).max(0.25);
-                ui.close_menu();
-            }
-            if ui.button("Zoom to Fit").clicked() {
-                state.schematic.zoom_to_fit(800.0, 600.0);
-                ui.close_menu();
-            }
-            if ui.button("Zoom 100%   Ctrl+0").clicked() {
-                state.schematic.zoom = 1.0;
-                ui.close_menu();
-            }
-
-            ui.separator();
-
-            // Panel toggles with checkmarks
-            let browser_label = if state.panels.project_browser {
-                "✓ Library Browser"
-            } else {
-                "  Library Browser"
-            };
-            if ui.button(browser_label).clicked() {
-                state.panels.project_browser = !state.panels.project_browser;
-                ui.close_menu();
-            }
-
-            let waveform_label = if state.panels.bottom_panel
-                && state.panels.active_bottom_tab == crate::common::app::BottomPanelTab::Waveform
-            {
-                "✓ Waveform Viewer"
-            } else {
-                "  Waveform Viewer"
-            };
-            if ui.button(waveform_label).clicked() {
-                // Toggle: if already on Waveform tab, hide panel; otherwise show and switch to it
-                if state.panels.bottom_panel
-                    && state.panels.active_bottom_tab
-                        == crate::common::app::BottomPanelTab::Waveform
-                {
-                    state.panels.bottom_panel = false;
-                } else {
-                    state.panels.bottom_panel = true;
-                    state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
-                }
-                ui.close_menu();
-            }
-
-            let log_label = if state.panels.bottom_panel
-                && state.panels.active_bottom_tab == crate::common::app::BottomPanelTab::Log
-            {
-                "[x] Log"
-            } else {
-                "[ ] Log"
-            };
-            if ui.button(log_label).clicked() {
-                // Toggle: if already on Log tab, hide panel; otherwise show and switch to it
-                if state.panels.bottom_panel
-                    && state.panels.active_bottom_tab == crate::common::app::BottomPanelTab::Log
-                {
-                    state.panels.bottom_panel = false;
-                } else {
-                    state.panels.bottom_panel = true;
-                    state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Log;
-                }
-                ui.close_menu();
-            }
-
-            let props_label = if state.panels.properties {
-                "✓ Properties"
-            } else {
-                "  Properties"
-            };
-            if ui.button(props_label).clicked() {
-                state.panels.properties = !state.panels.properties;
-                ui.close_menu();
-            }
-
-            let browser_label = if state.panels.signal_browser {
-                "✓ Signal Browser"
-            } else {
-                "  Signal Browser"
-            };
-            if ui.button(browser_label).clicked() {
-                state.panels.signal_browser = !state.panels.signal_browser;
-                ui.close_menu();
-            }
-
-            let script_label = if state.panels.script_console {
-                "✓ Automation Console"
-            } else {
-                "  Automation Console"
-            };
-            if ui.button(script_label).clicked() {
-                state.panels.script_console = !state.panels.script_console;
-                ui.close_menu();
-            }
-
-            ui.separator();
-
-            // Specialized Viewers submenu
-            ui.menu_button("Specialized Viewers", |ui| {
-                use crate::viewers::ActiveViewer;
-
-                for viewer in ActiveViewer::all() {
-                    let is_active = state.active_viewer == *viewer;
-                    let label = if is_active {
-                        format!("✓ {}", viewer.name())
-                    } else {
-                        format!("  {}", viewer.name())
-                    };
-
-                    if ui.button(&label).clicked() {
-                        state.active_viewer = *viewer;
-                        state.panels.bottom_panel = true;
-                        state.panels.active_bottom_tab =
-                            crate::common::app::BottomPanelTab::Waveform;
-                        state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
-                            "Switched to {} viewer",
-                            viewer.name()
-                        )));
-                        ui.close_menu();
-                    }
-                }
-            });
+            menu_bar_view_menu::render_view_menu(ui, state);
         });
-
         // =====================================================================
         // SIMULATE MENU
         // =====================================================================
