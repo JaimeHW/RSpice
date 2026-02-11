@@ -314,7 +314,9 @@ impl RSpiceApp {
         match command {
             ShortcutCommand::FileNew => self.action_file_new(),
             ShortcutCommand::FileOpen => self.action_file_open(),
-            ShortcutCommand::FileSave => self.action_file_save(),
+            ShortcutCommand::FileSave => {
+                let _ = self.action_file_save();
+            }
             ShortcutCommand::EditUndo => self.action_edit_undo(),
             ShortcutCommand::EditRedo => self.action_edit_redo(),
             ShortcutCommand::EditCopy => self.action_edit_copy(),
@@ -500,9 +502,10 @@ impl RSpiceApp {
             }
             ConfirmationResponse::Yes => {
                 // Save first, then proceed
-                self.action_file_save();
-                if let Some(action) = pending {
-                    self.execute_pending_action(action);
+                if self.action_file_save() {
+                    if let Some(action) = pending {
+                        self.execute_pending_action(action);
+                    }
                 }
             }
         }
@@ -520,8 +523,8 @@ impl RSpiceApp {
         }
     }
 
-    fn action_file_save(&mut self) {
-        use crate::io::{save_schematic, show_save_dialog, SchematicIoError};
+    fn action_file_save(&mut self) -> bool {
+        use crate::io::save_schematic;
 
         // If we have a current file path, save directly
         // Otherwise, show Save As dialog
@@ -533,19 +536,21 @@ impl RSpiceApp {
                         "Saved: {}",
                         path.display()
                     )));
+                    true
                 }
                 Err(e) => {
                     self.state
                         .push_user_message(ConsoleMessage::error(format!("Save failed: {}", e)));
+                    false
                 }
             }
         } else {
             // No current file - do Save As
-            self.action_file_save_as();
+            self.action_file_save_as()
         }
     }
 
-    fn action_file_save_as(&mut self) {
+    fn action_file_save_as(&mut self) -> bool {
         use crate::io::{save_schematic, show_save_dialog, SchematicIoError};
 
         // Get default filename from current file or use "untitled"
@@ -566,18 +571,22 @@ impl RSpiceApp {
                         "Saved: {}",
                         path.display()
                     )));
+                    true
                 }
                 Err(e) => {
                     self.state
                         .push_user_message(ConsoleMessage::error(format!("Save failed: {}", e)));
+                    false
                 }
             },
             Err(SchematicIoError::Cancelled) => {
                 // User cancelled - no message needed
+                false
             }
             Err(e) => {
                 self.state
                     .push_user_message(ConsoleMessage::error(format!("Save As failed: {}", e)));
+                false
             }
         }
     }
@@ -3150,6 +3159,15 @@ impl RSpiceApp {
 mod tests {
     use super::*;
 
+    fn make_test_app() -> RSpiceApp {
+        RSpiceApp {
+            state: AppState::default(),
+            first_frame: false,
+            symbol_library: None,
+            simulation_controller: crate::simulation::SimulationController::new(),
+        }
+    }
+
     #[test]
     fn test_app_state_default() {
         let state = AppState::default();
@@ -3486,5 +3504,101 @@ mod tests {
         let action = state.pending_action;
         state.close();
         assert_eq!(action, Some(ConfirmationAction::FileNew));
+    }
+
+    #[test]
+    fn test_confirmation_yes_executes_pending_exit_after_successful_save() {
+        let mut app = make_test_app();
+        let temp = tempfile::tempdir().expect("tempdir should create");
+        let save_path = temp.path().join("confirmation-save-success.rsch");
+        app.state.schematic.current_file = Some(save_path.clone());
+        app.state.schematic.is_dirty = true;
+        app.state
+            .dialogs
+            .confirmation_dialog
+            .show(ConfirmationAction::Exit);
+
+        app.handle_confirmation_response(ConfirmationResponse::Yes);
+
+        assert!(
+            app.state.exit_requested,
+            "successful save should allow pending exit action to proceed"
+        );
+        assert!(
+            save_path.exists(),
+            "successful confirmation save should persist schematic file"
+        );
+        assert!(
+            !app.state.schematic.is_dirty,
+            "successful save should clear dirty flag"
+        );
+        assert!(!app.state.dialogs.confirmation_dialog.visible);
+        assert!(app.state.dialogs.confirmation_dialog.pending_action.is_none());
+    }
+
+    #[test]
+    fn test_confirmation_yes_does_not_execute_pending_exit_when_save_fails() {
+        let mut app = make_test_app();
+        let temp = tempfile::tempdir().expect("tempdir should create");
+        let invalid_file_target = temp.path().to_path_buf(); // existing directory: save should fail
+        app.state.schematic.current_file = Some(invalid_file_target);
+        app.state.schematic.is_dirty = true;
+        app.state
+            .dialogs
+            .confirmation_dialog
+            .show(ConfirmationAction::Exit);
+
+        app.handle_confirmation_response(ConfirmationResponse::Yes);
+
+        assert!(
+            !app.state.exit_requested,
+            "failed save must not continue to pending exit action"
+        );
+        assert!(
+            app.state.schematic.is_dirty,
+            "failed save should keep schematic dirty"
+        );
+        assert!(
+            app.state
+                .console_messages
+                .iter()
+                .any(|msg| msg.message.contains("Save failed")),
+            "failed save should emit an error message"
+        );
+        assert!(!app.state.dialogs.confirmation_dialog.visible);
+        assert!(app.state.dialogs.confirmation_dialog.pending_action.is_none());
+    }
+
+    #[test]
+    fn test_confirmation_yes_does_not_execute_pending_new_when_save_fails() {
+        use crate::state::{Component, ComponentType, Point};
+
+        let mut app = make_test_app();
+        app.state.schematic.components.push(
+            Component::new(1, ComponentType::Resistor, Point::new(100, 100))
+                .with_name_value("R1", "1k"),
+        );
+        let temp = tempfile::tempdir().expect("tempdir should create");
+        let invalid_file_target = temp.path().to_path_buf(); // existing directory: save should fail
+        app.state.schematic.current_file = Some(invalid_file_target);
+        app.state.schematic.is_dirty = true;
+        app.state
+            .dialogs
+            .confirmation_dialog
+            .show(ConfirmationAction::FileNew);
+
+        app.handle_confirmation_response(ConfirmationResponse::Yes);
+
+        assert!(
+            !app.state.schematic.components.is_empty(),
+            "failed save must not continue into destructive FileNew action"
+        );
+        assert!(
+            app.state
+                .console_messages
+                .iter()
+                .any(|msg| msg.message.contains("Save failed")),
+            "failed save should emit an error message"
+        );
     }
 }
