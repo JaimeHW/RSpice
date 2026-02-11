@@ -437,7 +437,8 @@ impl PxfResult {
         self.points
             .iter()
             .map(|p| (p.freq_in, p.magnitude_db()))
-            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .filter(|(_, db)| db.is_finite())
+            .max_by(|a, b| a.1.total_cmp(&b.1))
     }
 
     /// Find 3dB bandwidth below peak
@@ -865,6 +866,57 @@ mod tests {
         let (peak_freq, peak_db) = peak.unwrap();
         assert!((peak_freq - 1e5).abs() < 1.0);
         assert!((peak_db - 0.0).abs() < 0.01); // 1.0 linear = 0 dB
+    }
+
+    #[test]
+    fn test_pxf_result_peak_gain_ignores_non_finite_points() {
+        let mut result = PxfResult::new(1e9, 1, 0);
+        result.add_point(TransferPoint {
+            freq_in: 1e3,
+            freq_out: 1e3,
+            transfer: Complex64::new(0.1, 0.0),
+            sideband_in: 1,
+            sideband_out: 0,
+        });
+        result.add_point(TransferPoint {
+            freq_in: 1e4,
+            freq_out: 1e4,
+            transfer: Complex64::new(f64::NAN, 0.0),
+            sideband_in: 1,
+            sideband_out: 0,
+        });
+        result.add_point(TransferPoint {
+            freq_in: 1e5,
+            freq_out: 1e5,
+            transfer: Complex64::new(1.0, 0.0),
+            sideband_in: 1,
+            sideband_out: 0,
+        });
+
+        let (peak_freq, peak_db) = result.find_peak_gain().expect("peak should exist");
+        assert!((peak_freq - 1e5).abs() < 1.0);
+        assert!((peak_db - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_pxf_result_peak_gain_all_non_finite_returns_none() {
+        let mut result = PxfResult::new(1e9, 1, 0);
+        result.add_point(TransferPoint {
+            freq_in: 1e3,
+            freq_out: 1e3,
+            transfer: Complex64::new(f64::NAN, 0.0),
+            sideband_in: 1,
+            sideband_out: 0,
+        });
+        result.add_point(TransferPoint {
+            freq_in: 1e4,
+            freq_out: 1e4,
+            transfer: Complex64::new(f64::INFINITY, 0.0),
+            sideband_in: 1,
+            sideband_out: 0,
+        });
+
+        assert!(result.find_peak_gain().is_none());
     }
 
     #[test]

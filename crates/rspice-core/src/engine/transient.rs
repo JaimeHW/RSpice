@@ -1223,8 +1223,8 @@ impl Engine {
 #[cfg(test)]
 mod abort_tests {
     use super::*;
-    use crate::Engine;
     use crate::abort_signal::{CountingAbort, ImmediateAbort, NoAbort};
+    use crate::Engine;
 
     fn simple_rc_netlist() -> Netlist {
         // Simple RC circuit: V1 1 0 1V, R1 1 2 1k, C1 2 0 1u
@@ -1534,7 +1534,7 @@ mod abort_tests {
             .iter()
             .copied()
             .enumerate()
-            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .max_by(|a, b| a.1.total_cmp(&b.1))
             .expect("peak should exist");
         let peak_t = result.time[peak_idx];
         assert!(

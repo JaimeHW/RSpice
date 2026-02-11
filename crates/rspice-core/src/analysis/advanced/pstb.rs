@@ -393,11 +393,7 @@ impl PstbAnalyzer {
             .collect();
 
         // Sort by magnitude (most unstable first)
-        multipliers.sort_by(|a, b| {
-            b.magnitude()
-                .partial_cmp(&a.magnitude())
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        multipliers.sort_by(|a, b| b.magnitude().total_cmp(&a.magnitude()));
 
         // Re-index after sorting
         for (i, m) in multipliers.iter_mut().enumerate() {
@@ -417,7 +413,8 @@ impl PstbAnalyzer {
                 .iter()
                 .filter(|m| !m.is_trivial)
                 .map(|m| m.stability_margin_db())
-                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .filter(|margin| margin.is_finite())
+                .min_by(|a, b| a.total_cmp(b))
                 .unwrap_or(f64::INFINITY)
         } else {
             -max_magnitude.log10() * 20.0 // Negative margin = unstable

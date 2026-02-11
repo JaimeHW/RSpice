@@ -431,11 +431,7 @@ impl PoleZeroAnalyzer {
                     && p.im.is_finite()
                     && p.magnitude() < config.max_pole_freq * 2.0 * PI
             });
-            poles.sort_by(|a, b| {
-                a.re.partial_cmp(&b.re)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-                    .then_with(|| a.im.partial_cmp(&b.im).unwrap_or(std::cmp::Ordering::Equal))
-            });
+            poles.sort_by(|a, b| a.re.total_cmp(&b.re).then_with(|| a.im.total_cmp(&b.im)));
             poles.dedup_by(|a, b| (a.re - b.re).abs() < 1e-9 && (a.im - b.im).abs() < 1e-9);
             return poles;
         }

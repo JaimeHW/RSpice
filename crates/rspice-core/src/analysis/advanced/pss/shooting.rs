@@ -3,8 +3,8 @@
 //! Implements the shooting method for finding periodic steady-state solutions.
 //! The core algorithm solves the boundary value problem: find x(0) such that x(T) = x(0).
 
-use crate::Value;
 use crate::solver::{SolverError, StaticMatrix};
+use crate::Value;
 
 /// State of the shooting Newton solver
 #[derive(Debug, Clone)]
@@ -640,7 +640,7 @@ mod tests {
         assert_eq!(multipliers.len(), 3);
 
         let mut reals: Vec<Value> = multipliers.iter().map(|m| m.re).collect();
-        reals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        reals.sort_by(|a, b| a.total_cmp(b));
         assert!((reals[0] - 0.5).abs() < 1e-3);
         assert!((reals[1] - 0.7).abs() < 1e-3);
         assert!((reals[2] - 0.9).abs() < 1e-3);
@@ -669,7 +669,7 @@ mod tests {
         assert!(has_complex_pair, "expected complex conjugate pair");
 
         let mut magnitudes: Vec<Value> = multipliers.iter().map(|m| m.norm()).collect();
-        magnitudes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        magnitudes.sort_by(|a, b| a.total_cmp(b));
         assert!((magnitudes[0] - 0.3).abs() < 1e-3);
         assert!((magnitudes[1] - 0.6).abs() < 1e-3);
         assert!((magnitudes[2] - 0.8).abs() < 2e-2);
