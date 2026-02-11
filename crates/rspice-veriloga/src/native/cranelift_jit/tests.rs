@@ -68,6 +68,73 @@ fn laplace_step_test(
     unsafe { rspice_laplace_step(filters_ptr, filters_len, filter_id, input, timestep) }
 }
 
+/// Safe wrapper for rspice_current_lookup for use in tests.
+fn current_lookup_test(
+    branch_currents: &[f64],
+    currents: &[f64],
+    num_terminals: usize,
+    pos: usize,
+    neg: usize,
+) -> f64 {
+    unsafe {
+        rspice_current_lookup(
+            branch_currents.as_ptr(),
+            branch_currents.len(),
+            currents.as_ptr(),
+            currents.len(),
+            num_terminals,
+            pos,
+            neg,
+        )
+    }
+}
+
+#[test]
+fn test_current_lookup_prefers_terminal_pair_table() {
+    let branch_currents = vec![
+        f64::NAN,
+        2.0e-3, //
+        -2.0e-3,
+        f64::NAN,
+    ];
+    let currents = vec![9.0e-3];
+
+    let value = current_lookup_test(&branch_currents, &currents, 2, 0, 1);
+    assert!((value - 2.0e-3).abs() < 1e-15);
+}
+
+#[test]
+fn test_current_lookup_falls_back_to_first_current_for_nan_entry() {
+    let branch_currents = vec![
+        f64::NAN,
+        f64::NAN, //
+        f64::NAN,
+        f64::NAN,
+    ];
+    let currents = vec![1.25e-3, 7.0e-3];
+
+    let value = current_lookup_test(&branch_currents, &currents, 2, 1, 0);
+    assert!((value - 1.25e-3).abs() < 1e-15);
+}
+
+#[test]
+fn test_current_lookup_falls_back_to_first_current_for_out_of_bounds_pair() {
+    let branch_currents = vec![f64::NAN; 4];
+    let currents = vec![3.0e-3];
+
+    let value = current_lookup_test(&branch_currents, &currents, 2, 4, 1);
+    assert!((value - 3.0e-3).abs() < 1e-15);
+}
+
+#[test]
+fn test_current_lookup_returns_zero_without_currents_or_pair() {
+    let branch_currents = vec![f64::NAN; 4];
+    let currents = Vec::new();
+
+    let value = current_lookup_test(&branch_currents, &currents, 2, 1, 1);
+    assert_eq!(value, 0.0);
+}
+
 #[test]
 fn test_laplace_step_test_null_pointer() {
     // Should return input unchanged when filters_ptr is null
@@ -318,6 +385,11 @@ fn test_eval_context_laplace_fields() {
         voltages: std::ptr::null(),
         internal_voltages: std::ptr::null(),
         params: std::ptr::null(),
+        branch_currents: std::ptr::null(),
+        branch_currents_len: 0,
+        currents: std::ptr::null(),
+        currents_len: 0,
+        num_terminals: 0,
         temperature: 300.0,
         time: 0.0,
         timestep: 1e-6,

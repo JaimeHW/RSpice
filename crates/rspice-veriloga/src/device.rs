@@ -388,20 +388,18 @@ impl VerilogADevice {
         currents
     }
 
-    /// Evaluate using Cranelift JIT compiled code
+    /// Build a native evaluation context snapshot.
     #[cfg(feature = "native")]
-    fn evaluate_native(&mut self) -> Vec<f64> {
-        use crate::native::EvalContext;
-
-        let native = self.native_model.as_ref().unwrap();
-
-        self.context.clear_currents();
-
-        // Build evaluation context
-        let ctx = EvalContext {
+    fn native_eval_context(&self) -> crate::native::EvalContext {
+        crate::native::EvalContext {
             voltages: self.context.voltages.as_ptr(),
             internal_voltages: self.context.internal_voltages.as_ptr(),
             params: self.context.parameters.as_ptr(),
+            branch_currents: self.context.terminal_pair_currents_ptr(),
+            branch_currents_len: self.context.terminal_pair_currents_len(),
+            currents: self.context.currents.as_ptr(),
+            currents_len: self.context.currents.len(),
+            num_terminals: self.context.terminal_count(),
             temperature: self.context.temperature,
             time: self.context.time,
             timestep: self.context.timestep,
@@ -423,15 +421,29 @@ impl VerilogADevice {
                 self.model.laplace_filters.as_ptr() as *mut _
             },
             laplace_filters_len: self.model.laplace_filters.len(),
-        };
+        }
+    }
+
+    /// Evaluate using Cranelift JIT compiled code
+    #[cfg(feature = "native")]
+    fn evaluate_native(&mut self) -> Vec<f64> {
+        let native = self.native_model.as_ref().unwrap();
+
+        self.context.clear_currents();
+        // Pre-reserve so currents pointer remains stable across stamp pushes.
+        self.context
+            .currents
+            .reserve(self.model.stamp_programs.len());
 
         // First, compute all variable assignments
-        native.evaluate_assignments(&ctx, &mut self.native_vars);
+        let assignment_ctx = self.native_eval_context();
+        native.evaluate_assignments(&assignment_ctx, &mut self.native_vars);
 
         // Then evaluate each stamp program
         let mut stamp_values = Vec::with_capacity(native.num_stamps);
         for i in 0..native.num_stamps {
-            let value = native.evaluate_stamp(i, &ctx, &self.native_vars);
+            let stamp_ctx = self.native_eval_context();
+            let value = native.evaluate_stamp(i, &stamp_ctx, &self.native_vars);
             stamp_values.push(value);
             self.context.currents.push(value);
             if let Some(program) = self.model.stamp_programs.get(i) {
@@ -1024,6 +1036,8 @@ mod tests {
     fn test_evaluate_current_feedback_uses_terminal_pair_lookup() {
         let model = create_current_feedback_model();
         let mut device = VerilogADevice::new("X1", model, &[1, 2]);
+        #[cfg(feature = "native")]
+        assert!(device.is_using_native());
         device.set_parameter("g", 1.0e-3);
         device.update_voltages(&[3.0, 1.0]); // V(0,1)=2V
 

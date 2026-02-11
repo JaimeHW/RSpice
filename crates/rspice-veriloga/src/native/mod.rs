@@ -11,37 +11,6 @@ pub mod cranelift_jit;
 pub use cranelift_jit::{EvalContext, JitCompiler, JitError, JitResult, NativeModel};
 
 use crate::codegen::CompiledModel;
-#[cfg(feature = "native")]
-use crate::codegen::Instruction;
-
-#[cfg(feature = "native")]
-fn first_unsupported_instruction(model: &CompiledModel) -> Option<&'static str> {
-    for program in &model.assignment_programs {
-        for instruction in &program.program.instructions {
-            if matches!(instruction, Instruction::PushCurrent(_, _)) {
-                return Some("PushCurrent");
-            }
-        }
-    }
-
-    for stamp in &model.stamp_programs {
-        for instruction in &stamp.value_program.instructions {
-            if matches!(instruction, Instruction::PushCurrent(_, _)) {
-                return Some("PushCurrent");
-            }
-        }
-
-        for jacobian in &stamp.jacobian_programs {
-            for instruction in &jacobian.program.instructions {
-                if matches!(instruction, Instruction::PushCurrent(_, _)) {
-                    return Some("PushCurrent");
-                }
-            }
-        }
-    }
-
-    None
-}
 
 /// Try to compile a model to native code
 ///
@@ -49,15 +18,6 @@ fn first_unsupported_instruction(model: &CompiledModel) -> Option<&'static str> 
 /// The caller should fall back to bytecode interpretation if this returns `None`.
 #[cfg(feature = "native")]
 pub fn try_compile_native(model: &CompiledModel) -> Option<NativeModel> {
-    if let Some(opcode) = first_unsupported_instruction(model) {
-        log::debug!(
-            "[JIT] Skipping native compilation for '{}': unsupported instruction {}",
-            model.name,
-            opcode
-        );
-        return None;
-    }
-
     log::debug!("[JIT] Compiling model '{}' with Cranelift...", model.name);
 
     match JitCompiler::new() {
@@ -151,6 +111,11 @@ mod tests {
             voltages: voltages.as_ptr(),
             internal_voltages: std::ptr::null(),
             params: params.as_ptr(),
+            branch_currents: std::ptr::null(),
+            branch_currents_len: 0,
+            currents: std::ptr::null(),
+            currents_len: 0,
+            num_terminals: 2,
             temperature: 300.0,
             time: 0.0,
             timestep: 1e-9,
@@ -231,6 +196,11 @@ mod tests {
             voltages: voltages.as_ptr(),
             internal_voltages: std::ptr::null(),
             params: params.as_ptr(),
+            branch_currents: std::ptr::null(),
+            branch_currents_len: 0,
+            currents: std::ptr::null(),
+            currents_len: 0,
+            num_terminals: 2,
             temperature: 300.0,
             time: 0.0,
             timestep: 1e-9,
@@ -259,7 +229,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "native")]
-    fn test_jit_falls_back_for_push_current() {
+    fn test_jit_compiles_push_current_program() {
         let model = CompiledModel {
             name: "requires_push_current".into(),
             num_terminals: 2,
@@ -282,8 +252,61 @@ mod tests {
 
         let native = try_compile_native(&model);
         assert!(
-            native.is_none(),
-            "PushCurrent must fall back to interpreter for correctness"
+            native.is_some(),
+            "PushCurrent should compile in native mode"
         );
+        let native = native.unwrap();
+
+        let voltages = [3.0, 1.0];
+        let params = [];
+        let vars = [];
+
+        let mut branch_currents = vec![f64::NAN; 4];
+        branch_currents[1] = 2.0e-3;
+        branch_currents[2] = -2.0e-3;
+        let fallback_currents = vec![9.0e-3];
+
+        let ctx_from_pair = EvalContext {
+            voltages: voltages.as_ptr(),
+            internal_voltages: std::ptr::null(),
+            params: params.as_ptr(),
+            branch_currents: branch_currents.as_ptr(),
+            branch_currents_len: branch_currents.len(),
+            currents: fallback_currents.as_ptr(),
+            currents_len: fallback_currents.len(),
+            num_terminals: 2,
+            temperature: 300.0,
+            time: 0.0,
+            timestep: 1e-9,
+            state_prev: std::ptr::null(),
+            lookup_tables: std::ptr::null(),
+            lookup_tables_len: 0,
+            laplace_filters: std::ptr::null_mut(),
+            laplace_filters_len: 0,
+        };
+        let pair_value = native.evaluate_stamp(0, &ctx_from_pair, &vars);
+        assert!((pair_value - 2.0e-3).abs() < 1e-12);
+
+        let nan_branch_currents = vec![f64::NAN; 4];
+        let ctx_from_fallback = EvalContext {
+            voltages: voltages.as_ptr(),
+            internal_voltages: std::ptr::null(),
+            params: params.as_ptr(),
+            branch_currents: nan_branch_currents.as_ptr(),
+            branch_currents_len: nan_branch_currents.len(),
+            currents: fallback_currents.as_ptr(),
+            currents_len: fallback_currents.len(),
+            num_terminals: 2,
+            temperature: 300.0,
+            time: 0.0,
+            timestep: 1e-9,
+            state_prev: std::ptr::null(),
+            lookup_tables: std::ptr::null(),
+            lookup_tables_len: 0,
+            laplace_filters: std::ptr::null_mut(),
+            laplace_filters_len: 0,
+        };
+        let fallback_value = native.evaluate_stamp(0, &ctx_from_fallback, &vars);
+        assert!((fallback_value - 9.0e-3).abs() < 1e-12);
     }
 }

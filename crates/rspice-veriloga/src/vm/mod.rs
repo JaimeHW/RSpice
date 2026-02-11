@@ -468,6 +468,24 @@ impl VmContext {
         self.currents.first().copied().unwrap_or(0.0)
     }
 
+    /// Get pointer to the terminal-pair current lookup buffer.
+    #[inline]
+    pub fn terminal_pair_currents_ptr(&self) -> *const f64 {
+        self.terminal_pair_currents.as_ptr()
+    }
+
+    /// Get length of the terminal-pair current lookup buffer.
+    #[inline]
+    pub fn terminal_pair_currents_len(&self) -> usize {
+        self.terminal_pair_currents.len()
+    }
+
+    /// Get number of terminals in this context.
+    #[inline]
+    pub fn terminal_count(&self) -> usize {
+        self.voltages.len()
+    }
+
     /// Get thermal voltage kT/q
     #[inline]
     pub fn vt(&self) -> f64 {

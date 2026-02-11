@@ -76,6 +76,16 @@ pub struct EvalContext {
     pub internal_voltages: *const f64,
     /// Parameter values
     pub params: *const f64,
+    /// Flattened terminal-pair branch current matrix (size = num_terminals * num_terminals)
+    pub branch_currents: *const f64,
+    /// Length of `branch_currents` buffer
+    pub branch_currents_len: usize,
+    /// Sequentially evaluated branch currents for fallback semantics
+    pub currents: *const f64,
+    /// Length of `currents` buffer
+    pub currents_len: usize,
+    /// Number of terminals in the device
+    pub num_terminals: usize,
     /// Temperature in Kelvin
     pub temperature: f64,
     /// Simulation time
@@ -94,6 +104,29 @@ pub struct EvalContext {
     /// Number of Laplace filters
     pub laplace_filters_len: usize,
 }
+
+const EVAL_CTX_OFFSET_VOLTAGES: i32 = std::mem::offset_of!(EvalContext, voltages) as i32;
+const EVAL_CTX_OFFSET_INTERNAL_VOLTAGES: i32 =
+    std::mem::offset_of!(EvalContext, internal_voltages) as i32;
+const EVAL_CTX_OFFSET_PARAMS: i32 = std::mem::offset_of!(EvalContext, params) as i32;
+const EVAL_CTX_OFFSET_BRANCH_CURRENTS: i32 =
+    std::mem::offset_of!(EvalContext, branch_currents) as i32;
+const EVAL_CTX_OFFSET_BRANCH_CURRENTS_LEN: i32 =
+    std::mem::offset_of!(EvalContext, branch_currents_len) as i32;
+const EVAL_CTX_OFFSET_CURRENTS: i32 = std::mem::offset_of!(EvalContext, currents) as i32;
+const EVAL_CTX_OFFSET_CURRENTS_LEN: i32 = std::mem::offset_of!(EvalContext, currents_len) as i32;
+const EVAL_CTX_OFFSET_NUM_TERMINALS: i32 = std::mem::offset_of!(EvalContext, num_terminals) as i32;
+const EVAL_CTX_OFFSET_TEMPERATURE: i32 = std::mem::offset_of!(EvalContext, temperature) as i32;
+const EVAL_CTX_OFFSET_TIME: i32 = std::mem::offset_of!(EvalContext, time) as i32;
+const EVAL_CTX_OFFSET_TIMESTEP: i32 = std::mem::offset_of!(EvalContext, timestep) as i32;
+const EVAL_CTX_OFFSET_STATE_PREV: i32 = std::mem::offset_of!(EvalContext, state_prev) as i32;
+const EVAL_CTX_OFFSET_LOOKUP_TABLES: i32 = std::mem::offset_of!(EvalContext, lookup_tables) as i32;
+const EVAL_CTX_OFFSET_LOOKUP_TABLES_LEN: i32 =
+    std::mem::offset_of!(EvalContext, lookup_tables_len) as i32;
+const EVAL_CTX_OFFSET_LAPLACE_FILTERS: i32 =
+    std::mem::offset_of!(EvalContext, laplace_filters) as i32;
+const EVAL_CTX_OFFSET_LAPLACE_FILTERS_LEN: i32 =
+    std::mem::offset_of!(EvalContext, laplace_filters_len) as i32;
 
 /// External helper function for table lookup interpolation
 /// Called from JIT code to perform table interpolation
@@ -198,6 +231,39 @@ pub unsafe extern "C" fn rspice_laplace_step(
     filters[filter_id].step(input, timestep)
 }
 
+/// External helper function for PushCurrent terminal-pair lookup.
+///
+/// # Safety
+/// This function is called from JIT-compiled code with valid pointers and lengths.
+#[unsafe(export_name = "rspice_current_lookup")]
+pub unsafe extern "C" fn rspice_current_lookup(
+    branch_currents_ptr: *const f64,
+    branch_currents_len: usize,
+    currents_ptr: *const f64,
+    currents_len: usize,
+    num_terminals: usize,
+    pos: usize,
+    neg: usize,
+) -> f64 {
+    if !branch_currents_ptr.is_null() && pos < num_terminals && neg < num_terminals {
+        let idx = pos.saturating_mul(num_terminals).saturating_add(neg);
+        if idx < branch_currents_len {
+            // Safety: caller guarantees valid pointer and bounds
+            let value = unsafe { *branch_currents_ptr.add(idx) };
+            if value.is_finite() {
+                return value;
+            }
+        }
+    }
+
+    if !currents_ptr.is_null() && currents_len > 0 {
+        // Safety: caller guarantees valid pointer and bounds
+        return unsafe { *currents_ptr };
+    }
+
+    0.0
+}
+
 impl NativeModel {
     /// Evaluate all assignments, storing results in vars array
     pub fn evaluate_assignments(&self, ctx: &EvalContext, vars: &mut [f64]) {
@@ -261,6 +327,7 @@ impl JitCompiler {
         builder.symbol("rspice_limit", rspice_limit as *const u8);
         builder.symbol("rspice_limexp", rspice_limexp as *const u8);
         builder.symbol("rspice_laplace_step", rspice_laplace_step as *const u8);
+        builder.symbol("rspice_current_lookup", rspice_current_lookup as *const u8);
 
         let mut module = JITModule::new(builder);
         let mut ctx = module.make_context();
@@ -395,6 +462,29 @@ impl JitCompiler {
             .declare_function("rspice_laplace_step", Linkage::Import, &laplace_sig)
             .map_err(|e| JitError::Module(e.to_string()))?;
         funcs.insert("rspice_laplace_step", id);
+
+        // Import rspice helper functions for PushCurrent lookup
+        // Signature: fn(branch_ptr, branch_len, currents_ptr, currents_len, num_terminals, pos, neg) -> f64
+        let current_lookup_sig = {
+            let mut sig = module.make_signature();
+            sig.params.push(AbiParam::new(ptr_type)); // branch_ptr
+            sig.params.push(AbiParam::new(ptr_type)); // branch_len
+            sig.params.push(AbiParam::new(ptr_type)); // currents_ptr
+            sig.params.push(AbiParam::new(ptr_type)); // currents_len
+            sig.params.push(AbiParam::new(ptr_type)); // num_terminals
+            sig.params.push(AbiParam::new(ptr_type)); // pos
+            sig.params.push(AbiParam::new(ptr_type)); // neg
+            sig.returns.push(AbiParam::new(types::F64));
+            sig
+        };
+        let id = module
+            .declare_function(
+                "rspice_current_lookup",
+                Linkage::Import,
+                &current_lookup_sig,
+            )
+            .map_err(|e| JitError::Module(e.to_string()))?;
+        funcs.insert("rspice_current_lookup", id);
 
         // Import rspice_limexp for limited exponential (prevents overflow)
         // Signature: fn(value: f64) -> f64
@@ -547,12 +637,11 @@ impl JitCompiler {
                     stack.push(val);
                 }
                 Instruction::PushParam(idx) => {
-                    // ctx->params is at offset 16 (after voltages, internal_voltages)
                     let params_ptr = builder.ins().load(
                         self.isa.pointer_type(),
                         MemFlags::new(),
                         ctx_ptr,
-                        16, // offset of params in EvalContext
+                        EVAL_CTX_OFFSET_PARAMS,
                     );
                     let val = builder.ins().load(
                         types::F64,
@@ -563,11 +652,12 @@ impl JitCompiler {
                     stack.push(val);
                 }
                 Instruction::PushVoltage(pos, neg) => {
-                    // ctx->voltages is at offset 0
-                    let voltages_ptr =
-                        builder
-                            .ins()
-                            .load(self.isa.pointer_type(), MemFlags::new(), ctx_ptr, 0);
+                    let voltages_ptr = builder.ins().load(
+                        self.isa.pointer_type(),
+                        MemFlags::new(),
+                        ctx_ptr,
+                        EVAL_CTX_OFFSET_VOLTAGES,
+                    );
                     let v_pos = builder.ins().load(
                         types::F64,
                         MemFlags::new(),
@@ -584,11 +674,12 @@ impl JitCompiler {
                     stack.push(diff);
                 }
                 Instruction::PushInternalVoltage(idx) => {
-                    // ctx->internal_voltages is at offset 8
-                    let internal_ptr =
-                        builder
-                            .ins()
-                            .load(self.isa.pointer_type(), MemFlags::new(), ctx_ptr, 8);
+                    let internal_ptr = builder.ins().load(
+                        self.isa.pointer_type(),
+                        MemFlags::new(),
+                        ctx_ptr,
+                        EVAL_CTX_OFFSET_INTERNAL_VOLTAGES,
+                    );
                     let val = builder.ins().load(
                         types::F64,
                         MemFlags::new(),
@@ -607,13 +698,22 @@ impl JitCompiler {
                     stack.push(val);
                 }
                 Instruction::PushTemperature => {
-                    // ctx->temperature is at offset 24
-                    let val = builder.ins().load(types::F64, MemFlags::new(), ctx_ptr, 24);
+                    let val = builder.ins().load(
+                        types::F64,
+                        MemFlags::new(),
+                        ctx_ptr,
+                        EVAL_CTX_OFFSET_TEMPERATURE,
+                    );
                     stack.push(val);
                 }
                 Instruction::PushVt => {
                     // Vt = kT/q, compute from temperature
-                    let temp = builder.ins().load(types::F64, MemFlags::new(), ctx_ptr, 24);
+                    let temp = builder.ins().load(
+                        types::F64,
+                        MemFlags::new(),
+                        ctx_ptr,
+                        EVAL_CTX_OFFSET_TEMPERATURE,
+                    );
                     let k = builder.ins().f64const(1.380649e-23);
                     let q = builder.ins().f64const(1.602176634e-19);
                     let kt = builder.ins().fmul(k, temp);
@@ -621,14 +721,66 @@ impl JitCompiler {
                     stack.push(vt);
                 }
                 Instruction::PushTime => {
-                    // ctx->time is at offset 32
-                    let val = builder.ins().load(types::F64, MemFlags::new(), ctx_ptr, 32);
+                    let val = builder.ins().load(
+                        types::F64,
+                        MemFlags::new(),
+                        ctx_ptr,
+                        EVAL_CTX_OFFSET_TIME,
+                    );
                     stack.push(val);
                 }
-                Instruction::PushCurrent(_, _) => {
-                    return Err(JitError::Codegen(
-                        "Instruction PushCurrent is not supported in native JIT".into(),
-                    ));
+                Instruction::PushCurrent(pos, neg) => {
+                    let branch_currents_ptr = builder.ins().load(
+                        self.isa.pointer_type(),
+                        MemFlags::trusted(),
+                        ctx_ptr,
+                        EVAL_CTX_OFFSET_BRANCH_CURRENTS,
+                    );
+                    let branch_currents_len = builder.ins().load(
+                        self.isa.pointer_type(),
+                        MemFlags::trusted(),
+                        ctx_ptr,
+                        EVAL_CTX_OFFSET_BRANCH_CURRENTS_LEN,
+                    );
+                    let currents_ptr = builder.ins().load(
+                        self.isa.pointer_type(),
+                        MemFlags::trusted(),
+                        ctx_ptr,
+                        EVAL_CTX_OFFSET_CURRENTS,
+                    );
+                    let currents_len = builder.ins().load(
+                        self.isa.pointer_type(),
+                        MemFlags::trusted(),
+                        ctx_ptr,
+                        EVAL_CTX_OFFSET_CURRENTS_LEN,
+                    );
+                    let num_terminals = builder.ins().load(
+                        self.isa.pointer_type(),
+                        MemFlags::trusted(),
+                        ctx_ptr,
+                        EVAL_CTX_OFFSET_NUM_TERMINALS,
+                    );
+                    let pos_idx = builder.ins().iconst(self.isa.pointer_type(), *pos as i64);
+                    let neg_idx = builder.ins().iconst(self.isa.pointer_type(), *neg as i64);
+
+                    let func_id = math_funcs.get("rspice_current_lookup").ok_or_else(|| {
+                        JitError::FunctionNotFound("rspice_current_lookup".to_string())
+                    })?;
+                    let func_ref = module.declare_func_in_func(*func_id, builder.func);
+                    let call = builder.ins().call(
+                        func_ref,
+                        &[
+                            branch_currents_ptr,
+                            branch_currents_len,
+                            currents_ptr,
+                            currents_len,
+                            num_terminals,
+                            pos_idx,
+                            neg_idx,
+                        ],
+                    );
+                    let result = builder.inst_results(call)[0];
+                    stack.push(result);
                 }
 
                 // Binary operations
@@ -884,13 +1036,11 @@ impl JitCompiler {
                     let step_limit = stack.pop().unwrap();
                     let new_value = stack.pop().unwrap();
 
-                    // Load state_prev pointer from ctx (offset 48 = 6 * 8 bytes in EvalContext)
-                    let state_prev_offset = 48i32; // state_prev is at offset 48 in EvalContext
                     let state_prev = builder.ins().load(
                         self.isa.pointer_type(),
                         MemFlags::trusted(),
                         ctx_ptr,
-                        state_prev_offset,
+                        EVAL_CTX_OFFSET_STATE_PREV,
                     );
 
                     // Create state index as pointer-sized integer
@@ -913,22 +1063,18 @@ impl JitCompiler {
                 Instruction::TableLookup(table_id) => {
                     let input = stack.pop().unwrap();
 
-                    // Load lookup_tables pointer from ctx (offset 56 = 7 * 8 bytes)
-                    let tables_ptr_offset = 56i32;
                     let tables_ptr = builder.ins().load(
                         self.isa.pointer_type(),
                         MemFlags::trusted(),
                         ctx_ptr,
-                        tables_ptr_offset,
+                        EVAL_CTX_OFFSET_LOOKUP_TABLES,
                     );
 
-                    // Load lookup_tables_len from ctx (offset 64 = 8 * 8 bytes)
-                    let tables_len_offset = 64i32;
                     let tables_len = builder.ins().load(
                         self.isa.pointer_type(),
                         MemFlags::trusted(),
                         ctx_ptr,
-                        tables_len_offset,
+                        EVAL_CTX_OFFSET_LOOKUP_TABLES_LEN,
                     );
 
                     // Create table_id as pointer-sized integer
@@ -1042,24 +1188,25 @@ impl JitCompiler {
                 Instruction::LaplaceState(filter_id) => {
                     let input = stack.pop().unwrap();
 
-                    // Load laplace_filters pointer from ctx (offset after lookup_tables:
-                    // voltages=0, internal_voltages=8, params=16, temperature=24, time=32, timestep=40,
-                    // state_prev=48, lookup_tables=56, lookup_tables_len=64, laplace_filters=72, laplace_filters_len=80)
                     let filters_ptr = builder.ins().load(
                         self.isa.pointer_type(),
                         MemFlags::new(),
                         ctx_ptr,
-                        72, // offset of laplace_filters in EvalContext
+                        EVAL_CTX_OFFSET_LAPLACE_FILTERS,
                     );
                     let filters_len = builder.ins().load(
                         self.isa.pointer_type(),
                         MemFlags::new(),
                         ctx_ptr,
-                        80, // offset of laplace_filters_len in EvalContext
+                        EVAL_CTX_OFFSET_LAPLACE_FILTERS_LEN,
                     );
 
-                    // Load timestep from ctx (offset 40)
-                    let timestep = builder.ins().load(types::F64, MemFlags::new(), ctx_ptr, 40);
+                    let timestep = builder.ins().load(
+                        types::F64,
+                        MemFlags::new(),
+                        ctx_ptr,
+                        EVAL_CTX_OFFSET_TIMESTEP,
+                    );
 
                     // Create filter_id as a constant
                     let filter_idx = builder
