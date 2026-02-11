@@ -20,6 +20,20 @@ pub struct CodeGenerator<'a> {
     laplace_filters: std::cell::RefCell<Vec<StateSpaceFilter>>,
     /// Collected lookup tables used by $table_model expressions.
     lookup_tables: std::cell::RefCell<Vec<LookupTable>>,
+    /// Stateful slot allocator for `$limit`.
+    limit_state_count: std::cell::Cell<usize>,
+    /// Stateful slot allocator for `absdelay`.
+    delay_buffer_count: std::cell::Cell<usize>,
+    /// Stateful slot allocator for `transition`.
+    transition_filter_count: std::cell::Cell<usize>,
+    /// Stateful slot allocator for `slew`.
+    slew_filter_count: std::cell::Cell<usize>,
+    /// Stateful slot allocator for `cross`.
+    cross_detector_count: std::cell::Cell<usize>,
+    /// Stateful slot allocator for `above`.
+    above_detector_count: std::cell::Cell<usize>,
+    /// Stateful slot allocator for `timer`.
+    timer_state_count: std::cell::Cell<usize>,
 }
 
 /// Compiled device model ready for simulation
@@ -461,6 +475,13 @@ impl<'a> CodeGenerator<'a> {
             options,
             laplace_filters: std::cell::RefCell::new(Vec::new()),
             lookup_tables: std::cell::RefCell::new(Vec::new()),
+            limit_state_count: std::cell::Cell::new(0),
+            delay_buffer_count: std::cell::Cell::new(0),
+            transition_filter_count: std::cell::Cell::new(0),
+            slew_filter_count: std::cell::Cell::new(0),
+            cross_detector_count: std::cell::Cell::new(0),
+            above_detector_count: std::cell::Cell::new(0),
+            timer_state_count: std::cell::Cell::new(0),
         }
     }
 
@@ -482,6 +503,13 @@ impl<'a> CodeGenerator<'a> {
     fn generate_from_ir(&self, ir: &DeviceIR) -> CompileResult<CompiledModel> {
         self.lookup_tables.borrow_mut().clear();
         self.laplace_filters.borrow_mut().clear();
+        self.limit_state_count.set(0);
+        self.delay_buffer_count.set(0);
+        self.transition_filter_count.set(0);
+        self.slew_filter_count.set(0);
+        self.cross_detector_count.set(0);
+        self.above_detector_count.set(0);
+        self.timer_state_count.set(0);
 
         let mut model = CompiledModel {
             name: ir.name.clone(),
@@ -596,6 +624,13 @@ impl<'a> CodeGenerator<'a> {
         let mut program = BytecodeProgram::default();
         self.emit_expr(expr, ir, &mut program)?;
         Ok(program)
+    }
+
+    #[inline]
+    fn allocate_slot(counter: &std::cell::Cell<usize>) -> usize {
+        let id = counter.get();
+        counter.set(id + 1);
+        id
     }
 
     /// Emit bytecode for an expression
@@ -744,7 +779,6 @@ impl<'a> CodeGenerator<'a> {
             IrExpr::Limit(inner, step) => {
                 // $limit(expr, step) - bounds value change per Newton iteration
                 // For DC, we track previous value and limit the step
-                // State index 0 is used for limit tracking
                 self.emit_expr(inner, ir, program)?;
                 if let Some(step_expr) = step {
                     self.emit_expr(step_expr, ir, program)?;
@@ -752,7 +786,8 @@ impl<'a> CodeGenerator<'a> {
                     // Default step limit for pn-junction type limiting
                     program.instructions.push(Instruction::PushConst(0.7)); // ~2*Vt
                 }
-                program.instructions.push(Instruction::LimitState(0));
+                let state_id = Self::allocate_slot(&self.limit_state_count);
+                program.instructions.push(Instruction::LimitState(state_id));
             }
             IrExpr::TableLookup {
                 input,
@@ -772,9 +807,10 @@ impl<'a> CodeGenerator<'a> {
                 // Emit expression value, then delay time, then AbsDelayState instruction
                 self.emit_expr(expr, ir, program)?;
                 self.emit_expr(delay_time, ir, program)?;
-                // Use delay buffer index 0 for now
-                // In production, each absdelay call would have its own buffer
-                program.instructions.push(Instruction::AbsDelayState(0));
+                let buffer_id = Self::allocate_slot(&self.delay_buffer_count);
+                program
+                    .instructions
+                    .push(Instruction::AbsDelayState(buffer_id));
             }
             IrExpr::Transition {
                 expr,
@@ -802,7 +838,10 @@ impl<'a> CodeGenerator<'a> {
                 } else {
                     program.instructions.push(Instruction::PushConst(0.0));
                 }
-                program.instructions.push(Instruction::TransitionState(0));
+                let filter_id = Self::allocate_slot(&self.transition_filter_count);
+                program
+                    .instructions
+                    .push(Instruction::TransitionState(filter_id));
             }
             IrExpr::Slew {
                 expr,
@@ -827,7 +866,8 @@ impl<'a> CodeGenerator<'a> {
                         .instructions
                         .push(Instruction::PushConst(f64::INFINITY));
                 }
-                program.instructions.push(Instruction::SlewState(0));
+                let filter_id = Self::allocate_slot(&self.slew_filter_count);
+                program.instructions.push(Instruction::SlewState(filter_id));
             }
             IrExpr::Cross {
                 expr,
@@ -841,7 +881,8 @@ impl<'a> CodeGenerator<'a> {
                 program
                     .instructions
                     .push(Instruction::PushConst(dir as f64));
-                program.instructions.push(Instruction::CrossState(0));
+                let detector_id = Self::allocate_slot(&self.cross_detector_count);
+                program.instructions.push(Instruction::CrossState(detector_id));
             }
             IrExpr::WhiteNoise { power, name: _ } => {
                 // $white_noise(power, name)
@@ -882,7 +923,8 @@ impl<'a> CodeGenerator<'a> {
                 // above(expr, threshold) - level crossing
                 self.emit_expr(expr, ir, program)?;
                 self.emit_expr(threshold, ir, program)?;
-                program.instructions.push(Instruction::AboveState(0));
+                let detector_id = Self::allocate_slot(&self.above_detector_count);
+                program.instructions.push(Instruction::AboveState(detector_id));
             }
             IrExpr::Timer { start_time, period } => {
                 // timer(start, period) - periodic trigger
@@ -892,7 +934,8 @@ impl<'a> CodeGenerator<'a> {
                 } else {
                     program.instructions.push(Instruction::PushConst(0.0));
                 }
-                program.instructions.push(Instruction::TimerState(0));
+                let timer_id = Self::allocate_slot(&self.timer_state_count);
+                program.instructions.push(Instruction::TimerState(timer_id));
             }
             IrExpr::Unary(op, _) => {
                 return Err(CompileError::CodeGen(CodeGenError::new(
@@ -1295,6 +1338,197 @@ mod tests {
             Instruction::TableLookup(1)
         ));
         assert_eq!(codegen.lookup_tables.borrow().len(), 2);
+    }
+
+    #[test]
+    fn test_compile_limit_allocates_distinct_state_ids() {
+        let options = CompilerOptions::default();
+        let codegen = CodeGenerator::new(&options);
+        let ir = create_test_ir();
+
+        let expr_a = IrExpr::Limit(Box::new(IrExpr::Const(1.0)), Some(Box::new(IrExpr::Const(0.1))));
+        let expr_b = IrExpr::Limit(Box::new(IrExpr::Const(2.0)), Some(Box::new(IrExpr::Const(0.2))));
+
+        let prog_a = codegen.compile_expr(&expr_a, &ir).unwrap();
+        let prog_b = codegen.compile_expr(&expr_b, &ir).unwrap();
+
+        assert!(matches!(
+            prog_a.instructions.last(),
+            Some(Instruction::LimitState(0))
+        ));
+        assert!(matches!(
+            prog_b.instructions.last(),
+            Some(Instruction::LimitState(1))
+        ));
+    }
+
+    #[test]
+    fn test_compile_absdelay_allocates_distinct_buffer_ids() {
+        let options = CompilerOptions::default();
+        let codegen = CodeGenerator::new(&options);
+        let ir = create_test_ir();
+
+        let expr_a = IrExpr::AbsDelay {
+            expr: Box::new(IrExpr::Const(1.0)),
+            delay_time: Box::new(IrExpr::Const(1e-9)),
+        };
+        let expr_b = IrExpr::AbsDelay {
+            expr: Box::new(IrExpr::Const(2.0)),
+            delay_time: Box::new(IrExpr::Const(2e-9)),
+        };
+
+        let prog_a = codegen.compile_expr(&expr_a, &ir).unwrap();
+        let prog_b = codegen.compile_expr(&expr_b, &ir).unwrap();
+
+        assert!(matches!(
+            prog_a.instructions.last(),
+            Some(Instruction::AbsDelayState(0))
+        ));
+        assert!(matches!(
+            prog_b.instructions.last(),
+            Some(Instruction::AbsDelayState(1))
+        ));
+    }
+
+    #[test]
+    fn test_compile_transition_allocates_distinct_filter_ids() {
+        let options = CompilerOptions::default();
+        let codegen = CodeGenerator::new(&options);
+        let ir = create_test_ir();
+
+        let expr_a = IrExpr::Transition {
+            expr: Box::new(IrExpr::Const(1.0)),
+            delay: Some(Box::new(IrExpr::Const(0.0))),
+            rise_time: Some(Box::new(IrExpr::Const(1e-9))),
+            fall_time: Some(Box::new(IrExpr::Const(2e-9))),
+        };
+        let expr_b = IrExpr::Transition {
+            expr: Box::new(IrExpr::Const(2.0)),
+            delay: Some(Box::new(IrExpr::Const(0.0))),
+            rise_time: Some(Box::new(IrExpr::Const(1e-9))),
+            fall_time: Some(Box::new(IrExpr::Const(2e-9))),
+        };
+
+        let prog_a = codegen.compile_expr(&expr_a, &ir).unwrap();
+        let prog_b = codegen.compile_expr(&expr_b, &ir).unwrap();
+
+        assert!(matches!(
+            prog_a.instructions.last(),
+            Some(Instruction::TransitionState(0))
+        ));
+        assert!(matches!(
+            prog_b.instructions.last(),
+            Some(Instruction::TransitionState(1))
+        ));
+    }
+
+    #[test]
+    fn test_compile_slew_allocates_distinct_filter_ids() {
+        let options = CompilerOptions::default();
+        let codegen = CodeGenerator::new(&options);
+        let ir = create_test_ir();
+
+        let expr_a = IrExpr::Slew {
+            expr: Box::new(IrExpr::Const(1.0)),
+            max_pos_slew: Some(Box::new(IrExpr::Const(10.0))),
+            max_neg_slew: Some(Box::new(IrExpr::Const(20.0))),
+        };
+        let expr_b = IrExpr::Slew {
+            expr: Box::new(IrExpr::Const(2.0)),
+            max_pos_slew: Some(Box::new(IrExpr::Const(30.0))),
+            max_neg_slew: Some(Box::new(IrExpr::Const(40.0))),
+        };
+
+        let prog_a = codegen.compile_expr(&expr_a, &ir).unwrap();
+        let prog_b = codegen.compile_expr(&expr_b, &ir).unwrap();
+
+        assert!(matches!(
+            prog_a.instructions.last(),
+            Some(Instruction::SlewState(0))
+        ));
+        assert!(matches!(
+            prog_b.instructions.last(),
+            Some(Instruction::SlewState(1))
+        ));
+    }
+
+    #[test]
+    fn test_compile_cross_allocates_distinct_detector_ids() {
+        let options = CompilerOptions::default();
+        let codegen = CodeGenerator::new(&options);
+        let ir = create_test_ir();
+
+        let expr_a = IrExpr::Cross {
+            expr: Box::new(IrExpr::Const(-1.0)),
+            direction: Some(1),
+            time_tol: None,
+        };
+        let expr_b = IrExpr::Cross {
+            expr: Box::new(IrExpr::Const(1.0)),
+            direction: Some(-1),
+            time_tol: None,
+        };
+
+        let prog_a = codegen.compile_expr(&expr_a, &ir).unwrap();
+        let prog_b = codegen.compile_expr(&expr_b, &ir).unwrap();
+
+        assert!(matches!(
+            prog_a.instructions.last(),
+            Some(Instruction::CrossState(0))
+        ));
+        assert!(matches!(
+            prog_b.instructions.last(),
+            Some(Instruction::CrossState(1))
+        ));
+    }
+
+    #[test]
+    fn test_compile_above_and_timer_allocate_distinct_ids() {
+        let options = CompilerOptions::default();
+        let codegen = CodeGenerator::new(&options);
+        let ir = create_test_ir();
+
+        let above_a = IrExpr::Above {
+            expr: Box::new(IrExpr::Const(1.0)),
+            threshold: Box::new(IrExpr::Const(0.0)),
+            time_tol: None,
+        };
+        let above_b = IrExpr::Above {
+            expr: Box::new(IrExpr::Const(2.0)),
+            threshold: Box::new(IrExpr::Const(0.0)),
+            time_tol: None,
+        };
+
+        let timer_a = IrExpr::Timer {
+            start_time: Box::new(IrExpr::Const(0.0)),
+            period: Some(Box::new(IrExpr::Const(1e-9))),
+        };
+        let timer_b = IrExpr::Timer {
+            start_time: Box::new(IrExpr::Const(0.0)),
+            period: Some(Box::new(IrExpr::Const(2e-9))),
+        };
+
+        let above_prog_a = codegen.compile_expr(&above_a, &ir).unwrap();
+        let above_prog_b = codegen.compile_expr(&above_b, &ir).unwrap();
+        let timer_prog_a = codegen.compile_expr(&timer_a, &ir).unwrap();
+        let timer_prog_b = codegen.compile_expr(&timer_b, &ir).unwrap();
+
+        assert!(matches!(
+            above_prog_a.instructions.last(),
+            Some(Instruction::AboveState(0))
+        ));
+        assert!(matches!(
+            above_prog_b.instructions.last(),
+            Some(Instruction::AboveState(1))
+        ));
+        assert!(matches!(
+            timer_prog_a.instructions.last(),
+            Some(Instruction::TimerState(0))
+        ));
+        assert!(matches!(
+            timer_prog_b.instructions.last(),
+            Some(Instruction::TimerState(1))
+        ));
     }
 
     #[test]
