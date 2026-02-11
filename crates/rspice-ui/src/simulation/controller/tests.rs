@@ -2254,6 +2254,288 @@ fn test_color_for_index_valid_hex() {
 }
 
 #[test]
+fn test_preferred_viewer_for_analysis_matches_navigation_policy() {
+    use crate::state::AnalysisType;
+
+    let all_analysis_types = [
+        AnalysisType::DcOp,
+        AnalysisType::DcSweep,
+        AnalysisType::Ac,
+        AnalysisType::Disto,
+        AnalysisType::Transient,
+        AnalysisType::Noise,
+        AnalysisType::PoleZero,
+        AnalysisType::Tf,
+        AnalysisType::Sensitivity,
+        AnalysisType::Pac,
+        AnalysisType::Pnoise,
+        AnalysisType::Pxf,
+        AnalysisType::Pstb,
+        AnalysisType::Stb,
+        AnalysisType::MonteCarlo,
+        AnalysisType::Parametric,
+        AnalysisType::Corner,
+        AnalysisType::Reliability,
+        AnalysisType::Optimization,
+        AnalysisType::Soa,
+        AnalysisType::SParameter,
+        AnalysisType::Envelope,
+        AnalysisType::Fourier,
+        AnalysisType::HarmonicBalance,
+        AnalysisType::Pss,
+    ];
+
+    for analysis_type in all_analysis_types {
+        assert_eq!(
+            SimulationController::preferred_viewer_for_analysis(analysis_type),
+            crate::common::analysis_navigation::preferred_viewer(analysis_type),
+            "viewer policy mismatch for {:?}",
+            analysis_type
+        );
+    }
+}
+
+#[test]
+fn test_update_waveforms_transient_populates_waveforms_eye_and_fft() {
+    use crate::simulation::results::WaveformData as EngineWaveformData;
+    use crate::simulation::SimulationResult;
+    use std::collections::HashMap;
+
+    let controller = SimulationController::new();
+    let mut state = AppState::default();
+    state.simulation.waveforms.push(crate::state::WaveformData::new(
+        "stale",
+        vec![0.0],
+        vec![0.0],
+        "#000000",
+    ));
+
+    let sample_count = 512;
+    let dt = 1e-10;
+    let bit_period = 2e-9;
+    let mut time = Vec::with_capacity(sample_count);
+    let mut signal = Vec::with_capacity(sample_count);
+    for i in 0..sample_count {
+        let t = i as f64 * dt;
+        time.push(t);
+        let cycles = (t / bit_period).floor() as i64;
+        signal.push(if cycles % 2 == 0 { 1.0 } else { -1.0 });
+    }
+
+    let mut waveforms = HashMap::new();
+    waveforms.insert(
+        "V(out)".to_string(),
+        EngineWaveformData::new_time_domain("V(out)", time.clone(), signal),
+    );
+
+    controller.update_waveforms(&mut state, &SimulationResult::Transient { time, waveforms });
+
+    assert_eq!(state.simulation.waveforms.len(), 1);
+    assert_eq!(state.simulation.waveforms[0].name, "V(out)");
+    assert!(state.simulation.node_to_waveform.contains_key("V(out)"));
+    assert!(state.eye_diagram_state.trace_count() > 0);
+    assert!(state.fft_state.has_data());
+    assert_eq!(
+        state.panels.active_bottom_tab,
+        crate::common::app::BottomPanelTab::Waveform
+    );
+}
+
+#[test]
+fn test_update_waveforms_ac_populates_bode_nyquist_and_smith_data() {
+    use crate::simulation::results::WaveformData as EngineWaveformData;
+    use crate::simulation::SimulationResult;
+    use std::collections::HashMap;
+
+    let controller = SimulationController::new();
+    let mut state = AppState::default();
+
+    let frequencies = vec![1e3, 1e4, 1e5, 1e6];
+    let mut waveforms = HashMap::new();
+    waveforms.insert(
+        "S11".to_string(),
+        EngineWaveformData::new_complex(
+            "S11",
+            frequencies.clone(),
+            vec![0.1, 0.15, 0.2, 0.25],
+            vec![0.0, -0.02, -0.04, -0.08],
+        ),
+    );
+    waveforms.insert(
+        "V(out)".to_string(),
+        EngineWaveformData::new_complex(
+            "V(out)",
+            frequencies.clone(),
+            vec![10.0, 3.0, 1.2, 0.7],
+            vec![0.0, -1.0, -0.8, -0.2],
+        ),
+    );
+
+    controller.update_waveforms(
+        &mut state,
+        &SimulationResult::Ac {
+            frequencies,
+            waveforms,
+        },
+    );
+
+    assert_eq!(state.simulation.waveforms.len(), 2);
+    assert!(
+        state
+            .simulation
+            .waveforms
+            .iter()
+            .any(|wf| wf.name.as_str() == "|S11|")
+    );
+    assert!(
+        state
+            .simulation
+            .waveforms
+            .iter()
+            .any(|wf| wf.name.as_str() == "|V(out)|")
+    );
+    assert_eq!(state.bode_plot_state.trace_count(), 2);
+    assert_eq!(state.nyquist_state.curve_count(), 2);
+    assert_eq!(state.smith_chart_state.traces.len(), 1);
+    assert_eq!(state.smith_chart_state.traces[0].name, "S11");
+}
+
+#[test]
+fn test_update_waveforms_noise_populates_output_input_and_contributors() {
+    use crate::simulation::SimulationResult;
+    use std::collections::HashMap;
+
+    let controller = SimulationController::new();
+    let mut state = AppState::default();
+
+    let frequencies = vec![1.0, 10.0, 100.0];
+    let output_noise = vec![1e-12, 2e-12, 3e-12];
+    let input_noise = Some(vec![5e-13, 6e-13, 7e-13]);
+    let mut contributors = HashMap::new();
+    contributors.insert("R1".to_string(), vec![1e-13, 2e-13, 3e-13]);
+    contributors.insert("M1".to_string(), vec![4e-13, 5e-13, 6e-13]);
+
+    controller.update_waveforms(
+        &mut state,
+        &SimulationResult::Noise {
+            frequencies,
+            output_noise,
+            input_noise,
+            contributors,
+        },
+    );
+
+    assert_eq!(state.simulation.waveforms.len(), 4);
+    assert!(state.simulation.node_to_waveform.contains_key("onoise"));
+    assert!(state.simulation.node_to_waveform.contains_key("inoise"));
+    assert!(
+        state
+            .simulation
+            .waveforms
+            .iter()
+            .any(|wf| wf.name.starts_with("noise("))
+    );
+    assert!(
+        state
+            .console_messages
+            .iter()
+            .any(|msg| msg.message.contains("Noise:")),
+        "expected noise summary console output"
+    );
+}
+
+#[test]
+fn test_update_waveforms_monte_carlo_loads_histograms_and_skips_invalid_bins() {
+    use crate::simulation::results::MonteCarloVariableResult;
+    use crate::simulation::SimulationResult;
+
+    let controller = SimulationController::new();
+    let mut state = AppState::default();
+
+    let variables = vec![
+        MonteCarloVariableResult {
+            name: "V(out)".to_string(),
+            mean: 1.0,
+            std_dev: 0.01,
+            min: 0.97,
+            max: 1.03,
+            histogram: vec![2, 6, 8, 4],
+            bin_edges: vec![0.96, 0.98, 1.0, 1.02, 1.04],
+        },
+        MonteCarloVariableResult {
+            name: "I(vdd)".to_string(),
+            mean: 2e-3,
+            std_dev: 1e-4,
+            min: 1.8e-3,
+            max: 2.3e-3,
+            histogram: vec![1, 2, 3],
+            bin_edges: vec![1.8e-3, 2.0e-3], // Invalid, should be skipped
+        },
+    ];
+
+    controller.update_waveforms(
+        &mut state,
+        &SimulationResult::MonteCarlo {
+            runs_requested: 32,
+            runs_completed: 32,
+            num_failures: 0,
+            all_converged: true,
+            variables,
+        },
+    );
+
+    assert_eq!(state.histogram_state.histogram_count(), 1);
+    assert_eq!(state.simulation.waveforms.len(), 2);
+    assert!(
+        state
+            .simulation
+            .waveforms
+            .iter()
+            .any(|wf| wf.name.as_str() == "hist(V(out))")
+    );
+    assert_eq!(
+        state.panels.active_bottom_tab,
+        crate::common::app::BottomPanelTab::Waveform
+    );
+}
+
+#[test]
+fn test_update_waveforms_monte_carlo_without_valid_histograms_selects_log_tab() {
+    use crate::simulation::results::MonteCarloVariableResult;
+    use crate::simulation::SimulationResult;
+
+    let controller = SimulationController::new();
+    let mut state = AppState::default();
+    state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
+
+    controller.update_waveforms(
+        &mut state,
+        &SimulationResult::MonteCarlo {
+            runs_requested: 8,
+            runs_completed: 7,
+            num_failures: 1,
+            all_converged: false,
+            variables: vec![MonteCarloVariableResult {
+                name: "invalid".to_string(),
+                mean: 0.0,
+                std_dev: 0.0,
+                min: 0.0,
+                max: 0.0,
+                histogram: vec![],
+                bin_edges: vec![0.0],
+            }],
+        },
+    );
+
+    assert!(state.simulation.waveforms.is_empty());
+    assert_eq!(state.histogram_state.histogram_count(), 0);
+    assert_eq!(
+        state.panels.active_bottom_tab,
+        crate::common::app::BottomPanelTab::Log
+    );
+}
+
+#[test]
 fn test_current_config_none_initially() {
     let controller = SimulationController::new();
     assert!(controller.current_config.is_none());
