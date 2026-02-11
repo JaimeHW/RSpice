@@ -4,57 +4,7 @@
 //! the UI dialog state and converted to rspice-core analysis parameters.
 
 use crate::simulation::dialog::{AcConfig, DcConfig, NoiseConfig, TransientConfig};
-
-//=============================================================================
-// Analysis Type
-//=============================================================================
-
-/// Type of analysis to run
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AnalysisType {
-    /// DC operating point
-    DcOp,
-    /// DC sweep
-    DcSweep,
-    /// Transient analysis
-    Transient,
-    /// AC small-signal analysis
-    Ac,
-    /// Noise analysis
-    Noise,
-    /// Pole-zero analysis
-    PoleZero,
-    /// Sensitivity analysis
-    Sensitivity,
-}
-
-impl AnalysisType {
-    /// Get SPICE analysis command
-    pub fn spice_command(&self) -> &'static str {
-        match self {
-            AnalysisType::DcOp => ".op",
-            AnalysisType::DcSweep => ".dc",
-            AnalysisType::Transient => ".tran",
-            AnalysisType::Ac => ".ac",
-            AnalysisType::Noise => ".noise",
-            AnalysisType::PoleZero => ".pz",
-            AnalysisType::Sensitivity => ".sens",
-        }
-    }
-
-    /// Get display name
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            AnalysisType::DcOp => "DC Operating Point",
-            AnalysisType::DcSweep => "DC Sweep",
-            AnalysisType::Transient => "Transient",
-            AnalysisType::Ac => "AC Analysis",
-            AnalysisType::Noise => "Noise Analysis",
-            AnalysisType::PoleZero => "Pole-Zero",
-            AnalysisType::Sensitivity => "Sensitivity",
-        }
-    }
-}
+use crate::state::AnalysisType;
 
 //=============================================================================
 // Analysis Configuration

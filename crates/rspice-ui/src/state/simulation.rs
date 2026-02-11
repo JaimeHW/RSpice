@@ -164,6 +164,37 @@ pub enum AnalysisType {
 }
 
 impl AnalysisType {
+    /// Get SPICE directive keyword for this analysis type.
+    pub fn spice_command(&self) -> &'static str {
+        match self {
+            AnalysisType::DcOp => ".op",
+            AnalysisType::DcSweep => ".dc",
+            AnalysisType::Ac => ".ac",
+            AnalysisType::Disto => ".disto",
+            AnalysisType::Transient => ".tran",
+            AnalysisType::Noise => ".noise",
+            AnalysisType::PoleZero => ".pz",
+            AnalysisType::Tf => ".tf",
+            AnalysisType::Sensitivity => ".sens",
+            AnalysisType::Pac => ".pac",
+            AnalysisType::Pnoise => ".pnoise",
+            AnalysisType::Pxf => ".pxf",
+            AnalysisType::Pstb => ".pstb",
+            AnalysisType::Stb => ".stb",
+            AnalysisType::MonteCarlo => ".mc",
+            AnalysisType::Parametric => ".step",
+            AnalysisType::Corner => ".step",
+            AnalysisType::Reliability => ".reliability",
+            AnalysisType::Optimization => ".opt",
+            AnalysisType::Soa => ".soa",
+            AnalysisType::SParameter => ".sp",
+            AnalysisType::Envelope => ".envlp",
+            AnalysisType::Fourier => ".four",
+            AnalysisType::HarmonicBalance => ".hb",
+            AnalysisType::Pss => ".pss",
+        }
+    }
+
     /// Get human-readable display name for this analysis type
     pub fn display_name(&self) -> &'static str {
         match self {
@@ -1009,6 +1040,35 @@ mod tests {
         assert_eq!(AnalysisType::SParameter.display_name(), "S-Parameter");
         assert_eq!(AnalysisType::Envelope.display_name(), "Envelope");
         assert_eq!(AnalysisType::Fourier.display_name(), "Fourier");
+    }
+
+    #[test]
+    fn test_analysis_type_spice_commands() {
+        assert_eq!(AnalysisType::DcOp.spice_command(), ".op");
+        assert_eq!(AnalysisType::DcSweep.spice_command(), ".dc");
+        assert_eq!(AnalysisType::Ac.spice_command(), ".ac");
+        assert_eq!(AnalysisType::Disto.spice_command(), ".disto");
+        assert_eq!(AnalysisType::Transient.spice_command(), ".tran");
+        assert_eq!(AnalysisType::Noise.spice_command(), ".noise");
+        assert_eq!(AnalysisType::PoleZero.spice_command(), ".pz");
+        assert_eq!(AnalysisType::Tf.spice_command(), ".tf");
+        assert_eq!(AnalysisType::Sensitivity.spice_command(), ".sens");
+        assert_eq!(AnalysisType::Pac.spice_command(), ".pac");
+        assert_eq!(AnalysisType::Pnoise.spice_command(), ".pnoise");
+        assert_eq!(AnalysisType::Pxf.spice_command(), ".pxf");
+        assert_eq!(AnalysisType::Pstb.spice_command(), ".pstb");
+        assert_eq!(AnalysisType::Stb.spice_command(), ".stb");
+        assert_eq!(AnalysisType::MonteCarlo.spice_command(), ".mc");
+        assert_eq!(AnalysisType::Parametric.spice_command(), ".step");
+        assert_eq!(AnalysisType::Corner.spice_command(), ".step");
+        assert_eq!(AnalysisType::Reliability.spice_command(), ".reliability");
+        assert_eq!(AnalysisType::Optimization.spice_command(), ".opt");
+        assert_eq!(AnalysisType::Soa.spice_command(), ".soa");
+        assert_eq!(AnalysisType::SParameter.spice_command(), ".sp");
+        assert_eq!(AnalysisType::Envelope.spice_command(), ".envlp");
+        assert_eq!(AnalysisType::Fourier.spice_command(), ".four");
+        assert_eq!(AnalysisType::HarmonicBalance.spice_command(), ".hb");
+        assert_eq!(AnalysisType::Pss.spice_command(), ".pss");
     }
 
     #[test]

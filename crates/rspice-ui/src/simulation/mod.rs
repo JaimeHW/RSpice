@@ -27,7 +27,7 @@ pub use reliability_engine::{
     AgingMechanism, ParamShift, ReliabilityEngine, ReliabilityResult, StressMetrics,
 };
 
-pub use config::{AnalysisConfig, AnalysisType};
+pub use config::AnalysisConfig;
 pub use controller::SimulationController;
 pub use dialog::SimulationDialog;
 pub use engine_bridge::EngineBridge;
