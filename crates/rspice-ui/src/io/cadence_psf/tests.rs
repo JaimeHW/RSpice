@@ -775,3 +775,33 @@
             .expect_err("non-zero pad bytes must fail");
         assert!(err.to_string().contains("non-zero bytes"));
     }
+
+    #[test]
+    fn test_ensure_channel_length_real_resizes_with_nan_padding() {
+        let mut values = SignalValues::Real(vec![1.0]);
+        ensure_channel_length(&mut values, 3);
+        match values {
+            SignalValues::Real(v) => {
+                assert_eq!(v.len(), 3);
+                assert_eq!(v[0], 1.0);
+                assert!(v[1].is_nan());
+                assert!(v[2].is_nan());
+            }
+            SignalValues::Complex(_) => panic!("expected real channel values"),
+        }
+    }
+
+    #[test]
+    fn test_ensure_channel_length_complex_resizes_with_nan_padding() {
+        let mut values = SignalValues::Complex(vec![(1.0, -1.0)]);
+        ensure_channel_length(&mut values, 2);
+        match values {
+            SignalValues::Complex(v) => {
+                assert_eq!(v.len(), 2);
+                assert_eq!(v[0], (1.0, -1.0));
+                assert!(v[1].0.is_nan());
+                assert!(v[1].1.is_nan());
+            }
+            SignalValues::Real(_) => panic!("expected complex channel values"),
+        }
+    }

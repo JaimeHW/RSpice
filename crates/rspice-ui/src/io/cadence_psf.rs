@@ -1056,16 +1056,8 @@ fn channel_sample_width(channels: &[SignalChannel]) -> Result<usize, CadencePsfE
 
 fn ensure_channel_length(values: &mut SignalValues, len: usize) {
     match values {
-        SignalValues::Real(v) => {
-            while v.len() < len {
-                v.push(f64::NAN);
-            }
-        }
-        SignalValues::Complex(v) => {
-            while v.len() < len {
-                v.push((f64::NAN, f64::NAN));
-            }
-        }
+        SignalValues::Real(v) => v.resize(len, f64::NAN),
+        SignalValues::Complex(v) => v.resize(len, (f64::NAN, f64::NAN)),
     }
 }
 
