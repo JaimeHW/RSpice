@@ -67,8 +67,8 @@ pub enum IntegrationMethod {
 }
 
 impl IntegrationMethod {
-    /// Convert to string for Spectre
-    pub fn to_spectre(&self) -> &'static str {
+    /// Convert to engine keyword
+    pub fn to_engine_keyword(&self) -> &'static str {
         match self {
             IntegrationMethod::Trapezoidal => "trap",
             IntegrationMethod::BackwardEuler => "euler",
@@ -89,8 +89,8 @@ impl IntegrationMethod {
 }
 
 impl EngineOptions {
-    /// Create with default Spectre-style settings
-    pub fn spectre_defaults() -> Self {
+    /// Create with robust default settings for the simulation engine.
+    pub fn engine_defaults() -> Self {
         Self {
             abstol: 1e-12,
             reltol: 1e-3,
@@ -143,8 +143,8 @@ impl EngineOptions {
         self
     }
 
-    /// Generate Spectre options string
-    pub fn to_spectre_string(&self) -> String {
+    /// Generate engine options string
+    pub fn to_engine_options_string(&self) -> String {
         let mut opts = Vec::new();
         opts.push(format!("temp={}", self.temp));
         opts.push(format!("tnom={}", self.tnom));
@@ -152,7 +152,7 @@ impl EngineOptions {
         opts.push(format!("abstol={}", self.abstol));
         opts.push(format!("vntol={}", self.vntol));
         opts.push(format!("gmin={}", self.gmin));
-        opts.push(format!("method={}", self.method.to_spectre()));
+        opts.push(format!("method={}", self.method.to_engine_keyword()));
 
         if self.gmin_stepping {
             opts.push("gmin_stepping=yes".to_string());
@@ -219,7 +219,7 @@ impl OptionsTranslator {
     /// Create new translator with defaults
     pub fn new() -> Self {
         Self {
-            base: EngineOptions::spectre_defaults(),
+            base: EngineOptions::engine_defaults(),
         }
     }
 
@@ -333,41 +333,41 @@ mod tests {
 
     #[test]
     fn test_engine_options_defaults() {
-        let opts = EngineOptions::spectre_defaults();
+        let opts = EngineOptions::engine_defaults();
         assert_eq!(opts.temp, 27.0);
         assert!(opts.reltol > 0.0);
     }
 
     #[test]
     fn test_engine_options_with_temp() {
-        let opts = EngineOptions::spectre_defaults().with_temp(85.0);
+        let opts = EngineOptions::engine_defaults().with_temp(85.0);
         assert_eq!(opts.temp, 85.0);
     }
 
     #[test]
     fn test_engine_options_high_precision() {
-        let opts = EngineOptions::spectre_defaults().high_precision();
+        let opts = EngineOptions::engine_defaults().high_precision();
         assert!(opts.reltol < 1e-4);
         assert!(opts.itl1 >= 200);
     }
 
     #[test]
     fn test_engine_options_fast_mode() {
-        let opts = EngineOptions::spectre_defaults().fast_mode();
+        let opts = EngineOptions::engine_defaults().fast_mode();
         assert!(opts.reltol >= 1e-2);
     }
 
     #[test]
-    fn test_to_spectre_string() {
-        let opts = EngineOptions::spectre_defaults();
-        let s = opts.to_spectre_string();
+    fn test_to_engine_options_string() {
+        let opts = EngineOptions::engine_defaults();
+        let s = opts.to_engine_options_string();
         assert!(s.contains("temp=27"));
         assert!(s.contains("reltol="));
     }
 
     #[test]
     fn test_to_spice_options() {
-        let opts = EngineOptions::spectre_defaults();
+        let opts = EngineOptions::engine_defaults();
         let s = opts.to_spice_options();
         assert!(s.contains(".OPTIONS"));
         assert!(s.contains("TEMP="));
@@ -378,7 +378,7 @@ mod tests {
 
     #[test]
     fn test_to_spice_options_temperature_is_read_as_netlist_option() {
-        let opts = EngineOptions::spectre_defaults().with_temp(85.0);
+        let opts = EngineOptions::engine_defaults().with_temp(85.0);
         let netlist = format!("* opts\nR1 in 0 1k\n{}\n.end\n", opts.to_spice_options());
         let parsed = rspice_core::netlist::parse_netlist(&netlist)
             .expect("options-augmented netlist should parse");
@@ -387,7 +387,7 @@ mod tests {
 
     #[test]
     fn test_to_spice_options_includes_custom_options_in_stable_order() {
-        let mut opts = EngineOptions::spectre_defaults();
+        let mut opts = EngineOptions::engine_defaults();
         opts.custom.insert("zeta".to_string(), "2".to_string());
         opts.custom.insert("alpha".to_string(), "1".to_string());
         opts.custom.insert("nopage".to_string(), String::new());
@@ -407,9 +407,9 @@ mod tests {
     }
 
     #[test]
-    fn test_integration_method_to_spectre() {
-        assert_eq!(IntegrationMethod::Trapezoidal.to_spectre(), "trap");
-        assert_eq!(IntegrationMethod::Gear.to_spectre(), "gear");
+    fn test_integration_method_to_engine_keyword() {
+        assert_eq!(IntegrationMethod::Trapezoidal.to_engine_keyword(), "trap");
+        assert_eq!(IntegrationMethod::Gear.to_engine_keyword(), "gear");
     }
 
     #[test]

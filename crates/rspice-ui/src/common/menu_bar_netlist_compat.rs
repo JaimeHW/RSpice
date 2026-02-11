@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-pub(super) fn spice_to_spectre_compatible_netlist(spice_netlist: &str) -> String {
+pub(super) fn spice_to_ahdl_compatible_netlist(spice_netlist: &str) -> String {
     let mut ahdl_paths: Vec<String> = Vec::new();
     let mut seen_paths: HashSet<String> = HashSet::new();
     let mut retained_lines: Vec<&str> = Vec::new();
@@ -24,20 +24,20 @@ pub(super) fn spice_to_spectre_compatible_netlist(spice_netlist: &str) -> String
     for line in retained_lines {
         let trimmed = line.trim();
         if !inserted_prefix && !trimmed.is_empty() && !trimmed.starts_with('*') {
-            push_spectre_ahdl_prefix(&mut output, &ahdl_paths);
+            push_ahdl_prefix(&mut output, &ahdl_paths);
             inserted_prefix = true;
         }
         output.push(line.to_string());
     }
 
     if !inserted_prefix {
-        push_spectre_ahdl_prefix(&mut output, &ahdl_paths);
+        push_ahdl_prefix(&mut output, &ahdl_paths);
     }
 
     output.join("\n")
 }
 
-fn push_spectre_ahdl_prefix(output: &mut Vec<String>, ahdl_paths: &[String]) {
+fn push_ahdl_prefix(output: &mut Vec<String>, ahdl_paths: &[String]) {
     output.push("simulator lang=spectre".to_string());
     for path in ahdl_paths {
         output.push(format!("ahdl_include {}", quote_netlist_path(path)));
@@ -92,7 +92,7 @@ mod tests {
     }
 
     #[test]
-    fn test_spice_to_spectre_compatible_netlist_converts_veriloga_directives() {
+    fn test_spice_to_ahdl_compatible_netlist_converts_veriloga_directives() {
         let spice = r#"
 * Header
 .VERILOGA "C:/models/opamp.va" opamp
@@ -100,34 +100,34 @@ R1 in out 1k
 .end
 "#;
 
-        let spectre = spice_to_spectre_compatible_netlist(spice);
-        assert!(spectre.contains("simulator lang=spectre"));
-        assert!(spectre.contains("ahdl_include \"C:/models/opamp.va\""));
-        assert!(spectre.contains("simulator lang=spice"));
-        assert!(spectre.contains("R1 in out 1k"));
-        assert!(!spectre.contains(".VERILOGA"));
+        let converted = spice_to_ahdl_compatible_netlist(spice);
+        assert!(converted.contains("simulator lang=spectre"));
+        assert!(converted.contains("ahdl_include \"C:/models/opamp.va\""));
+        assert!(converted.contains("simulator lang=spice"));
+        assert!(converted.contains("R1 in out 1k"));
+        assert!(!converted.contains(".VERILOGA"));
     }
 
     #[test]
-    fn test_spice_to_spectre_compatible_netlist_preserves_spice_when_no_veriloga() {
+    fn test_spice_to_ahdl_compatible_netlist_preserves_spice_when_no_veriloga() {
         let spice = "R1 in out 1k\n.end";
-        assert_eq!(spice_to_spectre_compatible_netlist(spice), spice);
+        assert_eq!(spice_to_ahdl_compatible_netlist(spice), spice);
     }
 
     #[test]
-    fn test_spice_to_spectre_compatible_netlist_deduplicates_veriloga_includes() {
+    fn test_spice_to_ahdl_compatible_netlist_deduplicates_veriloga_includes() {
         let spice = r#"
 .veriloga "C:/models/opamp.va"
 .VERILOGA "C:/models/opamp.va"
 R1 in out 1k
 "#;
 
-        let spectre = spice_to_spectre_compatible_netlist(spice);
-        assert_eq!(spectre.matches("ahdl_include").count(), 1);
+        let converted = spice_to_ahdl_compatible_netlist(spice);
+        assert_eq!(converted.matches("ahdl_include").count(), 1);
     }
 
     #[test]
-    fn test_spice_to_spectre_compatible_netlist_inserts_prefix_after_header_comments() {
+    fn test_spice_to_ahdl_compatible_netlist_inserts_prefix_after_header_comments() {
         let spice = r#"
 * generated netlist
 * keep this header
@@ -135,8 +135,8 @@ R1 in out 1k
 R1 in out 1k
 "#;
 
-        let spectre = spice_to_spectre_compatible_netlist(spice);
+        let converted = spice_to_ahdl_compatible_netlist(spice);
         let expected = "* keep this header\nsimulator lang=spectre";
-        assert!(spectre.contains(expected));
+        assert!(converted.contains(expected));
     }
 }

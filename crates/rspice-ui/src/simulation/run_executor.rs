@@ -2963,7 +2963,7 @@ mod tests {
             baseline_result.errors
         );
 
-        let mut invalid_opts = EngineOptions::spectre_defaults();
+        let mut invalid_opts = EngineOptions::engine_defaults();
         invalid_opts.reltol = f64::NAN;
 
         let mut override_queue = RunQueue::new().with_netlist(netlist);

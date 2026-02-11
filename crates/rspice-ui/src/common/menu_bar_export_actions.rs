@@ -166,7 +166,7 @@ fn build_menu_netlist(state: &mut AppState, format: crate::io::NetlistFormat) ->
     let spice_netlist = generation.netlist;
     Some(match format {
         crate::io::NetlistFormat::Spectre => {
-            super::menu_bar_netlist_compat::spice_to_spectre_compatible_netlist(&spice_netlist)
+            super::menu_bar_netlist_compat::spice_to_ahdl_compatible_netlist(&spice_netlist)
         }
         _ => spice_netlist,
     })
@@ -459,10 +459,9 @@ mod tests {
 
         assert_eq!(io.write_text_calls(), 1);
         assert!(
-            state
-                .console_messages
-                .iter()
-                .any(|message| message.message.contains("Netlist export failed: permission denied")),
+            state.console_messages.iter().any(|message| message
+                .message
+                .contains("Netlist export failed: permission denied")),
             "netlist write errors should be surfaced to users"
         );
     }
