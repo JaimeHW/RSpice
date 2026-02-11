@@ -33,7 +33,7 @@
 
 use std::sync::Arc;
 
-use egui::{CentralPanel, Color32, Context, Frame, RichText, SidePanel, TopBottomPanel};
+use egui::{CentralPanel, Context, Frame, SidePanel, TopBottomPanel};
 
 use crate::state::{SchematicState, SimulationState};
 use crate::waveform::WaveformViewerState;
@@ -90,6 +90,9 @@ mod app_library_dialogs;
 
 #[path = "app_help_dialogs.rs"]
 mod app_help_dialogs;
+
+#[path = "app_confirmation_dialog.rs"]
+mod app_confirmation_dialog;
 
 /// Main application state container
 #[derive(Clone)]
@@ -725,93 +728,7 @@ impl eframe::App for RSpiceApp {
         // Modal Dialogs
         // =====================================================================
 
-        // Save Confirmation Dialog (unsaved changes warning)
-        // Matches commercial EDA pattern: Yes = Save and proceed, No = Discard, Cancel = Abort
-        if self.state.dialogs.confirmation_dialog.visible {
-            let mut response: Option<ConfirmationResponse> = None;
-
-            egui::Area::new(egui::Id::new("save_confirmation_backdrop"))
-                .order(egui::Order::Foreground)
-                .anchor(egui::Align2::LEFT_TOP, egui::Vec2::ZERO)
-                .show(ctx, |ui| {
-                    // Semi-transparent backdrop to prevent interaction with main UI
-                    let screen = ui.ctx().screen_rect();
-                    ui.painter().rect_filled(
-                        screen,
-                        egui::Rounding::ZERO,
-                        egui::Color32::from_rgba_unmultiplied(0, 0, 0, 180),
-                    );
-                });
-
-            egui::Window::new("Save Changes?")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-                .order(egui::Order::Foreground)
-                .show(ctx, |ui| {
-                    ui.set_min_width(350.0);
-
-                    // Icon and message
-                    ui.horizontal(|ui| {
-                        ui.add_space(10.0);
-                        ui.label(
-                            RichText::new("!")
-                                .size(28.0)
-                                .color(egui::Color32::from_rgb(255, 191, 0)),
-                        );
-                        ui.add_space(10.0);
-                        ui.vertical(|ui| {
-                            if let Some(action) =
-                                &self.state.dialogs.confirmation_dialog.pending_action
-                            {
-                                ui.label(RichText::new(action.dialog_title()).size(14.0).strong());
-                            }
-                            ui.add_space(4.0);
-                            ui.label("The current schematic has unsaved changes.");
-                            ui.label("Do you want to save before continuing?");
-                        });
-                    });
-
-                    ui.add_space(16.0);
-                    ui.separator();
-                    ui.add_space(8.0);
-
-                    // Button row: Yes | No | Cancel (commercial pattern)
-                    ui.horizontal(|ui| {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            // Cancel button (rightmost)
-                            if ui.button("Cancel").clicked() {
-                                response = Some(ConfirmationResponse::Cancel);
-                            }
-
-                            ui.add_space(8.0);
-
-                            // No button
-                            if ui.button("Don't Save").clicked() {
-                                response = Some(ConfirmationResponse::No);
-                            }
-
-                            ui.add_space(8.0);
-
-                            // Yes button (primary action)
-                            if ui
-                                .add(
-                                    egui::Button::new(RichText::new("Save").strong())
-                                        .fill(egui::Color32::from_rgb(59, 130, 246)),
-                                )
-                                .clicked()
-                            {
-                                response = Some(ConfirmationResponse::Yes);
-                            }
-                        });
-                    });
-                });
-
-            // Handle the response after dialog rendering
-            if let Some(r) = response {
-                self.handle_confirmation_response(r);
-            }
-        }
+        self.render_confirmation_dialog(ctx);
 
         // Component Properties Dialog
 
