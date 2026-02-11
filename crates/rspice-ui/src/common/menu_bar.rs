@@ -7,6 +7,8 @@ use egui::{menu, Ui};
 
 use crate::common::app::AppState;
 
+#[path = "menu_bar_export_actions.rs"]
+mod menu_bar_export_actions;
 #[path = "menu_bar_file_actions.rs"]
 mod menu_bar_file_actions;
 #[path = "menu_bar_netlist_compat.rs"]
@@ -50,7 +52,7 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
 
             ui.menu_button("Export", |ui| {
                 if ui.button("SVG...").clicked() {
-                    action_export_svg(state);
+                    menu_bar_export_actions::action_export_svg(state);
                     ui.close_menu();
                 }
                 if ui.button("PDF...").clicked() {
@@ -394,15 +396,21 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
             // Netlist menu
             ui.menu_button("Netlist", |ui| {
                 if ui.button("View Netlist").clicked() {
-                    action_view_netlist(state);
+                    menu_bar_export_actions::action_view_netlist(state);
                     ui.close_menu();
                 }
                 if ui.button("Export SPICE Netlist...").clicked() {
-                    action_export_netlist(state, crate::io::NetlistFormat::Spice);
+                    menu_bar_export_actions::action_export_netlist(
+                        state,
+                        crate::io::NetlistFormat::Spice,
+                    );
                     ui.close_menu();
                 }
                 if ui.button("Export Spectre Netlist...").clicked() {
-                    action_export_netlist(state, crate::io::NetlistFormat::Spectre);
+                    menu_bar_export_actions::action_export_netlist(
+                        state,
+                        crate::io::NetlistFormat::Spectre,
+                    );
                     ui.close_menu();
                 }
             });
@@ -672,200 +680,4 @@ pub fn render_menu_bar(ui: &mut Ui, state: &mut AppState) {
             }
         });
     });
-}
-
-// =============================================================================
-// Action Handlers (for menu-specific logic)
-// =============================================================================
-
-fn action_export_svg(state: &mut AppState) {
-    use crate::schematic::export::{export_to_svg, SvgExportConfig};
-
-    // Generate SVG content
-    let config = SvgExportConfig::default();
-    let svg_content = export_to_svg(&state.schematic, &config);
-
-    // Get default filename from current schematic file
-    let default_name = state
-        .schematic
-        .current_file
-        .as_ref()
-        .and_then(|p| p.file_stem())
-        .map(|s| format!("{}.svg", s.to_string_lossy()))
-        .unwrap_or_else(|| "schematic.svg".to_string());
-
-    // Show save dialog for SVG
-    let dialog = rfd::FileDialog::new()
-        .add_filter("SVG Image", &["svg"])
-        .set_file_name(&default_name)
-        .set_title("Export SVG");
-
-    match dialog.save_file() {
-        Some(mut path) => {
-            // Ensure .svg extension
-            menu_bar_file_actions::ensure_file_extension(&mut path, "svg");
-
-            match std::fs::write(&path, &svg_content) {
-                Ok(()) => {
-                    state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
-                        "Exported SVG: {}",
-                        path.display()
-                    )));
-                }
-                Err(e) => {
-                    state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
-                        "SVG export failed: {}",
-                        e
-                    )));
-                }
-            }
-        }
-        None => {
-            // User cancelled - no message needed
-        }
-    }
-}
-
-fn action_export_netlist(state: &mut AppState, format: crate::io::NetlistFormat) {
-    // Check if we have a schematic to export
-    if state.schematic.components.is_empty() {
-        state.push_user_message(crate::common::app::ConsoleMessage::warning(
-            "No circuit to export. Add components first.",
-        ));
-        return;
-    }
-
-    let Some(netlist_content) = build_menu_netlist(state, format) else {
-        return;
-    };
-
-    // Default filename
-    let default_name = state
-        .schematic
-        .current_file
-        .as_ref()
-        .and_then(|p| p.file_stem())
-        .map(|s| format!("{}.{}", s.to_string_lossy(), format.extension()))
-        .unwrap_or_else(|| format!("circuit.{}", format.extension()));
-
-    // Show save dialog
-    let filter_name = match format {
-        crate::io::NetlistFormat::Spectre => "Spectre Netlist",
-        crate::io::NetlistFormat::Spice => "SPICE Netlist",
-        crate::io::NetlistFormat::Hspice => "HSPICE Netlist",
-        crate::io::NetlistFormat::Xyce => "Xyce Netlist",
-    };
-
-    let dialog = rfd::FileDialog::new()
-        .add_filter(filter_name, &[format.extension()])
-        .set_file_name(&default_name)
-        .set_title("Export Netlist");
-
-    match dialog.save_file() {
-        Some(mut path) => {
-            // Ensure correct extension
-            menu_bar_file_actions::ensure_file_extension(&mut path, format.extension());
-
-            match std::fs::write(&path, &netlist_content) {
-                Ok(()) => {
-                    state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
-                        "Exported {}: {}",
-                        filter_name,
-                        path.display()
-                    )));
-                }
-                Err(e) => {
-                    state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
-                        "Netlist export failed: {}",
-                        e
-                    )));
-                }
-            }
-        }
-        None => {
-            // User cancelled - no message needed
-        }
-    }
-}
-
-fn action_view_netlist(state: &mut AppState) {
-    // Check if we have a schematic to view
-    if state.schematic.components.is_empty() {
-        state.push_user_message(crate::common::app::ConsoleMessage::warning(
-            "No circuit to generate netlist. Add components first.",
-        ));
-        return;
-    }
-
-    let Some(netlist_content) = build_menu_netlist(state, crate::io::NetlistFormat::Spice) else {
-        return;
-    };
-
-    // Store in simulation state for editor viewing
-    state.simulation.netlist_content = netlist_content.clone();
-
-    // Log first few lines to console for quick preview
-    let preview_lines: Vec<&str> = netlist_content.lines().take(10).collect();
-    let preview = preview_lines.join("\n");
-    let total_lines = netlist_content.lines().count();
-
-    state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
-        "Generated netlist ({} lines):\n{}{}",
-        total_lines,
-        preview,
-        if total_lines > 10 { "\n..." } else { "" }
-    )));
-}
-
-fn build_menu_netlist(state: &mut AppState, format: crate::io::NetlistFormat) -> Option<String> {
-    let generation =
-        crate::simulation::netlist_gen::generate_netlist_with_analysis(&state.schematic, &[]);
-
-    if !generation.errors.is_empty() {
-        for err in generation.errors {
-            state.push_user_message(crate::common::app::ConsoleMessage::error(err));
-        }
-        return None;
-    }
-
-    for warning in generation.warnings {
-        state.push_user_message(crate::common::app::ConsoleMessage::warning(warning));
-    }
-
-    let spice_netlist = generation.netlist;
-    Some(match format {
-        crate::io::NetlistFormat::Spectre => {
-            menu_bar_netlist_compat::spice_to_spectre_compatible_netlist(&spice_netlist)
-        }
-        _ => spice_netlist,
-    })
-}
-
-// =============================================================================
-// Tests
-// =============================================================================
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_action_view_netlist_uses_generated_schematic_netlist() {
-        let mut state = AppState::default();
-        use crate::state::{Component, ComponentType, Point};
-        let comp = Component::new(1, ComponentType::Resistor, Point::new(100, 100))
-            .with_name_value("R1", "1k");
-        state.schematic.components.push(comp);
-
-        action_view_netlist(&mut state);
-
-        assert!(
-            state.simulation.netlist_content.contains("R1"),
-            "generated netlist should include the real component instance"
-        );
-        assert!(
-            !state.simulation.netlist_content.contains("N1 N2"),
-            "legacy placeholder node names must not appear"
-        );
-    }
 }
