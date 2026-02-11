@@ -338,7 +338,7 @@ impl HbConfig {
         cmd
     }
 
-    /// Generate SPICE directive (state/simulation_command compatibility).
+    /// Generate SPICE directive (legacy compatibility helper).
     pub fn to_spice_string(&self) -> String {
         self.to_spice()
     }

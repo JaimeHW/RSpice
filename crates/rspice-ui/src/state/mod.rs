@@ -29,7 +29,6 @@ pub mod schematic_file;
 pub mod session_state;
 pub mod shortcuts;
 mod simulation;
-pub mod simulation_command;
 pub mod spatial_index;
 pub mod viewport;
 
