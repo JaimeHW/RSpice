@@ -51,16 +51,20 @@ impl SimulationController {
             }
 
             SimulationResult::Transient { time, waveforms } => {
-                let wf_data: Vec<WaveformData> = waveforms
-                    .iter()
+                let mut names: Vec<_> = waveforms.keys().cloned().collect();
+                names.sort();
+                let wf_data: Vec<WaveformData> = names
+                    .into_iter()
                     .enumerate()
-                    .map(|(idx, (name, wf))| {
-                        WaveformData::new(
-                            name.clone(),
-                            time.clone(),
-                            wf.y_values.clone(),
-                            Self::color_for_index(idx),
-                        )
+                    .filter_map(|(idx, name)| {
+                        waveforms.get(&name).map(|wf| {
+                            WaveformData::new(
+                                name,
+                                time.clone(),
+                                wf.y_values.clone(),
+                                Self::color_for_index(idx),
+                            )
+                        })
                     })
                     .collect();
                 AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)

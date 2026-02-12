@@ -40,8 +40,13 @@ impl SimulationController {
             SimulationResult::Transient { time, waveforms } => {
                 // Transient: Create waveform traces with time as X-axis
                 let time_vec: Vec<f64> = time.clone();
+                let mut names: Vec<_> = waveforms.keys().cloned().collect();
+                names.sort();
 
-                for (idx, (name, wf_data)) in waveforms.iter().enumerate() {
+                for (idx, name) in names.into_iter().enumerate() {
+                    let Some(wf_data) = waveforms.get(&name) else {
+                        continue;
+                    };
                     let color = Self::color_for_index(idx);
                     let waveform = WaveformData::new(
                         name.clone(),

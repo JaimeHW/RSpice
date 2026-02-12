@@ -118,47 +118,108 @@ impl SimulationController {
             {
                 return Some(wf);
             }
+
+            if let Some(wf) =
+                Self::match_preferred_fft_source_normalized(waveforms, expected_len, name)
+            {
+                return Some(wf);
+            }
         }
 
-        waveforms
-            .values()
-            .filter(|wf| wf.y_values.len() == expected_len)
-            .max_by(|a, b| {
-                let score_a = Self::fft_source_score(a);
-                let score_b = Self::fft_source_score(b);
-                score_a
-                    .total_cmp(&score_b)
-                    .then_with(|| b.name.cmp(&a.name))
-            })
+        // Keep fallback deterministic and predictable so the same waveform is
+        // analyzed run-to-run when no explicit source is available.
+        let mut names: Vec<_> = waveforms.keys().cloned().collect();
+        names.sort();
+        names.into_iter().find_map(|name| {
+            waveforms
+                .get(&name)
+                .filter(|wf| wf.y_values.len() == expected_len)
+        })
     }
 
-    fn fft_source_score(waveform: &crate::simulation::WaveformData) -> f64 {
-        // Prefer traces with the largest AC content (RMS after removing mean),
-        // which is robust against auto-generated node renaming.
-        if waveform.y_values.is_empty() {
-            return f64::NEG_INFINITY;
-        }
-        let mut sum = 0.0;
-        let mut sum_sq = 0.0;
-        let mut count = 0usize;
-        for &v in &waveform.y_values {
-            if !v.is_finite() {
+    fn match_preferred_fft_source_normalized<'a>(
+        waveforms: &'a std::collections::HashMap<String, crate::simulation::WaveformData>,
+        expected_len: usize,
+        preferred_name: &str,
+    ) -> Option<&'a crate::simulation::WaveformData> {
+        let preferred = Self::parse_fft_source_name(preferred_name);
+        let mut names: Vec<_> = waveforms.keys().cloned().collect();
+        names.sort();
+
+        let mut best: Option<(i32, &'a crate::simulation::WaveformData)> = None;
+        for name in names {
+            let Some(wf) = waveforms.get(&name) else {
+                continue;
+            };
+            if wf.y_values.len() != expected_len {
                 continue;
             }
-            sum += v;
-            sum_sq += v * v;
-            count += 1;
+
+            let key_name = Self::parse_fft_source_name(&name);
+            let wf_name = Self::parse_fft_source_name(&wf.name);
+            if preferred.core != key_name.core && preferred.core != wf_name.core {
+                continue;
+            }
+
+            let candidate_kind = match wf_name.kind {
+                FftSourceKind::Other => key_name.kind,
+                kind => kind,
+            };
+            let rank = Self::fft_source_kind_rank(preferred.kind, candidate_kind);
+            match best {
+                Some((best_rank, _)) if rank >= best_rank => {}
+                _ => {
+                    best = Some((rank, wf));
+                }
+            }
         }
-        if count == 0 {
-            return f64::NEG_INFINITY;
+
+        best.map(|(_, wf)| wf)
+    }
+
+    fn parse_fft_source_name(name: &str) -> ParsedFftSourceName {
+        let trimmed = name.trim().trim_matches('|');
+        if let Some(core) = trimmed.strip_prefix("V(").and_then(|s| s.strip_suffix(')')) {
+            return ParsedFftSourceName {
+                core: core.trim().to_ascii_lowercase(),
+                kind: FftSourceKind::Voltage,
+            };
         }
-        let n = count as f64;
-        let mean = sum / n;
-        let variance = (sum_sq / n) - mean * mean;
-        if variance.is_finite() {
-            variance.max(0.0).sqrt()
-        } else {
-            f64::NEG_INFINITY
+        if let Some(core) = trimmed.strip_prefix("I(").and_then(|s| s.strip_suffix(')')) {
+            return ParsedFftSourceName {
+                core: core.trim().to_ascii_lowercase(),
+                kind: FftSourceKind::Current,
+            };
+        }
+        ParsedFftSourceName {
+            core: trimmed.trim().to_ascii_lowercase(),
+            kind: FftSourceKind::Other,
+        }
+    }
+
+    fn fft_source_kind_rank(preferred: FftSourceKind, candidate: FftSourceKind) -> i32 {
+        match preferred {
+            FftSourceKind::Voltage => {
+                if candidate == FftSourceKind::Voltage {
+                    0
+                } else {
+                    1
+                }
+            }
+            FftSourceKind::Current => {
+                if candidate == FftSourceKind::Current {
+                    0
+                } else {
+                    1
+                }
+            }
+            FftSourceKind::Other => match candidate {
+                // For ambiguous untyped labels (e.g. "out"), prefer voltage
+                // traces over current traces.
+                FftSourceKind::Voltage => 0,
+                FftSourceKind::Other => 1,
+                FftSourceKind::Current => 2,
+            },
         }
     }
 
@@ -242,4 +303,17 @@ impl SimulationController {
     ) -> crate::viewers::ActiveViewer {
         crate::common::analysis_navigation::preferred_viewer(analysis_type)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FftSourceKind {
+    Voltage,
+    Current,
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedFftSourceName {
+    core: String,
+    kind: FftSourceKind,
 }

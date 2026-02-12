@@ -447,7 +447,7 @@ fn test_update_waveforms_transient_prefers_selected_fft_source_trace() {
 }
 
 #[test]
-fn test_update_waveforms_transient_fft_source_fallback_prefers_strongest_ac_trace() {
+fn test_update_waveforms_transient_fft_source_fallback_is_deterministic_by_name() {
     use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
     use std::collections::HashMap;
@@ -492,13 +492,13 @@ fn test_update_waveforms_transient_fft_source_fallback_prefers_strongest_ac_trac
     );
 
     let source = state.fft_state.source_cache.as_ref().expect("source cache");
-    assert_eq!(source.name, "Z_strong");
+    assert_eq!(source.name, "A_weak");
     let fundamental = state.fft_state.fundamental_freq().expect("fundamental");
-    assert!((fundamental - 8_000.0).abs() < 800.0);
+    assert!((fundamental - 2_000.0).abs() < 400.0);
 }
 
 #[test]
-fn test_update_waveforms_transient_missing_preferred_fft_source_uses_strongest_ac_trace() {
+fn test_update_waveforms_transient_missing_preferred_fft_source_uses_deterministic_fallback() {
     use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
     use std::collections::HashMap;
@@ -540,8 +540,148 @@ fn test_update_waveforms_transient_missing_preferred_fft_source_uses_strongest_a
     );
 
     let source = state.fft_state.source_cache.as_ref().expect("source cache");
-    assert_eq!(source.name, "C_high");
-    assert_eq!(state.fft_state.selected_source.as_deref(), Some("C_high"));
+    assert_eq!(source.name, "B_low");
+    assert_eq!(state.fft_state.selected_source.as_deref(), Some("B_low"));
+}
+
+#[test]
+fn test_update_waveforms_transient_preferred_fft_source_matches_normalized_name() {
+    use crate::simulation::results::WaveformData as EngineWaveformData;
+    use crate::simulation::SimulationResult;
+    use std::collections::HashMap;
+
+    let controller = SimulationController::new();
+    let mut state = AppState::default();
+    state.fft_state.set_selected_source(Some("out".to_string()));
+
+    let sample_count = 4096usize;
+    let fs = 100_000.0;
+    let time: Vec<f64> = (0..sample_count).map(|i| i as f64 / fs).collect();
+    let out: Vec<f64> = time
+        .iter()
+        .map(|t| (2.0 * std::f64::consts::PI * 9_000.0 * t).sin())
+        .collect();
+    let other: Vec<f64> = time
+        .iter()
+        .map(|t| (2.0 * std::f64::consts::PI * 2_000.0 * t).sin())
+        .collect();
+
+    let mut waveforms = HashMap::new();
+    waveforms.insert(
+        "V(out)".to_string(),
+        EngineWaveformData::new_time_domain("V(out)", time.clone(), out),
+    );
+    waveforms.insert(
+        "V(a)".to_string(),
+        EngineWaveformData::new_time_domain("V(a)", time.clone(), other),
+    );
+
+    controller.update_waveforms(
+        &mut state,
+        &SimulationResult::Transient {
+            time: time.clone(),
+            waveforms,
+        },
+    );
+
+    let source = state.fft_state.source_cache.as_ref().expect("source cache");
+    assert_eq!(source.name, "V(out)");
+    let fundamental = state.fft_state.fundamental_freq().expect("fundamental");
+    assert!((fundamental - 9_000.0).abs() < 600.0);
+}
+
+#[test]
+fn test_update_waveforms_transient_ambiguous_normalized_source_prefers_voltage_trace() {
+    use crate::simulation::results::WaveformData as EngineWaveformData;
+    use crate::simulation::SimulationResult;
+    use std::collections::HashMap;
+
+    let controller = SimulationController::new();
+    let mut state = AppState::default();
+    state.fft_state.set_selected_source(Some("out".to_string()));
+
+    let sample_count = 4096usize;
+    let fs = 100_000.0;
+    let time: Vec<f64> = (0..sample_count).map(|i| i as f64 / fs).collect();
+    let v_out: Vec<f64> = time
+        .iter()
+        .map(|t| 0.7 * (2.0 * std::f64::consts::PI * 9_000.0 * t).sin())
+        .collect();
+    let i_out: Vec<f64> = time
+        .iter()
+        .map(|t| 1.5 * (2.0 * std::f64::consts::PI * 2_000.0 * t).sin())
+        .collect();
+
+    let mut waveforms = HashMap::new();
+    waveforms.insert(
+        "I(out)".to_string(),
+        EngineWaveformData::new_time_domain("I(out)", time.clone(), i_out),
+    );
+    waveforms.insert(
+        "V(out)".to_string(),
+        EngineWaveformData::new_time_domain("V(out)", time.clone(), v_out),
+    );
+
+    controller.update_waveforms(
+        &mut state,
+        &SimulationResult::Transient {
+            time: time.clone(),
+            waveforms,
+        },
+    );
+
+    let source = state.fft_state.source_cache.as_ref().expect("source cache");
+    assert_eq!(source.name, "V(out)");
+    let fundamental = state.fft_state.fundamental_freq().expect("fundamental");
+    assert!((fundamental - 9_000.0).abs() < 600.0);
+}
+
+#[test]
+fn test_update_waveforms_transient_typed_current_source_selects_current_trace() {
+    use crate::simulation::results::WaveformData as EngineWaveformData;
+    use crate::simulation::SimulationResult;
+    use std::collections::HashMap;
+
+    let controller = SimulationController::new();
+    let mut state = AppState::default();
+    state
+        .fft_state
+        .set_selected_source(Some("I(out)".to_string()));
+
+    let sample_count = 4096usize;
+    let fs = 100_000.0;
+    let time: Vec<f64> = (0..sample_count).map(|i| i as f64 / fs).collect();
+    let v_out: Vec<f64> = time
+        .iter()
+        .map(|t| 0.7 * (2.0 * std::f64::consts::PI * 9_000.0 * t).sin())
+        .collect();
+    let i_out: Vec<f64> = time
+        .iter()
+        .map(|t| 1.5 * (2.0 * std::f64::consts::PI * 2_000.0 * t).sin())
+        .collect();
+
+    let mut waveforms = HashMap::new();
+    waveforms.insert(
+        "I(out)".to_string(),
+        EngineWaveformData::new_time_domain("I(out)", time.clone(), i_out),
+    );
+    waveforms.insert(
+        "V(out)".to_string(),
+        EngineWaveformData::new_time_domain("V(out)", time.clone(), v_out),
+    );
+
+    controller.update_waveforms(
+        &mut state,
+        &SimulationResult::Transient {
+            time: time.clone(),
+            waveforms,
+        },
+    );
+
+    let source = state.fft_state.source_cache.as_ref().expect("source cache");
+    assert_eq!(source.name, "I(out)");
+    let fundamental = state.fft_state.fundamental_freq().expect("fundamental");
+    assert!((fundamental - 2_000.0).abs() < 400.0);
 }
 
 #[test]
