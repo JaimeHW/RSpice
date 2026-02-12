@@ -16,6 +16,7 @@ use super::state::{
     SmithChartState,
 };
 use crate::common::app::AppState;
+use crate::common::viewer_style::viewer_header_bg_color;
 
 // =============================================================================
 // Constants
@@ -169,7 +170,7 @@ fn render_header(
     let painter = ui.painter();
 
     // Background
-    painter.rect_filled(layout.header, Rounding::ZERO, Color32::from_rgb(30, 33, 40));
+    painter.rect_filled(layout.header, Rounding::ZERO, viewer_header_bg_color());
 
     // Create UI area for header controls
     let header_rect = layout.header.shrink(4.0);

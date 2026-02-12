@@ -8,6 +8,7 @@ use std::f64::consts::PI;
 use super::data::{ComplexRoot, PoleZeroData, RootType};
 use super::state::{DomainType, PoleZeroState};
 use crate::common::app::AppState;
+use crate::common::viewer_style::viewer_header_bg_color;
 
 // =============================================================================
 // Constants
@@ -115,7 +116,7 @@ fn calculate_layout(available: Rect) -> PzLayout {
 
 fn render_header(ui: &mut Ui, layout: &PzLayout, state: &mut PoleZeroState) {
     ui.painter()
-        .rect_filled(layout.header, Rounding::ZERO, Color32::from_rgb(30, 33, 40));
+        .rect_filled(layout.header, Rounding::ZERO, viewer_header_bg_color());
 
     let header_rect = layout.header.shrink(4.0);
     ui.allocate_new_ui(UiBuilder::new().max_rect(header_rect), |ui| {

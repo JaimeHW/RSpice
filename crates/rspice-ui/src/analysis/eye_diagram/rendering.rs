@@ -12,6 +12,7 @@ use super::data::{EyeData, EyeDataBuilder, EyeTrace};
 use super::measurements::{calculate_eye_measurements, EyeMeasurements};
 use super::state::{ColorMap, EyeDiagramState, EyeDisplayMode, EyeMask};
 use crate::common::app::AppState;
+use crate::common::viewer_style::viewer_header_bg_color;
 
 // =============================================================================
 // Constants
@@ -133,7 +134,7 @@ fn render_header(ui: &mut Ui, layout: &EyeLayout, state: &mut EyeDiagramState) -
     let painter = ui.painter();
     let mut close_requested = false;
 
-    painter.rect_filled(layout.header, Rounding::ZERO, Color32::from_rgb(30, 33, 40));
+    painter.rect_filled(layout.header, Rounding::ZERO, viewer_header_bg_color());
 
     let header_rect = layout.header.shrink(4.0);
     ui.allocate_new_ui(UiBuilder::new().max_rect(header_rect), |ui| {

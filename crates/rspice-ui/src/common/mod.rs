@@ -26,6 +26,7 @@ pub mod menu_bar;
 pub mod simulation_analysis_tabs;
 pub mod status_bar;
 pub mod theme;
+pub mod viewer_style;
 
 // Re-export main application type
 pub use app::{AppState, ConsoleMessage, RSpiceApp};

@@ -11,6 +11,7 @@ use super::data::{Histogram, HistogramBuilder};
 use super::state::{AxisScale, DistributionOverlay, HistogramDisplayMode, HistogramState};
 use super::statistics::{HistogramStats, LogNormalParams, NormalParams};
 use crate::common::app::AppState;
+use crate::common::viewer_style::viewer_header_bg_color;
 
 // =============================================================================
 // Constants
@@ -131,7 +132,7 @@ fn render_header(ui: &mut Ui, layout: &HistogramLayout, state: &mut HistogramSta
     let painter = ui.painter();
     let mut close_requested = false;
 
-    painter.rect_filled(layout.header, Rounding::ZERO, Color32::from_rgb(30, 33, 40));
+    painter.rect_filled(layout.header, Rounding::ZERO, viewer_header_bg_color());
 
     let header_rect = layout.header.shrink(4.0);
     ui.allocate_new_ui(UiBuilder::new().max_rect(header_rect), |ui| {

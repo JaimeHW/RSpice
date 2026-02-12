@@ -27,6 +27,7 @@ use egui::{
 use super::axis::{self, GridLineType};
 use super::state::{TraceData, ViewTransform, WaveformViewerState};
 use crate::common::app::AppState;
+use crate::common::viewer_style::viewer_header_bg_color;
 use crate::utils::vertical_label_layout::{
     place_vertical_line_labels, LabelSide, VerticalLabelLayoutConfig, VerticalLabelPlacement,
     VerticalLabelRequest,
@@ -296,7 +297,7 @@ fn render_header(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Waveform
     let painter = ui.painter();
 
     // Header background
-    painter.rect_filled(layout.header, Rounding::ZERO, Color32::from_rgb(30, 33, 40));
+    painter.rect_filled(layout.header, Rounding::ZERO, viewer_header_bg_color());
 
     // Shrink uniformly so all controls sit centered within the header band.
     let header_rect = layout.header.shrink(4.0);
