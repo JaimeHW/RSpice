@@ -9,6 +9,7 @@ use super::data::{FftData, FftPoint, SpectrumAnalysis, SpectrumNormalization};
 use super::state::{FftState, FrequencyScale, InputFidelity, MagnitudeScale};
 use super::window::WindowFunction;
 use crate::common::app::AppState;
+use crate::common::viewer_style::viewer_header_bg_color;
 use crate::state::AnalysisType;
 use crate::utils::vertical_label_layout::{
     place_vertical_line_labels, LabelSide, VerticalLabelLayoutConfig, VerticalLabelPlacement,
@@ -28,7 +29,7 @@ fn surface_bg_color() -> Color32 {
 }
 
 fn header_bg_color() -> Color32 {
-    Color32::from_rgb(30, 33, 40)
+    viewer_header_bg_color()
 }
 
 fn grid_major_color() -> Color32 {
@@ -79,7 +80,15 @@ pub fn render_fft_viewer(ui: &mut Ui, app_state: &mut AppState) {
 
     let header_actions = {
         let state = &mut app_state.fft_state;
-        render_header(ui, &layout, state, &source_names, source_time_bounds)
+        let mut actions = HeaderActions::default();
+        actions.merge(render_time_controls_header(
+            ui,
+            &layout,
+            state,
+            source_time_bounds,
+        ));
+        actions.merge(render_header(ui, &layout, state, &source_names));
+        actions
     };
 
     if let Some(source_name) = header_actions.refresh_source {
@@ -107,12 +116,15 @@ pub fn render_fft_plot(ui: &mut Ui, state: &FftState) {
 #[derive(Debug, Clone)]
 struct FftLayout {
     total: Rect,
-    header: Rect,
+    header_top: Rect,
+    header_main: Rect,
     spectrum: Rect,
     info: Rect,
 }
 
-const HEADER_HEIGHT: f32 = 34.0;
+const HEADER_ROW_HEIGHT: f32 = 34.0;
+const HEADER_TOP_HEIGHT: f32 = HEADER_ROW_HEIGHT;
+const HEADER_MAIN_HEIGHT: f32 = HEADER_ROW_HEIGHT;
 const INFO_WIDTH: f32 = 150.0;
 const CHART_SIDE_PADDING: f32 = 8.0;
 const CHART_TOP_GAP: f32 = 0.0;
@@ -143,18 +155,26 @@ const CURSOR_LABEL_BG_ALPHA: u8 = 220;
 
 fn calculate_layout(available: Rect) -> FftLayout {
     let total = available;
+    let total_header_height = (HEADER_TOP_HEIGHT + HEADER_MAIN_HEIGHT).min(total.height());
+    let top_height = HEADER_TOP_HEIGHT.min(total_header_height);
+    let main_height = (total_header_height - top_height).max(0.0);
 
-    let header = Rect::from_min_size(total.min, Vec2::new(total.width(), HEADER_HEIGHT));
+    let header_top = Rect::from_min_size(total.min, Vec2::new(total.width(), top_height));
+    let header_main = Rect::from_min_size(
+        Pos2::new(total.min.x, header_top.max.y),
+        Vec2::new(total.width(), main_height),
+    );
+    let content_top = header_main.max.y;
 
     let info = Rect::from_min_size(
-        Pos2::new(total.max.x - INFO_WIDTH, header.max.y),
-        Vec2::new(INFO_WIDTH, total.height() - HEADER_HEIGHT),
+        Pos2::new(total.max.x - INFO_WIDTH, content_top),
+        Vec2::new(INFO_WIDTH, (total.max.y - content_top).max(0.0)),
     );
 
     let spectrum = Rect::from_min_max(
         Pos2::new(
             total.min.x + CHART_SIDE_PADDING,
-            header.max.y + CHART_TOP_GAP,
+            content_top + CHART_TOP_GAP,
         ),
         Pos2::new(
             info.min.x - CHART_SIDE_PADDING,
@@ -164,7 +184,8 @@ fn calculate_layout(available: Rect) -> FftLayout {
 
     FftLayout {
         total,
-        header,
+        header_top,
+        header_main,
         spectrum,
         info,
     }
@@ -253,6 +274,14 @@ where
 #[derive(Debug, Default)]
 struct HeaderActions {
     refresh_source: Option<String>,
+}
+
+impl HeaderActions {
+    fn merge(&mut self, other: HeaderActions) {
+        if other.refresh_source.is_some() {
+            self.refresh_source = other.refresh_source;
+        }
+    }
 }
 
 fn queue_fft_refresh(actions: &mut HeaderActions, state: &FftState) {
@@ -352,34 +381,128 @@ fn refresh_fft_from_source_waveform(app_state: &mut AppState, source_name: &str)
 // Header Rendering
 // =============================================================================
 
+fn sync_manual_fft_time_window(state: &mut FftState, source_time_bounds: Option<(f64, f64)>) {
+    let Some((min_t, max_t)) = source_time_bounds else {
+        return;
+    };
+
+    if state.time_window_auto {
+        state.time_window_start = min_t;
+        state.time_window_end = max_t;
+        return;
+    }
+
+    state.time_window_start = state.time_window_start.clamp(min_t, max_t);
+    state.time_window_end = state.time_window_end.clamp(min_t, max_t);
+    if state.time_window_end <= state.time_window_start {
+        state.time_window_start = min_t;
+        state.time_window_end = max_t;
+    }
+}
+
+fn render_time_controls_header(
+    ui: &mut Ui,
+    layout: &FftLayout,
+    state: &mut FftState,
+    source_time_bounds: Option<(f64, f64)>,
+) -> HeaderActions {
+    let mut actions = HeaderActions::default();
+    ui.painter()
+        .rect_filled(layout.header_top, Rounding::ZERO, header_bg_color());
+
+    sync_manual_fft_time_window(state, source_time_bounds);
+
+    let header_rect = layout.header_top.shrink(4.0);
+    ui.allocate_new_ui(UiBuilder::new().max_rect(header_rect), |ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
+
+        ui.horizontal(|ui| {
+            ui.spacing_mut().interact_size.y = HEADER_CONTROL_HEIGHT;
+            ui.spacing_mut().button_padding.y = 2.0;
+            ui.add_space(4.0);
+
+            ui.label("Auto Time");
+            let mut time_changed = ui.checkbox(&mut state.time_window_auto, "").changed();
+            let time_speed = source_time_bounds
+                .map(|(min_t, max_t)| ((max_t - min_t).abs() / 1000.0).max(1e-15))
+                .unwrap_or(1e-9);
+            ui.add_enabled_ui(!state.time_window_auto, |ui| {
+                ui.label("Start");
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut state.time_window_start)
+                            .speed(time_speed)
+                            .max_decimals(12),
+                    )
+                    .changed()
+                {
+                    time_changed = true;
+                }
+                ui.label("End");
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut state.time_window_end)
+                            .speed(time_speed)
+                            .max_decimals(12),
+                    )
+                    .changed()
+                {
+                    time_changed = true;
+                }
+            });
+            sync_manual_fft_time_window(state, source_time_bounds);
+            if time_changed {
+                queue_fft_refresh(&mut actions, state);
+            }
+
+            ui.separator();
+
+            ui.label("Auto N");
+            let mut sample_changed = ui.checkbox(&mut state.sample_count_auto, "").changed();
+            ui.add_enabled_ui(!state.sample_count_auto, |ui| {
+                ui.label("N");
+                let mut sample_count = state.sample_count as u64;
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut sample_count)
+                            .range(
+                                crate::analysis::fft::MIN_FFT_SAMPLES as u64
+                                    ..=crate::analysis::fft::MAX_REFERENCE_RESAMPLE_POINTS as u64,
+                            )
+                            .speed(1.0),
+                    )
+                    .changed()
+                {
+                    state.sample_count = sample_count as usize;
+                    sample_changed = true;
+                }
+            });
+            state.sample_count = state.sample_count.clamp(
+                crate::analysis::fft::MIN_FFT_SAMPLES,
+                crate::analysis::fft::MAX_REFERENCE_RESAMPLE_POINTS,
+            );
+            if sample_changed {
+                queue_fft_refresh(&mut actions, state);
+            }
+        });
+    });
+
+    actions
+}
+
 fn render_header(
     ui: &mut Ui,
     layout: &FftLayout,
     state: &mut FftState,
     source_names: &[String],
-    source_time_bounds: Option<(f64, f64)>,
 ) -> HeaderActions {
     let mut actions = HeaderActions::default();
     ui.painter()
-        .rect_filled(layout.header, Rounding::ZERO, header_bg_color());
+        .rect_filled(layout.header_main, Rounding::ZERO, header_bg_color());
 
-    let header_rect = layout.header.shrink(4.0);
+    let header_rect = layout.header_main.shrink(4.0);
     ui.allocate_new_ui(UiBuilder::new().max_rect(header_rect), |ui| {
         ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
-
-        if let Some((min_t, max_t)) = source_time_bounds {
-            if state.time_window_auto {
-                state.time_window_start = min_t;
-                state.time_window_end = max_t;
-            } else {
-                state.time_window_start = state.time_window_start.clamp(min_t, max_t);
-                state.time_window_end = state.time_window_end.clamp(min_t, max_t);
-                if state.time_window_end <= state.time_window_start {
-                    state.time_window_start = min_t;
-                    state.time_window_end = max_t;
-                }
-            }
-        }
 
         ui.horizontal(|ui| {
             ui.spacing_mut().interact_size.y = HEADER_CONTROL_HEIGHT;
@@ -523,86 +646,6 @@ fn render_header(
                 });
             if fidelity != state.input_fidelity {
                 state.set_input_fidelity(fidelity);
-                queue_fft_refresh(&mut actions, state);
-            }
-
-            ui.separator();
-
-            ui.label("Auto Time");
-            let mut time_changed = ui.checkbox(&mut state.time_window_auto, "").changed();
-            let time_speed = source_time_bounds
-                .map(|(min_t, max_t)| ((max_t - min_t).abs() / 1000.0).max(1e-15))
-                .unwrap_or(1e-9);
-            ui.add_enabled_ui(!state.time_window_auto, |ui| {
-                ui.label("Start");
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut state.time_window_start)
-                            .speed(time_speed)
-                            .max_decimals(12),
-                    )
-                    .changed()
-                {
-                    time_changed = true;
-                }
-                ui.label("End");
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut state.time_window_end)
-                            .speed(time_speed)
-                            .max_decimals(12),
-                    )
-                    .changed()
-                {
-                    time_changed = true;
-                }
-            });
-
-            if let Some((min_t, max_t)) = source_time_bounds {
-                if state.time_window_auto {
-                    state.time_window_start = min_t;
-                    state.time_window_end = max_t;
-                } else {
-                    state.time_window_start = state.time_window_start.clamp(min_t, max_t);
-                    state.time_window_end = state.time_window_end.clamp(min_t, max_t);
-                    if state.time_window_end <= state.time_window_start {
-                        state.time_window_start = min_t;
-                        state.time_window_end = max_t;
-                    }
-                }
-            }
-
-            if time_changed {
-                queue_fft_refresh(&mut actions, state);
-            }
-
-            ui.separator();
-
-            ui.label("Auto N");
-            let mut sample_changed = ui.checkbox(&mut state.sample_count_auto, "").changed();
-            ui.add_enabled_ui(!state.sample_count_auto, |ui| {
-                ui.label("N");
-                let mut sample_count = state.sample_count as u64;
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut sample_count)
-                            .range(
-                                crate::analysis::fft::MIN_FFT_SAMPLES as u64
-                                    ..=crate::analysis::fft::MAX_REFERENCE_RESAMPLE_POINTS as u64,
-                            )
-                            .speed(1.0),
-                    )
-                    .changed()
-                {
-                    state.sample_count = sample_count as usize;
-                    sample_changed = true;
-                }
-            });
-            state.sample_count = state.sample_count.clamp(
-                crate::analysis::fft::MIN_FFT_SAMPLES,
-                crate::analysis::fft::MAX_REFERENCE_RESAMPLE_POINTS,
-            );
-            if sample_changed {
                 queue_fft_refresh(&mut actions, state);
             }
 
@@ -1876,6 +1919,54 @@ mod tests {
         let plot_rect = spectrum_plot_rect(layout.spectrum);
         assert!(plot_rect.min.x > layout.spectrum.min.x);
         assert!(plot_rect.max.y < layout.spectrum.max.y);
+    }
+
+    #[test]
+    fn test_layout_uses_two_stacked_header_rows() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
+        let layout = calculate_layout(rect);
+
+        assert!((layout.header_top.height() - HEADER_TOP_HEIGHT).abs() < f32::EPSILON);
+        assert!((layout.header_main.height() - HEADER_MAIN_HEIGHT).abs() < f32::EPSILON);
+        assert!((layout.header_main.min.y - layout.header_top.max.y).abs() < f32::EPSILON);
+        assert!((layout.info.min.y - layout.header_main.max.y).abs() < f32::EPSILON);
+        assert!(layout.spectrum.min.y >= layout.header_main.max.y);
+    }
+
+    #[test]
+    fn test_layout_clamps_header_rows_for_short_viewports() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 40.0));
+        let layout = calculate_layout(rect);
+
+        assert!((layout.header_top.height() - 34.0).abs() < f32::EPSILON);
+        assert!((layout.header_main.height() - 6.0).abs() < f32::EPSILON);
+        assert!((layout.info.height() - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_sync_manual_fft_time_window_auto_tracks_source_bounds() {
+        let mut state = FftState::default();
+        state.time_window_auto = true;
+        state.time_window_start = -1.0;
+        state.time_window_end = -0.5;
+
+        sync_manual_fft_time_window(&mut state, Some((1.0, 3.0)));
+
+        assert!((state.time_window_start - 1.0).abs() < f64::EPSILON);
+        assert!((state.time_window_end - 3.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_sync_manual_fft_time_window_manual_clamps_and_recovers_invalid_range() {
+        let mut state = FftState::default();
+        state.time_window_auto = false;
+        state.time_window_start = 10.0;
+        state.time_window_end = 5.0;
+
+        sync_manual_fft_time_window(&mut state, Some((1.0, 3.0)));
+
+        assert!((state.time_window_start - 1.0).abs() < f64::EPSILON);
+        assert!((state.time_window_end - 3.0).abs() < f64::EPSILON);
     }
 
     #[test]
