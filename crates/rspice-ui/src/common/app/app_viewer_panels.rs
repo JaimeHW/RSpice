@@ -102,9 +102,13 @@ fn render_tab_strip_action_button(ui: &mut Ui, label: &str, width: f32) -> egui:
             let label_width = (width - 2.0 * VIEWER_TAB_INNER_X).max(1.0);
             ui.add_sized(
                 egui::vec2(label_width, VIEWER_TAB_ROW_HEIGHT),
-                egui::Label::new(RichText::new(label).color(tab_text_color(false, true)).size(11.0))
-                    .selectable(false)
-                    .sense(egui::Sense::click()),
+                egui::Label::new(
+                    RichText::new(label)
+                        .color(tab_text_color(false, true))
+                        .size(11.0),
+                )
+                .selectable(false)
+                .sense(egui::Sense::click()),
             )
             .on_hover_cursor(egui::CursorIcon::PointingHand)
         })
@@ -226,12 +230,17 @@ impl RSpiceApp {
 
                                         if can_close_tabs {
                                             ui.add_space(3.0);
-                                            let (close_hit_rect, _close_response) = ui.allocate_exact_size(
-                                                egui::vec2(VIEWER_TAB_CLOSE_SIZE, VIEWER_TAB_CLOSE_SIZE),
-                                                egui::Sense::hover(),
-                                            );
+                                            let (close_hit_rect, _close_response) = ui
+                                                .allocate_exact_size(
+                                                    egui::vec2(
+                                                        VIEWER_TAB_CLOSE_SIZE,
+                                                        VIEWER_TAB_CLOSE_SIZE,
+                                                    ),
+                                                    egui::Sense::hover(),
+                                                );
                                             close_rect = Some(close_hit_rect);
-                                            let close_hovered = ui.rect_contains_pointer(close_hit_rect);
+                                            let close_hovered =
+                                                ui.rect_contains_pointer(close_hit_rect);
                                             if close_hovered {
                                                 ui.painter().rect_filled(
                                                     close_hit_rect,
@@ -240,7 +249,8 @@ impl RSpiceApp {
                                                 );
                                             }
 
-                                            let close_color = close_glyph_color(selected, close_hovered);
+                                            let close_color =
+                                                close_glyph_color(selected, close_hovered);
                                             let cross_half = 3.0;
                                             let center = close_hit_rect.center();
                                             let stroke = Stroke::new(1.4, close_color);
@@ -256,7 +266,7 @@ impl RSpiceApp {
                                                     center + egui::vec2(cross_half, -cross_half),
                                                     center + egui::vec2(-cross_half, cross_half),
                                                 ],
-                                                    stroke,
+                                                stroke,
                                             );
                                         }
                                     },
@@ -264,11 +274,12 @@ impl RSpiceApp {
                             });
 
                         let tab_id = ui.make_persistent_id(("viewer_tab_focus", viewer.id()));
-                        let mut tab_focus_response =
-                            ui.interact(tab_response.response.rect, tab_id, egui::Sense::click())
-                                .on_hover_cursor(egui::CursorIcon::PointingHand);
+                        let mut tab_focus_response = ui
+                            .interact(tab_response.response.rect, tab_id, egui::Sense::click())
+                            .on_hover_cursor(egui::CursorIcon::PointingHand);
                         if !capability.available {
-                            tab_focus_response = tab_focus_response.on_hover_text(capability.reason);
+                            tab_focus_response =
+                                tab_focus_response.on_hover_text(capability.reason);
                         }
 
                         if tab_focus_response.clicked() {
@@ -327,7 +338,8 @@ impl RSpiceApp {
                                     viewer.name().to_string()
                                 };
 
-                                let mut response = ui.add_enabled(enabled, egui::Button::new(label));
+                                let mut response =
+                                    ui.add_enabled(enabled, egui::Button::new(label));
                                 if !enabled {
                                     response = response.on_hover_text(capability.reason);
                                 }
@@ -454,10 +466,7 @@ mod tests {
 
     #[test]
     fn close_glyph_color_prioritizes_hover_feedback() {
-        assert_eq!(
-            close_glyph_color(false, true),
-            close_hover_text_color(),
-        );
+        assert_eq!(close_glyph_color(false, true), close_hover_text_color(),);
         assert_eq!(close_glyph_color(true, false), close_text_color(true));
         assert_eq!(close_glyph_color(false, false), close_text_color(false));
     }
