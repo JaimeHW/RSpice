@@ -8,6 +8,8 @@ use rustfft::{num_complex::Complex, FftPlanner};
 
 use super::window::{apply_window_copy, generate_window, WindowFunction};
 
+const INV_SQRT2: f64 = std::f64::consts::FRAC_1_SQRT_2;
+
 // =============================================================================
 // FFT Point
 // =============================================================================
@@ -142,6 +144,7 @@ impl FftData {
         fft.process(&mut buffer);
 
         // One-sided spectrum: include DC..Nyquist (Nyquist exists only for even n).
+        // AC bins are reported as RMS magnitudes to match electrical dB/dBm conventions.
         let n_freqs = n / 2 + 1;
         let mut points = Vec::with_capacity(n_freqs);
         let base_scale = 1.0 / (n as f64 * cg);
@@ -152,6 +155,9 @@ impl FftData {
             let mut scale = base_scale;
             if k != 0 && !(has_nyquist && k == n / 2) {
                 scale *= 2.0;
+            }
+            if k != 0 {
+                scale *= INV_SQRT2;
             }
 
             points.push(FftPoint::from_complex(freq, bin.re * scale, bin.im * scale));
@@ -687,6 +693,22 @@ mod tests {
         // Should find peak near 100 Hz
         let (_, peak) = fft.find_peak().unwrap();
         assert!((peak.frequency - f_sig).abs() < fft.frequency_resolution() * 2.0);
+    }
+
+    #[test]
+    fn test_fft_from_time_domain_reports_rms_magnitude_for_tone_bins() {
+        let fs = 10_240.0;
+        let n = 1024usize;
+        let f_sig = 1_000.0; // Exact bin: k = 100
+        let data = generate_sine(f_sig, fs, n);
+
+        let fft = FftData::from_time_domain("SineRms", &data, fs, WindowFunction::Rectangular);
+        let (_, peak) = fft.find_peak().expect("peak");
+        let expected_rms = std::f64::consts::FRAC_1_SQRT_2;
+
+        assert!((peak.frequency - f_sig).abs() < fft.frequency_resolution() * 0.5);
+        assert!((peak.magnitude - expected_rms).abs() < 1e-3);
+        assert!((peak.magnitude_db() + 3.0103).abs() < 0.05);
     }
 
     #[test]
