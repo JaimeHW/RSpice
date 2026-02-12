@@ -113,7 +113,6 @@ const CHART_SIDE_PADDING: f32 = 8.0;
 const CHART_TOP_GAP: f32 = 0.0;
 const CHART_BOTTOM_PADDING: f32 = 8.0;
 const HEADER_CONTROL_HEIGHT: f32 = 24.0;
-const HEADER_SLIDER_WIDTH: f32 = 130.0;
 const HEADER_SOURCE_WIDTH: f32 = 180.0;
 const HEADER_WINDOW_WIDTH: f32 = 176.0;
 const HEADER_NORM_WIDTH: f32 = 96.0;
@@ -443,8 +442,7 @@ fn render_header(
             ui.separator();
 
             ui.label("Peak Th (dB)");
-            ui.add_sized(
-                [HEADER_SLIDER_WIDTH * 0.6, HEADER_CONTROL_HEIGHT],
+            ui.add(
                 egui::DragValue::new(&mut state.peak_threshold_db)
                     .speed(0.5)
                     .fixed_decimals(1),
@@ -454,10 +452,7 @@ fn render_header(
             ui.label("Harmonics");
             let mut harmonics = state.num_harmonics as u32;
             if ui
-                .add_sized(
-                    [HEADER_SLIDER_WIDTH * 0.5, HEADER_CONTROL_HEIGHT],
-                    egui::DragValue::new(&mut harmonics).speed(1.0),
-                )
+                .add(egui::DragValue::new(&mut harmonics).speed(1.0))
                 .changed()
             {
                 state.set_num_harmonics(harmonics.clamp(1, 64) as usize);
