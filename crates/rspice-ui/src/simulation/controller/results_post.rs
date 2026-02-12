@@ -120,17 +120,46 @@ impl SimulationController {
             }
         }
 
-        let mut names: Vec<_> = waveforms.keys().cloned().collect();
-        names.sort();
-        for name in names {
-            let Some(waveform) = waveforms.get(&name) else {
-                continue;
-            };
-            if waveform.y_values.len() == expected_len {
-                return Some(waveform);
-            }
+        waveforms
+            .values()
+            .filter(|wf| wf.y_values.len() == expected_len)
+            .max_by(|a, b| {
+                let score_a = Self::fft_source_score(a);
+                let score_b = Self::fft_source_score(b);
+                score_a
+                    .total_cmp(&score_b)
+                    .then_with(|| b.name.cmp(&a.name))
+            })
+    }
+
+    fn fft_source_score(waveform: &crate::simulation::WaveformData) -> f64 {
+        // Prefer traces with the largest AC content (RMS after removing mean),
+        // which is robust against auto-generated node renaming.
+        if waveform.y_values.is_empty() {
+            return f64::NEG_INFINITY;
         }
-        None
+        let mut sum = 0.0;
+        let mut sum_sq = 0.0;
+        let mut count = 0usize;
+        for &v in &waveform.y_values {
+            if !v.is_finite() {
+                continue;
+            }
+            sum += v;
+            sum_sq += v * v;
+            count += 1;
+        }
+        if count == 0 {
+            return f64::NEG_INFINITY;
+        }
+        let n = count as f64;
+        let mean = sum / n;
+        let variance = (sum_sq / n) - mean * mean;
+        if variance.is_finite() {
+            variance.max(0.0).sqrt()
+        } else {
+            f64::NEG_INFINITY
+        }
     }
 
     fn estimate_ui_period(time: &[f64], signal: &[f64]) -> Option<f64> {
