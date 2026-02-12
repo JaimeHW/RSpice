@@ -93,7 +93,7 @@ pub(super) fn render_view_menu(ui: &mut Ui, state: &mut AppState) {
 
     ui.menu_button("Specialized Viewers", |ui| {
         for viewer in ActiveViewer::all() {
-            let is_active = state.active_viewer == *viewer;
+            let is_active = state.active_viewer() == *viewer;
             let label = checkmark_label(is_active, viewer.name());
 
             if ui.button(&label).clicked() {
@@ -122,9 +122,7 @@ fn toggle_bottom_tab_panel(state: &mut AppState, tab: BottomPanelTab) {
 }
 
 fn activate_specialized_viewer(state: &mut AppState, viewer: ActiveViewer) {
-    state.active_viewer = viewer;
-    state.panels.bottom_panel = true;
-    state.panels.active_bottom_tab = BottomPanelTab::Waveform;
+    state.open_viewer_in_tab(viewer, BottomPanelTab::Waveform);
     state.push_user_message(ConsoleMessage::info(format!(
         "Switched to {} viewer",
         viewer.name()
@@ -165,7 +163,7 @@ mod tests {
 
         activate_specialized_viewer(&mut state, ActiveViewer::EyeDiagram);
 
-        assert_eq!(state.active_viewer, ActiveViewer::EyeDiagram);
+        assert_eq!(state.active_viewer(), ActiveViewer::EyeDiagram);
         assert!(state.panels.bottom_panel);
         assert_eq!(state.panels.active_bottom_tab, BottomPanelTab::Waveform);
         assert!(

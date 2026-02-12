@@ -129,10 +129,9 @@ pub fn render_results_browser(ui: &mut Ui, state: &mut AppState) {
                     state.simulation.select_analysis(analysis_idx);
 
                     // Switch to appropriate viewer tab
-                    state.panels.bottom_panel = true;
-                    state.panels.active_bottom_tab =
-                        analysis_navigation::preferred_bottom_tab(analysis_type);
-                    state.active_viewer = analysis_navigation::preferred_viewer(analysis_type);
+                    let tab = analysis_navigation::preferred_bottom_tab(analysis_type);
+                    let viewer = analysis_navigation::preferred_viewer(analysis_type);
+                    state.open_viewer_in_tab(viewer, tab);
                 }
             }
         });

@@ -49,7 +49,7 @@ pub use app_dialog_state::DialogState;
 
 mod app_serialization;
 #[cfg(test)]
-use app_serialization::{PanelSizesSer, PanelVisibilitySer};
+use app_serialization::{PanelSizesSer, PanelVisibilitySer, ViewerWorkspaceSer};
 
 mod app_console;
 pub use app_console::{ConsoleLevel, ConsoleMessage};
@@ -119,8 +119,8 @@ pub struct AppState {
     pub property_editor: crate::properties::dialog::PropertyEditorState,
     /// Scripting/Automation console state
     pub script_console: crate::panels::ScriptConsoleState,
-    /// Active specialized viewer state
-    pub active_viewer: crate::viewers::ActiveViewer,
+    /// Open specialized viewer workspace tabs.
+    pub viewer_workspace: crate::viewers::ViewerWorkspace,
     /// Waveform viewer state (persists across frames for pan/zoom)
     pub waveform_viewer: WaveformViewerState,
     /// Library/Cell/View manager for design hierarchy
@@ -206,6 +206,32 @@ impl AppState {
     pub fn clear_primary_log(&mut self) {
         self.console_messages.clear();
         self.log_buffer.clear();
+    }
+
+    /// Open/focus a specialized viewer and route the bottom panel to it.
+    pub fn open_viewer(&mut self, viewer: crate::viewers::ActiveViewer) {
+        self.open_viewer_in_tab(viewer, BottomPanelTab::Waveform);
+    }
+
+    /// Open/focus a specialized viewer and route to a specific bottom tab.
+    pub fn open_viewer_in_tab(
+        &mut self,
+        viewer: crate::viewers::ActiveViewer,
+        tab: BottomPanelTab,
+    ) {
+        self.viewer_workspace.open_or_focus(viewer);
+        self.panels.bottom_panel = true;
+        self.panels.active_bottom_tab = tab;
+    }
+
+    /// Close the active viewer tab.
+    pub fn close_active_viewer(&mut self) {
+        self.viewer_workspace.close_active();
+    }
+
+    /// Active specialized viewer currently displayed in the workspace.
+    pub fn active_viewer(&self) -> crate::viewers::ActiveViewer {
+        self.viewer_workspace.active_viewer()
     }
 }
 

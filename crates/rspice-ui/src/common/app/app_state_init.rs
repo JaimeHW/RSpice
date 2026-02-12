@@ -43,7 +43,7 @@ pub(super) fn default_app_state() -> AppState {
         log_panel_state: crate::panels::LogPanelState::default(),
         property_editor: crate::properties::dialog::PropertyEditorState::default(),
         script_console: crate::panels::ScriptConsoleState::default(),
-        active_viewer: crate::viewers::ActiveViewer::default(),
+        viewer_workspace: crate::viewers::ViewerWorkspace::default(),
         waveform_viewer: crate::waveform::WaveformViewerState::default(),
         library_manager: crate::state::LibraryManager::with_primitives(),
         pending_delete_cell: None,

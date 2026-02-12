@@ -537,7 +537,10 @@ impl SimulationController {
                     state.waveform_viewer.x_axis_unit = x_unit.to_string();
                     state.waveform_viewer.y_axis_label = y_label.to_string();
                     state.waveform_viewer.y_axis_unit = y_unit.to_string();
-                    state.active_viewer = Self::preferred_viewer_for_analysis(analysis_type);
+                    let preferred_tab =
+                        crate::common::analysis_navigation::preferred_bottom_tab(analysis_type);
+                    let preferred_viewer = Self::preferred_viewer_for_analysis(analysis_type);
+                    state.open_viewer_in_tab(preferred_viewer, preferred_tab);
 
                     // --- Phase 10-11-12 Integration Glue (run once per analysis) ---
 

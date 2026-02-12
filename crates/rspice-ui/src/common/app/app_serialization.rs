@@ -7,9 +7,13 @@ impl serde::Serialize for AppState {
     {
         // Serialize minimal state needed for session recovery.
         use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("AppState", 2)?;
+        let mut state = serializer.serialize_struct("AppState", 3)?;
         state.serialize_field("panels", &PanelVisibilitySer::from(&self.panels))?;
         state.serialize_field("panel_sizes", &PanelSizesSer::from(&self.panel_sizes))?;
+        state.serialize_field(
+            "viewer_workspace",
+            &ViewerWorkspaceSer::from(&self.viewer_workspace),
+        )?;
         state.end()
     }
 }
@@ -23,6 +27,8 @@ impl<'de> serde::Deserialize<'de> for AppState {
         struct AppStateDe {
             panels: PanelVisibilitySer,
             panel_sizes: PanelSizesSer,
+            #[serde(default)]
+            viewer_workspace: ViewerWorkspaceSer,
         }
 
         // Deserialize minimal persisted data and use defaults for the rest.
@@ -30,6 +36,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
         Ok(Self {
             panels: de.panels.into(),
             panel_sizes: de.panel_sizes.into(),
+            viewer_workspace: de.viewer_workspace.into(),
             ..Default::default()
         })
     }
@@ -124,5 +131,46 @@ impl From<PanelSizesSer> for PanelSizes {
             browser_width: serialized.browser_width,
             properties_width: serialized.properties_width,
         }
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(super) struct ViewerWorkspaceSer {
+    #[serde(default = "default_viewer_workspace_tabs")]
+    pub(super) tabs: Vec<u8>,
+    #[serde(default)]
+    pub(super) active_index: usize,
+}
+
+impl Default for ViewerWorkspaceSer {
+    fn default() -> Self {
+        Self {
+            tabs: default_viewer_workspace_tabs(),
+            active_index: 0,
+        }
+    }
+}
+
+fn default_viewer_workspace_tabs() -> Vec<u8> {
+    vec![crate::viewers::ActiveViewer::Waveform.id()]
+}
+
+impl From<&crate::viewers::ViewerWorkspace> for ViewerWorkspaceSer {
+    fn from(workspace: &crate::viewers::ViewerWorkspace) -> Self {
+        Self {
+            tabs: workspace.tabs().iter().map(|viewer| viewer.id()).collect(),
+            active_index: workspace.active_index(),
+        }
+    }
+}
+
+impl From<ViewerWorkspaceSer> for crate::viewers::ViewerWorkspace {
+    fn from(serialized: ViewerWorkspaceSer) -> Self {
+        let tabs = serialized
+            .tabs
+            .into_iter()
+            .filter_map(crate::viewers::ActiveViewer::from_id)
+            .collect();
+        crate::viewers::ViewerWorkspace::from_tabs(tabs, serialized.active_index)
     }
 }
