@@ -351,11 +351,13 @@ impl EngineBridge {
 
     #[inline]
     fn resolve_transient_max_step(config: &super::config::TransientAnalysisConfig) -> f64 {
-        // SPICE .tran step is an output interval. Unless max_timestep is explicitly
-        // provided, allow a coarser internal step so adaptive transient can run fast.
+        // SPICE .tran step is an output interval. Since our transient engine
+        // emits accepted timesteps directly (without a separate output
+        // interpolation stage), keep internal max-step at or below the
+        // requested output step by default to preserve waveform fidelity.
         config
             .max_timestep
-            .unwrap_or(config.step_time * 10.0)
+            .unwrap_or(config.step_time)
             .max(1e-18)
     }
 

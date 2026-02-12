@@ -304,7 +304,7 @@ fn test_convert_dc_result_with_nodes() {
 // -------------------------------------------------------------------------
 
 #[test]
-fn test_resolve_transient_max_step_defaults_to_output_scaled_value() {
+fn test_resolve_transient_max_step_defaults_to_output_step_value() {
     let cfg = super::super::config::TransientAnalysisConfig {
         stop_time: 5e-3,
         step_time: 10e-9,
@@ -313,7 +313,7 @@ fn test_resolve_transient_max_step_defaults_to_output_scaled_value() {
         uic: false,
     };
     let max_step = EngineBridge::resolve_transient_max_step(&cfg);
-    assert!((max_step - 100e-9).abs() < 1e-18);
+    assert!((max_step - 10e-9).abs() < 1e-18);
 }
 
 #[test]
