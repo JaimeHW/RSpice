@@ -51,6 +51,8 @@ const LEGEND_WIDTH: f32 = 120.0;
 
 /// Maximum points to render before decimation
 const DECIMATION_THRESHOLD: usize = 2000;
+const DIRECT_RENDER_MIN_SAMPLES: usize = 256;
+const DIRECT_RENDER_POINTS_PER_PIXEL: usize = 2;
 const AXIS_TITLE_MIN_LEFT_INSET: f32 = 2.0;
 const AXIS_TITLE_TO_VALUE_LABEL_GAP: f32 = 6.0;
 const AXIS_TITLE_BOTTOM_INSET: f32 = 2.0;
@@ -636,34 +638,8 @@ fn render_trace(
     }
 
     let view = &viewer_state.view;
-    let n = trace.len();
-
-    // Decimate if too many points
-    let step = if n > DECIMATION_THRESHOLD {
-        (n / DECIMATION_THRESHOLD).max(1)
-    } else {
-        1
-    };
-
-    // Build screen coordinate points
-    let mut points: Vec<Pos2> = Vec::with_capacity(n / step + 1);
-
-    for i in (0..n).step_by(step) {
-        let data_x = trace.x[i];
-        let data_y = trace.y[i];
-
-        // Skip invalid values
-        if !data_x.is_finite() || !data_y.is_finite() {
-            continue;
-        }
-
-        let screen_x = layout.plot.min.x
-            + ((data_x - view.x_min) / view.x_range()) as f32 * layout.plot.width();
-        let screen_y = layout.plot.min.y
-            + ((view.y_max - data_y) / view.y_range()) as f32 * layout.plot.height();
-
-        points.push(Pos2::new(screen_x, screen_y));
-    }
+    let polyline = build_trace_polyline(layout, view, trace);
+    let points = polyline.points;
 
     if points.len() < 2 {
         return;
@@ -687,10 +663,211 @@ fn render_trace(
     }
 
     // Draw markers if enabled
-    if trace.style.show_markers && n <= 200 {
+    if trace.style.show_markers && polyline.visible_samples <= 200 {
         for point in &points {
             painter.circle_filled(*point, trace.style.marker_size / 2.0, color);
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TraceScreenSample {
+    sample_index: usize,
+    data_y: f64,
+    pos: Pos2,
+}
+
+#[derive(Debug, Clone, Default)]
+struct TraceBucket {
+    first: Option<TraceScreenSample>,
+    last: Option<TraceScreenSample>,
+    min: Option<TraceScreenSample>,
+    max: Option<TraceScreenSample>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct TracePolyline {
+    points: Vec<Pos2>,
+    visible_samples: usize,
+}
+
+fn trace_screen_pos(
+    layout: &ViewerLayout,
+    view: &ViewTransform,
+    data_x: f64,
+    data_y: f64,
+) -> Option<Pos2> {
+    if !data_x.is_finite() || !data_y.is_finite() {
+        return None;
+    }
+    if view.x_range() <= 0.0 || view.y_range() <= 0.0 {
+        return None;
+    }
+    let screen_x =
+        layout.plot.min.x + ((data_x - view.x_min) / view.x_range()) as f32 * layout.plot.width();
+    let screen_y =
+        layout.plot.min.y + ((view.y_max - data_y) / view.y_range()) as f32 * layout.plot.height();
+    if !screen_x.is_finite() || !screen_y.is_finite() {
+        return None;
+    }
+    Some(Pos2::new(screen_x, screen_y))
+}
+
+fn visible_trace_index_window(trace: &TraceData, view: &ViewTransform) -> Option<(usize, usize)> {
+    if trace.is_empty() || trace.x.is_empty() || view.x_max <= view.x_min {
+        return None;
+    }
+
+    let first_x = *trace.x.first()?;
+    let last_x = *trace.x.last()?;
+    if !first_x.is_finite() || !last_x.is_finite() {
+        return Some((0, trace.len()));
+    }
+    if view.x_max < first_x || view.x_min > last_x {
+        return None;
+    }
+
+    let start = trace.x.partition_point(|x| *x < view.x_min).saturating_sub(1);
+    let end = (trace.x.partition_point(|x| *x <= view.x_max) + 1).min(trace.len());
+    if end <= start {
+        return None;
+    }
+    Some((start, end))
+}
+
+fn should_render_trace_directly(plot_width_px: usize, visible_samples: usize) -> bool {
+    let direct_budget =
+        (plot_width_px * DIRECT_RENDER_POINTS_PER_PIXEL).max(DIRECT_RENDER_MIN_SAMPLES);
+    visible_samples <= direct_budget.min(DECIMATION_THRESHOLD)
+}
+
+fn push_unique_point(points: &mut Vec<Pos2>, point: Pos2) {
+    if points.last().copied() == Some(point) {
+        return;
+    }
+    points.push(point);
+}
+
+fn update_trace_bucket(bucket: &mut TraceBucket, sample: TraceScreenSample) {
+    if bucket
+        .first
+        .map(|existing| sample.sample_index < existing.sample_index)
+        .unwrap_or(true)
+    {
+        bucket.first = Some(sample);
+    }
+    if bucket
+        .last
+        .map(|existing| sample.sample_index > existing.sample_index)
+        .unwrap_or(true)
+    {
+        bucket.last = Some(sample);
+    }
+    if bucket
+        .min
+        .map(|existing| sample.data_y < existing.data_y)
+        .unwrap_or(true)
+    {
+        bucket.min = Some(sample);
+    }
+    if bucket
+        .max
+        .map(|existing| sample.data_y > existing.data_y)
+        .unwrap_or(true)
+    {
+        bucket.max = Some(sample);
+    }
+}
+
+fn collect_bucket_points(points: &mut Vec<Pos2>, bucket: &TraceBucket) {
+    let mut bucket_samples = [
+        bucket.first,
+        bucket.min,
+        bucket.max,
+        bucket.last,
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    if bucket_samples.is_empty() {
+        return;
+    }
+    bucket_samples.sort_by_key(|sample| sample.sample_index);
+    bucket_samples.dedup_by_key(|sample| sample.sample_index);
+    for sample in bucket_samples {
+        push_unique_point(points, sample.pos);
+    }
+}
+
+fn build_trace_polyline(
+    layout: &ViewerLayout,
+    view: &ViewTransform,
+    trace: &TraceData,
+) -> TracePolyline {
+    let Some((start, end)) = visible_trace_index_window(trace, view) else {
+        return TracePolyline::default();
+    };
+
+    let visible_samples = end.saturating_sub(start);
+    if visible_samples == 0 {
+        return TracePolyline::default();
+    }
+
+    let plot_width_px = layout.plot.width().max(1.0).ceil() as usize;
+    let mut points = Vec::new();
+
+    if should_render_trace_directly(plot_width_px, visible_samples) {
+        points.reserve(visible_samples);
+        for idx in start..end {
+            let Some((&x, &y)) = trace.x.get(idx).zip(trace.y.get(idx)) else {
+                continue;
+            };
+            if let Some(pos) = trace_screen_pos(layout, view, x, y) {
+                push_unique_point(&mut points, pos);
+            }
+        }
+        return TracePolyline {
+            points,
+            visible_samples,
+        };
+    }
+
+    let bucket_count = plot_width_px.max(1);
+    let mut buckets = vec![TraceBucket::default(); bucket_count];
+
+    for idx in start..end {
+        let Some((&x, &y)) = trace.x.get(idx).zip(trace.y.get(idx)) else {
+            continue;
+        };
+        let Some(pos) = trace_screen_pos(layout, view, x, y) else {
+            continue;
+        };
+
+        // Ignore samples far outside the clip lane to avoid skewing bucket picks.
+        if pos.x < layout.plot.min.x - 1.0 || pos.x > layout.plot.max.x + 1.0 {
+            continue;
+        }
+
+        let bucket_index = ((pos.x - layout.plot.min.x).floor() as isize)
+            .clamp(0, bucket_count as isize - 1) as usize;
+        update_trace_bucket(
+            &mut buckets[bucket_index],
+            TraceScreenSample {
+                sample_index: idx,
+                data_y: y,
+                pos,
+            },
+        );
+    }
+
+    points.reserve(bucket_count * 2);
+    for bucket in &buckets {
+        collect_bucket_points(&mut points, bucket);
+    }
+
+    TracePolyline {
+        points,
+        visible_samples,
     }
 }
 
@@ -1249,33 +1426,121 @@ mod tests {
     }
 
     #[test]
-    fn test_decimation_threshold() {
-        // A trace with many points should decimate
-        let n = 10000;
-        let step = if n > DECIMATION_THRESHOLD {
-            (n / DECIMATION_THRESHOLD).max(1)
-        } else {
-            1
-        };
-
-        assert!(step > 1, "Large traces should be decimated");
-        assert!(
-            n / step <= DECIMATION_THRESHOLD * 2,
-            "Decimation should stay near threshold"
+    fn test_visible_trace_index_window_expands_one_sample_past_view_bounds() {
+        let trace = TraceData::new(
+            "T",
+            vec![0.0, 1.0, 2.0, 3.0, 4.0],
+            vec![0.0, 0.0, 0.0, 0.0, 0.0],
         );
+        let mut view = ViewTransform::default();
+        view.x_min = 1.5;
+        view.x_max = 2.5;
+
+        let window = visible_trace_index_window(&trace, &view).expect("window");
+        assert_eq!(window, (1, 4));
     }
 
     #[test]
-    fn test_decimation_small_trace() {
-        // A small trace should not decimate
-        let n = 500;
-        let step = if n > DECIMATION_THRESHOLD {
-            (n / DECIMATION_THRESHOLD).max(1)
-        } else {
-            1
-        };
+    fn test_visible_trace_index_window_returns_none_when_trace_is_outside_view() {
+        let trace = TraceData::new(
+            "T",
+            vec![0.0, 1.0, 2.0],
+            vec![0.0, 0.0, 0.0],
+        );
+        let mut view = ViewTransform::default();
+        view.x_min = 10.0;
+        view.x_max = 11.0;
 
-        assert_eq!(step, 1, "Small traces should not decimate");
+        assert!(visible_trace_index_window(&trace, &view).is_none());
+    }
+
+    #[test]
+    fn test_should_render_trace_directly_uses_visible_density_not_total_trace_length() {
+        assert!(should_render_trace_directly(1000, 900));
+        assert!(!should_render_trace_directly(1000, 5000));
+    }
+
+    fn screen_to_data_y(layout: &ViewerLayout, view: &ViewTransform, screen_y: f32) -> f64 {
+        let y_frac = (screen_y - layout.plot.min.y) as f64 / layout.plot.height() as f64;
+        view.y_max - y_frac * view.y_range()
+    }
+
+    #[test]
+    fn test_build_trace_polyline_uses_visible_window_density() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1200.0, 600.0));
+        let layout = calculate_layout(rect);
+        let mut view = ViewTransform::default();
+        view.x_min = 10.0;
+        view.x_max = 10.1;
+        view.y_min = -1.2;
+        view.y_max = 1.2;
+
+        let n = 200_000usize;
+        let dt = 20.0 / (n as f64 - 1.0);
+        let x: Vec<f64> = (0..n).map(|i| i as f64 * dt).collect();
+        let y: Vec<f64> = x
+            .iter()
+            .map(|t| (2.0 * std::f64::consts::PI * 5_000.0 * t).sin())
+            .collect();
+        let trace = TraceData::new("HF", x, y);
+
+        let polyline = build_trace_polyline(&layout, &view, &trace);
+        assert!(polyline.visible_samples > 900);
+        assert!(polyline.visible_samples < 1100);
+        assert!(polyline.points.len() > 200);
+    }
+
+    #[test]
+    fn test_build_trace_polyline_bucket_decimation_preserves_extrema() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 500.0));
+        let layout = calculate_layout(rect);
+        let mut view = ViewTransform::default();
+        view.x_min = 0.0;
+        view.x_max = 1.0;
+        view.y_min = -1.2;
+        view.y_max = 1.2;
+
+        let n = 200_000usize;
+        let x: Vec<f64> = (0..n).map(|i| i as f64 / (n as f64 - 1.0)).collect();
+        let y: Vec<f64> = x
+            .iter()
+            .map(|t| (2.0 * std::f64::consts::PI * 250.0 * t).sin())
+            .collect();
+        let trace = TraceData::new("HF", x, y);
+
+        let polyline = build_trace_polyline(&layout, &view, &trace);
+        assert!(polyline.points.len() >= layout.plot.width() as usize);
+
+        let y_values: Vec<f64> = polyline
+            .points
+            .iter()
+            .map(|p| screen_to_data_y(&layout, &view, p.y))
+            .collect();
+        let max_y = y_values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let min_y = y_values.iter().copied().fold(f64::INFINITY, f64::min);
+        assert!(max_y > 0.95);
+        assert!(min_y < -0.95);
+    }
+
+    #[test]
+    fn test_build_trace_polyline_ignores_non_finite_samples() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 480.0));
+        let layout = calculate_layout(rect);
+        let mut view = ViewTransform::default();
+        view.x_min = 0.0;
+        view.x_max = 4.0;
+        view.y_min = -2.0;
+        view.y_max = 2.0;
+
+        let trace = TraceData::new(
+            "NF",
+            vec![0.0, 1.0, 2.0, 3.0, 4.0],
+            vec![0.0, f64::NAN, 1.0, f64::INFINITY, -1.0],
+        );
+
+        let polyline = build_trace_polyline(&layout, &view, &trace);
+        assert!(polyline.points.len() >= 2);
+        assert!(polyline.points.iter().all(|p| p.x.is_finite() && p.y.is_finite()));
     }
 
     #[test]
