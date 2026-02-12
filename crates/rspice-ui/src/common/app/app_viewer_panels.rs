@@ -18,6 +18,7 @@ const VIEWER_TAB_INNER_X: f32 = 9.0;
 const VIEWER_TAB_INNER_Y: f32 = 2.0;
 const VIEWER_TAB_HOVER_OVERLAY_ALPHA: u8 = 26;
 const VIEWER_TAB_HOVER_STROKE_BOOST: f32 = 0.35;
+const VIEWER_TAB_CLOSE_HOVER_BG_ALPHA: u8 = 52;
 
 fn tab_strip_fill() -> Color32 {
     Color32::from_rgb(23, 26, 32)
@@ -66,6 +67,14 @@ fn close_text_color(selected: bool) -> Color32 {
     } else {
         Color32::from_rgb(120, 126, 138)
     }
+}
+
+fn close_hover_bg_color() -> Color32 {
+    Color32::from_rgba_unmultiplied(255, 80, 80, VIEWER_TAB_CLOSE_HOVER_BG_ALPHA)
+}
+
+fn close_hover_text_color() -> Color32 {
+    Color32::from_rgb(255, 170, 170)
 }
 
 fn viewer_workspace_status(state: &crate::common::app::AppState) -> (&'static str, Color32) {
@@ -205,21 +214,40 @@ impl RSpiceApp {
                                         if can_close_tabs {
                                             ui.add_space(3.0);
                                             if selected {
-                                                if ui
-                                                    .add(
-                                                        egui::Button::new(
-                                                            RichText::new("x")
-                                                                .size(10.0)
-                                                                .color(close_text_color(selected)),
-                                                        )
-                                                        .frame(false)
-                                                        .min_size(egui::vec2(
+                                                let (close_rect, close_response) = ui
+                                                    .allocate_exact_size(
+                                                        egui::vec2(
                                                             VIEWER_TAB_CLOSE_SIZE,
                                                             VIEWER_TAB_CLOSE_SIZE,
-                                                        )),
-                                                    )
-                                                    .clicked()
-                                                {
+                                                        ),
+                                                        egui::Sense::click(),
+                                                    );
+                                                let close_response = close_response
+                                                    .on_hover_cursor(
+                                                        egui::CursorIcon::PointingHand,
+                                                    );
+                                                if close_response.hovered() {
+                                                    ui.painter().rect_filled(
+                                                        close_rect,
+                                                        egui::Rounding::same(3.0),
+                                                        close_hover_bg_color(),
+                                                    );
+                                                }
+
+                                                let close_color = if close_response.hovered() {
+                                                    close_hover_text_color()
+                                                } else {
+                                                    close_text_color(selected)
+                                                };
+                                                ui.painter().text(
+                                                    close_rect.center(),
+                                                    egui::Align2::CENTER_CENTER,
+                                                    "x",
+                                                    egui::FontId::proportional(10.0),
+                                                    close_color,
+                                                );
+
+                                                if close_response.clicked() {
                                                     close_request = Some(viewer);
                                                 }
                                             } else {
