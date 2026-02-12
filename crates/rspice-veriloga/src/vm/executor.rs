@@ -411,35 +411,19 @@ impl<'a> Vm<'a> {
                 let result = match analysis_str_id {
                     0 => {
                         // "dc" check
-                        if current_type == 0 {
-                            1.0
-                        } else {
-                            0.0
-                        }
+                        if current_type == 0 { 1.0 } else { 0.0 }
                     }
                     1 => {
                         // "ac" check
-                        if current_type == 1 {
-                            1.0
-                        } else {
-                            0.0
-                        }
+                        if current_type == 1 { 1.0 } else { 0.0 }
                     }
                     2 => {
                         // "tran" check
-                        if current_type == 2 {
-                            1.0
-                        } else {
-                            0.0
-                        }
+                        if current_type == 2 { 1.0 } else { 0.0 }
                     }
                     3 => {
                         // "noise" check
-                        if current_type == 3 {
-                            1.0
-                        } else {
-                            0.0
-                        }
+                        if current_type == 3 { 1.0 } else { 0.0 }
                     }
                     _ => 0.0, // Unknown analysis type
                 };

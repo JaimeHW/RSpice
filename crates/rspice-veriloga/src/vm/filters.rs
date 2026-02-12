@@ -243,11 +243,7 @@ impl CrossDetector {
                         || (self.prev_value > 0.0 && value <= 0.0)
                 }
             };
-            if crossed {
-                1.0
-            } else {
-                0.0
-            }
+            if crossed { 1.0 } else { 0.0 }
         };
 
         self.prev_value = value;

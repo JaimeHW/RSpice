@@ -3,8 +3,8 @@ use super::*;
 
 #[cfg(feature = "native")]
 use crate::codegen::{
-    AssignmentProgram, BytecodeProgram, CompiledParameter, Instruction, StampIndex,
-    StampLocation, StampProgram,
+    AssignmentProgram, BytecodeProgram, CompiledParameter, Instruction, StampIndex, StampLocation,
+    StampProgram,
 };
 
 #[test]

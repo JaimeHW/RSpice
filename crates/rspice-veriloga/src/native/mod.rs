@@ -51,4 +51,3 @@ pub fn try_compile_native(_model: &CompiledModel) -> Option<()> {
 
 #[cfg(test)]
 mod tests;
-

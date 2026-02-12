@@ -13,7 +13,6 @@ mod compiler_emit;
 mod compiler_expr;
 mod compiler_imports;
 
-
 mod abi;
 
 use crate::codegen::{BytecodeProgram, CompiledModel, Instruction, StampProgram};
@@ -205,7 +204,6 @@ impl JitCompiler {
             _module: module,
         })
     }
-
 }
 
 impl Default for JitCompiler {
