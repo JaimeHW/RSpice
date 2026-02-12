@@ -1,5 +1,5 @@
-use rspice_core::Value;
 use rspice_core::netlist::ElementKind;
+use rspice_core::Value;
 
 pub(super) fn build_voltage_output_expr(output_node: &str, output_ref: Option<&str>) -> String {
     let output_node = output_node.trim();

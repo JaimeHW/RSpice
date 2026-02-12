@@ -53,4 +53,3 @@ impl AnalysisPlan {
         Ok(queue)
     }
 }
-

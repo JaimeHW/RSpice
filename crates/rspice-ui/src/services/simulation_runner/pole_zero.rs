@@ -2,8 +2,8 @@
 
 use super::build_engine_config;
 use crate::output_spec::resolve_node_or_ground_index;
-use rspice_core::Value;
 use rspice_core::engine::Engine;
+use rspice_core::Value;
 
 /// Pole-zero analysis data
 #[derive(Debug, Clone)]

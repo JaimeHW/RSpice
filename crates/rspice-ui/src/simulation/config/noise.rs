@@ -161,4 +161,3 @@ impl From<NoiseConfig> for NoiseAnalysisConfig {
         }
     }
 }
-

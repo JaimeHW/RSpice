@@ -238,4 +238,3 @@ fn test_spec_to_analysis_type_preserves_advanced_categories() {
         );
     }
 }
-

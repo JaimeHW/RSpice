@@ -1,7 +1,7 @@
 use super::{build_engine_config, now_ms};
-use rspice_core::Value;
 use rspice_core::engine::{Engine, TransientResult};
 use rspice_core::netlist::AnalysisCommand;
+use rspice_core::Value;
 
 /// Result of a simulation run
 #[derive(Debug, Clone)]

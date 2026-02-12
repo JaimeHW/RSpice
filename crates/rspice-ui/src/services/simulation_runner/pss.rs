@@ -1,7 +1,7 @@
 use super::build_engine_config;
-use rspice_core::Value;
 use rspice_core::analysis::PssConfig;
 use rspice_core::engine::Engine;
+use rspice_core::Value;
 
 /// PSS analysis data
 #[derive(Debug, Clone)]

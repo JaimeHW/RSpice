@@ -16,11 +16,11 @@
 //! - Status bar shows simulation progress and tool tips
 //! - Theme provides consistent styling across all components
 
-pub mod app;
 pub mod analysis_navigation;
+pub mod app;
 pub mod examples;
-pub(crate) mod file_actions;
 pub(crate) mod export_workflow;
+pub(crate) mod file_actions;
 pub(crate) mod file_workflow;
 pub mod menu_bar;
 pub mod simulation_analysis_tabs;

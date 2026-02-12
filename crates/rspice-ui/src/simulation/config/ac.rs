@@ -187,4 +187,3 @@ impl From<AcConfig> for AcAnalysisConfig {
         }
     }
 }
-

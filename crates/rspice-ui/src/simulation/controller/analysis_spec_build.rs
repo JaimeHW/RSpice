@@ -221,7 +221,6 @@ impl SimulationController {
         }
     }
 
-
     pub(super) fn build_monte_carlo_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
         let mut mc_state = state.dialogs.mc_state.clone();
         mc_state.ensure_initialized();

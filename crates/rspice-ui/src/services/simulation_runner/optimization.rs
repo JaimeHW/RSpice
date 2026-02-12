@@ -2,8 +2,8 @@ use super::{build_engine_config, is_ground_like};
 use crate::simulation::optimizer::{
     DesignVar, OptimizationGoal, OptimizerAlgo, OptimizerConfig, OptimizerEngine,
 };
-use rspice_core::Value;
 use rspice_core::engine::Engine;
+use rspice_core::Value;
 use std::collections::{HashMap, HashSet};
 
 /// Optimization objective strategy.

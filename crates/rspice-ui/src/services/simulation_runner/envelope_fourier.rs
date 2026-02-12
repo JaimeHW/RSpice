@@ -1,7 +1,7 @@
-use super::{TransientData, run_transient_analysis};
+use super::{run_transient_analysis, TransientData};
 use num_complex::Complex64;
-use rspice_core::Value;
 use rspice_core::analysis::{FourierAnalysis, FourierConfig};
+use rspice_core::Value;
 
 /// Configuration for envelope analysis.
 #[derive(Debug, Clone)]

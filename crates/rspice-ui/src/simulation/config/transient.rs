@@ -94,4 +94,3 @@ impl From<TransientConfig> for TransientAnalysisConfig {
         }
     }
 }
-

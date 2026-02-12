@@ -102,7 +102,6 @@ impl SimulationController {
         }
     }
 
-
     fn primary_waveform<'a>(
         waveforms: &'a std::collections::HashMap<String, crate::simulation::WaveformData>,
         expected_len: usize,

@@ -526,4 +526,3 @@ impl RunQueue {
         self.completed_complexity = 0;
     }
 }
-

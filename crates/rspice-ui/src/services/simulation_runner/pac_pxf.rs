@@ -3,8 +3,8 @@ use super::{
     infer_primary_source_name, is_ground_like,
 };
 use num_complex::Complex64;
-use rspice_core::Value;
 use rspice_core::engine::Engine;
+use rspice_core::Value;
 // =============================================================================
 // PAC (Periodic AC) Analysis
 // =============================================================================
@@ -137,8 +137,8 @@ fn run_pac_internal(
     netlist: &rspice_core::Netlist,
     config: &PacRunConfig,
 ) -> Result<PacInternalResult, String> {
-    use rspice_core::analysis::PssConfig;
     use rspice_core::analysis::advanced::pac::{PacAnalyzer, PacConfig};
+    use rspice_core::analysis::PssConfig;
 
     config.validate()?;
 

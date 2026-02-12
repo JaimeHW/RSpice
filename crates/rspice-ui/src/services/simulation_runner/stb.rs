@@ -1,7 +1,7 @@
 use super::build_engine_config;
 use num_complex::Complex64;
-use rspice_core::Value;
 use rspice_core::engine::Engine;
+use rspice_core::Value;
 
 /// STB analysis data for feedback loop stability
 #[derive(Debug, Clone)]
