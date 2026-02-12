@@ -25,7 +25,7 @@ fn chart_bg_color() -> Color32 {
 }
 
 fn surface_bg_color() -> Color32 {
-    Color32::from_rgb(25, 27, 33)
+    viewer_header_bg_color()
 }
 
 fn header_bg_color() -> Color32 {
@@ -416,74 +416,77 @@ fn render_time_controls_header(
     ui.allocate_new_ui(UiBuilder::new().max_rect(header_rect), |ui| {
         ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
 
-        ui.horizontal(|ui| {
-            ui.spacing_mut().interact_size.y = HEADER_CONTROL_HEIGHT;
-            ui.spacing_mut().button_padding.y = 2.0;
-            ui.add_space(4.0);
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().interact_size.y = HEADER_CONTROL_HEIGHT;
+                ui.spacing_mut().button_padding.y = 2.0;
+                ui.add_space(4.0);
 
-            ui.label("Auto Time");
-            let mut time_changed = ui.checkbox(&mut state.time_window_auto, "").changed();
-            let time_speed = source_time_bounds
-                .map(|(min_t, max_t)| ((max_t - min_t).abs() / 1000.0).max(1e-15))
-                .unwrap_or(1e-9);
-            ui.add_enabled_ui(!state.time_window_auto, |ui| {
-                ui.label("Start");
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut state.time_window_start)
-                            .speed(time_speed)
-                            .max_decimals(12),
-                    )
-                    .changed()
-                {
-                    time_changed = true;
+                ui.label("Auto Time");
+                let mut time_changed = ui.checkbox(&mut state.time_window_auto, "").changed();
+                let time_speed = source_time_bounds
+                    .map(|(min_t, max_t)| ((max_t - min_t).abs() / 1000.0).max(1e-15))
+                    .unwrap_or(1e-9);
+                ui.add_enabled_ui(!state.time_window_auto, |ui| {
+                    ui.label("Start");
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut state.time_window_start)
+                                .speed(time_speed)
+                                .max_decimals(12),
+                        )
+                        .changed()
+                    {
+                        time_changed = true;
+                    }
+                    ui.label("End");
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut state.time_window_end)
+                                .speed(time_speed)
+                                .max_decimals(12),
+                        )
+                        .changed()
+                    {
+                        time_changed = true;
+                    }
+                });
+                sync_manual_fft_time_window(state, source_time_bounds);
+                if time_changed {
+                    queue_fft_refresh(&mut actions, state);
                 }
-                ui.label("End");
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut state.time_window_end)
-                            .speed(time_speed)
-                            .max_decimals(12),
-                    )
-                    .changed()
-                {
-                    time_changed = true;
+
+                ui.separator();
+
+                ui.label("Auto N");
+                let mut sample_changed = ui.checkbox(&mut state.sample_count_auto, "").changed();
+                ui.add_enabled_ui(!state.sample_count_auto, |ui| {
+                    ui.label("N");
+                    let mut sample_count = state.sample_count as u64;
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut sample_count)
+                                .range(
+                                    crate::analysis::fft::MIN_FFT_SAMPLES as u64
+                                        ..=crate::analysis::fft::MAX_REFERENCE_RESAMPLE_POINTS
+                                            as u64,
+                                )
+                                .speed(1.0),
+                        )
+                        .changed()
+                    {
+                        state.sample_count = sample_count as usize;
+                        sample_changed = true;
+                    }
+                });
+                state.sample_count = state.sample_count.clamp(
+                    crate::analysis::fft::MIN_FFT_SAMPLES,
+                    crate::analysis::fft::MAX_REFERENCE_RESAMPLE_POINTS,
+                );
+                if sample_changed {
+                    queue_fft_refresh(&mut actions, state);
                 }
             });
-            sync_manual_fft_time_window(state, source_time_bounds);
-            if time_changed {
-                queue_fft_refresh(&mut actions, state);
-            }
-
-            ui.separator();
-
-            ui.label("Auto N");
-            let mut sample_changed = ui.checkbox(&mut state.sample_count_auto, "").changed();
-            ui.add_enabled_ui(!state.sample_count_auto, |ui| {
-                ui.label("N");
-                let mut sample_count = state.sample_count as u64;
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut sample_count)
-                            .range(
-                                crate::analysis::fft::MIN_FFT_SAMPLES as u64
-                                    ..=crate::analysis::fft::MAX_REFERENCE_RESAMPLE_POINTS as u64,
-                            )
-                            .speed(1.0),
-                    )
-                    .changed()
-                {
-                    state.sample_count = sample_count as usize;
-                    sample_changed = true;
-                }
-            });
-            state.sample_count = state.sample_count.clamp(
-                crate::analysis::fft::MIN_FFT_SAMPLES,
-                crate::analysis::fft::MAX_REFERENCE_RESAMPLE_POINTS,
-            );
-            if sample_changed {
-                queue_fft_refresh(&mut actions, state);
-            }
         });
     });
 
@@ -1967,6 +1970,12 @@ mod tests {
 
         assert!((state.time_window_start - 1.0).abs() < f64::EPSILON);
         assert!((state.time_window_end - 3.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_fft_surface_and_header_backgrounds_match_viewer_chrome() {
+        assert_eq!(surface_bg_color(), header_bg_color());
+        assert_eq!(surface_bg_color(), viewer_header_bg_color());
     }
 
     #[test]

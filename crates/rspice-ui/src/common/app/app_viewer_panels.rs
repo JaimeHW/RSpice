@@ -1,6 +1,7 @@
 use egui::{Color32, RichText, Stroke, Ui};
 
 use super::RSpiceApp;
+use crate::common::viewer_style::viewer_header_bg_color;
 
 const VIEWER_TAB_CHIP_OUTER_HEIGHT: f32 = VIEWER_TAB_ROW_HEIGHT + 2.0 * VIEWER_TAB_INNER_Y;
 const VIEWER_TAB_CHIP_TOP_SPACE: f32 = 5.0;
@@ -21,7 +22,7 @@ const VIEWER_TAB_HOVER_STROKE_BOOST: f32 = 0.35;
 const VIEWER_TAB_CLOSE_HOVER_BG_ALPHA: u8 = 52;
 
 fn tab_strip_fill() -> Color32 {
-    Color32::from_rgb(23, 26, 32)
+    viewer_header_bg_color()
 }
 
 fn tab_fill(selected: bool) -> Color32 {
@@ -430,6 +431,7 @@ impl RSpiceApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::viewer_style::viewer_header_bg_color;
 
     fn luma(color: Color32) -> f32 {
         0.2126 * color.r() as f32 + 0.7152 * color.g() as f32 + 0.0722 * color.b() as f32
@@ -480,6 +482,11 @@ mod tests {
     #[test]
     fn strip_and_tab_colors_are_not_identical() {
         assert_ne!(tab_strip_fill(), tab_fill(true));
+    }
+
+    #[test]
+    fn strip_fill_matches_viewer_header_fill() {
+        assert_eq!(tab_strip_fill(), viewer_header_bg_color());
     }
 
     #[test]

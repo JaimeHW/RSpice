@@ -3,6 +3,7 @@ use std::ops::RangeInclusive;
 use egui::{CentralPanel, Color32, Context, Frame, SidePanel, TopBottomPanel};
 
 use super::{BottomPanelTab, PanelVisibility, RSpiceApp};
+use crate::common::viewer_style::viewer_header_bg_color;
 
 const ICON_RAIL_WIDTH: f32 = 42.0;
 const SIDE_PANEL_MARGIN: f32 = 8.0;
@@ -32,6 +33,10 @@ fn should_show_project_browser(panels: &PanelVisibility) -> bool {
 
 fn separator_line_bounds(rect: egui::Rect, margin: f32) -> RangeInclusive<f32> {
     (rect.left() - margin)..=(rect.right() + margin)
+}
+
+fn bottom_panel_bg_fill() -> Color32 {
+    viewer_header_bg_color()
 }
 
 fn draw_side_panel_separator(ui: &mut egui::Ui, margin: f32) {
@@ -80,7 +85,7 @@ impl RSpiceApp {
             .resizable(true)
             .default_height(default_height)
             .height_range(height_range)
-            .frame(Frame::none().fill(Color32::from_rgb(25, 27, 33)))
+            .frame(Frame::none().fill(bottom_panel_bg_fill()))
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
 
@@ -398,6 +403,11 @@ mod tests {
         let bounds = separator_line_bounds(rect, 2.5);
         assert_eq!(*bounds.start(), 7.5);
         assert_eq!(*bounds.end(), 32.5);
+    }
+
+    #[test]
+    fn test_bottom_panel_bg_fill_matches_viewer_header_fill() {
+        assert_eq!(bottom_panel_bg_fill(), viewer_header_bg_color());
     }
 
     #[test]
