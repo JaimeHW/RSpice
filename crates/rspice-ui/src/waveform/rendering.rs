@@ -1,4 +1,4 @@
-//! Waveform Rendering Engine
+﻿//! Waveform Rendering Engine
 //!
 //! This module handles all visual rendering of the waveform viewer,
 //! including traces, grid, axes, cursors, and overlays.
@@ -240,79 +240,118 @@ fn render_header(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Waveform
     // Create a UI area for header controls
     let header_rect = layout.header.shrink(4.0);
     ui.allocate_new_ui(UiBuilder::new().max_rect(header_rect), |ui| {
-        ui.horizontal(|ui| {
-            ui.add_space(8.0);
-
-            // Title
-            ui.label(
-                egui::RichText::new("Waveform Viewer")
-                    .size(13.0)
-                    .strong()
-                    .color(Color32::from_rgb(200, 200, 210)),
-            );
-
-            ui.add_space(16.0);
-
-            // Fit buttons
-            if ui.small_button("Fit All").clicked() {
-                viewer_state.view.fit_to_traces(&viewer_state.traces);
-            }
-            if ui.small_button("Fit X").clicked() {
-                viewer_state.view.fit_x_to_traces(&viewer_state.traces);
-            }
-            if ui.small_button("Fit Y").clicked() {
-                viewer_state.view.fit_y_to_traces(&viewer_state.traces);
-            }
-
-            ui.separator();
-
-            // Zoom buttons
-            if ui.small_button("−").clicked() {
-                viewer_state.view.zoom(1.25, 0.5, 0.5);
-            }
-            if ui.small_button("+").clicked() {
-                viewer_state.view.zoom(0.8, 0.5, 0.5);
-            }
-
-            ui.separator();
-
-            // Cursor clear
-            if ui.small_button("Clear Cursors").clicked() {
-                viewer_state.cursors.clear();
-            }
-
-            // Right-aligned controls
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        let control_height = (ui.available_height() - 2.0)
+            .max(ui.spacing().interact_size.y)
+            .max(18.0);
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), ui.available_height()),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
                 ui.add_space(8.0);
 
-                // Toggle buttons
-                let meas_text = if viewer_state.show_measurements {
-                    "📊 ✓"
-                } else {
-                    "📊"
-                };
+                // Title
+                let (title_rect, _title_response) = ui.allocate_exact_size(
+                    egui::vec2(128.0, control_height),
+                    egui::Sense::hover(),
+                );
+                ui.painter().text(
+                    title_rect.left_center(),
+                    egui::Align2::LEFT_CENTER,
+                    "Waveform Viewer",
+                    FontId::proportional(13.0),
+                    Color32::from_rgb(200, 200, 210),
+                );
+
+                ui.add_space(16.0);
+
+                // Fit buttons
                 if ui
-                    .small_button(meas_text)
-                    .on_hover_text("Measurements")
+                    .add_sized(
+                        egui::vec2(58.0, control_height),
+                        egui::Button::new("Fit All"),
+                    )
                     .clicked()
                 {
-                    viewer_state.show_measurements = !viewer_state.show_measurements;
+                    viewer_state.view.fit_to_traces(&viewer_state.traces);
+                }
+                if ui
+                    .add_sized(egui::vec2(48.0, control_height), egui::Button::new("Fit X"))
+                    .clicked()
+                {
+                    viewer_state.view.fit_x_to_traces(&viewer_state.traces);
+                }
+                if ui
+                    .add_sized(egui::vec2(48.0, control_height), egui::Button::new("Fit Y"))
+                    .clicked()
+                {
+                    viewer_state.view.fit_y_to_traces(&viewer_state.traces);
                 }
 
-                let export_text = if viewer_state.show_export {
-                    "💾 ✓"
-                } else {
-                    "💾"
-                };
+                ui.separator();
+
+                // Zoom buttons
                 if ui
-                    .small_button(export_text)
-                    .on_hover_text("Export")
+                    .add_sized(egui::vec2(28.0, control_height), egui::Button::new("-"))
                     .clicked()
                 {
-                    viewer_state.show_export = !viewer_state.show_export;
+                    viewer_state.view.zoom(1.25, 0.5, 0.5);
                 }
-            });
-        });
+                if ui
+                    .add_sized(egui::vec2(28.0, control_height), egui::Button::new("+"))
+                    .clicked()
+                {
+                    viewer_state.view.zoom(0.8, 0.5, 0.5);
+                }
+
+                ui.separator();
+
+                // Cursor clear
+                if ui
+                    .add_sized(
+                        egui::vec2(94.0, control_height),
+                        egui::Button::new("Clear Cursors"),
+                    )
+                    .clicked()
+                {
+                    viewer_state.cursors.clear();
+                }
+
+                // Right-aligned controls
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_space(8.0);
+
+                    // Toggle buttons
+                    let meas_text = if viewer_state.show_measurements {
+                        "Meas On"
+                    } else {
+                        "Meas Off"
+                    };
+                    if ui
+                        .add_sized(egui::vec2(68.0, control_height), egui::Button::new(meas_text))
+                        .on_hover_text("Measurements")
+                        .clicked()
+                    {
+                        viewer_state.show_measurements = !viewer_state.show_measurements;
+                    }
+
+                    let export_text = if viewer_state.show_export {
+                        "Export On"
+                    } else {
+                        "Export Off"
+                    };
+                    if ui
+                        .add_sized(
+                            egui::vec2(76.0, control_height),
+                            egui::Button::new(export_text),
+                        )
+                        .on_hover_text("Export")
+                        .clicked()
+                    {
+                        viewer_state.show_export = !viewer_state.show_export;
+                    }
+                });
+            },
+        );
     });
 }
 
