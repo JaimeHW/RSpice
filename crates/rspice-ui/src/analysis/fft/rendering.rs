@@ -479,10 +479,7 @@ fn render_time_controls_header(
                         sample_changed = true;
                     }
                 });
-                state.sample_count = state.sample_count.clamp(
-                    crate::analysis::fft::MIN_FFT_SAMPLES,
-                    crate::analysis::fft::MAX_REFERENCE_RESAMPLE_POINTS,
-                );
+                state.sync_sample_count_control_value();
                 if sample_changed {
                     queue_fft_refresh(&mut actions, state);
                 }
@@ -2328,6 +2325,37 @@ mod tests {
             .expect("source cache");
         assert!(source.samples.len() <= crate::analysis::fft::DEFAULT_MAX_FFT_POINTS);
         assert!(source.decimation_factor > 1);
+    }
+
+    #[test]
+    fn test_refresh_fft_from_source_waveform_syncs_auto_n_control_to_effective_samples() {
+        let mut app_state = AppState::default();
+        let fs = 2_000_000.0;
+        let n = crate::analysis::fft::DEFAULT_MAX_FFT_POINTS * 3;
+        let time: Vec<f64> = (0..n).map(|i| i as f64 / fs).collect();
+        let values: Vec<f64> = (0..n)
+            .map(|i| (2.0 * PI * 250_000.0 * i as f64 / fs).sin())
+            .collect();
+        app_state
+            .simulation
+            .waveforms
+            .push(crate::state::WaveformData::new(
+                "V(out)", time, values, "#4aa3ff",
+            ));
+        app_state
+            .fft_state
+            .set_input_fidelity(InputFidelity::Interactive);
+        app_state.fft_state.sample_count_auto = true;
+        app_state.fft_state.sample_count = 2048;
+
+        refresh_fft_from_source_waveform(&mut app_state, "V(out)");
+
+        let source = app_state
+            .fft_state
+            .source_cache
+            .as_ref()
+            .expect("source cache");
+        assert_eq!(app_state.fft_state.sample_count, source.samples.len());
     }
 
     #[test]

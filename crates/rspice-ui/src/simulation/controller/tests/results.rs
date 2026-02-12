@@ -819,6 +819,48 @@ fn test_update_waveforms_transient_fft_interactive_mode_caps_large_uniform_input
 }
 
 #[test]
+fn test_update_waveforms_transient_fft_auto_n_tracks_effective_sample_count() {
+    use crate::simulation::results::WaveformData as EngineWaveformData;
+    use crate::simulation::SimulationResult;
+    use std::collections::HashMap;
+
+    let controller = SimulationController::new();
+    let mut state = AppState::default();
+    state
+        .fft_state
+        .set_input_fidelity(crate::analysis::fft::state::InputFidelity::Interactive);
+    state
+        .fft_state
+        .set_selected_source(Some("V(out)".to_string()));
+    state.fft_state.sample_count_auto = true;
+    state.fft_state.sample_count = 2048;
+
+    let n = crate::analysis::fft::DEFAULT_MAX_FFT_POINTS * 3;
+    let fs = 2_000_000.0;
+    let time: Vec<f64> = (0..n).map(|i| i as f64 / fs).collect();
+    let signal: Vec<f64> = (0..n)
+        .map(|i| (2.0 * std::f64::consts::PI * 250_000.0 * i as f64 / fs).sin())
+        .collect();
+
+    let mut waveforms = HashMap::new();
+    waveforms.insert(
+        "V(out)".to_string(),
+        EngineWaveformData::new_time_domain("V(out)", time.clone(), signal),
+    );
+
+    controller.update_waveforms(
+        &mut state,
+        &SimulationResult::Transient {
+            time: time.clone(),
+            waveforms,
+        },
+    );
+
+    let source = state.fft_state.source_cache.as_ref().expect("source cache");
+    assert_eq!(state.fft_state.sample_count, source.samples.len());
+}
+
+#[test]
 fn test_update_waveforms_transient_fft_manual_window_and_sample_count_are_applied() {
     use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;

@@ -235,6 +235,7 @@ impl FftState {
             original_count: input.original_count,
             decimation_factor: input.decimation_factor,
         });
+        self.sync_sample_count_control_value();
         self.recompute_from_source();
     }
 
@@ -297,6 +298,22 @@ impl FftState {
         FftInputOptions::with_policy(self.input_policy())
             .with_time_window(time_window)
             .with_target_samples(target_samples)
+    }
+
+    /// Keep the UI `N` control value synchronized with the effective FFT input.
+    ///
+    /// - In auto mode, mirror the prepared source sample count (when available).
+    /// - In manual mode, clamp to valid FFT bounds.
+    pub fn sync_sample_count_control_value(&mut self) {
+        if self.sample_count_auto {
+            if let Some(sample_len) = self.source_cache.as_ref().map(|source| source.samples.len()) {
+                self.sample_count = sample_len.clamp(MIN_FFT_SAMPLES, MAX_REFERENCE_RESAMPLE_POINTS);
+            }
+        } else {
+            self.sample_count = self
+                .sample_count
+                .clamp(MIN_FFT_SAMPLES, MAX_REFERENCE_RESAMPLE_POINTS);
+        }
     }
 
     /// Recompute FFT data from cached source using current window.
@@ -854,6 +871,40 @@ mod tests {
         assert!(state.analysis.is_some());
         assert!(state.source_cache.is_some());
         assert_eq!(state.selected_source.as_deref(), Some("V(out)"));
+    }
+
+    #[test]
+    fn test_state_load_prepared_input_syncs_sample_count_when_auto_enabled() {
+        let mut state = FftState::new();
+        state.sample_count_auto = true;
+        state.sample_count = 4096;
+        let input = PreparedFftInput {
+            name: "V(out)".to_string(),
+            samples: (0..1024).map(|i| (i as f64).sin()).collect(),
+            sample_rate: 8_000.0,
+            original_count: 1024,
+            decimation_factor: 1,
+        };
+
+        state.load_prepared_input(input);
+        assert_eq!(state.sample_count, 1024);
+    }
+
+    #[test]
+    fn test_state_load_prepared_input_preserves_manual_sample_count_when_auto_disabled() {
+        let mut state = FftState::new();
+        state.sample_count_auto = false;
+        state.sample_count = 2048;
+        let input = PreparedFftInput {
+            name: "V(out)".to_string(),
+            samples: (0..1024).map(|i| (i as f64).sin()).collect(),
+            sample_rate: 8_000.0,
+            original_count: 1024,
+            decimation_factor: 1,
+        };
+
+        state.load_prepared_input(input);
+        assert_eq!(state.sample_count, 2048);
     }
 
     #[test]
