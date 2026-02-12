@@ -747,12 +747,17 @@ fn format_freq_tick(freq: f64) -> String {
 }
 
 fn magnitude_to_linear(value: f64, state: &FftState) -> f64 {
+    let z0 = if state.z0.is_finite() && state.z0 > 0.0 {
+        state.z0
+    } else {
+        50.0
+    };
     match state.mag_scale {
         MagnitudeScale::Linear => value,
         MagnitudeScale::DB => 10.0_f64.powf(value / 20.0),
         MagnitudeScale::DBm => {
             let power_w = 1e-3 * 10.0_f64.powf(value / 10.0);
-            (power_w * state.z0.max(1e-9)).sqrt()
+            (power_w * z0).sqrt()
         }
     }
 }
@@ -1126,7 +1131,7 @@ fn freq_to_x(freq: f64, rect: Rect, state: &FftState) -> f32 {
             rect.min.x + t as f32 * rect.width()
         }
         FrequencyScale::Log => {
-            let f_min = state.freq_min.max(1.0);
+            let f_min = state.freq_min.max(1e-12);
             let f_max = state.freq_max;
             if f_max <= f_min || freq <= 0.0 {
                 return rect.min.x;
@@ -1489,6 +1494,19 @@ mod tests {
         // 100Hz is 1 decade from 10, which is 1/3 of 3 decades
         let x = freq_to_x(100.0, rect, &state);
         assert!((x - 100.0 / 3.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_freq_to_x_log_supports_sub_hz_ranges() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(120.0, 100.0));
+        let mut state = FftState::new();
+        state.freq_min = 1e-3;
+        state.freq_max = 1e3;
+        state.freq_scale = FrequencyScale::Log;
+
+        // 1 Hz is centered across six decades (1e-3..1e3).
+        let x = freq_to_x(1.0, rect, &state);
+        assert!((x - rect.center().x).abs() < 1.0);
     }
 
     #[test]

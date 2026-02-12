@@ -234,8 +234,16 @@ impl FftState {
         if let Some(ref data) = self.data {
             if self.freq_auto {
                 if let Some((min, max)) = data.frequency_range() {
-                    self.freq_min = min;
-                    self.freq_max = max;
+                    match self.freq_scale {
+                        FrequencyScale::Linear => {
+                            self.freq_min = min;
+                            self.freq_max = max;
+                        }
+                        FrequencyScale::Log => {
+                            self.freq_min = first_positive_frequency(data).unwrap_or(1e-12);
+                            self.freq_max = max.max(self.freq_min * 1.01);
+                        }
+                    }
                 }
             }
 
@@ -295,7 +303,18 @@ impl FftState {
 
     /// Set frequency scale
     pub fn set_freq_scale(&mut self, scale: FrequencyScale) {
+        if self.freq_scale == scale {
+            return;
+        }
         self.freq_scale = scale;
+        if self.freq_auto {
+            self.update_auto_scale();
+        } else if self.freq_scale == FrequencyScale::Log {
+            self.freq_min = self.freq_min.max(1e-12);
+            if self.freq_max <= self.freq_min {
+                self.freq_max = self.freq_min * 1.01;
+            }
+        }
     }
 
     /// Set number of harmonics for distortion analysis.
@@ -343,6 +362,13 @@ impl FftState {
     pub fn snr_db(&self) -> Option<f64> {
         self.analysis.as_ref()?.snr_db
     }
+}
+
+fn first_positive_frequency(data: &FftData) -> Option<f64> {
+    data.points
+        .iter()
+        .map(|p| p.frequency)
+        .find(|freq| freq.is_finite() && *freq > 0.0)
 }
 
 // =============================================================================
@@ -464,6 +490,37 @@ mod tests {
 
         state.set_freq_scale(FrequencyScale::Log);
         assert_eq!(state.freq_scale, FrequencyScale::Log);
+    }
+
+    #[test]
+    fn test_state_set_freq_scale_log_auto_uses_positive_min() {
+        let mut state = FftState::new();
+        let mut data = FftData::new("Test");
+        data.points = vec![
+            FftPoint::new(0.0, 1.0, 0.0),
+            FftPoint::new(5.0, 0.8, 0.0),
+            FftPoint::new(10.0, 0.6, 0.0),
+        ];
+        data.sample_rate = 20.0;
+        data.fft_size = 4;
+        state.load_data(data);
+
+        state.set_freq_scale(FrequencyScale::Log);
+        assert_eq!(state.freq_scale, FrequencyScale::Log);
+        assert!((state.freq_min - 5.0).abs() < 1e-12);
+        assert!(state.freq_max > state.freq_min);
+    }
+
+    #[test]
+    fn test_state_set_freq_scale_log_manual_clamps_nonpositive_min() {
+        let mut state = FftState::new();
+        state.freq_auto = false;
+        state.freq_min = 0.0;
+        state.freq_max = 100.0;
+
+        state.set_freq_scale(FrequencyScale::Log);
+        assert!(state.freq_min > 0.0);
+        assert!(state.freq_max > state.freq_min);
     }
 
     #[test]

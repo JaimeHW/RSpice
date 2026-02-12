@@ -61,6 +61,7 @@ impl FftPoint {
         if self.magnitude <= 0.0 {
             f64::NEG_INFINITY
         } else {
+            let z0 = if z0.is_finite() && z0 > 0.0 { z0 } else { 50.0 };
             let power_mw = (self.magnitude * self.magnitude) / z0 * 1000.0;
             10.0 * power_mw.log10()
         }
@@ -349,9 +350,12 @@ impl SpectrumAnalysis {
         analysis.fundamental_db = Some(fund_db);
 
         let guard_bins = Self::guard_bins(fft.window);
-        let mut excluded = vec![false; fft.points.len()];
-        Self::exclude_bin_region(&mut excluded, 0, 0);
-        Self::exclude_bin_region(&mut excluded, fund_bin, guard_bins);
+        let mut excluded_for_noise = vec![false; fft.points.len()];
+        let mut excluded_for_spur = vec![false; fft.points.len()];
+        Self::exclude_bin_region(&mut excluded_for_noise, 0, 0);
+        Self::exclude_bin_region(&mut excluded_for_noise, fund_bin, guard_bins);
+        Self::exclude_bin_region(&mut excluded_for_spur, 0, 0);
+        Self::exclude_bin_region(&mut excluded_for_spur, fund_bin, guard_bins);
 
         // Harmonic extraction
         let mut harmonic_power_sum = 0.0;
@@ -372,7 +376,7 @@ impl SpectrumAnalysis {
 
             analysis.harmonics.push((harm_freq, harm_db));
             harmonic_power_sum += harm_mag * harm_mag;
-            Self::exclude_bin_region(&mut excluded, harm_idx, guard_bins);
+            Self::exclude_bin_region(&mut excluded_for_noise, harm_idx, guard_bins);
         }
 
         let thd_ratio = (harmonic_power_sum / fund_power).sqrt();
@@ -397,11 +401,13 @@ impl SpectrumAnalysis {
                 continue;
             }
 
-            if excluded.get(idx).copied().unwrap_or(false) {
-                continue;
+            if !excluded_for_spur.get(idx).copied().unwrap_or(false) {
+                largest_spur_db = largest_spur_db.max(db);
             }
 
-            largest_spur_db = largest_spur_db.max(db);
+            if excluded_for_noise.get(idx).copied().unwrap_or(false) {
+                continue;
+            }
             noise_power_sum += mag * mag;
             noise_db_bins.push(db);
         }
@@ -630,6 +636,16 @@ mod tests {
         let p = FftPoint::new(100.0, 1.0, 0.0);
         let dbm = p.magnitude_dbm(50.0);
         assert!(approx_eq_rel(dbm, 13.01, 0.1));
+    }
+
+    #[test]
+    fn test_magnitude_dbm_invalid_impedance_falls_back_to_nominal() {
+        let p = FftPoint::new(100.0, 1.0, 0.0);
+        let nominal = p.magnitude_dbm(50.0);
+        let invalid = p.magnitude_dbm(0.0);
+        assert!(nominal.is_finite());
+        assert!(invalid.is_finite());
+        assert!(approx_eq_rel(invalid, nominal, 1e-9));
     }
 
     #[test]
@@ -872,6 +888,26 @@ mod tests {
         if let Some(sfdr) = analysis.sfdr_db {
             assert!(sfdr > 30.0 && sfdr < 50.0);
         }
+    }
+
+    #[test]
+    fn test_analysis_sfdr_includes_harmonic_spur() {
+        let fs = 20_000.0;
+        let data: Vec<f64> = (0..4096)
+            .map(|i| {
+                let t = i as f64 / fs;
+                (2.0 * PI * 1_000.0 * t).sin()
+                    + 0.2 * (2.0 * PI * 2_000.0 * t).sin()
+                    + 0.01 * (2.0 * PI * 3_700.0 * t).sin()
+            })
+            .collect();
+
+        let fft = FftData::from_time_domain("SFDR-Harmonic", &data, fs, WindowFunction::Hanning);
+        let analysis = SpectrumAnalysis::analyze(&fft, 10);
+
+        // Largest spur is the 2nd harmonic at about -14 dBc.
+        let sfdr = analysis.sfdr_db.expect("expected SFDR");
+        assert!(sfdr > 10.0 && sfdr < 20.0);
     }
 
     #[test]
