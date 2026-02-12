@@ -9,7 +9,7 @@ use super::data::{FftData, FftPoint, SpectrumAnalysis, SpectrumNormalization};
 use super::state::{FftState, FrequencyScale, InputFidelity, MagnitudeScale};
 use super::window::WindowFunction;
 use crate::common::app::AppState;
-use crate::common::viewer_style::viewer_header_bg_color;
+use crate::common::viewer_style::{viewer_chart_bg_color, viewer_header_bg_color};
 use crate::state::AnalysisType;
 use crate::utils::vertical_label_layout::{
     place_vertical_line_labels, LabelSide, VerticalLabelLayoutConfig, VerticalLabelPlacement,
@@ -21,7 +21,7 @@ use crate::utils::vertical_label_layout::{
 // =============================================================================
 
 fn chart_bg_color() -> Color32 {
-    Color32::from_rgb(15, 17, 21)
+    viewer_chart_bg_color()
 }
 
 fn surface_bg_color() -> Color32 {

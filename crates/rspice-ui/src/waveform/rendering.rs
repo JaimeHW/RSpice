@@ -27,7 +27,7 @@ use egui::{
 use super::axis::{self, GridLineType};
 use super::state::{TraceData, ViewTransform, WaveformViewerState};
 use crate::common::app::AppState;
-use crate::common::viewer_style::viewer_header_bg_color;
+use crate::common::viewer_style::{viewer_chart_bg_color, viewer_header_bg_color};
 use crate::utils::vertical_label_layout::{
     place_vertical_line_labels, LabelSide, VerticalLabelLayoutConfig, VerticalLabelPlacement,
     VerticalLabelRequest,
@@ -535,7 +535,7 @@ fn render_plot_area(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Wavef
     viewer_state.view.plot_height = layout.plot.height() as f64;
 
     // Background
-    painter.rect_filled(layout.plot, Rounding::ZERO, Color32::from_rgb(18, 20, 24));
+    painter.rect_filled(layout.plot, Rounding::ZERO, viewer_chart_bg_color());
 
     // Clip to plot area for all subsequent rendering
     let clip_rect = layout.plot;
