@@ -7,7 +7,9 @@ impl SimulationController {
         time: &[f64],
         waveforms: &std::collections::HashMap<String, crate::simulation::WaveformData>,
     ) {
-        let Some((_name, waveform)) = Self::primary_waveform(waveforms, time.len()) else {
+        let preferred_fft_source = state.fft_state.selected_source.as_deref();
+        let Some(waveform) = Self::fft_source_waveform(waveforms, time.len(), preferred_fft_source)
+        else {
             return;
         };
 
@@ -22,18 +24,13 @@ impl SimulationController {
             }
         }
 
-        if let Some((samples, sample_rate)) =
-            Self::downsample_for_fft(time, &waveform.y_values, 4096)
-        {
-            let fft_data = crate::analysis::fft::FftData::from_time_domain(
-                &format!("FFT({})", waveform.name),
-                &samples,
-                sample_rate,
-                state.fft_state.window,
-            );
-            if !fft_data.is_empty() {
-                state.fft_state.load_data(fft_data);
-            }
+        if let Some(prepared) = crate::analysis::fft::prepare_fft_input(
+            &waveform.name,
+            time,
+            &waveform.y_values,
+            crate::analysis::fft::DEFAULT_MAX_FFT_POINTS,
+        ) {
+            state.fft_state.load_prepared_input(prepared);
         }
     }
 
@@ -102,10 +99,27 @@ impl SimulationController {
         }
     }
 
-    fn primary_waveform<'a>(
+    fn fft_source_waveform<'a>(
         waveforms: &'a std::collections::HashMap<String, crate::simulation::WaveformData>,
         expected_len: usize,
-    ) -> Option<(&'a str, &'a crate::simulation::WaveformData)> {
+        preferred_name: Option<&str>,
+    ) -> Option<&'a crate::simulation::WaveformData> {
+        if let Some(name) = preferred_name {
+            if let Some(wf) = waveforms
+                .get(name)
+                .filter(|wf| wf.y_values.len() == expected_len)
+            {
+                return Some(wf);
+            }
+
+            if let Some((_key, wf)) = waveforms
+                .iter()
+                .find(|(_, wf)| wf.name == name && wf.y_values.len() == expected_len)
+            {
+                return Some(wf);
+            }
+        }
+
         let mut names: Vec<_> = waveforms.keys().cloned().collect();
         names.sort();
         for name in names {
@@ -113,7 +127,7 @@ impl SimulationController {
                 continue;
             };
             if waveform.y_values.len() == expected_len {
-                return Some((waveform.name.as_str(), waveform));
+                return Some(waveform);
             }
         }
         None
@@ -180,42 +194,6 @@ impl SimulationController {
         intervals.sort_by(|a, b| a.total_cmp(b));
         let median = intervals[intervals.len() / 2];
         (median.is_finite() && median > 0.0).then_some(median)
-    }
-
-    fn downsample_for_fft(
-        time: &[f64],
-        signal: &[f64],
-        max_points: usize,
-    ) -> Option<(Vec<f64>, f64)> {
-        let n = time.len().min(signal.len());
-        if n < 16 || max_points < 16 {
-            return None;
-        }
-        let step = (n / max_points).max(1);
-
-        let mut values = Vec::with_capacity((n / step) + 1);
-        let mut times = Vec::with_capacity((n / step) + 1);
-        for idx in (0..n).step_by(step) {
-            let t = time[idx];
-            let y = signal[idx];
-            if t.is_finite() && y.is_finite() {
-                times.push(t);
-                values.push(y);
-            }
-        }
-        if values.len() < 16 {
-            return None;
-        }
-
-        let duration = times[times.len() - 1] - times[0];
-        if !duration.is_finite() || duration <= 0.0 {
-            return None;
-        }
-        let sample_rate = (values.len().saturating_sub(1) as f64) / duration;
-        if !sample_rate.is_finite() || sample_rate <= 0.0 {
-            return None;
-        }
-        Some((values, sample_rate))
     }
 
     fn is_sparameter_trace_name(name: &str) -> bool {

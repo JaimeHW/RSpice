@@ -18,12 +18,14 @@
 
 pub mod compute;
 pub mod data;
+pub mod pipeline;
 pub mod rendering;
 pub mod state;
 pub mod window;
 
 pub use compute::{compute_fft, FftResult};
 pub use data::{FftData, FftPoint, SpectrumAnalysis};
+pub use pipeline::{prepare_fft_input, PreparedFftInput, DEFAULT_MAX_FFT_POINTS, MIN_FFT_SAMPLES};
 pub use rendering::render_fft_plot;
 pub use state::FftState;
 pub use window::WindowFunction;

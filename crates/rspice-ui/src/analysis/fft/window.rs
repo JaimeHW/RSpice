@@ -160,6 +160,9 @@ fn hanning_window(length: usize) -> Vec<f64> {
     if length == 0 {
         return Vec::new();
     }
+    if length == 1 {
+        return vec![1.0];
+    }
     let n = length as f64;
     (0..length)
         .map(|i| 0.5 * (1.0 - (2.0 * PI * i as f64 / (n - 1.0)).cos()))
@@ -170,6 +173,9 @@ fn hamming_window(length: usize) -> Vec<f64> {
     if length == 0 {
         return Vec::new();
     }
+    if length == 1 {
+        return vec![1.0];
+    }
     let n = length as f64;
     (0..length)
         .map(|i| 0.54 - 0.46 * (2.0 * PI * i as f64 / (n - 1.0)).cos())
@@ -179,6 +185,9 @@ fn hamming_window(length: usize) -> Vec<f64> {
 fn blackman_window(length: usize) -> Vec<f64> {
     if length == 0 {
         return Vec::new();
+    }
+    if length == 1 {
+        return vec![1.0];
     }
     let n = length as f64;
     let a0 = 0.42;
@@ -197,6 +206,9 @@ fn blackman_harris_window(length: usize) -> Vec<f64> {
     if length == 0 {
         return Vec::new();
     }
+    if length == 1 {
+        return vec![1.0];
+    }
     let n = length as f64;
     let a0 = 0.35875;
     let a1 = 0.48829;
@@ -214,6 +226,9 @@ fn blackman_harris_window(length: usize) -> Vec<f64> {
 fn flat_top_window(length: usize) -> Vec<f64> {
     if length == 0 {
         return Vec::new();
+    }
+    if length == 1 {
+        return vec![1.0];
     }
     let n = length as f64;
     let a0 = 0.21557895;
@@ -235,6 +250,9 @@ fn kaiser_window(length: usize, beta: f64) -> Vec<f64> {
     if length == 0 {
         return Vec::new();
     }
+    if length == 1 {
+        return vec![1.0];
+    }
     let n = length as f64;
     let denom = bessel_i0(beta);
 
@@ -250,6 +268,9 @@ fn kaiser_window(length: usize, beta: f64) -> Vec<f64> {
 fn gaussian_window(length: usize, sigma: f64) -> Vec<f64> {
     if length == 0 {
         return Vec::new();
+    }
+    if length == 1 {
+        return vec![1.0];
     }
     let n = length as f64;
     let center = (n - 1.0) / 2.0;
@@ -660,5 +681,15 @@ mod tests {
         let w1 = generate_window_with_param(WindowFunction::Kaiser, 64, 3.0);
         let w2 = generate_window_with_param(WindowFunction::Kaiser, 64, 8.0);
         assert_ne!(w1[0], w2[0]);
+    }
+
+    #[test]
+    fn test_generate_window_single_sample_is_finite() {
+        for wtype in WindowFunction::all() {
+            let w = generate_window(*wtype, 1);
+            assert_eq!(w.len(), 1);
+            assert!(w[0].is_finite());
+            assert!((w[0] - 1.0).abs() < 1e-12);
+        }
     }
 }

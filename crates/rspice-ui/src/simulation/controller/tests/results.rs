@@ -399,6 +399,54 @@ fn test_update_waveforms_transient_populates_waveforms_eye_and_fft() {
 }
 
 #[test]
+fn test_update_waveforms_transient_prefers_selected_fft_source_trace() {
+    use crate::simulation::results::WaveformData as EngineWaveformData;
+    use crate::simulation::SimulationResult;
+    use std::collections::HashMap;
+
+    let controller = SimulationController::new();
+    let mut state = AppState::default();
+    state
+        .fft_state
+        .set_selected_source(Some("V(sel)".to_string()));
+
+    let sample_count = 4096usize;
+    let fs = 100_000.0;
+    let time: Vec<f64> = (0..sample_count).map(|i| i as f64 / fs).collect();
+    let sig_a: Vec<f64> = time
+        .iter()
+        .map(|t| (2.0 * std::f64::consts::PI * 2_000.0 * t).sin())
+        .collect();
+    let sig_b: Vec<f64> = time
+        .iter()
+        .map(|t| (2.0 * std::f64::consts::PI * 9_000.0 * t).sin())
+        .collect();
+
+    let mut waveforms = HashMap::new();
+    waveforms.insert(
+        "V(a)".to_string(),
+        EngineWaveformData::new_time_domain("V(a)", time.clone(), sig_a),
+    );
+    waveforms.insert(
+        "V(sel)".to_string(),
+        EngineWaveformData::new_time_domain("V(sel)", time.clone(), sig_b),
+    );
+
+    controller.update_waveforms(
+        &mut state,
+        &SimulationResult::Transient {
+            time: time.clone(),
+            waveforms,
+        },
+    );
+
+    let source = state.fft_state.source_cache.as_ref().expect("source cache");
+    assert_eq!(source.name, "V(sel)");
+    let fundamental = state.fft_state.fundamental_freq().expect("fundamental");
+    assert!((fundamental - 9_000.0).abs() < 600.0);
+}
+
+#[test]
 fn test_update_waveforms_ac_populates_bode_nyquist_and_smith_data() {
     use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;

@@ -4,6 +4,8 @@
 
 use std::f64::consts::PI;
 
+use rustfft::{num_complex::Complex, FftPlanner};
+
 use super::window::{apply_window_copy, generate_window, WindowFunction};
 
 // =============================================================================
@@ -110,8 +112,7 @@ impl FftData {
         }
     }
 
-    /// Create from time-domain data using DFT
-    /// Note: For production use, replace with FFT library
+    /// Create from uniformly sampled time-domain data using FFT.
     pub fn from_time_domain(
         name: &str,
         data: &[f64],
@@ -119,7 +120,7 @@ impl FftData {
         window: WindowFunction,
     ) -> Self {
         let n = data.len();
-        if n == 0 {
+        if n == 0 || !sample_rate.is_finite() || sample_rate <= 0.0 {
             return Self::new(name);
         }
 
@@ -127,35 +128,32 @@ impl FftData {
         let win = generate_window(window, n);
         let windowed = apply_window_copy(data, &win);
 
-        // Calculate coherent gain correction
-        let cg = window.coherent_gain();
+        // Coherent gain from actual generated coefficients, not a table constant.
+        let cg = win.iter().sum::<f64>() / n as f64;
+        if !cg.is_finite() || cg.abs() < 1e-15 {
+            return Self::new(name);
+        }
 
-        // Compute DFT (positive frequencies only)
+        let mut buffer: Vec<Complex<f64>> =
+            windowed.into_iter().map(|x| Complex::new(x, 0.0)).collect();
+        let mut planner = FftPlanner::new();
+        let fft = planner.plan_fft_forward(n);
+        fft.process(&mut buffer);
+
+        // One-sided spectrum: include DC..Nyquist (Nyquist exists only for even n).
         let n_freqs = n / 2 + 1;
         let mut points = Vec::with_capacity(n_freqs);
+        let base_scale = 1.0 / (n as f64 * cg);
+        let has_nyquist = n % 2 == 0;
 
-        for k in 0..n_freqs {
+        for (k, bin) in buffer.iter().take(n_freqs).enumerate() {
             let freq = k as f64 * sample_rate / n as f64;
-            let mut real = 0.0;
-            let mut imag = 0.0;
-
-            for (j, &x) in windowed.iter().enumerate() {
-                let angle = -2.0 * PI * k as f64 * j as f64 / n as f64;
-                real += x * angle.cos();
-                imag += x * angle.sin();
+            let mut scale = base_scale;
+            if k != 0 && !(has_nyquist && k == n / 2) {
+                scale *= 2.0;
             }
 
-            // Normalize
-            let scale = if k == 0 || k == n / 2 {
-                1.0 / n as f64 / cg
-            } else {
-                2.0 / n as f64 / cg // Factor of 2 for one-sided spectrum
-            };
-
-            real *= scale;
-            imag *= scale;
-
-            points.push(FftPoint::from_complex(freq, real, imag));
+            points.push(FftPoint::from_complex(freq, bin.re * scale, bin.im * scale));
         }
 
         Self {
@@ -333,80 +331,197 @@ impl SpectrumAnalysis {
     /// Analyze FFT data
     pub fn analyze(fft: &FftData, num_harmonics: usize) -> Self {
         let mut analysis = Self::default();
-
-        // Find fundamental (largest peak excluding DC)
-        let Some((fund_idx, fund_peak)) = fft.find_peak() else {
+        let Some((fund_idx, _fund_peak)) = fft.find_peak() else {
             return analysis;
         };
 
-        analysis.fundamental_frequency = Some(fund_peak.frequency);
-        analysis.fundamental_db = Some(fund_peak.magnitude_db());
+        let fundamental = Self::interpolate_peak(fft, fund_idx).unwrap_or_else(|| {
+            let p = fft.points[fund_idx];
+            (fund_idx, p.frequency, p.magnitude, p.magnitude_db())
+        });
+        let (fund_bin, fund_freq, fund_mag, fund_db) = fundamental;
+        let fund_power = fund_mag * fund_mag;
+        if !(fund_power.is_finite() && fund_power > 0.0) {
+            return analysis;
+        }
 
-        // Find harmonics
-        let fund_freq = fund_peak.frequency;
-        let fund_power = fund_peak.magnitude.powi(2);
+        analysis.fundamental_frequency = Some(fund_freq);
+        analysis.fundamental_db = Some(fund_db);
+
+        let guard_bins = Self::guard_bins(fft.window);
+        let mut excluded = vec![false; fft.points.len()];
+        Self::exclude_bin_region(&mut excluded, 0, 0);
+        Self::exclude_bin_region(&mut excluded, fund_bin, guard_bins);
+
+        // Harmonic extraction
         let mut harmonic_power_sum = 0.0;
-
-        for h in 2..=num_harmonics {
-            let harmonic_freq = fund_freq * h as f64;
-            if harmonic_freq > fft.nyquist() {
+        let harmonic_count = num_harmonics.max(1);
+        for h in 2..=harmonic_count {
+            let target = fund_freq * h as f64;
+            if target > fft.nyquist() {
                 break;
             }
-
-            if let Some(point) = fft.interpolate(harmonic_freq) {
-                analysis
-                    .harmonics
-                    .push((point.frequency, point.magnitude_db()));
-                harmonic_power_sum += point.magnitude.powi(2);
+            let Some((harm_idx, harm_freq, harm_mag, harm_db)) =
+                Self::find_harmonic_peak(fft, target)
+            else {
+                continue;
+            };
+            if !harm_mag.is_finite() || harm_mag <= 0.0 {
+                continue;
             }
+
+            analysis.harmonics.push((harm_freq, harm_db));
+            harmonic_power_sum += harm_mag * harm_mag;
+            Self::exclude_bin_region(&mut excluded, harm_idx, guard_bins);
         }
 
-        // Calculate THD
-        if fund_power > 0.0 {
-            let thd_ratio = (harmonic_power_sum / fund_power).sqrt();
+        let thd_ratio = (harmonic_power_sum / fund_power).sqrt();
+        if thd_ratio.is_finite() {
             analysis.thd_percent = Some(thd_ratio * 100.0);
-            analysis.thd_db = Some(20.0 * thd_ratio.log10());
+            if thd_ratio > 0.0 {
+                analysis.thd_db = Some(20.0 * thd_ratio.log10());
+            }
         }
 
-        // Calculate SFDR (fundamental to next largest spur)
-        let peaks = fft.find_peaks(fund_peak.magnitude_db() - 100.0);
+        // Largest spur outside guarded signal/harmonic bins.
         let mut largest_spur_db = f64::NEG_INFINITY;
-
-        for (idx, peak) in &peaks {
-            if *idx != fund_idx {
-                let db = peak.magnitude_db();
-                if db > largest_spur_db {
-                    largest_spur_db = db;
-                }
+        let mut noise_power_sum = 0.0;
+        let mut noise_db_bins = Vec::new();
+        for (idx, point) in fft.points.iter().enumerate().skip(1) {
+            let mag = point.magnitude;
+            if !mag.is_finite() || mag <= 0.0 {
+                continue;
             }
+            let db = point.magnitude_db();
+            if !db.is_finite() {
+                continue;
+            }
+
+            if excluded.get(idx).copied().unwrap_or(false) {
+                continue;
+            }
+
+            largest_spur_db = largest_spur_db.max(db);
+            noise_power_sum += mag * mag;
+            noise_db_bins.push(db);
         }
 
         if largest_spur_db.is_finite() {
-            if let Some(fund_db) = analysis.fundamental_db {
-                analysis.sfdr_db = Some(fund_db - largest_spur_db);
+            analysis.sfdr_db = Some(fund_db - largest_spur_db);
+        }
+
+        if !noise_db_bins.is_empty() {
+            noise_db_bins.sort_by(|a, b| a.total_cmp(b));
+            let mid = noise_db_bins.len() / 2;
+            let noise_floor = if noise_db_bins.len() % 2 == 0 {
+                0.5 * (noise_db_bins[mid - 1] + noise_db_bins[mid])
+            } else {
+                noise_db_bins[mid]
+            };
+            analysis.noise_floor_db = Some(noise_floor);
+        }
+
+        if noise_power_sum > 0.0 {
+            let snr = 10.0 * (fund_power / noise_power_sum).log10();
+            if snr.is_finite() {
+                analysis.snr_db = Some(snr);
             }
         }
 
-        // Estimate noise floor (median of bottom 25% magnitudes)
-        let mut mags: Vec<f64> = fft.points[1..]
-            .iter()
-            .map(|p| p.magnitude_db())
-            .filter(|db| db.is_finite())
-            .collect();
-        mags.sort_by(|a, b| a.total_cmp(b));
-
-        if mags.len() > 4 {
-            let quarter = mags.len() / 4;
-            let noise_floor: f64 = mags[..quarter].iter().sum::<f64>() / quarter as f64;
-            analysis.noise_floor_db = Some(noise_floor);
-
-            // SNR = fundamental - noise floor
-            if let Some(fund_db) = analysis.fundamental_db {
-                analysis.snr_db = Some(fund_db - noise_floor);
+        let noise_and_distortion = noise_power_sum + harmonic_power_sum;
+        if noise_and_distortion > 0.0 {
+            let sinad = 10.0 * (fund_power / noise_and_distortion).log10();
+            if sinad.is_finite() {
+                analysis.sinad_db = Some(sinad);
             }
         }
 
         analysis
+    }
+
+    fn interpolate_peak(fft: &FftData, idx: usize) -> Option<(usize, f64, f64, f64)> {
+        let point = fft.points.get(idx)?;
+        let mut freq = point.frequency;
+        let mut db = point.magnitude_db();
+        if !db.is_finite() {
+            return None;
+        }
+
+        if idx > 0 && idx + 1 < fft.points.len() {
+            let left = fft.points[idx - 1].magnitude_db();
+            let center = fft.points[idx].magnitude_db();
+            let right = fft.points[idx + 1].magnitude_db();
+            if left.is_finite() && center.is_finite() && right.is_finite() {
+                let denom = left - 2.0 * center + right;
+                if denom.abs() > 1e-12 {
+                    let delta = (0.5 * (left - right) / denom).clamp(-0.5, 0.5);
+                    let df = fft.frequency_resolution();
+                    freq = point.frequency + delta * df;
+                    db = center - 0.25 * (left - right) * delta;
+                }
+            }
+        }
+
+        let mag = if db.is_finite() {
+            10.0_f64.powf(db / 20.0)
+        } else {
+            point.magnitude
+        };
+        if !mag.is_finite() || mag <= 0.0 {
+            return None;
+        }
+
+        Some((idx, freq, mag, db))
+    }
+
+    fn find_harmonic_peak(fft: &FftData, target_freq: f64) -> Option<(usize, f64, f64, f64)> {
+        if fft.points.len() < 3 {
+            return None;
+        }
+        let df = fft.frequency_resolution();
+        if df <= 0.0 || !df.is_finite() {
+            return None;
+        }
+
+        let center = (target_freq / df).round() as isize;
+        let search = 2isize;
+        let min_idx = (center - search).max(1) as usize;
+        let max_idx = (center + search).min((fft.points.len() - 1) as isize) as usize;
+        if min_idx > max_idx {
+            return None;
+        }
+
+        let mut best_idx = None;
+        let mut best_mag = f64::NEG_INFINITY;
+        for idx in min_idx..=max_idx {
+            let mag = fft.points[idx].magnitude;
+            if mag.is_finite() && mag > best_mag {
+                best_mag = mag;
+                best_idx = Some(idx);
+            }
+        }
+        let idx = best_idx?;
+        Self::interpolate_peak(fft, idx)
+    }
+
+    fn guard_bins(window: WindowFunction) -> usize {
+        match window {
+            WindowFunction::Rectangular => 1,
+            WindowFunction::Hanning | WindowFunction::Hamming => 2,
+            WindowFunction::Blackman | WindowFunction::Kaiser | WindowFunction::Gaussian => 3,
+            WindowFunction::BlackmanHarris | WindowFunction::FlatTop => 4,
+        }
+    }
+
+    fn exclude_bin_region(mask: &mut [bool], center: usize, radius: usize) {
+        if mask.is_empty() {
+            return;
+        }
+        let start = center.saturating_sub(radius);
+        let end = (center + radius).min(mask.len() - 1);
+        for idx in start..=end {
+            mask[idx] = true;
+        }
     }
 
     /// Format THD for display
@@ -819,5 +934,38 @@ mod tests {
             .map(|db| db.is_finite())
             .unwrap_or(false));
         assert!(analysis.snr_db.map(|db| db.is_finite()).unwrap_or(false));
+    }
+
+    #[test]
+    fn test_analysis_reports_sinad_for_distorted_signal() {
+        let fs = 20_000.0;
+        let data: Vec<f64> = (0..4096)
+            .map(|i| {
+                let t = i as f64 / fs;
+                (2.0 * PI * 1000.0 * t).sin()
+                    + 0.1 * (2.0 * PI * 2000.0 * t).sin()
+                    + 0.01 * (2.0 * PI * 3500.0 * t).sin()
+            })
+            .collect();
+        let fft = FftData::from_time_domain("SINAD", &data, fs, WindowFunction::Blackman);
+        let analysis = SpectrumAnalysis::analyze(&fft, 10);
+        assert!(analysis.sinad_db.map(|v| v.is_finite()).unwrap_or(false));
+    }
+
+    #[test]
+    fn test_fft_from_time_domain_handles_odd_length() {
+        let fs = 1000.0;
+        let n = 255usize;
+        let f_sig = 117.0;
+        let data: Vec<f64> = (0..n)
+            .map(|i| {
+                let t = i as f64 / fs;
+                (2.0 * PI * f_sig * t).sin()
+            })
+            .collect();
+        let fft = FftData::from_time_domain("Odd", &data, fs, WindowFunction::Hanning);
+        assert_eq!(fft.len(), n / 2 + 1);
+        let (_, peak) = fft.find_peak().expect("peak exists");
+        assert!((peak.frequency - f_sig).abs() < 2.0 * fft.frequency_resolution());
     }
 }

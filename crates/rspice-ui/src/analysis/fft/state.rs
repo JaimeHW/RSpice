@@ -3,6 +3,7 @@
 //! Viewer state for FFT/spectrum display.
 
 use super::data::{FftData, SpectrumAnalysis};
+use super::pipeline::PreparedFftInput;
 use super::window::WindowFunction;
 
 // =============================================================================
@@ -62,6 +63,15 @@ impl FrequencyScale {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct FftSourceCache {
+    pub name: String,
+    pub samples: Vec<f64>,
+    pub sample_rate: f64,
+    pub original_count: usize,
+    pub decimation_factor: usize,
+}
+
 // =============================================================================
 // FFT State
 // =============================================================================
@@ -73,6 +83,10 @@ pub struct FftState {
     pub data: Option<FftData>,
     /// Analysis results
     pub analysis: Option<SpectrumAnalysis>,
+    /// Cached source used to derive current FFT data.
+    pub source_cache: Option<FftSourceCache>,
+    /// User-selected source trace name preference.
+    pub selected_source: Option<String>,
     /// Window function
     pub window: WindowFunction,
     /// Magnitude scale
@@ -103,6 +117,8 @@ pub struct FftState {
     pub freq_auto: bool,
     /// Reference impedance for dBm
     pub z0: f64,
+    /// Interactive marker frequency (Hz) placed by user.
+    pub marker_frequency: Option<f64>,
 }
 
 impl Default for FftState {
@@ -110,6 +126,8 @@ impl Default for FftState {
         Self {
             data: None,
             analysis: None,
+            source_cache: None,
+            selected_source: None,
             window: WindowFunction::Hanning,
             mag_scale: MagnitudeScale::DB,
             freq_scale: FrequencyScale::Linear,
@@ -125,6 +143,7 @@ impl Default for FftState {
             freq_max: 1000.0,
             freq_auto: true,
             z0: 50.0,
+            marker_frequency: None,
         }
     }
 }
@@ -140,13 +159,64 @@ impl FftState {
         let analysis = SpectrumAnalysis::analyze(&data, self.num_harmonics);
         self.data = Some(data);
         self.analysis = Some(analysis);
+        self.source_cache = None;
         self.update_auto_scale();
+    }
+
+    /// Load prepared uniformly sampled source and compute FFT using current settings.
+    pub fn load_prepared_input(&mut self, input: PreparedFftInput) {
+        self.selected_source = Some(input.name.clone());
+        self.source_cache = Some(FftSourceCache {
+            name: input.name,
+            samples: input.samples,
+            sample_rate: input.sample_rate,
+            original_count: input.original_count,
+            decimation_factor: input.decimation_factor,
+        });
+        self.recompute_from_source();
+    }
+
+    /// Select preferred source trace name.
+    pub fn set_selected_source(&mut self, source_name: Option<String>) {
+        self.selected_source = source_name;
+    }
+
+    /// Recompute FFT data from cached source using current window.
+    pub fn recompute_from_source(&mut self) {
+        let Some(source) = self.source_cache.as_ref() else {
+            return;
+        };
+        let data = FftData::from_time_domain(
+            &format!("FFT({})", source.name),
+            &source.samples,
+            source.sample_rate,
+            self.window,
+        );
+        if data.is_empty() {
+            self.data = None;
+            self.analysis = None;
+            return;
+        }
+        let analysis = SpectrumAnalysis::analyze(&data, self.num_harmonics);
+        self.data = Some(data);
+        self.analysis = Some(analysis);
+        self.update_auto_scale();
+    }
+
+    /// Recompute scalar analysis from currently loaded spectrum data.
+    pub fn recompute_analysis(&mut self) {
+        if let Some(data) = self.data.as_ref() {
+            self.analysis = Some(SpectrumAnalysis::analyze(data, self.num_harmonics));
+        } else {
+            self.analysis = None;
+        }
     }
 
     /// Clear data
     pub fn clear(&mut self) {
         self.data = None;
         self.analysis = None;
+        self.source_cache = None;
     }
 
     /// Has data?
@@ -170,10 +240,34 @@ impl FftState {
             }
 
             if self.mag_auto {
-                if let Some((min, max)) = data.magnitude_range_db() {
-                    let padding = (max - min) * 0.1;
-                    self.mag_min = (min - padding).floor().max(-140.0);
-                    self.mag_max = (max + padding).ceil().min(40.0);
+                let mut values = Vec::new();
+                for point in &data.points {
+                    let value = match self.mag_scale {
+                        MagnitudeScale::DB => point.magnitude_db(),
+                        MagnitudeScale::DBm => point.magnitude_dbm(self.z0),
+                        MagnitudeScale::Linear => point.magnitude,
+                    };
+                    if value.is_finite() {
+                        values.push(value);
+                    }
+                }
+
+                if !values.is_empty() {
+                    let min = values.iter().copied().fold(f64::INFINITY, f64::min);
+                    let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+                    let span = (max - min).abs();
+                    let padding = if span > 0.0 { span * 0.1 } else { 1.0 };
+
+                    match self.mag_scale {
+                        MagnitudeScale::Linear => {
+                            self.mag_min = (min - padding).max(0.0);
+                            self.mag_max = (max + padding).max(self.mag_min + 1e-9);
+                        }
+                        _ => {
+                            self.mag_min = (min - padding).floor().max(-300.0);
+                            self.mag_max = (max + padding).ceil().min(120.0);
+                        }
+                    }
                 }
             }
         }
@@ -181,18 +275,33 @@ impl FftState {
 
     /// Set window function
     pub fn set_window(&mut self, window: WindowFunction) {
+        if self.window == window {
+            return;
+        }
         self.window = window;
-        // Would need to recalculate FFT in real implementation
+        self.recompute_from_source();
     }
 
     /// Set magnitude scale
     pub fn set_mag_scale(&mut self, scale: MagnitudeScale) {
+        if self.mag_scale == scale {
+            return;
+        }
         self.mag_scale = scale;
+        if self.mag_auto {
+            self.update_auto_scale();
+        }
     }
 
     /// Set frequency scale
     pub fn set_freq_scale(&mut self, scale: FrequencyScale) {
         self.freq_scale = scale;
+    }
+
+    /// Set number of harmonics for distortion analysis.
+    pub fn set_num_harmonics(&mut self, num_harmonics: usize) {
+        self.num_harmonics = num_harmonics.max(1);
+        self.recompute_analysis();
     }
 
     /// Toggle grid
@@ -208,6 +317,11 @@ impl FftState {
     /// Toggle harmonics
     pub fn toggle_harmonics(&mut self) {
         self.show_harmonics = !self.show_harmonics;
+    }
+
+    /// Set marker frequency.
+    pub fn set_marker_frequency(&mut self, marker_frequency: Option<f64>) {
+        self.marker_frequency = marker_frequency;
     }
 
     /// Get fundamental frequency
@@ -238,6 +352,7 @@ impl FftState {
 #[cfg(test)]
 mod tests {
     use super::super::data::FftPoint;
+    use super::super::pipeline::PreparedFftInput;
     use super::*;
 
     // =========================================================================
@@ -385,5 +500,104 @@ mod tests {
         assert!(state.thd_percent().is_none());
         assert!(state.sfdr_db().is_none());
         assert!(state.snr_db().is_none());
+    }
+
+    #[test]
+    fn test_state_load_prepared_input_sets_source_and_computes_fft() {
+        let mut state = FftState::new();
+        let input = PreparedFftInput {
+            name: "V(out)".to_string(),
+            samples: vec![0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0],
+            sample_rate: 8_000.0,
+            original_count: 8,
+            decimation_factor: 1,
+        };
+
+        state.load_prepared_input(input);
+        assert!(state.data.is_some());
+        assert!(state.analysis.is_some());
+        assert!(state.source_cache.is_some());
+        assert_eq!(state.selected_source.as_deref(), Some("V(out)"));
+    }
+
+    #[test]
+    fn test_state_set_window_recomputes_from_cached_source() {
+        let mut state = FftState::new();
+        let input = PreparedFftInput {
+            name: "V(out)".to_string(),
+            samples: (0..256).map(|i| ((i as f64) * 0.2).sin()).collect(),
+            sample_rate: 10_000.0,
+            original_count: 256,
+            decimation_factor: 1,
+        };
+        state.load_prepared_input(input);
+        let before = state
+            .data
+            .as_ref()
+            .and_then(|d| d.find_peak().map(|(_, p)| p.magnitude))
+            .unwrap_or(0.0);
+
+        state.set_window(WindowFunction::FlatTop);
+        let after = state
+            .data
+            .as_ref()
+            .and_then(|d| d.find_peak().map(|(_, p)| p.magnitude))
+            .unwrap_or(0.0);
+
+        assert_eq!(state.window, WindowFunction::FlatTop);
+        assert!((before - after).abs() > 1e-6);
+    }
+
+    #[test]
+    fn test_state_set_num_harmonics_updates_analysis() {
+        let mut state = FftState::new();
+        let input = PreparedFftInput {
+            name: "V(out)".to_string(),
+            samples: (0..1024)
+                .map(|i| {
+                    let t = i as f64 / 10_000.0;
+                    (2.0 * std::f64::consts::PI * 1_000.0 * t).sin()
+                        + 0.1 * (2.0 * std::f64::consts::PI * 2_000.0 * t).sin()
+                        + 0.05 * (2.0 * std::f64::consts::PI * 3_000.0 * t).sin()
+                })
+                .collect(),
+            sample_rate: 10_000.0,
+            original_count: 1024,
+            decimation_factor: 1,
+        };
+        state.load_prepared_input(input);
+
+        state.set_num_harmonics(2);
+        let h2_count = state
+            .analysis
+            .as_ref()
+            .map(|a| a.harmonics.len())
+            .unwrap_or(0);
+        state.set_num_harmonics(10);
+        let h10_count = state
+            .analysis
+            .as_ref()
+            .map(|a| a.harmonics.len())
+            .unwrap_or(0);
+        assert!(h10_count >= h2_count);
+    }
+
+    #[test]
+    fn test_state_mag_auto_updates_for_linear_scale() {
+        let mut state = FftState::new();
+        let mut data = FftData::new("Test");
+        data.points = vec![
+            FftPoint::new(0.0, 0.0, 0.0),
+            FftPoint::new(10.0, 0.1, 0.0),
+            FftPoint::new(20.0, 2.5, 0.0),
+            FftPoint::new(30.0, 1.0, 0.0),
+        ];
+        data.sample_rate = 100.0;
+        data.fft_size = 8;
+        state.load_data(data);
+
+        state.set_mag_scale(MagnitudeScale::Linear);
+        assert!(state.mag_max > 2.0);
+        assert!(state.mag_min >= 0.0);
     }
 }
