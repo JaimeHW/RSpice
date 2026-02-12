@@ -19,6 +19,8 @@ pub enum MagnitudeScale {
     /// dB scale (20 * log10)
     #[default]
     DB,
+    /// dBc relative to fundamental level
+    DBc,
     /// Linear scale
     Linear,
     /// dBm (power into 50Ω)
@@ -30,6 +32,7 @@ impl MagnitudeScale {
     pub fn display_name(&self) -> &'static str {
         match self {
             Self::DB => "dB",
+            Self::DBc => "dBc",
             Self::Linear => "Linear",
             Self::DBm => "dBm",
         }
@@ -37,7 +40,27 @@ impl MagnitudeScale {
 
     /// All modes
     pub fn all() -> &'static [MagnitudeScale] {
-        &[Self::DB, Self::Linear, Self::DBm]
+        &[Self::DB, Self::DBc, Self::Linear, Self::DBm]
+    }
+}
+
+/// Active FFT user marker slot.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MarkerSlot {
+    /// Primary user marker.
+    #[default]
+    M1,
+    /// Secondary user marker.
+    M2,
+}
+
+impl MarkerSlot {
+    /// Display name for UI.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::M1 => "M1",
+            Self::M2 => "M2",
+        }
     }
 }
 
@@ -171,6 +194,10 @@ pub struct FftState {
     pub z0: f64,
     /// Interactive marker frequency (Hz) placed by user.
     pub marker_frequency: Option<f64>,
+    /// Secondary interactive marker frequency (Hz) placed by user.
+    pub marker_frequency_secondary: Option<f64>,
+    /// Active marker slot used by click placement.
+    pub active_marker_slot: MarkerSlot,
 }
 
 impl Default for FftState {
@@ -203,6 +230,8 @@ impl Default for FftState {
             freq_auto: true,
             z0: 50.0,
             marker_frequency: None,
+            marker_frequency_secondary: None,
+            active_marker_slot: MarkerSlot::M1,
         }
     }
 }
@@ -375,6 +404,7 @@ impl FftState {
         self.data = None;
         self.analysis = None;
         self.source_cache = None;
+        self.clear_markers();
     }
 
     /// Has data?
@@ -408,11 +438,7 @@ impl FftState {
             if self.mag_auto {
                 let mut values = Vec::new();
                 for point in &data.points {
-                    let value = match self.mag_scale {
-                        MagnitudeScale::DB => point.magnitude_db(),
-                        MagnitudeScale::DBm => point.magnitude_dbm(self.z0),
-                        MagnitudeScale::Linear => point.magnitude,
-                    };
+                    let value = self.display_magnitude(point);
                     if value.is_finite() {
                         values.push(value);
                     }
@@ -429,12 +455,29 @@ impl FftState {
                             self.mag_min = (min - padding).max(0.0);
                             self.mag_max = (max + padding).max(self.mag_min + 1e-9);
                         }
-                        _ => {
+                        MagnitudeScale::DB | MagnitudeScale::DBm | MagnitudeScale::DBc => {
                             self.mag_min = (min - padding).floor().max(-300.0);
                             self.mag_max = (max + padding).ceil().min(120.0);
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /// Convert a spectrum point to currently selected display magnitude.
+    pub fn display_magnitude(&self, point: &super::data::FftPoint) -> f64 {
+        match self.mag_scale {
+            MagnitudeScale::DB => point.magnitude_db(),
+            MagnitudeScale::DBm => point.magnitude_dbm(self.z0),
+            MagnitudeScale::Linear => point.magnitude,
+            MagnitudeScale::DBc => {
+                let fundamental_db = self
+                    .analysis
+                    .as_ref()
+                    .and_then(|analysis| analysis.fundamental_db)
+                    .unwrap_or(0.0);
+                point.magnitude_db() - fundamental_db
             }
         }
     }
@@ -498,7 +541,38 @@ impl FftState {
 
     /// Set marker frequency.
     pub fn set_marker_frequency(&mut self, marker_frequency: Option<f64>) {
-        self.marker_frequency = marker_frequency;
+        self.set_marker_frequency_for_slot(self.active_marker_slot, marker_frequency);
+    }
+
+    /// Set marker frequency in a specific slot.
+    pub fn set_marker_frequency_for_slot(
+        &mut self,
+        slot: MarkerSlot,
+        marker_frequency: Option<f64>,
+    ) {
+        match slot {
+            MarkerSlot::M1 => self.marker_frequency = marker_frequency,
+            MarkerSlot::M2 => self.marker_frequency_secondary = marker_frequency,
+        }
+    }
+
+    /// Read marker frequency from a specific slot.
+    pub fn marker_frequency_for_slot(&self, slot: MarkerSlot) -> Option<f64> {
+        match slot {
+            MarkerSlot::M1 => self.marker_frequency,
+            MarkerSlot::M2 => self.marker_frequency_secondary,
+        }
+    }
+
+    /// Set active marker slot used by click placement.
+    pub fn set_active_marker_slot(&mut self, slot: MarkerSlot) {
+        self.active_marker_slot = slot;
+    }
+
+    /// Clear both user markers.
+    pub fn clear_markers(&mut self) {
+        self.marker_frequency = None;
+        self.marker_frequency_secondary = None;
     }
 
     /// Get fundamental frequency
@@ -562,13 +636,20 @@ mod tests {
     #[test]
     fn test_mag_scale_names() {
         assert_eq!(MagnitudeScale::DB.display_name(), "dB");
+        assert_eq!(MagnitudeScale::DBc.display_name(), "dBc");
         assert_eq!(MagnitudeScale::DBm.display_name(), "dBm");
     }
 
     #[test]
     fn test_mag_scale_all() {
         let all = MagnitudeScale::all();
-        assert_eq!(all.len(), 3);
+        assert_eq!(all.len(), 4);
+    }
+
+    #[test]
+    fn test_marker_slot_display_names() {
+        assert_eq!(MarkerSlot::M1.display_name(), "M1");
+        assert_eq!(MarkerSlot::M2.display_name(), "M2");
     }
 
     // =========================================================================
@@ -650,6 +731,9 @@ mod tests {
         assert!(state.mag_auto);
         assert!(state.freq_auto);
         assert_eq!(state.z0, 50.0);
+        assert!(state.marker_frequency.is_none());
+        assert!(state.marker_frequency_secondary.is_none());
+        assert_eq!(state.active_marker_slot, MarkerSlot::M1);
     }
 
     #[test]
@@ -847,6 +931,22 @@ mod tests {
     }
 
     #[test]
+    fn test_state_marker_slots_track_independent_frequencies() {
+        let mut state = FftState::new();
+        state.set_active_marker_slot(MarkerSlot::M1);
+        state.set_marker_frequency(Some(1_000.0));
+        state.set_active_marker_slot(MarkerSlot::M2);
+        state.set_marker_frequency(Some(2_500.0));
+
+        assert_eq!(state.marker_frequency_for_slot(MarkerSlot::M1), Some(1_000.0));
+        assert_eq!(state.marker_frequency_for_slot(MarkerSlot::M2), Some(2_500.0));
+
+        state.clear_markers();
+        assert!(state.marker_frequency_for_slot(MarkerSlot::M1).is_none());
+        assert!(state.marker_frequency_for_slot(MarkerSlot::M2).is_none());
+    }
+
+    #[test]
     fn test_state_empty_measurements() {
         let state = FftState::new();
         assert!(state.fundamental_freq().is_none());
@@ -1034,6 +1134,37 @@ mod tests {
         // State defaults to RMS normalization, so the loaded Peak spectrum is rescaled.
         assert!(state.mag_max > 1.5);
         assert!(state.mag_min >= 0.0);
+    }
+
+    #[test]
+    fn test_state_display_magnitude_dbc_uses_fundamental_reference() {
+        let mut state = FftState::new();
+        let mut data = FftData::new("tone");
+        data.points = vec![
+            FftPoint::new(0.0, 0.0, 0.0),
+            FftPoint::new(1_000.0, 1.0, 0.0),
+            FftPoint::new(2_000.0, 0.1, 0.0),
+        ];
+        data.sample_rate = 10_000.0;
+        data.fft_size = 8;
+        state.load_data(data);
+        state.set_mag_scale(MagnitudeScale::DBc);
+
+        let fundamental = state
+            .data
+            .as_ref()
+            .and_then(|d| d.points.get(1))
+            .expect("fundamental point");
+        let harmonic = state
+            .data
+            .as_ref()
+            .and_then(|d| d.points.get(2))
+            .expect("harmonic point");
+        let fund_display = state.display_magnitude(fundamental);
+        let harm_display = state.display_magnitude(harmonic);
+
+        assert!(fund_display.abs() < 1e-6);
+        assert!(harm_display < -15.0);
     }
 
     #[test]

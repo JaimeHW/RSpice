@@ -6,7 +6,7 @@ use egui::{Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, 
 use std::f64::consts::PI;
 
 use super::data::{FftData, FftPoint, SpectrumAnalysis, SpectrumNormalization};
-use super::state::{FftState, FrequencyScale, InputFidelity, MagnitudeScale};
+use super::state::{FftState, FrequencyScale, InputFidelity, MagnitudeScale, MarkerSlot};
 use super::window::WindowFunction;
 use crate::common::app::AppState;
 use crate::common::viewer_style::{viewer_chart_bg_color, viewer_header_bg_color};
@@ -54,6 +54,14 @@ fn harmonic_color() -> Color32 {
 
 fn fundamental_color() -> Color32 {
     Color32::from_rgb(100, 255, 100)
+}
+
+fn marker_primary_color() -> Color32 {
+    Color32::from_rgb(220, 220, 120)
+}
+
+fn marker_secondary_color() -> Color32 {
+    Color32::from_rgb(255, 175, 95)
 }
 
 fn text_color() -> Color32 {
@@ -669,6 +677,29 @@ fn render_header(
                 state.toggle_harmonics();
             }
 
+            let grid_label = if state.show_grid { "Grid [on]" } else { "Grid" };
+            if ui.button(grid_label).clicked() {
+                state.toggle_grid();
+            }
+
+            ui.separator();
+            ui.label("Marker");
+            if ui
+                .selectable_label(state.active_marker_slot == MarkerSlot::M1, "M1")
+                .clicked()
+            {
+                state.set_active_marker_slot(MarkerSlot::M1);
+            }
+            if ui
+                .selectable_label(state.active_marker_slot == MarkerSlot::M2, "M2")
+                .clicked()
+            {
+                state.set_active_marker_slot(MarkerSlot::M2);
+            }
+            if ui.small_button("Clear Mk").clicked() {
+                state.clear_markers();
+            }
+
             ui.separator();
 
             ui.label("Auto Freq");
@@ -798,7 +829,27 @@ fn render_spectrum_core(ui: &mut Ui, layout: &FftLayout, state: &FftState) {
         }
 
         if let Some(marker_freq) = state.marker_frequency {
-            if let Some(label) = render_user_marker(plot_rect, marker_freq, data, state, &painter) {
+            if let Some(label) = render_user_marker(
+                plot_rect,
+                marker_freq,
+                data,
+                state,
+                &painter,
+                MarkerSlot::M1,
+            ) {
+                line_x_positions.push(label.anchor_x);
+                cursor_labels.push(label);
+            }
+        }
+        if let Some(marker_freq) = state.marker_frequency_secondary {
+            if let Some(label) = render_user_marker(
+                plot_rect,
+                marker_freq,
+                data,
+                state,
+                &painter,
+                MarkerSlot::M2,
+            ) {
                 line_x_positions.push(label.anchor_x);
                 cursor_labels.push(label);
             }
@@ -1108,6 +1159,14 @@ fn magnitude_to_linear(value: f64, state: &FftState) -> f64 {
     match state.mag_scale {
         MagnitudeScale::Linear => value,
         MagnitudeScale::DB => 10.0_f64.powf(value / 20.0),
+        MagnitudeScale::DBc => {
+            let fundamental_db = state
+                .analysis
+                .as_ref()
+                .and_then(|analysis| analysis.fundamental_db)
+                .unwrap_or(0.0);
+            10.0_f64.powf((value + fundamental_db) / 20.0)
+        }
         MagnitudeScale::DBm => {
             let power_w = 1e-3 * 10.0_f64.powf(value / 10.0);
             (power_w * z0).sqrt()
@@ -1280,38 +1339,56 @@ fn render_user_marker(
     data: &FftData,
     state: &FftState,
     painter: &egui::Painter,
+    slot: MarkerSlot,
 ) -> Option<PlotCursorLabelSpec> {
     let x = freq_to_x(marker_freq, plot_rect, state);
     if !x.is_finite() || x < plot_rect.min.x || x > plot_rect.max.x {
         return None;
     }
+    let (marker_name, marker_color) = match slot {
+        MarkerSlot::M1 => ("M1", marker_primary_color()),
+        MarkerSlot::M2 => ("M2", marker_secondary_color()),
+    };
     painter.line_segment(
         [Pos2::new(x, plot_rect.min.y), Pos2::new(x, plot_rect.max.y)],
-        Stroke::new(1.0, Color32::from_rgb(220, 220, 120)),
+        Stroke::new(1.0, marker_color),
     );
 
     data.interpolate(marker_freq).map(|point| {
         let text = match state.mag_scale {
             MagnitudeScale::Linear => {
-                format!("M: {} | {:.4}", format_freq(marker_freq), point.magnitude)
+                format!(
+                    "{}: {} | {:.4}",
+                    marker_name,
+                    format_freq(marker_freq),
+                    state.display_magnitude(&point)
+                )
             }
             MagnitudeScale::DB => format!(
-                "M: {} | {:.2} dB",
+                "{}: {} | {:.2} dB",
+                marker_name,
                 format_freq(marker_freq),
-                point.magnitude_db()
+                state.display_magnitude(&point)
+            ),
+            MagnitudeScale::DBc => format!(
+                "{}: {} | {:.2} dBc",
+                marker_name,
+                format_freq(marker_freq),
+                state.display_magnitude(&point)
             ),
             MagnitudeScale::DBm => {
                 format!(
-                    "M: {} | {:.2} dBm",
+                    "{}: {} | {:.2} dBm",
+                    marker_name,
                     format_freq(marker_freq),
-                    point.magnitude_dbm(state.z0)
+                    state.display_magnitude(&point)
                 )
             }
         };
         PlotCursorLabelSpec {
             anchor_x: x,
             text,
-            color: Color32::from_rgb(220, 220, 120),
+            color: marker_color,
             font: FontId::proportional(CURSOR_LABEL_FONT_SIZE),
         }
     })
@@ -1463,7 +1540,7 @@ fn handle_spectrum_interactions(
     if response.double_clicked() {
         state.freq_auto = true;
         state.mag_auto = true;
-        state.marker_frequency = None;
+        state.clear_markers();
         state.update_auto_scale();
         return;
     }
@@ -1678,11 +1755,7 @@ fn x_to_freq(x: f32, rect: Rect, state: &FftState) -> f64 {
 }
 
 fn mag_to_y(point: &FftPoint, rect: Rect, state: &FftState) -> f32 {
-    let value = match state.mag_scale {
-        MagnitudeScale::DB => point.magnitude_db(),
-        MagnitudeScale::DBm => point.magnitude_dbm(state.z0),
-        MagnitudeScale::Linear => point.magnitude,
-    };
+    let value = state.display_magnitude(point);
 
     let (min, max) = (state.mag_min, state.mag_max);
 
@@ -1815,29 +1888,56 @@ fn render_info_panel_content(ui: &mut Ui, state: &FftState) {
             info_row(ui, "Fs", &format_freq(source.sample_rate));
         }
 
-        if let Some(marker_freq) = state.marker_frequency {
+        if state.marker_frequency.is_some() || state.marker_frequency_secondary.is_some() {
             ui.add_space(6.0);
-            ui.label(egui::RichText::new("Marker").size(10.0).color(text_color()));
-            info_row(ui, "Freq", &format_freq(marker_freq));
+            ui.label(egui::RichText::new("Markers").size(10.0).color(text_color()));
             if let Some(ref data) = state.data {
-                if let Some(point) = data.interpolate(marker_freq) {
-                    match state.mag_scale {
-                        MagnitudeScale::Linear => {
-                            info_row(ui, "Mag", &format!("{:.5}", point.magnitude))
-                        }
-                        MagnitudeScale::DB => {
-                            info_row(ui, "Mag", &format!("{:.2} dB", point.magnitude_db()))
-                        }
-                        MagnitudeScale::DBm => info_row(
-                            ui,
-                            "Mag",
-                            &format!("{:.2} dBm", point.magnitude_dbm(state.z0)),
-                        ),
+                if let Some(marker_freq) = state.marker_frequency {
+                    info_row(ui, "M1 F", &format_freq(marker_freq));
+                    if let Some(point) = data.interpolate(marker_freq) {
+                        info_row(ui, "M1 M", &format_marker_magnitude(state, &point));
+                    }
+                }
+                if let Some(marker_freq) = state.marker_frequency_secondary {
+                    info_row(ui, "M2 F", &format_freq(marker_freq));
+                    if let Some(point) = data.interpolate(marker_freq) {
+                        info_row(ui, "M2 M", &format_marker_magnitude(state, &point));
+                    }
+                }
+                if let (Some(m1), Some(m2)) = (state.marker_frequency, state.marker_frequency_secondary)
+                {
+                    info_row(
+                        ui,
+                        "ΔF",
+                        &format_freq((m2 - m1).abs()),
+                    );
+                    let m1_mag = data.interpolate(m1).map(|p| state.display_magnitude(&p));
+                    let m2_mag = data.interpolate(m2).map(|p| state.display_magnitude(&p));
+                    if let (Some(v1), Some(v2)) = (m1_mag, m2_mag) {
+                        info_row(ui, "ΔM", &format_marker_delta(state, v2 - v1));
                     }
                 }
             }
         }
     });
+}
+
+fn format_marker_magnitude(state: &FftState, point: &FftPoint) -> String {
+    match state.mag_scale {
+        MagnitudeScale::Linear => format!("{:.5}", state.display_magnitude(point)),
+        MagnitudeScale::DB => format!("{:.2} dB", state.display_magnitude(point)),
+        MagnitudeScale::DBc => format!("{:.2} dBc", state.display_magnitude(point)),
+        MagnitudeScale::DBm => format!("{:.2} dBm", state.display_magnitude(point)),
+    }
+}
+
+fn format_marker_delta(state: &FftState, delta: f64) -> String {
+    match state.mag_scale {
+        MagnitudeScale::Linear => format!("{:+.5}", delta),
+        MagnitudeScale::DB => format!("{:+.2} dB", delta),
+        MagnitudeScale::DBc => format!("{:+.2} dBc", delta),
+        MagnitudeScale::DBm => format!("{:+.2} dBm", delta),
+    }
 }
 
 fn info_row(ui: &mut Ui, label: &str, value: &str) {
@@ -2549,5 +2649,45 @@ mod tests {
         // 13.0103 dBm ~= 1 Vrms into 50 ohm
         let v = magnitude_to_linear(13.0103, &state);
         assert!((v - 1.0).abs() < 1e-2);
+    }
+
+    #[test]
+    fn test_magnitude_to_linear_dbc_uses_fundamental_db_reference() {
+        let mut state = FftState::new();
+        state.mag_scale = MagnitudeScale::DBc;
+        state.analysis = Some(SpectrumAnalysis {
+            fundamental_frequency: Some(1_000.0),
+            fundamental_db: Some(-6.0),
+            harmonics: Vec::new(),
+            thd_percent: None,
+            thd_db: None,
+            sfdr_db: None,
+            snr_db: None,
+            sinad_db: None,
+            noise_floor_db: None,
+        });
+        // 0 dBc should map to the same absolute magnitude as -6 dB.
+        let v = magnitude_to_linear(0.0, &state);
+        assert!((v - 10.0_f64.powf(-6.0 / 20.0)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_format_marker_magnitude_supports_dbc_units() {
+        let mut state = FftState::new();
+        state.mag_scale = MagnitudeScale::DBc;
+        state.analysis = Some(SpectrumAnalysis {
+            fundamental_frequency: Some(1_000.0),
+            fundamental_db: Some(0.0),
+            harmonics: Vec::new(),
+            thd_percent: None,
+            thd_db: None,
+            sfdr_db: None,
+            snr_db: None,
+            sinad_db: None,
+            noise_floor_db: None,
+        });
+        let point = FftPoint::new(2_000.0, 0.5, 0.0);
+        let text = format_marker_magnitude(&state, &point);
+        assert!(text.contains("dBc"));
     }
 }
