@@ -237,35 +237,37 @@ fn render_header(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Waveform
     // Header background
     painter.rect_filled(layout.header, Rounding::ZERO, Color32::from_rgb(30, 33, 40));
 
-    // Create a UI area for header controls
-    let header_rect = layout.header.shrink(4.0);
+    // Create a UI area for header controls.
+    // Shrink only horizontally so the full header height remains for vertical centering.
+    let header_rect = Rect::from_min_max(
+        Pos2::new(layout.header.min.x + 4.0, layout.header.min.y),
+        Pos2::new(layout.header.max.x - 4.0, layout.header.max.y),
+    );
     ui.allocate_new_ui(UiBuilder::new().max_rect(header_rect), |ui| {
-        // Keep toolbar controls compact and center the row inside the header.
-        let control_height = (ui.available_height() - 6.0).clamp(16.0, 17.0);
-        let row_vertical_pad = ((ui.available_height() - control_height) * 0.5).max(0.0);
-        ui.add_space(row_vertical_pad);
+        // Uniform height for every control (label and buttons) so they share
+        // the same vertical extent and are centered together by the layout.
+        let control_height = 18.0;
+
         ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), control_height),
+            egui::vec2(ui.available_width(), ui.available_height()),
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
                 ui.add_space(8.0);
 
-                // Title
-                let (title_rect, _title_response) = ui.allocate_exact_size(
-                    egui::vec2(128.0, control_height),
-                    egui::Sense::hover(),
-                );
-                ui.painter().text(
-                    title_rect.left_center(),
-                    egui::Align2::LEFT_CENTER,
-                    "Waveform Viewer",
-                    FontId::proportional(13.0),
-                    Color32::from_rgb(200, 200, 210),
+                // Title — use add_sized so its height matches the buttons.
+                ui.add_sized(
+                    egui::vec2(110.0, control_height),
+                    egui::Label::new(
+                        egui::RichText::new("Waveform Viewer")
+                            .size(13.0)
+                            .strong()
+                            .color(Color32::from_rgb(200, 200, 210)),
+                    ),
                 );
 
-                ui.add_space(16.0);
+                ui.add_space(12.0);
 
-                // Fit buttons
                 if ui
                     .add_sized(
                         egui::vec2(58.0, control_height),
@@ -290,9 +292,8 @@ fn render_header(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Waveform
 
                 ui.separator();
 
-                // Zoom buttons
                 if ui
-                    .add_sized(egui::vec2(28.0, control_height), egui::Button::new("-"))
+                    .add_sized(egui::vec2(28.0, control_height), egui::Button::new("−"))
                     .clicked()
                 {
                     viewer_state.view.zoom(1.25, 0.5, 0.5);
@@ -306,7 +307,6 @@ fn render_header(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Waveform
 
                 ui.separator();
 
-                // Cursor clear
                 if ui
                     .add_sized(
                         egui::vec2(94.0, control_height),
@@ -317,18 +317,19 @@ fn render_header(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Waveform
                     viewer_state.cursors.clear();
                 }
 
-                // Right-aligned controls
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(8.0);
 
-                    // Toggle buttons
                     let meas_text = if viewer_state.show_measurements {
                         "Meas On"
                     } else {
                         "Meas Off"
                     };
                     if ui
-                        .add_sized(egui::vec2(68.0, control_height), egui::Button::new(meas_text))
+                        .add_sized(
+                            egui::vec2(68.0, control_height),
+                            egui::Button::new(meas_text),
+                        )
                         .on_hover_text("Measurements")
                         .clicked()
                     {
