@@ -4,7 +4,7 @@ use super::RSpiceApp;
 
 const VIEWER_TAB_STRIP_MIN_HEIGHT: f32 = VIEWER_TAB_ROW_HEIGHT;
 const VIEWER_TAB_STRIP_PAD_X: f32 = 8.0;
-const VIEWER_TAB_STRIP_PAD_Y: f32 = 0.0;
+const VIEWER_TAB_STRIP_PAD_Y: f32 = 1.0;
 const VIEWER_TAB_SPACING: f32 = 6.0;
 const VIEWER_TAB_ROW_HEIGHT: f32 = 22.0;
 const VIEWER_TAB_CLOSE_SIZE: f32 = 12.0;
@@ -13,6 +13,8 @@ const VIEWER_ADD_BUTTON_HEIGHT: f32 = 20.0;
 const VIEWER_TAB_ROUNDING: f32 = 8.0;
 const VIEWER_TAB_INNER_X: f32 = 9.0;
 const VIEWER_TAB_INNER_Y: f32 = 3.0;
+const VIEWER_TAB_HOVER_OVERLAY_ALPHA: u8 = 26;
+const VIEWER_TAB_HOVER_STROKE_BOOST: f32 = 0.35;
 
 fn tab_strip_fill() -> Color32 {
     Color32::from_rgb(23, 26, 32)
@@ -32,6 +34,17 @@ fn tab_stroke(selected: bool) -> Stroke {
     } else {
         Stroke::new(1.0, Color32::from_rgb(64, 72, 86))
     }
+}
+
+fn tab_hover_overlay() -> Color32 {
+    Color32::from_rgba_unmultiplied(255, 255, 255, VIEWER_TAB_HOVER_OVERLAY_ALPHA)
+}
+
+fn tab_hover_stroke(stroke: Stroke) -> Stroke {
+    Stroke::new(
+        (stroke.width + VIEWER_TAB_HOVER_STROKE_BOOST).max(stroke.width),
+        stroke.color,
+    )
 }
 
 fn tab_text_color(selected: bool, available: bool) -> Color32 {
@@ -146,10 +159,12 @@ impl RSpiceApp {
                             };
                             let capability = self.state.viewer_capability(viewer);
                             let selected = viewer == active_viewer;
+                            let base_fill = tab_fill(selected);
+                            let base_stroke = tab_stroke(selected);
 
-                            egui::Frame::none()
-                                .fill(tab_fill(selected))
-                                .stroke(tab_stroke(selected))
+                            let tab_response = egui::Frame::none()
+                                .fill(base_fill)
+                                .stroke(base_stroke)
                                 .rounding(VIEWER_TAB_ROUNDING)
                                 .inner_margin(egui::Margin::symmetric(
                                     VIEWER_TAB_INNER_X,
@@ -171,9 +186,12 @@ impl RSpiceApp {
                                                 ))
                                             };
 
-                                            let mut response = ui.add(
-                                                egui::Label::new(text).sense(egui::Sense::click()),
-                                            );
+                                            let mut response = ui
+                                                .add(
+                                                    egui::Label::new(text)
+                                                        .sense(egui::Sense::click()),
+                                                )
+                                                .on_hover_cursor(egui::CursorIcon::PointingHand);
                                             if !capability.available {
                                                 response =
                                                     response.on_hover_text(capability.reason);
@@ -211,6 +229,19 @@ impl RSpiceApp {
                                         },
                                     );
                                 });
+
+                            if tab_response.response.hovered() {
+                                ui.painter().rect_filled(
+                                    tab_response.response.rect,
+                                    egui::Rounding::same(VIEWER_TAB_ROUNDING),
+                                    tab_hover_overlay(),
+                                );
+                                ui.painter().rect_stroke(
+                                    tab_response.response.rect,
+                                    egui::Rounding::same(VIEWER_TAB_ROUNDING),
+                                    tab_hover_stroke(base_stroke),
+                                );
+                            }
                         }
 
                         ui.add_space(8.0);
