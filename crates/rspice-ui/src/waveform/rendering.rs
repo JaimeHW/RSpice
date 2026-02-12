@@ -27,6 +27,10 @@ use egui::{
 use super::axis::{self, GridLineType};
 use super::state::{TraceData, ViewTransform, WaveformViewerState};
 use crate::common::app::AppState;
+use crate::utils::vertical_label_layout::{
+    place_vertical_line_labels, LabelSide, VerticalLabelLayoutConfig, VerticalLabelPlacement,
+    VerticalLabelRequest,
+};
 
 // =============================================================================
 // Constants
@@ -51,6 +55,11 @@ const AXIS_TITLE_TO_VALUE_LABEL_GAP: f32 = 6.0;
 const AXIS_TITLE_BOTTOM_INSET: f32 = 2.0;
 const AXIS_TICK_X_OFFSET: f32 = 2.0;
 const AXIS_TICK_Y_OFFSET: f32 = 2.0;
+const CURSOR_LABEL_FONT_SIZE: f32 = 9.0;
+const CURSOR_LABEL_TEXT_PADDING_X: f32 = 5.0;
+const CURSOR_LABEL_TEXT_PADDING_Y: f32 = 2.0;
+const CURSOR_LABEL_BG_ALPHA: u8 = 220;
+const CURSOR_LABEL_CORNER_RADIUS: f32 = 3.0;
 
 // Grid line colors (using runtime values since Color32 constructors aren't const)
 fn grid_major_color() -> Color32 {
@@ -264,6 +273,10 @@ fn measure_text_width(painter: &Painter, text: &str, font: FontId, color: Color3
         .layout_no_wrap(text.to_owned(), font, color)
         .size()
         .x
+}
+
+fn measure_text_size(painter: &Painter, text: &str, font: FontId, color: Color32) -> Vec2 {
+    painter.layout_no_wrap(text.to_owned(), font, color).size()
 }
 
 fn y_axis_title_text(viewer_state: &WaveformViewerState, prefix: &str) -> String {
@@ -688,6 +701,8 @@ fn render_cursors(
 ) {
     let view = &viewer_state.view;
     let cursors = &viewer_state.cursors;
+    let mut labels: Vec<WaveformCursorLabelSpec> = Vec::with_capacity(2);
+    let mut line_x_positions: Vec<f32> = Vec::with_capacity(2);
 
     // Cursor 1
     if let Some(x1) = cursors.cursor1_x {
@@ -702,25 +717,13 @@ fn render_cursors(
             ],
             Stroke::new(1.5, cursor1_color()),
         );
-
-        // Label at top
-        painter.text(
-            Pos2::new(screen_x, layout.plot.min.y + 4.0),
-            egui::Align2::CENTER_TOP,
-            "C1",
-            FontId::proportional(10.0),
-            cursor1_color(),
-        );
-
-        // Time readout
-        let time_str = axis::format_time(x1);
-        painter.text(
-            Pos2::new(screen_x + 4.0, layout.plot.min.y + 18.0),
-            egui::Align2::LEFT_TOP,
-            time_str,
-            FontId::proportional(9.0),
-            cursor1_color(),
-        );
+        line_x_positions.push(screen_x);
+        labels.push(WaveformCursorLabelSpec {
+            anchor_x: screen_x,
+            text: format!("C1 {}", axis::format_time(x1)),
+            color: cursor1_color(),
+            font: FontId::proportional(CURSOR_LABEL_FONT_SIZE),
+        });
     }
 
     // Cursor 2
@@ -735,23 +738,17 @@ fn render_cursors(
             ],
             Stroke::new(1.5, cursor2_color()),
         );
+        line_x_positions.push(screen_x);
+        labels.push(WaveformCursorLabelSpec {
+            anchor_x: screen_x,
+            text: format!("C2 {}", axis::format_time(x2)),
+            color: cursor2_color(),
+            font: FontId::proportional(CURSOR_LABEL_FONT_SIZE),
+        });
+    }
 
-        painter.text(
-            Pos2::new(screen_x, layout.plot.min.y + 4.0),
-            egui::Align2::CENTER_TOP,
-            "C2",
-            FontId::proportional(10.0),
-            cursor2_color(),
-        );
-
-        let time_str = axis::format_time(x2);
-        painter.text(
-            Pos2::new(screen_x + 4.0, layout.plot.min.y + 18.0),
-            egui::Align2::LEFT_TOP,
-            time_str,
-            FontId::proportional(9.0),
-            cursor2_color(),
-        );
+    if !labels.is_empty() {
+        render_waveform_cursor_labels(painter, layout, viewer_state, &labels, &line_x_positions);
     }
 
     // Delta readout (if both cursors active)
@@ -796,6 +793,163 @@ fn render_cursors(
             Color32::from_rgb(160, 165, 175),
         );
     }
+}
+
+#[derive(Debug, Clone)]
+struct WaveformCursorLabelSpec {
+    anchor_x: f32,
+    text: String,
+    color: Color32,
+    font: FontId,
+}
+
+fn render_waveform_cursor_labels(
+    painter: &Painter,
+    layout: &ViewerLayout,
+    viewer_state: &WaveformViewerState,
+    labels: &[WaveformCursorLabelSpec],
+    line_x_positions: &[f32],
+) {
+    let requests: Vec<VerticalLabelRequest> = labels
+        .iter()
+        .map(|label| {
+            let text_size =
+                measure_text_size(painter, &label.text, label.font.clone(), label.color);
+            VerticalLabelRequest {
+                anchor_x: label.anchor_x,
+                size: Vec2::new(
+                    text_size.x + CURSOR_LABEL_TEXT_PADDING_X * 2.0,
+                    text_size.y + CURSOR_LABEL_TEXT_PADDING_Y * 2.0,
+                ),
+            }
+        })
+        .collect();
+
+    let placements =
+        layout_waveform_cursor_labels(layout, viewer_state, &requests, line_x_positions);
+    for (label, placement) in labels.iter().zip(placements.iter()) {
+        draw_waveform_cursor_label(painter, label, placement);
+    }
+}
+
+fn layout_waveform_cursor_labels(
+    layout: &ViewerLayout,
+    viewer_state: &WaveformViewerState,
+    requests: &[VerticalLabelRequest],
+    line_x_positions: &[f32],
+) -> Vec<VerticalLabelPlacement> {
+    let config = VerticalLabelLayoutConfig {
+        line_clearance: 4.0,
+        top_margin: 2.0,
+        row_gap: 3.0,
+        preferred_rows: 5,
+        nudge_step: 8.0,
+        nudge_steps: 10,
+        label_gap: 2.0,
+    };
+    let max_h = requests.iter().fold(0.0f32, |acc, r| acc.max(r.size.y));
+    let search_band_bottom = layout.plot.min.y
+        + config.top_margin
+        + (max_h + config.row_gap) * config.preferred_rows as f32
+        + 4.0;
+    let obstacles =
+        collect_waveform_cursor_label_obstacles(layout, viewer_state, search_band_bottom);
+    place_vertical_line_labels(layout.plot, requests, line_x_positions, &obstacles, config)
+}
+
+fn collect_waveform_cursor_label_obstacles(
+    layout: &ViewerLayout,
+    viewer_state: &WaveformViewerState,
+    band_bottom: f32,
+) -> Vec<Rect> {
+    let mut obstacles = Vec::new();
+    if !band_bottom.is_finite() || band_bottom <= layout.plot.min.y {
+        return obstacles;
+    }
+
+    let view = &viewer_state.view;
+    if view.x_range() <= 0.0 || view.y_range() <= 0.0 {
+        return obstacles;
+    }
+
+    let band_bottom = band_bottom.min(layout.plot.max.y);
+    for trace in &viewer_state.traces {
+        if !trace.visible || trace.is_empty() {
+            continue;
+        }
+        let n = trace.len();
+        let step = (n / 600).max(1);
+        for idx in (0..n).step_by(step) {
+            let (Some(&x), Some(&y)) = (trace.x.get(idx), trace.y.get(idx)) else {
+                continue;
+            };
+            if !x.is_finite() || !y.is_finite() || x < view.x_min || x > view.x_max {
+                continue;
+            }
+
+            let screen_x = layout.plot.min.x
+                + ((x - view.x_min) / view.x_range()) as f32 * layout.plot.width();
+            let screen_y = layout.plot.min.y
+                + ((view.y_max - y) / view.y_range()) as f32 * layout.plot.height();
+            if !screen_x.is_finite() || !screen_y.is_finite() {
+                continue;
+            }
+            if screen_x < layout.plot.min.x
+                || screen_x > layout.plot.max.x
+                || screen_y < layout.plot.min.y
+                || screen_y > band_bottom
+            {
+                continue;
+            }
+            obstacles.push(Rect::from_center_size(
+                Pos2::new(screen_x, screen_y),
+                Vec2::splat(3.0),
+            ));
+        }
+    }
+    obstacles
+}
+
+fn draw_waveform_cursor_label(
+    painter: &Painter,
+    label: &WaveformCursorLabelSpec,
+    placement: &VerticalLabelPlacement,
+) {
+    let bg = Color32::from_rgba_unmultiplied(20, 22, 28, CURSOR_LABEL_BG_ALPHA);
+    painter.rect_filled(
+        placement.rect,
+        Rounding::same(CURSOR_LABEL_CORNER_RADIUS),
+        bg,
+    );
+    painter.rect_stroke(
+        placement.rect,
+        Rounding::same(CURSOR_LABEL_CORNER_RADIUS),
+        Stroke::new(1.0, label.color.gamma_multiply(0.8)),
+    );
+
+    let connector_y = placement.rect.center().y;
+    let connector_x = match placement.side {
+        LabelSide::Right => placement.rect.min.x,
+        LabelSide::Left => placement.rect.max.x,
+    };
+    painter.line_segment(
+        [
+            Pos2::new(label.anchor_x, connector_y),
+            Pos2::new(connector_x, connector_y),
+        ],
+        Stroke::new(1.0, label.color.gamma_multiply(0.75)),
+    );
+
+    painter.text(
+        Pos2::new(
+            placement.rect.min.x + CURSOR_LABEL_TEXT_PADDING_X,
+            placement.rect.min.y + CURSOR_LABEL_TEXT_PADDING_Y,
+        ),
+        egui::Align2::LEFT_TOP,
+        &label.text,
+        label.font.clone(),
+        label.color,
+    );
 }
 
 fn render_box_selection(
@@ -1173,5 +1327,60 @@ mod tests {
         assert_eq!(title, "mV");
         assert!(!title.contains('['));
         assert!(!title.contains(']'));
+    }
+
+    #[test]
+    fn test_layout_waveform_cursor_labels_avoids_line_collisions_and_overlap() {
+        let layout = calculate_layout(Rect::from_min_size(Pos2::ZERO, Vec2::new(920.0, 520.0)));
+        let state = WaveformViewerState::new();
+        let requests = vec![
+            VerticalLabelRequest {
+                anchor_x: layout.plot.center().x - 8.0,
+                size: Vec2::new(84.0, 16.0),
+            },
+            VerticalLabelRequest {
+                anchor_x: layout.plot.center().x + 8.0,
+                size: Vec2::new(84.0, 16.0),
+            },
+        ];
+        let lines = vec![layout.plot.center().x - 8.0, layout.plot.center().x + 8.0];
+
+        let placements = layout_waveform_cursor_labels(&layout, &state, &requests, &lines);
+        assert_eq!(placements.len(), requests.len());
+        assert!(!placements[0].rect.intersects(placements[1].rect));
+        for placement in &placements {
+            for x in &lines {
+                assert!(!(*x >= placement.rect.min.x && *x <= placement.rect.max.x));
+            }
+        }
+    }
+
+    #[test]
+    fn test_layout_waveform_cursor_labels_moves_below_dense_top_trace_band() {
+        let layout = calculate_layout(Rect::from_min_size(Pos2::ZERO, Vec2::new(920.0, 520.0)));
+        let mut state = WaveformViewerState::new();
+        state.view.x_min = 0.0;
+        state.view.x_max = 1.0;
+        state.view.y_min = -1.0;
+        state.view.y_max = 1.0;
+
+        let mut x = Vec::new();
+        let mut y = Vec::new();
+        for i in 0..=120 {
+            let t = i as f64 / 120.0;
+            x.push(t);
+            y.push(0.95);
+        }
+        state.traces.push(TraceData::new("TopBand", x, y));
+
+        let requests = vec![VerticalLabelRequest {
+            anchor_x: layout.plot.center().x,
+            size: Vec2::new(90.0, 16.0),
+        }];
+        let lines = vec![layout.plot.center().x];
+        let placements = layout_waveform_cursor_labels(&layout, &state, &requests, &lines);
+
+        assert_eq!(placements.len(), 1);
+        assert!(placements[0].rect.min.y > layout.plot.min.y + 2.0);
     }
 }
