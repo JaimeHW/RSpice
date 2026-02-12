@@ -62,7 +62,7 @@ pub fn render_histogram_viewer(ui: &mut Ui, app_state: &mut AppState) {
         close_requested
     };
     if close_requested {
-        app_state.active_viewer = crate::viewers::ActiveViewer::Waveform;
+        app_state.close_active_viewer();
     }
 }
 
