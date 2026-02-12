@@ -7,7 +7,7 @@
 //! - Drop invalid/non-monotonic samples
 //! - Resample variable-step data to a uniform grid
 //! - Anti-alias low-pass filter before decimation
-//! - Enforce strict point cap for responsive UI
+//! - Optional strict point cap for responsive UI paths
 
 use std::f64::consts::PI;
 
@@ -17,9 +17,48 @@ pub const MIN_FFT_SAMPLES: usize = 16;
 /// Default point cap for interactive FFT computation.
 pub const DEFAULT_MAX_FFT_POINTS: usize = 65_536;
 
+/// Maximum reference-quality nonuniform resample point count.
+///
+/// This keeps memory/time bounded while still preserving far more detail than
+/// the interactive cap when users need analysis-grade fidelity.
+pub const MAX_REFERENCE_RESAMPLE_POINTS: usize = 1_048_576;
+
 const NONUNIFORM_OVERSAMPLE_FACTOR: usize = 4;
-const MAX_RESAMPLE_POINTS: usize = 262_144;
 const UNIFORMITY_REL_TOL: f64 = 1e-6;
+
+/// FFT input preparation policy.
+///
+/// - `Reference`: preserve available time-domain detail (no post-resample
+///   decimation), bounded only by `MAX_REFERENCE_RESAMPLE_POINTS` for safety.
+/// - `Interactive`: enforce a hard point cap for responsiveness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FftInputPolicy {
+    Reference,
+    Interactive { max_points: usize },
+}
+
+impl FftInputPolicy {
+    pub const fn reference() -> Self {
+        Self::Reference
+    }
+
+    pub const fn interactive_default() -> Self {
+        Self::Interactive {
+            max_points: DEFAULT_MAX_FFT_POINTS,
+        }
+    }
+
+    pub const fn capped(max_points: usize) -> Self {
+        Self::Interactive { max_points }
+    }
+
+    fn point_cap(self) -> Option<usize> {
+        match self {
+            Self::Reference => None,
+            Self::Interactive { max_points } => Some(max_points.max(MIN_FFT_SAMPLES)),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreparedFftInput {
@@ -50,7 +89,19 @@ pub fn prepare_fft_input(
     values: &[f64],
     max_points: usize,
 ) -> Option<PreparedFftInput> {
-    let max_points = max_points.max(MIN_FFT_SAMPLES);
+    prepare_fft_input_with_policy(name, time, values, FftInputPolicy::capped(max_points))
+}
+
+/// Prepare a waveform for FFT analysis using an explicit policy.
+///
+/// Returns `None` when there is insufficient valid data.
+pub fn prepare_fft_input_with_policy(
+    name: &str,
+    time: &[f64],
+    values: &[f64],
+    policy: FftInputPolicy,
+) -> Option<PreparedFftInput> {
+    let point_cap = policy.point_cap();
     let cleaned = clean_time_series(time, values);
     if cleaned.len() < MIN_FFT_SAMPLES {
         return None;
@@ -60,20 +111,22 @@ pub fn prepare_fft_input(
     let mut uniform = if is_uniform_timeline(&cleaned) {
         uniform_from_cleaned(&cleaned)?
     } else {
-        let target = choose_resample_count(cleaned.len(), max_points);
+        let target = choose_resample_count(cleaned.len(), point_cap);
         resample_to_uniform(&cleaned, target)?
     };
 
     let mut decimation_factor = 1usize;
-    if uniform.samples.len() > max_points {
-        decimation_factor = ceil_div(uniform.samples.len(), max_points);
-        uniform = anti_alias_decimate(&uniform, decimation_factor)?;
-    }
+    if let Some(max_points) = point_cap {
+        if uniform.samples.len() > max_points {
+            decimation_factor = ceil_div(uniform.samples.len(), max_points);
+            uniform = anti_alias_decimate(&uniform, decimation_factor)?;
+        }
 
-    // Safety clamp: decimation can still land slightly above cap depending on rounding.
-    while uniform.samples.len() > max_points {
-        decimation_factor = decimation_factor.saturating_mul(2);
-        uniform = anti_alias_decimate(&uniform, 2)?;
+        // Safety clamp: decimation can still land slightly above cap depending on rounding.
+        while uniform.samples.len() > max_points {
+            decimation_factor = decimation_factor.saturating_mul(2);
+            uniform = anti_alias_decimate(&uniform, 2)?;
+        }
     }
 
     if uniform.samples.len() < MIN_FFT_SAMPLES || !uniform.sample_rate.is_finite() {
@@ -234,10 +287,13 @@ fn anti_alias_decimate(input: &UniformSeries, factor: usize) -> Option<UniformSe
     })
 }
 
-fn choose_resample_count(cleaned_count: usize, max_points: usize) -> usize {
-    let upper = max_points
-        .saturating_mul(NONUNIFORM_OVERSAMPLE_FACTOR)
-        .clamp(MIN_FFT_SAMPLES, MAX_RESAMPLE_POINTS);
+fn choose_resample_count(cleaned_count: usize, point_cap: Option<usize>) -> usize {
+    let upper = match point_cap {
+        Some(max_points) => max_points
+            .saturating_mul(NONUNIFORM_OVERSAMPLE_FACTOR)
+            .clamp(MIN_FFT_SAMPLES, MAX_REFERENCE_RESAMPLE_POINTS),
+        None => MAX_REFERENCE_RESAMPLE_POINTS,
+    };
     cleaned_count.clamp(MIN_FFT_SAMPLES, upper)
 }
 
@@ -472,6 +528,42 @@ mod tests {
     }
 
     #[test]
+    fn test_prepare_fft_input_reference_preserves_uniform_series_above_interactive_cap() {
+        let fs = 2_000_000.0;
+        let n = DEFAULT_MAX_FFT_POINTS * 3;
+        let time: Vec<f64> = (0..n).map(|i| i as f64 / fs).collect();
+        let values = generate_sine(250_000.0, fs, n);
+
+        let prepared =
+            prepare_fft_input_with_policy("ref", &time, &values, FftInputPolicy::reference())
+                .expect("reference prepared");
+
+        assert_eq!(prepared.decimation_factor, 1);
+        assert_eq!(prepared.samples.len(), n);
+        assert!((prepared.sample_rate - fs).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_prepare_fft_input_interactive_enforces_cap_for_large_uniform_series() {
+        let fs = 2_000_000.0;
+        let n = DEFAULT_MAX_FFT_POINTS * 3;
+        let time: Vec<f64> = (0..n).map(|i| i as f64 / fs).collect();
+        let values = generate_sine(250_000.0, fs, n);
+
+        let prepared = prepare_fft_input_with_policy(
+            "interactive",
+            &time,
+            &values,
+            FftInputPolicy::interactive_default(),
+        )
+        .expect("interactive prepared");
+
+        assert!(prepared.samples.len() <= DEFAULT_MAX_FFT_POINTS);
+        assert!(prepared.decimation_factor > 1);
+        assert!(prepared.sample_rate < fs);
+    }
+
+    #[test]
     fn test_prepare_fft_input_enforces_point_cap() {
         let fs = 50_000.0;
         let n = 20_000usize;
@@ -482,6 +574,42 @@ mod tests {
         assert!(prepared.samples.len() <= 2048);
         assert!(prepared.decimation_factor >= 1);
         assert!(prepared.sample_rate > 0.0);
+    }
+
+    #[test]
+    fn test_prepare_fft_input_reference_nonuniform_avoids_decimation_at_default_scale() {
+        let fs = 1_000_000.0;
+        let n = DEFAULT_MAX_FFT_POINTS * 2;
+        let mut time = Vec::with_capacity(n);
+        let mut values = Vec::with_capacity(n);
+        let mut t = 0.0;
+
+        for i in 0..n {
+            let jitter = if i % 4 == 0 { 0.95 } else { 1.05 };
+            t += jitter / fs;
+            time.push(t);
+            values.push((2.0 * PI * 80_000.0 * t).sin());
+        }
+
+        let ref_prepared = prepare_fft_input_with_policy(
+            "ref_nonuniform",
+            &time,
+            &values,
+            FftInputPolicy::reference(),
+        )
+        .expect("reference prepared");
+        let int_prepared = prepare_fft_input_with_policy(
+            "int_nonuniform",
+            &time,
+            &values,
+            FftInputPolicy::interactive_default(),
+        )
+        .expect("interactive prepared");
+
+        assert_eq!(ref_prepared.decimation_factor, 1);
+        assert!(ref_prepared.samples.len() > DEFAULT_MAX_FFT_POINTS);
+        assert!(int_prepared.samples.len() <= DEFAULT_MAX_FFT_POINTS);
+        assert!(int_prepared.decimation_factor > 1);
     }
 
     #[test]

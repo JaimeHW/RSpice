@@ -3,7 +3,7 @@
 //! Viewer state for FFT/spectrum display.
 
 use super::data::{FftData, SpectrumAnalysis, SpectrumNormalization};
-use super::pipeline::PreparedFftInput;
+use super::pipeline::{FftInputPolicy, PreparedFftInput};
 use super::window::WindowFunction;
 
 // =============================================================================
@@ -63,6 +63,39 @@ impl FrequencyScale {
     }
 }
 
+/// FFT input fidelity mode.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum InputFidelity {
+    /// Preserve source detail for analysis-grade spectra (default).
+    #[default]
+    Reference,
+    /// Enforce capped point count for faster interaction on large datasets.
+    Interactive,
+}
+
+impl InputFidelity {
+    /// Display name.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Reference => "Reference",
+            Self::Interactive => "Interactive",
+        }
+    }
+
+    /// All modes.
+    pub fn all() -> &'static [InputFidelity] {
+        &[Self::Reference, Self::Interactive]
+    }
+
+    /// Pipeline policy for this fidelity.
+    pub fn input_policy(&self) -> FftInputPolicy {
+        match self {
+            Self::Reference => FftInputPolicy::reference(),
+            Self::Interactive => FftInputPolicy::interactive_default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FftSourceCache {
     pub name: String,
@@ -95,6 +128,8 @@ pub struct FftState {
     pub mag_scale: MagnitudeScale,
     /// Frequency scale
     pub freq_scale: FrequencyScale,
+    /// Input preparation fidelity policy.
+    pub input_fidelity: InputFidelity,
     /// Show grid
     pub show_grid: bool,
     /// Show peaks
@@ -134,6 +169,7 @@ impl Default for FftState {
             window: WindowFunction::Hanning,
             mag_scale: MagnitudeScale::DB,
             freq_scale: FrequencyScale::Linear,
+            input_fidelity: InputFidelity::Reference,
             show_grid: true,
             show_peaks: true,
             show_harmonics: true,
@@ -185,6 +221,16 @@ impl FftState {
     /// Select preferred source trace name.
     pub fn set_selected_source(&mut self, source_name: Option<String>) {
         self.selected_source = source_name;
+    }
+
+    /// Set FFT input fidelity mode.
+    pub fn set_input_fidelity(&mut self, input_fidelity: InputFidelity) {
+        self.input_fidelity = input_fidelity;
+    }
+
+    /// Active FFT input pipeline policy.
+    pub fn input_policy(&self) -> FftInputPolicy {
+        self.input_fidelity.input_policy()
     }
 
     /// Recompute FFT data from cached source using current window.
@@ -454,6 +500,40 @@ mod tests {
     }
 
     // =========================================================================
+    // InputFidelity Tests
+    // =========================================================================
+
+    #[test]
+    fn test_input_fidelity_default() {
+        let fidelity = InputFidelity::default();
+        assert_eq!(fidelity, InputFidelity::Reference);
+    }
+
+    #[test]
+    fn test_input_fidelity_names() {
+        assert_eq!(InputFidelity::Reference.display_name(), "Reference");
+        assert_eq!(InputFidelity::Interactive.display_name(), "Interactive");
+    }
+
+    #[test]
+    fn test_input_fidelity_all() {
+        let all = InputFidelity::all();
+        assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn test_input_fidelity_policy_mapping() {
+        assert_eq!(
+            InputFidelity::Reference.input_policy(),
+            FftInputPolicy::Reference
+        );
+        assert_eq!(
+            InputFidelity::Interactive.input_policy(),
+            FftInputPolicy::interactive_default()
+        );
+    }
+
+    // =========================================================================
     // FftState Tests
     // =========================================================================
 
@@ -470,6 +550,7 @@ mod tests {
         let state = FftState::default();
         assert_eq!(state.window, WindowFunction::Hanning);
         assert_eq!(state.normalization, SpectrumNormalization::Rms);
+        assert_eq!(state.input_fidelity, InputFidelity::Reference);
         assert!(state.mag_auto);
         assert!(state.freq_auto);
         assert_eq!(state.z0, 50.0);
@@ -554,6 +635,15 @@ mod tests {
 
         state.set_freq_scale(FrequencyScale::Log);
         assert_eq!(state.freq_scale, FrequencyScale::Log);
+    }
+
+    #[test]
+    fn test_state_set_input_fidelity_updates_policy() {
+        let mut state = FftState::new();
+        assert_eq!(state.input_policy(), FftInputPolicy::Reference);
+
+        state.set_input_fidelity(InputFidelity::Interactive);
+        assert_eq!(state.input_policy(), FftInputPolicy::interactive_default());
     }
 
     #[test]

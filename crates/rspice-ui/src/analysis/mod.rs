@@ -36,7 +36,9 @@ pub mod smith_chart;
 pub use bode::{render_bode_panel, BodeData, BodeDisplayMode, BodePlotState, FrequencyResponse};
 
 // FFT
-pub use fft::{render_fft_plot, FftData, FftPoint, FftState, SpectrumAnalysis, WindowFunction};
+pub use fft::{
+    render_fft_plot, FftData, FftPoint, FftState, InputFidelity, SpectrumAnalysis, WindowFunction,
+};
 
 // Histogram
 pub use histogram::{
