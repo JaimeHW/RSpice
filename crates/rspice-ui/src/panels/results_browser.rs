@@ -56,7 +56,7 @@ pub fn render_results_browser(ui: &mut Ui, state: &mut AppState) {
         ));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.small_button("Clear All").clicked() {
-                state.simulation.clear_runs();
+                clear_runs_and_sync_viewers(state);
             }
         });
     });
@@ -109,7 +109,7 @@ pub fn render_results_browser(ui: &mut Ui, state: &mut AppState) {
 
                 // Handle run deletion (deferred to avoid borrow conflict)
                 if run_response.delete_requested {
-                    state.simulation.delete_run(run_data.index);
+                    delete_run_and_sync_viewers(state, run_data.index);
                 }
 
                 // Handle run selection
@@ -129,6 +129,21 @@ pub fn render_results_browser(ui: &mut Ui, state: &mut AppState) {
                 }
             }
         });
+}
+
+fn clear_runs_and_sync_viewers(state: &mut AppState) {
+    state.simulation.clear_runs();
+    state.clear_specialized_viewer_data();
+}
+
+fn delete_run_and_sync_viewers(state: &mut AppState, run_idx: usize) {
+    // Only invalidate specialized viewer caches if the active waveform selection changed.
+    // Non-active run deletions should preserve the currently loaded specialized data.
+    let before_data_version = state.simulation.data_version;
+    if state.simulation.delete_run(run_idx) && state.simulation.data_version != before_data_version
+    {
+        state.clear_specialized_viewer_data();
+    }
 }
 
 fn activate_analysis_view(
@@ -453,6 +468,13 @@ mod tests {
         state.bode_plot_state.load_data(bode);
     }
 
+    fn seed_fft_data(state: &mut AppState) {
+        let mut fft = crate::analysis::fft::FftData::new("spec");
+        fft.points
+            .push(crate::analysis::fft::FftPoint::new(1.0, 1.0, 0.0));
+        state.fft_state.load_data(fft);
+    }
+
     #[test]
     fn test_activate_analysis_view_prefers_available_ac_viewer() {
         let mut state = AppState::default();
@@ -490,5 +512,49 @@ mod tests {
             state.active_viewer(),
             crate::viewers::ActiveViewer::BodePlot
         );
+    }
+
+    #[test]
+    fn delete_run_sync_clears_specialized_viewers_when_active_selection_changes() {
+        let mut state = AppState::default();
+        seed_run_with_analysis(&mut state, AnalysisType::Transient);
+        assert!(state.simulation.select_analysis(0));
+        seed_fft_data(&mut state);
+        assert!(state.viewer_is_available(crate::viewers::ActiveViewer::Fft));
+
+        delete_run_and_sync_viewers(&mut state, 0);
+
+        assert_eq!(state.simulation.run_count(), 0);
+        assert!(!state.viewer_is_available(crate::viewers::ActiveViewer::Fft));
+    }
+
+    #[test]
+    fn delete_run_sync_preserves_specialized_viewers_when_active_data_unchanged() {
+        let mut state = AppState::default();
+        seed_run_with_analysis(&mut state, AnalysisType::Transient);
+        seed_run_with_analysis(&mut state, AnalysisType::Transient);
+        assert!(state.simulation.select_run(0));
+        assert!(state.simulation.select_analysis(0));
+        seed_fft_data(&mut state);
+        assert!(state.viewer_is_available(crate::viewers::ActiveViewer::Fft));
+
+        delete_run_and_sync_viewers(&mut state, 1);
+
+        assert_eq!(state.simulation.run_count(), 1);
+        assert!(state.viewer_is_available(crate::viewers::ActiveViewer::Fft));
+    }
+
+    #[test]
+    fn clear_runs_sync_clears_specialized_viewers() {
+        let mut state = AppState::default();
+        seed_run_with_analysis(&mut state, AnalysisType::Transient);
+        assert!(state.simulation.select_analysis(0));
+        seed_fft_data(&mut state);
+        assert!(state.viewer_is_available(crate::viewers::ActiveViewer::Fft));
+
+        clear_runs_and_sync_viewers(&mut state);
+
+        assert_eq!(state.simulation.run_count(), 0);
+        assert!(!state.viewer_is_available(crate::viewers::ActiveViewer::Fft));
     }
 }
