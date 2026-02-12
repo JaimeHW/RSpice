@@ -113,10 +113,9 @@ const CHART_SIDE_PADDING: f32 = 8.0;
 const CHART_TOP_GAP: f32 = 0.0;
 const CHART_BOTTOM_PADDING: f32 = 8.0;
 const HEADER_CONTROL_HEIGHT: f32 = 24.0;
-const HEADER_SOURCE_WIDTH: f32 = 180.0;
-const HEADER_WINDOW_WIDTH: f32 = 176.0;
-const HEADER_NORM_WIDTH: f32 = 96.0;
-const HEADER_SCALE_WIDTH: f32 = 116.0;
+const HEADER_DROPDOWN_MIN_WIDTH: f32 = 82.0;
+const HEADER_DROPDOWN_MAX_WIDTH: f32 = 220.0;
+const HEADER_DROPDOWN_TEXT_PADDING: f32 = 28.0;
 const INFO_PANEL_PADDING: f32 = 8.0;
 const AXIS_LEFT_GUTTER: f32 = 52.0;
 const AXIS_RIGHT_GUTTER: f32 = 4.0;
@@ -211,6 +210,29 @@ fn measure_text_width(painter: &egui::Painter, text: &str, font: FontId, color: 
         .layout_no_wrap(text.to_owned(), font, color)
         .size()
         .x
+}
+
+fn combo_width_from_texts<'a, I>(
+    ui: &Ui,
+    selected_text: &str,
+    options: I,
+    min_width: f32,
+    max_width: f32,
+) -> f32
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let painter = ui.painter();
+    let font = FontId::proportional(12.0);
+    let color = text_color();
+
+    let mut max_text_width = measure_text_width(painter, selected_text, font.clone(), color);
+    for option in options {
+        let width = measure_text_width(painter, option, font.clone(), color);
+        max_text_width = max_text_width.max(width);
+    }
+
+    (max_text_width + HEADER_DROPDOWN_TEXT_PADDING).clamp(min_width, max_width)
 }
 
 #[derive(Debug, Default)]
@@ -311,14 +333,20 @@ fn render_header(
                 .selected_source
                 .clone()
                 .or_else(|| state.source_cache.as_ref().map(|src| src.name.clone()));
+            let source_selected_text = selected_source.as_deref().unwrap_or("Source waveform");
+            let source_width = combo_width_from_texts(
+                ui,
+                source_selected_text,
+                source_names
+                    .iter()
+                    .map(String::as_str)
+                    .chain(std::iter::once("Source waveform")),
+                HEADER_DROPDOWN_MIN_WIDTH,
+                HEADER_DROPDOWN_MAX_WIDTH,
+            );
             egui::ComboBox::from_id_salt("fft_source")
-                .width(HEADER_SOURCE_WIDTH)
-                .selected_text(
-                    selected_source
-                        .as_deref()
-                        .unwrap_or("Source waveform")
-                        .to_string(),
-                )
+                .width(source_width)
+                .selected_text(source_selected_text)
                 .show_ui(ui, |ui| {
                     for name in source_names {
                         ui.selectable_value(&mut selected_source, Some(name.clone()), name);
@@ -330,8 +358,15 @@ fn render_header(
             }
 
             let mut window = state.window;
+            let window_width = combo_width_from_texts(
+                ui,
+                window.display_name(),
+                WindowFunction::all().iter().map(|w| w.display_name()),
+                HEADER_DROPDOWN_MIN_WIDTH,
+                HEADER_DROPDOWN_MAX_WIDTH,
+            );
             egui::ComboBox::from_id_salt("fft_window")
-                .width(HEADER_WINDOW_WIDTH)
+                .width(window_width)
                 .selected_text(window.display_name())
                 .show_ui(ui, |ui| {
                     for w in WindowFunction::all() {
@@ -343,8 +378,15 @@ fn render_header(
             }
 
             let mut mag_scale = state.mag_scale;
+            let mag_scale_width = combo_width_from_texts(
+                ui,
+                mag_scale.display_name(),
+                MagnitudeScale::all().iter().map(|s| s.display_name()),
+                HEADER_DROPDOWN_MIN_WIDTH,
+                HEADER_DROPDOWN_MAX_WIDTH,
+            );
             egui::ComboBox::from_id_salt("fft_mag_scale")
-                .width(HEADER_SCALE_WIDTH)
+                .width(mag_scale_width)
                 .selected_text(mag_scale.display_name())
                 .show_ui(ui, |ui| {
                     for s in MagnitudeScale::all() {
@@ -356,8 +398,15 @@ fn render_header(
             }
 
             let mut freq_scale = state.freq_scale;
+            let freq_scale_width = combo_width_from_texts(
+                ui,
+                freq_scale.display_name(),
+                FrequencyScale::all().iter().map(|s| s.display_name()),
+                HEADER_DROPDOWN_MIN_WIDTH,
+                HEADER_DROPDOWN_MAX_WIDTH,
+            );
             egui::ComboBox::from_id_salt("fft_freq_scale")
-                .width(HEADER_SCALE_WIDTH)
+                .width(freq_scale_width)
                 .selected_text(freq_scale.display_name())
                 .show_ui(ui, |ui| {
                     for s in FrequencyScale::all() {
@@ -369,8 +418,17 @@ fn render_header(
             }
 
             let mut normalization = state.normalization;
+            let normalization_width = combo_width_from_texts(
+                ui,
+                normalization.display_name(),
+                SpectrumNormalization::all()
+                    .iter()
+                    .map(|mode| mode.display_name()),
+                HEADER_DROPDOWN_MIN_WIDTH,
+                HEADER_DROPDOWN_MAX_WIDTH,
+            );
             egui::ComboBox::from_id_salt("fft_norm")
-                .width(HEADER_NORM_WIDTH)
+                .width(normalization_width)
                 .selected_text(normalization.display_name())
                 .show_ui(ui, |ui| {
                     for mode in SpectrumNormalization::all() {
