@@ -53,6 +53,35 @@ impl ActiveViewer {
         ]
     }
 
+    /// Stable numeric identifier for persistence.
+    pub fn id(self) -> u8 {
+        match self {
+            Self::Waveform => 0,
+            Self::SmithChart => 1,
+            Self::EyeDiagram => 2,
+            Self::Histogram => 3,
+            Self::BodePlot => 4,
+            Self::Nyquist => 5,
+            Self::Fft => 6,
+            Self::PoleZero => 7,
+        }
+    }
+
+    /// Parse a stable numeric identifier.
+    pub fn from_id(id: u8) -> Option<Self> {
+        match id {
+            0 => Some(Self::Waveform),
+            1 => Some(Self::SmithChart),
+            2 => Some(Self::EyeDiagram),
+            3 => Some(Self::Histogram),
+            4 => Some(Self::BodePlot),
+            5 => Some(Self::Nyquist),
+            6 => Some(Self::Fft),
+            7 => Some(Self::PoleZero),
+            _ => None,
+        }
+    }
+
     /// Whether this viewer primarily requires frequency-domain data.
     pub fn needs_ac_data(&self) -> bool {
         matches!(
@@ -118,5 +147,14 @@ mod tests {
         assert!(ActiveViewer::Histogram.needs_transient_data());
         assert!(ActiveViewer::Fft.needs_transient_data());
         assert!(!ActiveViewer::SmithChart.needs_transient_data());
+    }
+
+    #[test]
+    fn active_viewer_ids_round_trip() {
+        for viewer in ActiveViewer::all() {
+            let id = viewer.id();
+            assert_eq!(ActiveViewer::from_id(id), Some(*viewer));
+        }
+        assert_eq!(ActiveViewer::from_id(255), None);
     }
 }
