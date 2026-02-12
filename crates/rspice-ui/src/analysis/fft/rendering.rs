@@ -1334,113 +1334,122 @@ fn render_info_panel(ui: &mut Ui, layout: &FftLayout, state: &FftState) {
 
     let panel_rect = info_content_rect(layout);
     ui.allocate_new_ui(UiBuilder::new().max_rect(panel_rect), |ui| {
-        ui.vertical(|ui| {
+        egui::ScrollArea::vertical()
+            .id_salt("fft_info_panel_scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                // Keep the right-aligned value column stable while scrolling.
+                ui.set_width(ui.available_width());
+                render_info_panel_content(ui, state);
+            });
+    });
+}
+
+fn render_info_panel_content(ui: &mut Ui, state: &FftState) {
+    ui.vertical(|ui| {
+        ui.label(
+            egui::RichText::new("Analysis")
+                .size(10.0)
+                .color(text_color()),
+        );
+        ui.add_space(4.0);
+
+        if let Some(ref analysis) = state.analysis {
+            if let Some(fund) = analysis.fundamental_frequency {
+                info_row(ui, "Fund.", &format_freq(fund));
+            }
+
+            if let Some(fund_db) = analysis.fundamental_db {
+                info_row(ui, "Level", &format!("{:.1} dB", fund_db));
+            }
+
+            if let Some(thd) = analysis.thd_percent {
+                let color = if thd < 1.0 {
+                    Color32::from_rgb(100, 200, 100)
+                } else if thd < 5.0 {
+                    Color32::from_rgb(200, 200, 100)
+                } else {
+                    Color32::from_rgb(255, 100, 100)
+                };
+                info_row_colored(ui, "THD", &format!("{:.3}%", thd), color);
+            }
+
+            if let Some(sfdr) = analysis.sfdr_db {
+                info_row(ui, "SFDR", &format!("{:.1} dB", sfdr));
+            }
+
+            if let Some(snr) = analysis.snr_db {
+                info_row(ui, "SNR", &format!("{:.1} dB", snr));
+            }
+
+            if let Some(sinad) = analysis.sinad_db {
+                info_row(ui, "SINAD", &format!("{:.1} dB", sinad));
+            }
+
+            if let Some(noise) = analysis.noise_floor_db {
+                info_row(ui, "Noise", &format!("{:.1} dB", noise));
+            }
+
+            info_row(ui, "Harmonics", &format!("{}", analysis.harmonics.len()));
+        } else {
             ui.label(
-                egui::RichText::new("Analysis")
+                egui::RichText::new("No data")
                     .size(10.0)
-                    .color(text_color()),
+                    .color(Color32::from_rgb(100, 105, 115)),
             );
-            ui.add_space(4.0);
+        }
 
-            if let Some(ref analysis) = state.analysis {
-                if let Some(fund) = analysis.fundamental_frequency {
-                    info_row(ui, "Fund.", &format_freq(fund));
-                }
+        ui.add_space(6.0);
 
-                if let Some(fund_db) = analysis.fundamental_db {
-                    info_row(ui, "Level", &format!("{:.1} dB", fund_db));
-                }
+        // Window info
+        ui.label(egui::RichText::new("Window").size(10.0).color(text_color()));
+        info_row(ui, "Type", state.window.display_name());
+        info_row(ui, "Norm", state.normalization.display_name());
+        info_row(
+            ui,
+            "Sidelobe",
+            &format!("{:.0} dB", state.window.sidelobe_level()),
+        );
+        info_row(
+            ui,
+            "ENBW",
+            &format!("{:.2} bins", state.window.noise_bandwidth()),
+        );
 
-                // ui.add_space(4.0);
-
-                if let Some(thd) = analysis.thd_percent {
-                    let color = if thd < 1.0 {
-                        Color32::from_rgb(100, 200, 100)
-                    } else if thd < 5.0 {
-                        Color32::from_rgb(200, 200, 100)
-                    } else {
-                        Color32::from_rgb(255, 100, 100)
-                    };
-                    info_row_colored(ui, "THD", &format!("{:.3}%", thd), color);
-                }
-
-                if let Some(sfdr) = analysis.sfdr_db {
-                    info_row(ui, "SFDR", &format!("{:.1} dB", sfdr));
-                }
-
-                if let Some(snr) = analysis.snr_db {
-                    info_row(ui, "SNR", &format!("{:.1} dB", snr));
-                }
-
-                if let Some(sinad) = analysis.sinad_db {
-                    info_row(ui, "SINAD", &format!("{:.1} dB", sinad));
-                }
-
-                if let Some(noise) = analysis.noise_floor_db {
-                    info_row(ui, "Noise", &format!("{:.1} dB", noise));
-                }
-
-                info_row(ui, "Harmonics", &format!("{}", analysis.harmonics.len()));
-            } else {
-                ui.label(
-                    egui::RichText::new("No data")
-                        .size(10.0)
-                        .color(Color32::from_rgb(100, 105, 115)),
-                );
-            }
-
+        if let Some(ref source) = state.source_cache {
             ui.add_space(6.0);
-
-            // Window info
-            ui.label(egui::RichText::new("Window").size(10.0).color(text_color()));
-            info_row(ui, "Type", state.window.display_name());
-            info_row(ui, "Norm", state.normalization.display_name());
-            info_row(
-                ui,
-                "Sidelobe",
-                &format!("{:.0} dB", state.window.sidelobe_level()),
-            );
-            info_row(
-                ui,
-                "ENBW",
-                &format!("{:.2} bins", state.window.noise_bandwidth()),
-            );
-
-            if let Some(ref source) = state.source_cache {
-                ui.add_space(6.0);
-                ui.label(egui::RichText::new("Source").size(10.0).color(text_color()));
-                info_row(ui, "Trace", &source.name);
-                info_row(ui, "Input N", &format!("{}", source.original_count));
-                info_row(ui, "Samples", &format!("{}", source.samples.len()));
-                if source.decimation_factor > 1 {
-                    info_row(ui, "Decim", &format!("x{}", source.decimation_factor));
-                }
-                info_row(ui, "Fs", &format_freq(source.sample_rate));
+            ui.label(egui::RichText::new("Source").size(10.0).color(text_color()));
+            info_row(ui, "Trace", &source.name);
+            info_row(ui, "Input N", &format!("{}", source.original_count));
+            info_row(ui, "Samples", &format!("{}", source.samples.len()));
+            if source.decimation_factor > 1 {
+                info_row(ui, "Decim", &format!("x{}", source.decimation_factor));
             }
+            info_row(ui, "Fs", &format_freq(source.sample_rate));
+        }
 
-            if let Some(marker_freq) = state.marker_frequency {
-                ui.add_space(6.0);
-                ui.label(egui::RichText::new("Marker").size(10.0).color(text_color()));
-                info_row(ui, "Freq", &format_freq(marker_freq));
-                if let Some(ref data) = state.data {
-                    if let Some(point) = data.interpolate(marker_freq) {
-                        match state.mag_scale {
-                            MagnitudeScale::Linear => {
-                                info_row(ui, "Mag", &format!("{:.5}", point.magnitude))
-                            }
-                            MagnitudeScale::DB => {
-                                info_row(ui, "Mag", &format!("{:.2} dB", point.magnitude_db()))
-                            }
-                            MagnitudeScale::DBm => info_row(
-                                ui,
-                                "Mag",
-                                &format!("{:.2} dBm", point.magnitude_dbm(state.z0)),
-                            ),
+        if let Some(marker_freq) = state.marker_frequency {
+            ui.add_space(6.0);
+            ui.label(egui::RichText::new("Marker").size(10.0).color(text_color()));
+            info_row(ui, "Freq", &format_freq(marker_freq));
+            if let Some(ref data) = state.data {
+                if let Some(point) = data.interpolate(marker_freq) {
+                    match state.mag_scale {
+                        MagnitudeScale::Linear => {
+                            info_row(ui, "Mag", &format!("{:.5}", point.magnitude))
                         }
+                        MagnitudeScale::DB => {
+                            info_row(ui, "Mag", &format!("{:.2} dB", point.magnitude_db()))
+                        }
+                        MagnitudeScale::DBm => info_row(
+                            ui,
+                            "Mag",
+                            &format!("{:.2} dBm", point.magnitude_dbm(state.z0)),
+                        ),
                     }
                 }
             }
-        });
+        }
     });
 }
 
@@ -1595,6 +1604,50 @@ mod tests {
         assert!((content.center().x - inner_lane.center().x).abs() < f32::EPSILON);
         assert!((content.min.x - inner_lane.min.x).abs() < f32::EPSILON);
         assert!((content.max.x - inner_lane.max.x).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_render_info_panel_handles_small_height_with_scroll() {
+        let mut state = FftState::new();
+        load_demo_data(&mut state);
+        state.marker_frequency = state
+            .analysis
+            .as_ref()
+            .and_then(|a| a.fundamental_frequency);
+        assert!(state.analysis.is_some());
+        assert!(state.source_cache.is_some());
+
+        let ctx = egui::Context::default();
+        let output = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let layout =
+                    calculate_layout(Rect::from_min_size(Pos2::ZERO, Vec2::new(640.0, 96.0)));
+                render_info_panel(ui, &layout, &state);
+            });
+        });
+
+        assert!(
+            !output.shapes.is_empty(),
+            "render should produce clipped shapes for constrained-height info panels"
+        );
+    }
+
+    #[test]
+    fn test_render_info_panel_handles_empty_state_with_scroll_container() {
+        let state = FftState::new();
+        let ctx = egui::Context::default();
+        let output = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let layout =
+                    calculate_layout(Rect::from_min_size(Pos2::ZERO, Vec2::new(480.0, 88.0)));
+                render_info_panel(ui, &layout, &state);
+            });
+        });
+
+        assert!(
+            !output.shapes.is_empty(),
+            "empty-state info panel should still render header/body within constrained space"
+        );
     }
 
     #[test]
