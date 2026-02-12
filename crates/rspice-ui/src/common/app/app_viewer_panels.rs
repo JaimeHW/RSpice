@@ -2,12 +2,14 @@ use egui::{Color32, Pos2, RichText, Stroke, Ui};
 
 use super::RSpiceApp;
 
-const VIEWER_TAB_STRIP_MIN_HEIGHT: f32 = 30.0;
+const VIEWER_TAB_STRIP_MIN_HEIGHT: f32 = VIEWER_TAB_ROW_HEIGHT;
 const VIEWER_TAB_STRIP_PAD_X: f32 = 8.0;
-const VIEWER_TAB_STRIP_PAD_Y: f32 = 4.0;
+const VIEWER_TAB_STRIP_PAD_Y: f32 = 0.0;
 const VIEWER_TAB_SPACING: f32 = 4.0;
 const VIEWER_TAB_ROW_HEIGHT: f32 = 22.0;
 const VIEWER_TAB_CLOSE_SIZE: f32 = 12.0;
+const VIEWER_ADD_BUTTON_WIDTH: f32 = 104.0;
+const VIEWER_ADD_BUTTON_HEIGHT: f32 = 20.0;
 const VIEWER_TAB_ROUNDING: f32 = 2.0;
 const VIEWER_TAB_INNER_X: f32 = 9.0;
 const VIEWER_TAB_INNER_Y: f32 = 3.0;
@@ -67,8 +69,11 @@ fn viewer_workspace_status(state: &crate::common::app::AppState) -> (&'static st
 impl RSpiceApp {
     /// Render the waveform panel.
     pub(super) fn render_waveform_panel(&mut self, ui: &mut Ui) {
-        self.render_viewer_workspace_tabs(ui);
-        self.render_viewer_workspace_header(ui);
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            self.render_viewer_workspace_tabs(ui);
+            self.render_viewer_workspace_header(ui);
+        });
 
         match self.state.active_viewer() {
             crate::viewers::ActiveViewer::Waveform => {
@@ -109,7 +114,6 @@ impl RSpiceApp {
                 }
             });
         });
-        ui.separator();
     }
     fn render_viewer_workspace_tabs(&mut self, ui: &mut Ui) {
         use crate::viewers::ActiveViewer;
@@ -209,7 +213,7 @@ impl RSpiceApp {
 
                             if selected {
                                 let rect = tab_response.response.rect;
-                                let y = rect.max.y - 1.0;
+                                let y = ui.max_rect().max.y - 1.0;
                                 ui.painter().line_segment(
                                     [
                                         Pos2::new(rect.min.x + 5.0, y),
@@ -222,34 +226,19 @@ impl RSpiceApp {
 
                         ui.add_space(8.0);
                         let add_menu_id = ui.make_persistent_id("viewer_add_menu");
-                        let add_trigger = ui.allocate_ui_with_layout(
-                            egui::vec2(96.0, VIEWER_TAB_ROW_HEIGHT),
-                            egui::Layout::left_to_right(egui::Align::Center),
-                            |ui| {
-                                ui.add(
-                                    egui::Label::new(
-                                        RichText::new("+ Add Viewer")
-                                            .color(tab_text_color(false, true))
-                                            .size(11.0),
-                                    )
-                                    .sense(egui::Sense::click()),
-                                )
-                            },
+                        let add_response = ui.add_sized(
+                            egui::vec2(VIEWER_ADD_BUTTON_WIDTH, VIEWER_ADD_BUTTON_HEIGHT),
+                            egui::Button::new(
+                                RichText::new("Add Viewer")
+                                    .color(tab_text_color(false, true))
+                                    .size(11.0),
+                            )
+                            .fill(Color32::from_rgb(30, 34, 42))
+                            .stroke(Stroke::new(1.0, Color32::from_rgb(56, 63, 76)))
+                            .rounding(3.0),
                         );
-                        let add_response = add_trigger.inner;
                         if add_response.clicked() {
                             ui.memory_mut(|mem| mem.toggle_popup(add_menu_id));
-                        }
-                        if add_response.hovered() {
-                            let rect = add_trigger.response.rect;
-                            let y = rect.max.y - 1.0;
-                            ui.painter().line_segment(
-                                [
-                                    Pos2::new(rect.min.x + 3.0, y),
-                                    Pos2::new(rect.max.x - 3.0, y),
-                                ],
-                                Stroke::new(1.0, tab_underline_color()),
-                            );
                         }
 
                         egui::popup_below_widget(
@@ -298,8 +287,6 @@ impl RSpiceApp {
         if let Some(viewer) = open_request {
             self.state.open_viewer(viewer);
         }
-
-        ui.separator();
     }
 
     /// Render the structured log panel.
