@@ -10,6 +10,10 @@ use super::state::{FftState, FrequencyScale, MagnitudeScale};
 use super::window::WindowFunction;
 use crate::common::app::AppState;
 use crate::state::AnalysisType;
+use crate::utils::vertical_label_layout::{
+    place_vertical_line_labels, LabelSide, VerticalLabelLayoutConfig, VerticalLabelPlacement,
+    VerticalLabelRequest,
+};
 
 // =============================================================================
 // Constants
@@ -129,6 +133,12 @@ const AXIS_TICK_Y_OFFSET: f32 = 2.0;
 const MAX_LINEAR_MAJOR_TICKS: usize = 50;
 const MAX_LINEAR_MINOR_TICKS: usize = 250;
 const LINEAR_MINOR_SUBDIVISIONS: usize = 5;
+const CURSOR_LABEL_TEXT_PADDING_X: f32 = 5.0;
+const CURSOR_LABEL_TEXT_PADDING_Y: f32 = 2.0;
+const CURSOR_LABEL_CORNER_RADIUS: f32 = 3.0;
+const CURSOR_LABEL_LINE_STROKE: f32 = 1.0;
+const CURSOR_LABEL_FONT_SIZE: f32 = 9.0;
+const CURSOR_LABEL_BG_ALPHA: u8 = 220;
 
 fn calculate_layout(available: Rect) -> FftLayout {
     let total = available;
@@ -210,6 +220,10 @@ fn measure_text_width(painter: &egui::Painter, text: &str, font: FontId, color: 
         .layout_no_wrap(text.to_owned(), font, color)
         .size()
         .x
+}
+
+fn measure_text_size(painter: &egui::Painter, text: &str, font: FontId, color: Color32) -> Vec2 {
+    painter.layout_no_wrap(text.to_owned(), font, color).size()
 }
 
 fn combo_width_from_texts<'a, I>(
@@ -551,17 +565,30 @@ fn render_spectrum_core(ui: &mut Ui, layout: &FftLayout, state: &FftState) {
     // Spectrum trace
     if let Some(ref data) = state.data {
         render_trace(&painter, plot_rect, data, state);
+        let mut cursor_labels: Vec<PlotCursorLabelSpec> = Vec::with_capacity(2);
+        let mut line_x_positions: Vec<f32> = Vec::new();
 
         // Fundamental marker
         if let Some(ref analysis) = state.analysis {
             if let Some(fund_freq) = analysis.fundamental_frequency {
-                render_fundamental_marker(&painter, plot_rect, fund_freq, data, state);
+                if let Some(x) = render_fundamental_marker(&painter, plot_rect, fund_freq, state) {
+                    line_x_positions.push(x);
+                    cursor_labels.push(PlotCursorLabelSpec {
+                        anchor_x: x,
+                        text: "f0".to_string(),
+                        color: fundamental_color(),
+                        font: FontId::proportional(10.0),
+                    });
+                }
             }
 
             // Harmonic markers
             if state.show_harmonics {
                 for (freq, db) in &analysis.harmonics {
-                    render_harmonic_marker(&painter, plot_rect, *freq, *db, state);
+                    if let Some(x) = render_harmonic_marker(&painter, plot_rect, *freq, *db, state)
+                    {
+                        line_x_positions.push(x);
+                    }
                 }
             }
         }
@@ -575,7 +602,21 @@ fn render_spectrum_core(ui: &mut Ui, layout: &FftLayout, state: &FftState) {
         }
 
         if let Some(marker_freq) = state.marker_frequency {
-            render_user_marker(&painter, rect, plot_rect, marker_freq, data, state);
+            if let Some(label) = render_user_marker(plot_rect, marker_freq, data, state, &painter) {
+                line_x_positions.push(label.anchor_x);
+                cursor_labels.push(label);
+            }
+        }
+
+        if !cursor_labels.is_empty() {
+            render_fft_cursor_labels(
+                &painter,
+                plot_rect,
+                data,
+                state,
+                &cursor_labels,
+                &line_x_positions,
+            );
         }
     }
 
@@ -975,32 +1016,30 @@ fn clip_line_segment_to_rect(start: Pos2, end: Pos2, rect: Rect) -> Option<[Pos2
     Some([clipped_start, clipped_end])
 }
 
+#[derive(Debug, Clone)]
+struct PlotCursorLabelSpec {
+    anchor_x: f32,
+    text: String,
+    color: Color32,
+    font: FontId,
+}
+
 fn render_fundamental_marker(
     painter: &egui::Painter,
     rect: Rect,
     freq: f64,
-    _data: &FftData,
     state: &FftState,
-) {
+) -> Option<f32> {
     let x = freq_to_x(freq, rect, state);
     if x < rect.min.x || x > rect.max.x {
-        return;
+        return None;
     }
 
-    // Vertical line
     painter.line_segment(
         [Pos2::new(x, rect.min.y), Pos2::new(x, rect.max.y)],
         Stroke::new(1.0, fundamental_color()),
     );
-
-    // Label
-    painter.text(
-        Pos2::new(x, rect.min.y + 5.0),
-        egui::Align2::CENTER_TOP,
-        "f0",
-        FontId::proportional(10.0),
-        fundamental_color(),
-    );
+    Some(x)
 }
 
 fn render_harmonic_marker(
@@ -1009,10 +1048,10 @@ fn render_harmonic_marker(
     freq: f64,
     _db: f64,
     state: &FftState,
-) {
+) -> Option<f32> {
     let x = freq_to_x(freq, rect, state);
     if x < rect.min.x || x > rect.max.x {
-        return;
+        return None;
     }
 
     // Short vertical tick
@@ -1020,6 +1059,7 @@ fn render_harmonic_marker(
         [Pos2::new(x, rect.min.y), Pos2::new(x, rect.min.y + 15.0)],
         Stroke::new(1.0, harmonic_color()),
     );
+    Some(x)
 }
 
 fn render_peak_marker(painter: &egui::Painter, rect: Rect, peak: &FftPoint, state: &FftState) {
@@ -1039,24 +1079,23 @@ fn render_peak_marker(painter: &egui::Painter, rect: Rect, peak: &FftPoint, stat
 }
 
 fn render_user_marker(
-    painter: &egui::Painter,
-    spectrum_rect: Rect,
     plot_rect: Rect,
     marker_freq: f64,
     data: &FftData,
     state: &FftState,
-) {
+    painter: &egui::Painter,
+) -> Option<PlotCursorLabelSpec> {
     let x = freq_to_x(marker_freq, plot_rect, state);
     if !x.is_finite() || x < plot_rect.min.x || x > plot_rect.max.x {
-        return;
+        return None;
     }
     painter.line_segment(
         [Pos2::new(x, plot_rect.min.y), Pos2::new(x, plot_rect.max.y)],
         Stroke::new(1.0, Color32::from_rgb(220, 220, 120)),
     );
 
-    if let Some(point) = data.interpolate(marker_freq) {
-        let label = match state.mag_scale {
+    data.interpolate(marker_freq).map(|point| {
+        let text = match state.mag_scale {
             MagnitudeScale::Linear => {
                 format!("M: {} | {:.4}", format_freq(marker_freq), point.magnitude)
             }
@@ -1073,14 +1112,150 @@ fn render_user_marker(
                 )
             }
         };
-        painter.text(
-            Pos2::new(x, spectrum_rect.min.y + 2.0),
-            egui::Align2::CENTER_TOP,
-            label,
-            FontId::proportional(9.0),
-            Color32::from_rgb(220, 220, 120),
-        );
+        PlotCursorLabelSpec {
+            anchor_x: x,
+            text,
+            color: Color32::from_rgb(220, 220, 120),
+            font: FontId::proportional(CURSOR_LABEL_FONT_SIZE),
+        }
+    })
+}
+
+fn render_fft_cursor_labels(
+    painter: &egui::Painter,
+    plot_rect: Rect,
+    data: &FftData,
+    state: &FftState,
+    labels: &[PlotCursorLabelSpec],
+    line_x_positions: &[f32],
+) {
+    if labels.is_empty() {
+        return;
     }
+
+    let requests: Vec<VerticalLabelRequest> = labels
+        .iter()
+        .map(|label| {
+            let text_size =
+                measure_text_size(painter, &label.text, label.font.clone(), label.color);
+            VerticalLabelRequest {
+                anchor_x: label.anchor_x,
+                size: Vec2::new(
+                    text_size.x + CURSOR_LABEL_TEXT_PADDING_X * 2.0,
+                    text_size.y + CURSOR_LABEL_TEXT_PADDING_Y * 2.0,
+                ),
+            }
+        })
+        .collect();
+
+    let placements = layout_fft_cursor_labels(plot_rect, &requests, line_x_positions, data, state);
+    for (label, placement) in labels.iter().zip(placements.iter()) {
+        draw_cursor_label(painter, label, placement);
+    }
+}
+
+fn layout_fft_cursor_labels(
+    plot_rect: Rect,
+    requests: &[VerticalLabelRequest],
+    line_x_positions: &[f32],
+    data: &FftData,
+    state: &FftState,
+) -> Vec<VerticalLabelPlacement> {
+    let max_h = requests.iter().fold(0.0f32, |acc, r| acc.max(r.size.y));
+    let config = VerticalLabelLayoutConfig {
+        line_clearance: 4.0,
+        top_margin: 2.0,
+        row_gap: 3.0,
+        preferred_rows: 6,
+        nudge_step: 8.0,
+        nudge_steps: 10,
+        label_gap: 2.0,
+    };
+    let search_band_bottom = plot_rect.min.y
+        + config.top_margin
+        + (max_h + config.row_gap) * config.preferred_rows as f32
+        + 4.0;
+    let obstacles = collect_fft_cursor_label_obstacles(plot_rect, data, state, search_band_bottom);
+
+    place_vertical_line_labels(plot_rect, requests, line_x_positions, &obstacles, config)
+}
+
+fn collect_fft_cursor_label_obstacles(
+    plot_rect: Rect,
+    data: &FftData,
+    state: &FftState,
+    band_bottom: f32,
+) -> Vec<Rect> {
+    let mut obstacles = Vec::new();
+    if !band_bottom.is_finite() || band_bottom <= plot_rect.min.y {
+        return obstacles;
+    }
+
+    let band_bottom = band_bottom.min(plot_rect.max.y);
+    let n = data.points.len();
+    if n == 0 {
+        return obstacles;
+    }
+    let step = (n / 600).max(1);
+    obstacles.reserve((n / step).min(800));
+
+    for point in data.points.iter().step_by(step) {
+        let Some(x) = freq_to_x_for_trace(point.frequency, plot_rect, state) else {
+            continue;
+        };
+        let y = mag_to_y(point, plot_rect, state);
+        if !x.is_finite() || !y.is_finite() {
+            continue;
+        }
+        if x < plot_rect.min.x || x > plot_rect.max.x || y < plot_rect.min.y || y > band_bottom {
+            continue;
+        }
+        obstacles.push(Rect::from_center_size(Pos2::new(x, y), Vec2::splat(3.0)));
+    }
+
+    obstacles
+}
+
+fn draw_cursor_label(
+    painter: &egui::Painter,
+    label: &PlotCursorLabelSpec,
+    placement: &VerticalLabelPlacement,
+) {
+    let bg = Color32::from_rgba_unmultiplied(20, 22, 28, CURSOR_LABEL_BG_ALPHA);
+    painter.rect_filled(
+        placement.rect,
+        Rounding::same(CURSOR_LABEL_CORNER_RADIUS),
+        bg,
+    );
+    painter.rect_stroke(
+        placement.rect,
+        Rounding::same(CURSOR_LABEL_CORNER_RADIUS),
+        Stroke::new(1.0, label.color.gamma_multiply(0.8)),
+    );
+
+    let connector_y = placement.rect.center().y;
+    let connector_x = match placement.side {
+        LabelSide::Right => placement.rect.min.x,
+        LabelSide::Left => placement.rect.max.x,
+    };
+    painter.line_segment(
+        [
+            Pos2::new(label.anchor_x, connector_y),
+            Pos2::new(connector_x, connector_y),
+        ],
+        Stroke::new(CURSOR_LABEL_LINE_STROKE, label.color.gamma_multiply(0.75)),
+    );
+
+    painter.text(
+        Pos2::new(
+            placement.rect.min.x + CURSOR_LABEL_TEXT_PADDING_X,
+            placement.rect.min.y + CURSOR_LABEL_TEXT_PADDING_Y,
+        ),
+        egui::Align2::LEFT_TOP,
+        &label.text,
+        label.font.clone(),
+        label.color,
+    );
 }
 
 fn handle_spectrum_interactions(
@@ -1604,6 +1779,56 @@ mod tests {
         assert!((content.center().x - inner_lane.center().x).abs() < f32::EPSILON);
         assert!((content.min.x - inner_lane.min.x).abs() < f32::EPSILON);
         assert!((content.max.x - inner_lane.max.x).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_layout_fft_cursor_labels_avoids_line_collisions_and_label_overlap() {
+        let plot = Rect::from_min_size(Pos2::ZERO, Vec2::new(600.0, 320.0));
+        let requests = vec![
+            VerticalLabelRequest {
+                anchor_x: 220.0,
+                size: Vec2::new(66.0, 16.0),
+            },
+            VerticalLabelRequest {
+                anchor_x: 230.0,
+                size: Vec2::new(66.0, 16.0),
+            },
+        ];
+        let line_x = vec![220.0, 230.0, 250.0];
+        let data = FftData::default();
+        let state = FftState::new();
+
+        let placements = layout_fft_cursor_labels(plot, &requests, &line_x, &data, &state);
+        assert_eq!(placements.len(), requests.len());
+        assert!(!placements[0].rect.intersects(placements[1].rect));
+        for placement in &placements {
+            for x in &line_x {
+                assert!(!(*x >= placement.rect.min.x && *x <= placement.rect.max.x));
+            }
+        }
+    }
+
+    #[test]
+    fn test_collect_fft_cursor_label_obstacles_samples_top_band_trace_points() {
+        let plot = Rect::from_min_size(Pos2::ZERO, Vec2::new(600.0, 320.0));
+        let mut state = FftState::new();
+        state.freq_scale = FrequencyScale::Linear;
+        state.freq_min = 0.0;
+        state.freq_max = 1000.0;
+        state.mag_scale = MagnitudeScale::DB;
+        state.mag_min = -120.0;
+        state.mag_max = 20.0;
+
+        let freqs = vec![0.0, 100.0, 200.0, 300.0, 400.0, 500.0];
+        let mags = vec![1.0; freqs.len()];
+        let phases = vec![0.0; freqs.len()];
+        let data = FftData::from_spectrum("top", &freqs, &mags, &phases, 1000.0);
+        let obstacles = collect_fft_cursor_label_obstacles(plot, &data, &state, plot.min.y + 64.0);
+
+        assert!(!obstacles.is_empty());
+        assert!(obstacles
+            .iter()
+            .all(|r| r.max.y <= plot.min.y + 64.0 + 1e-3));
     }
 
     #[test]
