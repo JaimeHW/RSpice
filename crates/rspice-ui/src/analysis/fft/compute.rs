@@ -2,7 +2,8 @@
 //!
 //! Provides FFT computation for frequency-domain analysis of waveforms.
 
-use rustfft::{num_complex::Complex, FftPlanner};
+use super::data::FftData;
+use super::pipeline::{prepare_fft_input, MIN_FFT_SAMPLES};
 
 /// Window function types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -108,49 +109,36 @@ pub fn compute_fft(time: &[f64], values: &[f64], window: WindowFunction) -> Opti
     if time.len() < 4 || time.len() != values.len() {
         return None;
     }
-
-    let n = values.len();
-
-    // Calculate sample rate from time data
-    let dt = (time.last()? - time.first()?) / (n - 1) as f64;
-    if dt <= 0.0 {
+    let prepared = prepare_fft_input(
+        "compute_fft",
+        time,
+        values,
+        values.len().max(MIN_FFT_SAMPLES),
+    )?;
+    let fft = FftData::from_time_domain(
+        "compute_fft",
+        &prepared.samples,
+        prepared.sample_rate,
+        map_window(window),
+    );
+    if fft.is_empty() {
         return None;
     }
-    let sample_rate = 1.0 / dt;
 
-    // Apply window and convert to complex
-    let mut buffer: Vec<Complex<f64>> = values
-        .iter()
-        .enumerate()
-        .map(|(i, &v)| {
-            let w = window.apply(i, n);
-            Complex::new(v * w, 0.0)
-        })
-        .collect();
-
-    // Compute FFT
-    let mut planner = FftPlanner::new();
-    let fft = planner.plan_fft_forward(n);
-    fft.process(&mut buffer);
-
-    // Extract frequencies, magnitudes, and phases
-    // Only take the first half (positive frequencies) due to symmetry
-    let half_n = n / 2;
-    let freq_resolution = sample_rate / n as f64;
-
-    let frequencies: Vec<f64> = (0..half_n).map(|i| i as f64 * freq_resolution).collect();
-
-    let scale = 2.0 / n as f64; // Normalization factor
-
-    let magnitudes: Vec<f64> = buffer[..half_n].iter().map(|c| c.norm() * scale).collect();
-
-    let phases: Vec<f64> = buffer[..half_n].iter().map(|c| c.arg()).collect();
+    let mut frequencies = Vec::with_capacity(fft.points.len());
+    let mut magnitudes = Vec::with_capacity(fft.points.len());
+    let mut phases = Vec::with_capacity(fft.points.len());
+    for point in fft.points {
+        frequencies.push(point.frequency);
+        magnitudes.push(point.magnitude);
+        phases.push(point.phase);
+    }
 
     Some(FftResult {
         frequencies,
         magnitudes,
         phases,
-        sample_rate,
+        sample_rate: prepared.sample_rate,
         window,
     })
 }
@@ -225,5 +213,55 @@ mod tests {
         };
 
         assert!(result.peak_frequency().is_none());
+    }
+
+    #[test]
+    fn test_compute_fft_includes_nyquist_for_even_length() {
+        let n = 1024usize;
+        let sample_rate = 10_000.0;
+        let time: Vec<f64> = (0..n).map(|i| i as f64 / sample_rate).collect();
+        let values: Vec<f64> = time
+            .iter()
+            .map(|t| (2.0 * std::f64::consts::PI * 1000.0 * t).sin())
+            .collect();
+
+        let result = compute_fft(&time, &values, WindowFunction::Hanning).expect("fft");
+        assert_eq!(result.frequencies.len(), n / 2 + 1);
+        assert!(
+            (result.frequencies.last().copied().unwrap_or(0.0) - sample_rate * 0.5).abs() < 1e-9
+        );
+    }
+
+    #[test]
+    fn test_compute_fft_handles_nonuniform_timeline() {
+        let n = 2048usize;
+        let sample_rate = 50_000.0;
+        let mut time = Vec::with_capacity(n);
+        let mut t = 0.0;
+        for i in 0..n {
+            let jitter = if i % 3 == 0 { 0.85 } else { 1.15 };
+            t += jitter / sample_rate;
+            time.push(t);
+        }
+        let values: Vec<f64> = time
+            .iter()
+            .map(|tt| (2.0 * std::f64::consts::PI * 5000.0 * tt).sin())
+            .collect();
+
+        let result = compute_fft(&time, &values, WindowFunction::Hanning);
+        assert!(result.is_some());
+        assert!(result
+            .as_ref()
+            .map(|r| r.sample_rate.is_finite() && r.sample_rate > 0.0)
+            .unwrap_or(false));
+    }
+}
+
+fn map_window(window: WindowFunction) -> super::window::WindowFunction {
+    match window {
+        WindowFunction::Rectangular => super::window::WindowFunction::Rectangular,
+        WindowFunction::Hanning => super::window::WindowFunction::Hanning,
+        WindowFunction::Hamming => super::window::WindowFunction::Hamming,
+        WindowFunction::Blackman => super::window::WindowFunction::Blackman,
     }
 }
