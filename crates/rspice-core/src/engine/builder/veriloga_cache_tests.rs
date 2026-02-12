@@ -209,10 +209,12 @@ fn test_veriloga_cache_entries_reports_dependencies() {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].source_path, canonicalize_for_cache(&source));
         assert_eq!(entries[0].dependencies.len(), 2);
-        assert!(entries[0]
-            .dependencies
-            .iter()
-            .any(|p| *p == canonicalize_for_cache(&include)));
+        assert!(
+            entries[0]
+                .dependencies
+                .iter()
+                .any(|p| *p == canonicalize_for_cache(&include))
+        );
     });
 }
 

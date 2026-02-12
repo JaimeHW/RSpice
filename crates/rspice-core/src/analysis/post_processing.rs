@@ -666,10 +666,12 @@ mod tests {
         assert!(result.signal_level_db.is_finite());
         assert!(result.spur_level_db.is_finite());
         assert!(result.sfdr_db.is_finite());
-        assert!(result
-            .spurs
-            .iter()
-            .all(|(f, l)| f.is_finite() && l.is_finite()));
+        assert!(
+            result
+                .spurs
+                .iter()
+                .all(|(f, l)| f.is_finite() && l.is_finite())
+        );
     }
 
     // =========================================================================

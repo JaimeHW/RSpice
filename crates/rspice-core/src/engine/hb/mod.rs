@@ -516,11 +516,7 @@ impl Engine {
 
     #[inline]
     fn hb_node_to_solver_index(node: usize, num_nodes: usize) -> usize {
-        if node == 0 {
-            num_nodes
-        } else {
-            node - 1
-        }
+        if node == 0 { num_nodes } else { node - 1 }
     }
 
     fn hb_stamp_supported_nonlinear_devices(

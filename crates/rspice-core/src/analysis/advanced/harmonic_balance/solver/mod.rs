@@ -9,11 +9,11 @@ use std::f64::consts::PI;
 use super::config::HbConfig;
 use super::fft::HbFft;
 use super::result::{HbResult, SpectralVoltage};
+use crate::Value;
 #[cfg(feature = "veriloga")]
 use crate::device::veriloga::VerilogADevice;
 use crate::solver::convergence::{PseudoTransient, SourceStepper};
 use crate::solver::limit_pn_voltage;
-use crate::Value;
 
 /// Error types specific to Harmonic Balance solver
 #[derive(Debug, Clone)]

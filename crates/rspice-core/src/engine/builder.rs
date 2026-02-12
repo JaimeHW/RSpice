@@ -3,8 +3,8 @@
 //! This module handles the conversion from parsed netlist elements
 //! to the runtime circuit representation.
 
-use super::{extract_dc_value, Engine, SimulationError};
-use crate::netlist::{flatten_netlist, ElementKind};
+use super::{Engine, SimulationError, extract_dc_value};
+use crate::netlist::{ElementKind, flatten_netlist};
 use crate::{CircuitData, Netlist};
 #[cfg(feature = "veriloga")]
 use serde::{Deserialize, Serialize};
@@ -27,9 +27,10 @@ use model_resolution::*;
 mod veriloga_cache;
 #[cfg(feature = "veriloga")]
 pub use veriloga_cache::{
-    clear_veriloga_cache, prune_veriloga_cache, register_precompiled_veriloga_model,
+    VerilogACacheEntry, VerilogACachePruneReport, VerilogACacheStats, clear_veriloga_cache,
+    prune_veriloga_cache, register_precompiled_veriloga_model,
     register_precompiled_veriloga_model_with_dependencies, veriloga_cache_entries,
-    veriloga_cache_stats, VerilogACacheEntry, VerilogACachePruneReport, VerilogACacheStats,
+    veriloga_cache_stats,
 };
 #[cfg(feature = "veriloga")]
 use veriloga_cache::{normalize_model_key, resolve_cached_or_compile_veriloga};
@@ -800,11 +801,7 @@ impl Engine {
                     let delay = (*td)
                         .or_else(|| {
                             if let (Some(f), Some(n)) = (freq_eff, nl_eff) {
-                                if f > 0.0 {
-                                    Some(n / f)
-                                } else {
-                                    None
-                                }
+                                if f > 0.0 { Some(n / f) } else { None }
                             } else {
                                 None
                             }

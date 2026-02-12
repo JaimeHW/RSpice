@@ -379,7 +379,7 @@ impl PeriodDetector {
     /// Uses parabolic interpolation for sub-bin frequency accuracy,
     /// as implemented in industry simulators.
     pub fn detect_fft(&self, time: &[Value], values: &[Value]) -> Option<PeriodEstimate> {
-        use rustfft::{num_complex::Complex, FftPlanner};
+        use rustfft::{FftPlanner, num_complex::Complex};
 
         if !Self::has_valid_input_shape(time, values, 16) {
             return None;

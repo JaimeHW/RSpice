@@ -1223,8 +1223,8 @@ impl Engine {
 #[cfg(test)]
 mod abort_tests {
     use super::*;
-    use crate::abort_signal::{CountingAbort, ImmediateAbort, NoAbort};
     use crate::Engine;
+    use crate::abort_signal::{CountingAbort, ImmediateAbort, NoAbort};
 
     fn simple_rc_netlist() -> Netlist {
         // Simple RC circuit: V1 1 0 1V, R1 1 2 1k, C1 2 0 1u

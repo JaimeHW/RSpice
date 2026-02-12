@@ -77,11 +77,7 @@ impl Complex {
     /// ζ = -Re(p) / |p|
     pub fn damping_factor(&self) -> Value {
         let mag = self.magnitude();
-        if mag > 1e-15 {
-            -self.re / mag
-        } else {
-            0.0
-        }
+        if mag > 1e-15 { -self.re / mag } else { 0.0 }
     }
 
     /// Get time constant (for real pole)
@@ -1282,10 +1278,12 @@ mod tests {
         let result = analyzer.analyze(&config);
 
         assert_eq!(result.poles.len(), 2);
-        assert!(result
-            .poles
-            .iter()
-            .all(|p| (p.re + 2.0).abs() < 1e-6 && (p.im.abs() - 10.0).abs() < 1e-5));
+        assert!(
+            result
+                .poles
+                .iter()
+                .all(|p| (p.re + 2.0).abs() < 1e-6 && (p.im.abs() - 10.0).abs() < 1e-5)
+        );
     }
 
     #[test]
@@ -1338,10 +1336,12 @@ mod tests {
             "expected zero near -1.5, got {:?}",
             result.zeros
         );
-        assert!(!result
-            .zeros
-            .iter()
-            .any(|z| (z.re + 3.0).abs() < 1e-3 && z.im.abs() < 1e-3));
+        assert!(
+            !result
+                .zeros
+                .iter()
+                .any(|z| (z.re + 3.0).abs() < 1e-3 && z.im.abs() < 1e-3)
+        );
     }
 
     #[test]

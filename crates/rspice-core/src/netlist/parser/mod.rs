@@ -7,7 +7,7 @@
 //! - Subcircuit definitions and instances
 
 use super::expr::eval_expression;
-use super::lexer::{tokenize, LexError, TokenKind, TokenStream};
+use super::lexer::{LexError, TokenKind, TokenStream, tokenize};
 use super::xspice_parser;
 use super::{
     AnalysisCommand, Element, ElementKind, FreqVariation, InitialCondition, ModelDef,

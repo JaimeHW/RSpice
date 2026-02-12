@@ -632,26 +632,30 @@ fn test_run_hb_preserves_circuit_node_names_in_results() {
     );
 
     let hb = result.expect("HB run should succeed");
-    assert!(hb
-        .result
-        .node_names
-        .iter()
-        .any(|name| name.eq_ignore_ascii_case("vin")));
-    assert!(hb
-        .result
-        .node_names
-        .iter()
-        .any(|name| name.eq_ignore_ascii_case("vout")));
-    assert!(hb
-        .result
-        .spectral_voltages
-        .iter()
-        .any(|spectrum| spectrum.node_name.eq_ignore_ascii_case("vin")));
-    assert!(hb
-        .result
-        .spectral_voltages
-        .iter()
-        .any(|spectrum| spectrum.node_name.eq_ignore_ascii_case("vout")));
+    assert!(
+        hb.result
+            .node_names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case("vin"))
+    );
+    assert!(
+        hb.result
+            .node_names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case("vout"))
+    );
+    assert!(
+        hb.result
+            .spectral_voltages
+            .iter()
+            .any(|spectrum| spectrum.node_name.eq_ignore_ascii_case("vin"))
+    );
+    assert!(
+        hb.result
+            .spectral_voltages
+            .iter()
+            .any(|spectrum| spectrum.node_name.eq_ignore_ascii_case("vout"))
+    );
 }
 
 #[test]
@@ -1729,8 +1733,8 @@ fn test_hb_solver_inductor_frequency_dependence() {
 fn test_dcac_parsing_and_circuit_building() {
     // Comprehensive test to verify DC AC combined syntax parsing
     // and propagation through circuit building to HB solver
-    use crate::netlist::{ElementKind, SourceSpec};
     use crate::Netlist;
+    use crate::netlist::{ElementKind, SourceSpec};
 
     let netlist_str = r#"
             * Test DC AC combined source
@@ -1819,7 +1823,7 @@ fn test_run_hb_rlc_series_resonance() {
     let r: f64 = 100.0;
     let l: f64 = 1e-3; // 1mH
     let c: f64 = 10e-9; // 10nF
-                        // Resonant frequency = 1/(2π√(1e-3 * 10e-9)) ≈ 50.33 kHz
+    // Resonant frequency = 1/(2π√(1e-3 * 10e-9)) ≈ 50.33 kHz
     let f0 = 1.0 / (2.0 * PI * (l * c).sqrt());
 
     // Test at resonance

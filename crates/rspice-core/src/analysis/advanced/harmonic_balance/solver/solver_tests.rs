@@ -714,7 +714,7 @@ fn test_build_full_jacobian_linear_only() {
     solver.add_conductance(0, 0, 0.01);
     // 1k resistor between nodes 0 and 1 (full MNA stamp)
     solver.add_resistor(0, 1, 1000.0); // G = 0.001
-                                       // 1pF capacitor at node 1
+    // 1pF capacitor at node 1
     solver.add_capacitance(1, 1, 1e-12);
 
     let state = HbSolverState::new(2, 2);
@@ -1254,11 +1254,7 @@ fn test_numerical_jacobian_consistency() {
             // Use absolute tolerance for near-zero values, relative for larger
             let rel_diff = if scale < abs_tol {
                 // Both values are near zero - check absolute difference
-                if diff < abs_tol {
-                    0.0
-                } else {
-                    diff / abs_tol
-                }
+                if diff < abs_tol { 0.0 } else { diff / abs_tol }
             } else {
                 diff / scale
             };
@@ -1575,7 +1571,7 @@ fn test_dc_solve_nmos_saturation() {
     solver.set_dc_source(2, 1e-3); // Current into drain
     solver.add_conductance(1, 1, 1.0); // Gate conductance to ground (G=1S)
     solver.add_conductance(3, 3, 1.0); // Source grounded
-                                       // NMOS: drain=2, gate=1, source=3, bulk=3, kp=200µA/V², vth=0.5V
+    // NMOS: drain=2, gate=1, source=3, bulk=3, kp=200µA/V², vth=0.5V
     solver.add_nmos(2, 1, 3, 3, 2e-4, 0.5);
     for n in 0..4 {
         solver.add_conductance(n, n, 1e-9);
@@ -1612,7 +1608,7 @@ fn test_dc_solve_pnp_bjt() {
 
     // Use add_resistor for proper MNA stamp: 100 ohm base resistor to ground
     solver.add_resistor(1, 3, 100.0); // Base to ground: G = 0.01S
-                                      // 100 ohm collector resistor to ground
+    // 100 ohm collector resistor to ground
     solver.add_resistor(2, 3, 100.0); // Collector to ground: G = 0.01S
 
     // Ground node (large conductance to clamp)

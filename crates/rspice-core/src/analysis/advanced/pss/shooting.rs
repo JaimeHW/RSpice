@@ -3,8 +3,8 @@
 //! Implements the shooting method for finding periodic steady-state solutions.
 //! The core algorithm solves the boundary value problem: find x(0) such that x(T) = x(0).
 
-use crate::solver::{SolverError, StaticMatrix};
 use crate::Value;
+use crate::solver::{SolverError, StaticMatrix};
 
 /// State of the shooting Newton solver
 #[derive(Debug, Clone)]

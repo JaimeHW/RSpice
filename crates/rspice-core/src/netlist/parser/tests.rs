@@ -1007,9 +1007,10 @@ fn test_parse_disto_invalid_variation() {
 .END
 "#;
     let err = parse_netlist(netlist).expect_err("expected invalid .DISTO variation");
-    assert!(err
-        .to_string()
-        .contains("Invalid .DISTO frequency variation"));
+    assert!(
+        err.to_string()
+            .contains("Invalid .DISTO frequency variation")
+    );
 }
 
 #[test]
@@ -1097,9 +1098,10 @@ fn test_parse_mc_invalid_distribution() {
 .END
 "#;
     let err = parse_netlist(netlist).expect_err("expected .MC distribution parse error");
-    assert!(err
-        .to_string()
-        .contains("expected GAUSS, UNIFORM, or WORSTCASE"));
+    assert!(
+        err.to_string()
+            .contains("expected GAUSS, UNIFORM, or WORSTCASE")
+    );
 }
 
 #[test]
