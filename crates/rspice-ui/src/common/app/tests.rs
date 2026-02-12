@@ -242,6 +242,156 @@ fn test_panel_sizes_serialization() {
 }
 
 #[test]
+fn test_viewer_workspace_serialization_round_trip() {
+    let mut workspace = crate::viewers::ViewerWorkspace::default();
+    workspace.open_or_focus(crate::viewers::ActiveViewer::BodePlot);
+    workspace.open_or_focus(crate::viewers::ActiveViewer::Histogram);
+    workspace.focus(crate::viewers::ActiveViewer::BodePlot);
+
+    let serialized = ViewerWorkspaceSer::from(&workspace);
+    assert_eq!(serialized.tabs.len(), 3);
+    assert_eq!(
+        serialized.tabs,
+        vec![
+            crate::viewers::ActiveViewer::Waveform.id(),
+            crate::viewers::ActiveViewer::BodePlot.id(),
+            crate::viewers::ActiveViewer::Histogram.id(),
+        ]
+    );
+
+    let restored: crate::viewers::ViewerWorkspace = serialized.into();
+    assert_eq!(
+        restored.tabs(),
+        &[
+            crate::viewers::ActiveViewer::Waveform,
+            crate::viewers::ActiveViewer::BodePlot,
+            crate::viewers::ActiveViewer::Histogram,
+        ]
+    );
+    assert_eq!(
+        restored.active_viewer(),
+        crate::viewers::ActiveViewer::BodePlot
+    );
+}
+
+#[test]
+fn test_viewer_workspace_deserialization_filters_invalid_ids() {
+    let serialized = ViewerWorkspaceSer {
+        tabs: vec![255, crate::viewers::ActiveViewer::Nyquist.id()],
+        active_index: 999,
+    };
+
+    let restored: crate::viewers::ViewerWorkspace = serialized.into();
+    assert_eq!(restored.tabs(), &[crate::viewers::ActiveViewer::Nyquist]);
+    assert_eq!(
+        restored.active_viewer(),
+        crate::viewers::ActiveViewer::Nyquist
+    );
+}
+
+#[test]
+fn test_app_state_open_viewer_routes_to_waveform_tab() {
+    let mut state = AppState::default();
+    state.panels.active_bottom_tab = BottomPanelTab::Log;
+
+    state.open_viewer(crate::viewers::ActiveViewer::EyeDiagram);
+
+    assert!(state.panels.bottom_panel);
+    assert_eq!(state.panels.active_bottom_tab, BottomPanelTab::Waveform);
+    assert_eq!(
+        state.active_viewer(),
+        crate::viewers::ActiveViewer::EyeDiagram
+    );
+    assert!(state
+        .viewer_workspace
+        .contains(crate::viewers::ActiveViewer::EyeDiagram));
+}
+
+#[test]
+fn test_app_state_open_viewer_in_tab_respects_target_tab() {
+    let mut state = AppState::default();
+
+    state.open_viewer_in_tab(
+        crate::viewers::ActiveViewer::BodePlot,
+        BottomPanelTab::Automation,
+    );
+
+    assert_eq!(state.panels.active_bottom_tab, BottomPanelTab::Automation);
+    assert_eq!(
+        state.active_viewer(),
+        crate::viewers::ActiveViewer::BodePlot
+    );
+}
+
+#[test]
+fn test_app_state_close_active_viewer_keeps_workspace_non_empty() {
+    let mut state = AppState::default();
+    state.open_viewer(crate::viewers::ActiveViewer::Nyquist);
+    assert_eq!(state.active_viewer(), crate::viewers::ActiveViewer::Nyquist);
+
+    state.close_active_viewer();
+    assert_eq!(
+        state.active_viewer(),
+        crate::viewers::ActiveViewer::Waveform
+    );
+    assert!(state
+        .viewer_workspace
+        .contains(crate::viewers::ActiveViewer::Waveform));
+
+    state.close_active_viewer();
+    assert_eq!(
+        state.active_viewer(),
+        crate::viewers::ActiveViewer::Waveform
+    );
+    assert_eq!(state.viewer_workspace.tab_count(), 1);
+}
+
+#[test]
+fn test_app_state_serialization_round_trip_preserves_viewer_workspace() {
+    let mut state = AppState::default();
+    state.open_viewer(crate::viewers::ActiveViewer::BodePlot);
+    state.open_viewer(crate::viewers::ActiveViewer::Nyquist);
+    state
+        .viewer_workspace
+        .focus(crate::viewers::ActiveViewer::BodePlot);
+
+    let encoded = serde_json::to_string(&state).expect("serialize app state");
+    let restored: AppState = serde_json::from_str(&encoded).expect("deserialize app state");
+
+    assert_eq!(
+        restored.viewer_workspace.tabs(),
+        &[
+            crate::viewers::ActiveViewer::Waveform,
+            crate::viewers::ActiveViewer::BodePlot,
+            crate::viewers::ActiveViewer::Nyquist,
+        ]
+    );
+    assert_eq!(
+        restored.active_viewer(),
+        crate::viewers::ActiveViewer::BodePlot
+    );
+}
+
+#[test]
+fn test_app_state_deserialization_legacy_payload_defaults_viewer_workspace() {
+    let mut state = AppState::default();
+    state.open_viewer(crate::viewers::ActiveViewer::EyeDiagram);
+
+    let mut value = serde_json::to_value(&state).expect("serialize to value");
+    let map = value
+        .as_object_mut()
+        .expect("serialized app state should be object");
+    map.remove("viewer_workspace");
+
+    let restored: AppState = serde_json::from_value(value).expect("deserialize legacy payload");
+    assert_eq!(
+        restored.active_viewer(),
+        crate::viewers::ActiveViewer::Waveform
+    );
+    assert_eq!(restored.viewer_workspace.tab_count(), 1);
+}
+
+#[test]
 fn test_theme_is_dark_by_default() {
     let state = AppState::default();
     assert!(
