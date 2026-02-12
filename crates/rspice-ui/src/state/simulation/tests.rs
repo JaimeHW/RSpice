@@ -331,6 +331,8 @@ fn test_simulation_state_complete_run_syncs_waveforms() {
     assert_eq!(state.waveforms.len(), 2);
     assert_eq!(state.waveforms[0].name, "V(1)");
     assert_eq!(state.waveforms[1].name, "V(2)");
+    assert_eq!(state.node_to_waveform.get("V(1)"), Some(&0));
+    assert_eq!(state.node_to_waveform.get("V(2)"), Some(&1));
 }
 
 #[test]
@@ -358,18 +360,39 @@ fn test_simulation_state_delete_run() {
 fn test_simulation_state_delete_active_run() {
     let mut state = SimulationState::default();
 
-    state.start_run();
-    state.start_run();
+    let run_old = state.start_run();
+    run_old.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TR-old").with_waveforms(vec![
+            WaveformData::new("V(old)", vec![0.0, 1.0], vec![0.0, 1.0], "#ff0000"),
+        ]),
+    );
+    state.complete_run();
 
-    // Active is run at index 0
+    let run_new = state.start_run();
+    run_new.add_analysis(
+        AnalysisResult::new(2, AnalysisType::Transient, "TR-new").with_waveforms(vec![
+            WaveformData::new("V(new)", vec![0.0, 1.0], vec![1.0, 2.0], "#00ff00"),
+        ]),
+    );
+    state.complete_run();
+
+    // Active is newest run at index 0.
     assert_eq!(state.active_run_idx, Some(0));
+    assert_eq!(state.waveforms.len(), 1);
+    assert_eq!(state.waveforms[0].name, "V(new)");
+    assert_eq!(state.node_to_waveform.get("V(new)"), Some(&0));
 
-    // Delete active run
+    // Delete active run.
     state.delete_run(0);
 
-    // Should select newest remaining (index 0)
+    // Should select newest remaining (index 0) and sync displayed waveforms.
     assert_eq!(state.active_run_idx, Some(0));
+    assert_eq!(state.active_analysis_idx, Some(0));
     assert_eq!(state.run_count(), 1);
+    assert_eq!(state.waveforms.len(), 1);
+    assert_eq!(state.waveforms[0].name, "V(old)");
+    assert_eq!(state.node_to_waveform.get("V(old)"), Some(&0));
+    assert!(!state.node_to_waveform.contains_key("V(new)"));
 }
 
 #[test]
@@ -392,18 +415,55 @@ fn test_simulation_state_prune_history() {
 fn test_simulation_state_clear_runs() {
     let mut state = SimulationState::default();
 
+    let run = state.start_run();
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TR").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
+        ]),
+    );
+    state.complete_run();
+
     state.start_run();
-    state.start_run();
+    state.select_run(1);
     let first_id = state.next_run_id;
+    let version_before_clear = state.data_version;
+
+    assert!(!state.waveforms.is_empty());
+    assert!(!state.node_to_waveform.is_empty());
 
     state.clear_runs();
 
     assert!(!state.has_results());
     assert_eq!(state.active_run_idx, None);
     assert_eq!(state.active_analysis_idx, None);
+    assert!(state.waveforms.is_empty());
+    assert!(state.node_to_waveform.is_empty());
+    assert_ne!(state.data_version, version_before_clear);
 
     // next_run_id should be preserved
     assert_eq!(state.next_run_id, first_id);
+}
+
+#[test]
+fn test_simulation_state_select_run_without_analyses_clears_displayed_waveforms() {
+    let mut state = SimulationState::default();
+
+    let run_with_data = state.start_run();
+    run_with_data.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TR").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.2, 0.4], "#ffaa00"),
+        ]),
+    );
+    state.complete_run();
+    assert_eq!(state.waveforms.len(), 1);
+
+    // Newest run has no analyses.
+    state.start_run();
+    assert!(state.select_run(0));
+    assert_eq!(state.active_run_idx, Some(0));
+    assert_eq!(state.active_analysis_idx, None);
+    assert!(state.waveforms.is_empty());
+    assert!(state.node_to_waveform.is_empty());
 }
 
 #[test]
