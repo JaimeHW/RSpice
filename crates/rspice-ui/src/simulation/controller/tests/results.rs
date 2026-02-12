@@ -819,6 +819,54 @@ fn test_update_waveforms_transient_fft_interactive_mode_caps_large_uniform_input
 }
 
 #[test]
+fn test_update_waveforms_transient_fft_manual_window_and_sample_count_are_applied() {
+    use crate::simulation::results::WaveformData as EngineWaveformData;
+    use crate::simulation::SimulationResult;
+    use std::collections::HashMap;
+
+    let controller = SimulationController::new();
+    let mut state = AppState::default();
+    state
+        .fft_state
+        .set_input_fidelity(crate::analysis::fft::state::InputFidelity::Reference);
+    state
+        .fft_state
+        .set_selected_source(Some("V(out)".to_string()));
+    state.fft_state.time_window_auto = false;
+    state.fft_state.time_window_start = 0.2;
+    state.fft_state.time_window_end = 0.4;
+    state.fft_state.sample_count_auto = false;
+    state.fft_state.sample_count = 2048;
+
+    let n = 100_000usize;
+    let fs = 100_000.0;
+    let time: Vec<f64> = (0..n).map(|i| i as f64 / fs).collect();
+    let signal: Vec<f64> = (0..n)
+        .map(|i| (2.0 * std::f64::consts::PI * 5_000.0 * i as f64 / fs).sin())
+        .collect();
+
+    let mut waveforms = HashMap::new();
+    waveforms.insert(
+        "V(out)".to_string(),
+        EngineWaveformData::new_time_domain("V(out)", time.clone(), signal),
+    );
+
+    controller.update_waveforms(
+        &mut state,
+        &SimulationResult::Transient {
+            time: time.clone(),
+            waveforms,
+        },
+    );
+
+    let source = state.fft_state.source_cache.as_ref().expect("source cache");
+    assert_eq!(source.decimation_factor, 1);
+    assert_eq!(source.samples.len(), 2048);
+    assert!(source.original_count > 15_000);
+    assert!(source.original_count < 25_000);
+}
+
+#[test]
 fn test_update_waveforms_ac_populates_bode_nyquist_and_smith_data() {
     use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;

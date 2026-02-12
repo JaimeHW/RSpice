@@ -75,10 +75,11 @@ pub fn render_fft_viewer(ui: &mut Ui, app_state: &mut AppState) {
     let (_id, _rect) = ui.allocate_space(available_rect.size());
     let layout = calculate_layout(available_rect);
     let source_names = collect_fft_source_names(app_state);
+    let source_time_bounds = current_fft_source_time_bounds(app_state);
 
     let header_actions = {
         let state = &mut app_state.fft_state;
-        render_header(ui, &layout, state, &source_names)
+        render_header(ui, &layout, state, &source_names, source_time_bounds)
     };
 
     if let Some(source_name) = header_actions.refresh_source {
@@ -254,6 +255,15 @@ struct HeaderActions {
     refresh_source: Option<String>,
 }
 
+fn queue_fft_refresh(actions: &mut HeaderActions, state: &FftState) {
+    if actions.refresh_source.is_none() {
+        actions.refresh_source = state
+            .selected_source
+            .clone()
+            .or_else(|| state.source_cache.as_ref().map(|src| src.name.clone()));
+    }
+}
+
 fn collect_fft_source_names(app_state: &AppState) -> Vec<String> {
     if !fft_supported_for_active_analysis(app_state) {
         return Vec::new();
@@ -268,6 +278,32 @@ fn collect_fft_source_names(app_state: &AppState) -> Vec<String> {
     names.sort();
     names.dedup();
     names
+}
+
+fn current_fft_source_time_bounds(app_state: &AppState) -> Option<(f64, f64)> {
+    let selected = app_state.fft_state.selected_source.as_ref().or_else(|| {
+        app_state
+            .fft_state
+            .source_cache
+            .as_ref()
+            .map(|src| &src.name)
+    })?;
+    let waveform = app_state
+        .simulation
+        .waveforms
+        .iter()
+        .find(|wf| wf.name == *selected)?;
+    waveform_time_bounds(waveform)
+}
+
+fn waveform_time_bounds(waveform: &crate::state::WaveformData) -> Option<(f64, f64)> {
+    let start = waveform.x.iter().copied().find(|x| x.is_finite())?;
+    let end = waveform.x.iter().copied().rfind(|x| x.is_finite())?;
+    if end > start {
+        Some((start, end))
+    } else {
+        None
+    }
 }
 
 fn fft_supported_for_active_analysis(app_state: &AppState) -> bool {
@@ -289,7 +325,6 @@ fn refresh_fft_from_source_waveform(app_state: &mut AppState, source_name: &str)
     app_state
         .fft_state
         .set_selected_source(Some(source_name.to_string()));
-    let input_policy = app_state.fft_state.input_policy();
     let Some(waveform) = app_state
         .simulation
         .waveforms
@@ -300,11 +335,12 @@ fn refresh_fft_from_source_waveform(app_state: &mut AppState, source_name: &str)
         return;
     };
 
-    if let Some(prepared) = crate::analysis::fft::prepare_fft_input_with_policy(
+    let input_options = app_state.fft_state.input_options_for_waveform(&waveform.x);
+    if let Some(prepared) = crate::analysis::fft::prepare_fft_input_with_options(
         source_name,
         &waveform.x,
         &waveform.y,
-        input_policy,
+        input_options,
     ) {
         app_state.fft_state.load_prepared_input(prepared);
     } else {
@@ -321,6 +357,7 @@ fn render_header(
     layout: &FftLayout,
     state: &mut FftState,
     source_names: &[String],
+    source_time_bounds: Option<(f64, f64)>,
 ) -> HeaderActions {
     let mut actions = HeaderActions::default();
     ui.painter()
@@ -329,6 +366,20 @@ fn render_header(
     let header_rect = layout.header.shrink(4.0);
     ui.allocate_new_ui(UiBuilder::new().max_rect(header_rect), |ui| {
         ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
+
+        if let Some((min_t, max_t)) = source_time_bounds {
+            if state.time_window_auto {
+                state.time_window_start = min_t;
+                state.time_window_end = max_t;
+            } else {
+                state.time_window_start = state.time_window_start.clamp(min_t, max_t);
+                state.time_window_end = state.time_window_end.clamp(min_t, max_t);
+                if state.time_window_end <= state.time_window_start {
+                    state.time_window_start = min_t;
+                    state.time_window_end = max_t;
+                }
+            }
+        }
 
         ui.horizontal(|ui| {
             ui.spacing_mut().interact_size.y = HEADER_CONTROL_HEIGHT;
@@ -472,12 +523,87 @@ fn render_header(
                 });
             if fidelity != state.input_fidelity {
                 state.set_input_fidelity(fidelity);
-                if actions.refresh_source.is_none() {
-                    actions.refresh_source = state
-                        .selected_source
-                        .clone()
-                        .or_else(|| state.source_cache.as_ref().map(|src| src.name.clone()));
+                queue_fft_refresh(&mut actions, state);
+            }
+
+            ui.separator();
+
+            ui.label("Auto Time");
+            let mut time_changed = ui.checkbox(&mut state.time_window_auto, "").changed();
+            let time_speed = source_time_bounds
+                .map(|(min_t, max_t)| ((max_t - min_t).abs() / 1000.0).max(1e-15))
+                .unwrap_or(1e-9);
+            ui.add_enabled_ui(!state.time_window_auto, |ui| {
+                ui.label("Start");
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut state.time_window_start)
+                            .speed(time_speed)
+                            .max_decimals(12),
+                    )
+                    .changed()
+                {
+                    time_changed = true;
                 }
+                ui.label("End");
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut state.time_window_end)
+                            .speed(time_speed)
+                            .max_decimals(12),
+                    )
+                    .changed()
+                {
+                    time_changed = true;
+                }
+            });
+
+            if let Some((min_t, max_t)) = source_time_bounds {
+                if state.time_window_auto {
+                    state.time_window_start = min_t;
+                    state.time_window_end = max_t;
+                } else {
+                    state.time_window_start = state.time_window_start.clamp(min_t, max_t);
+                    state.time_window_end = state.time_window_end.clamp(min_t, max_t);
+                    if state.time_window_end <= state.time_window_start {
+                        state.time_window_start = min_t;
+                        state.time_window_end = max_t;
+                    }
+                }
+            }
+
+            if time_changed {
+                queue_fft_refresh(&mut actions, state);
+            }
+
+            ui.separator();
+
+            ui.label("Auto N");
+            let mut sample_changed = ui.checkbox(&mut state.sample_count_auto, "").changed();
+            ui.add_enabled_ui(!state.sample_count_auto, |ui| {
+                ui.label("N");
+                let mut sample_count = state.sample_count as u64;
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut sample_count)
+                            .range(
+                                crate::analysis::fft::MIN_FFT_SAMPLES as u64
+                                    ..=crate::analysis::fft::MAX_REFERENCE_RESAMPLE_POINTS as u64,
+                            )
+                            .speed(1.0),
+                    )
+                    .changed()
+                {
+                    state.sample_count = sample_count as usize;
+                    sample_changed = true;
+                }
+            });
+            state.sample_count = state.sample_count.clamp(
+                crate::analysis::fft::MIN_FFT_SAMPLES,
+                crate::analysis::fft::MAX_REFERENCE_RESAMPLE_POINTS,
+            );
+            if sample_changed {
+                queue_fft_refresh(&mut actions, state);
             }
 
             ui.separator();
@@ -1608,6 +1734,21 @@ fn render_info_panel_content(ui: &mut Ui, state: &FftState) {
         info_row(ui, "Type", state.window.display_name());
         info_row(ui, "Norm", state.normalization.display_name());
         info_row(ui, "Fidelity", state.input_fidelity.display_name());
+        if !state.time_window_auto {
+            info_row(
+                ui,
+                "Tstart",
+                &crate::waveform::axis::format_time(state.time_window_start),
+            );
+            info_row(
+                ui,
+                "Tstop",
+                &crate::waveform::axis::format_time(state.time_window_end),
+            );
+        }
+        if !state.sample_count_auto {
+            info_row(ui, "N set", &format!("{}", state.sample_count));
+        }
         info_row(
             ui,
             "Sidelobe",
@@ -1707,11 +1848,11 @@ fn load_demo_data(state: &mut FftState) {
         })
         .collect();
 
-    if let Some(prepared) = crate::analysis::fft::prepare_fft_input_with_policy(
+    if let Some(prepared) = crate::analysis::fft::prepare_fft_input_with_options(
         "Demo Signal",
         &time,
         &data,
-        state.input_policy(),
+        state.input_options_for_waveform(&time),
     ) {
         state.load_prepared_input(prepared);
     }
@@ -2087,6 +2228,73 @@ mod tests {
             .expect("source cache");
         assert!(source.samples.len() <= crate::analysis::fft::DEFAULT_MAX_FFT_POINTS);
         assert!(source.decimation_factor > 1);
+    }
+
+    #[test]
+    fn test_refresh_fft_from_source_waveform_applies_manual_time_window_and_sample_target() {
+        let mut app_state = AppState::default();
+        let fs = 100_000.0;
+        let n = 100_000usize;
+        let time: Vec<f64> = (0..n).map(|i| i as f64 / fs).collect();
+        let values: Vec<f64> = (0..n)
+            .map(|i| (2.0 * PI * 5_000.0 * i as f64 / fs).sin())
+            .collect();
+        app_state
+            .simulation
+            .waveforms
+            .push(crate::state::WaveformData::new(
+                "V(out)", time, values, "#4aa3ff",
+            ));
+        app_state
+            .fft_state
+            .set_input_fidelity(InputFidelity::Reference);
+        app_state.fft_state.time_window_auto = false;
+        app_state.fft_state.time_window_start = 0.2;
+        app_state.fft_state.time_window_end = 0.4;
+        app_state.fft_state.sample_count_auto = false;
+        app_state.fft_state.sample_count = 2048;
+
+        refresh_fft_from_source_waveform(&mut app_state, "V(out)");
+
+        let source = app_state
+            .fft_state
+            .source_cache
+            .as_ref()
+            .expect("source cache");
+        assert_eq!(source.decimation_factor, 1);
+        assert_eq!(source.samples.len(), 2048);
+        assert!(source.original_count > 15_000);
+        assert!(source.original_count < 25_000);
+    }
+
+    #[test]
+    fn test_current_fft_source_time_bounds_uses_selected_source() {
+        let mut app_state = AppState::default();
+        app_state
+            .simulation
+            .waveforms
+            .push(crate::state::WaveformData::new(
+                "A",
+                vec![0.0, 1.0, 2.0],
+                vec![0.0, 0.0, 0.0],
+                "#123456",
+            ));
+        app_state
+            .simulation
+            .waveforms
+            .push(crate::state::WaveformData::new(
+                "B",
+                vec![10.0, 11.0, 12.0],
+                vec![0.0, 0.0, 0.0],
+                "#abcdef",
+            ));
+        app_state
+            .fft_state
+            .set_selected_source(Some("B".to_string()));
+
+        let bounds = current_fft_source_time_bounds(&app_state).expect("bounds");
+        assert!((bounds.0 - 10.0).abs() < 1e-12);
+        assert!((bounds.1 - 12.0).abs() < 1e-12);
     }
 
     #[test]
