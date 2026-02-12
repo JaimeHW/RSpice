@@ -43,8 +43,6 @@ pub struct PanelVisibility {
     pub bottom_panel: bool,
     /// Active tab in bottom panel
     pub active_bottom_tab: BottomPanelTab,
-    /// Smith chart viewer
-    pub smith_chart: bool,
     /// Cross-probe signal browser
     pub signal_browser: bool,
     /// Scripting/Automation console
@@ -59,7 +57,6 @@ impl Default for PanelVisibility {
             properties: true,
             bottom_panel: true, // Visible by default with Log tab
             active_bottom_tab: BottomPanelTab::Log,
-            smith_chart: false,
             signal_browser: false,
             script_console: false,
         }

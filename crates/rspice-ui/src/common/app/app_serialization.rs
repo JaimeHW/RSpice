@@ -53,8 +53,6 @@ pub(super) struct PanelVisibilitySer {
     #[serde(default)]
     pub(super) active_bottom_tab: usize,
     #[serde(default)]
-    pub(super) smith_chart: bool,
-    #[serde(default)]
     pub(super) signal_browser: bool,
     #[serde(default)]
     pub(super) script_console: bool,
@@ -76,7 +74,6 @@ impl From<&PanelVisibility> for PanelVisibilitySer {
                 BottomPanelTab::Log => 2,
                 BottomPanelTab::Automation => 3,
             },
-            smith_chart: panels.smith_chart,
             signal_browser: panels.signal_browser,
             script_console: panels.script_console,
         }
@@ -97,7 +94,6 @@ impl From<PanelVisibilitySer> for PanelVisibility {
                 3 => BottomPanelTab::Automation,
                 _ => BottomPanelTab::Log,
             },
-            smith_chart: serialized.smith_chart,
             signal_browser: serialized.signal_browser,
             script_console: serialized.script_console,
         }

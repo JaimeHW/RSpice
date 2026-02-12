@@ -230,7 +230,7 @@ fn render_header(
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(8.0);
                 if ui.small_button("✕").clicked() {
-                    app_state.panels.smith_chart = false;
+                    app_state.close_active_viewer();
                 }
             });
         });
