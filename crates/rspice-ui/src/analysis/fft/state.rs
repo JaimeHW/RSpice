@@ -2,7 +2,7 @@
 //!
 //! Viewer state for FFT/spectrum display.
 
-use super::data::{FftData, SpectrumAnalysis};
+use super::data::{FftData, SpectrumAnalysis, SpectrumNormalization};
 use super::pipeline::PreparedFftInput;
 use super::window::WindowFunction;
 
@@ -87,6 +87,8 @@ pub struct FftState {
     pub source_cache: Option<FftSourceCache>,
     /// User-selected source trace name preference.
     pub selected_source: Option<String>,
+    /// Amplitude normalization mode for FFT magnitudes.
+    pub normalization: SpectrumNormalization,
     /// Window function
     pub window: WindowFunction,
     /// Magnitude scale
@@ -128,6 +130,7 @@ impl Default for FftState {
             analysis: None,
             source_cache: None,
             selected_source: None,
+            normalization: SpectrumNormalization::Rms,
             window: WindowFunction::Hanning,
             mag_scale: MagnitudeScale::DB,
             freq_scale: FrequencyScale::Linear,
@@ -155,7 +158,8 @@ impl FftState {
     }
 
     /// Load FFT data and analyze
-    pub fn load_data(&mut self, data: FftData) {
+    pub fn load_data(&mut self, mut data: FftData) {
+        data.convert_normalization(self.normalization);
         let analysis = SpectrumAnalysis::analyze(&data, self.num_harmonics);
         self.data = Some(data);
         self.analysis = Some(analysis);
@@ -188,12 +192,13 @@ impl FftState {
         let Some(source) = self.source_cache.as_ref() else {
             return;
         };
-        let data = FftData::from_time_domain(
+        let mut data = FftData::from_time_domain(
             &format!("FFT({})", source.name),
             &source.samples,
             source.sample_rate,
             self.window,
         );
+        data.convert_normalization(self.normalization);
         if data.is_empty() {
             self.data = None;
             self.analysis = None;
@@ -203,6 +208,28 @@ impl FftState {
         self.data = Some(data);
         self.analysis = Some(analysis);
         self.update_auto_scale();
+    }
+
+    /// Set amplitude normalization mode.
+    ///
+    /// This performs an in-place O(N) rescale on loaded bins to avoid expensive
+    /// FFT recomputation for simple RMS/Peak toggles.
+    pub fn set_normalization(&mut self, normalization: SpectrumNormalization) {
+        if self.normalization == normalization {
+            return;
+        }
+        self.normalization = normalization;
+
+        if let Some(data) = self.data.as_mut() {
+            data.convert_normalization(normalization);
+            self.recompute_analysis();
+            self.update_auto_scale();
+            return;
+        }
+
+        if self.source_cache.is_some() {
+            self.recompute_from_source();
+        }
     }
 
     /// Recompute scalar analysis from currently loaded spectrum data.
@@ -442,6 +469,7 @@ mod tests {
     fn test_state_default() {
         let state = FftState::default();
         assert_eq!(state.window, WindowFunction::Hanning);
+        assert_eq!(state.normalization, SpectrumNormalization::Rms);
         assert!(state.mag_auto);
         assert!(state.freq_auto);
         assert_eq!(state.z0, 50.0);
@@ -456,12 +484,46 @@ mod tests {
             FftPoint::new(1000.0, 1.0, 0.0),
         ];
         data.sample_rate = 10000.0;
+        data.normalization = SpectrumNormalization::Peak;
 
         state.load_data(data);
 
         assert!(state.has_data());
         assert!(!state.is_empty());
         assert!(state.analysis.is_some());
+        assert_eq!(
+            state.data.as_ref().map(|d| d.normalization),
+            Some(SpectrumNormalization::Rms)
+        );
+    }
+
+    #[test]
+    fn test_state_set_normalization_rescales_existing_data() {
+        let mut state = FftState::new();
+        state.normalization = SpectrumNormalization::Peak;
+        let mut data = FftData::new("Tone");
+        data.points = vec![
+            FftPoint::new(0.0, 0.0, 0.0),
+            FftPoint::new(1000.0, 1.0, 0.0),
+        ];
+        data.sample_rate = 10_000.0;
+        data.fft_size = 1024;
+        data.normalization = SpectrumNormalization::Peak;
+        state.load_data(data);
+
+        let before = state
+            .data
+            .as_ref()
+            .and_then(|d| d.find_peak().map(|(_, p)| p.magnitude_db()))
+            .expect("peak before");
+        state.set_normalization(SpectrumNormalization::Rms);
+        let after = state
+            .data
+            .as_ref()
+            .and_then(|d| d.find_peak().map(|(_, p)| p.magnitude_db()))
+            .expect("peak after");
+
+        assert!((before - after - 3.0103).abs() < 0.05);
     }
 
     #[test]
@@ -596,6 +658,36 @@ mod tests {
     }
 
     #[test]
+    fn test_state_load_prepared_input_honors_rms_normalization() {
+        let mut state = FftState::new();
+        state.normalization = SpectrumNormalization::Rms;
+        let fs = 10_240.0;
+        let n = 1024usize;
+        let f_sig = 1_000.0;
+        let input = PreparedFftInput {
+            name: "tone".to_string(),
+            samples: (0..n)
+                .map(|i| (2.0 * std::f64::consts::PI * f_sig * i as f64 / fs).sin())
+                .collect(),
+            sample_rate: fs,
+            original_count: n,
+            decimation_factor: 1,
+        };
+
+        state.load_prepared_input(input);
+        let peak_db = state
+            .data
+            .as_ref()
+            .and_then(|d| d.find_peak().map(|(_, p)| p.magnitude_db()))
+            .expect("peak db");
+        assert!((peak_db + 3.0103).abs() < 0.1);
+        assert_eq!(
+            state.data.as_ref().map(|d| d.normalization),
+            Some(SpectrumNormalization::Rms)
+        );
+    }
+
+    #[test]
     fn test_state_set_window_recomputes_from_cached_source() {
         let mut state = FftState::new();
         let input = PreparedFftInput {
@@ -667,12 +759,14 @@ mod tests {
             FftPoint::new(20.0, 2.5, 0.0),
             FftPoint::new(30.0, 1.0, 0.0),
         ];
+        data.normalization = SpectrumNormalization::Peak;
         data.sample_rate = 100.0;
         data.fft_size = 8;
         state.load_data(data);
 
         state.set_mag_scale(MagnitudeScale::Linear);
-        assert!(state.mag_max > 2.0);
+        // State defaults to RMS normalization, so the loaded Peak spectrum is rescaled.
+        assert!(state.mag_max > 1.5);
         assert!(state.mag_min >= 0.0);
     }
 }
