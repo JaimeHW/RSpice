@@ -1,19 +1,18 @@
-use egui::{Color32, Pos2, RichText, Stroke, Ui};
+use egui::{Color32, RichText, Stroke, Ui};
 
 use super::RSpiceApp;
 
 const VIEWER_TAB_STRIP_MIN_HEIGHT: f32 = VIEWER_TAB_ROW_HEIGHT;
 const VIEWER_TAB_STRIP_PAD_X: f32 = 8.0;
 const VIEWER_TAB_STRIP_PAD_Y: f32 = 0.0;
-const VIEWER_TAB_SPACING: f32 = 4.0;
+const VIEWER_TAB_SPACING: f32 = 6.0;
 const VIEWER_TAB_ROW_HEIGHT: f32 = 22.0;
 const VIEWER_TAB_CLOSE_SIZE: f32 = 12.0;
 const VIEWER_ADD_BUTTON_WIDTH: f32 = 104.0;
 const VIEWER_ADD_BUTTON_HEIGHT: f32 = 20.0;
-const VIEWER_TAB_ROUNDING: f32 = 4.0;
+const VIEWER_TAB_ROUNDING: f32 = 8.0;
 const VIEWER_TAB_INNER_X: f32 = 9.0;
 const VIEWER_TAB_INNER_Y: f32 = 3.0;
-const VIEWER_TAB_ACCENT_HEIGHT: f32 = 2.0;
 
 fn tab_strip_fill() -> Color32 {
     Color32::from_rgb(23, 26, 32)
@@ -21,29 +20,25 @@ fn tab_strip_fill() -> Color32 {
 
 fn tab_fill(selected: bool) -> Color32 {
     if selected {
-        Color32::from_rgb(42, 50, 66)
+        Color32::from_rgb(52, 74, 110)
     } else {
-        Color32::from_rgb(31, 35, 43)
+        Color32::from_rgb(28, 32, 40)
     }
 }
 
 fn tab_stroke(selected: bool) -> Stroke {
     if selected {
-        Stroke::new(1.0, Color32::from_rgb(90, 113, 150))
+        Stroke::new(1.0, Color32::from_rgb(112, 152, 210))
     } else {
-        Stroke::new(1.0, Color32::from_rgb(54, 60, 72))
+        Stroke::new(1.0, Color32::from_rgb(64, 72, 86))
     }
-}
-
-fn tab_accent_color() -> Color32 {
-    Color32::from_rgb(92, 154, 245)
 }
 
 fn tab_text_color(selected: bool, available: bool) -> Color32 {
     if selected {
-        Color32::from_rgb(229, 236, 247)
+        Color32::from_rgb(238, 243, 252)
     } else if available {
-        Color32::from_rgb(182, 189, 201)
+        Color32::from_rgb(186, 194, 208)
     } else {
         Color32::from_rgb(120, 126, 138)
     }
@@ -152,7 +147,7 @@ impl RSpiceApp {
                             let capability = self.state.viewer_capability(viewer);
                             let selected = viewer == active_viewer;
 
-                            let tab_response = egui::Frame::none()
+                            egui::Frame::none()
                                 .fill(tab_fill(selected))
                                 .stroke(tab_stroke(selected))
                                 .rounding(VIEWER_TAB_ROUNDING)
@@ -216,22 +211,6 @@ impl RSpiceApp {
                                         },
                                     );
                                 });
-
-                            if selected {
-                                let rect = tab_response.response.rect;
-                                let accent_rect = egui::Rect::from_min_size(
-                                    Pos2::new(rect.min.x + 4.0, rect.min.y + 1.0),
-                                    egui::vec2(
-                                        (rect.width() - 8.0).max(0.0),
-                                        VIEWER_TAB_ACCENT_HEIGHT,
-                                    ),
-                                );
-                                ui.painter().rect_filled(
-                                    accent_rect,
-                                    egui::Rounding::same(1.0),
-                                    tab_accent_color(),
-                                );
-                            }
                         }
 
                         ui.add_space(8.0);
