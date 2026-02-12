@@ -60,6 +60,69 @@ impl FftInputPolicy {
     }
 }
 
+/// Optional time-domain bounds for FFT input selection.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FftTimeWindow {
+    /// Inclusive lower bound (seconds).
+    pub start: f64,
+    /// Inclusive upper bound (seconds).
+    pub end: f64,
+}
+
+impl FftTimeWindow {
+    pub const fn new(start: f64, end: f64) -> Self {
+        Self { start, end }
+    }
+
+    fn normalized(self) -> Option<Self> {
+        if self.start.is_finite() && self.end.is_finite() && self.end > self.start {
+            Some(self)
+        } else {
+            None
+        }
+    }
+}
+
+/// End-to-end FFT input preparation options.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FftInputOptions {
+    /// Data fidelity/performance policy.
+    pub policy: FftInputPolicy,
+    /// Optional selected time-domain window.
+    pub time_window: Option<FftTimeWindow>,
+    /// Optional target sample count for explicit resampling.
+    pub target_samples: Option<usize>,
+}
+
+impl Default for FftInputOptions {
+    fn default() -> Self {
+        Self {
+            policy: FftInputPolicy::interactive_default(),
+            time_window: None,
+            target_samples: None,
+        }
+    }
+}
+
+impl FftInputOptions {
+    pub fn with_policy(policy: FftInputPolicy) -> Self {
+        Self {
+            policy,
+            ..Self::default()
+        }
+    }
+
+    pub fn with_time_window(mut self, time_window: Option<FftTimeWindow>) -> Self {
+        self.time_window = time_window;
+        self
+    }
+
+    pub fn with_target_samples(mut self, target_samples: Option<usize>) -> Self {
+        self.target_samples = target_samples;
+        self
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreparedFftInput {
     /// Source label (typically waveform name).
@@ -101,18 +164,44 @@ pub fn prepare_fft_input_with_policy(
     values: &[f64],
     policy: FftInputPolicy,
 ) -> Option<PreparedFftInput> {
-    let point_cap = policy.point_cap();
+    prepare_fft_input_with_options(name, time, values, FftInputOptions::with_policy(policy))
+}
+
+/// Prepare a waveform for FFT analysis using explicit options.
+///
+/// Returns `None` when there is insufficient valid data.
+pub fn prepare_fft_input_with_options(
+    name: &str,
+    time: &[f64],
+    values: &[f64],
+    options: FftInputOptions,
+) -> Option<PreparedFftInput> {
+    let point_cap = options.policy.point_cap();
+    let target_samples = options
+        .target_samples
+        .map(|n| n.clamp(MIN_FFT_SAMPLES, MAX_REFERENCE_RESAMPLE_POINTS));
     let cleaned = clean_time_series(time, values);
     if cleaned.len() < MIN_FFT_SAMPLES {
         return None;
     }
 
-    let original_count = cleaned.len();
-    let mut uniform = if is_uniform_timeline(&cleaned) {
-        uniform_from_cleaned(&cleaned)?
+    let windowed = apply_time_window(&cleaned, options.time_window);
+    if windowed.len() < MIN_FFT_SAMPLES {
+        return None;
+    }
+
+    let original_count = windowed.len();
+    let mut uniform = if let Some(target) = target_samples {
+        if target == windowed.len() && is_uniform_timeline(&windowed) {
+            uniform_from_cleaned(&windowed)?
+        } else {
+            resample_to_uniform(&windowed, target)?
+        }
+    } else if is_uniform_timeline(&windowed) {
+        uniform_from_cleaned(&windowed)?
     } else {
-        let target = choose_resample_count(cleaned.len(), point_cap);
-        resample_to_uniform(&cleaned, target)?
+        let target = choose_resample_count(windowed.len(), point_cap);
+        resample_to_uniform(&windowed, target)?
     };
 
     let mut decimation_factor = 1usize;
@@ -163,6 +252,31 @@ fn clean_time_series(time: &[f64], values: &[f64]) -> Vec<(f64, f64)> {
     }
 
     cleaned
+}
+
+fn apply_time_window(data: &[(f64, f64)], time_window: Option<FftTimeWindow>) -> Vec<(f64, f64)> {
+    let Some(window) = time_window.and_then(FftTimeWindow::normalized) else {
+        return data.to_vec();
+    };
+    if data.is_empty() {
+        return Vec::new();
+    }
+
+    let min_t = data.first().map(|(t, _)| *t).unwrap_or(0.0);
+    let max_t = data.last().map(|(t, _)| *t).unwrap_or(0.0);
+    let start = window.start.clamp(min_t, max_t);
+    let end = window.end.clamp(min_t, max_t);
+    if !start.is_finite() || !end.is_finite() || end <= start {
+        return Vec::new();
+    }
+
+    let start_idx = data.partition_point(|(t, _)| *t < start);
+    let end_idx = data.partition_point(|(t, _)| *t <= end);
+    if end_idx <= start_idx {
+        return Vec::new();
+    }
+
+    data[start_idx..end_idx].to_vec()
 }
 
 fn is_uniform_timeline(data: &[(f64, f64)]) -> bool {
@@ -525,6 +639,68 @@ mod tests {
         assert_eq!(prepared.samples.len(), n);
         assert!((prepared.sample_rate - fs).abs() < 1e-6);
         assert_eq!(prepared.decimation_factor, 1);
+    }
+
+    #[test]
+    fn test_apply_time_window_clamps_to_available_range() {
+        let data: Vec<(f64, f64)> = (0..10).map(|i| (i as f64, i as f64)).collect();
+        let windowed = apply_time_window(&data, Some(FftTimeWindow::new(-5.0, 20.0)));
+        assert_eq!(windowed.len(), data.len());
+        assert_eq!(windowed.first().map(|x| x.0), Some(0.0));
+        assert_eq!(windowed.last().map(|x| x.0), Some(9.0));
+    }
+
+    #[test]
+    fn test_prepare_fft_input_with_options_applies_time_window() {
+        let fs = 1000.0;
+        let n = 10_000usize;
+        let time: Vec<f64> = (0..n).map(|i| i as f64 / fs).collect();
+        let values = generate_sine(50.0, fs, n);
+
+        let options = FftInputOptions::with_policy(FftInputPolicy::reference())
+            .with_time_window(Some(FftTimeWindow::new(2.0, 4.0)));
+        let prepared =
+            prepare_fft_input_with_options("windowed", &time, &values, options).expect("prepared");
+
+        assert_eq!(prepared.decimation_factor, 1);
+        assert_eq!(prepared.samples.len(), 2001);
+        assert_eq!(prepared.original_count, 2001);
+        assert!((prepared.sample_rate - fs).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_prepare_fft_input_with_options_respects_target_samples() {
+        let fs = 100_000.0;
+        let n = 8192usize;
+        let time: Vec<f64> = (0..n).map(|i| i as f64 / fs).collect();
+        let values = generate_sine(5000.0, fs, n);
+
+        let target = 1024usize;
+        let options = FftInputOptions::with_policy(FftInputPolicy::reference())
+            .with_target_samples(Some(target));
+        let prepared =
+            prepare_fft_input_with_options("resampled", &time, &values, options).expect("prepared");
+
+        assert_eq!(prepared.samples.len(), target);
+        assert_eq!(prepared.decimation_factor, 1);
+        assert!(prepared.sample_rate.is_finite());
+        assert!(prepared.sample_rate > 0.0);
+    }
+
+    #[test]
+    fn test_prepare_fft_input_with_options_interactive_still_enforces_cap_after_target_resample() {
+        let fs = 2_000_000.0;
+        let n = DEFAULT_MAX_FFT_POINTS * 3;
+        let time: Vec<f64> = (0..n).map(|i| i as f64 / fs).collect();
+        let values = generate_sine(250_000.0, fs, n);
+
+        let options = FftInputOptions::with_policy(FftInputPolicy::interactive_default())
+            .with_target_samples(Some(DEFAULT_MAX_FFT_POINTS * 2));
+        let prepared =
+            prepare_fft_input_with_options("interactive", &time, &values, options).expect("input");
+
+        assert!(prepared.samples.len() <= DEFAULT_MAX_FFT_POINTS);
+        assert!(prepared.decimation_factor > 1);
     }
 
     #[test]

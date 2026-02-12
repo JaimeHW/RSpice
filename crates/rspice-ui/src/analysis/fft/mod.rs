@@ -26,8 +26,9 @@ pub mod window;
 pub use compute::{compute_fft, FftResult};
 pub use data::{FftData, FftPoint, SpectrumAnalysis};
 pub use pipeline::{
-    prepare_fft_input, prepare_fft_input_with_policy, FftInputPolicy, PreparedFftInput,
-    DEFAULT_MAX_FFT_POINTS, MAX_REFERENCE_RESAMPLE_POINTS, MIN_FFT_SAMPLES,
+    prepare_fft_input, prepare_fft_input_with_options, prepare_fft_input_with_policy,
+    FftInputOptions, FftInputPolicy, FftTimeWindow, PreparedFftInput, DEFAULT_MAX_FFT_POINTS,
+    MAX_REFERENCE_RESAMPLE_POINTS, MIN_FFT_SAMPLES,
 };
 pub use rendering::render_fft_plot;
 pub use state::{FftState, InputFidelity};

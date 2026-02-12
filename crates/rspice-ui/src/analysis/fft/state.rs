@@ -3,7 +3,10 @@
 //! Viewer state for FFT/spectrum display.
 
 use super::data::{FftData, SpectrumAnalysis, SpectrumNormalization};
-use super::pipeline::{FftInputPolicy, PreparedFftInput};
+use super::pipeline::{
+    FftInputOptions, FftInputPolicy, FftTimeWindow, PreparedFftInput,
+    MAX_REFERENCE_RESAMPLE_POINTS, MIN_FFT_SAMPLES,
+};
 use super::window::WindowFunction;
 
 // =============================================================================
@@ -96,6 +99,8 @@ impl InputFidelity {
     }
 }
 
+const DEFAULT_MANUAL_SAMPLE_COUNT: usize = 4096;
+
 #[derive(Debug, Clone)]
 pub struct FftSourceCache {
     pub name: String,
@@ -130,6 +135,16 @@ pub struct FftState {
     pub freq_scale: FrequencyScale,
     /// Input preparation fidelity policy.
     pub input_fidelity: InputFidelity,
+    /// Auto-select full source time range for FFT.
+    pub time_window_auto: bool,
+    /// Manual FFT time-window start.
+    pub time_window_start: f64,
+    /// Manual FFT time-window end.
+    pub time_window_end: f64,
+    /// Auto-select FFT sample count from source fidelity policy.
+    pub sample_count_auto: bool,
+    /// Manual FFT sample count target.
+    pub sample_count: usize,
     /// Show grid
     pub show_grid: bool,
     /// Show peaks
@@ -170,6 +185,11 @@ impl Default for FftState {
             mag_scale: MagnitudeScale::DB,
             freq_scale: FrequencyScale::Linear,
             input_fidelity: InputFidelity::Reference,
+            time_window_auto: true,
+            time_window_start: 0.0,
+            time_window_end: 0.0,
+            sample_count_auto: true,
+            sample_count: DEFAULT_MANUAL_SAMPLE_COUNT,
             show_grid: true,
             show_peaks: true,
             show_harmonics: true,
@@ -231,6 +251,52 @@ impl FftState {
     /// Active FFT input pipeline policy.
     pub fn input_policy(&self) -> FftInputPolicy {
         self.input_fidelity.input_policy()
+    }
+
+    /// Build pipeline input options for a source timeline.
+    pub fn input_options_for_waveform(&self, source_time: &[f64]) -> FftInputOptions {
+        self.input_options_for_bounds(finite_time_bounds(source_time))
+    }
+
+    /// Build pipeline input options from source bounds.
+    pub fn input_options_for_bounds(&self, source_bounds: Option<(f64, f64)>) -> FftInputOptions {
+        let time_window = if self.time_window_auto {
+            None
+        } else if let Some((min_t, max_t)) = source_bounds {
+            let (mut start, mut end) =
+                if self.time_window_start.is_finite() && self.time_window_end.is_finite() {
+                    (
+                        self.time_window_start.clamp(min_t, max_t),
+                        self.time_window_end.clamp(min_t, max_t),
+                    )
+                } else {
+                    (min_t, max_t)
+                };
+            if end <= start {
+                start = min_t;
+                end = max_t;
+            }
+            if end > start {
+                Some(FftTimeWindow::new(start, end))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let target_samples = if self.sample_count_auto {
+            None
+        } else {
+            Some(
+                self.sample_count
+                    .clamp(MIN_FFT_SAMPLES, MAX_REFERENCE_RESAMPLE_POINTS),
+            )
+        };
+
+        FftInputOptions::with_policy(self.input_policy())
+            .with_time_window(time_window)
+            .with_target_samples(target_samples)
     }
 
     /// Recompute FFT data from cached source using current window.
@@ -446,6 +512,16 @@ fn first_positive_frequency(data: &FftData) -> Option<f64> {
         .find(|freq| freq.is_finite() && *freq > 0.0)
 }
 
+fn finite_time_bounds(time: &[f64]) -> Option<(f64, f64)> {
+    let start = time.iter().copied().find(|t| t.is_finite())?;
+    let end = time.iter().copied().rfind(|t| t.is_finite())?;
+    if end > start {
+        Some((start, end))
+    } else {
+        None
+    }
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -551,6 +627,9 @@ mod tests {
         assert_eq!(state.window, WindowFunction::Hanning);
         assert_eq!(state.normalization, SpectrumNormalization::Rms);
         assert_eq!(state.input_fidelity, InputFidelity::Reference);
+        assert!(state.time_window_auto);
+        assert!(state.sample_count_auto);
+        assert_eq!(state.sample_count, DEFAULT_MANUAL_SAMPLE_COUNT);
         assert!(state.mag_auto);
         assert!(state.freq_auto);
         assert_eq!(state.z0, 50.0);
@@ -644,6 +723,52 @@ mod tests {
 
         state.set_input_fidelity(InputFidelity::Interactive);
         assert_eq!(state.input_policy(), FftInputPolicy::interactive_default());
+    }
+
+    #[test]
+    fn test_state_input_options_auto_uses_policy_only() {
+        let mut state = FftState::new();
+        state.set_input_fidelity(InputFidelity::Reference);
+        state.time_window_auto = true;
+        state.sample_count_auto = true;
+
+        let time: Vec<f64> = (0..100).map(|i| i as f64 * 1e-3).collect();
+        let options = state.input_options_for_waveform(&time);
+
+        assert_eq!(options.policy, FftInputPolicy::Reference);
+        assert!(options.time_window.is_none());
+        assert!(options.target_samples.is_none());
+    }
+
+    #[test]
+    fn test_state_input_options_manual_window_and_samples_are_clamped_to_source_bounds() {
+        let mut state = FftState::new();
+        state.time_window_auto = false;
+        state.time_window_start = -10.0;
+        state.time_window_end = 10.0;
+        state.sample_count_auto = false;
+        state.sample_count = MAX_REFERENCE_RESAMPLE_POINTS * 2;
+
+        let options = state.input_options_for_bounds(Some((0.25, 0.75)));
+        let time_window = options.time_window.expect("time window");
+
+        assert!((time_window.start - 0.25).abs() < 1e-12);
+        assert!((time_window.end - 0.75).abs() < 1e-12);
+        assert_eq!(options.target_samples, Some(MAX_REFERENCE_RESAMPLE_POINTS));
+    }
+
+    #[test]
+    fn test_state_input_options_manual_invalid_window_falls_back_to_full_bounds() {
+        let mut state = FftState::new();
+        state.time_window_auto = false;
+        state.time_window_start = 0.7;
+        state.time_window_end = 0.3;
+
+        let options = state.input_options_for_bounds(Some((0.2, 0.8)));
+        let time_window = options.time_window.expect("time window");
+
+        assert!((time_window.start - 0.2).abs() < 1e-12);
+        assert!((time_window.end - 0.8).abs() < 1e-12);
     }
 
     #[test]
@@ -858,5 +983,13 @@ mod tests {
         // State defaults to RMS normalization, so the loaded Peak spectrum is rescaled.
         assert!(state.mag_max > 1.5);
         assert!(state.mag_min >= 0.0);
+    }
+
+    #[test]
+    fn test_finite_time_bounds_uses_first_and_last_finite_samples() {
+        let time = vec![f64::NAN, 0.1, 0.2, 0.3, f64::INFINITY];
+        let bounds = finite_time_bounds(&time).expect("bounds");
+        assert!((bounds.0 - 0.1).abs() < 1e-12);
+        assert!((bounds.1 - 0.3).abs() < 1e-12);
     }
 }
