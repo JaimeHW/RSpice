@@ -239,12 +239,25 @@ impl RSpiceApp {
                                                 } else {
                                                     close_text_color(selected)
                                                 };
-                                                ui.painter().text(
-                                                    close_rect.center(),
-                                                    egui::Align2::CENTER_CENTER,
-                                                    "x",
-                                                    egui::FontId::proportional(10.0),
-                                                    close_color,
+                                                let cross_half = 3.0;
+                                                let center = close_rect.center();
+                                                let stroke = Stroke::new(1.4, close_color);
+                                                ui.painter().line_segment(
+                                                    [
+                                                        center
+                                                            + egui::vec2(-cross_half, -cross_half),
+                                                        center + egui::vec2(cross_half, cross_half),
+                                                    ],
+                                                    stroke,
+                                                );
+                                                ui.painter().line_segment(
+                                                    [
+                                                        center
+                                                            + egui::vec2(cross_half, -cross_half),
+                                                        center
+                                                            + egui::vec2(-cross_half, cross_half),
+                                                    ],
+                                                    stroke,
                                                 );
 
                                                 if close_response.clicked() {
