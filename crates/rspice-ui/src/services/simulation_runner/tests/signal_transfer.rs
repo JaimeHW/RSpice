@@ -79,30 +79,22 @@ fn test_run_tf_analysis_with_config_executes_for_driven_rc() {
     assert_eq!(result.transfer.len(), result.frequencies.len());
     assert_eq!(result.magnitude_db.len(), result.frequencies.len());
     assert_eq!(result.phase_deg.len(), result.frequencies.len());
-    assert!(
-        result
-            .transfer
-            .iter()
-            .all(|value| value.re.is_finite() && value.im.is_finite())
-    );
-    assert!(
-        result
-            .group_delay
-            .as_ref()
-            .is_some_and(|curve| !curve.is_empty())
-    );
-    assert!(
-        result
-            .input_impedance
-            .as_ref()
-            .is_some_and(|curve| curve.iter().all(|value| value.re.is_finite()))
-    );
-    assert!(
-        result
-            .output_impedance
-            .as_ref()
-            .is_some_and(|curve| curve.iter().all(|value| value.re.is_finite()))
-    );
+    assert!(result
+        .transfer
+        .iter()
+        .all(|value| value.re.is_finite() && value.im.is_finite()));
+    assert!(result
+        .group_delay
+        .as_ref()
+        .is_some_and(|curve| !curve.is_empty()));
+    assert!(result
+        .input_impedance
+        .as_ref()
+        .is_some_and(|curve| curve.iter().all(|value| value.re.is_finite())));
+    assert!(result
+        .output_impedance
+        .as_ref()
+        .is_some_and(|curve| curve.iter().all(|value| value.re.is_finite())));
 }
 
 #[test]

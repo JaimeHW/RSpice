@@ -94,12 +94,10 @@ fn test_run_pxf_analysis_with_config_executes_for_driven_rc() {
     assert_eq!(result.input_sideband, 1);
     assert_eq!(result.output_sideband, 1);
     assert!(result.output_label.starts_with("V("));
-    assert!(
-        result
-            .transfer
-            .iter()
-            .all(|value| value.re.is_finite() && value.im.is_finite())
-    );
+    assert!(result
+        .transfer
+        .iter()
+        .all(|value| value.re.is_finite() && value.im.is_finite()));
     assert!(result.magnitude_db.iter().all(|value| value.is_finite()));
     assert!(result.phase_deg.iter().all(|value| value.is_finite()));
 }
@@ -190,11 +188,9 @@ fn test_run_pnoise_analysis_with_config_executes_output_referred() {
     assert_eq!(result.output_noise.len(), result.frequencies.len());
     assert_eq!(result.reference, PnoiseReference::Output);
     assert_eq!(result.sideband_factor, 7);
-    assert!(
-        result
-            .total_output_noise
-            .is_some_and(|value| value.is_finite() && value >= 0.0)
-    );
+    assert!(result
+        .total_output_noise
+        .is_some_and(|value| value.is_finite() && value >= 0.0));
 }
 
 #[test]
@@ -281,18 +277,14 @@ fn test_run_pnoise_analysis_input_reference_matches_core_input_referred_density(
         .as_ref()
         .expect("input-referred mode should return an input-noise vector");
     assert_eq!(input_curve.len(), output_result.output_noise.len());
-    assert!(
-        !input_result
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("TF fallback"))
-    );
-    assert!(
-        !input_result
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("unity gain"))
-    );
+    assert!(!input_result
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("TF fallback")));
+    assert!(!input_result
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("unity gain")));
 
     let parsed = rspice_core::netlist::parse_netlist(netlist).expect("netlist should parse");
     let mut sim_config = build_engine_config(&parsed, None);
@@ -412,12 +404,10 @@ fn test_run_pnoise_analysis_sideband_input_matches_translated_core_sum() {
     };
     let result = run_pnoise_analysis_with_config(netlist, &cfg)
         .expect("sideband PNOISE input run should execute");
-    assert!(
-        !result
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("TF fallback"))
-    );
+    assert!(!result
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("TF fallback")));
 
     let input_curve = result
         .input_noise
@@ -552,18 +542,14 @@ fn test_run_pnoise_analysis_supports_differential_reference_node() {
         .expect("differential PNOISE output should execute");
     assert_eq!(result.output_noise.len(), result.frequencies.len());
     assert!(!result.contributors.is_empty());
-    assert!(
-        result
-            .contributors
-            .iter()
-            .all(|(_, percentage)| percentage.is_finite() && *percentage >= 0.0)
-    );
-    assert!(
-        !result
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("uncorrelated PSD summation"))
-    );
+    assert!(result
+        .contributors
+        .iter()
+        .all(|(_, percentage)| percentage.is_finite() && *percentage >= 0.0));
+    assert!(!result
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("uncorrelated PSD summation")));
 }
 
 #[test]
@@ -698,37 +684,27 @@ fn test_run_pstb_analysis_with_config_executes_for_driven_rlc_probe() {
     assert_eq!(result.mode_indices.len(), result.mode_damping.len());
     assert_eq!(result.mode_indices.len(), result.mode_frequency_hz.len());
     assert_eq!(result.mode_indices.len(), result.stability_margin_db.len());
-    assert!(
-        result
-            .probe_mode_participation
-            .iter()
-            .all(|value| value.is_finite() && *value >= 0.0 && *value <= 1.0)
-    );
-    assert!(
-        result
-            .multiplier_magnitude
-            .iter()
-            .all(|value| value.is_finite() && *value >= 0.0)
-    );
-    assert!(
-        result
-            .multiplier_phase_deg
-            .iter()
-            .all(|value| value.is_finite())
-    );
+    assert!(result
+        .probe_mode_participation
+        .iter()
+        .all(|value| value.is_finite() && *value >= 0.0 && *value <= 1.0));
+    assert!(result
+        .multiplier_magnitude
+        .iter()
+        .all(|value| value.is_finite() && *value >= 0.0));
+    assert!(result
+        .multiplier_phase_deg
+        .iter()
+        .all(|value| value.is_finite()));
     assert!(result.mode_damping.iter().all(|value| value.is_finite()));
-    assert!(
-        result
-            .mode_frequency_hz
-            .iter()
-            .all(|value| value.is_finite() && *value >= 0.0)
-    );
-    assert!(
-        result
-            .stability_margin_db
-            .iter()
-            .all(|value| value.is_finite())
-    );
+    assert!(result
+        .mode_frequency_hz
+        .iter()
+        .all(|value| value.is_finite() && *value >= 0.0));
+    assert!(result
+        .stability_margin_db
+        .iter()
+        .all(|value| value.is_finite()));
     assert!(result.dominant_multiplier_magnitude.is_finite());
     assert!(result.min_stability_margin_db.is_finite());
     assert!(
