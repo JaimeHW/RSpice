@@ -48,6 +48,7 @@ const HEADER_HEIGHT: f32 = 32.0;
 
 /// Legend width (pixels)
 const LEGEND_WIDTH: f32 = 120.0;
+const CHART_TOP_GAP: f32 = 2.0;
 
 /// Maximum points to render before decimation
 const DECIMATION_THRESHOLD: usize = 2000;
@@ -86,6 +87,10 @@ fn box_select_fill() -> Color32 {
 }
 fn box_select_stroke() -> Color32 {
     Color32::from_rgb(59, 130, 246)
+}
+
+fn plot_border_color() -> Color32 {
+    Color32::from_rgb(60, 65, 75)
 }
 
 // =============================================================================
@@ -206,11 +211,14 @@ fn calculate_layout(available: Rect) -> ViewerLayout {
 
     // Header at top
     let header = Rect::from_min_size(total.min, Vec2::new(total.width(), HEADER_HEIGHT));
+    let content_top = header.max.y + CHART_TOP_GAP;
+    let content_height = (total.height() - HEADER_HEIGHT - CHART_TOP_GAP).max(0.0);
+    let chart_height = (content_height - X_AXIS_HEIGHT).max(0.0);
 
     // Legend on right side (below header)
     let legend = Rect::from_min_size(
-        Pos2::new(total.max.x - LEGEND_WIDTH, header.max.y),
-        Vec2::new(LEGEND_WIDTH, total.height() - HEADER_HEIGHT),
+        Pos2::new(total.max.x - LEGEND_WIDTH, content_top),
+        Vec2::new(LEGEND_WIDTH, content_height),
     );
 
     // X-axis at bottom (excluding legend)
@@ -221,16 +229,16 @@ fn calculate_layout(available: Rect) -> ViewerLayout {
 
     // Y-axis on left side (between header and x-axis)
     let y_axis = Rect::from_min_size(
-        Pos2::new(total.min.x, header.max.y),
-        Vec2::new(Y_AXIS_WIDTH, total.height() - HEADER_HEIGHT - X_AXIS_HEIGHT),
+        Pos2::new(total.min.x, content_top),
+        Vec2::new(Y_AXIS_WIDTH, chart_height),
     );
 
     // Plot area in the center
     let plot = Rect::from_min_size(
-        Pos2::new(total.min.x + Y_AXIS_WIDTH, header.max.y),
+        Pos2::new(total.min.x + Y_AXIS_WIDTH, content_top),
         Vec2::new(
             total.width() - Y_AXIS_WIDTH - LEGEND_WIDTH,
-            total.height() - HEADER_HEIGHT - X_AXIS_HEIGHT,
+            chart_height,
         ),
     );
 
@@ -520,7 +528,7 @@ fn render_x_axis(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &WaveformView
 // =============================================================================
 
 fn render_plot_area(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut WaveformViewerState) {
-    let painter = ui.painter();
+    let painter = ui.painter().clone();
 
     // Update view dimensions
     viewer_state.view.plot_width = layout.plot.width() as f64;
@@ -533,12 +541,12 @@ fn render_plot_area(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Wavef
     let clip_rect = layout.plot;
 
     // Grid lines
-    render_grid(painter, layout, viewer_state, clip_rect);
+    render_grid(&painter, layout, viewer_state, clip_rect);
 
     // Spec overlays (render before traces so they appear as background)
     for overlay in viewer_state.spec_overlays.iter().filter(|o| o.visible) {
         overlay.render(
-            painter,
+            &painter,
             layout.plot,
             viewer_state.view.y_min,
             viewer_state.view.y_max,
@@ -547,22 +555,29 @@ fn render_plot_area(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Wavef
 
     // Waveform traces
     for trace in viewer_state.traces.iter().filter(|t| t.visible) {
-        render_trace(painter, layout, viewer_state, trace, clip_rect);
+        render_trace(&painter, layout, viewer_state, trace, clip_rect);
     }
 
     // Cursors
     if viewer_state.cursors.is_active() {
-        render_cursors(painter, layout, viewer_state, clip_rect);
+        render_cursors(&painter, layout, viewer_state, clip_rect);
     }
 
     // Box selection overlay
     if viewer_state.box_selection.is_selecting {
-        render_box_selection(painter, layout, viewer_state, clip_rect);
+        render_box_selection(&painter, layout, viewer_state, clip_rect);
     }
 
     // Handle mouse interactions
     let response = ui.allocate_rect(layout.plot, Sense::click_and_drag());
     handle_plot_interactions(response, layout, viewer_state);
+
+    // Plot border (match FFT viewer chrome)
+    painter.rect_stroke(
+        layout.plot,
+        Rounding::ZERO,
+        Stroke::new(1.0, plot_border_color()),
+    );
 }
 
 fn render_grid(
@@ -1423,6 +1438,15 @@ mod tests {
         // Should still produce valid layout even if cramped
         assert!(layout.plot.width() >= 0.0);
         assert!(layout.plot.height() >= 0.0);
+    }
+
+    #[test]
+    fn test_layout_uses_fft_matched_chart_top_gap() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 600.0));
+        let layout = calculate_layout(rect);
+
+        assert!((layout.plot.min.y - layout.header.max.y - CHART_TOP_GAP).abs() < f32::EPSILON);
+        assert!((layout.y_axis.min.y - layout.header.max.y - CHART_TOP_GAP).abs() < f32::EPSILON);
     }
 
     #[test]
