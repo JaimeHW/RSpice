@@ -77,6 +77,18 @@ fn close_hover_text_color() -> Color32 {
     Color32::from_rgb(255, 170, 170)
 }
 
+fn close_glyph_color(selected: bool, hovered: bool) -> Color32 {
+    if hovered {
+        close_hover_text_color()
+    } else {
+        close_text_color(selected)
+    }
+}
+
+fn should_focus_tab(close_clicked: bool) -> bool {
+    !close_clicked
+}
+
 fn render_tab_strip_action_button(ui: &mut Ui, label: &str, width: f32) -> egui::Response {
     egui::Frame::none()
         .fill(Color32::from_rgb(30, 34, 42))
@@ -185,6 +197,7 @@ impl RSpiceApp {
                         let base_fill = tab_fill(selected);
                         let base_stroke = tab_stroke(selected);
 
+                        let mut close_rect: Option<egui::Rect> = None;
                         let tab_response = egui::Frame::none()
                             .fill(base_fill)
                             .stroke(base_stroke)
@@ -209,81 +222,72 @@ impl RSpiceApp {
                                             ))
                                         };
 
-                                        let mut response = ui
-                                            .add(
-                                                egui::Label::new(text)
-                                                    .selectable(false)
-                                                    .sense(egui::Sense::click()),
-                                            )
-                                            .on_hover_cursor(egui::CursorIcon::PointingHand);
-                                        if !capability.available {
-                                            response = response.on_hover_text(capability.reason);
-                                        }
-                                        if response.clicked() {
-                                            focus_request = Some(viewer);
-                                        }
+                                        ui.add(egui::Label::new(text).selectable(false));
 
                                         if can_close_tabs {
                                             ui.add_space(3.0);
-                                            if selected {
-                                                let (close_rect, close_response) = ui
-                                                    .allocate_exact_size(
-                                                        egui::vec2(
-                                                            VIEWER_TAB_CLOSE_SIZE,
-                                                            VIEWER_TAB_CLOSE_SIZE,
-                                                        ),
-                                                        egui::Sense::click(),
-                                                    );
-                                                let close_response = close_response
-                                                    .on_hover_cursor(
-                                                        egui::CursorIcon::PointingHand,
-                                                    );
-                                                if close_response.hovered() {
-                                                    ui.painter().rect_filled(
-                                                        close_rect,
-                                                        egui::Rounding::same(3.0),
-                                                        close_hover_bg_color(),
-                                                    );
-                                                }
-
-                                                let close_color = if close_response.hovered() {
-                                                    close_hover_text_color()
-                                                } else {
-                                                    close_text_color(selected)
-                                                };
-                                                let cross_half = 3.0;
-                                                let center = close_rect.center();
-                                                let stroke = Stroke::new(1.4, close_color);
-                                                ui.painter().line_segment(
-                                                    [
-                                                        center
-                                                            + egui::vec2(-cross_half, -cross_half),
-                                                        center + egui::vec2(cross_half, cross_half),
-                                                    ],
-                                                    stroke,
+                                            let (close_hit_rect, _close_response) = ui.allocate_exact_size(
+                                                egui::vec2(VIEWER_TAB_CLOSE_SIZE, VIEWER_TAB_CLOSE_SIZE),
+                                                egui::Sense::hover(),
+                                            );
+                                            close_rect = Some(close_hit_rect);
+                                            let close_hovered = ui.rect_contains_pointer(close_hit_rect);
+                                            if close_hovered {
+                                                ui.painter().rect_filled(
+                                                    close_hit_rect,
+                                                    egui::Rounding::same(3.0),
+                                                    close_hover_bg_color(),
                                                 );
-                                                ui.painter().line_segment(
-                                                    [
-                                                        center
-                                                            + egui::vec2(cross_half, -cross_half),
-                                                        center
-                                                            + egui::vec2(-cross_half, cross_half),
-                                                    ],
-                                                    stroke,
-                                                );
-
-                                                if close_response.clicked() {
-                                                    close_request = Some(viewer);
-                                                }
-                                            } else {
-                                                ui.add_space(VIEWER_TAB_CLOSE_SIZE);
                                             }
+
+                                            let close_color = close_glyph_color(selected, close_hovered);
+                                            let cross_half = 3.0;
+                                            let center = close_hit_rect.center();
+                                            let stroke = Stroke::new(1.4, close_color);
+                                            ui.painter().line_segment(
+                                                [
+                                                    center + egui::vec2(-cross_half, -cross_half),
+                                                    center + egui::vec2(cross_half, cross_half),
+                                                ],
+                                                stroke,
+                                            );
+                                            ui.painter().line_segment(
+                                                [
+                                                    center + egui::vec2(cross_half, -cross_half),
+                                                    center + egui::vec2(-cross_half, cross_half),
+                                                ],
+                                                    stroke,
+                                            );
                                         }
                                     },
                                 );
                             });
 
-                        if tab_response.response.hovered() {
+                        let tab_id = ui.make_persistent_id(("viewer_tab_focus", viewer.id()));
+                        let mut tab_focus_response =
+                            ui.interact(tab_response.response.rect, tab_id, egui::Sense::click())
+                                .on_hover_cursor(egui::CursorIcon::PointingHand);
+                        if !capability.available {
+                            tab_focus_response = tab_focus_response.on_hover_text(capability.reason);
+                        }
+
+                        if tab_focus_response.clicked() {
+                            let close_clicked = can_close_tabs
+                                && close_rect
+                                    .and_then(|rect| {
+                                        tab_focus_response
+                                            .interact_pointer_pos()
+                                            .map(|pos| rect.contains(pos))
+                                    })
+                                    .unwrap_or(false);
+                            if should_focus_tab(close_clicked) {
+                                focus_request = Some(viewer);
+                            } else {
+                                close_request = Some(viewer);
+                            }
+                        }
+
+                        if tab_focus_response.hovered() {
                             ui.painter().rect_filled(
                                 tab_response.response.rect,
                                 egui::Rounding::same(VIEWER_TAB_ROUNDING),
@@ -446,6 +450,22 @@ mod tests {
         let selected_close = close_text_color(true);
         let unselected_close = close_text_color(false);
         assert!(luma(selected_close) > luma(unselected_close));
+    }
+
+    #[test]
+    fn close_glyph_color_prioritizes_hover_feedback() {
+        assert_eq!(
+            close_glyph_color(false, true),
+            close_hover_text_color(),
+        );
+        assert_eq!(close_glyph_color(true, false), close_text_color(true));
+        assert_eq!(close_glyph_color(false, false), close_text_color(false));
+    }
+
+    #[test]
+    fn tab_focus_is_blocked_when_close_hotspot_was_clicked() {
+        assert!(should_focus_tab(false));
+        assert!(!should_focus_tab(true));
     }
 
     #[test]
