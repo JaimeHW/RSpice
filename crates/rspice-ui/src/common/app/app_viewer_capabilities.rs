@@ -29,6 +29,22 @@ impl ViewerCapability {
 }
 
 impl AppState {
+    /// Clear all specialized (non-waveform) viewer data caches.
+    ///
+    /// Use when result selection changes in a way that can invalidate
+    /// cached analysis-specific visualizations.
+    pub fn clear_specialized_viewer_data(&mut self) {
+        self.fft_state.clear();
+        self.eye_diagram_state
+            .load_data(crate::analysis::eye_diagram::data::EyeData::default());
+        self.histogram_state.clear();
+        self.bode_plot_state
+            .load_data(crate::analysis::bode::BodeData::new());
+        self.nyquist_state.clear();
+        self.smith_chart_state.clear_traces();
+        self.pole_zero_state.clear();
+    }
+
     /// Resolve whether a viewer can currently be opened with meaningful data.
     pub fn viewer_capability(&self, viewer: ActiveViewer) -> ViewerCapability {
         match viewer {
@@ -278,5 +294,32 @@ mod tests {
         let opened = state.open_preferred_viewer_for_analysis(AnalysisType::Ac);
         assert_eq!(opened, ActiveViewer::Waveform);
         assert_eq!(state.panels.active_bottom_tab, BottomPanelTab::Waveform);
+    }
+
+    #[test]
+    fn clear_specialized_viewer_data_resets_all_non_waveform_capabilities() {
+        let mut state = AppState::default();
+        seed_bode(&mut state);
+        seed_nyquist(&mut state);
+        seed_fft(&mut state);
+        seed_eye(&mut state);
+        seed_histogram(&mut state);
+        seed_smith(&mut state);
+        seed_pole_zero(&mut state);
+
+        state.clear_specialized_viewer_data();
+
+        assert!(state.viewer_is_available(ActiveViewer::Waveform));
+        for viewer in ActiveViewer::all()
+            .iter()
+            .copied()
+            .filter(|viewer| *viewer != ActiveViewer::Waveform)
+        {
+            assert!(
+                !state.viewer_is_available(viewer),
+                "{:?} should be unavailable after cache clear",
+                viewer
+            );
+        }
     }
 }
