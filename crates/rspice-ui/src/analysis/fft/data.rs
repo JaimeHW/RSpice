@@ -8,6 +8,44 @@ use rustfft::{num_complex::Complex, FftPlanner};
 
 use super::window::{apply_window_copy, generate_window, WindowFunction};
 
+/// Amplitude normalization used for FFT magnitudes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SpectrumNormalization {
+    /// Frequency components represent peak amplitude.
+    #[default]
+    Peak,
+    /// Frequency components represent RMS amplitude.
+    Rms,
+}
+
+impl SpectrumNormalization {
+    #[inline]
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Peak => "Peak",
+            Self::Rms => "RMS",
+        }
+    }
+
+    #[inline]
+    pub fn all() -> &'static [SpectrumNormalization] {
+        &[Self::Rms, Self::Peak]
+    }
+
+    #[inline]
+    fn scale_from_peak(&self) -> f64 {
+        match self {
+            Self::Peak => 1.0,
+            Self::Rms => std::f64::consts::FRAC_1_SQRT_2,
+        }
+    }
+
+    #[inline]
+    pub fn relative_scale(from: SpectrumNormalization, to: SpectrumNormalization) -> f64 {
+        to.scale_from_peak() / from.scale_from_peak()
+    }
+}
+
 // =============================================================================
 // FFT Point
 // =============================================================================
@@ -90,6 +128,8 @@ pub struct FftData {
     pub fft_size: usize,
     /// Window function used
     pub window: WindowFunction,
+    /// Amplitude normalization used for `points`.
+    pub normalization: SpectrumNormalization,
 }
 
 impl Default for FftData {
@@ -100,6 +140,7 @@ impl Default for FftData {
             sample_rate: 1.0,
             fft_size: 0,
             window: WindowFunction::Hanning,
+            normalization: SpectrumNormalization::Peak,
         }
     }
 }
@@ -119,6 +160,23 @@ impl FftData {
         data: &[f64],
         sample_rate: f64,
         window: WindowFunction,
+    ) -> Self {
+        Self::from_time_domain_with_normalization(
+            name,
+            data,
+            sample_rate,
+            window,
+            SpectrumNormalization::Peak,
+        )
+    }
+
+    /// Create from uniformly sampled time-domain data using FFT.
+    pub fn from_time_domain_with_normalization(
+        name: &str,
+        data: &[f64],
+        sample_rate: f64,
+        window: WindowFunction,
+        normalization: SpectrumNormalization,
     ) -> Self {
         let n = data.len();
         if n == 0 || !sample_rate.is_finite() || sample_rate <= 0.0 {
@@ -145,7 +203,7 @@ impl FftData {
         // AC bins are amplitude-calibrated to peak values for FFT plot compatibility.
         let n_freqs = n / 2 + 1;
         let mut points = Vec::with_capacity(n_freqs);
-        let base_scale = 1.0 / (n as f64 * cg);
+        let base_scale = (1.0 / (n as f64 * cg)) * normalization.scale_from_peak();
         let has_nyquist = n % 2 == 0;
 
         for (k, bin) in buffer.iter().take(n_freqs).enumerate() {
@@ -164,6 +222,7 @@ impl FftData {
             sample_rate,
             fft_size: n,
             window,
+            normalization,
         }
     }
 
@@ -174,6 +233,25 @@ impl FftData {
         magnitudes: &[f64],
         phases: &[f64],
         sample_rate: f64,
+    ) -> Self {
+        Self::from_spectrum_with_normalization(
+            name,
+            frequencies,
+            magnitudes,
+            phases,
+            sample_rate,
+            SpectrumNormalization::Peak,
+        )
+    }
+
+    /// Create from magnitude/phase arrays with explicit normalization metadata.
+    pub fn from_spectrum_with_normalization(
+        name: &str,
+        frequencies: &[f64],
+        magnitudes: &[f64],
+        phases: &[f64],
+        sample_rate: f64,
+        normalization: SpectrumNormalization,
     ) -> Self {
         let n = frequencies.len().min(magnitudes.len()).min(phases.len());
         let points: Vec<FftPoint> = (0..n)
@@ -187,7 +265,20 @@ impl FftData {
             sample_rate,
             fft_size,
             window: WindowFunction::Rectangular,
+            normalization,
         }
+    }
+
+    /// Convert all spectrum magnitudes to a different normalization mode.
+    pub fn convert_normalization(&mut self, target: SpectrumNormalization) {
+        if self.normalization == target {
+            return;
+        }
+        let scale = SpectrumNormalization::relative_scale(self.normalization, target);
+        for point in &mut self.points {
+            point.magnitude *= scale;
+        }
+        self.normalization = target;
     }
 
     /// Number of frequency bins
@@ -671,6 +762,7 @@ mod tests {
         let fft = FftData::default();
         assert!(fft.is_empty());
         assert_eq!(fft.window, WindowFunction::Hanning);
+        assert_eq!(fft.normalization, SpectrumNormalization::Peak);
     }
 
     #[test]
@@ -704,6 +796,48 @@ mod tests {
         assert!((peak.frequency - f_sig).abs() < fft.frequency_resolution() * 0.5);
         assert!((peak.magnitude - expected_peak).abs() < 1e-3);
         assert!(peak.magnitude_db().abs() < 0.05);
+    }
+
+    #[test]
+    fn test_fft_from_time_domain_reports_rms_magnitude_when_requested() {
+        let fs = 10_240.0;
+        let n = 1024usize;
+        let f_sig = 1_000.0; // Exact bin.
+        let data = generate_sine(f_sig, fs, n);
+
+        let fft = FftData::from_time_domain_with_normalization(
+            "SineRms",
+            &data,
+            fs,
+            WindowFunction::Rectangular,
+            SpectrumNormalization::Rms,
+        );
+        let (_, peak) = fft.find_peak().expect("peak");
+
+        assert_eq!(fft.normalization, SpectrumNormalization::Rms);
+        assert!((peak.frequency - f_sig).abs() < fft.frequency_resolution() * 0.5);
+        assert!((peak.magnitude - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-3);
+        assert!((peak.magnitude_db() + 3.0103).abs() < 0.05);
+    }
+
+    #[test]
+    fn test_fft_convert_normalization_is_reversible() {
+        let fs = 10_240.0;
+        let n = 1024usize;
+        let f_sig = 1_000.0;
+        let data = generate_sine(f_sig, fs, n);
+
+        let mut fft = FftData::from_time_domain("SinePeak", &data, fs, WindowFunction::Rectangular);
+        let (_, peak_before) = fft.find_peak().expect("peak before");
+        let db_before = peak_before.magnitude_db();
+
+        fft.convert_normalization(SpectrumNormalization::Rms);
+        let (_, peak_rms) = fft.find_peak().expect("peak rms");
+        assert!((peak_rms.magnitude_db() - (db_before - 3.0103)).abs() < 0.05);
+
+        fft.convert_normalization(SpectrumNormalization::Peak);
+        let (_, peak_after) = fft.find_peak().expect("peak after");
+        assert!((peak_after.magnitude_db() - db_before).abs() < 0.05);
     }
 
     #[test]
@@ -756,6 +890,7 @@ mod tests {
             sample_rate: 1000.0,
             fft_size: 8,
             window: WindowFunction::Rectangular,
+            normalization: SpectrumNormalization::Peak,
         };
 
         let peak = fft.find_peak().expect("peak should be found");
@@ -776,6 +911,7 @@ mod tests {
             sample_rate: 1000.0,
             fft_size: 8,
             window: WindowFunction::Rectangular,
+            normalization: SpectrumNormalization::Peak,
         };
 
         assert!(fft.find_peak().is_none());
@@ -978,6 +1114,7 @@ mod tests {
             sample_rate: 2000.0,
             fft_size: 16,
             window: WindowFunction::Rectangular,
+            normalization: SpectrumNormalization::Peak,
         };
 
         let analysis = SpectrumAnalysis::analyze(&fft, 5);
