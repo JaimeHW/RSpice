@@ -77,6 +77,28 @@ fn close_hover_text_color() -> Color32 {
     Color32::from_rgb(255, 170, 170)
 }
 
+fn render_tab_strip_action_button(ui: &mut Ui, label: &str, width: f32) -> egui::Response {
+    egui::Frame::none()
+        .fill(Color32::from_rgb(30, 34, 42))
+        .stroke(Stroke::new(1.0, Color32::from_rgb(56, 63, 76)))
+        .rounding(egui::Rounding::same(4.0))
+        .inner_margin(egui::Margin::symmetric(
+            VIEWER_TAB_INNER_X,
+            VIEWER_TAB_INNER_Y,
+        ))
+        .show(ui, |ui| {
+            let label_width = (width - 2.0 * VIEWER_TAB_INNER_X).max(1.0);
+            ui.add_sized(
+                egui::vec2(label_width, VIEWER_TAB_ROW_HEIGHT),
+                egui::Label::new(RichText::new(label).color(tab_text_color(false, true)).size(11.0))
+                    .selectable(false)
+                    .sense(egui::Sense::click()),
+            )
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+        })
+        .inner
+}
+
 fn viewer_workspace_status(state: &crate::common::app::AppState) -> (&'static str, Color32) {
     let active = state.active_viewer();
     let capability = state.viewer_capability(active);
@@ -129,16 +151,6 @@ impl RSpiceApp {
             );
 
             ui.label(RichText::new(status_text).size(10.0).color(status_color));
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .small_button("Close Active")
-                    .on_hover_text("Close the active viewer tab")
-                    .clicked()
-                {
-                    self.state.close_active_viewer();
-                }
-            });
         });
     }
     fn render_viewer_workspace_tabs(&mut self, ui: &mut Ui) {
@@ -287,30 +299,8 @@ impl RSpiceApp {
 
                     ui.add_space(8.0);
                     let add_menu_id = ui.make_persistent_id("viewer_add_menu");
-                    let add_response = egui::Frame::none()
-                        .fill(Color32::from_rgb(30, 34, 42))
-                        .stroke(Stroke::new(1.0, Color32::from_rgb(56, 63, 76)))
-                        .rounding(egui::Rounding::same(4.0))
-                        .inner_margin(egui::Margin::symmetric(
-                            VIEWER_TAB_INNER_X,
-                            VIEWER_TAB_INNER_Y,
-                        ))
-                        .show(ui, |ui| {
-                            let label_width =
-                                (VIEWER_ADD_BUTTON_WIDTH - 2.0 * VIEWER_TAB_INNER_X).max(1.0);
-                            ui.add_sized(
-                                egui::vec2(label_width, VIEWER_TAB_ROW_HEIGHT),
-                                egui::Label::new(
-                                    RichText::new("Add Viewer")
-                                        .color(tab_text_color(false, true))
-                                        .size(11.0),
-                                )
-                                .selectable(false)
-                                .sense(egui::Sense::click()),
-                            )
-                            .on_hover_cursor(egui::CursorIcon::PointingHand)
-                        })
-                        .inner;
+                    let add_response =
+                        render_tab_strip_action_button(ui, "Add Viewer", VIEWER_ADD_BUTTON_WIDTH);
                     if add_response.clicked() {
                         ui.memory_mut(|mem| mem.toggle_popup(add_menu_id));
                     }
@@ -333,8 +323,7 @@ impl RSpiceApp {
                                     viewer.name().to_string()
                                 };
 
-                                let mut response =
-                                    ui.add_enabled(enabled, egui::Button::new(label));
+                                let mut response = ui.add_enabled(enabled, egui::Button::new(label));
                                 if !enabled {
                                     response = response.on_hover_text(capability.reason);
                                 }
