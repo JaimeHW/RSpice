@@ -130,6 +130,11 @@ impl ViewerWorkspace {
         &self.tabs
     }
 
+    /// Access tab by index.
+    pub fn tab_at(&self, index: usize) -> Option<ActiveViewer> {
+        self.tabs.get(index).copied()
+    }
+
     /// Number of open tabs.
     pub fn tab_count(&self) -> usize {
         self.tabs.len()

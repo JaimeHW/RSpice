@@ -1,4 +1,4 @@
-use egui::{RichText, Ui};
+use egui::{Color32, RichText, Ui};
 
 use super::RSpiceApp;
 
@@ -6,6 +6,7 @@ impl RSpiceApp {
     /// Render the waveform panel.
     pub(super) fn render_waveform_panel(&mut self, ui: &mut Ui) {
         self.render_viewer_workspace_tabs(ui);
+        self.render_viewer_workspace_header(ui);
 
         match self.state.active_viewer() {
             crate::viewers::ActiveViewer::Waveform => {
@@ -21,12 +22,44 @@ impl RSpiceApp {
         }
     }
 
+    fn render_viewer_workspace_header(&mut self, ui: &mut Ui) {
+        let active = self.state.active_viewer();
+        let capability = self.state.viewer_capability(active);
+
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(active.name())
+                    .strong()
+                    .size(12.0)
+                    .color(Color32::from_rgb(220, 225, 235)),
+            );
+
+            let (status_text, status_color) = if capability.available {
+                ("Data ready", Color32::from_rgb(100, 210, 120))
+            } else {
+                (capability.reason, Color32::from_rgb(220, 180, 90))
+            };
+            ui.label(RichText::new(status_text).size(10.0).color(status_color));
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .small_button("Close Active")
+                    .on_hover_text("Close the active viewer tab")
+                    .clicked()
+                {
+                    self.state.close_active_viewer();
+                }
+            });
+        });
+        ui.separator();
+    }
+
     fn render_viewer_workspace_tabs(&mut self, ui: &mut Ui) {
         use crate::viewers::ActiveViewer;
 
-        let tabs = self.state.viewer_workspace.tabs().to_vec();
         let active_viewer = self.state.active_viewer();
-        let can_close_tabs = tabs.len() > 1;
+        let tab_count = self.state.viewer_workspace.tab_count();
+        let can_close_tabs = tab_count > 1;
 
         let mut focus_request: Option<ActiveViewer> = None;
         let mut close_request: Option<ActiveViewer> = None;
@@ -35,17 +68,28 @@ impl RSpiceApp {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
 
-            for viewer in tabs {
+            for index in 0..tab_count {
+                let Some(viewer) = self.state.viewer_workspace.tab_at(index) else {
+                    continue;
+                };
+                let capability = self.state.viewer_capability(viewer);
+
                 ui.group(|ui| {
                     ui.horizontal(|ui| {
                         let selected = viewer == active_viewer;
                         let text = if selected {
                             RichText::new(viewer.name()).strong()
-                        } else {
+                        } else if capability.available {
                             RichText::new(viewer.name())
+                        } else {
+                            RichText::new(viewer.name()).weak()
                         };
 
-                        if ui.selectable_label(selected, text).clicked() {
+                        let mut response = ui.selectable_label(selected, text);
+                        if !capability.available {
+                            response = response.on_hover_text(capability.reason);
+                        }
+                        if response.clicked() {
                             focus_request = Some(viewer);
                         }
 
@@ -60,13 +104,21 @@ impl RSpiceApp {
             ui.menu_button("Add Viewer", |ui| {
                 for viewer in ActiveViewer::all() {
                     let is_open = self.state.viewer_workspace.contains(*viewer);
+                    let capability = self.state.viewer_capability(*viewer);
+                    let enabled = capability.available;
+
                     let label = if is_open {
                         format!("[open] {}", viewer.name())
                     } else {
                         viewer.name().to_string()
                     };
 
-                    if ui.button(label).clicked() {
+                    let mut response = ui.add_enabled(enabled, egui::Button::new(label));
+                    if !enabled {
+                        response = response.on_hover_text(capability.reason);
+                    }
+
+                    if response.clicked() {
                         open_request = Some(*viewer);
                         ui.close_menu();
                     }
