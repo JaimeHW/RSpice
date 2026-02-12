@@ -11,11 +11,19 @@ const BOTTOM_TAB_HEIGHT: f32 = 28.0;
 const BOTTOM_TAB_MIN_WIDTH: f32 = 80.0;
 const BOTTOM_TAB_PADDING: f32 = 16.0;
 const BOTTOM_TAB_UNDERLINE_HEIGHT: f32 = 2.0;
+const BOTTOM_PANEL_MIN_HEIGHT: f32 = 100.0;
+const BOTTOM_PANEL_EDGE_MARGIN: f32 = 120.0;
 
 const SIDE_PANEL_HEADER_HEIGHT: f32 = 16.0;
 
 fn compute_bottom_tab_width(text_width: f32) -> f32 {
     (text_width + BOTTOM_TAB_PADDING * 2.0).max(BOTTOM_TAB_MIN_WIDTH)
+}
+
+fn bottom_panel_height_range(screen_height: f32) -> RangeInclusive<f32> {
+    let min = BOTTOM_PANEL_MIN_HEIGHT;
+    let max = (screen_height - BOTTOM_PANEL_EDGE_MARGIN).max(min);
+    min..=max
 }
 
 fn should_show_project_browser(panels: &PanelVisibility) -> bool {
@@ -59,10 +67,19 @@ impl RSpiceApp {
             return;
         }
 
+        let height_range = bottom_panel_height_range(ctx.screen_rect().height());
+
+        // Use waveform_height only as the initial default — do NOT feed the
+        // panel's actual rect height back into default_height each frame.
+        // egui stores resize deltas relative to default_height, so tracking
+        // the actual height creates a compounding feedback loop that forces
+        // the panel to its maximum size.
+        let default_height = self.state.panel_sizes.waveform_height;
+
         TopBottomPanel::bottom("bottom_panel")
             .resizable(true)
-            .default_height(self.state.panel_sizes.waveform_height)
-            .height_range(100.0..=500.0)
+            .default_height(default_height)
+            .height_range(height_range)
             .frame(Frame::none().fill(Color32::from_rgb(25, 27, 33)))
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
@@ -381,5 +398,19 @@ mod tests {
         let bounds = separator_line_bounds(rect, 2.5);
         assert_eq!(*bounds.start(), 7.5);
         assert_eq!(*bounds.end(), 32.5);
+    }
+
+    #[test]
+    fn test_bottom_panel_height_range_scales_with_screen_height() {
+        let range = bottom_panel_height_range(900.0);
+        assert_eq!(*range.start(), BOTTOM_PANEL_MIN_HEIGHT);
+        assert_eq!(*range.end(), 780.0);
+    }
+
+    #[test]
+    fn test_bottom_panel_height_range_never_inverts() {
+        let range = bottom_panel_height_range(80.0);
+        assert_eq!(*range.start(), BOTTOM_PANEL_MIN_HEIGHT);
+        assert_eq!(*range.end(), BOTTOM_PANEL_MIN_HEIGHT);
     }
 }
