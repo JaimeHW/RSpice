@@ -10,26 +10,32 @@ const VIEWER_TAB_ROW_HEIGHT: f32 = 22.0;
 const VIEWER_TAB_CLOSE_SIZE: f32 = 12.0;
 const VIEWER_ADD_BUTTON_WIDTH: f32 = 104.0;
 const VIEWER_ADD_BUTTON_HEIGHT: f32 = 20.0;
-const VIEWER_TAB_ROUNDING: f32 = 2.0;
+const VIEWER_TAB_ROUNDING: f32 = 4.0;
 const VIEWER_TAB_INNER_X: f32 = 9.0;
 const VIEWER_TAB_INNER_Y: f32 = 3.0;
-const VIEWER_TAB_UNDERLINE_HEIGHT: f32 = 2.0;
+const VIEWER_TAB_ACCENT_HEIGHT: f32 = 2.0;
 
 fn tab_strip_fill() -> Color32 {
     Color32::from_rgb(23, 26, 32)
 }
 
 fn tab_fill(selected: bool) -> Color32 {
-    let _ = selected;
-    Color32::TRANSPARENT
+    if selected {
+        Color32::from_rgb(42, 50, 66)
+    } else {
+        Color32::from_rgb(31, 35, 43)
+    }
 }
 
 fn tab_stroke(selected: bool) -> Stroke {
-    let _ = selected;
-    Stroke::new(0.0, Color32::TRANSPARENT)
+    if selected {
+        Stroke::new(1.0, Color32::from_rgb(90, 113, 150))
+    } else {
+        Stroke::new(1.0, Color32::from_rgb(54, 60, 72))
+    }
 }
 
-fn tab_underline_color() -> Color32 {
+fn tab_accent_color() -> Color32 {
     Color32::from_rgb(92, 154, 245)
 }
 
@@ -213,13 +219,17 @@ impl RSpiceApp {
 
                             if selected {
                                 let rect = tab_response.response.rect;
-                                let y = ui.max_rect().max.y - 1.0;
-                                ui.painter().line_segment(
-                                    [
-                                        Pos2::new(rect.min.x + 5.0, y),
-                                        Pos2::new(rect.max.x - 5.0, y),
-                                    ],
-                                    Stroke::new(VIEWER_TAB_UNDERLINE_HEIGHT, tab_underline_color()),
+                                let accent_rect = egui::Rect::from_min_size(
+                                    Pos2::new(rect.min.x + 4.0, rect.min.y + 1.0),
+                                    egui::vec2(
+                                        (rect.width() - 8.0).max(0.0),
+                                        VIEWER_TAB_ACCENT_HEIGHT,
+                                    ),
+                                );
+                                ui.painter().rect_filled(
+                                    accent_rect,
+                                    egui::Rounding::same(1.0),
+                                    tab_accent_color(),
                                 );
                             }
                         }
@@ -356,11 +366,15 @@ mod tests {
     }
 
     #[test]
-    fn tab_frames_are_flat_to_avoid_button_chrome() {
-        assert_eq!(tab_fill(true), Color32::TRANSPARENT);
-        assert_eq!(tab_fill(false), Color32::TRANSPARENT);
-        assert_eq!(tab_stroke(true).width, 0.0);
-        assert_eq!(tab_stroke(false).width, 0.0);
+    fn viewer_tabs_have_distinct_active_surface() {
+        let selected_fill = tab_fill(true);
+        let unselected_fill = tab_fill(false);
+        let selected_stroke = tab_stroke(true);
+        let unselected_stroke = tab_stroke(false);
+
+        assert_ne!(selected_fill, unselected_fill);
+        assert!(selected_stroke.width >= 1.0);
+        assert!(unselected_stroke.width >= 1.0);
     }
 
     #[test]
