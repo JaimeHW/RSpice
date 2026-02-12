@@ -129,156 +129,162 @@ impl RSpiceApp {
                 VIEWER_TAB_STRIP_PAD_Y,
             ))
             .show(ui, |ui| {
-                ui.set_min_height(VIEWER_TAB_STRIP_MIN_HEIGHT);
                 ui.spacing_mut().item_spacing = egui::vec2(VIEWER_TAB_SPACING, 0.0);
 
-                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    for index in 0..tab_count {
-                        let Some(viewer) = self.state.viewer_workspace.tab_at(index) else {
-                            continue;
-                        };
-                        let capability = self.state.viewer_capability(viewer);
-                        let selected = viewer == active_viewer;
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), VIEWER_TAB_STRIP_MIN_HEIGHT),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        for index in 0..tab_count {
+                            let Some(viewer) = self.state.viewer_workspace.tab_at(index) else {
+                                continue;
+                            };
+                            let capability = self.state.viewer_capability(viewer);
+                            let selected = viewer == active_viewer;
 
-                        let tab_response = egui::Frame::none()
-                            .fill(tab_fill(selected))
-                            .stroke(tab_stroke(selected))
-                            .rounding(VIEWER_TAB_ROUNDING)
-                            .inner_margin(egui::Margin::symmetric(
-                                VIEWER_TAB_INNER_X,
-                                VIEWER_TAB_INNER_Y,
-                            ))
-                            .show(ui, |ui| {
-                                ui.set_min_height(VIEWER_TAB_ROW_HEIGHT);
-                                ui.with_layout(
-                                    egui::Layout::left_to_right(egui::Align::Center),
-                                    |ui| {
-                                        let text = if selected {
-                                            RichText::new(viewer.name()).strong().color(
-                                                tab_text_color(selected, capability.available),
-                                            )
-                                        } else {
-                                            RichText::new(viewer.name()).color(tab_text_color(
-                                                selected,
-                                                capability.available,
-                                            ))
-                                        };
-
-                                        let mut response = ui.add(
-                                            egui::Label::new(text).sense(egui::Sense::click()),
-                                        );
-                                        if !capability.available {
-                                            response = response.on_hover_text(capability.reason);
-                                        }
-                                        if response.clicked() {
-                                            focus_request = Some(viewer);
-                                        }
-
-                                        if can_close_tabs {
-                                            ui.add_space(3.0);
-                                            if selected {
-                                                if ui
-                                                    .add(
-                                                        egui::Button::new(
-                                                            RichText::new("x")
-                                                                .size(10.0)
-                                                                .color(close_text_color(selected)),
-                                                        )
-                                                        .frame(false)
-                                                        .min_size(egui::vec2(
-                                                            VIEWER_TAB_CLOSE_SIZE,
-                                                            VIEWER_TAB_CLOSE_SIZE,
-                                                        )),
-                                                    )
-                                                    .clicked()
-                                                {
-                                                    close_request = Some(viewer);
-                                                }
+                            let tab_response = egui::Frame::none()
+                                .fill(tab_fill(selected))
+                                .stroke(tab_stroke(selected))
+                                .rounding(VIEWER_TAB_ROUNDING)
+                                .inner_margin(egui::Margin::symmetric(
+                                    VIEWER_TAB_INNER_X,
+                                    VIEWER_TAB_INNER_Y,
+                                ))
+                                .show(ui, |ui| {
+                                    ui.set_min_height(VIEWER_TAB_ROW_HEIGHT);
+                                    ui.with_layout(
+                                        egui::Layout::left_to_right(egui::Align::Center),
+                                        |ui| {
+                                            let text = if selected {
+                                                RichText::new(viewer.name()).strong().color(
+                                                    tab_text_color(selected, capability.available),
+                                                )
                                             } else {
-                                                ui.add_space(VIEWER_TAB_CLOSE_SIZE);
-                                            }
-                                        }
-                                    },
-                                );
-                            });
+                                                RichText::new(viewer.name()).color(tab_text_color(
+                                                    selected,
+                                                    capability.available,
+                                                ))
+                                            };
 
-                        if selected {
-                            let rect = tab_response.response.rect;
+                                            let mut response = ui.add(
+                                                egui::Label::new(text).sense(egui::Sense::click()),
+                                            );
+                                            if !capability.available {
+                                                response =
+                                                    response.on_hover_text(capability.reason);
+                                            }
+                                            if response.clicked() {
+                                                focus_request = Some(viewer);
+                                            }
+
+                                            if can_close_tabs {
+                                                ui.add_space(3.0);
+                                                if selected {
+                                                    if ui
+                                                        .add(
+                                                            egui::Button::new(
+                                                                RichText::new("x")
+                                                                    .size(10.0)
+                                                                    .color(close_text_color(
+                                                                        selected,
+                                                                    )),
+                                                            )
+                                                            .frame(false)
+                                                            .min_size(egui::vec2(
+                                                                VIEWER_TAB_CLOSE_SIZE,
+                                                                VIEWER_TAB_CLOSE_SIZE,
+                                                            )),
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        close_request = Some(viewer);
+                                                    }
+                                                } else {
+                                                    ui.add_space(VIEWER_TAB_CLOSE_SIZE);
+                                                }
+                                            }
+                                        },
+                                    );
+                                });
+
+                            if selected {
+                                let rect = tab_response.response.rect;
+                                let y = rect.max.y - 1.0;
+                                ui.painter().line_segment(
+                                    [
+                                        Pos2::new(rect.min.x + 5.0, y),
+                                        Pos2::new(rect.max.x - 5.0, y),
+                                    ],
+                                    Stroke::new(VIEWER_TAB_UNDERLINE_HEIGHT, tab_underline_color()),
+                                );
+                            }
+                        }
+
+                        ui.add_space(8.0);
+                        let add_menu_id = ui.make_persistent_id("viewer_add_menu");
+                        let add_trigger = ui.allocate_ui_with_layout(
+                            egui::vec2(96.0, VIEWER_TAB_ROW_HEIGHT),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new("+ Add Viewer")
+                                            .color(tab_text_color(false, true))
+                                            .size(11.0),
+                                    )
+                                    .sense(egui::Sense::click()),
+                                )
+                            },
+                        );
+                        let add_response = add_trigger.inner;
+                        if add_response.clicked() {
+                            ui.memory_mut(|mem| mem.toggle_popup(add_menu_id));
+                        }
+                        if add_response.hovered() {
+                            let rect = add_trigger.response.rect;
                             let y = rect.max.y - 1.0;
                             ui.painter().line_segment(
                                 [
-                                    Pos2::new(rect.min.x + 5.0, y),
-                                    Pos2::new(rect.max.x - 5.0, y),
+                                    Pos2::new(rect.min.x + 3.0, y),
+                                    Pos2::new(rect.max.x - 3.0, y),
                                 ],
-                                Stroke::new(VIEWER_TAB_UNDERLINE_HEIGHT, tab_underline_color()),
+                                Stroke::new(1.0, tab_underline_color()),
                             );
                         }
-                    }
 
-                    ui.add_space(8.0);
-                    let add_menu_id = ui.make_persistent_id("viewer_add_menu");
-                    let add_trigger = ui.allocate_ui_with_layout(
-                        egui::vec2(96.0, VIEWER_TAB_ROW_HEIGHT),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new("+ Add Viewer")
-                                        .color(tab_text_color(false, true))
-                                        .size(11.0),
-                                )
-                                .sense(egui::Sense::click()),
-                            )
-                        },
-                    );
-                    let add_response = add_trigger.inner;
-                    if add_response.clicked() {
-                        ui.memory_mut(|mem| mem.toggle_popup(add_menu_id));
-                    }
-                    if add_response.hovered() {
-                        let rect = add_trigger.response.rect;
-                        let y = rect.max.y - 1.0;
-                        ui.painter().line_segment(
-                            [
-                                Pos2::new(rect.min.x + 3.0, y),
-                                Pos2::new(rect.max.x - 3.0, y),
-                            ],
-                            Stroke::new(1.0, tab_underline_color()),
+                        egui::popup_below_widget(
+                            ui,
+                            add_menu_id,
+                            &add_response,
+                            egui::PopupCloseBehavior::CloseOnClickOutside,
+                            |ui| {
+                                ui.set_min_width(170.0);
+                                for viewer in ActiveViewer::all() {
+                                    let is_open = self.state.viewer_workspace.contains(*viewer);
+                                    let capability = self.state.viewer_capability(*viewer);
+                                    let enabled = capability.available;
+
+                                    let label = if is_open {
+                                        format!("[open] {}", viewer.name())
+                                    } else {
+                                        viewer.name().to_string()
+                                    };
+
+                                    let mut response =
+                                        ui.add_enabled(enabled, egui::Button::new(label));
+                                    if !enabled {
+                                        response = response.on_hover_text(capability.reason);
+                                    }
+
+                                    if response.clicked() {
+                                        open_request = Some(*viewer);
+                                        ui.memory_mut(|mem| mem.close_popup());
+                                    }
+                                }
+                            },
                         );
-                    }
-
-                    egui::popup_below_widget(
-                        ui,
-                        add_menu_id,
-                        &add_response,
-                        egui::PopupCloseBehavior::CloseOnClickOutside,
-                        |ui| {
-                            ui.set_min_width(170.0);
-                            for viewer in ActiveViewer::all() {
-                                let is_open = self.state.viewer_workspace.contains(*viewer);
-                                let capability = self.state.viewer_capability(*viewer);
-                                let enabled = capability.available;
-
-                                let label = if is_open {
-                                    format!("[open] {}", viewer.name())
-                                } else {
-                                    viewer.name().to_string()
-                                };
-
-                                let mut response =
-                                    ui.add_enabled(enabled, egui::Button::new(label));
-                                if !enabled {
-                                    response = response.on_hover_text(capability.reason);
-                                }
-
-                                if response.clicked() {
-                                    open_request = Some(*viewer);
-                                    ui.memory_mut(|mem| mem.close_popup());
-                                }
-                            }
-                        },
-                    );
-                });
+                    },
+                );
             });
 
         if let Some(viewer) = focus_request {
