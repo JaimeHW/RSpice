@@ -1,4 +1,4 @@
-﻿//! Waveform Rendering Engine
+//! Waveform Rendering Engine
 //!
 //! This module handles all visual rendering of the waveform viewer,
 //! including traces, grid, axes, cursors, and overlays.
@@ -33,7 +33,7 @@ use crate::common::app::AppState;
 // =============================================================================
 
 /// Margin for Y-axis labels (pixels)
-const Y_AXIS_WIDTH: f32 = 60.0;
+const Y_AXIS_WIDTH: f32 = 52.0;
 
 /// Margin for X-axis labels (pixels)
 const X_AXIS_HEIGHT: f32 = 30.0;
@@ -46,6 +46,11 @@ const LEGEND_WIDTH: f32 = 120.0;
 
 /// Maximum points to render before decimation
 const DECIMATION_THRESHOLD: usize = 2000;
+const AXIS_TITLE_MIN_LEFT_INSET: f32 = 2.0;
+const AXIS_TITLE_TO_VALUE_LABEL_GAP: f32 = 6.0;
+const AXIS_TITLE_BOTTOM_INSET: f32 = 2.0;
+const AXIS_TICK_X_OFFSET: f32 = 2.0;
+const AXIS_TICK_Y_OFFSET: f32 = 2.0;
 
 // Grid line colors (using runtime values since Color32 constructors aren't const)
 fn grid_major_color() -> Color32 {
@@ -227,6 +232,49 @@ fn calculate_layout(available: Rect) -> ViewerLayout {
     }
 }
 
+fn x_axis_title_position(layout: &ViewerLayout) -> Pos2 {
+    Pos2::new(
+        layout.x_axis.center().x,
+        layout.x_axis.max.y - AXIS_TITLE_BOTTOM_INSET,
+    )
+}
+
+fn y_axis_title_position(
+    layout: &ViewerLayout,
+    max_y_tick_label_width: f32,
+    y_title_width: f32,
+) -> Pos2 {
+    let y_tick_anchor_x = y_tick_label_position(layout, layout.plot.center().y).x;
+    let y_tick_left_edge = y_tick_anchor_x - max_y_tick_label_width.max(0.0);
+    let title_left = (y_tick_left_edge - AXIS_TITLE_TO_VALUE_LABEL_GAP - y_title_width)
+        .max(layout.y_axis.min.x + AXIS_TITLE_MIN_LEFT_INSET);
+    Pos2::new(title_left, layout.plot.center().y)
+}
+
+fn x_tick_label_position(layout: &ViewerLayout, x: f32) -> Pos2 {
+    Pos2::new(x, layout.plot.max.y + AXIS_TICK_Y_OFFSET)
+}
+
+fn y_tick_label_position(layout: &ViewerLayout, y: f32) -> Pos2 {
+    Pos2::new(layout.plot.min.x - AXIS_TICK_X_OFFSET, y)
+}
+
+fn measure_text_width(painter: &Painter, text: &str, font: FontId, color: Color32) -> f32 {
+    painter
+        .layout_no_wrap(text.to_owned(), font, color)
+        .size()
+        .x
+}
+
+fn y_axis_title_text(viewer_state: &WaveformViewerState, prefix: &str) -> String {
+    let unit = if viewer_state.y_axis_unit.is_empty() {
+        "V"
+    } else {
+        &viewer_state.y_axis_unit
+    };
+    axis::format_axis_unit(unit, prefix)
+}
+
 // =============================================================================
 // Header Rendering
 // =============================================================================
@@ -361,13 +409,16 @@ fn render_y_axis(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &WaveformView
     // Render tick labels (numeric values) - properly aligned with plot grid
     let font = FontId::proportional(10.0);
     let text_color = Color32::from_rgb(160, 165, 175);
+    let mut max_y_tick_label_width = 0.0f32;
 
     for (i, &tick) in y_ticks.major_ticks.iter().enumerate() {
         let y_frac = (viewer_state.view.y_max - tick) / viewer_state.view.y_range();
         let screen_y = layout.y_axis.min.y + y_frac as f32 * layout.y_axis.height();
 
         if let Some(label) = labels.get(i) {
-            let text_pos = Pos2::new(layout.y_axis.max.x - 4.0, screen_y);
+            let width = measure_text_width(painter, label, font.clone(), text_color);
+            max_y_tick_label_width = max_y_tick_label_width.max(width);
+            let text_pos = y_tick_label_position(layout, screen_y);
             painter.text(
                 text_pos,
                 egui::Align2::RIGHT_CENTER,
@@ -378,19 +429,17 @@ fn render_y_axis(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &WaveformView
         }
     }
 
-    // Y-axis unit label at top-left corner (compact format like professional tools)
-    let unit = if viewer_state.y_axis_unit.is_empty() {
-        "V"
-    } else {
-        &viewer_state.y_axis_unit
-    };
-    let unit_label = format!("[{}{}]", y_ticks.prefix, unit);
+    // Y-axis title in outer lane (farther from tick values, matching FFT layout model).
+    let unit_label = y_axis_title_text(viewer_state, y_ticks.prefix);
+    let title_font = FontId::proportional(10.0);
+    let title_color = Color32::from_rgb(130, 135, 145);
+    let title_width = measure_text_width(painter, &unit_label, title_font.clone(), title_color);
     painter.text(
-        Pos2::new(layout.y_axis.min.x + 2.0, layout.y_axis.min.y + 2.0),
-        egui::Align2::LEFT_TOP,
+        y_axis_title_position(layout, max_y_tick_label_width, title_width),
+        egui::Align2::LEFT_CENTER,
         &unit_label,
-        FontId::proportional(9.0),
-        Color32::from_rgb(130, 135, 145),
+        title_font,
+        title_color,
     );
 }
 
@@ -418,7 +467,7 @@ fn render_x_axis(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &WaveformView
         let screen_x = layout.x_axis.min.x + x_frac as f32 * layout.x_axis.width();
 
         if let Some(label) = labels.get(i) {
-            let text_pos = Pos2::new(screen_x, layout.x_axis.min.y + 8.0);
+            let text_pos = x_tick_label_position(layout, screen_x);
             painter.text(
                 text_pos,
                 egui::Align2::CENTER_TOP,
@@ -442,7 +491,7 @@ fn render_x_axis(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &WaveformView
     };
     let unit_label = format!("{} ({}{})", label, x_ticks.prefix, unit);
     painter.text(
-        Pos2::new(layout.x_axis.center().x, layout.x_axis.max.y - 4.0),
+        x_axis_title_position(layout),
         egui::Align2::CENTER_BOTTOM,
         unit_label,
         FontId::proportional(9.0),
@@ -1088,5 +1137,41 @@ mod tests {
         assert!(X_AXIS_HEIGHT > 0.0);
         assert!(HEADER_HEIGHT > 0.0);
         assert!(LEGEND_WIDTH > 0.0);
+    }
+
+    #[test]
+    fn test_axis_positions_follow_fft_lane_model() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 600.0));
+        let layout = calculate_layout(rect);
+
+        let x_tick = x_tick_label_position(&layout, layout.plot.center().x);
+        let x_title = x_axis_title_position(&layout);
+        assert!(x_tick.y > layout.plot.max.y);
+        assert!(x_title.y > x_tick.y);
+
+        let y_tick = y_tick_label_position(&layout, layout.plot.center().y);
+        let y_title = y_axis_title_position(&layout, 28.0, 14.0);
+        assert!(y_tick.x < layout.plot.min.x);
+        assert!(y_title.x < y_tick.x);
+    }
+
+    #[test]
+    fn test_y_axis_title_position_tracks_y_value_label_width() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 600.0));
+        let layout = calculate_layout(rect);
+        let narrow = y_axis_title_position(&layout, 14.0, 12.0);
+        let wide = y_axis_title_position(&layout, 40.0, 12.0);
+        assert!(wide.x < narrow.x);
+    }
+
+    #[test]
+    fn test_y_axis_title_text_has_no_square_brackets() {
+        let mut state = WaveformViewerState::new();
+        state.y_axis_unit = "V".to_string();
+
+        let title = y_axis_title_text(&state, "m");
+        assert_eq!(title, "mV");
+        assert!(!title.contains('['));
+        assert!(!title.contains(']'));
     }
 }

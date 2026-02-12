@@ -26,8 +26,12 @@ fn header_bg_color() -> Color32 {
     Color32::from_rgb(30, 33, 40)
 }
 
-fn grid_color() -> Color32 {
-    Color32::from_rgb(40, 45, 55)
+fn grid_major_color() -> Color32 {
+    Color32::from_rgb(50, 52, 58)
+}
+
+fn grid_minor_color() -> Color32 {
+    Color32::from_rgb(35, 37, 42)
 }
 
 fn trace_color() -> Color32 {
@@ -108,10 +112,18 @@ const HEADER_SECOND_ROW_HEIGHT: f32 = 22.0;
 const HEADER_SOURCE_WIDTH: f32 = 180.0;
 const HEADER_WINDOW_WIDTH: f32 = 176.0;
 const HEADER_SCALE_WIDTH: f32 = 116.0;
-const AXIS_LEFT_GUTTER: f32 = 26.0;
+const AXIS_LEFT_GUTTER: f32 = 52.0;
 const AXIS_RIGHT_GUTTER: f32 = 4.0;
 const AXIS_TOP_GUTTER: f32 = 2.0;
-const AXIS_BOTTOM_GUTTER: f32 = 16.0;
+const AXIS_BOTTOM_GUTTER: f32 = 30.0;
+const AXIS_TITLE_MIN_LEFT_INSET: f32 = 2.0;
+const AXIS_TITLE_TO_VALUE_LABEL_GAP: f32 = 6.0;
+const AXIS_TITLE_BOTTOM_INSET: f32 = 2.0;
+const AXIS_TICK_X_OFFSET: f32 = 2.0;
+const AXIS_TICK_Y_OFFSET: f32 = 2.0;
+const MAX_LINEAR_MAJOR_TICKS: usize = 50;
+const MAX_LINEAR_MINOR_TICKS: usize = 250;
+const LINEAR_MINOR_SUBDIVISIONS: usize = 5;
 
 fn calculate_layout(available: Rect) -> FftLayout {
     let total = available;
@@ -148,6 +160,41 @@ fn spectrum_plot_rect(spectrum_rect: Rect) -> Rect {
     let min_y = (spectrum_rect.min.y + AXIS_TOP_GUTTER).min(spectrum_rect.max.y - 1.0);
     let max_y = (spectrum_rect.max.y - AXIS_BOTTOM_GUTTER).max(min_y + 1.0);
     Rect::from_min_max(Pos2::new(min_x, min_y), Pos2::new(max_x, max_y))
+}
+
+fn x_axis_title_position(spectrum_rect: Rect, plot_rect: Rect) -> Pos2 {
+    Pos2::new(
+        plot_rect.center().x,
+        spectrum_rect.max.y - AXIS_TITLE_BOTTOM_INSET,
+    )
+}
+
+fn y_axis_title_position(
+    spectrum_rect: Rect,
+    plot_rect: Rect,
+    max_y_tick_label_width: f32,
+    y_title_width: f32,
+) -> Pos2 {
+    let y_tick_anchor_x = y_tick_label_position(plot_rect.center().y, plot_rect).x;
+    let y_tick_left_edge = y_tick_anchor_x - max_y_tick_label_width.max(0.0);
+    let title_left = (y_tick_left_edge - AXIS_TITLE_TO_VALUE_LABEL_GAP - y_title_width)
+        .max(spectrum_rect.min.x + AXIS_TITLE_MIN_LEFT_INSET);
+    Pos2::new(title_left, plot_rect.center().y)
+}
+
+fn x_tick_label_position(x: f32, plot_rect: Rect) -> Pos2 {
+    Pos2::new(x, plot_rect.max.y + AXIS_TICK_Y_OFFSET)
+}
+
+fn y_tick_label_position(y: f32, plot_rect: Rect) -> Pos2 {
+    Pos2::new(plot_rect.min.x - AXIS_TICK_X_OFFSET, y)
+}
+
+fn measure_text_width(painter: &egui::Painter, text: &str, font: FontId, color: Color32) -> f32 {
+    painter
+        .layout_no_wrap(text.to_owned(), font, color)
+        .size()
+        .x
 }
 
 #[derive(Debug, Default)]
@@ -379,9 +426,11 @@ fn render_spectrum_core(ui: &mut Ui, layout: &FftLayout, state: &FftState) {
     painter.rect_filled(plot_rect, Rounding::ZERO, chart_bg_color());
 
     // Grid
-    if state.show_grid {
-        render_grid(&painter, rect, plot_rect, state);
-    }
+    let grid_metrics = if state.show_grid {
+        render_grid(&painter, rect, plot_rect, state)
+    } else {
+        GridLabelMetrics::default()
+    };
 
     // Spectrum trace
     if let Some(ref data) = state.data {
@@ -416,18 +465,31 @@ fn render_spectrum_core(ui: &mut Ui, layout: &FftLayout, state: &FftState) {
 
     // Axis labels rendered in gutters so they never overlap trace data.
     painter.text(
-        Pos2::new(plot_rect.center().x, rect.max.y - 2.0),
+        x_axis_title_position(rect, plot_rect),
         egui::Align2::CENTER_BOTTOM,
         "Frequency",
         FontId::proportional(10.0),
         text_color(),
     );
 
+    let y_axis_title = state.mag_scale.display_name();
+    let y_axis_title_font = FontId::proportional(10.0);
+    let y_axis_title_width = measure_text_width(
+        &painter,
+        y_axis_title,
+        y_axis_title_font.clone(),
+        text_color(),
+    );
     painter.text(
-        Pos2::new(rect.min.x + 2.0, plot_rect.center().y),
+        y_axis_title_position(
+            rect,
+            plot_rect,
+            grid_metrics.max_y_tick_label_width,
+            y_axis_title_width,
+        ),
         egui::Align2::LEFT_CENTER,
-        state.mag_scale.display_name(),
-        FontId::proportional(10.0),
+        y_axis_title,
+        y_axis_title_font,
         text_color(),
     );
 
@@ -446,9 +508,21 @@ struct AxisTick {
     major: bool,
 }
 
-fn render_grid(painter: &egui::Painter, spectrum_rect: Rect, plot_rect: Rect, state: &FftState) {
+#[derive(Debug, Clone, Copy, Default)]
+struct GridLabelMetrics {
+    max_y_tick_label_width: f32,
+}
+
+fn render_grid(
+    painter: &egui::Painter,
+    _spectrum_rect: Rect,
+    plot_rect: Rect,
+    state: &FftState,
+) -> GridLabelMetrics {
     let freq_ticks = frequency_ticks(state, 10);
     let mag_ticks = magnitude_ticks(state, 8);
+    let tick_font = FontId::proportional(9.0);
+    let mut metrics = GridLabelMetrics::default();
 
     for tick in &freq_ticks {
         let x = freq_to_x(tick.value, plot_rect, state);
@@ -456,9 +530,9 @@ fn render_grid(painter: &egui::Painter, spectrum_rect: Rect, plot_rect: Rect, st
             continue;
         }
         let stroke = if tick.major {
-            Stroke::new(0.7, grid_color())
+            Stroke::new(1.0, grid_major_color())
         } else {
-            Stroke::new(0.4, Color32::from_rgb(34, 38, 46))
+            Stroke::new(0.5, grid_minor_color())
         };
         painter.line_segment(
             [Pos2::new(x, plot_rect.min.y), Pos2::new(x, plot_rect.max.y)],
@@ -466,10 +540,10 @@ fn render_grid(painter: &egui::Painter, spectrum_rect: Rect, plot_rect: Rect, st
         );
         if tick.major {
             painter.text(
-                Pos2::new(x, spectrum_rect.max.y - 4.0),
-                egui::Align2::CENTER_BOTTOM,
+                x_tick_label_position(x, plot_rect),
+                egui::Align2::CENTER_TOP,
                 &tick.label,
-                FontId::proportional(9.0),
+                tick_font.clone(),
                 text_color(),
             );
         }
@@ -482,24 +556,28 @@ fn render_grid(painter: &egui::Painter, spectrum_rect: Rect, plot_rect: Rect, st
             continue;
         }
         let stroke = if tick.major {
-            Stroke::new(0.7, grid_color())
+            Stroke::new(1.0, grid_major_color())
         } else {
-            Stroke::new(0.4, Color32::from_rgb(34, 38, 46))
+            Stroke::new(0.5, grid_minor_color())
         };
         painter.line_segment(
             [Pos2::new(plot_rect.min.x, y), Pos2::new(plot_rect.max.x, y)],
             stroke,
         );
         if tick.major {
+            let width = measure_text_width(painter, &tick.label, tick_font.clone(), text_color());
+            metrics.max_y_tick_label_width = metrics.max_y_tick_label_width.max(width);
             painter.text(
-                Pos2::new(spectrum_rect.min.x + 2.0, y),
-                egui::Align2::LEFT_CENTER,
+                y_tick_label_position(y, plot_rect),
+                egui::Align2::RIGHT_CENTER,
                 &tick.label,
-                FontId::proportional(9.0),
+                tick_font.clone(),
                 text_color(),
             );
         }
     }
+
+    metrics
 }
 
 fn frequency_ticks(state: &FftState, approx: usize) -> Vec<AxisTick> {
@@ -541,20 +619,66 @@ where
         return Vec::new();
     }
 
-    let mut ticks = Vec::new();
-    let start = (min / step).floor() as i64 - 1;
-    let end = (max / step).ceil() as i64 + 1;
-    for idx in start..=end {
-        let value = idx as f64 * step;
-        if value < min - step * 0.25 || value > max + step * 0.25 {
-            continue;
+    let epsilon = step * 1e-9;
+    let start = (min / step).floor() * step;
+    let end = (max / step).ceil() * step;
+
+    let mut major_ticks = Vec::with_capacity(approx + 4);
+    let mut major = start;
+    while major <= end + epsilon && major_ticks.len() < MAX_LINEAR_MAJOR_TICKS {
+        if major >= min - epsilon && major <= max + epsilon {
+            major_ticks.push(major);
         }
+        major += step;
+    }
+
+    let mut ticks = Vec::with_capacity(
+        major_ticks
+            .len()
+            .saturating_mul(LINEAR_MINOR_SUBDIVISIONS)
+            .min(MAX_LINEAR_MINOR_TICKS),
+    );
+
+    for &major_value in &major_ticks {
         ticks.push(AxisTick {
-            value,
-            label: labeler(value),
+            value: major_value,
+            label: labeler(major_value),
             major: true,
         });
     }
+
+    let minor_step = step / LINEAR_MINOR_SUBDIVISIONS as f64;
+    if !minor_step.is_finite() || minor_step <= 0.0 {
+        ticks.sort_by(|a, b| a.value.total_cmp(&b.value));
+        return ticks;
+    }
+
+    let mut minor_count = 0usize;
+    let mut base = start;
+    while base <= end + epsilon && minor_count < MAX_LINEAR_MINOR_TICKS {
+        for i in 1..LINEAR_MINOR_SUBDIVISIONS {
+            if minor_count >= MAX_LINEAR_MINOR_TICKS {
+                break;
+            }
+            let value = base + i as f64 * minor_step;
+            if value <= min + epsilon || value >= max - epsilon {
+                continue;
+            }
+            let coincides_with_major = major_ticks.iter().any(|&m| (m - value).abs() < epsilon);
+            if coincides_with_major {
+                continue;
+            }
+            ticks.push(AxisTick {
+                value,
+                label: String::new(),
+                major: false,
+            });
+            minor_count += 1;
+        }
+        base += step;
+    }
+
+    ticks.sort_by(|a, b| a.value.total_cmp(&b.value));
     ticks
 }
 
@@ -567,8 +691,9 @@ fn log_ticks(min: f64, max: f64) -> Vec<AxisTick> {
     let mut ticks = Vec::new();
     for dec in min_dec..=max_dec {
         let decade = 10.0_f64.powi(dec);
-        for (mult, major) in [(1.0, true), (2.0, false), (5.0, false)] {
-            let value = decade * mult;
+        for mult in 1..=9 {
+            let major = mult == 1;
+            let value = decade * mult as f64;
             if value < min || value > max {
                 continue;
             }
@@ -638,37 +763,91 @@ fn render_trace(painter: &egui::Painter, rect: Rect, data: &FftData, state: &Fft
     }
 
     let stroke = Stroke::new(1.5, trace_color());
+    let clipped_painter = painter.with_clip_rect(rect);
 
-    let points: Vec<Pos2> = data
-        .points
-        .iter()
-        .filter_map(|p| {
-            let x = freq_to_x(p.frequency, rect, state);
-            let y = mag_to_y(p, rect, state);
-            if x.is_finite() && y.is_finite() && x >= rect.min.x && x <= rect.max.x {
-                Some(Pos2::new(x, y.clamp(rect.min.y, rect.max.y)))
-            } else {
-                None
+    for window in data.points.windows(2) {
+        let [start, end] = window else {
+            continue;
+        };
+
+        let x0 = freq_to_x(start.frequency, rect, state);
+        let y0 = mag_to_y(start, rect, state);
+        let x1 = freq_to_x(end.frequency, rect, state);
+        let y1 = mag_to_y(end, rect, state);
+        if !(x0.is_finite() && y0.is_finite() && x1.is_finite() && y1.is_finite()) {
+            continue;
+        }
+        if segment_is_trivially_outside_rect(x0, y0, x1, y1, rect) {
+            continue;
+        }
+
+        clipped_painter.line_segment([Pos2::new(x0, y0), Pos2::new(x1, y1)], stroke);
+    }
+}
+
+fn segment_is_trivially_outside_rect(x0: f32, y0: f32, x1: f32, y1: f32, rect: Rect) -> bool {
+    (x0 < rect.min.x && x1 < rect.min.x)
+        || (x0 > rect.max.x && x1 > rect.max.x)
+        || (y0 < rect.min.y && y1 < rect.min.y)
+        || (y0 > rect.max.y && y1 > rect.max.y)
+}
+
+#[cfg(test)]
+fn clip_line_segment_to_rect(start: Pos2, end: Pos2, rect: Rect) -> Option<[Pos2; 2]> {
+    if !(start.x.is_finite() && start.y.is_finite() && end.x.is_finite() && end.y.is_finite()) {
+        return None;
+    }
+
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    let mut t_min = 0.0f32;
+    let mut t_max = 1.0f32;
+
+    // Liang-Barsky clipping against left, right, top, bottom boundaries.
+    for (p, q) in [
+        (-dx, start.x - rect.min.x),
+        (dx, rect.max.x - start.x),
+        (-dy, start.y - rect.min.y),
+        (dy, rect.max.y - start.y),
+    ] {
+        if p.abs() <= f32::EPSILON {
+            if q < 0.0 {
+                return None;
             }
-        })
-        .collect();
-
-    // Draw as filled area
-    if points.len() >= 2 {
-        // Draw fill (subtle)
-        let mut fill_points = points.clone();
-        if let Some(first) = fill_points.first() {
-            fill_points.insert(0, Pos2::new(first.x, rect.max.y));
-        }
-        if let Some(last) = fill_points.last() {
-            fill_points.push(Pos2::new(last.x, rect.max.y));
+            continue;
         }
 
-        // Draw line
-        for window in points.windows(2) {
-            painter.line_segment([window[0], window[1]], stroke);
+        let t = q / p;
+        if p < 0.0 {
+            if t > t_max {
+                return None;
+            }
+            if t > t_min {
+                t_min = t;
+            }
+        } else {
+            if t < t_min {
+                return None;
+            }
+            if t < t_max {
+                t_max = t;
+            }
         }
     }
+
+    if t_max < t_min {
+        return None;
+    }
+
+    let clipped_start = Pos2::new(
+        (start.x + dx * t_min).clamp(rect.min.x, rect.max.x),
+        (start.y + dy * t_min).clamp(rect.min.y, rect.max.y),
+    );
+    let clipped_end = Pos2::new(
+        (start.x + dx * t_max).clamp(rect.min.x, rect.max.x),
+        (start.y + dy * t_max).clamp(rect.min.y, rect.max.y),
+    );
+    Some([clipped_start, clipped_end])
 }
 
 fn render_fundamental_marker(
@@ -1194,6 +1373,100 @@ mod tests {
     }
 
     #[test]
+    fn test_spectrum_plot_rect_reserves_axis_gutters() {
+        let spectrum = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 400.0));
+        let plot = spectrum_plot_rect(spectrum);
+        assert!((plot.min.x - spectrum.min.x - AXIS_LEFT_GUTTER).abs() < f32::EPSILON);
+        assert!((plot.max.x - spectrum.max.x + AXIS_RIGHT_GUTTER).abs() < f32::EPSILON);
+        assert!((plot.min.y - spectrum.min.y - AXIS_TOP_GUTTER).abs() < f32::EPSILON);
+        assert!((plot.max.y - spectrum.max.y + AXIS_BOTTOM_GUTTER).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_axis_titles_are_farther_from_plot_than_tick_labels() {
+        let spectrum = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 400.0));
+        let plot = spectrum_plot_rect(spectrum);
+
+        let x_tick = x_tick_label_position(plot.center().x, plot);
+        let x_axis = x_axis_title_position(spectrum, plot);
+        assert!(x_tick.y > plot.max.y);
+        assert!(x_axis.y > x_tick.y);
+
+        let y_tick = y_tick_label_position(plot.center().y, plot);
+        let y_axis = y_axis_title_position(spectrum, plot, 28.0, 14.0);
+        assert!(y_tick.x < plot.min.x);
+        assert!(y_axis.x < y_tick.x);
+    }
+
+    #[test]
+    fn test_y_axis_title_position_tracks_y_value_label_width() {
+        let spectrum = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 400.0));
+        let plot = spectrum_plot_rect(spectrum);
+
+        let narrow = y_axis_title_position(spectrum, plot, 14.0, 12.0);
+        let wide = y_axis_title_position(spectrum, plot, 40.0, 12.0);
+        assert!(wide.x < narrow.x);
+    }
+
+    #[test]
+    fn test_clip_line_segment_inside_rect_is_unchanged() {
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(10.0, 10.0));
+        let clipped = clip_line_segment_to_rect(Pos2::new(2.0, 3.0), Pos2::new(8.0, 9.0), rect)
+            .expect("segment should remain visible");
+        assert!((clipped[0].x - 2.0).abs() < 1e-6);
+        assert!((clipped[0].y - 3.0).abs() < 1e-6);
+        assert!((clipped[1].x - 8.0).abs() < 1e-6);
+        assert!((clipped[1].y - 9.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_clip_line_segment_fully_below_rect_is_rejected() {
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(10.0, 10.0));
+        let clipped = clip_line_segment_to_rect(Pos2::new(1.0, 12.0), Pos2::new(9.0, 14.0), rect);
+        assert!(clipped.is_none());
+    }
+
+    #[test]
+    fn test_clip_line_segment_crossing_bottom_is_trimmed() {
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(10.0, 10.0));
+        let clipped = clip_line_segment_to_rect(Pos2::new(2.0, 8.0), Pos2::new(8.0, 14.0), rect)
+            .expect("segment should intersect bottom edge");
+
+        // Intersects y=10 at t=1/3 -> x=4.
+        assert!((clipped[0].x - 2.0).abs() < 1e-6);
+        assert!((clipped[0].y - 8.0).abs() < 1e-6);
+        assert!((clipped[1].x - 4.0).abs() < 1e-5);
+        assert!((clipped[1].y - 10.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_clip_line_segment_outside_left_and_right_is_clipped_to_vertical_edges() {
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(10.0, 10.0));
+        let clipped = clip_line_segment_to_rect(Pos2::new(-5.0, 5.0), Pos2::new(15.0, 5.0), rect)
+            .expect("segment crosses plotting area");
+        assert!((clipped[0].x - 0.0).abs() < 1e-6);
+        assert!((clipped[0].y - 5.0).abs() < 1e-6);
+        assert!((clipped[1].x - 10.0).abs() < 1e-6);
+        assert!((clipped[1].y - 5.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_segment_is_trivially_outside_rect_below() {
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(10.0, 10.0));
+        assert!(segment_is_trivially_outside_rect(
+            1.0, 12.0, 9.0, 14.0, rect
+        ));
+    }
+
+    #[test]
+    fn test_segment_is_trivially_outside_rect_false_for_crossing_segment() {
+        let rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(10.0, 10.0));
+        assert!(!segment_is_trivially_outside_rect(
+            2.0, 8.0, 8.0, 14.0, rect
+        ));
+    }
+
+    #[test]
     fn test_freq_to_x_linear() {
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(100.0, 100.0));
         let mut state = FftState::new();
@@ -1280,6 +1553,75 @@ mod tests {
         assert!(ticks
             .iter()
             .any(|t| t.major && (t.value - 100000.0).abs() < 1e-9));
+    }
+
+    #[test]
+    fn test_frequency_ticks_log_contains_minor_subdivisions() {
+        let mut state = FftState::new();
+        state.freq_scale = FrequencyScale::Log;
+        state.freq_min = 10.0;
+        state.freq_max = 100.0;
+
+        let ticks = frequency_ticks(&state, 10);
+        assert!(ticks
+            .iter()
+            .any(|t| !t.major && (t.value - 20.0).abs() < 1e-9));
+        assert!(ticks
+            .iter()
+            .any(|t| !t.major && (t.value - 50.0).abs() < 1e-9));
+        assert!(ticks
+            .iter()
+            .any(|t| !t.major && (t.value - 90.0).abs() < 1e-9));
+    }
+
+    #[test]
+    fn test_frequency_ticks_linear_contains_minor_gridlines() {
+        let mut state = FftState::new();
+        state.freq_scale = FrequencyScale::Linear;
+        state.freq_min = 0.0;
+        state.freq_max = 10.0;
+
+        let ticks = frequency_ticks(&state, 5);
+        let major_count = ticks.iter().filter(|t| t.major).count();
+        let minor_count = ticks.iter().filter(|t| !t.major).count();
+
+        assert!(major_count >= 3);
+        assert!(minor_count > 0);
+        assert!(ticks
+            .iter()
+            .filter(|t| !t.major)
+            .all(|t| t.label.is_empty()));
+    }
+
+    #[test]
+    fn test_magnitude_ticks_contains_minor_gridlines() {
+        let mut state = FftState::new();
+        state.mag_scale = MagnitudeScale::DB;
+        state.mag_min = -120.0;
+        state.mag_max = 0.0;
+
+        let ticks = magnitude_ticks(&state, 8);
+        assert!(ticks.iter().any(|t| t.major));
+        assert!(ticks.iter().any(|t| !t.major));
+    }
+
+    #[test]
+    fn test_linear_ticks_minor_do_not_overlap_major_values() {
+        let ticks = linear_ticks(-5.0, 5.0, 5, |v| format!("{v:.1}"));
+        let majors: Vec<f64> = ticks.iter().filter(|t| t.major).map(|t| t.value).collect();
+        let epsilon = 1e-9;
+        for minor in ticks.iter().filter(|t| !t.major) {
+            assert!(majors
+                .iter()
+                .all(|&major| (major - minor.value).abs() > epsilon));
+        }
+    }
+
+    #[test]
+    fn test_linear_ticks_minor_count_is_capped() {
+        let ticks = linear_ticks(0.0, 1_000_000_000.0, 1_000_000, |v| format!("{v:.0}"));
+        let minor_count = ticks.iter().filter(|t| !t.major).count();
+        assert!(minor_count <= MAX_LINEAR_MINOR_TICKS);
     }
 
     #[test]
