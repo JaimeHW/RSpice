@@ -75,6 +75,10 @@ const LEGEND_TRACE_SWATCH_WIDTH: f32 = 10.0;
 const LEGEND_TRACE_CONTROL_WIDTH: f32 = 22.0;
 const LEGEND_TRACE_SOLO_WIDTH: f32 = 20.0;
 const LEGEND_TRACE_LABEL_MIN_WIDTH: f32 = 28.0;
+const LEGEND_TRACE_LABEL_MAX_WIDTH: f32 = 120.0;
+const LEGEND_TRACE_SHOW_SWATCH_MIN_WIDTH: f32 = 96.0;
+const LEGEND_TRACE_SHOW_SOLO_MIN_WIDTH: f32 = 132.0;
+const LEGEND_TEXT_TRUNCATION_PADDING: f32 = 8.0;
 
 // Grid line colors (using runtime values since Color32 constructors aren't const)
 fn grid_major_color() -> Color32 {
@@ -1426,6 +1430,77 @@ fn render_legend(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Waveform
     });
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LegendTraceRowLayout {
+    show_swatch: bool,
+    show_solo: bool,
+    name_width: f32,
+    spacer_width: f32,
+}
+
+fn calculate_legend_trace_row_layout(row_width: f32, item_spacing_x: f32) -> LegendTraceRowLayout {
+    let available = row_width.max(0.0);
+    let show_swatch = available >= LEGEND_TRACE_SHOW_SWATCH_MIN_WIDTH;
+    let show_solo = available >= LEGEND_TRACE_SHOW_SOLO_MIN_WIDTH;
+
+    let swatch_width = if show_swatch {
+        LEGEND_TRACE_SWATCH_WIDTH + item_spacing_x
+    } else {
+        0.0
+    };
+    let solo_width = if show_solo {
+        LEGEND_TRACE_SOLO_WIDTH + item_spacing_x
+    } else {
+        0.0
+    };
+    let fixed_width = swatch_width + LEGEND_TRACE_CONTROL_WIDTH + item_spacing_x + solo_width;
+    let max_name_space = (available - fixed_width).max(LEGEND_TRACE_LABEL_MIN_WIDTH);
+    let name_width = max_name_space
+        .clamp(LEGEND_TRACE_LABEL_MIN_WIDTH, LEGEND_TRACE_LABEL_MAX_WIDTH)
+        .min(max_name_space);
+    let spacer_width = (max_name_space - name_width).max(0.0);
+
+    LegendTraceRowLayout {
+        show_swatch,
+        show_solo,
+        name_width,
+        spacer_width,
+    }
+}
+
+fn truncate_legend_trace_name(painter: &Painter, text: &str, font: FontId, max_width: f32) -> String {
+    const ELLIPSIS: &str = "...";
+    if text.is_empty() || max_width <= 0.0 {
+        return String::new();
+    }
+    let text_width = measure_text_width(painter, text, font.clone(), Color32::WHITE);
+    if text_width <= max_width {
+        return text.to_owned();
+    }
+    let ellipsis_width = measure_text_width(painter, ELLIPSIS, font.clone(), Color32::WHITE);
+    if ellipsis_width >= max_width {
+        return ELLIPSIS.to_owned();
+    }
+
+    let chars: Vec<char> = text.chars().collect();
+    let mut low = 0usize;
+    let mut high = chars.len();
+    while low < high {
+        let mid = (low + high + 1) / 2;
+        let prefix: String = chars.iter().take(mid).collect();
+        let candidate = format!("{prefix}{ELLIPSIS}");
+        let width = measure_text_width(painter, &candidate, font.clone(), Color32::WHITE);
+        if width <= max_width {
+            low = mid;
+        } else {
+            high = mid.saturating_sub(1);
+        }
+    }
+
+    let prefix: String = chars.iter().take(low).collect();
+    format!("{prefix}{ELLIPSIS}")
+}
+
 fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState) {
     ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
 
@@ -1521,8 +1596,9 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
             .is_some_and(|name| name == item.name);
 
         ui.horizontal(|ui| {
-            let show_swatch = ui.available_width() >= 96.0;
-            if show_swatch {
+            let row_layout =
+                calculate_legend_trace_row_layout(ui.available_width(), ui.spacing().item_spacing.x);
+            if row_layout.show_swatch {
                 let swatch_rect = ui
                     .allocate_space(Vec2::new(LEGEND_TRACE_SWATCH_WIDTH, LEGEND_ROW_HEIGHT))
                     .1;
@@ -1554,24 +1630,31 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
             } else {
                 Color32::from_rgb(110, 115, 125)
             };
-            let label = egui::RichText::new(&item.name).size(10.0).color(text_color);
-            let show_solo = ui.available_width()
-                >= (LEGEND_TRACE_LABEL_MIN_WIDTH + LEGEND_TRACE_SOLO_WIDTH + 6.0);
-            let label_width = if show_solo {
-                (ui.available_width() - LEGEND_TRACE_SOLO_WIDTH - ui.spacing().item_spacing.x)
-                    .max(LEGEND_TRACE_LABEL_MIN_WIDTH)
-            } else {
-                ui.available_width().max(LEGEND_TRACE_LABEL_MIN_WIDTH)
-            };
+            let display_name = truncate_legend_trace_name(
+                ui.painter(),
+                &item.name,
+                FontId::proportional(10.0),
+                (row_layout.name_width - LEGEND_TEXT_TRUNCATION_PADDING).max(0.0),
+            );
+            let label = egui::RichText::new(&display_name).size(10.0).color(text_color);
             let label_response = ui.add_sized(
-                Vec2::new(label_width, LEGEND_ROW_HEIGHT),
+                Vec2::new(row_layout.name_width, LEGEND_ROW_HEIGHT),
                 egui::SelectableLabel::new(selected, label),
             );
+            let label_response = if display_name != item.name {
+                label_response.on_hover_text(&item.name)
+            } else {
+                label_response
+            };
             if label_response.clicked() {
                 selected_trace_name = Some(item.name.clone());
             }
 
-            if show_solo {
+            if row_layout.spacer_width > 0.0 {
+                ui.add_space(row_layout.spacer_width);
+            }
+
+            if row_layout.show_solo {
                 if ui
                     .add_sized(
                         Vec2::new(LEGEND_TRACE_SOLO_WIDTH, LEGEND_ROW_HEIGHT),
@@ -2218,6 +2301,59 @@ mod tests {
 
         // Width should increase for wider layouts (up to max clamp).
         assert!(wide_legend_width >= narrow_legend_width);
+    }
+
+    #[test]
+    fn test_calculate_legend_trace_row_layout_wide_keeps_all_columns_stable() {
+        let layout = calculate_legend_trace_row_layout(180.0, 4.0);
+        assert!(layout.show_swatch);
+        assert!(layout.show_solo);
+        assert!(layout.name_width <= LEGEND_TRACE_LABEL_MAX_WIDTH);
+        assert!(layout.name_width >= LEGEND_TRACE_LABEL_MIN_WIDTH);
+        assert!(layout.spacer_width >= 0.0);
+    }
+
+    #[test]
+    fn test_calculate_legend_trace_row_layout_narrow_hides_optional_columns() {
+        let layout = calculate_legend_trace_row_layout(88.0, 4.0);
+        assert!(!layout.show_swatch);
+        assert!(!layout.show_solo);
+        assert!(layout.name_width >= LEGEND_TRACE_LABEL_MIN_WIDTH);
+    }
+
+    #[test]
+    fn test_truncate_legend_trace_name_applies_ellipsis_when_needed() {
+        let mut truncated = String::new();
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                truncated = truncate_legend_trace_name(
+                    ui.painter(),
+                    "NET_SUPER_LONG_HIERARCHICAL_NAME_OUT",
+                    FontId::proportional(10.0),
+                    30.0,
+                );
+            });
+        });
+        assert!(truncated.ends_with("..."));
+        assert!(truncated.len() < "NET_SUPER_LONG_HIERARCHICAL_NAME_OUT".len());
+    }
+
+    #[test]
+    fn test_truncate_legend_trace_name_keeps_short_names_intact() {
+        let mut rendered = String::new();
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                rendered = truncate_legend_trace_name(
+                    ui.painter(),
+                    "NET1",
+                    FontId::proportional(10.0),
+                    120.0,
+                );
+            });
+        });
+        assert_eq!(rendered, "NET1");
     }
 
     #[test]
