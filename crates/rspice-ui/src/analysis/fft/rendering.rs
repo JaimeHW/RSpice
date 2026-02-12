@@ -442,22 +442,25 @@ fn render_header(
 
             ui.separator();
 
+            ui.label("Peak Th (dB)");
             ui.add_sized(
-                [HEADER_SLIDER_WIDTH, HEADER_CONTROL_HEIGHT],
-                egui::Slider::new(&mut state.peak_threshold_db, -180.0..=20.0)
-                    .text("Peak Th (dB)")
-                    .fixed_decimals(0),
+                [HEADER_SLIDER_WIDTH * 0.6, HEADER_CONTROL_HEIGHT],
+                egui::DragValue::new(&mut state.peak_threshold_db)
+                    .speed(0.5)
+                    .fixed_decimals(1),
             );
+            state.peak_threshold_db = state.peak_threshold_db.clamp(-180.0, 20.0);
 
+            ui.label("Harmonics");
             let mut harmonics = state.num_harmonics as u32;
             if ui
                 .add_sized(
-                    [HEADER_SLIDER_WIDTH, HEADER_CONTROL_HEIGHT],
-                    egui::Slider::new(&mut harmonics, 1..=64).text("Harmonics"),
+                    [HEADER_SLIDER_WIDTH * 0.5, HEADER_CONTROL_HEIGHT],
+                    egui::DragValue::new(&mut harmonics).speed(1.0),
                 )
                 .changed()
             {
-                state.set_num_harmonics(harmonics as usize);
+                state.set_num_harmonics(harmonics.clamp(1, 64) as usize);
             }
         });
     });
