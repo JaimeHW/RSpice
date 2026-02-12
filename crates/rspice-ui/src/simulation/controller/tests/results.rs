@@ -353,12 +353,15 @@ fn test_update_waveforms_transient_populates_waveforms_eye_and_fft() {
 
     let controller = SimulationController::new();
     let mut state = AppState::default();
-    state.simulation.waveforms.push(crate::state::WaveformData::new(
-        "stale",
-        vec![0.0],
-        vec![0.0],
-        "#000000",
-    ));
+    state
+        .simulation
+        .waveforms
+        .push(crate::state::WaveformData::new(
+            "stale",
+            vec![0.0],
+            vec![0.0],
+            "#000000",
+        ));
 
     let sample_count = 512;
     let dt = 1e-10;
@@ -388,6 +391,10 @@ fn test_update_waveforms_transient_populates_waveforms_eye_and_fft() {
     assert_eq!(
         state.panels.active_bottom_tab,
         crate::common::app::BottomPanelTab::Waveform
+    );
+    assert_eq!(
+        state.active_viewer(),
+        crate::viewers::ActiveViewer::Waveform
     );
 }
 
@@ -430,24 +437,24 @@ fn test_update_waveforms_ac_populates_bode_nyquist_and_smith_data() {
     );
 
     assert_eq!(state.simulation.waveforms.len(), 2);
-    assert!(
-        state
-            .simulation
-            .waveforms
-            .iter()
-            .any(|wf| wf.name.as_str() == "|S11|")
-    );
-    assert!(
-        state
-            .simulation
-            .waveforms
-            .iter()
-            .any(|wf| wf.name.as_str() == "|V(out)|")
-    );
+    assert!(state
+        .simulation
+        .waveforms
+        .iter()
+        .any(|wf| wf.name.as_str() == "|S11|"));
+    assert!(state
+        .simulation
+        .waveforms
+        .iter()
+        .any(|wf| wf.name.as_str() == "|V(out)|"));
     assert_eq!(state.bode_plot_state.trace_count(), 2);
     assert_eq!(state.nyquist_state.curve_count(), 2);
     assert_eq!(state.smith_chart_state.traces.len(), 1);
     assert_eq!(state.smith_chart_state.traces[0].name, "S11");
+    assert_eq!(
+        state.active_viewer(),
+        crate::viewers::ActiveViewer::BodePlot
+    );
 }
 
 #[test]
@@ -478,13 +485,11 @@ fn test_update_waveforms_noise_populates_output_input_and_contributors() {
     assert_eq!(state.simulation.waveforms.len(), 4);
     assert!(state.simulation.node_to_waveform.contains_key("onoise"));
     assert!(state.simulation.node_to_waveform.contains_key("inoise"));
-    assert!(
-        state
-            .simulation
-            .waveforms
-            .iter()
-            .any(|wf| wf.name.starts_with("noise("))
-    );
+    assert!(state
+        .simulation
+        .waveforms
+        .iter()
+        .any(|wf| wf.name.starts_with("noise(")));
     assert!(
         state
             .console_messages
@@ -536,16 +541,18 @@ fn test_update_waveforms_monte_carlo_loads_histograms_and_skips_invalid_bins() {
 
     assert_eq!(state.histogram_state.histogram_count(), 1);
     assert_eq!(state.simulation.waveforms.len(), 2);
-    assert!(
-        state
-            .simulation
-            .waveforms
-            .iter()
-            .any(|wf| wf.name.as_str() == "hist(V(out))")
-    );
+    assert!(state
+        .simulation
+        .waveforms
+        .iter()
+        .any(|wf| wf.name.as_str() == "hist(V(out))"));
     assert_eq!(
         state.panels.active_bottom_tab,
         crate::common::app::BottomPanelTab::Waveform
+    );
+    assert_eq!(
+        state.active_viewer(),
+        crate::viewers::ActiveViewer::Histogram
     );
 }
 
@@ -582,6 +589,10 @@ fn test_update_waveforms_monte_carlo_without_valid_histograms_selects_log_tab() 
     assert_eq!(
         state.panels.active_bottom_tab,
         crate::common::app::BottomPanelTab::Log
+    );
+    assert_eq!(
+        state.active_viewer(),
+        crate::viewers::ActiveViewer::Waveform
     );
 }
 

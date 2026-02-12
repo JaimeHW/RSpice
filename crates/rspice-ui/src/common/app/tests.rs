@@ -121,6 +121,35 @@ fn make_test_app() -> RSpiceApp {
     RSpiceApp::new_for_tests(AppState::default())
 }
 
+fn seed_eye_data(state: &mut AppState) {
+    let mut eye = crate::analysis::eye_diagram::data::EyeData::default();
+    eye.add_trace(crate::analysis::eye_diagram::data::EyeTrace::new(
+        vec![0.0, 1.0],
+        vec![0.0, 1.0],
+    ));
+    state.eye_diagram_state.load_data(eye);
+}
+
+fn seed_bode_data(state: &mut AppState) {
+    let mut response = crate::analysis::bode::data::FrequencyResponse::new("tf");
+    response.add_point(crate::analysis::bode::data::FrequencyPoint::new(
+        1.0, 1.0, 0.0,
+    ));
+    let mut data = crate::analysis::bode::BodeData::new();
+    data.add_response(response);
+    state.bode_plot_state.load_data(data);
+}
+
+fn seed_nyquist_data(state: &mut AppState) {
+    let curve = crate::analysis::nyquist::NyquistData::from_arrays(
+        "loop",
+        &[1.0, 10.0],
+        &[0.5, 0.25],
+        &[0.0, -0.2],
+    );
+    state.nyquist_state.load_data(curve);
+}
+
 #[test]
 fn test_app_state_default() {
     let state = AppState::default();
@@ -192,7 +221,6 @@ fn test_panel_visibility_serialization() {
         properties: false,
         bottom_panel: true,
         active_bottom_tab: BottomPanelTab::Waveform,
-        smith_chart: false,
         signal_browser: false,
         script_console: false,
     };
@@ -217,7 +245,6 @@ fn test_panel_visibility_deserialization_legacy_console_index_maps_to_log() {
         properties: true,
         bottom_panel: true,
         active_bottom_tab: 0,
-        smith_chart: false,
         signal_browser: false,
         script_console: false,
     };
@@ -292,6 +319,7 @@ fn test_viewer_workspace_deserialization_filters_invalid_ids() {
 #[test]
 fn test_app_state_open_viewer_routes_to_waveform_tab() {
     let mut state = AppState::default();
+    seed_eye_data(&mut state);
     state.panels.active_bottom_tab = BottomPanelTab::Log;
 
     state.open_viewer(crate::viewers::ActiveViewer::EyeDiagram);
@@ -310,6 +338,7 @@ fn test_app_state_open_viewer_routes_to_waveform_tab() {
 #[test]
 fn test_app_state_open_viewer_in_tab_respects_target_tab() {
     let mut state = AppState::default();
+    seed_bode_data(&mut state);
 
     state.open_viewer_in_tab(
         crate::viewers::ActiveViewer::BodePlot,
@@ -326,6 +355,7 @@ fn test_app_state_open_viewer_in_tab_respects_target_tab() {
 #[test]
 fn test_app_state_close_active_viewer_keeps_workspace_non_empty() {
     let mut state = AppState::default();
+    seed_nyquist_data(&mut state);
     state.open_viewer(crate::viewers::ActiveViewer::Nyquist);
     assert_eq!(state.active_viewer(), crate::viewers::ActiveViewer::Nyquist);
 
@@ -349,6 +379,8 @@ fn test_app_state_close_active_viewer_keeps_workspace_non_empty() {
 #[test]
 fn test_app_state_serialization_round_trip_preserves_viewer_workspace() {
     let mut state = AppState::default();
+    seed_bode_data(&mut state);
+    seed_nyquist_data(&mut state);
     state.open_viewer(crate::viewers::ActiveViewer::BodePlot);
     state.open_viewer(crate::viewers::ActiveViewer::Nyquist);
     state
@@ -375,7 +407,13 @@ fn test_app_state_serialization_round_trip_preserves_viewer_workspace() {
 #[test]
 fn test_app_state_deserialization_legacy_payload_defaults_viewer_workspace() {
     let mut state = AppState::default();
+    seed_eye_data(&mut state);
     state.open_viewer(crate::viewers::ActiveViewer::EyeDiagram);
+    assert_eq!(
+        state.active_viewer(),
+        crate::viewers::ActiveViewer::EyeDiagram
+    );
+    assert_eq!(state.viewer_workspace.tab_count(), 2);
 
     let mut value = serde_json::to_value(&state).expect("serialize to value");
     let map = value
