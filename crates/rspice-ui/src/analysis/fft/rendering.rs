@@ -6,7 +6,7 @@ use egui::{Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, 
 use std::f64::consts::PI;
 
 use super::data::{FftData, FftPoint, SpectrumAnalysis, SpectrumNormalization};
-use super::state::{FftState, FrequencyScale, MagnitudeScale};
+use super::state::{FftState, FrequencyScale, InputFidelity, MagnitudeScale};
 use super::window::WindowFunction;
 use crate::common::app::AppState;
 use crate::state::AnalysisType;
@@ -81,7 +81,7 @@ pub fn render_fft_viewer(ui: &mut Ui, app_state: &mut AppState) {
         render_header(ui, &layout, state, &source_names)
     };
 
-    if let Some(source_name) = header_actions.select_source {
+    if let Some(source_name) = header_actions.refresh_source {
         refresh_fft_from_source_waveform(app_state, &source_name);
     }
 
@@ -251,7 +251,7 @@ where
 
 #[derive(Debug, Default)]
 struct HeaderActions {
-    select_source: Option<String>,
+    refresh_source: Option<String>,
 }
 
 fn collect_fft_source_names(app_state: &AppState) -> Vec<String> {
@@ -289,6 +289,7 @@ fn refresh_fft_from_source_waveform(app_state: &mut AppState, source_name: &str)
     app_state
         .fft_state
         .set_selected_source(Some(source_name.to_string()));
+    let input_policy = app_state.fft_state.input_policy();
     let Some(waveform) = app_state
         .simulation
         .waveforms
@@ -299,11 +300,11 @@ fn refresh_fft_from_source_waveform(app_state: &mut AppState, source_name: &str)
         return;
     };
 
-    if let Some(prepared) = crate::analysis::fft::prepare_fft_input(
+    if let Some(prepared) = crate::analysis::fft::prepare_fft_input_with_policy(
         source_name,
         &waveform.x,
         &waveform.y,
-        crate::analysis::fft::DEFAULT_MAX_FFT_POINTS,
+        input_policy,
     ) {
         app_state.fft_state.load_prepared_input(prepared);
     } else {
@@ -368,7 +369,7 @@ fn render_header(
                 });
             if selected_source != state.selected_source {
                 state.set_selected_source(selected_source.clone());
-                actions.select_source = selected_source;
+                actions.refresh_source = selected_source;
             }
 
             let mut window = state.window;
@@ -451,6 +452,32 @@ fn render_header(
                 });
             if normalization != state.normalization {
                 state.set_normalization(normalization);
+            }
+
+            let mut fidelity = state.input_fidelity;
+            let fidelity_width = combo_width_from_texts(
+                ui,
+                fidelity.display_name(),
+                InputFidelity::all().iter().map(|mode| mode.display_name()),
+                HEADER_DROPDOWN_MIN_WIDTH,
+                HEADER_DROPDOWN_MAX_WIDTH,
+            );
+            egui::ComboBox::from_id_salt("fft_fidelity")
+                .width(fidelity_width)
+                .selected_text(fidelity.display_name())
+                .show_ui(ui, |ui| {
+                    for mode in InputFidelity::all() {
+                        ui.selectable_value(&mut fidelity, *mode, mode.display_name());
+                    }
+                });
+            if fidelity != state.input_fidelity {
+                state.set_input_fidelity(fidelity);
+                if actions.refresh_source.is_none() {
+                    actions.refresh_source = state
+                        .selected_source
+                        .clone()
+                        .or_else(|| state.source_cache.as_ref().map(|src| src.name.clone()));
+                }
             }
 
             ui.separator();
@@ -1580,6 +1607,7 @@ fn render_info_panel_content(ui: &mut Ui, state: &FftState) {
         ui.label(egui::RichText::new("Window").size(10.0).color(text_color()));
         info_row(ui, "Type", state.window.display_name());
         info_row(ui, "Norm", state.normalization.display_name());
+        info_row(ui, "Fidelity", state.input_fidelity.display_name());
         info_row(
             ui,
             "Sidelobe",
@@ -1679,11 +1707,11 @@ fn load_demo_data(state: &mut FftState) {
         })
         .collect();
 
-    if let Some(prepared) = crate::analysis::fft::prepare_fft_input(
+    if let Some(prepared) = crate::analysis::fft::prepare_fft_input_with_policy(
         "Demo Signal",
         &time,
         &data,
-        crate::analysis::fft::DEFAULT_MAX_FFT_POINTS,
+        state.input_policy(),
     ) {
         state.load_prepared_input(prepared);
     }
@@ -1999,6 +2027,66 @@ mod tests {
         assert!(state.has_data());
         assert!(state.analysis.is_some());
         assert!(state.source_cache.is_some());
+    }
+
+    #[test]
+    fn test_refresh_fft_from_source_waveform_reference_mode_preserves_large_uniform_input() {
+        let mut app_state = AppState::default();
+        let fs = 2_000_000.0;
+        let n = crate::analysis::fft::DEFAULT_MAX_FFT_POINTS * 3;
+        let time: Vec<f64> = (0..n).map(|i| i as f64 / fs).collect();
+        let values: Vec<f64> = (0..n)
+            .map(|i| (2.0 * PI * 250_000.0 * i as f64 / fs).sin())
+            .collect();
+        app_state
+            .simulation
+            .waveforms
+            .push(crate::state::WaveformData::new(
+                "V(out)", time, values, "#4aa3ff",
+            ));
+        app_state
+            .fft_state
+            .set_input_fidelity(InputFidelity::Reference);
+
+        refresh_fft_from_source_waveform(&mut app_state, "V(out)");
+
+        let source = app_state
+            .fft_state
+            .source_cache
+            .as_ref()
+            .expect("source cache");
+        assert_eq!(source.decimation_factor, 1);
+        assert_eq!(source.samples.len(), n);
+    }
+
+    #[test]
+    fn test_refresh_fft_from_source_waveform_interactive_mode_caps_large_uniform_input() {
+        let mut app_state = AppState::default();
+        let fs = 2_000_000.0;
+        let n = crate::analysis::fft::DEFAULT_MAX_FFT_POINTS * 3;
+        let time: Vec<f64> = (0..n).map(|i| i as f64 / fs).collect();
+        let values: Vec<f64> = (0..n)
+            .map(|i| (2.0 * PI * 250_000.0 * i as f64 / fs).sin())
+            .collect();
+        app_state
+            .simulation
+            .waveforms
+            .push(crate::state::WaveformData::new(
+                "V(out)", time, values, "#4aa3ff",
+            ));
+        app_state
+            .fft_state
+            .set_input_fidelity(InputFidelity::Interactive);
+
+        refresh_fft_from_source_waveform(&mut app_state, "V(out)");
+
+        let source = app_state
+            .fft_state
+            .source_cache
+            .as_ref()
+            .expect("source cache");
+        assert!(source.samples.len() <= crate::analysis::fft::DEFAULT_MAX_FFT_POINTS);
+        assert!(source.decimation_factor > 1);
     }
 
     #[test]

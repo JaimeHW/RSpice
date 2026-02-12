@@ -17,6 +17,7 @@ impl SimulationController {
         state
             .fft_state
             .set_selected_source(Some(waveform_key.clone()));
+        let input_policy = state.fft_state.input_policy();
 
         if let Some(bit_period) = Self::estimate_ui_period(time, &waveform.y_values) {
             let eye_data = crate::analysis::eye_diagram::data::EyeDataBuilder::new()
@@ -29,11 +30,11 @@ impl SimulationController {
             }
         }
 
-        if let Some(prepared) = crate::analysis::fft::prepare_fft_input(
+        if let Some(prepared) = crate::analysis::fft::prepare_fft_input_with_policy(
             &waveform_key,
             time,
             &waveform.y_values,
-            crate::analysis::fft::DEFAULT_MAX_FFT_POINTS,
+            input_policy,
         ) {
             state.fft_state.load_prepared_input(prepared);
         }

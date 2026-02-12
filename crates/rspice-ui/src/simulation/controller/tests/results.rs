@@ -737,6 +737,88 @@ fn test_update_waveforms_transient_duplicate_labels_use_deterministic_key() {
 }
 
 #[test]
+fn test_update_waveforms_transient_fft_reference_mode_preserves_large_uniform_input() {
+    use crate::simulation::results::WaveformData as EngineWaveformData;
+    use crate::simulation::SimulationResult;
+    use std::collections::HashMap;
+
+    let controller = SimulationController::new();
+    let mut state = AppState::default();
+    state
+        .fft_state
+        .set_input_fidelity(crate::analysis::fft::state::InputFidelity::Reference);
+    state
+        .fft_state
+        .set_selected_source(Some("V(out)".to_string()));
+
+    let n = crate::analysis::fft::DEFAULT_MAX_FFT_POINTS * 3;
+    let fs = 2_000_000.0;
+    let time: Vec<f64> = (0..n).map(|i| i as f64 / fs).collect();
+    let signal: Vec<f64> = (0..n)
+        .map(|i| (2.0 * std::f64::consts::PI * 250_000.0 * i as f64 / fs).sin())
+        .collect();
+
+    let mut waveforms = HashMap::new();
+    waveforms.insert(
+        "V(out)".to_string(),
+        EngineWaveformData::new_time_domain("V(out)", time.clone(), signal),
+    );
+
+    controller.update_waveforms(
+        &mut state,
+        &SimulationResult::Transient {
+            time: time.clone(),
+            waveforms,
+        },
+    );
+
+    let source = state.fft_state.source_cache.as_ref().expect("source cache");
+    assert_eq!(source.decimation_factor, 1);
+    assert_eq!(source.samples.len(), n);
+}
+
+#[test]
+fn test_update_waveforms_transient_fft_interactive_mode_caps_large_uniform_input() {
+    use crate::simulation::results::WaveformData as EngineWaveformData;
+    use crate::simulation::SimulationResult;
+    use std::collections::HashMap;
+
+    let controller = SimulationController::new();
+    let mut state = AppState::default();
+    state
+        .fft_state
+        .set_input_fidelity(crate::analysis::fft::state::InputFidelity::Interactive);
+    state
+        .fft_state
+        .set_selected_source(Some("V(out)".to_string()));
+
+    let n = crate::analysis::fft::DEFAULT_MAX_FFT_POINTS * 3;
+    let fs = 2_000_000.0;
+    let time: Vec<f64> = (0..n).map(|i| i as f64 / fs).collect();
+    let signal: Vec<f64> = (0..n)
+        .map(|i| (2.0 * std::f64::consts::PI * 250_000.0 * i as f64 / fs).sin())
+        .collect();
+
+    let mut waveforms = HashMap::new();
+    waveforms.insert(
+        "V(out)".to_string(),
+        EngineWaveformData::new_time_domain("V(out)", time.clone(), signal),
+    );
+
+    controller.update_waveforms(
+        &mut state,
+        &SimulationResult::Transient {
+            time: time.clone(),
+            waveforms,
+        },
+    );
+
+    let source = state.fft_state.source_cache.as_ref().expect("source cache");
+    assert!(source.samples.len() <= crate::analysis::fft::DEFAULT_MAX_FFT_POINTS);
+    assert!(source.decimation_factor > 1);
+}
+
+#[test]
 fn test_update_waveforms_ac_populates_bode_nyquist_and_smith_data() {
     use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
