@@ -297,16 +297,16 @@ fn render_header(
         ui.horizontal(|ui| {
             ui.spacing_mut().interact_size.y = HEADER_CONTROL_HEIGHT;
             ui.spacing_mut().button_padding.y = 2.0;
-            ui.add_space(6.0);
+            ui.add_space(4.0);
 
-            ui.label(
-                egui::RichText::new("FFT Spectrum")
-                    .size(13.0)
-                    .strong()
-                    .color(Color32::from_rgb(200, 200, 210)),
-            );
+            // ui.label(
+            //     egui::RichText::new("FFT Spectrum")
+            //         .size(13.0)
+            //         .strong()
+            //         .color(Color32::from_rgb(200, 200, 210)),
+            // );
 
-            ui.add_space(8.0);
+            // ui.add_space(8.0);
 
             let mut selected_source = state
                 .selected_source
@@ -381,6 +381,7 @@ fn render_header(
             if normalization != state.normalization {
                 state.set_normalization(normalization);
             }
+
             ui.separator();
 
             let peaks_label = if state.show_peaks {
@@ -401,12 +402,43 @@ fn render_header(
                 state.toggle_harmonics();
             }
 
+            ui.separator();
+
             if ui.checkbox(&mut state.freq_auto, "Auto Freq").changed() && state.freq_auto {
                 state.update_auto_scale();
             }
+
+            ui.add_enabled_ui(!state.freq_auto, |ui| {
+                ui.label("fmin");
+                ui.add(egui::DragValue::new(&mut state.freq_min).speed(10.0));
+                ui.label("fmax");
+                ui.add(egui::DragValue::new(&mut state.freq_max).speed(10.0));
+            });
+
+            if state.freq_scale == FrequencyScale::Log {
+                state.freq_min = state.freq_min.max(1e-12);
+            }
+            if state.freq_max <= state.freq_min {
+                state.freq_max = state.freq_min * 1.01;
+            }
+
+            ui.separator();
+
             if ui.checkbox(&mut state.mag_auto, "Auto Mag").changed() && state.mag_auto {
                 state.update_auto_scale();
             }
+
+            ui.add_enabled_ui(!state.mag_auto, |ui| {
+                ui.label("mmin");
+                ui.add(egui::DragValue::new(&mut state.mag_min).speed(0.5));
+                ui.label("mmax");
+                ui.add(egui::DragValue::new(&mut state.mag_max).speed(0.5));
+            });
+            if state.mag_max <= state.mag_min {
+                state.mag_max = state.mag_min + 1.0;
+            }
+
+            ui.separator();
 
             ui.add_sized(
                 [HEADER_SLIDER_WIDTH, HEADER_CONTROL_HEIGHT],
@@ -424,29 +456,6 @@ fn render_header(
                 .changed()
             {
                 state.set_num_harmonics(harmonics as usize);
-            }
-
-            if !state.freq_auto {
-                ui.label("fmin");
-                ui.add(egui::DragValue::new(&mut state.freq_min).speed(10.0));
-                ui.label("fmax");
-                ui.add(egui::DragValue::new(&mut state.freq_max).speed(10.0));
-                if state.freq_scale == FrequencyScale::Log {
-                    state.freq_min = state.freq_min.max(1e-12);
-                }
-                if state.freq_max <= state.freq_min {
-                    state.freq_max = state.freq_min * 1.01;
-                }
-            }
-
-            if !state.mag_auto {
-                ui.label("mmin");
-                ui.add(egui::DragValue::new(&mut state.mag_min).speed(0.5));
-                ui.label("mmax");
-                ui.add(egui::DragValue::new(&mut state.mag_max).speed(0.5));
-                if state.mag_max <= state.mag_min {
-                    state.mag_max = state.mag_min + 1.0;
-                }
             }
         });
     });
