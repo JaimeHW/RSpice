@@ -3,9 +3,10 @@ use egui::{Color32, RichText, Stroke, Ui};
 use super::RSpiceApp;
 
 const VIEWER_TAB_CHIP_OUTER_HEIGHT: f32 = VIEWER_TAB_ROW_HEIGHT + 2.0 * VIEWER_TAB_INNER_Y;
-const VIEWER_TAB_CHIP_EDGE_SPACE: f32 = 3.0;
+const VIEWER_TAB_CHIP_TOP_SPACE: f32 = 5.0;
+const VIEWER_TAB_CHIP_BOTTOM_SPACE: f32 = 4.0;
 const VIEWER_TAB_STRIP_MIN_HEIGHT: f32 =
-    VIEWER_TAB_CHIP_OUTER_HEIGHT + 2.0 * VIEWER_TAB_CHIP_EDGE_SPACE;
+    VIEWER_TAB_CHIP_OUTER_HEIGHT + VIEWER_TAB_CHIP_TOP_SPACE + VIEWER_TAB_CHIP_BOTTOM_SPACE;
 const VIEWER_TAB_STRIP_PAD_X: f32 = 8.0;
 const VIEWER_TAB_STRIP_PAD_Y: f32 = 1.0;
 const VIEWER_TAB_SPACING: f32 = 6.0;
@@ -150,8 +151,9 @@ impl RSpiceApp {
                 VIEWER_TAB_STRIP_PAD_Y,
             ))
             .show(ui, |ui| {
+                ui.set_min_height(VIEWER_TAB_STRIP_MIN_HEIGHT);
                 ui.spacing_mut().item_spacing = egui::vec2(VIEWER_TAB_SPACING, 0.0);
-                ui.add_space(VIEWER_TAB_CHIP_EDGE_SPACE);
+                ui.add_space(VIEWER_TAB_CHIP_TOP_SPACE);
 
                 ui.horizontal(|ui| {
                     for index in 0..tab_count {
@@ -293,7 +295,7 @@ impl RSpiceApp {
                     );
                 });
 
-                ui.add_space(VIEWER_TAB_CHIP_EDGE_SPACE);
+                ui.add_space(VIEWER_TAB_CHIP_BOTTOM_SPACE);
             });
 
         if let Some(viewer) = focus_request {
@@ -413,9 +415,10 @@ mod tests {
     fn chip_height_leaves_vertical_breathing_room_in_strip() {
         assert_eq!(
             VIEWER_TAB_STRIP_MIN_HEIGHT,
-            VIEWER_TAB_CHIP_OUTER_HEIGHT + 2.0 * VIEWER_TAB_CHIP_EDGE_SPACE
+            VIEWER_TAB_CHIP_OUTER_HEIGHT + VIEWER_TAB_CHIP_TOP_SPACE + VIEWER_TAB_CHIP_BOTTOM_SPACE
         );
-        assert!(VIEWER_TAB_CHIP_EDGE_SPACE > 0.0);
+        assert!(VIEWER_TAB_CHIP_TOP_SPACE > 0.0);
+        assert!(VIEWER_TAB_CHIP_BOTTOM_SPACE > 0.0);
     }
 
     #[test]
