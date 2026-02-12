@@ -4,7 +4,7 @@ use super::RSpiceApp;
 
 const VIEWER_TAB_CHIP_OUTER_HEIGHT: f32 = VIEWER_TAB_ROW_HEIGHT + 2.0 * VIEWER_TAB_INNER_Y;
 const VIEWER_TAB_CHIP_TOP_SPACE: f32 = 5.0;
-const VIEWER_TAB_CHIP_BOTTOM_SPACE: f32 = 4.0;
+const VIEWER_TAB_CHIP_BOTTOM_SPACE: f32 = 2.0;
 const VIEWER_TAB_STRIP_MIN_HEIGHT: f32 =
     VIEWER_TAB_CHIP_OUTER_HEIGHT + VIEWER_TAB_CHIP_TOP_SPACE + VIEWER_TAB_CHIP_BOTTOM_SPACE;
 const VIEWER_TAB_STRIP_PAD_X: f32 = 8.0;
@@ -13,7 +13,6 @@ const VIEWER_TAB_SPACING: f32 = 6.0;
 const VIEWER_TAB_ROW_HEIGHT: f32 = 16.0;
 const VIEWER_TAB_CLOSE_SIZE: f32 = 12.0;
 const VIEWER_ADD_BUTTON_WIDTH: f32 = 104.0;
-const VIEWER_ADD_BUTTON_HEIGHT: f32 = 20.0;
 const VIEWER_TAB_ROUNDING: f32 = 8.0;
 const VIEWER_TAB_INNER_X: f32 = 9.0;
 const VIEWER_TAB_INNER_Y: f32 = 2.0;
@@ -247,17 +246,30 @@ impl RSpiceApp {
 
                     ui.add_space(8.0);
                     let add_menu_id = ui.make_persistent_id("viewer_add_menu");
-                    let add_response = ui.add_sized(
-                        egui::vec2(VIEWER_ADD_BUTTON_WIDTH, VIEWER_ADD_BUTTON_HEIGHT),
-                        egui::Button::new(
-                            RichText::new("Add Viewer")
-                                .color(tab_text_color(false, true))
-                                .size(11.0),
-                        )
+                    let add_response = egui::Frame::none()
                         .fill(Color32::from_rgb(30, 34, 42))
                         .stroke(Stroke::new(1.0, Color32::from_rgb(56, 63, 76)))
-                        .rounding(3.0),
-                    );
+                        .rounding(egui::Rounding::same(4.0))
+                        .inner_margin(egui::Margin::symmetric(
+                            VIEWER_TAB_INNER_X,
+                            VIEWER_TAB_INNER_Y,
+                        ))
+                        .show(ui, |ui| {
+                            let label_width =
+                                (VIEWER_ADD_BUTTON_WIDTH - 2.0 * VIEWER_TAB_INNER_X).max(1.0);
+                            ui.add_sized(
+                                egui::vec2(label_width, VIEWER_TAB_ROW_HEIGHT),
+                                egui::Label::new(
+                                    RichText::new("Add Viewer")
+                                        .color(tab_text_color(false, true))
+                                        .size(11.0),
+                                )
+                                .selectable(false)
+                                .sense(egui::Sense::click()),
+                            )
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        })
+                        .inner;
                     if add_response.clicked() {
                         ui.memory_mut(|mem| mem.toggle_popup(add_menu_id));
                     }
