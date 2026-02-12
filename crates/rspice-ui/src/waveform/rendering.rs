@@ -79,6 +79,7 @@ const LEGEND_TRACE_LABEL_MAX_WIDTH: f32 = 120.0;
 const LEGEND_TRACE_SHOW_SWATCH_MIN_WIDTH: f32 = 96.0;
 const LEGEND_TRACE_SHOW_SOLO_MIN_WIDTH: f32 = 132.0;
 const LEGEND_TEXT_TRUNCATION_PADDING: f32 = 8.0;
+const LEGEND_FIND_EDIT_MIN_WIDTH: f32 = 40.0;
 
 // Grid line colors (using runtime values since Color32 constructors aren't const)
 fn grid_major_color() -> Color32 {
@@ -1438,6 +1439,12 @@ struct LegendTraceRowLayout {
     spacer_width: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LegendFindRowLayout {
+    show_clear: bool,
+    edit_width: f32,
+}
+
 fn calculate_legend_trace_row_layout(row_width: f32, item_spacing_x: f32) -> LegendTraceRowLayout {
     let available = row_width.max(0.0);
     let show_swatch = available >= LEGEND_TRACE_SHOW_SWATCH_MIN_WIDTH;
@@ -1465,6 +1472,21 @@ fn calculate_legend_trace_row_layout(row_width: f32, item_spacing_x: f32) -> Leg
         show_solo,
         name_width,
         spacer_width,
+    }
+}
+
+fn calculate_legend_find_row_layout(row_width: f32, item_spacing_x: f32) -> LegendFindRowLayout {
+    let available = row_width.max(0.0);
+    let required_for_clear = LEGEND_FIND_EDIT_MIN_WIDTH + LEGEND_TRACE_SOLO_WIDTH + item_spacing_x;
+    let show_clear = available >= required_for_clear;
+    let edit_width = if show_clear {
+        (available - LEGEND_TRACE_SOLO_WIDTH - item_spacing_x).max(0.0)
+    } else {
+        available
+    };
+    LegendFindRowLayout {
+        show_clear,
+        edit_width,
     }
 }
 
@@ -1552,19 +1574,13 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
 
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new("Find").size(9.0).color(Color32::from_rgb(120, 125, 135)));
-        let show_clear = ui.available_width() >= 84.0;
-        let clear_width = if show_clear {
-            LEGEND_TRACE_SOLO_WIDTH + ui.spacing().item_spacing.x
-        } else {
-            0.0
-        };
-        let edit_width = (ui.available_width() - clear_width).max(40.0);
-        ui.add(
-            egui::TextEdit::singleline(&mut viewer_state.legend_state.filter)
-                .desired_width(edit_width)
-                .hint_text("trace"),
+        let find_layout =
+            calculate_legend_find_row_layout(ui.available_width(), ui.spacing().item_spacing.x);
+        ui.add_sized(
+            Vec2::new(find_layout.edit_width, LEGEND_ROW_HEIGHT),
+            egui::TextEdit::singleline(&mut viewer_state.legend_state.filter).hint_text("trace"),
         );
-        if show_clear {
+        if find_layout.show_clear {
             if ui
                 .add_sized(
                     Vec2::new(LEGEND_TRACE_SOLO_WIDTH, LEGEND_ROW_HEIGHT),
@@ -1595,7 +1611,11 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
             .as_deref()
             .is_some_and(|name| name == item.name);
 
-        ui.horizontal(|ui| {
+        let row_width = ui.available_width();
+        ui.allocate_ui_with_layout(
+            Vec2::new(row_width, LEGEND_ROW_HEIGHT),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
             let row_layout =
                 calculate_legend_trace_row_layout(ui.available_width(), ui.spacing().item_spacing.x);
             if row_layout.show_swatch {
@@ -1670,7 +1690,8 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
                     selected_trace_name = Some(item.name.clone());
                 }
             }
-        });
+            },
+        );
     }
 
     for (idx, visible) in visibility_updates {
@@ -1681,9 +1702,7 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
     if let Some(idx) = solo_trace_idx {
         legend::solo_trace(&mut viewer_state.traces, idx);
     }
-    if let Some(name) = selected_trace_name {
-        viewer_state.selected_trace = Some(name);
-    }
+    apply_legend_selection(viewer_state, selected_trace_name);
 
     if items.is_empty() {
         ui.label(
@@ -1691,6 +1710,17 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
                 .size(10.0)
                 .color(Color32::from_rgb(100, 105, 115)),
         );
+    }
+}
+
+fn apply_legend_selection(
+    viewer_state: &mut WaveformViewerState,
+    selected_trace_name: Option<String>,
+) {
+    if let Some(name) = selected_trace_name {
+        viewer_state.selected_trace = Some(name.clone());
+        viewer_state.clear_highlights();
+        viewer_state.set_trace_highlight(&name, true);
     }
 }
 
@@ -2325,6 +2355,20 @@ mod tests {
     }
 
     #[test]
+    fn test_calculate_legend_find_row_layout_hides_clear_when_narrow() {
+        let layout = calculate_legend_find_row_layout(48.0, 4.0);
+        assert!(!layout.show_clear);
+        assert!((layout.edit_width - 48.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_calculate_legend_find_row_layout_shows_clear_when_wide() {
+        let layout = calculate_legend_find_row_layout(96.0, 4.0);
+        assert!(layout.show_clear);
+        assert!((layout.edit_width - (96.0 - LEGEND_TRACE_SOLO_WIDTH - 4.0)).abs() < f32::EPSILON);
+    }
+
+    #[test]
     fn test_truncate_legend_trace_name_applies_ellipsis_when_needed() {
         let mut truncated = String::new();
         let ctx = egui::Context::default();
@@ -2357,6 +2401,22 @@ mod tests {
             });
         });
         assert_eq!(rendered, "NET1");
+    }
+
+    #[test]
+    fn test_apply_legend_selection_sets_selected_trace_and_highlight() {
+        let mut state = WaveformViewerState::new();
+        state.traces = vec![
+            TraceData::new("NET1", vec![0.0, 1.0], vec![0.0, 1.0]),
+            TraceData::new("NET2", vec![0.0, 1.0], vec![1.0, 0.0]),
+        ];
+        state.traces[0].highlighted = true;
+
+        apply_legend_selection(&mut state, Some("NET2".to_string()));
+
+        assert_eq!(state.selected_trace.as_deref(), Some("NET2"));
+        assert!(!state.traces[0].highlighted);
+        assert!(state.traces[1].highlighted);
     }
 
     #[test]
