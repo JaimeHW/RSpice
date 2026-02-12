@@ -14,6 +14,7 @@ impl SimulationState {
     /// Clear waveforms and increment version
     pub fn clear_waveforms(&mut self) {
         self.waveforms.clear();
+        self.node_to_waveform.clear();
         self.data_version = self.data_version.wrapping_add(1);
     }
 
@@ -195,11 +196,18 @@ impl SimulationState {
             self.active_run_idx = Some(run_idx);
             self.active_analysis_idx = None;
 
-            // Auto-select first analysis in this run (this will sync only that analysis's waveforms)
-            if let Some(run) = self.runs.get(run_idx) {
-                if !run.analyses.is_empty() {
-                    self.select_analysis(0);
-                }
+            let has_analyses = self
+                .runs
+                .get(run_idx)
+                .map(|run| !run.analyses.is_empty())
+                .unwrap_or(false);
+
+            // Auto-select first analysis in this run (this will sync only that analysis's waveforms).
+            // If the run has no analyses, clear displayed waveform data so the viewer cannot show stale traces.
+            if has_analyses {
+                self.select_analysis(0);
+            } else {
+                self.sync_selected_analysis_waveforms();
             }
             true
         } else {
@@ -215,15 +223,7 @@ impl SimulationState {
             if let Some(run) = self.runs.get(run_idx) {
                 if analysis_idx < run.analyses.len() {
                     self.active_analysis_idx = Some(analysis_idx);
-
-                    // Sync waveforms from selected analysis only
-                    self.waveforms.clear();
-                    if let Some(analysis) = run.analyses.get(analysis_idx) {
-                        for wf in &analysis.waveforms {
-                            self.waveforms.push(wf.clone());
-                        }
-                    }
-                    self.data_version = self.data_version.wrapping_add(1);
+                    self.sync_selected_analysis_waveforms();
                     return true;
                 }
             }
@@ -264,6 +264,7 @@ impl SimulationState {
         self.runs.clear();
         self.active_run_idx = None;
         self.active_analysis_idx = None;
+        self.sync_selected_analysis_waveforms();
         // Don't reset next_run_id to preserve uniqueness
     }
 
@@ -284,9 +285,15 @@ impl SimulationState {
             // Adjust active indices
             if let Some(active) = self.active_run_idx {
                 if active == run_idx {
-                    // Deleted the active run, select newest if available
-                    self.active_run_idx = if self.runs.is_empty() { None } else { Some(0) };
-                    self.active_analysis_idx = None;
+                    if self.runs.is_empty() {
+                        // Deleted final run: clear active selection and displayed waveform data.
+                        self.active_run_idx = None;
+                        self.active_analysis_idx = None;
+                        self.sync_selected_analysis_waveforms();
+                    } else {
+                        // Deleted active run: select the new head run and synchronize displayed data.
+                        let _ = self.select_run(0);
+                    }
                 } else if active > run_idx {
                     // Shift active index down
                     self.active_run_idx = Some(active - 1);
@@ -296,5 +303,24 @@ impl SimulationState {
         } else {
             false
         }
+    }
+
+    fn sync_selected_analysis_waveforms(&mut self) {
+        let selected_waveforms = self
+            .active_run_idx
+            .and_then(|run_idx| self.runs.get(run_idx))
+            .and_then(|run| {
+                self.active_analysis_idx
+                    .and_then(|analysis_idx| run.analyses.get(analysis_idx))
+            })
+            .map(|analysis| analysis.waveforms.clone())
+            .unwrap_or_default();
+
+        self.waveforms = selected_waveforms;
+        self.node_to_waveform.clear();
+        for (index, waveform) in self.waveforms.iter().enumerate() {
+            self.node_to_waveform.insert(waveform.name.clone(), index);
+        }
+        self.data_version = self.data_version.wrapping_add(1);
     }
 }
