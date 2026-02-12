@@ -240,11 +240,12 @@ fn render_header(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Waveform
     // Create a UI area for header controls
     let header_rect = layout.header.shrink(4.0);
     ui.allocate_new_ui(UiBuilder::new().max_rect(header_rect), |ui| {
-        let control_height = (ui.available_height() - 2.0)
-            .max(ui.spacing().interact_size.y)
-            .max(18.0);
+        // Keep toolbar controls compact and center the row inside the header.
+        let control_height = (ui.available_height() - 6.0).clamp(16.0, 17.0);
+        let row_vertical_pad = ((ui.available_height() - control_height) * 0.5).max(0.0);
+        ui.add_space(row_vertical_pad);
         ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), ui.available_height()),
+            egui::vec2(ui.available_width(), control_height),
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
                 ui.add_space(8.0);
