@@ -15,11 +15,11 @@ use std::f64::consts::PI;
 pub const MIN_FFT_SAMPLES: usize = 16;
 
 /// Default point cap for interactive FFT computation.
-pub const DEFAULT_MAX_FFT_POINTS: usize = 4096;
+pub const DEFAULT_MAX_FFT_POINTS: usize = 65_536;
 
 const NONUNIFORM_OVERSAMPLE_FACTOR: usize = 4;
-const MAX_RESAMPLE_POINTS: usize = 65_536;
-const UNIFORMITY_REL_TOL: f64 = 1e-3;
+const MAX_RESAMPLE_POINTS: usize = 262_144;
+const UNIFORMITY_REL_TOL: f64 = 1e-6;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreparedFftInput {
@@ -80,9 +80,12 @@ pub fn prepare_fft_input(
         return None;
     }
 
+    let mut samples = uniform.samples;
+    remove_dc_offset(&mut samples);
+
     Some(PreparedFftInput {
         name: name.to_string(),
-        samples: uniform.samples,
+        samples,
         sample_rate: uniform.sample_rate,
         original_count,
         decimation_factor,
@@ -173,6 +176,7 @@ fn resample_to_uniform(data: &[(f64, f64)], target_count: usize) -> Option<Unifo
 
     let mut samples = Vec::with_capacity(n);
     let mut src_idx = 0usize;
+    let tangents = pchip_tangents(data);
 
     for i in 0..n {
         let t = t_start + (i as f64) * dt;
@@ -189,8 +193,7 @@ fn resample_to_uniform(data: &[(f64, f64)], target_count: usize) -> Option<Unifo
             if t1 <= t0 {
                 y0
             } else {
-                let alpha = ((t - t0) / (t1 - t0)).clamp(0.0, 1.0);
-                y0 + alpha * (y1 - y0)
+                pchip_eval(t0, y0, tangents[src_idx], t1, y1, tangents[src_idx + 1], t)
             }
         };
         samples.push(y);
@@ -245,6 +248,89 @@ fn mean_dt(data: &[(f64, f64)]) -> f64 {
     let duration =
         data.last().map(|x| x.0).unwrap_or(0.0) - data.first().map(|x| x.0).unwrap_or(0.0);
     duration / (data.len().saturating_sub(1) as f64)
+}
+
+fn pchip_tangents(data: &[(f64, f64)]) -> Vec<f64> {
+    let n = data.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    if n == 1 {
+        return vec![0.0];
+    }
+    if n == 2 {
+        let h = data[1].0 - data[0].0;
+        let slope = if h > 0.0 {
+            (data[1].1 - data[0].1) / h
+        } else {
+            0.0
+        };
+        return vec![slope, slope];
+    }
+
+    let mut h = vec![0.0; n - 1];
+    let mut delta = vec![0.0; n - 1];
+    for i in 0..(n - 1) {
+        h[i] = data[i + 1].0 - data[i].0;
+        if h[i] > 0.0 {
+            delta[i] = (data[i + 1].1 - data[i].1) / h[i];
+        }
+    }
+
+    let mut m = vec![0.0; n];
+    m[0] = pchip_endpoint_tangent(h[0], h[1], delta[0], delta[1]);
+    m[n - 1] = pchip_endpoint_tangent(h[n - 2], h[n - 3], delta[n - 2], delta[n - 3]);
+
+    for i in 1..(n - 1) {
+        if delta[i - 1] == 0.0 || delta[i] == 0.0 || delta[i - 1].signum() != delta[i].signum() {
+            m[i] = 0.0;
+            continue;
+        }
+        let w1 = 2.0 * h[i] + h[i - 1];
+        let w2 = h[i] + 2.0 * h[i - 1];
+        let denom = w1 / delta[i - 1] + w2 / delta[i];
+        m[i] = if denom.abs() > 0.0 {
+            (w1 + w2) / denom
+        } else {
+            0.0
+        };
+    }
+
+    m
+}
+
+fn pchip_endpoint_tangent(h0: f64, h1: f64, d0: f64, d1: f64) -> f64 {
+    if !(h0.is_finite() && h1.is_finite() && d0.is_finite() && d1.is_finite()) {
+        return 0.0;
+    }
+    if h0 <= 0.0 || h1 <= 0.0 {
+        return d0;
+    }
+
+    let mut m0 = ((2.0 * h0 + h1) * d0 - h0 * d1) / (h0 + h1);
+    if m0.signum() != d0.signum() {
+        m0 = 0.0;
+    } else if d0.signum() != d1.signum() && m0.abs() > 3.0 * d0.abs() {
+        m0 = 3.0 * d0;
+    }
+    m0
+}
+
+fn pchip_eval(t0: f64, y0: f64, m0: f64, t1: f64, y1: f64, m1: f64, t: f64) -> f64 {
+    let h = t1 - t0;
+    if !h.is_finite() || h <= 0.0 {
+        return y0;
+    }
+    let u = ((t - t0) / h).clamp(0.0, 1.0);
+    let u2 = u * u;
+    let u3 = u2 * u;
+
+    let h00 = 2.0 * u3 - 3.0 * u2 + 1.0;
+    let h10 = u3 - 2.0 * u2 + u;
+    let h01 = -2.0 * u3 + 3.0 * u2;
+    let h11 = u3 - u2;
+
+    h00 * y0 + h10 * h * m0 + h01 * y1 + h11 * h * m1
 }
 
 fn ceil_div(n: usize, d: usize) -> usize {
@@ -309,8 +395,23 @@ fn apply_fir(samples: &[f64], coeffs: &[f64]) -> Vec<f64> {
     out
 }
 
+fn remove_dc_offset(samples: &mut [f64]) {
+    if samples.is_empty() {
+        return;
+    }
+    let mean = samples.iter().sum::<f64>() / samples.len() as f64;
+    if !mean.is_finite() {
+        return;
+    }
+    for sample in samples {
+        *sample -= mean;
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::super::data::FftData;
+    use super::super::window::WindowFunction;
     use super::*;
 
     fn generate_sine(freq: f64, sample_rate: f64, n: usize) -> Vec<f64> {
@@ -320,6 +421,20 @@ mod tests {
                 (2.0 * PI * freq * t).sin()
             })
             .collect()
+    }
+
+    fn magnitude_db_at_nearest_bin(fft: &FftData, freq: f64) -> f64 {
+        let (_, point) = fft
+            .points
+            .iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| {
+                (a.frequency - freq)
+                    .abs()
+                    .total_cmp(&(b.frequency - freq).abs())
+            })
+            .expect("fft has bins");
+        point.magnitude_db()
     }
 
     fn rms(signal: &[f64]) -> f64 {
@@ -392,6 +507,34 @@ mod tests {
     }
 
     #[test]
+    fn test_prepare_fft_input_treats_subpercent_jitter_as_nonuniform() {
+        let fs = 100_000.0;
+        let n = 4096usize;
+        let dt = 1.0 / fs;
+
+        let mut time = Vec::with_capacity(n);
+        let mut values = Vec::with_capacity(n);
+        for i in 0..n {
+            let base_t = i as f64 * dt;
+            // ~0.01% deterministic jitter (larger than strict uniformity tolerance).
+            let jitter = if i % 2 == 0 {
+                1.0e-4 * dt
+            } else {
+                -1.0e-4 * dt
+            };
+            let t = base_t + jitter;
+            time.push(t);
+            values.push((2.0 * PI * 5_000.0 * t).sin());
+        }
+
+        let prepared = prepare_fft_input("jittered", &time, &values, n).expect("prepared");
+        // Resampling creates exactly target_count samples and derives sample rate from duration.
+        assert_eq!(prepared.samples.len(), n);
+        assert!(prepared.sample_rate.is_finite());
+        assert!(prepared.sample_rate > 0.0);
+    }
+
+    #[test]
     fn test_anti_alias_decimate_reduces_out_of_band_component() {
         let fs = 20_000.0;
         let n = 8192usize;
@@ -442,5 +585,108 @@ mod tests {
         let filtered = apply_fir(&samples, &coeffs);
         let out_rms = rms(&filtered);
         assert!((out_rms - 1.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_prepare_fft_input_removes_dc_offset() {
+        let fs = 10_000.0;
+        let n = 4096usize;
+        let dc = 3.3;
+        let time: Vec<f64> = (0..n).map(|i| i as f64 / fs).collect();
+        let values: Vec<f64> = (0..n)
+            .map(|i| {
+                let t = i as f64 / fs;
+                dc + (2.0 * PI * 1000.0 * t).sin()
+            })
+            .collect();
+
+        let prepared =
+            prepare_fft_input("biased", &time, &values, DEFAULT_MAX_FFT_POINTS).expect("prepared");
+        let mean = prepared.samples.iter().sum::<f64>() / prepared.samples.len() as f64;
+        assert!(mean.abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_higher_fft_cap_preserves_high_frequency_tone() {
+        let fs = 5_000_000.0;
+        let n = 50_000usize;
+        let tone = 300_000.0;
+        let time: Vec<f64> = (0..n).map(|i| i as f64 / fs).collect();
+        let values = generate_sine(tone, fs, n);
+
+        let low_cap = 4096usize;
+        let prepared_low = prepare_fft_input("tone", &time, &values, low_cap).expect("low cap");
+        let fft_low = FftData::from_time_domain(
+            "low",
+            &prepared_low.samples,
+            prepared_low.sample_rate,
+            WindowFunction::Hanning,
+        );
+        let low_peak = fft_low
+            .find_peak()
+            .map(|(_, p)| p.frequency)
+            .expect("low-cap peak");
+
+        let high_cap = DEFAULT_MAX_FFT_POINTS;
+        let prepared_high = prepare_fft_input("tone", &time, &values, high_cap).expect("high cap");
+        let fft_high = FftData::from_time_domain(
+            "high",
+            &prepared_high.samples,
+            prepared_high.sample_rate,
+            WindowFunction::Hanning,
+        );
+        let high_peak = fft_high
+            .find_peak()
+            .map(|(_, p)| p.frequency)
+            .expect("high-cap peak");
+
+        assert!((high_peak - tone).abs() < fft_high.frequency_resolution() * 2.0);
+        assert!((low_peak - tone).abs() > 100_000.0);
+    }
+
+    #[test]
+    fn test_nonuniform_resampling_preserves_harmonic_levels() {
+        let n = 5000usize;
+        let duration = 0.02; // 50 Hz bin spacing after uniform resample.
+        let f1 = 1000.0;
+        let f2 = 2000.0;
+        let a2 = 0.1;
+
+        let dt = duration / (n - 1) as f64;
+        let mut time = Vec::with_capacity(n);
+        let mut values = Vec::with_capacity(n);
+        for i in 0..n {
+            let base_t = i as f64 * dt;
+            let jitter = 0.15 * dt * (2.0 * PI * i as f64 / 97.0).sin();
+            let t = base_t + jitter;
+            time.push(t);
+            values.push((2.0 * PI * f1 * t).sin() + a2 * (2.0 * PI * f2 * t + 0.37).sin());
+        }
+
+        let prepared =
+            prepare_fft_input("harmonic", &time, &values, DEFAULT_MAX_FFT_POINTS).expect("input");
+        let fft = FftData::from_time_domain(
+            "harmonic",
+            &prepared.samples,
+            prepared.sample_rate,
+            WindowFunction::Hanning,
+        );
+
+        let fundamental_db = magnitude_db_at_nearest_bin(&fft, f1);
+        let second_db = magnitude_db_at_nearest_bin(&fft, f2);
+        let observed_delta = second_db - fundamental_db;
+        let expected_delta = 20.0 * a2.log10(); // -20 dB
+
+        assert!(fundamental_db.is_finite());
+        assert!(second_db.is_finite());
+        assert!((observed_delta - expected_delta).abs() < 1.5);
+    }
+
+    #[test]
+    fn test_pchip_eval_matches_interval_endpoints() {
+        let y0 = pchip_eval(0.0, 2.0, 0.5, 1.0, -1.0, 1.25, 0.0);
+        let y1 = pchip_eval(0.0, 2.0, 0.5, 1.0, -1.0, 1.25, 1.0);
+        assert!((y0 - 2.0).abs() < 1e-12);
+        assert!((y1 + 1.0).abs() < 1e-12);
     }
 }
