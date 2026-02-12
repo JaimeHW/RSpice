@@ -2,17 +2,17 @@ use egui::{Color32, RichText, Stroke, Ui};
 
 use super::RSpiceApp;
 
-const VIEWER_TAB_STRIP_MIN_HEIGHT: f32 = VIEWER_TAB_ROW_HEIGHT;
+const VIEWER_TAB_STRIP_MIN_HEIGHT: f32 = 24.0;
 const VIEWER_TAB_STRIP_PAD_X: f32 = 8.0;
 const VIEWER_TAB_STRIP_PAD_Y: f32 = 1.0;
 const VIEWER_TAB_SPACING: f32 = 6.0;
-const VIEWER_TAB_ROW_HEIGHT: f32 = 22.0;
+const VIEWER_TAB_ROW_HEIGHT: f32 = 16.0;
 const VIEWER_TAB_CLOSE_SIZE: f32 = 12.0;
 const VIEWER_ADD_BUTTON_WIDTH: f32 = 104.0;
 const VIEWER_ADD_BUTTON_HEIGHT: f32 = 20.0;
 const VIEWER_TAB_ROUNDING: f32 = 8.0;
 const VIEWER_TAB_INNER_X: f32 = 9.0;
-const VIEWER_TAB_INNER_Y: f32 = 3.0;
+const VIEWER_TAB_INNER_Y: f32 = 2.0;
 const VIEWER_TAB_HOVER_OVERLAY_ALPHA: u8 = 26;
 const VIEWER_TAB_HOVER_STROKE_BOOST: f32 = 0.35;
 
@@ -189,6 +189,7 @@ impl RSpiceApp {
                                             let mut response = ui
                                                 .add(
                                                     egui::Label::new(text)
+                                                        .selectable(false)
                                                         .sense(egui::Sense::click()),
                                                 )
                                                 .on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -407,6 +408,12 @@ mod tests {
     #[test]
     fn strip_and_tab_colors_are_not_identical() {
         assert_ne!(tab_strip_fill(), tab_fill(true));
+    }
+
+    #[test]
+    fn chip_height_leaves_vertical_breathing_room_in_strip() {
+        let chip_outer_height = VIEWER_TAB_ROW_HEIGHT + 2.0 * VIEWER_TAB_INNER_Y;
+        assert!(VIEWER_TAB_STRIP_MIN_HEIGHT > chip_outer_height);
     }
 
     #[test]
