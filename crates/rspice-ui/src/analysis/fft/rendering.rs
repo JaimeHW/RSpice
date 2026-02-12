@@ -404,14 +404,15 @@ fn render_header(
 
             ui.separator();
 
-            if ui.checkbox(&mut state.freq_auto, "Auto Freq").changed() && state.freq_auto {
+            ui.label("Auto Freq");
+            if ui.checkbox(&mut state.freq_auto, "").changed() && state.freq_auto {
                 state.update_auto_scale();
             }
 
             ui.add_enabled_ui(!state.freq_auto, |ui| {
-                ui.label("fmin");
+                ui.label("Min");
                 ui.add(egui::DragValue::new(&mut state.freq_min).speed(10.0));
-                ui.label("fmax");
+                ui.label("Max");
                 ui.add(egui::DragValue::new(&mut state.freq_max).speed(10.0));
             });
 
@@ -424,14 +425,15 @@ fn render_header(
 
             ui.separator();
 
-            if ui.checkbox(&mut state.mag_auto, "Auto Mag").changed() && state.mag_auto {
+            ui.label("Auto Mag");
+            if ui.checkbox(&mut state.mag_auto, "").changed() && state.mag_auto {
                 state.update_auto_scale();
             }
 
             ui.add_enabled_ui(!state.mag_auto, |ui| {
-                ui.label("mmin");
+                ui.label("Min");
                 ui.add(egui::DragValue::new(&mut state.mag_min).speed(0.5));
-                ui.label("mmax");
+                ui.label("Max");
                 ui.add(egui::DragValue::new(&mut state.mag_max).speed(0.5));
             });
             if state.mag_max <= state.mag_min {
