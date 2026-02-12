@@ -49,8 +49,10 @@ const X_AXIS_HEIGHT: f32 = 30.0;
 /// Header height (pixels)
 const HEADER_HEIGHT: f32 = 32.0;
 
-/// Legend width (pixels)
-const LEGEND_WIDTH: f32 = 120.0;
+/// Legend width policy (pixels)
+const LEGEND_WIDTH_MIN: f32 = 120.0;
+const LEGEND_WIDTH_MAX: f32 = 180.0;
+const LEGEND_WIDTH_FRACTION: f32 = 0.16;
 const CHART_TOP_GAP: f32 = 2.0;
 
 /// Maximum points to render before decimation
@@ -229,6 +231,8 @@ pub struct ViewerLayout {
 /// Calculate layout regions from available space
 fn calculate_layout(available: Rect) -> ViewerLayout {
     let total = available;
+    let legend_width =
+        (total.width() * LEGEND_WIDTH_FRACTION).clamp(LEGEND_WIDTH_MIN, LEGEND_WIDTH_MAX);
 
     // Header at top
     let header = Rect::from_min_size(total.min, Vec2::new(total.width(), HEADER_HEIGHT));
@@ -238,14 +242,14 @@ fn calculate_layout(available: Rect) -> ViewerLayout {
 
     // Legend on right side (below header)
     let legend = Rect::from_min_size(
-        Pos2::new(total.max.x - LEGEND_WIDTH, content_top),
-        Vec2::new(LEGEND_WIDTH, content_height),
+        Pos2::new(total.max.x - legend_width, content_top),
+        Vec2::new(legend_width, content_height),
     );
 
     // X-axis at bottom (excluding legend)
     let x_axis = Rect::from_min_size(
         Pos2::new(total.min.x + Y_AXIS_WIDTH, total.max.y - X_AXIS_HEIGHT),
-        Vec2::new(total.width() - Y_AXIS_WIDTH - LEGEND_WIDTH, X_AXIS_HEIGHT),
+        Vec2::new((total.width() - Y_AXIS_WIDTH - legend_width).max(0.0), X_AXIS_HEIGHT),
     );
 
     // Y-axis on left side (between header and x-axis)
@@ -258,7 +262,7 @@ fn calculate_layout(available: Rect) -> ViewerLayout {
     let plot = Rect::from_min_size(
         Pos2::new(total.min.x + Y_AXIS_WIDTH, content_top),
         Vec2::new(
-            total.width() - Y_AXIS_WIDTH - LEGEND_WIDTH,
+            (total.width() - Y_AXIS_WIDTH - legend_width).max(0.0),
             chart_height,
         ),
     );
@@ -1439,6 +1443,8 @@ fn legend_trace_name_width(row_width: f32) -> f32 {
 }
 
 fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState) {
+    ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
+
     ui.label(
         egui::RichText::new("Traces")
             .size(11.0)
@@ -2187,7 +2193,27 @@ mod tests {
         assert!(Y_AXIS_WIDTH > 0.0);
         assert!(X_AXIS_HEIGHT > 0.0);
         assert!(HEADER_HEIGHT > 0.0);
-        assert!(LEGEND_WIDTH > 0.0);
+        assert!(LEGEND_WIDTH_MIN > 0.0);
+        assert!(LEGEND_WIDTH_MAX >= LEGEND_WIDTH_MIN);
+        assert!(LEGEND_WIDTH_FRACTION > 0.0);
+    }
+
+    #[test]
+    fn test_layout_legend_width_tracks_dynamic_policy() {
+        let wide = Rect::from_min_size(Pos2::ZERO, Vec2::new(1800.0, 700.0));
+        let wide_layout = calculate_layout(wide);
+        let wide_legend_width = wide_layout.legend.width();
+        assert!(wide_legend_width <= LEGEND_WIDTH_MAX + f32::EPSILON);
+        assert!(wide_legend_width >= LEGEND_WIDTH_MIN - f32::EPSILON);
+
+        let narrow = Rect::from_min_size(Pos2::ZERO, Vec2::new(340.0, 260.0));
+        let narrow_layout = calculate_layout(narrow);
+        let narrow_legend_width = narrow_layout.legend.width();
+        assert!(narrow_legend_width <= LEGEND_WIDTH_MAX + f32::EPSILON);
+        assert!(narrow_legend_width >= LEGEND_WIDTH_MIN - f32::EPSILON);
+
+        // Width should increase for wider layouts (up to max clamp).
+        assert!(wide_legend_width >= narrow_legend_width);
     }
 
     #[test]
