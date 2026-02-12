@@ -967,6 +967,8 @@ pub struct WaveformViewerState {
     pub multi_panel_enabled: bool,
     /// Cursor state
     pub cursors: CursorState,
+    /// User markers (additional vertical references beyond dual cursors)
+    pub markers: Vec<f64>,
     /// Box selection state
     pub box_selection: BoxSelection,
     /// Whether measurement panel is visible
@@ -999,12 +1001,102 @@ pub struct WaveformViewerState {
 
     /// Specification overlays for pass/fail visualization
     pub spec_overlays: Vec<super::spec_overlay::SpecOverlay>,
+    /// Legend UI state (filter/sort/collapse). Runtime-only UI preference.
+    #[serde(skip)]
+    pub legend_state: super::legend::LegendState,
+    /// Selected trace for focused measurements/operations.
+    #[serde(skip)]
+    pub selected_trace: Option<String>,
+    /// Scope used for measurement panel calculations.
+    #[serde(skip)]
+    pub measurement_scope: MeasurementScope,
+    /// Whether measurements should use cursor range when dual cursors are active.
+    #[serde(skip)]
+    pub measurement_use_cursor_range: bool,
+    /// Runtime export options controlled by waveform export panel.
+    #[serde(skip)]
+    pub export_options: super::export::ExportOptions,
+    /// Optional export status message shown in the export panel.
+    #[serde(skip)]
+    pub export_status: Option<String>,
+}
+
+/// Scope for waveform measurement display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MeasurementScope {
+    /// Calculate measurements only for the selected trace.
+    Selected,
+    /// Calculate measurements for visible traces.
+    #[default]
+    Visible,
+    /// Calculate measurements for every trace.
+    All,
+}
+
+impl MeasurementScope {
+    /// Display label for UI controls.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Selected => "Selected",
+            Self::Visible => "Visible",
+            Self::All => "All",
+        }
+    }
+
+    /// All supported scope options in deterministic UI order.
+    pub fn all() -> &'static [MeasurementScope] {
+        &[Self::Selected, Self::Visible, Self::All]
+    }
 }
 
 impl WaveformViewerState {
     /// Create a new viewer state
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Add a waveform marker. Maintains sorted marker order and bounded count.
+    pub fn add_marker(&mut self, x: f64) {
+        if !x.is_finite() {
+            return;
+        }
+        const MAX_MARKERS: usize = 16;
+        const MERGE_EPS: f64 = 1e-12;
+        if self.markers.iter().any(|m| (*m - x).abs() <= MERGE_EPS) {
+            return;
+        }
+        self.markers.push(x);
+        self.markers.sort_by(|a, b| a.total_cmp(b));
+        if self.markers.len() > MAX_MARKERS {
+            self.markers.remove(0);
+        }
+    }
+
+    /// Clear all waveform markers.
+    pub fn clear_markers(&mut self) {
+        self.markers.clear();
+    }
+
+    /// Remove the nearest marker within a tolerance window.
+    pub fn remove_nearest_marker(&mut self, x: f64, tolerance: f64) -> bool {
+        if !x.is_finite() || !tolerance.is_finite() || tolerance < 0.0 {
+            return false;
+        }
+        let Some((idx, dist)) = self
+            .markers
+            .iter()
+            .enumerate()
+            .map(|(idx, marker)| (idx, (*marker - x).abs()))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+        else {
+            return false;
+        };
+        if dist <= tolerance {
+            self.markers.remove(idx);
+            true
+        } else {
+            false
+        }
     }
 
     /// Load traces from simulation waveforms
@@ -1553,7 +1645,38 @@ mod tests {
     fn test_waveform_viewer_state_default() {
         let state = WaveformViewerState::new();
         assert!(state.traces.is_empty());
+        assert!(state.markers.is_empty());
         assert!(!state.show_measurements);
+        assert!(!state.show_export);
+        assert_eq!(state.measurement_scope, MeasurementScope::Visible);
+        assert!(!state.measurement_use_cursor_range);
+        assert!(state.export_status.is_none());
+        assert!(state.selected_trace.is_none());
+    }
+
+    #[test]
+    fn test_measurement_scope_metadata() {
+        let all = MeasurementScope::all();
+        assert_eq!(all.len(), 3);
+        assert_eq!(MeasurementScope::Selected.display_name(), "Selected");
+        assert_eq!(MeasurementScope::Visible.display_name(), "Visible");
+        assert_eq!(MeasurementScope::All.display_name(), "All");
+    }
+
+    #[test]
+    fn test_waveform_markers_are_sorted_and_deduplicated() {
+        let mut state = WaveformViewerState::new();
+        state.add_marker(10.0);
+        state.add_marker(5.0);
+        state.add_marker(10.0); // duplicate
+        state.add_marker(f64::NAN); // ignored
+
+        assert_eq!(state.markers, vec![5.0, 10.0]);
+        assert!(state.remove_nearest_marker(9.8, 0.5));
+        assert_eq!(state.markers, vec![5.0]);
+        assert!(!state.remove_nearest_marker(9.8, 0.1));
+        state.clear_markers();
+        assert!(state.markers.is_empty());
     }
 
     #[test]

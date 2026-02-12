@@ -25,7 +25,10 @@ use egui::{
 };
 
 use super::axis::{self, GridLineType};
-use super::state::{TraceData, ViewTransform, WaveformViewerState};
+use super::export::{calculate_export_stats, export_to_csv, export_to_spice_raw, ExportFormat};
+use super::legend::{self, LegendSortOrder};
+use super::measurements::{self, TraceMeasurements};
+use super::state::{MeasurementScope, TraceData, ViewTransform, WaveformViewerState};
 use crate::common::app::AppState;
 use crate::common::viewer_style::{viewer_chart_bg_color, viewer_header_bg_color};
 use crate::utils::vertical_label_layout::{
@@ -64,6 +67,7 @@ const CURSOR_LABEL_TEXT_PADDING_X: f32 = 5.0;
 const CURSOR_LABEL_TEXT_PADDING_Y: f32 = 2.0;
 const CURSOR_LABEL_BG_ALPHA: u8 = 220;
 const CURSOR_LABEL_CORNER_RADIUS: f32 = 3.0;
+const LEGEND_SECTION_SPACING: f32 = 8.0;
 
 // Grid line colors (using runtime values since Color32 constructors aren't const)
 fn grid_major_color() -> Color32 {
@@ -79,6 +83,18 @@ fn cursor1_color() -> Color32 {
 }
 fn cursor2_color() -> Color32 {
     Color32::from_rgb(50, 200, 255)
+}
+
+fn marker_color(index: usize) -> Color32 {
+    const MARKER_COLORS: [Color32; 6] = [
+        Color32::from_rgb(255, 155, 95),
+        Color32::from_rgb(180, 235, 120),
+        Color32::from_rgb(255, 220, 120),
+        Color32::from_rgb(205, 170, 255),
+        Color32::from_rgb(130, 215, 255),
+        Color32::from_rgb(255, 135, 180),
+    ];
+    MARKER_COLORS[index % MARKER_COLORS.len()]
 }
 
 // Box selection colors
@@ -373,6 +389,16 @@ fn render_header(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Waveform
                 .clicked()
             {
                 viewer_state.cursors.clear();
+            }
+
+            if ui
+                .add(
+                    egui::Button::new("Clear Markers")
+                        .min_size(egui::vec2(94.0, HEADER_HEIGHT - 8.0)),
+                )
+                .clicked()
+            {
+                viewer_state.clear_markers();
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -894,8 +920,9 @@ fn render_cursors(
 ) {
     let view = &viewer_state.view;
     let cursors = &viewer_state.cursors;
-    let mut labels: Vec<WaveformCursorLabelSpec> = Vec::with_capacity(2);
-    let mut line_x_positions: Vec<f32> = Vec::with_capacity(2);
+    let marker_count = viewer_state.markers.len();
+    let mut labels: Vec<WaveformCursorLabelSpec> = Vec::with_capacity(2 + marker_count);
+    let mut line_x_positions: Vec<f32> = Vec::with_capacity(2 + marker_count);
 
     // Cursor 1
     if let Some(x1) = cursors.cursor1_x {
@@ -936,6 +963,29 @@ fn render_cursors(
             anchor_x: screen_x,
             text: format!("C2 {}", axis::format_time(x2)),
             color: cursor2_color(),
+            font: FontId::proportional(CURSOR_LABEL_FONT_SIZE),
+        });
+    }
+
+    for (idx, marker_x) in viewer_state.markers.iter().enumerate() {
+        let screen_x = layout.plot.min.x
+            + ((*marker_x - view.x_min) / view.x_range()) as f32 * layout.plot.width();
+        if !screen_x.is_finite() || screen_x < layout.plot.min.x || screen_x > layout.plot.max.x {
+            continue;
+        }
+        let color = marker_color(idx);
+        painter.line_segment(
+            [
+                Pos2::new(screen_x, layout.plot.min.y),
+                Pos2::new(screen_x, layout.plot.max.y),
+            ],
+            Stroke::new(1.0, color),
+        );
+        line_x_positions.push(screen_x);
+        labels.push(WaveformCursorLabelSpec {
+            anchor_x: screen_x,
+            text: format!("M{} {}", idx + 1, axis::format_time(*marker_x)),
+            color,
             font: FontId::proportional(CURSOR_LABEL_FONT_SIZE),
         });
     }
@@ -1215,12 +1265,30 @@ fn handle_plot_interactions(
         }
     }
 
-    // Click to place cursor
+    // Click to place cursor or marker
     if response.clicked() && !viewer_state.view.did_drag {
         if let Some(pos) = response.hover_pos() {
             let x_frac = (pos.x - layout.plot.min.x) / layout.plot.width();
             let data_x = viewer_state.view.x_min + x_frac as f64 * viewer_state.view.x_range();
-            viewer_state.cursors.place(data_x);
+            let modifiers = response.ctx.input(|i| i.modifiers);
+            if modifiers.alt {
+                viewer_state.add_marker(data_x);
+            } else {
+                viewer_state.cursors.place(data_x);
+            }
+        }
+    }
+
+    // Alt + right click removes nearest marker.
+    if response.secondary_clicked() {
+        if let Some(pos) = response.hover_pos() {
+            let modifiers = response.ctx.input(|i| i.modifiers);
+            if modifiers.alt {
+                let x_frac = (pos.x - layout.plot.min.x) / layout.plot.width();
+                let data_x = viewer_state.view.x_min + x_frac as f64 * viewer_state.view.x_range();
+                let tolerance = viewer_state.view.x_range() * 0.01;
+                viewer_state.remove_nearest_marker(data_x, tolerance);
+            }
         }
     }
 
@@ -1302,6 +1370,7 @@ fn handle_plot_interactions(
             }
             if i.key_pressed(egui::Key::Escape) {
                 viewer_state.cursors.clear();
+                viewer_state.clear_markers();
                 viewer_state.box_selection.cancel();
             }
         });
@@ -1327,86 +1396,508 @@ fn render_legend(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Waveform
         Stroke::new(1.0, Color32::from_rgb(50, 52, 58)),
     );
 
-    // Collect clicked trace indices (can't mutate during immutable iteration)
-    let mut clicked_indices: Vec<usize> = Vec::new();
-
     // Create UI area for legend items
     let legend_inner = layout.legend.shrink(8.0);
     ui.allocate_new_ui(UiBuilder::new().max_rect(legend_inner), |ui| {
-        ui.vertical(|ui| {
-            ui.label(
-                egui::RichText::new("Traces")
-                    .size(11.0)
-                    .strong()
-                    .color(Color32::from_rgb(160, 165, 175)),
-            );
+        egui::ScrollArea::vertical()
+            .id_salt("waveform_legend_scroll")
+            .show(ui, |ui| {
+                render_trace_list_section(ui, viewer_state);
+                if viewer_state.show_measurements {
+                    ui.add_space(LEGEND_SECTION_SPACING);
+                    render_measurements_panel(ui, viewer_state);
+                }
+                if viewer_state.show_export {
+                    ui.add_space(LEGEND_SECTION_SPACING);
+                    render_export_panel(ui, viewer_state);
+                }
+            });
+    });
+}
 
-            ui.add_space(4.0);
+fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState) {
+    ui.label(
+        egui::RichText::new("Traces")
+            .size(11.0)
+            .strong()
+            .color(Color32::from_rgb(160, 165, 175)),
+    );
+    ui.add_space(4.0);
 
-            // Render each trace as a legend item
-            for (i, trace) in viewer_state.traces.iter().enumerate() {
-                let color = trace.style.to_color32();
-                let text_color = if trace.visible {
-                    Color32::from_rgb(200, 200, 210)
-                } else {
-                    Color32::from_rgb(100, 105, 115)
-                };
-
-                ui.horizontal(|ui| {
-                    // Color swatch
-                    let swatch_rect = ui.allocate_space(Vec2::new(12.0, 12.0)).1;
-                    if trace.visible {
-                        ui.painter()
-                            .rect_filled(swatch_rect, Rounding::same(2.0), color);
-                    } else {
-                        ui.painter().rect_stroke(
-                            swatch_rect,
-                            Rounding::same(2.0),
-                            Stroke::new(1.0, color),
-                        );
-                    }
-
-                    // Trace name (clickable to toggle visibility)
-                    let name_response = ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(&trace.name)
-                                .size(10.0)
-                                .color(text_color),
-                        )
-                        .sense(Sense::click()),
-                    );
-
-                    if name_response.clicked() {
-                        clicked_indices.push(i);
-                    }
-
-                    if name_response.hovered() {
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                    }
-                });
-            }
-
-            // If no traces, show placeholder
-            if viewer_state.traces.is_empty() {
-                ui.label(
-                    egui::RichText::new("No waveforms")
-                        .size(10.0)
-                        .color(Color32::from_rgb(100, 105, 115)),
+    ui.horizontal(|ui| {
+        if ui.small_button("All").clicked() {
+            legend::show_all_traces(&mut viewer_state.traces);
+        }
+        if ui.small_button("None").clicked() {
+            legend::hide_all_traces(&mut viewer_state.traces);
+        }
+        ui.label(egui::RichText::new("Sort").size(9.0).color(Color32::from_rgb(120, 125, 135)));
+        egui::ComboBox::from_id_salt("waveform_legend_sort")
+            .selected_text(match viewer_state.legend_state.sort_by {
+                LegendSortOrder::Index => "Index",
+                LegendSortOrder::Name => "Name",
+                LegendSortOrder::Visibility => "Visible",
+            })
+            .width(68.0)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(
+                    &mut viewer_state.legend_state.sort_by,
+                    LegendSortOrder::Index,
+                    "Index",
                 );
-            }
-        });
+                ui.selectable_value(
+                    &mut viewer_state.legend_state.sort_by,
+                    LegendSortOrder::Name,
+                    "Name",
+                );
+                ui.selectable_value(
+                    &mut viewer_state.legend_state.sort_by,
+                    LegendSortOrder::Visibility,
+                    "Visible",
+                );
+            });
     });
 
-    // Apply visibility toggles after the iteration
-    for idx in clicked_indices {
-        if let Some(trace) = viewer_state.traces.get_mut(idx) {
-            trace.visible = !trace.visible;
-            log::info!(
-                "Toggled trace '{}' visibility to {}",
-                trace.name,
-                trace.visible
-            );
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new("Find").size(9.0).color(Color32::from_rgb(120, 125, 135)));
+        ui.add(
+            egui::TextEdit::singleline(&mut viewer_state.legend_state.filter)
+                .desired_width(96.0)
+                .hint_text("trace"),
+        );
+        if ui.small_button("X").clicked() {
+            viewer_state.legend_state.clear_filter();
         }
+    });
+    ui.add_space(4.0);
+
+    let items = legend::build_legend_items(&viewer_state.traces, &viewer_state.legend_state);
+    let mut visibility_updates: Vec<(usize, bool)> = Vec::new();
+    let mut solo_trace_idx: Option<usize> = None;
+    let mut selected_trace_name: Option<String> = None;
+
+    for item in &items {
+        let color = Color32::from_rgba_unmultiplied(
+            item.color[0],
+            item.color[1],
+            item.color[2],
+            item.color[3],
+        );
+        let selected = viewer_state
+            .selected_trace
+            .as_deref()
+            .is_some_and(|name| name == item.name);
+
+        ui.horizontal(|ui| {
+            let swatch_rect = ui.allocate_space(Vec2::new(10.0, 10.0)).1;
+            if item.visible {
+                ui.painter()
+                    .rect_filled(swatch_rect, Rounding::same(2.0), color);
+            } else {
+                ui.painter().rect_stroke(
+                    swatch_rect,
+                    Rounding::same(2.0),
+                    Stroke::new(1.0, color),
+                );
+            }
+
+            let mut visible = item.visible;
+            if ui.checkbox(&mut visible, "").changed() {
+                visibility_updates.push((item.index, visible));
+            }
+
+            let text_color = if item.visible {
+                Color32::from_rgb(200, 205, 215)
+            } else {
+                Color32::from_rgb(110, 115, 125)
+            };
+            let label = egui::RichText::new(&item.name).size(10.0).color(text_color);
+            if ui.selectable_label(selected, label).clicked() {
+                selected_trace_name = Some(item.name.clone());
+            }
+
+            if ui.small_button("S").on_hover_text("Solo trace").clicked() {
+                solo_trace_idx = Some(item.index);
+                selected_trace_name = Some(item.name.clone());
+            }
+        });
+    }
+
+    for (idx, visible) in visibility_updates {
+        if let Some(trace) = viewer_state.traces.get_mut(idx) {
+            trace.visible = visible;
+        }
+    }
+    if let Some(idx) = solo_trace_idx {
+        legend::solo_trace(&mut viewer_state.traces, idx);
+    }
+    if let Some(name) = selected_trace_name {
+        viewer_state.selected_trace = Some(name);
+    }
+
+    if items.is_empty() {
+        ui.label(
+            egui::RichText::new("No traces in filter")
+                .size(10.0)
+                .color(Color32::from_rgb(100, 105, 115)),
+        );
+    }
+}
+
+fn measurement_cursor_range(viewer_state: &WaveformViewerState) -> Option<(f64, f64)> {
+    if !viewer_state.measurement_use_cursor_range {
+        return None;
+    }
+    let (Some(c1), Some(c2)) = (
+        viewer_state.cursors.cursor1_x,
+        viewer_state.cursors.cursor2_x,
+    ) else {
+        return None;
+    };
+    Some((c1.min(c2), c1.max(c2)))
+}
+
+fn measurement_trace_indices(viewer_state: &WaveformViewerState) -> Vec<usize> {
+    match viewer_state.measurement_scope {
+        MeasurementScope::Selected => {
+            let Some(selected) = viewer_state.selected_trace.as_deref() else {
+                return Vec::new();
+            };
+            viewer_state
+                .traces
+                .iter()
+                .enumerate()
+                .find_map(|(idx, trace)| (trace.name == selected).then_some(idx))
+                .into_iter()
+                .collect()
+        }
+        MeasurementScope::Visible => viewer_state
+            .traces
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, trace)| trace.visible.then_some(idx))
+            .collect(),
+        MeasurementScope::All => (0..viewer_state.traces.len()).collect(),
+    }
+}
+
+fn format_optional_value(value: Option<f64>, unit: &str) -> String {
+    value
+        .map(|v| axis::format_with_si_prefix(v, unit, 4))
+        .unwrap_or_else(|| "--".to_string())
+}
+
+fn format_optional_time(value: Option<f64>) -> String {
+    value
+        .map(axis::format_time)
+        .unwrap_or_else(|| "--".to_string())
+}
+
+fn format_optional_freq(value: Option<f64>) -> String {
+    value
+        .map(axis::format_frequency)
+        .unwrap_or_else(|| "--".to_string())
+}
+
+fn measurement_row(ui: &mut Ui, label: &str, value: &str) {
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(format!("{}:", label))
+                .size(9.0)
+                .color(Color32::from_rgb(120, 125, 135)),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                egui::RichText::new(value)
+                    .size(10.0)
+                    .color(Color32::from_rgb(200, 205, 215)),
+            );
+        });
+    });
+}
+
+fn render_trace_measurements(
+    ui: &mut Ui,
+    trace: &TraceData,
+    measurements: &TraceMeasurements,
+    y_unit: &str,
+    x_unit: &str,
+) {
+    ui.label(
+        egui::RichText::new(&trace.name)
+            .size(10.0)
+            .strong()
+            .color(trace.style.to_color32()),
+    );
+    measurement_row(ui, "Min", &format_optional_value(measurements.min, y_unit));
+    measurement_row(ui, "Max", &format_optional_value(measurements.max, y_unit));
+    measurement_row(ui, "PkPk", &format_optional_value(measurements.pk_pk, y_unit));
+    measurement_row(ui, "Mean", &format_optional_value(measurements.mean, y_unit));
+    measurement_row(ui, "RMS", &format_optional_value(measurements.rms, y_unit));
+    measurement_row(ui, "Std", &format_optional_value(measurements.std_dev, y_unit));
+    measurement_row(ui, "Rise", &format_optional_time(measurements.rise_time));
+    measurement_row(ui, "Fall", &format_optional_time(measurements.fall_time));
+    measurement_row(ui, "Period", &format_optional_time(measurements.period));
+    measurement_row(ui, "Freq", &format_optional_freq(measurements.frequency));
+    measurement_row(
+        ui,
+        "Duty",
+        &measurements
+            .duty_cycle
+            .map(|v| format!("{:.2}%", v))
+            .unwrap_or_else(|| "--".to_string()),
+    );
+    measurement_row(
+        ui,
+        "Integral",
+        &format_optional_value(measurements.integral, &format!("{}*{}", y_unit, x_unit)),
+    );
+}
+
+fn render_measurements_panel(ui: &mut Ui, viewer_state: &mut WaveformViewerState) {
+    ui.separator();
+    ui.label(
+        egui::RichText::new("Measurements")
+            .size(11.0)
+            .strong()
+            .color(Color32::from_rgb(160, 165, 175)),
+    );
+    ui.add_space(4.0);
+
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new("Scope")
+                .size(9.0)
+                .color(Color32::from_rgb(120, 125, 135)),
+        );
+        egui::ComboBox::from_id_salt("waveform_measure_scope")
+            .selected_text(viewer_state.measurement_scope.display_name())
+            .width(80.0)
+            .show_ui(ui, |ui| {
+                for scope in MeasurementScope::all() {
+                    ui.selectable_value(
+                        &mut viewer_state.measurement_scope,
+                        *scope,
+                        scope.display_name(),
+                    );
+                }
+            });
+        ui.checkbox(
+            &mut viewer_state.measurement_use_cursor_range,
+            "Cursor range",
+        );
+    });
+
+    if let Some((start, end)) = measurement_cursor_range(viewer_state) {
+        measurement_row(
+            ui,
+            "Range",
+            &format!("{} - {}", axis::format_time(start), axis::format_time(end)),
+        );
+    }
+
+    let trace_indices = measurement_trace_indices(viewer_state);
+    if trace_indices.is_empty() {
+        ui.label(
+            egui::RichText::new("No traces in selected scope")
+                .size(10.0)
+                .color(Color32::from_rgb(100, 105, 115)),
+        );
+        return;
+    }
+
+    let y_unit = if viewer_state.y_axis_unit.is_empty() {
+        "V"
+    } else {
+        viewer_state.y_axis_unit.as_str()
+    };
+    let x_unit = if viewer_state.x_axis_unit.is_empty() {
+        "s"
+    } else {
+        viewer_state.x_axis_unit.as_str()
+    };
+
+    let cursor_range = measurement_cursor_range(viewer_state);
+    for (idx, trace_idx) in trace_indices.iter().enumerate() {
+        if let Some(trace) = viewer_state.traces.get(*trace_idx) {
+            if idx > 0 {
+                ui.add_space(6.0);
+            }
+            let measurements = if let Some((start, end)) = cursor_range {
+                measurements::calculate_measurements_in_range(trace, start, end)
+            } else {
+                measurements::calculate_all_measurements(trace)
+            };
+            render_trace_measurements(ui, trace, &measurements, y_unit, x_unit);
+        }
+    }
+}
+
+fn export_format_display_name(format: ExportFormat) -> &'static str {
+    match format {
+        ExportFormat::Csv => "CSV",
+        ExportFormat::Tsv => "TSV",
+        ExportFormat::SpiceRaw => "SPICE RAW",
+    }
+}
+
+fn build_export_payload(traces: &[TraceData], options: &super::export::ExportOptions) -> String {
+    match options.format {
+        ExportFormat::SpiceRaw => export_to_spice_raw(traces, "RSpice Waveforms"),
+        ExportFormat::Csv | ExportFormat::Tsv => export_to_csv(traces, options),
+    }
+}
+
+fn save_export_payload_with_dialog(
+    payload: &str,
+    format: ExportFormat,
+) -> Result<std::path::PathBuf, String> {
+    let extension = format.extension();
+    let filter_name = export_format_display_name(format);
+    let dialog = rfd::FileDialog::new()
+        .add_filter(filter_name, &[extension])
+        .set_file_name(format!("waveforms.{}", extension))
+        .set_title("Export Waveforms");
+    let Some(path) = dialog.save_file() else {
+        return Err("Export canceled".to_string());
+    };
+    std::fs::write(&path, payload).map_err(|err| err.to_string())?;
+    Ok(path)
+}
+
+fn render_export_panel(ui: &mut Ui, viewer_state: &mut WaveformViewerState) {
+    ui.separator();
+    ui.label(
+        egui::RichText::new("Export")
+            .size(11.0)
+            .strong()
+            .color(Color32::from_rgb(160, 165, 175)),
+    );
+    ui.add_space(4.0);
+
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new("Format")
+                .size(9.0)
+                .color(Color32::from_rgb(120, 125, 135)),
+        );
+        egui::ComboBox::from_id_salt("waveform_export_format")
+            .selected_text(export_format_display_name(viewer_state.export_options.format))
+            .width(96.0)
+            .show_ui(ui, |ui| {
+                for format in [ExportFormat::Csv, ExportFormat::Tsv, ExportFormat::SpiceRaw] {
+                    ui.selectable_value(
+                        &mut viewer_state.export_options.format,
+                        format,
+                        export_format_display_name(format),
+                    );
+                }
+            });
+    });
+
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut viewer_state.export_options.include_header, "Header");
+        ui.checkbox(&mut viewer_state.export_options.include_hidden, "Hidden");
+        ui.checkbox(
+            &mut viewer_state.export_options.scientific_notation,
+            "Scientific",
+        );
+    });
+
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new("Precision")
+                .size(9.0)
+                .color(Color32::from_rgb(120, 125, 135)),
+        );
+        ui.add(
+            egui::DragValue::new(&mut viewer_state.export_options.precision)
+                .range(1..=15)
+                .speed(1.0),
+        );
+    });
+
+    let mut use_start = viewer_state.export_options.x_start.is_some();
+    let mut use_end = viewer_state.export_options.x_end.is_some();
+    ui.horizontal(|ui| {
+        if ui.checkbox(&mut use_start, "Start").changed() {
+            viewer_state.export_options.x_start = if use_start {
+                Some(viewer_state.view.x_min)
+            } else {
+                None
+            };
+        }
+        if use_start {
+            let mut value = viewer_state
+                .export_options
+                .x_start
+                .unwrap_or(viewer_state.view.x_min);
+            if ui.add(egui::DragValue::new(&mut value).speed(1e-9)).changed() {
+                viewer_state.export_options.x_start = Some(value);
+            }
+        }
+    });
+    ui.horizontal(|ui| {
+        if ui.checkbox(&mut use_end, "End").changed() {
+            viewer_state.export_options.x_end = if use_end {
+                Some(viewer_state.view.x_max)
+            } else {
+                None
+            };
+        }
+        if use_end {
+            let mut value = viewer_state
+                .export_options
+                .x_end
+                .unwrap_or(viewer_state.view.x_max);
+            if ui.add(egui::DragValue::new(&mut value).speed(1e-9)).changed() {
+                viewer_state.export_options.x_end = Some(value);
+            }
+        }
+    });
+
+    if let (Some(start), Some(end)) = (
+        viewer_state.export_options.x_start,
+        viewer_state.export_options.x_end,
+    ) {
+        if end < start {
+            viewer_state.export_options.x_end = Some(start);
+        }
+    }
+
+    let stats = calculate_export_stats(&viewer_state.traces, &viewer_state.export_options);
+    measurement_row(ui, "Traces", &format!("{}", stats.num_traces));
+    measurement_row(ui, "Points", &format!("{}", stats.num_points));
+    measurement_row(
+        ui,
+        "Est Size",
+        &axis::format_with_si_prefix(stats.estimated_size as f64, "B", 2),
+    );
+
+    ui.horizontal(|ui| {
+        if ui.button("Copy").clicked() {
+            let payload = build_export_payload(&viewer_state.traces, &viewer_state.export_options);
+            ui.ctx().copy_text(payload.clone());
+            viewer_state.export_status = Some(format!("Copied {} bytes", payload.len()));
+        }
+        if ui.button("Save...").clicked() {
+            let payload = build_export_payload(&viewer_state.traces, &viewer_state.export_options);
+            viewer_state.export_status = match save_export_payload_with_dialog(
+                &payload,
+                viewer_state.export_options.format,
+            ) {
+                Ok(path) => Some(format!("Saved {}", path.display())),
+                Err(err) => Some(err),
+            };
+        }
+    });
+
+    if let Some(status) = viewer_state.export_status.as_deref() {
+        ui.label(
+            egui::RichText::new(status)
+                .size(9.0)
+                .color(Color32::from_rgb(130, 180, 220)),
+        );
     }
 }
 
@@ -1482,6 +1973,68 @@ mod tests {
     fn test_should_render_trace_directly_uses_visible_density_not_total_trace_length() {
         assert!(should_render_trace_directly(1000, 900));
         assert!(!should_render_trace_directly(1000, 5000));
+    }
+
+    #[test]
+    fn test_measurement_cursor_range_requires_dual_cursor_and_flag() {
+        let mut state = WaveformViewerState::new();
+        state.measurement_use_cursor_range = true;
+        assert!(measurement_cursor_range(&state).is_none());
+
+        state.cursors.place(4.0);
+        state.cursors.place(1.0);
+        assert_eq!(measurement_cursor_range(&state), Some((1.0, 4.0)));
+
+        state.measurement_use_cursor_range = false;
+        assert!(measurement_cursor_range(&state).is_none());
+    }
+
+    #[test]
+    fn test_measurement_trace_indices_respect_scope() {
+        let mut state = WaveformViewerState::new();
+        let mut t0 = TraceData::new("A", vec![0.0, 1.0], vec![0.0, 1.0]);
+        let mut t1 = TraceData::new("B", vec![0.0, 1.0], vec![1.0, 2.0]);
+        t0.visible = true;
+        t1.visible = false;
+        state.traces = vec![t0, t1];
+
+        state.measurement_scope = MeasurementScope::Visible;
+        assert_eq!(measurement_trace_indices(&state), vec![0]);
+
+        state.measurement_scope = MeasurementScope::All;
+        assert_eq!(measurement_trace_indices(&state), vec![0, 1]);
+
+        state.measurement_scope = MeasurementScope::Selected;
+        state.selected_trace = Some("B".to_string());
+        assert_eq!(measurement_trace_indices(&state), vec![1]);
+
+        state.selected_trace = Some("Missing".to_string());
+        assert!(measurement_trace_indices(&state).is_empty());
+    }
+
+    #[test]
+    fn test_build_export_payload_routes_by_format() {
+        let traces = vec![TraceData::new(
+            "V(out)",
+            vec![0.0, 1e-6],
+            vec![0.0, 1.0],
+        )];
+
+        let mut csv_opts = super::super::export::ExportOptions::default();
+        csv_opts.format = ExportFormat::Csv;
+        let csv = build_export_payload(&traces, &csv_opts);
+        assert!(csv.contains("Time,"));
+
+        let mut tsv_opts = super::super::export::ExportOptions::default();
+        tsv_opts.format = ExportFormat::Tsv;
+        let tsv = build_export_payload(&traces, &tsv_opts);
+        assert!(tsv.contains('\t'));
+
+        let mut raw_opts = super::super::export::ExportOptions::default();
+        raw_opts.format = ExportFormat::SpiceRaw;
+        let raw = build_export_payload(&traces, &raw_opts);
+        assert!(raw.contains("Title: RSpice Waveforms"));
+        assert!(raw.contains("Values:"));
     }
 
     fn screen_to_data_y(layout: &ViewerLayout, view: &ViewTransform, screen_y: f32) -> f64 {
