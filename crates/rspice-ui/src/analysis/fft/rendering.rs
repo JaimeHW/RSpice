@@ -5,10 +5,11 @@
 use egui::{Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2};
 use std::f64::consts::PI;
 
-use super::data::{FftData, FftPoint, SpectrumAnalysis};
+use super::data::{FftData, FftPoint, SpectrumAnalysis, SpectrumNormalization};
 use super::state::{FftState, FrequencyScale, MagnitudeScale};
 use super::window::WindowFunction;
 use crate::common::app::AppState;
+use crate::state::AnalysisType;
 
 // =============================================================================
 // Constants
@@ -60,6 +61,10 @@ fn text_color() -> Color32 {
 
 /// Render the FFT viewer panel
 pub fn render_fft_viewer(ui: &mut Ui, app_state: &mut AppState) {
+    if !fft_supported_for_active_analysis(app_state) {
+        app_state.fft_state.clear();
+    }
+
     let available_rect = ui.available_rect_before_wrap();
     // Claim full available space so the parent resizable panel keeps user height
     // instead of collapsing to a content-driven "natural" size.
@@ -102,16 +107,18 @@ struct FftLayout {
     info: Rect,
 }
 
-const HEADER_HEIGHT: f32 = 62.0;
+const HEADER_HEIGHT: f32 = 34.0;
 const INFO_WIDTH: f32 = 150.0;
 const CHART_SIDE_PADDING: f32 = 8.0;
 const CHART_TOP_GAP: f32 = 0.0;
 const CHART_BOTTOM_PADDING: f32 = 8.0;
 const HEADER_CONTROL_HEIGHT: f32 = 24.0;
-const HEADER_SECOND_ROW_HEIGHT: f32 = 22.0;
+const HEADER_SLIDER_WIDTH: f32 = 130.0;
 const HEADER_SOURCE_WIDTH: f32 = 180.0;
 const HEADER_WINDOW_WIDTH: f32 = 176.0;
+const HEADER_NORM_WIDTH: f32 = 96.0;
 const HEADER_SCALE_WIDTH: f32 = 116.0;
+const INFO_PANEL_PADDING: f32 = 8.0;
 const AXIS_LEFT_GUTTER: f32 = 52.0;
 const AXIS_RIGHT_GUTTER: f32 = 4.0;
 const AXIS_TOP_GUTTER: f32 = 2.0;
@@ -182,6 +189,16 @@ fn y_axis_title_position(
     Pos2::new(title_left, plot_rect.center().y)
 }
 
+fn info_content_rect(layout: &FftLayout) -> Rect {
+    // The visual right-side lane is bounded by the spectrum edge and window edge.
+    // Center content inside that lane so it does not appear right-shifted.
+    let lane = Rect::from_min_max(
+        Pos2::new(layout.spectrum.max.x, layout.info.min.y),
+        layout.info.max,
+    );
+    lane.shrink(INFO_PANEL_PADDING)
+}
+
 fn x_tick_label_position(x: f32, plot_rect: Rect) -> Pos2 {
     Pos2::new(x, plot_rect.max.y + AXIS_TICK_Y_OFFSET)
 }
@@ -203,6 +220,10 @@ struct HeaderActions {
 }
 
 fn collect_fft_source_names(app_state: &AppState) -> Vec<String> {
+    if !fft_supported_for_active_analysis(app_state) {
+        return Vec::new();
+    }
+
     let mut names: Vec<String> = app_state
         .simulation
         .waveforms
@@ -212,6 +233,21 @@ fn collect_fft_source_names(app_state: &AppState) -> Vec<String> {
     names.sort();
     names.dedup();
     names
+}
+
+fn fft_supported_for_active_analysis(app_state: &AppState) -> bool {
+    matches!(
+        app_state
+            .simulation
+            .active_analysis()
+            .map(|analysis| analysis.analysis_type),
+        Some(
+            AnalysisType::Transient
+                | AnalysisType::Pss
+                | AnalysisType::Envelope
+                | AnalysisType::Soa
+        )
+    )
 }
 
 fn refresh_fft_from_source_waveform(app_state: &mut AppState, source_name: &str) {
@@ -229,7 +265,7 @@ fn refresh_fft_from_source_waveform(app_state: &mut AppState, source_name: &str)
     };
 
     if let Some(prepared) = crate::analysis::fft::prepare_fft_input(
-        &waveform.name,
+        source_name,
         &waveform.x,
         &waveform.y,
         crate::analysis::fft::DEFAULT_MAX_FFT_POINTS,
@@ -332,11 +368,20 @@ fn render_header(
             if freq_scale != state.freq_scale {
                 state.set_freq_scale(freq_scale);
             }
-        });
 
-        ui.horizontal(|ui| {
-            ui.spacing_mut().interact_size.y = HEADER_SECOND_ROW_HEIGHT;
-            ui.add_space(6.0);
+            let mut normalization = state.normalization;
+            egui::ComboBox::from_id_salt("fft_norm")
+                .width(HEADER_NORM_WIDTH)
+                .selected_text(normalization.display_name())
+                .show_ui(ui, |ui| {
+                    for mode in SpectrumNormalization::all() {
+                        ui.selectable_value(&mut normalization, *mode, mode.display_name());
+                    }
+                });
+            if normalization != state.normalization {
+                state.set_normalization(normalization);
+            }
+            ui.separator();
 
             let peaks_label = if state.show_peaks {
                 "Peaks [on]"
@@ -363,7 +408,8 @@ fn render_header(
                 state.update_auto_scale();
             }
 
-            ui.add(
+            ui.add_sized(
+                [HEADER_SLIDER_WIDTH, HEADER_CONTROL_HEIGHT],
                 egui::Slider::new(&mut state.peak_threshold_db, -180.0..=20.0)
                     .text("Peak Th (dB)")
                     .fixed_decimals(0),
@@ -371,7 +417,10 @@ fn render_header(
 
             let mut harmonics = state.num_harmonics as u32;
             if ui
-                .add(egui::Slider::new(&mut harmonics, 1..=64).text("Harmonics"))
+                .add_sized(
+                    [HEADER_SLIDER_WIDTH, HEADER_CONTROL_HEIGHT],
+                    egui::Slider::new(&mut harmonics, 1..=64).text("Harmonics"),
+                )
                 .changed()
             {
                 state.set_num_harmonics(harmonics as usize);
@@ -775,9 +824,13 @@ fn render_trace(painter: &egui::Painter, rect: Rect, data: &FftData, state: &Fft
             continue;
         };
 
-        let x0 = freq_to_x(start.frequency, rect, state);
+        let Some(x0) = freq_to_x_for_trace(start.frequency, rect, state) else {
+            continue;
+        };
+        let Some(x1) = freq_to_x_for_trace(end.frequency, rect, state) else {
+            continue;
+        };
         let y0 = mag_to_y(start, rect, state);
-        let x1 = freq_to_x(end.frequency, rect, state);
         let y1 = mag_to_y(end, rect, state);
         if !(x0.is_finite() && y0.is_finite() && x1.is_finite() && y1.is_finite()) {
             continue;
@@ -1120,6 +1173,36 @@ fn pan_magnitude_range(state: &mut FftState, delta_y_pixels: f64, height_pixels:
     }
 }
 
+fn freq_to_x_for_trace(freq: f64, rect: Rect, state: &FftState) -> Option<f32> {
+    if !freq.is_finite() {
+        return None;
+    }
+    match state.freq_scale {
+        FrequencyScale::Linear => {
+            let range = state.freq_max - state.freq_min;
+            if !range.is_finite() || range <= 0.0 {
+                return None;
+            }
+            let t = (freq - state.freq_min) / range;
+            Some(rect.min.x + t as f32 * rect.width())
+        }
+        FrequencyScale::Log => {
+            if freq <= 0.0 {
+                // Nonpositive frequencies cannot be represented on a log axis.
+                return None;
+            }
+            let f_min = state.freq_min.max(1e-12);
+            let f_max = state.freq_max.max(f_min * 1.000_001);
+            let log_range = f_max.log10() - f_min.log10();
+            if !log_range.is_finite() || log_range <= 0.0 {
+                return None;
+            }
+            let t = (freq.log10() - f_min.log10()) / log_range;
+            Some(rect.min.x + t as f32 * rect.width())
+        }
+    }
+}
+
 fn freq_to_x(freq: f64, rect: Rect, state: &FftState) -> f32 {
     match state.freq_scale {
         FrequencyScale::Linear => {
@@ -1182,15 +1265,15 @@ fn render_info_panel(ui: &mut Ui, layout: &FftLayout, state: &FftState) {
     ui.painter()
         .rect_filled(layout.info, Rounding::ZERO, surface_bg_color());
 
-    let panel_rect = layout.info.shrink(8.0);
+    let panel_rect = info_content_rect(layout);
     ui.allocate_new_ui(UiBuilder::new().max_rect(panel_rect), |ui| {
         ui.vertical(|ui| {
             ui.label(
                 egui::RichText::new("Analysis")
-                    .size(11.0)
+                    .size(10.0)
                     .color(text_color()),
             );
-            ui.add_space(8.0);
+            ui.add_space(4.0);
 
             if let Some(ref analysis) = state.analysis {
                 if let Some(fund) = analysis.fundamental_frequency {
@@ -1201,7 +1284,7 @@ fn render_info_panel(ui: &mut Ui, layout: &FftLayout, state: &FftState) {
                     info_row(ui, "Level", &format!("{:.1} dB", fund_db));
                 }
 
-                ui.add_space(4.0);
+                // ui.add_space(4.0);
 
                 if let Some(thd) = analysis.thd_percent {
                     let color = if thd < 1.0 {
@@ -1230,7 +1313,6 @@ fn render_info_panel(ui: &mut Ui, layout: &FftLayout, state: &FftState) {
                     info_row(ui, "Noise", &format!("{:.1} dB", noise));
                 }
 
-                ui.add_space(4.0);
                 info_row(ui, "Harmonics", &format!("{}", analysis.harmonics.len()));
             } else {
                 ui.label(
@@ -1240,13 +1322,12 @@ fn render_info_panel(ui: &mut Ui, layout: &FftLayout, state: &FftState) {
                 );
             }
 
-            ui.add_space(8.0);
-            ui.separator();
-            ui.add_space(4.0);
+            ui.add_space(6.0);
 
             // Window info
             ui.label(egui::RichText::new("Window").size(10.0).color(text_color()));
             info_row(ui, "Type", state.window.display_name());
+            info_row(ui, "Norm", state.normalization.display_name());
             info_row(
                 ui,
                 "Sidelobe",
@@ -1378,6 +1459,26 @@ mod tests {
     }
 
     #[test]
+    fn test_fft_supported_for_active_analysis_only_time_domain() {
+        let mut state = AppState::default();
+        assert!(!fft_supported_for_active_analysis(&state));
+
+        let mut run = crate::state::SimulationRun::new(1);
+        run.add_analysis(crate::state::AnalysisResult::new(
+            1,
+            AnalysisType::Transient,
+            "tran",
+        ));
+        state.simulation.runs.push(run);
+        state.simulation.active_run_idx = Some(0);
+        state.simulation.active_analysis_idx = Some(0);
+        assert!(fft_supported_for_active_analysis(&state));
+
+        state.simulation.runs[0].analyses[0].analysis_type = AnalysisType::Ac;
+        assert!(!fft_supported_for_active_analysis(&state));
+    }
+
+    #[test]
     fn test_spectrum_plot_rect_reserves_axis_gutters() {
         let spectrum = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 400.0));
         let plot = spectrum_plot_rect(spectrum);
@@ -1411,6 +1512,22 @@ mod tests {
         let narrow = y_axis_title_position(spectrum, plot, 14.0, 12.0);
         let wide = y_axis_title_position(spectrum, plot, 40.0, 12.0);
         assert!(wide.x < narrow.x);
+    }
+
+    #[test]
+    fn test_info_content_rect_is_centered_within_panel() {
+        let total = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
+        let layout = calculate_layout(total);
+        let content = info_content_rect(&layout);
+        let lane = Rect::from_min_max(
+            Pos2::new(layout.spectrum.max.x, layout.info.min.y),
+            layout.info.max,
+        );
+        let inner_lane = lane.shrink(INFO_PANEL_PADDING);
+
+        assert!((content.center().x - inner_lane.center().x).abs() < f32::EPSILON);
+        assert!((content.min.x - inner_lane.min.x).abs() < f32::EPSILON);
+        assert!((content.max.x - inner_lane.max.x).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -1507,6 +1624,19 @@ mod tests {
         // 1 Hz is centered across six decades (1e-3..1e3).
         let x = freq_to_x(1.0, rect, &state);
         assert!((x - rect.center().x).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_freq_to_x_for_trace_log_rejects_nonpositive_frequency() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(100.0, 100.0));
+        let mut state = FftState::new();
+        state.freq_min = 10.0;
+        state.freq_max = 10_000.0;
+        state.freq_scale = FrequencyScale::Log;
+
+        assert!(freq_to_x_for_trace(0.0, rect, &state).is_none());
+        assert!(freq_to_x_for_trace(-1.0, rect, &state).is_none());
+        assert!(freq_to_x_for_trace(100.0, rect, &state).is_some());
     }
 
     #[test]
