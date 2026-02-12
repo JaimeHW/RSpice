@@ -76,7 +76,9 @@ mod app_file_actions;
 mod app_icon_rail;
 
 mod app_simulation_analysis_options;
+mod app_viewer_capabilities;
 mod app_viewer_panels;
+pub use app_viewer_capabilities::ViewerCapability;
 
 mod app_simulation_dialogs;
 
@@ -206,32 +208,6 @@ impl AppState {
     pub fn clear_primary_log(&mut self) {
         self.console_messages.clear();
         self.log_buffer.clear();
-    }
-
-    /// Open/focus a specialized viewer and route the bottom panel to it.
-    pub fn open_viewer(&mut self, viewer: crate::viewers::ActiveViewer) {
-        self.open_viewer_in_tab(viewer, BottomPanelTab::Waveform);
-    }
-
-    /// Open/focus a specialized viewer and route to a specific bottom tab.
-    pub fn open_viewer_in_tab(
-        &mut self,
-        viewer: crate::viewers::ActiveViewer,
-        tab: BottomPanelTab,
-    ) {
-        self.viewer_workspace.open_or_focus(viewer);
-        self.panels.bottom_panel = true;
-        self.panels.active_bottom_tab = tab;
-    }
-
-    /// Close the active viewer tab.
-    pub fn close_active_viewer(&mut self) {
-        self.viewer_workspace.close_active();
-    }
-
-    /// Active specialized viewer currently displayed in the workspace.
-    pub fn active_viewer(&self) -> crate::viewers::ActiveViewer {
-        self.viewer_workspace.active_viewer()
     }
 }
 

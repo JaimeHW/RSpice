@@ -94,9 +94,16 @@ pub(super) fn render_view_menu(ui: &mut Ui, state: &mut AppState) {
     ui.menu_button("Specialized Viewers", |ui| {
         for viewer in ActiveViewer::all() {
             let is_active = state.active_viewer() == *viewer;
+            let capability = state.viewer_capability(*viewer);
+            let enabled = capability.available;
             let label = checkmark_label(is_active, viewer.name());
 
-            if ui.button(&label).clicked() {
+            let mut response = ui.add_enabled(enabled, egui::Button::new(&label));
+            if !enabled {
+                response = response.on_hover_text(capability.reason);
+            }
+
+            if response.clicked() {
                 activate_specialized_viewer(state, *viewer);
                 ui.close_menu();
             }
@@ -122,16 +129,25 @@ fn toggle_bottom_tab_panel(state: &mut AppState, tab: BottomPanelTab) {
 }
 
 fn activate_specialized_viewer(state: &mut AppState, viewer: ActiveViewer) {
-    state.open_viewer_in_tab(viewer, BottomPanelTab::Waveform);
+    let opened = state.open_viewer_in_tab(viewer, BottomPanelTab::Waveform);
     state.push_user_message(ConsoleMessage::info(format!(
         "Switched to {} viewer",
-        viewer.name()
+        opened.name()
     )));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn seed_eye_data(state: &mut AppState) {
+        let mut eye = crate::analysis::eye_diagram::data::EyeData::default();
+        eye.add_trace(crate::analysis::eye_diagram::data::EyeTrace::new(
+            vec![0.0, 1.0],
+            vec![0.0, 1.0],
+        ));
+        state.eye_diagram_state.load_data(eye);
+    }
 
     #[test]
     fn test_toggle_bottom_tab_panel_hides_when_same_tab_is_active() {
@@ -163,16 +179,30 @@ mod tests {
 
         activate_specialized_viewer(&mut state, ActiveViewer::EyeDiagram);
 
-        assert_eq!(state.active_viewer(), ActiveViewer::EyeDiagram);
+        assert_eq!(state.active_viewer(), ActiveViewer::Waveform);
         assert!(state.panels.bottom_panel);
         assert_eq!(state.panels.active_bottom_tab, BottomPanelTab::Waveform);
         assert!(
             state
                 .console_messages
                 .iter()
-                .any(|msg| msg.message.contains("Switched to Eye Diagram viewer")),
+                .any(|msg| msg.message.contains("Switched to Waveform viewer")),
             "expected viewer-switch message"
         );
+    }
+
+    #[test]
+    fn test_activate_specialized_viewer_opens_requested_viewer_when_available() {
+        let mut state = AppState::default();
+        seed_eye_data(&mut state);
+
+        activate_specialized_viewer(&mut state, ActiveViewer::EyeDiagram);
+
+        assert_eq!(state.active_viewer(), ActiveViewer::EyeDiagram);
+        assert!(state
+            .console_messages
+            .iter()
+            .any(|msg| msg.message.contains("Switched to Eye Diagram viewer")));
     }
 
     #[test]

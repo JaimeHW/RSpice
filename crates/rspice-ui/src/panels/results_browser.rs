@@ -125,16 +125,21 @@ pub fn render_results_browser(ui: &mut Ui, state: &mut AppState) {
 
                 // Handle analysis view request
                 if let Some((analysis_idx, analysis_type)) = run_response.analysis_view_requested {
-                    state.simulation.select_run(run_data.index);
-                    state.simulation.select_analysis(analysis_idx);
-
-                    // Switch to appropriate viewer tab
-                    let tab = analysis_navigation::preferred_bottom_tab(analysis_type);
-                    let viewer = analysis_navigation::preferred_viewer(analysis_type);
-                    state.open_viewer_in_tab(viewer, tab);
+                    activate_analysis_view(state, run_data.index, analysis_idx, analysis_type);
                 }
             }
         });
+}
+
+fn activate_analysis_view(
+    state: &mut AppState,
+    run_idx: usize,
+    analysis_idx: usize,
+    analysis_type: AnalysisType,
+) {
+    state.simulation.select_run(run_idx);
+    state.simulation.select_analysis(analysis_idx);
+    state.open_preferred_viewer_for_analysis(analysis_type);
 }
 
 // =============================================================================
@@ -426,6 +431,64 @@ mod tests {
         assert_eq!(
             analysis_navigation::preferred_viewer(AnalysisType::MonteCarlo),
             crate::viewers::ActiveViewer::Histogram
+        );
+    }
+
+    fn seed_run_with_analysis(state: &mut AppState, analysis_type: AnalysisType) {
+        let waveform =
+            crate::state::WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#00AAFF");
+        let result =
+            crate::state::AnalysisResult::new(1, analysis_type, analysis_type.display_name())
+                .with_waveforms(vec![waveform]);
+        state.simulation.start_run().add_analysis(result);
+    }
+
+    fn seed_bode_data(state: &mut AppState) {
+        let mut response = crate::analysis::bode::FrequencyResponse::new("tf");
+        response.add_point(crate::analysis::bode::data::FrequencyPoint::new(
+            1.0, 1.0, 0.0,
+        ));
+        let mut bode = crate::analysis::bode::BodeData::new();
+        bode.add_response(response);
+        state.bode_plot_state.load_data(bode);
+    }
+
+    #[test]
+    fn test_activate_analysis_view_prefers_available_ac_viewer() {
+        let mut state = AppState::default();
+        seed_run_with_analysis(&mut state, AnalysisType::Ac);
+        seed_bode_data(&mut state);
+
+        activate_analysis_view(&mut state, 0, 0, AnalysisType::Ac);
+
+        assert_eq!(
+            state.active_viewer(),
+            crate::viewers::ActiveViewer::BodePlot
+        );
+        assert_eq!(
+            state.panels.active_bottom_tab,
+            crate::common::app::BottomPanelTab::Waveform
+        );
+    }
+
+    #[test]
+    fn test_activate_analysis_view_falls_back_across_priority_chain() {
+        let mut state = AppState::default();
+        seed_run_with_analysis(&mut state, AnalysisType::SParameter);
+
+        // No specialized data loaded: should fall back to waveform.
+        activate_analysis_view(&mut state, 0, 0, AnalysisType::SParameter);
+        assert_eq!(
+            state.active_viewer(),
+            crate::viewers::ActiveViewer::Waveform
+        );
+
+        // With Bode loaded but no Smith data, S-parameter should choose Bode fallback.
+        seed_bode_data(&mut state);
+        activate_analysis_view(&mut state, 0, 0, AnalysisType::SParameter);
+        assert_eq!(
+            state.active_viewer(),
+            crate::viewers::ActiveViewer::BodePlot
         );
     }
 }

@@ -34,9 +34,7 @@ impl SimulationController {
                     dc_result.node_voltages.len()
                 )));
 
-                // Auto-show log panel so user sees results
-                state.panels.bottom_panel = true;
-                state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Log;
+                state.open_preferred_viewer_for_analysis(crate::state::AnalysisType::DcOp);
             }
 
             SimulationResult::Transient { time, waveforms } => {
@@ -61,9 +59,7 @@ impl SimulationController {
                     waveforms.len()
                 )));
 
-                // Auto-show waveform panel for better visibility
-                state.panels.bottom_panel = true;
-                state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
+                state.open_preferred_viewer_for_analysis(crate::state::AnalysisType::Transient);
             }
 
             SimulationResult::Ac {
@@ -93,8 +89,7 @@ impl SimulationController {
                     waveforms.len()
                 )));
 
-                state.panels.bottom_panel = true;
-                state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
+                state.open_preferred_viewer_for_analysis(crate::state::AnalysisType::Ac);
             }
 
             SimulationResult::DcSweep {
@@ -123,8 +118,7 @@ impl SimulationController {
                     waveforms.len()
                 )));
 
-                state.panels.bottom_panel = true;
-                state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
+                state.open_preferred_viewer_for_analysis(crate::state::AnalysisType::DcSweep);
             }
 
             SimulationResult::Noise {
@@ -180,8 +174,7 @@ impl SimulationController {
                     integrated
                 )));
 
-                state.panels.bottom_panel = true;
-                state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
+                state.open_preferred_viewer_for_analysis(crate::state::AnalysisType::Noise);
             }
 
             SimulationResult::PoleZero { poles, zeros, gain } => {
@@ -229,6 +222,7 @@ impl SimulationController {
                         )));
                     }
                 }
+                state.open_preferred_viewer_for_analysis(crate::state::AnalysisType::PoleZero);
             }
 
             SimulationResult::Sensitivity {
@@ -260,6 +254,7 @@ impl SimulationController {
                         )));
                     }
                 }
+                state.open_preferred_viewer_for_analysis(crate::state::AnalysisType::Sensitivity);
             }
 
             SimulationResult::MonteCarlo {
@@ -301,12 +296,13 @@ impl SimulationController {
                     )));
                 }
 
-                state.panels.bottom_panel = true;
-                state.panels.active_bottom_tab = if state.simulation.waveforms.is_empty() {
-                    crate::common::app::BottomPanelTab::Log
+                if state.simulation.waveforms.is_empty() {
+                    state.panels.bottom_panel = true;
+                    state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Log;
                 } else {
-                    crate::common::app::BottomPanelTab::Waveform
-                };
+                    state
+                        .open_preferred_viewer_for_analysis(crate::state::AnalysisType::MonteCarlo);
+                }
             }
 
             SimulationResult::Parametric {
@@ -333,8 +329,7 @@ impl SimulationController {
                     num_failures
                 )));
 
-                state.panels.bottom_panel = true;
-                state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
+                state.open_preferred_viewer_for_analysis(crate::state::AnalysisType::Parametric);
             }
 
             SimulationResult::Corner {
@@ -360,8 +355,7 @@ impl SimulationController {
                     num_failures
                 )));
 
-                state.panels.bottom_panel = true;
-                state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
+                state.open_preferred_viewer_for_analysis(crate::state::AnalysisType::Corner);
             }
 
             SimulationResult::Reliability {
@@ -386,8 +380,7 @@ impl SimulationController {
                     device_results.len()
                 )));
 
-                state.panels.bottom_panel = true;
-                state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
+                state.open_preferred_viewer_for_analysis(crate::state::AnalysisType::Reliability);
             }
 
             SimulationResult::Optimization {
@@ -420,8 +413,7 @@ impl SimulationController {
                     )));
                 }
 
-                state.panels.bottom_panel = true;
-                state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
+                state.open_preferred_viewer_for_analysis(crate::state::AnalysisType::Optimization);
             }
 
             SimulationResult::Soa {
@@ -445,8 +437,7 @@ impl SimulationController {
                     violations.len()
                 )));
 
-                state.panels.bottom_panel = true;
-                state.panels.active_bottom_tab = crate::common::app::BottomPanelTab::Waveform;
+                state.open_preferred_viewer_for_analysis(crate::state::AnalysisType::Soa);
             }
 
             SimulationResult::Empty { .. } => {
