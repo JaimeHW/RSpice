@@ -237,123 +237,108 @@ fn render_header(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Waveform
     // Header background
     painter.rect_filled(layout.header, Rounding::ZERO, Color32::from_rgb(30, 33, 40));
 
-    // Create a UI area for header controls.
-    // Shrink only horizontally so the full header height remains for vertical centering.
-    let header_rect = Rect::from_min_max(
-        Pos2::new(layout.header.min.x + 4.0, layout.header.min.y),
-        Pos2::new(layout.header.max.x - 4.0, layout.header.max.y),
-    );
+    // Shrink uniformly so all controls sit centered within the header band.
+    let header_rect = layout.header.shrink(4.0);
     ui.allocate_new_ui(UiBuilder::new().max_rect(header_rect), |ui| {
-        // Uniform height for every control (label and buttons) so they share
-        // the same vertical extent and are centered together by the layout.
-        let control_height = 18.0;
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            // Drive all widget heights via the spacing system so egui
+            // places every control on a single vertically-centered row.
+            ui.spacing_mut().interact_size.y = HEADER_HEIGHT - 8.0;
+            ui.spacing_mut().button_padding.y = 2.0;
 
-        ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), ui.available_height()),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.spacing_mut().item_spacing.y = 0.0;
-                ui.add_space(8.0);
+            ui.add_space(4.0);
 
-                // Title — use add_sized so its height matches the buttons.
-                ui.add_sized(
-                    egui::vec2(110.0, control_height),
-                    egui::Label::new(
-                        egui::RichText::new("Waveform Viewer")
-                            .size(13.0)
-                            .strong()
-                            .color(Color32::from_rgb(200, 200, 210)),
-                    ),
-                );
+            ui.label(
+                egui::RichText::new("Waveform Viewer")
+                    .size(13.0)
+                    .strong()
+                    .color(Color32::from_rgb(200, 200, 210)),
+            );
 
-                ui.add_space(12.0);
+            ui.add_space(12.0);
 
+            if ui
+                .add(egui::Button::new("Fit All").min_size(egui::vec2(58.0, HEADER_HEIGHT - 8.0)))
+                .clicked()
+            {
+                viewer_state.view.fit_to_traces(&viewer_state.traces);
+            }
+            if ui
+                .add(egui::Button::new("Fit X").min_size(egui::vec2(48.0, HEADER_HEIGHT - 8.0)))
+                .clicked()
+            {
+                viewer_state.view.fit_x_to_traces(&viewer_state.traces);
+            }
+            if ui
+                .add(egui::Button::new("Fit Y").min_size(egui::vec2(48.0, HEADER_HEIGHT - 8.0)))
+                .clicked()
+            {
+                viewer_state.view.fit_y_to_traces(&viewer_state.traces);
+            }
+
+            ui.separator();
+
+            if ui
+                .add(egui::Button::new("−").min_size(egui::vec2(28.0, HEADER_HEIGHT - 8.0)))
+                .clicked()
+            {
+                viewer_state.view.zoom(1.25, 0.5, 0.5);
+            }
+            if ui
+                .add(egui::Button::new("+").min_size(egui::vec2(28.0, HEADER_HEIGHT - 8.0)))
+                .clicked()
+            {
+                viewer_state.view.zoom(0.8, 0.5, 0.5);
+            }
+
+            ui.separator();
+
+            if ui
+                .add(
+                    egui::Button::new("Clear Cursors")
+                        .min_size(egui::vec2(94.0, HEADER_HEIGHT - 8.0)),
+                )
+                .clicked()
+            {
+                viewer_state.cursors.clear();
+            }
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(4.0);
+
+                let meas_text = if viewer_state.show_measurements {
+                    "Meas On"
+                } else {
+                    "Meas Off"
+                };
                 if ui
-                    .add_sized(
-                        egui::vec2(58.0, control_height),
-                        egui::Button::new("Fit All"),
+                    .add(
+                        egui::Button::new(meas_text)
+                            .min_size(egui::vec2(68.0, HEADER_HEIGHT - 8.0)),
                     )
+                    .on_hover_text("Measurements")
                     .clicked()
                 {
-                    viewer_state.view.fit_to_traces(&viewer_state.traces);
-                }
-                if ui
-                    .add_sized(egui::vec2(48.0, control_height), egui::Button::new("Fit X"))
-                    .clicked()
-                {
-                    viewer_state.view.fit_x_to_traces(&viewer_state.traces);
-                }
-                if ui
-                    .add_sized(egui::vec2(48.0, control_height), egui::Button::new("Fit Y"))
-                    .clicked()
-                {
-                    viewer_state.view.fit_y_to_traces(&viewer_state.traces);
+                    viewer_state.show_measurements = !viewer_state.show_measurements;
                 }
 
-                ui.separator();
-
+                let export_text = if viewer_state.show_export {
+                    "Export On"
+                } else {
+                    "Export Off"
+                };
                 if ui
-                    .add_sized(egui::vec2(28.0, control_height), egui::Button::new("−"))
-                    .clicked()
-                {
-                    viewer_state.view.zoom(1.25, 0.5, 0.5);
-                }
-                if ui
-                    .add_sized(egui::vec2(28.0, control_height), egui::Button::new("+"))
-                    .clicked()
-                {
-                    viewer_state.view.zoom(0.8, 0.5, 0.5);
-                }
-
-                ui.separator();
-
-                if ui
-                    .add_sized(
-                        egui::vec2(94.0, control_height),
-                        egui::Button::new("Clear Cursors"),
+                    .add(
+                        egui::Button::new(export_text)
+                            .min_size(egui::vec2(76.0, HEADER_HEIGHT - 8.0)),
                     )
+                    .on_hover_text("Export")
                     .clicked()
                 {
-                    viewer_state.cursors.clear();
+                    viewer_state.show_export = !viewer_state.show_export;
                 }
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(8.0);
-
-                    let meas_text = if viewer_state.show_measurements {
-                        "Meas On"
-                    } else {
-                        "Meas Off"
-                    };
-                    if ui
-                        .add_sized(
-                            egui::vec2(68.0, control_height),
-                            egui::Button::new(meas_text),
-                        )
-                        .on_hover_text("Measurements")
-                        .clicked()
-                    {
-                        viewer_state.show_measurements = !viewer_state.show_measurements;
-                    }
-
-                    let export_text = if viewer_state.show_export {
-                        "Export On"
-                    } else {
-                        "Export Off"
-                    };
-                    if ui
-                        .add_sized(
-                            egui::vec2(76.0, control_height),
-                            egui::Button::new(export_text),
-                        )
-                        .on_hover_text("Export")
-                        .clicked()
-                    {
-                        viewer_state.show_export = !viewer_state.show_export;
-                    }
-                });
-            },
-        );
+            });
+        });
     });
 }
 
