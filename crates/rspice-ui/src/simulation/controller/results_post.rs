@@ -8,10 +8,15 @@ impl SimulationController {
         waveforms: &std::collections::HashMap<String, crate::simulation::WaveformData>,
     ) {
         let preferred_fft_source = state.fft_state.selected_source.as_deref();
-        let Some(waveform) = Self::fft_source_waveform(waveforms, time.len(), preferred_fft_source)
+        let Some((waveform_key, waveform)) =
+            Self::fft_source_waveform(waveforms, time.len(), preferred_fft_source)
         else {
             return;
         };
+
+        state
+            .fft_state
+            .set_selected_source(Some(waveform_key.clone()));
 
         if let Some(bit_period) = Self::estimate_ui_period(time, &waveform.y_values) {
             let eye_data = crate::analysis::eye_diagram::data::EyeDataBuilder::new()
@@ -25,7 +30,7 @@ impl SimulationController {
         }
 
         if let Some(prepared) = crate::analysis::fft::prepare_fft_input(
-            &waveform.name,
+            &waveform_key,
             time,
             &waveform.y_values,
             crate::analysis::fft::DEFAULT_MAX_FFT_POINTS,
@@ -103,26 +108,30 @@ impl SimulationController {
         waveforms: &'a std::collections::HashMap<String, crate::simulation::WaveformData>,
         expected_len: usize,
         preferred_name: Option<&str>,
-    ) -> Option<&'a crate::simulation::WaveformData> {
+    ) -> Option<(String, &'a crate::simulation::WaveformData)> {
         if let Some(name) = preferred_name {
             if let Some(wf) = waveforms
                 .get(name)
                 .filter(|wf| wf.y_values.len() == expected_len)
             {
-                return Some(wf);
+                return Some((name.to_string(), wf));
             }
 
-            if let Some((_key, wf)) = waveforms
-                .iter()
-                .find(|(_, wf)| wf.name == name && wf.y_values.len() == expected_len)
-            {
-                return Some(wf);
+            let mut sorted_names: Vec<_> = waveforms.keys().cloned().collect();
+            sorted_names.sort();
+            for key in sorted_names {
+                let Some(wf) = waveforms.get(&key) else {
+                    continue;
+                };
+                if wf.y_values.len() == expected_len && wf.name == name {
+                    return Some((key, wf));
+                }
             }
 
-            if let Some(wf) =
+            if let Some((key, wf)) =
                 Self::match_preferred_fft_source_normalized(waveforms, expected_len, name)
             {
-                return Some(wf);
+                return Some((key, wf));
             }
         }
 
@@ -134,6 +143,7 @@ impl SimulationController {
             waveforms
                 .get(&name)
                 .filter(|wf| wf.y_values.len() == expected_len)
+                .map(|wf| (name, wf))
         })
     }
 
@@ -141,12 +151,12 @@ impl SimulationController {
         waveforms: &'a std::collections::HashMap<String, crate::simulation::WaveformData>,
         expected_len: usize,
         preferred_name: &str,
-    ) -> Option<&'a crate::simulation::WaveformData> {
+    ) -> Option<(String, &'a crate::simulation::WaveformData)> {
         let preferred = Self::parse_fft_source_name(preferred_name);
         let mut names: Vec<_> = waveforms.keys().cloned().collect();
         names.sort();
 
-        let mut best: Option<(i32, &'a crate::simulation::WaveformData)> = None;
+        let mut best: Option<(i32, String, &'a crate::simulation::WaveformData)> = None;
         for name in names {
             let Some(wf) = waveforms.get(&name) else {
                 continue;
@@ -167,14 +177,14 @@ impl SimulationController {
             };
             let rank = Self::fft_source_kind_rank(preferred.kind, candidate_kind);
             match best {
-                Some((best_rank, _)) if rank >= best_rank => {}
+                Some((best_rank, _, _)) if rank >= best_rank => {}
                 _ => {
-                    best = Some((rank, wf));
+                    best = Some((rank, name, wf));
                 }
             }
         }
 
-        best.map(|(_, wf)| wf)
+        best.map(|(_, key, wf)| (key, wf))
     }
 
     fn parse_fft_source_name(name: &str) -> ParsedFftSourceName {

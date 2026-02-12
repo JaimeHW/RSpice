@@ -165,7 +165,9 @@ impl FftState {
 
     /// Load prepared uniformly sampled source and compute FFT using current settings.
     pub fn load_prepared_input(&mut self, input: PreparedFftInput) {
-        self.selected_source = Some(input.name.clone());
+        if self.selected_source.is_none() {
+            self.selected_source = Some(input.name.clone());
+        }
         self.source_cache = Some(FftSourceCache {
             name: input.name,
             samples: input.samples,
@@ -575,6 +577,22 @@ mod tests {
         assert!(state.analysis.is_some());
         assert!(state.source_cache.is_some());
         assert_eq!(state.selected_source.as_deref(), Some("V(out)"));
+    }
+
+    #[test]
+    fn test_state_load_prepared_input_preserves_existing_selected_source() {
+        let mut state = FftState::new();
+        state.set_selected_source(Some("trace_key".to_string()));
+        let input = PreparedFftInput {
+            name: "V(out)".to_string(),
+            samples: vec![0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0],
+            sample_rate: 8_000.0,
+            original_count: 8,
+            decimation_factor: 1,
+        };
+
+        state.load_prepared_input(input);
+        assert_eq!(state.selected_source.as_deref(), Some("trace_key"));
     }
 
     #[test]

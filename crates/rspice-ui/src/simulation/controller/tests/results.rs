@@ -685,6 +685,58 @@ fn test_update_waveforms_transient_typed_current_source_selects_current_trace() 
 }
 
 #[test]
+fn test_update_waveforms_transient_duplicate_labels_use_deterministic_key() {
+    use crate::simulation::results::WaveformData as EngineWaveformData;
+    use crate::simulation::SimulationResult;
+    use std::collections::HashMap;
+
+    let controller = SimulationController::new();
+    let mut state = AppState::default();
+    state
+        .fft_state
+        .set_selected_source(Some("NET6".to_string()));
+
+    let sample_count = 4096usize;
+    let fs = 100_000.0;
+    let time: Vec<f64> = (0..sample_count).map(|i| i as f64 / fs).collect();
+    let a_signal: Vec<f64> = time
+        .iter()
+        .map(|t| (2.0 * std::f64::consts::PI * 1_500.0 * t).sin())
+        .collect();
+    let b_signal: Vec<f64> = time
+        .iter()
+        .map(|t| (2.0 * std::f64::consts::PI * 9_000.0 * t).sin())
+        .collect();
+
+    let mut waveforms = HashMap::new();
+    waveforms.insert(
+        "B_path.NET6".to_string(),
+        EngineWaveformData::new_time_domain("NET6", time.clone(), b_signal),
+    );
+    waveforms.insert(
+        "A_path.NET6".to_string(),
+        EngineWaveformData::new_time_domain("NET6", time.clone(), a_signal),
+    );
+
+    controller.update_waveforms(
+        &mut state,
+        &SimulationResult::Transient {
+            time: time.clone(),
+            waveforms,
+        },
+    );
+
+    let source = state.fft_state.source_cache.as_ref().expect("source cache");
+    assert_eq!(source.name, "A_path.NET6");
+    assert_eq!(
+        state.fft_state.selected_source.as_deref(),
+        Some("A_path.NET6")
+    );
+    let fundamental = state.fft_state.fundamental_freq().expect("fundamental");
+    assert!((fundamental - 1_500.0).abs() < 250.0);
+}
+
+#[test]
 fn test_update_waveforms_ac_populates_bode_nyquist_and_smith_data() {
     use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
