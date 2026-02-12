@@ -8,7 +8,7 @@ const VIEWER_TAB_STRIP_PAD_Y: f32 = 4.0;
 const VIEWER_TAB_SPACING: f32 = 4.0;
 const VIEWER_TAB_ROW_HEIGHT: f32 = 22.0;
 const VIEWER_TAB_CLOSE_SIZE: f32 = 12.0;
-const VIEWER_TAB_ROUNDING: f32 = 4.0;
+const VIEWER_TAB_ROUNDING: f32 = 2.0;
 const VIEWER_TAB_INNER_X: f32 = 9.0;
 const VIEWER_TAB_INNER_Y: f32 = 3.0;
 const VIEWER_TAB_UNDERLINE_HEIGHT: f32 = 2.0;
@@ -18,19 +18,13 @@ fn tab_strip_fill() -> Color32 {
 }
 
 fn tab_fill(selected: bool) -> Color32 {
-    if selected {
-        Color32::from_rgb(38, 43, 52)
-    } else {
-        Color32::TRANSPARENT
-    }
+    let _ = selected;
+    Color32::TRANSPARENT
 }
 
 fn tab_stroke(selected: bool) -> Stroke {
-    if selected {
-        Stroke::new(1.0, Color32::from_rgb(64, 74, 92))
-    } else {
-        Stroke::new(0.0, Color32::TRANSPARENT)
-    }
+    let _ = selected;
+    Stroke::new(0.0, Color32::TRANSPARENT)
 }
 
 fn tab_underline_color() -> Color32 {
@@ -138,7 +132,7 @@ impl RSpiceApp {
                 ui.set_min_height(VIEWER_TAB_STRIP_MIN_HEIGHT);
                 ui.spacing_mut().item_spacing = egui::vec2(VIEWER_TAB_SPACING, 0.0);
 
-                ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     for index in 0..tab_count {
                         let Some(viewer) = self.state.viewer_workspace.tab_at(index) else {
                             continue;
@@ -223,17 +217,34 @@ impl RSpiceApp {
 
                     ui.add_space(8.0);
                     let add_menu_id = ui.make_persistent_id("viewer_add_menu");
-                    let add_response = ui.add(
-                        egui::Button::new(
-                            RichText::new("+ Add Viewer")
-                                .color(tab_text_color(false, true))
-                                .size(11.0),
-                        )
-                        .frame(false)
-                        .min_size(egui::vec2(96.0, VIEWER_TAB_ROW_HEIGHT)),
+                    let add_trigger = ui.allocate_ui_with_layout(
+                        egui::vec2(96.0, VIEWER_TAB_ROW_HEIGHT),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new("+ Add Viewer")
+                                        .color(tab_text_color(false, true))
+                                        .size(11.0),
+                                )
+                                .sense(egui::Sense::click()),
+                            )
+                        },
                     );
+                    let add_response = add_trigger.inner;
                     if add_response.clicked() {
                         ui.memory_mut(|mem| mem.toggle_popup(add_menu_id));
+                    }
+                    if add_response.hovered() {
+                        let rect = add_trigger.response.rect;
+                        let y = rect.max.y - 1.0;
+                        ui.painter().line_segment(
+                            [
+                                Pos2::new(rect.min.x + 3.0, y),
+                                Pos2::new(rect.max.x - 3.0, y),
+                            ],
+                            Stroke::new(1.0, tab_underline_color()),
+                        );
                     }
 
                     egui::popup_below_widget(
@@ -352,14 +363,11 @@ mod tests {
     }
 
     #[test]
-    fn selected_tab_visuals_are_emphasized() {
-        let selected_fill = tab_fill(true);
-        let unselected_fill = tab_fill(false);
-        let selected_stroke = tab_stroke(true);
-        let unselected_stroke = tab_stroke(false);
-
-        assert!(selected_fill != unselected_fill);
-        assert!(selected_stroke.width > unselected_stroke.width);
+    fn tab_frames_are_flat_to_avoid_button_chrome() {
+        assert_eq!(tab_fill(true), Color32::TRANSPARENT);
+        assert_eq!(tab_fill(false), Color32::TRANSPARENT);
+        assert_eq!(tab_stroke(true).width, 0.0);
+        assert_eq!(tab_stroke(false).width, 0.0);
     }
 
     #[test]
