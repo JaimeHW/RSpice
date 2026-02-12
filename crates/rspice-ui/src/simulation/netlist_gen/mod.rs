@@ -319,7 +319,13 @@ impl<'a> NetlistGenerator<'a> {
         let mut visited: HashSet<Point> = HashSet::new();
         let mut net_id = 1;
 
-        let all_points: Vec<Point> = point_graph.keys().copied().collect();
+        // Deterministic traversal is critical because auto-generated node labels
+        // (net1, net2, ...) depend on discovery order. HashMap key iteration is
+        // intentionally randomized, so sort points first to keep names stable
+        // across repeated runs of the same schematic.
+        let mut all_points: Vec<Point> = point_graph.keys().copied().collect();
+        all_points.sort_by_key(|point| (point.x, point.y));
+
         for start_point in all_points {
             if visited.contains(&start_point) {
                 continue;

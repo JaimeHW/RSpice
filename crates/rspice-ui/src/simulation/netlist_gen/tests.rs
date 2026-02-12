@@ -346,6 +346,41 @@ fn test_generate_resets_internal_state_between_calls() {
 }
 
 #[test]
+fn test_generate_netlist_auto_node_names_are_stable_across_runs() {
+    let mut schematic = SchematicState::default();
+
+    // Use several disconnected passives so net numbering depends only on net
+    // discovery order, not wire traversal.
+    for i in 0..8 {
+        let id = (i + 1) as u64;
+        let x = (i as i32) * 100;
+        let y = ((i % 2) as i32) * 80;
+        let comp = Component::new(id, ComponentType::Resistor, Point::new(x, y))
+            .with_name_value(format!("R{}", i + 1), "1k");
+        schematic.components.push(comp);
+    }
+
+    let mut signatures = std::collections::BTreeSet::new();
+    for _ in 0..24 {
+        let result = generate_netlist(&schematic);
+        let signature = result
+            .netlist
+            .lines()
+            .filter(|line| line.starts_with('R'))
+            .map(|line| line.trim().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        signatures.insert(signature);
+    }
+
+    assert_eq!(
+        signatures.len(),
+        1,
+        "auto-generated net numbering should be stable across repeated netlist generation"
+    );
+}
+
+#[test]
 fn test_generate_netlist_with_analysis_convenience_api() {
     let schematic = SchematicState::default();
     let analysis = vec![".tran 1n 100n".to_string()];
