@@ -68,6 +68,11 @@ const CURSOR_LABEL_TEXT_PADDING_Y: f32 = 2.0;
 const CURSOR_LABEL_BG_ALPHA: u8 = 220;
 const CURSOR_LABEL_CORNER_RADIUS: f32 = 3.0;
 const LEGEND_SECTION_SPACING: f32 = 8.0;
+const LEGEND_ROW_HEIGHT: f32 = 18.0;
+const LEGEND_TRACE_SWATCH_WIDTH: f32 = 10.0;
+const LEGEND_TRACE_CONTROL_WIDTH: f32 = 22.0;
+const LEGEND_TRACE_SOLO_WIDTH: f32 = 20.0;
+const LEGEND_TRACE_LABEL_MIN_WIDTH: f32 = 28.0;
 
 // Grid line colors (using runtime values since Color32 constructors aren't const)
 fn grid_major_color() -> Color32 {
@@ -1399,6 +1404,8 @@ fn render_legend(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Waveform
     // Create UI area for legend items
     let legend_inner = layout.legend.shrink(8.0);
     ui.allocate_new_ui(UiBuilder::new().max_rect(legend_inner), |ui| {
+        ui.set_clip_rect(legend_inner);
+        ui.set_max_width(legend_inner.width());
         egui::ScrollArea::vertical()
             .id_salt("waveform_legend_scroll")
             .show(ui, |ui| {
@@ -1413,6 +1420,22 @@ fn render_legend(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Waveform
                 }
             });
     });
+}
+
+fn legend_sort_combo_width(section_width: f32) -> f32 {
+    (section_width - 30.0).clamp(56.0, 110.0)
+}
+
+fn legend_filter_width(section_width: f32, clear_button_width: f32) -> f32 {
+    (section_width - 28.0 - clear_button_width).max(40.0)
+}
+
+fn legend_trace_name_width(row_width: f32) -> f32 {
+    let fixed_width = LEGEND_TRACE_SWATCH_WIDTH
+        + LEGEND_TRACE_CONTROL_WIDTH
+        + LEGEND_TRACE_SOLO_WIDTH
+        + 16.0;
+    (row_width - fixed_width).max(LEGEND_TRACE_LABEL_MIN_WIDTH)
 }
 
 fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState) {
@@ -1431,6 +1454,10 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
         if ui.small_button("None").clicked() {
             legend::hide_all_traces(&mut viewer_state.traces);
         }
+    });
+
+    let section_width = ui.available_width().max(0.0);
+    ui.horizontal(|ui| {
         ui.label(egui::RichText::new("Sort").size(9.0).color(Color32::from_rgb(120, 125, 135)));
         egui::ComboBox::from_id_salt("waveform_legend_sort")
             .selected_text(match viewer_state.legend_state.sort_by {
@@ -1438,7 +1465,7 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
                 LegendSortOrder::Name => "Name",
                 LegendSortOrder::Visibility => "Visible",
             })
-            .width(68.0)
+            .width(legend_sort_combo_width(section_width))
             .show_ui(ui, |ui| {
                 ui.selectable_value(
                     &mut viewer_state.legend_state.sort_by,
@@ -1459,14 +1486,19 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
     });
 
     ui.horizontal(|ui| {
+        let section_width = ui.available_width().max(0.0);
+        let show_clear = section_width > 96.0;
+        let clear_width = if show_clear { 20.0 } else { 0.0 };
         ui.label(egui::RichText::new("Find").size(9.0).color(Color32::from_rgb(120, 125, 135)));
         ui.add(
             egui::TextEdit::singleline(&mut viewer_state.legend_state.filter)
-                .desired_width(96.0)
+                .desired_width(legend_filter_width(section_width, clear_width))
                 .hint_text("trace"),
         );
-        if ui.small_button("X").clicked() {
-            viewer_state.legend_state.clear_filter();
+        if show_clear {
+            if ui.small_button("X").clicked() {
+                viewer_state.legend_state.clear_filter();
+            }
         }
     });
     ui.add_space(4.0);
@@ -1489,7 +1521,12 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
             .is_some_and(|name| name == item.name);
 
         ui.horizontal(|ui| {
-            let swatch_rect = ui.allocate_space(Vec2::new(10.0, 10.0)).1;
+            let row_width = ui.available_width().max(0.0);
+            let label_width = legend_trace_name_width(row_width);
+
+            let swatch_rect = ui
+                .allocate_space(Vec2::new(LEGEND_TRACE_SWATCH_WIDTH, LEGEND_ROW_HEIGHT))
+                .1;
             if item.visible {
                 ui.painter()
                     .rect_filled(swatch_rect, Rounding::same(2.0), color);
@@ -1502,7 +1539,13 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
             }
 
             let mut visible = item.visible;
-            if ui.checkbox(&mut visible, "").changed() {
+            if ui
+                .add_sized(
+                    Vec2::new(LEGEND_TRACE_CONTROL_WIDTH, LEGEND_ROW_HEIGHT),
+                    egui::Checkbox::without_text(&mut visible),
+                )
+                .changed()
+            {
                 visibility_updates.push((item.index, visible));
             }
 
@@ -1512,11 +1555,22 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
                 Color32::from_rgb(110, 115, 125)
             };
             let label = egui::RichText::new(&item.name).size(10.0).color(text_color);
-            if ui.selectable_label(selected, label).clicked() {
+            let label_response = ui.add_sized(
+                Vec2::new(label_width, LEGEND_ROW_HEIGHT),
+                egui::SelectableLabel::new(selected, label),
+            );
+            if label_response.clicked() {
                 selected_trace_name = Some(item.name.clone());
             }
 
-            if ui.small_button("S").on_hover_text("Solo trace").clicked() {
+            if ui
+                .add_sized(
+                    Vec2::new(LEGEND_TRACE_SOLO_WIDTH, LEGEND_ROW_HEIGHT),
+                    egui::Button::new("S"),
+                )
+                .on_hover_text("Solo trace")
+                .clicked()
+            {
                 solo_trace_idx = Some(item.index);
                 selected_trace_name = Some(item.name.clone());
             }
@@ -2134,6 +2188,25 @@ mod tests {
         assert!(X_AXIS_HEIGHT > 0.0);
         assert!(HEADER_HEIGHT > 0.0);
         assert!(LEGEND_WIDTH > 0.0);
+    }
+
+    #[test]
+    fn test_legend_control_width_helpers_are_clamped() {
+        let sort_narrow = legend_sort_combo_width(60.0);
+        let sort_wide = legend_sort_combo_width(240.0);
+        assert!(sort_narrow >= 56.0);
+        assert!(sort_wide <= 110.0);
+
+        let find = legend_filter_width(100.0, 20.0);
+        assert!(find >= 40.0);
+    }
+
+    #[test]
+    fn test_legend_trace_name_width_preserves_minimum() {
+        let narrow = legend_trace_name_width(80.0);
+        let wide = legend_trace_name_width(220.0);
+        assert!(narrow >= LEGEND_TRACE_LABEL_MIN_WIDTH);
+        assert!(wide > narrow);
     }
 
     #[test]
