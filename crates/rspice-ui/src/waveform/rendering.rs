@@ -1637,10 +1637,13 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
                 (row_layout.name_width - LEGEND_TEXT_TRUNCATION_PADDING).max(0.0),
             );
             let label = egui::RichText::new(&display_name).size(10.0).color(text_color);
-            let label_response = ui.add_sized(
-                Vec2::new(row_layout.name_width, LEGEND_ROW_HEIGHT),
-                egui::SelectableLabel::new(selected, label),
-            );
+            let label_response = ui
+                .allocate_ui_with_layout(
+                    Vec2::new(row_layout.name_width, LEGEND_ROW_HEIGHT),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| ui.selectable_label(selected, label),
+                )
+                .inner;
             let label_response = if display_name != item.name {
                 label_response.on_hover_text(&item.name)
             } else {
