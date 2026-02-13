@@ -32,6 +32,15 @@ fn header_bg_color() -> Color32 {
     viewer_header_bg_color()
 }
 
+fn panel_bg_color() -> Color32 {
+    // Match waveform viewer right-side legend panel fill.
+    Color32::from_rgb(30, 33, 40)
+}
+
+fn panel_border_color() -> Color32 {
+    Color32::from_rgb(60, 65, 75)
+}
+
 fn grid_major_color() -> Color32 {
     Color32::from_rgb(50, 52, 58)
 }
@@ -235,6 +244,17 @@ fn info_content_rect(layout: &FftLayout) -> Rect {
         layout.info.max,
     );
     lane.shrink(INFO_PANEL_PADDING)
+}
+
+fn info_outline_rect(layout: &FftLayout) -> Option<Rect> {
+    let top = (layout.info.min.y + AXIS_TOP_GUTTER).min(layout.info.max.y);
+    if top >= layout.info.max.y {
+        return None;
+    }
+    Some(Rect::from_min_max(
+        Pos2::new(layout.info.min.x, top),
+        layout.info.max,
+    ))
 }
 
 fn x_tick_label_position(x: f32, plot_rect: Rect) -> Pos2 {
@@ -901,7 +921,7 @@ fn render_spectrum_core(ui: &mut Ui, layout: &FftLayout, state: &FftState) {
     painter.rect_stroke(
         plot_rect,
         Rounding::ZERO,
-        Stroke::new(1.0, Color32::from_rgb(60, 65, 75)),
+        Stroke::new(1.0, panel_border_color()),
     );
 }
 
@@ -1774,7 +1794,14 @@ fn mag_to_y(point: &FftPoint, rect: Rect, state: &FftState) -> f32 {
 
 fn render_info_panel(ui: &mut Ui, layout: &FftLayout, state: &FftState) {
     ui.painter()
-        .rect_filled(layout.info, Rounding::ZERO, surface_bg_color());
+        .rect_filled(layout.info, Rounding::ZERO, panel_bg_color());
+    if let Some(outline_rect) = info_outline_rect(layout) {
+        ui.painter().rect_stroke(
+            outline_rect,
+            Rounding::ZERO,
+            Stroke::new(1.0, panel_border_color()),
+        );
+    }
 
     let panel_rect = info_content_rect(layout);
     ui.allocate_new_ui(UiBuilder::new().max_rect(panel_rect), |ui| {
@@ -2073,6 +2100,22 @@ mod tests {
     fn test_fft_surface_and_header_backgrounds_match_viewer_chrome() {
         assert_eq!(surface_bg_color(), header_bg_color());
         assert_eq!(surface_bg_color(), viewer_header_bg_color());
+    }
+
+    #[test]
+    fn test_fft_info_panel_background_matches_waveform_panel_surface() {
+        assert_eq!(panel_bg_color(), Color32::from_rgb(30, 33, 40));
+    }
+
+    #[test]
+    fn test_info_outline_rect_aligns_to_plot_top_gutter() {
+        let total = Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 620.0));
+        let layout = calculate_layout(total);
+        let outline = info_outline_rect(&layout).expect("outline rect");
+        assert!((outline.min.y - (layout.info.min.y + AXIS_TOP_GUTTER)).abs() < f32::EPSILON);
+        assert!((outline.min.x - layout.info.min.x).abs() < f32::EPSILON);
+        assert!((outline.max.x - layout.info.max.x).abs() < f32::EPSILON);
+        assert!((outline.max.y - layout.info.max.y).abs() < f32::EPSILON);
     }
 
     #[test]
