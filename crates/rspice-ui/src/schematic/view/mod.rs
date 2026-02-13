@@ -1169,33 +1169,70 @@ fn draw_component(
 /// - Terminal positions (avoid overlapping terminals)
 ///
 /// Matches commercial EDA tool behavior (Cadence Virtuoso style).
-fn draw_component_labels(
-    painter: &Painter,
-    pos: Pos2,
-    scale: f32,
-    component: &crate::state::Component,
-    state: &AppState,
-) {
-    // Skip labels for Ground (too small, clutters schematic)
-    if matches!(component.kind, crate::state::ComponentType::Ground) {
-        return;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TerminalAxis {
+    Horizontal,
+    Vertical,
+    Mixed,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LabelLayout {
+    name_pos: Pos2,
+    name_align: egui::Align2,
+    value_pos: Pos2,
+    value_align: egui::Align2,
+}
+
+/// Infer the dominant terminal direction after mirror/rotation transforms.
+/// This is more robust than width/height heuristics for square symbols (e.g. capacitor).
+fn infer_terminal_axis(component: &crate::state::Component) -> TerminalAxis {
+    let terminals = component.terminal_positions();
+    if terminals.len() < 2 {
+        return TerminalAxis::Mixed;
     }
 
+    let mut min_x = i32::MAX;
+    let mut max_x = i32::MIN;
+    let mut min_y = i32::MAX;
+    let mut max_y = i32::MIN;
+
+    for (_, p) in terminals {
+        min_x = min_x.min(p.x);
+        max_x = max_x.max(p.x);
+        min_y = min_y.min(p.y);
+        max_y = max_y.max(p.y);
+    }
+
+    let span_x = max_x - min_x;
+    let span_y = max_y - min_y;
+
+    // One-grid hysteresis to avoid ambiguous axis flapping near equal spans.
+    const AXIS_HYSTERESIS: i32 = 10;
+    if span_x > span_y + AXIS_HYSTERESIS {
+        TerminalAxis::Horizontal
+    } else if span_y > span_x + AXIS_HYSTERESIS {
+        TerminalAxis::Vertical
+    } else {
+        TerminalAxis::Mixed
+    }
+}
+
+fn compute_label_layout(pos: Pos2, scale: f32, component: &crate::state::Component) -> LabelLayout {
     let (width, height) = component.kind.symbol_dimensions();
     let is_rotated_vertical = component.rotation.is_vertical(); // R90 or R270
 
-    // Determine effective dimensions after rotation
+    // Determine effective dimensions after rotation.
     let (eff_w, eff_h) = if is_rotated_vertical {
         (height as f32, width as f32) // Swap for rotated
     } else {
         (width as f32, height as f32)
     };
 
-    // Determine label placement based on component shape and orientation
-    // Horizontal components: name above, value below
-    // Vertical components: name to the left, value to the right
-    // Tall components (BJTs, MOSFETs): name above, value below regardless of rotation
-
+    // Determine label placement based on component shape and transformed terminal orientation.
+    // Horizontal terminal axis: labels above/below.
+    // Vertical terminal axis: labels left/right.
+    // Tall devices (BJTs, MOSFETs): name above, value on right side.
     let is_tall_device = matches!(
         component.kind,
         crate::state::ComponentType::NpnBjt
@@ -1208,99 +1245,64 @@ fn draw_component_labels(
             | crate::state::ComponentType::PVdmos
     );
 
-    let is_source = component.kind.is_source()
-        && !matches!(
-            component.kind,
-            crate::state::ComponentType::Vcvs
-                | crate::state::ComponentType::Vccs
-                | crate::state::ComponentType::Ccvs
-                | crate::state::ComponentType::Cccs
-        );
-
-    // Calculate label margin from component edge
+    // Calculate label margin from component edge.
     let margin = 4.0 * scale;
+    let half_w = (eff_w / 2.0) * scale;
+    let half_h = (eff_h / 2.0) * scale;
+    let terminal_axis = infer_terminal_axis(component);
+
+    if is_tall_device {
+        LabelLayout {
+            name_pos: Pos2::new(pos.x, pos.y - half_h - margin),
+            name_align: egui::Align2::CENTER_BOTTOM,
+            value_pos: Pos2::new(pos.x + half_w + margin, pos.y),
+            value_align: egui::Align2::LEFT_CENTER,
+        }
+    } else {
+        // Mixed axis falls back to geometric aspect ratio.
+        let use_left_right = matches!(terminal_axis, TerminalAxis::Vertical)
+            || (matches!(terminal_axis, TerminalAxis::Mixed) && eff_h > eff_w);
+
+        if use_left_right {
+            LabelLayout {
+                name_pos: Pos2::new(pos.x - half_w - margin, pos.y),
+                name_align: egui::Align2::RIGHT_CENTER,
+                value_pos: Pos2::new(pos.x + half_w + margin, pos.y),
+                value_align: egui::Align2::LEFT_CENTER,
+            }
+        } else {
+            LabelLayout {
+                name_pos: Pos2::new(pos.x, pos.y - half_h - margin),
+                name_align: egui::Align2::CENTER_BOTTOM,
+                value_pos: Pos2::new(pos.x, pos.y + half_h + margin),
+                value_align: egui::Align2::CENTER_TOP,
+            }
+        }
+    }
+}
+
+fn draw_component_labels(
+    painter: &Painter,
+    pos: Pos2,
+    scale: f32,
+    component: &crate::state::Component,
+    state: &AppState,
+) {
+    // Skip labels for Ground (too small, clutters schematic)
+    if matches!(component.kind, crate::state::ComponentType::Ground) {
+        return;
+    }
+
     let name_font = egui::FontId::proportional(10.0 * scale);
     let value_font = egui::FontId::proportional(9.0 * scale);
 
-    // Check if ORIGINAL component is horizontally-oriented (width > height)
-    // This is important because terminals are on left/right for horizontal components
-    let is_horizontal_component = width > height;
-
-    // Choose placement strategy based on component type and orientation
-    let (name_pos, name_align, value_pos, value_align) = if is_tall_device {
-        // Tall devices (transistors): name above, value on the terminal side
-        // For transistors, value goes on the side with terminals (right side typically)
-        let half_h = (eff_h / 2.0) * scale;
-        let half_w = (eff_w / 2.0) * scale;
-
-        let name_y = pos.y - half_h - margin;
-        let value_x = pos.x + half_w + margin;
-
-        (
-            Pos2::new(pos.x, name_y),
-            egui::Align2::CENTER_BOTTOM,
-            Pos2::new(value_x, pos.y),
-            egui::Align2::LEFT_CENTER,
-        )
-    } else if is_source && !is_rotated_vertical {
-        // Vertical sources (V, I): name to the left, value to the right
-        let half_w = (eff_w / 2.0) * scale;
-
-        (
-            Pos2::new(pos.x - half_w - margin, pos.y),
-            egui::Align2::RIGHT_CENTER,
-            Pos2::new(pos.x + half_w + margin, pos.y),
-            egui::Align2::LEFT_CENTER,
-        )
-    } else if is_source && is_rotated_vertical {
-        // Rotated sources: name above, value below
-        let half_h = (eff_h / 2.0) * scale;
-
-        (
-            Pos2::new(pos.x, pos.y - half_h - margin),
-            egui::Align2::CENTER_BOTTOM,
-            Pos2::new(pos.x, pos.y + half_h + margin),
-            egui::Align2::CENTER_TOP,
-        )
-    } else if is_horizontal_component && !is_rotated_vertical {
-        // Horizontal components (R, L, etc.) not rotated: name above, value below
-        // Terminals are on left/right, so top/bottom are safe for labels
-        let half_h = (eff_h / 2.0) * scale;
-
-        (
-            Pos2::new(pos.x, pos.y - half_h - margin),
-            egui::Align2::CENTER_BOTTOM,
-            Pos2::new(pos.x, pos.y + half_h + margin),
-            egui::Align2::CENTER_TOP,
-        )
-    } else if is_horizontal_component && is_rotated_vertical {
-        // Horizontal component rotated 90°/270°: terminals now at top/bottom
-        // Place labels on left/right to avoid terminals
-        let half_w = (eff_w / 2.0) * scale;
-
-        (
-            Pos2::new(pos.x - half_w - margin, pos.y),
-            egui::Align2::RIGHT_CENTER,
-            Pos2::new(pos.x + half_w + margin, pos.y),
-            egui::Align2::LEFT_CENTER,
-        )
-    } else {
-        // Default: name above, value below (for square-ish components)
-        let half_h = (eff_h / 2.0).max(10.0) * scale;
-
-        (
-            Pos2::new(pos.x, pos.y - half_h - margin),
-            egui::Align2::CENTER_BOTTOM,
-            Pos2::new(pos.x, pos.y + half_h + margin),
-            egui::Align2::CENTER_TOP,
-        )
-    };
+    let layout = compute_label_layout(pos, scale, component);
 
     // Draw component name (reference designator)
     if !component.name.is_empty() {
         painter.text(
-            name_pos,
-            name_align,
+            layout.name_pos,
+            layout.name_align,
             &component.name,
             name_font,
             state.theme.text_primary,
@@ -1310,8 +1312,8 @@ fn draw_component_labels(
     // Draw component value
     if !component.value.is_empty() {
         painter.text(
-            value_pos,
-            value_align,
+            layout.value_pos,
+            layout.value_align,
             &component.value,
             value_font,
             state.theme.text_secondary,
@@ -1405,6 +1407,62 @@ mod tests {
         assert_eq!(rotation_to_index(Rotation::R90), 1);
         assert_eq!(rotation_to_index(Rotation::R180), 2);
         assert_eq!(rotation_to_index(Rotation::R270), 3);
+    }
+
+    #[test]
+    fn test_infer_terminal_axis_for_capacitor_rotation() {
+        let cap_r0 = crate::state::Component::new(1, ComponentType::Capacitor, Point::new(0, 0));
+        assert_eq!(infer_terminal_axis(&cap_r0), TerminalAxis::Horizontal);
+
+        let cap_r90 = crate::state::Component::new(2, ComponentType::Capacitor, Point::new(0, 0))
+            .with_rotation(Rotation::R90);
+        assert_eq!(infer_terminal_axis(&cap_r90), TerminalAxis::Vertical);
+    }
+
+    #[test]
+    fn test_compute_label_layout_rotated_capacitor_uses_left_right_labels() {
+        let cap = crate::state::Component::new(1, ComponentType::Capacitor, Point::new(0, 0))
+            .with_rotation(Rotation::R90);
+        let center = Pos2::new(100.0, 100.0);
+        let layout = compute_label_layout(center, 1.0, &cap);
+
+        assert!(layout.name_pos.x < center.x);
+        assert!(layout.value_pos.x > center.x);
+        assert_eq!(layout.name_align, egui::Align2::RIGHT_CENTER);
+        assert_eq!(layout.value_align, egui::Align2::LEFT_CENTER);
+    }
+
+    #[test]
+    fn test_compute_label_layout_horizontal_capacitor_uses_top_bottom_labels() {
+        let cap = crate::state::Component::new(1, ComponentType::Capacitor, Point::new(0, 0));
+        let center = Pos2::new(100.0, 100.0);
+        let layout = compute_label_layout(center, 1.0, &cap);
+
+        assert!(layout.name_pos.y < center.y);
+        assert!(layout.value_pos.y > center.y);
+        assert_eq!(layout.name_align, egui::Align2::CENTER_BOTTOM);
+        assert_eq!(layout.value_align, egui::Align2::CENTER_TOP);
+    }
+
+    #[test]
+    fn test_compute_label_layout_source_switches_with_rotation() {
+        let src_r0 =
+            crate::state::Component::new(1, ComponentType::VoltageSource, Point::new(0, 0));
+        let src_r90 =
+            crate::state::Component::new(2, ComponentType::VoltageSource, Point::new(0, 0))
+                .with_rotation(Rotation::R90);
+
+        let center = Pos2::new(100.0, 100.0);
+        let layout_r0 = compute_label_layout(center, 1.0, &src_r0);
+        let layout_r90 = compute_label_layout(center, 1.0, &src_r90);
+
+        // Vertical terminals (R0 source) -> labels left/right
+        assert!(layout_r0.name_pos.x < center.x);
+        assert!(layout_r0.value_pos.x > center.x);
+
+        // Horizontal terminals (R90 source) -> labels top/bottom
+        assert!(layout_r90.name_pos.y < center.y);
+        assert!(layout_r90.value_pos.y > center.y);
     }
 
     #[test]
