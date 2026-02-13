@@ -82,7 +82,6 @@ const LEGEND_FIND_EDIT_MIN_WIDTH: f32 = 40.0;
 const LEGEND_FIND_RIGHT_GUARD: f32 = 6.0;
 const LEGEND_INSET_X: f32 = 4.0;
 const LEGEND_INSET_Y: f32 = 8.0;
-const LEGEND_SOLO_SYMBOL_SIZE: f32 = 11.0;
 
 // Grid line colors (using runtime values since Color32 constructors aren't const)
 fn grid_major_color() -> Color32 {
@@ -1549,32 +1548,8 @@ fn active_solo_trace_index(traces: &[TraceData]) -> Option<usize> {
     solo
 }
 
-fn solo_symbol(is_active: bool) -> &'static str {
-    if is_active {
-        "◉"
-    } else {
-        "◎"
-    }
-}
-
 fn render_solo_control(ui: &mut Ui, rect: Rect, is_active: bool) -> Response {
-    let symbol_color = if is_active {
-        Color32::from_rgb(210, 220, 255)
-    } else {
-        Color32::from_rgb(155, 165, 185)
-    };
-    let text = egui::RichText::new(solo_symbol(is_active))
-        .size(LEGEND_SOLO_SYMBOL_SIZE)
-        .color(symbol_color);
-    let response = ui.put(rect, egui::Label::new(text).sense(Sense::click()));
-    if response.hovered() || is_active {
-        ui.painter().rect_stroke(
-            rect.shrink(1.0),
-            Rounding::same(3.0),
-            Stroke::new(1.0, Color32::from_rgb(70, 78, 96)),
-        );
-    }
-    response
+    ui.put(rect, egui::RadioButton::new(is_active, ""))
 }
 
 fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState) {
@@ -2417,12 +2392,6 @@ mod tests {
     }
 
     #[test]
-    fn test_solo_symbol_variants() {
-        assert_eq!(solo_symbol(false), "◎");
-        assert_eq!(solo_symbol(true), "◉");
-    }
-
-    #[test]
     fn test_layout_legend_width_tracks_dynamic_policy() {
         let wide = Rect::from_min_size(Pos2::ZERO, Vec2::new(1800.0, 700.0));
         let wide_layout = calculate_layout(wide);
@@ -2638,3 +2607,4 @@ mod tests {
         assert!(placements[0].rect.min.y > layout.plot.min.y + 2.0);
     }
 }
+
