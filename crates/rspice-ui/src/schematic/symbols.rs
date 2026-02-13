@@ -155,6 +155,11 @@ impl SymbolLibrary {
             (ComponentType::Resistor, "resistor.svg", "Resistor"),
             (ComponentType::Capacitor, "cap_unpolarized.svg", "Capacitor"),
             (ComponentType::Inductor, "inductor.svg", "Inductor"),
+            (
+                ComponentType::SaturableInductor,
+                "inductor.svg",
+                "Saturable Inductor",
+            ),
             // Sources
             (
                 ComponentType::VoltageSource,
@@ -166,7 +171,62 @@ impl SymbolLibrary {
                 "v_src_ac_vertical.svg",
                 "AC Voltage Source",
             ),
+            (
+                ComponentType::VoltageSourceSin,
+                "v_src_ac_vertical.svg",
+                "Sinusoidal Voltage Source",
+            ),
+            (
+                ComponentType::VoltageSourcePulse,
+                "v_src_dc.svg",
+                "Pulse Voltage Source",
+            ),
+            (
+                ComponentType::VoltageSourcePwl,
+                "v_src_dc.svg",
+                "PWL Voltage Source",
+            ),
+            (
+                ComponentType::VoltageSourceExp,
+                "v_src_dc.svg",
+                "Exponential Voltage Source",
+            ),
+            (
+                ComponentType::VoltageSourceSffm,
+                "v_src_dc.svg",
+                "SFFM Voltage Source",
+            ),
             (ComponentType::CurrentSource, "i_src.svg", "Current Source"),
+            (
+                ComponentType::CurrentSourceAc,
+                "i_src.svg",
+                "AC Current Source",
+            ),
+            (
+                ComponentType::CurrentSourcePulse,
+                "i_src.svg",
+                "Pulse Current Source",
+            ),
+            (
+                ComponentType::CurrentSourceSin,
+                "i_src.svg",
+                "Sinusoidal Current Source",
+            ),
+            (
+                ComponentType::CurrentSourcePwl,
+                "i_src.svg",
+                "PWL Current Source",
+            ),
+            (
+                ComponentType::CurrentSourceExp,
+                "i_src.svg",
+                "Exponential Current Source",
+            ),
+            (
+                ComponentType::CurrentSourceNoise,
+                "i_src.svg",
+                "Noise Current Source",
+            ),
             // Ground
             (ComponentType::Ground, "ground_signal.svg", "Ground"),
             // Discrete semiconductors
@@ -181,6 +241,18 @@ impl SymbolLibrary {
                 ComponentType::Pmos,
                 "mos_p_chan_enh_no_substrate.svg",
                 "PMOS",
+            ),
+            (ComponentType::Njfet, "jfet_n_chan.svg", "N-JFET"),
+            (ComponentType::Pjfet, "jfet_p_chan.svg", "P-JFET"),
+            (
+                ComponentType::NVdmos,
+                "mos_n_chan_enh_body_diode_discrete.svg",
+                "N-VDMOS",
+            ),
+            (
+                ComponentType::PVdmos,
+                "mos_p_chan_enh_body_diode_discrete.svg",
+                "P-VDMOS",
             ),
             (ComponentType::NpnBjt, "bjt_npn.svg", "NPN BJT"),
             (ComponentType::PnpBjt, "bjt_pnp.svg", "PNP BJT"),
@@ -205,11 +277,18 @@ impl SymbolLibrary {
         }
 
         // Load horizontal variants for components that have separate horizontal SVGs
-        let horizontal_mappings: &[(ComponentType, &str, &str)] = &[(
-            ComponentType::VoltageSourceAc,
-            "v_src_ac_horizontal.svg",
-            "AC Voltage Source",
-        )];
+        let horizontal_mappings: &[(ComponentType, &str, &str)] = &[
+            (
+                ComponentType::VoltageSourceAc,
+                "v_src_ac_horizontal.svg",
+                "AC Voltage Source",
+            ),
+            (
+                ComponentType::VoltageSourceSin,
+                "v_src_ac_horizontal.svg",
+                "Sinusoidal Voltage Source",
+            ),
+        ];
 
         for (component_type, filename, name) in horizontal_mappings {
             let svg_data = Self::load_embedded_svg(filename)?;
@@ -861,7 +940,10 @@ fn add_default_pins(symbol: &mut Symbol, component_type: ComponentType) {
     let h = symbol.height() / 2.0;
 
     match component_type {
-        ComponentType::Resistor | ComponentType::Capacitor | ComponentType::Inductor => {
+        ComponentType::Resistor
+        | ComponentType::Capacitor
+        | ComponentType::Inductor
+        | ComponentType::SaturableInductor => {
             // Two-terminal horizontal component
             symbol.pins = vec![
                 SymbolPin {
@@ -876,7 +958,20 @@ fn add_default_pins(symbol: &mut Symbol, component_type: ComponentType) {
                 },
             ];
         }
-        ComponentType::VoltageSource | ComponentType::CurrentSource => {
+        ComponentType::VoltageSource
+        | ComponentType::VoltageSourceAc
+        | ComponentType::VoltageSourcePulse
+        | ComponentType::VoltageSourceSin
+        | ComponentType::VoltageSourcePwl
+        | ComponentType::VoltageSourceExp
+        | ComponentType::VoltageSourceSffm
+        | ComponentType::CurrentSource
+        | ComponentType::CurrentSourceAc
+        | ComponentType::CurrentSourcePulse
+        | ComponentType::CurrentSourceSin
+        | ComponentType::CurrentSourcePwl
+        | ComponentType::CurrentSourceExp
+        | ComponentType::CurrentSourceNoise => {
             // Vertical source
             symbol.pins = vec![
                 SymbolPin {
@@ -912,7 +1007,29 @@ fn add_default_pins(symbol: &mut Symbol, component_type: ComponentType) {
                 },
             ];
         }
-        ComponentType::Nmos | ComponentType::Pmos => {
+        ComponentType::Nmos
+        | ComponentType::Pmos
+        | ComponentType::NVdmos
+        | ComponentType::PVdmos => {
+            symbol.pins = vec![
+                SymbolPin {
+                    name: "G".to_string(),
+                    position: (cx - w, cy),
+                    direction: PinDirection::Left,
+                },
+                SymbolPin {
+                    name: "D".to_string(),
+                    position: (cx, cy - h),
+                    direction: PinDirection::Up,
+                },
+                SymbolPin {
+                    name: "S".to_string(),
+                    position: (cx, cy + h),
+                    direction: PinDirection::Down,
+                },
+            ];
+        }
+        ComponentType::Njfet | ComponentType::Pjfet => {
             symbol.pins = vec![
                 SymbolPin {
                     name: "G".to_string(),
@@ -1311,6 +1428,106 @@ mod tests {
                 "{:?} should have positive target_height",
                 component_type
             );
+        }
+    }
+
+    #[test]
+    fn test_high_confidence_symbol_hookups_are_loaded() {
+        let library = SymbolLibrary::load_embedded().expect("Should load library");
+
+        let expected_types = [
+            ComponentType::SaturableInductor,
+            ComponentType::VoltageSourcePulse,
+            ComponentType::VoltageSourceSin,
+            ComponentType::VoltageSourcePwl,
+            ComponentType::VoltageSourceExp,
+            ComponentType::VoltageSourceSffm,
+            ComponentType::CurrentSourceAc,
+            ComponentType::CurrentSourcePulse,
+            ComponentType::CurrentSourceSin,
+            ComponentType::CurrentSourcePwl,
+            ComponentType::CurrentSourceExp,
+            ComponentType::CurrentSourceNoise,
+            ComponentType::Njfet,
+            ComponentType::Pjfet,
+            ComponentType::NVdmos,
+            ComponentType::PVdmos,
+        ];
+
+        for component_type in expected_types {
+            assert!(
+                library.contains(component_type),
+                "Expected symbol mapping for {:?}",
+                component_type
+            );
+
+            let symbol = library
+                .get(component_type)
+                .expect("Mapped symbol should be retrievable");
+            assert!(
+                !symbol.paths.is_empty(),
+                "Mapped symbol for {:?} should have renderable paths",
+                component_type
+            );
+        }
+    }
+
+    #[test]
+    fn test_voltage_source_sin_uses_ac_horizontal_variant() {
+        let library = SymbolLibrary::load_embedded().expect("Should load library");
+
+        let vertical = library
+            .get(ComponentType::VoltageSourceSin)
+            .expect("Vertical symbol should exist");
+        assert_eq!(vertical.target_width, 28.0);
+        assert_eq!(vertical.target_height, 40.0);
+
+        let (horizontal_90, adjusted_90) = library
+            .get_with_rotation(ComponentType::VoltageSourceSin, 90)
+            .expect("Horizontal symbol should exist for 90 degree rotation");
+        assert_eq!(adjusted_90, 0);
+        assert_eq!(horizontal_90.target_width, 40.0);
+        assert_eq!(horizontal_90.target_height, 28.0);
+
+        let (horizontal_270, adjusted_270) = library
+            .get_with_rotation(ComponentType::VoltageSourceSin, 270)
+            .expect("Horizontal symbol should exist for 270 degree rotation");
+        assert_eq!(adjusted_270, 180);
+        assert_eq!(horizontal_270.target_width, 40.0);
+        assert_eq!(horizontal_270.target_height, 28.0);
+    }
+
+    #[test]
+    fn test_added_symbol_variants_have_expected_default_pins() {
+        let library = SymbolLibrary::load_embedded().expect("Should load library");
+
+        for source in [
+            ComponentType::VoltageSourceSin,
+            ComponentType::VoltageSourcePwl,
+            ComponentType::CurrentSourceSin,
+            ComponentType::CurrentSourceNoise,
+        ] {
+            let symbol = library
+                .get(source)
+                .expect("Source symbol should be available");
+            assert_eq!(
+                symbol.pins.len(),
+                2,
+                "Source {:?} should have two default pins",
+                source
+            );
+            assert_eq!(symbol.pins[0].name, "+");
+            assert_eq!(symbol.pins[1].name, "-");
+        }
+
+        for transistor in [ComponentType::Njfet, ComponentType::Pjfet] {
+            let symbol = library
+                .get(transistor)
+                .expect("JFET symbol should be available");
+            assert_eq!(symbol.pins.len(), 3);
+            assert_eq!(symbol.pins[0].name, "G");
+            assert_eq!(symbol.pins[1].name, "D");
+            assert_eq!(symbol.pins[2].name, "S");
         }
     }
 }
