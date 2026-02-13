@@ -1954,17 +1954,16 @@ fn render_measurements_panel(ui: &mut Ui, viewer_state: &mut WaveformViewerState
     };
 
     let cursor_range = measurement_cursor_range(viewer_state);
+    let traces = &viewer_state.traces;
+    let measurement_cache = &mut viewer_state.measurement_cache;
+    measurement_cache.truncate_to_trace_count(traces.len());
     for (idx, trace_idx) in trace_indices.iter().enumerate() {
-        if let Some(trace) = viewer_state.traces.get(*trace_idx) {
+        if let Some(trace) = traces.get(*trace_idx) {
             if idx > 0 {
                 ui.add_space(6.0);
             }
-            let measurements = if let Some((start, end)) = cursor_range {
-                measurements::calculate_measurements_in_range(trace, start, end)
-            } else {
-                measurements::calculate_all_measurements(trace)
-            };
-            render_trace_measurements(ui, trace, &measurements, y_unit, x_unit);
+            let measurements = measurement_cache.get_or_compute(*trace_idx, trace, cursor_range);
+            render_trace_measurements(ui, trace, measurements, y_unit, x_unit);
         }
     }
 }
@@ -2619,4 +2618,3 @@ mod tests {
         assert!(placements[0].rect.min.y > layout.plot.min.y + 2.0);
     }
 }
-

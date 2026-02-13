@@ -13,6 +13,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::measurements::MeasurementCache;
+
 // =============================================================================
 // View Transform
 // =============================================================================
@@ -1019,6 +1021,9 @@ pub struct WaveformViewerState {
     /// Optional export status message shown in the export panel.
     #[serde(skip)]
     pub export_status: Option<String>,
+    /// Cached per-trace measurement results used by the measurements panel.
+    #[serde(skip)]
+    pub measurement_cache: MeasurementCache,
 }
 
 /// Scope for waveform measurement display.
@@ -1104,6 +1109,7 @@ impl WaveformViewerState {
     /// This updates the traces and recalculates data bounds.
     /// Does NOT auto-fit - call fit_to_data_bounds() explicitly.
     pub fn load_from_simulation(&mut self, waveforms: &[crate::state::WaveformData]) {
+        self.measurement_cache.clear();
         self.traces = waveforms
             .iter()
             .enumerate()
