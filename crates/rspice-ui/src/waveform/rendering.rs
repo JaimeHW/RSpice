@@ -1556,7 +1556,7 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
     ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
     ui.spacing_mut().interact_size.y = LEGEND_ROW_HEIGHT;
 
-    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+    ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new("Traces")
                 .size(11.0)
@@ -1572,8 +1572,18 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
         }
     });
 
-    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-        ui.label(egui::RichText::new("Sort").size(9.0).color(Color32::from_rgb(120, 125, 135)));
+    ui.horizontal(|ui| {
+        ui.allocate_ui_with_layout(
+            Vec2::new(28.0, LEGEND_ROW_HEIGHT),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.label(
+                    egui::RichText::new("Sort")
+                        .size(9.0)
+                        .color(Color32::from_rgb(120, 125, 135)),
+                );
+            },
+        );
         let combo_width = ui.available_width().clamp(60.0, 140.0);
         egui::ComboBox::from_id_salt("waveform_legend_sort")
             .selected_text(match viewer_state.legend_state.sort_by {
