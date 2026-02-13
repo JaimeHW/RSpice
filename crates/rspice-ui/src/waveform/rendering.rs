@@ -1844,13 +1844,11 @@ fn measurement_row(ui: &mut Ui, label: &str, value: &str) {
                 .size(9.0)
                 .color(Color32::from_rgb(120, 125, 135)),
         );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(
-                egui::RichText::new(value)
-                    .size(10.0)
-                    .color(Color32::from_rgb(200, 205, 215)),
-            );
-        });
+        ui.label(
+            egui::RichText::new(value)
+                .size(10.0)
+                .color(Color32::from_rgb(200, 205, 215)),
+        );
     });
 }
 
