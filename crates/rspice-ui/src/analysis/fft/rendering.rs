@@ -143,7 +143,8 @@ const HEADER_ROW_HEIGHT: f32 = 34.0;
 const HEADER_TOP_HEIGHT: f32 = HEADER_ROW_HEIGHT;
 const HEADER_MAIN_HEIGHT: f32 = HEADER_ROW_HEIGHT;
 const INFO_WIDTH: f32 = 150.0;
-const CHART_SIDE_PADDING: f32 = 8.0;
+const CHART_LEFT_PADDING: f32 = 8.0;
+const CHART_RIGHT_PADDING: f32 = 0.0;
 const CHART_TOP_GAP: f32 = 0.0;
 const CHART_BOTTOM_PADDING: f32 = 8.0;
 const HEADER_CONTROL_HEIGHT: f32 = 24.0;
@@ -152,7 +153,7 @@ const HEADER_DROPDOWN_MAX_WIDTH: f32 = 220.0;
 const HEADER_DROPDOWN_TEXT_PADDING: f32 = 28.0;
 const INFO_PANEL_PADDING: f32 = 8.0;
 const AXIS_LEFT_GUTTER: f32 = 52.0;
-const AXIS_RIGHT_GUTTER: f32 = 4.0;
+const AXIS_RIGHT_GUTTER: f32 = 0.0;
 const AXIS_TOP_GUTTER: f32 = 2.0;
 const AXIS_BOTTOM_GUTTER: f32 = 30.0;
 const AXIS_TITLE_MIN_LEFT_INSET: f32 = 2.0;
@@ -190,11 +191,11 @@ fn calculate_layout(available: Rect) -> FftLayout {
 
     let spectrum = Rect::from_min_max(
         Pos2::new(
-            total.min.x + CHART_SIDE_PADDING,
+            total.min.x + CHART_LEFT_PADDING,
             content_top + CHART_TOP_GAP,
         ),
         Pos2::new(
-            info.min.x - CHART_SIDE_PADDING,
+            info.min.x - CHART_RIGHT_PADDING,
             total.max.y - CHART_BOTTOM_PADDING,
         ),
     );
@@ -2188,6 +2189,13 @@ mod tests {
         assert!((content.center().x - inner_lane.center().x).abs() < f32::EPSILON);
         assert!((content.min.x - inner_lane.min.x).abs() < f32::EPSILON);
         assert!((content.max.x - inner_lane.max.x).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_layout_spectrum_and_info_panel_are_edge_aligned_without_gap() {
+        let total = Rect::from_min_size(Pos2::ZERO, Vec2::new(980.0, 620.0));
+        let layout = calculate_layout(total);
+        assert!((layout.spectrum.max.x - layout.info.min.x).abs() < f32::EPSILON);
     }
 
     #[test]
