@@ -1606,19 +1606,24 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
         ui.label(egui::RichText::new("Find").size(9.0).color(Color32::from_rgb(120, 125, 135)));
         let find_layout =
             calculate_legend_find_row_layout(ui.available_width(), ui.spacing().item_spacing.x);
-        let search_response = ui.add_sized(
-            Vec2::new(find_layout.edit_width, LEGEND_ROW_HEIGHT),
+        let edit_rect = ui
+            .allocate_space(Vec2::new(find_layout.edit_width, LEGEND_ROW_HEIGHT))
+            .1;
+        ui.put(
+            edit_rect,
             egui::TextEdit::singleline(&mut viewer_state.legend_state.filter).hint_text("trace"),
         );
         if find_layout.show_clear {
-            let clear_height = search_response.rect.height().max(1.0);
-            if ui
-                .add_sized(
-                    Vec2::new(LEGEND_TRACE_SOLO_WIDTH, clear_height),
-                    egui::Button::new("x"),
-                )
-                .clicked()
-            {
+            let clear_rect = ui
+                .allocate_space(Vec2::new(LEGEND_TRACE_SOLO_WIDTH, edit_rect.height()))
+                .1;
+            let clear_clicked = ui
+                .scope(|ui| {
+                    ui.spacing_mut().button_padding = Vec2::ZERO;
+                    ui.put(clear_rect, egui::Button::new("x")).clicked()
+                })
+                .inner;
+            if clear_clicked {
                 viewer_state.legend_state.clear_filter();
             }
             ui.add_space(LEGEND_FIND_RIGHT_GUARD);
