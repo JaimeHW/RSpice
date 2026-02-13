@@ -1669,13 +1669,11 @@ fn render_legend(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Waveform
     // Background
     painter.rect_filled(layout.legend, Rounding::ZERO, Color32::from_rgb(30, 33, 40));
 
-    // Border on left
-    painter.line_segment(
-        [
-            Pos2::new(layout.legend.min.x, layout.legend.min.y),
-            Pos2::new(layout.legend.min.x, layout.legend.max.y),
-        ],
-        Stroke::new(1.0, Color32::from_rgb(50, 52, 58)),
+    // Match plot chrome so panel/graph top and edges align visually.
+    painter.rect_stroke(
+        layout.legend,
+        Rounding::ZERO,
+        Stroke::new(1.0, plot_border_color()),
     );
 
     // Create UI area for legend items
