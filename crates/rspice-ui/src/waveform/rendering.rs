@@ -82,6 +82,7 @@ const LEGEND_FIND_EDIT_MIN_WIDTH: f32 = 40.0;
 const LEGEND_FIND_RIGHT_GUARD: f32 = 6.0;
 const LEGEND_INSET_X: f32 = 4.0;
 const LEGEND_INSET_Y: f32 = 8.0;
+const LEGEND_SOLO_SYMBOL_SIZE: f32 = 11.0;
 
 // Grid line colors (using runtime values since Color32 constructors aren't const)
 fn grid_major_color() -> Color32 {
@@ -1534,6 +1535,48 @@ fn truncate_legend_trace_name(painter: &Painter, text: &str, font: FontId, max_w
     format!("{prefix}{ELLIPSIS}")
 }
 
+fn active_solo_trace_index(traces: &[TraceData]) -> Option<usize> {
+    let mut solo: Option<usize> = None;
+    for (idx, trace) in traces.iter().enumerate() {
+        if !trace.visible {
+            continue;
+        }
+        if solo.is_some() {
+            return None;
+        }
+        solo = Some(idx);
+    }
+    solo
+}
+
+fn solo_symbol(is_active: bool) -> &'static str {
+    if is_active {
+        "◉"
+    } else {
+        "◎"
+    }
+}
+
+fn render_solo_control(ui: &mut Ui, rect: Rect, is_active: bool) -> Response {
+    let symbol_color = if is_active {
+        Color32::from_rgb(210, 220, 255)
+    } else {
+        Color32::from_rgb(155, 165, 185)
+    };
+    let text = egui::RichText::new(solo_symbol(is_active))
+        .size(LEGEND_SOLO_SYMBOL_SIZE)
+        .color(symbol_color);
+    let response = ui.put(rect, egui::Label::new(text).sense(Sense::click()));
+    if response.hovered() || is_active {
+        ui.painter().rect_stroke(
+            rect.shrink(1.0),
+            Rounding::same(3.0),
+            Stroke::new(1.0, Color32::from_rgb(70, 78, 96)),
+        );
+    }
+    response
+}
+
 fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState) {
     ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
     ui.spacing_mut().interact_size.y = LEGEND_ROW_HEIGHT;
@@ -1612,6 +1655,7 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
     let mut visibility_updates: Vec<(usize, bool)> = Vec::new();
     let mut solo_trace_idx: Option<usize> = None;
     let mut selected_trace_name: Option<String> = None;
+    let solo_active_idx = active_solo_trace_index(&viewer_state.traces);
     let trace_rows_width = ui.max_rect().width().max(0.0);
     let trace_rows_left = ui.max_rect().min.x;
     let item_spacing_x = ui.spacing().item_spacing.x;
@@ -1673,8 +1717,8 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
                 Pos2::new(left, row_rect.min.y),
                 Vec2::new(LEGEND_TRACE_SOLO_WIDTH, LEGEND_ROW_HEIGHT),
             );
-            if ui
-                .put(solo_rect, egui::Button::new("."))
+            let is_active = solo_active_idx == Some(item.index);
+            if render_solo_control(ui, solo_rect, is_active)
                 .on_hover_text("Solo trace")
                 .clicked()
             {
@@ -2342,6 +2386,40 @@ mod tests {
         assert!(LEGEND_WIDTH_MAX >= LEGEND_WIDTH_MIN);
         assert!(LEGEND_WIDTH_FRACTION > 0.0);
         assert!((LEGEND_TRACE_SOLO_WIDTH - LEGEND_TRACE_CONTROL_WIDTH).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_active_solo_trace_index_detects_single_visible_trace() {
+        let mut traces = vec![
+            TraceData::new("A", vec![0.0], vec![0.0]),
+            TraceData::new("B", vec![0.0], vec![0.0]),
+            TraceData::new("C", vec![0.0], vec![0.0]),
+        ];
+        traces[0].visible = false;
+        traces[1].visible = true;
+        traces[2].visible = false;
+        assert_eq!(active_solo_trace_index(&traces), Some(1));
+    }
+
+    #[test]
+    fn test_active_solo_trace_index_returns_none_for_ambiguous_visibility() {
+        let mut traces = vec![
+            TraceData::new("A", vec![0.0], vec![0.0]),
+            TraceData::new("B", vec![0.0], vec![0.0]),
+        ];
+        traces[0].visible = true;
+        traces[1].visible = true;
+        assert_eq!(active_solo_trace_index(&traces), None);
+
+        traces[0].visible = false;
+        traces[1].visible = false;
+        assert_eq!(active_solo_trace_index(&traces), None);
+    }
+
+    #[test]
+    fn test_solo_symbol_variants() {
+        assert_eq!(solo_symbol(false), "◎");
+        assert_eq!(solo_symbol(true), "◉");
     }
 
     #[test]
