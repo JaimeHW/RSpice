@@ -1587,15 +1587,20 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
         );
         if find_layout.show_clear {
             let clear_height = search_response.rect.height().max(1.0);
-            if ui
-                .add_sized(
-                    Vec2::new(LEGEND_TRACE_SOLO_WIDTH, clear_height),
-                    egui::Button::new("x"),
-                )
-                .clicked()
-            {
-                viewer_state.legend_state.clear_filter();
-            }
+            ui.scope(|ui| {
+                ui.spacing_mut().button_padding.y = 0.0;
+                ui.spacing_mut().button_padding.x = 4.0;
+                if ui
+                    .add_sized(
+                        Vec2::new(LEGEND_TRACE_SOLO_WIDTH, clear_height),
+                        egui::Button::new("x"),
+                    )
+                    .clicked()
+                {
+                    viewer_state.legend_state.clear_filter();
+                }
+            });
+            ui.add_space(LEGEND_FIND_RIGHT_GUARD);
         }
     });
     ui.add_space(4.0);
@@ -1619,85 +1624,94 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
 
         let row_width = ui.available_width().max(0.0);
         let row_rect = ui.allocate_space(Vec2::new(row_width, LEGEND_ROW_HEIGHT)).1;
-        ui.allocate_new_ui(UiBuilder::new().max_rect(row_rect), |ui| {
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            let row_layout =
-                calculate_legend_trace_row_layout(ui.available_width(), ui.spacing().item_spacing.x);
-            if row_layout.show_swatch {
-                let swatch_rect = ui
-                    .allocate_space(Vec2::new(LEGEND_TRACE_SWATCH_WIDTH, LEGEND_ROW_HEIGHT))
-                    .1;
-                if item.visible {
-                    ui.painter()
-                        .rect_filled(swatch_rect, Rounding::same(2.0), color);
-                } else {
-                    ui.painter().rect_stroke(
-                        swatch_rect,
-                        Rounding::same(2.0),
-                        Stroke::new(1.0, color),
-                    );
-                }
-            }
+        let item_spacing_x = ui.spacing().item_spacing.x;
+        let row_layout = calculate_legend_trace_row_layout(row_rect.width(), item_spacing_x);
+        let mut left = row_rect.min.x;
+        let mut right = row_rect.max.x;
 
-            let mut visible = item.visible;
-            if ui
-                .add_sized(
-                    Vec2::new(LEGEND_TRACE_CONTROL_WIDTH, LEGEND_ROW_HEIGHT),
-                    egui::Checkbox::without_text(&mut visible),
-                )
-                .changed()
-            {
-                visibility_updates.push((item.index, visible));
-            }
-
-            let text_color = if item.visible {
-                Color32::from_rgb(200, 205, 215)
-            } else {
-                Color32::from_rgb(110, 115, 125)
-            };
-            let display_name = truncate_legend_trace_name(
-                ui.painter(),
-                &item.name,
-                FontId::proportional(10.0),
-                (row_layout.name_width - LEGEND_TEXT_TRUNCATION_PADDING).max(0.0),
+        if row_layout.show_solo {
+            let solo_rect = Rect::from_min_size(
+                Pos2::new(right - LEGEND_TRACE_SOLO_WIDTH, row_rect.min.y),
+                Vec2::new(LEGEND_TRACE_SOLO_WIDTH, LEGEND_ROW_HEIGHT),
             );
-            let label = egui::RichText::new(&display_name).size(10.0).color(text_color);
-            let label_response = ui
-                .allocate_ui_with_layout(
-                    Vec2::new(row_layout.name_width, LEGEND_ROW_HEIGHT),
-                    egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| ui.selectable_label(selected, label),
-                )
-                .inner;
-            let label_response = if display_name != item.name {
-                label_response.on_hover_text(&item.name)
-            } else {
-                label_response
-            };
-            if label_response.clicked() {
+            if ui
+                .put(solo_rect, egui::Button::new("S"))
+                .on_hover_text("Solo trace")
+                .clicked()
+            {
+                solo_trace_idx = Some(item.index);
                 selected_trace_name = Some(item.name.clone());
             }
+            right = solo_rect.min.x - item_spacing_x;
+        }
 
-            let remaining_name_slot = (row_layout.name_width - label_response.rect.width()).max(0.0);
-            if remaining_name_slot > 0.0 {
-                ui.add_space(remaining_name_slot);
+        if row_layout.show_swatch {
+            let swatch_rect = Rect::from_center_size(
+                Pos2::new(
+                    left + (LEGEND_TRACE_SWATCH_WIDTH * 0.5),
+                    row_rect.center().y,
+                ),
+                Vec2::new(LEGEND_TRACE_SWATCH_WIDTH, LEGEND_TRACE_SWATCH_WIDTH),
+            );
+            if item.visible {
+                ui.painter()
+                    .rect_filled(swatch_rect, Rounding::same(2.0), color);
+            } else {
+                ui.painter().rect_stroke(
+                    swatch_rect,
+                    Rounding::same(2.0),
+                    Stroke::new(1.0, color),
+                );
             }
+            left += LEGEND_TRACE_SWATCH_WIDTH + item_spacing_x;
+        }
 
-            if row_layout.show_solo {
-                if ui
-                    .add_sized(
-                        Vec2::new(LEGEND_TRACE_SOLO_WIDTH, LEGEND_ROW_HEIGHT),
-                        egui::Button::new("S"),
-                    )
-                    .on_hover_text("Solo trace")
-                    .clicked()
-                {
-                    solo_trace_idx = Some(item.index);
-                    selected_trace_name = Some(item.name.clone());
-                }
-            }
-            });
-        });
+        let checkbox_rect = Rect::from_min_size(
+            Pos2::new(left, row_rect.min.y),
+            Vec2::new(LEGEND_TRACE_CONTROL_WIDTH, LEGEND_ROW_HEIGHT),
+        );
+        let mut visible = item.visible;
+        if ui
+            .put(checkbox_rect, egui::Checkbox::without_text(&mut visible))
+            .changed()
+        {
+            visibility_updates.push((item.index, visible));
+        }
+        left += LEGEND_TRACE_CONTROL_WIDTH + item_spacing_x;
+
+        let name_slot_width = (right - left).max(LEGEND_TRACE_LABEL_MIN_WIDTH);
+        let name_rect = Rect::from_min_size(
+            Pos2::new(left, row_rect.min.y),
+            Vec2::new(name_slot_width, LEGEND_ROW_HEIGHT),
+        );
+        let text_color = if item.visible {
+            Color32::from_rgb(200, 205, 215)
+        } else {
+            Color32::from_rgb(110, 115, 125)
+        };
+        let display_name = truncate_legend_trace_name(
+            ui.painter(),
+            &item.name,
+            FontId::proportional(10.0),
+            (name_slot_width - LEGEND_TEXT_TRUNCATION_PADDING).max(0.0),
+        );
+        let label = egui::RichText::new(&display_name).size(10.0).color(text_color);
+        let label_response = ui
+            .allocate_new_ui(UiBuilder::new().max_rect(name_rect), |ui| {
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.selectable_label(selected, label)
+                })
+                .inner
+            })
+            .inner;
+        let label_response = if display_name != item.name {
+            label_response.on_hover_text(&item.name)
+        } else {
+            label_response
+        };
+        if label_response.clicked() {
+            selected_trace_name = Some(item.name.clone());
+        }
     }
 
     for (idx, visible) in visibility_updates {
