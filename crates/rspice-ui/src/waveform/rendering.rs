@@ -73,7 +73,7 @@ const LEGEND_SECTION_SPACING: f32 = 8.0;
 const LEGEND_ROW_HEIGHT: f32 = 18.0;
 const LEGEND_TRACE_SWATCH_WIDTH: f32 = 10.0;
 const LEGEND_TRACE_CONTROL_WIDTH: f32 = 22.0;
-const LEGEND_TRACE_SOLO_WIDTH: f32 = 20.0;
+const LEGEND_TRACE_SOLO_WIDTH: f32 = LEGEND_TRACE_CONTROL_WIDTH;
 const LEGEND_TRACE_LABEL_MIN_WIDTH: f32 = 28.0;
 const LEGEND_TRACE_SHOW_SWATCH_MIN_WIDTH: f32 = 96.0;
 const LEGEND_TRACE_SHOW_SOLO_MIN_WIDTH: f32 = 132.0;
@@ -1633,23 +1633,6 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
         ui.allocate_rect(row_rect, Sense::hover());
         let row_layout = calculate_legend_trace_row_layout(trace_rows_width, item_spacing_x);
         let mut left = row_rect.min.x;
-        let mut right = row_rect.max.x;
-
-        if row_layout.show_solo {
-            let solo_rect = Rect::from_min_size(
-                Pos2::new(right - LEGEND_TRACE_SOLO_WIDTH, row_rect.min.y),
-                Vec2::new(LEGEND_TRACE_SOLO_WIDTH, LEGEND_ROW_HEIGHT),
-            );
-            if ui
-                .put(solo_rect, egui::Button::new("S"))
-                .on_hover_text("Solo trace")
-                .clicked()
-            {
-                solo_trace_idx = Some(item.index);
-                selected_trace_name = Some(item.name.clone());
-            }
-            right = solo_rect.min.x - item_spacing_x;
-        }
 
         if row_layout.show_swatch {
             let swatch_rect = Rect::from_center_size(
@@ -1685,7 +1668,23 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
         }
         left += LEGEND_TRACE_CONTROL_WIDTH + item_spacing_x;
 
-        let name_slot_width = (right - left).max(LEGEND_TRACE_LABEL_MIN_WIDTH);
+        if row_layout.show_solo {
+            let solo_rect = Rect::from_min_size(
+                Pos2::new(left, row_rect.min.y),
+                Vec2::new(LEGEND_TRACE_SOLO_WIDTH, LEGEND_ROW_HEIGHT),
+            );
+            if ui
+                .put(solo_rect, egui::Button::new("."))
+                .on_hover_text("Solo trace")
+                .clicked()
+            {
+                solo_trace_idx = Some(item.index);
+                selected_trace_name = Some(item.name.clone());
+            }
+            left += LEGEND_TRACE_SOLO_WIDTH + item_spacing_x;
+        }
+
+        let name_slot_width = (row_rect.max.x - left).max(LEGEND_TRACE_LABEL_MIN_WIDTH);
         let name_rect = Rect::from_min_size(
             Pos2::new(left, row_rect.min.y),
             Vec2::new(name_slot_width, LEGEND_ROW_HEIGHT),
@@ -2342,6 +2341,7 @@ mod tests {
         assert!(LEGEND_WIDTH_MIN > 0.0);
         assert!(LEGEND_WIDTH_MAX >= LEGEND_WIDTH_MIN);
         assert!(LEGEND_WIDTH_FRACTION > 0.0);
+        assert!((LEGEND_TRACE_SOLO_WIDTH - LEGEND_TRACE_CONTROL_WIDTH).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -2378,8 +2378,8 @@ mod tests {
         assert!(layout.show_swatch);
         assert!(layout.show_solo);
         assert!(layout.name_width >= LEGEND_TRACE_LABEL_MIN_WIDTH);
-        // 180 - (swatch+spacing=14) - (checkbox+spacing=26) - (solo+spacing=24) = 116
-        assert!((layout.name_width - 116.0).abs() < f32::EPSILON);
+        // 180 - (swatch+spacing=14) - (checkbox+spacing=26) - (solo+spacing=26) = 114
+        assert!((layout.name_width - 114.0).abs() < f32::EPSILON);
     }
 
     #[test]
