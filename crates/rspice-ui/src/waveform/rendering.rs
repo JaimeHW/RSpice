@@ -80,6 +80,8 @@ const LEGEND_TRACE_SHOW_SWATCH_MIN_WIDTH: f32 = 96.0;
 const LEGEND_TRACE_SHOW_SOLO_MIN_WIDTH: f32 = 132.0;
 const LEGEND_TEXT_TRUNCATION_PADDING: f32 = 8.0;
 const LEGEND_FIND_EDIT_MIN_WIDTH: f32 = 40.0;
+const LEGEND_INSET_X: f32 = 4.0;
+const LEGEND_INSET_Y: f32 = 8.0;
 
 // Grid line colors (using runtime values since Color32 constructors aren't const)
 fn grid_major_color() -> Color32 {
@@ -1411,13 +1413,17 @@ fn render_legend(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Waveform
     );
 
     // Create UI area for legend items
-    let legend_inner = layout.legend.shrink(8.0);
+    let legend_inner = legend_inner_rect(layout.legend);
     ui.allocate_new_ui(UiBuilder::new().max_rect(legend_inner), |ui| {
-        ui.set_clip_rect(legend_inner);
+        ui.set_min_width(legend_inner.width());
         ui.set_max_width(legend_inner.width());
         egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
             .id_salt("waveform_legend_scroll")
             .show(ui, |ui| {
+                let content_width = ui.available_width().max(0.0);
+                ui.set_min_width(content_width);
+                ui.set_max_width(content_width);
                 render_trace_list_section(ui, viewer_state);
                 if viewer_state.show_measurements {
                     ui.add_space(LEGEND_SECTION_SPACING);
@@ -1429,6 +1435,10 @@ fn render_legend(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Waveform
                 }
             });
     });
+}
+
+fn legend_inner_rect(legend_rect: Rect) -> Rect {
+    legend_rect.shrink2(Vec2::new(LEGEND_INSET_X, LEGEND_INSET_Y))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2334,6 +2344,16 @@ mod tests {
 
         // Width should increase for wider layouts (up to max clamp).
         assert!(wide_legend_width >= narrow_legend_width);
+    }
+
+    #[test]
+    fn test_legend_inner_rect_uses_tighter_horizontal_inset() {
+        let legend = Rect::from_min_size(Pos2::new(10.0, 20.0), Vec2::new(200.0, 300.0));
+        let inner = legend_inner_rect(legend);
+        assert!((inner.min.x - (legend.min.x + LEGEND_INSET_X)).abs() < f32::EPSILON);
+        assert!((inner.max.x - (legend.max.x - LEGEND_INSET_X)).abs() < f32::EPSILON);
+        assert!((inner.min.y - (legend.min.y + LEGEND_INSET_Y)).abs() < f32::EPSILON);
+        assert!((inner.max.y - (legend.max.y - LEGEND_INSET_Y)).abs() < f32::EPSILON);
     }
 
     #[test]
