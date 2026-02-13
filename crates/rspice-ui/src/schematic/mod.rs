@@ -17,6 +17,7 @@
 
 pub mod export;
 pub mod op_annotation;
+mod source_labels;
 pub mod symbols;
 pub mod toolbar;
 pub mod view;

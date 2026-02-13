@@ -1310,11 +1310,12 @@ fn draw_component_labels(
     }
 
     // Draw component value
-    if !component.value.is_empty() {
+    let value_text = super::source_labels::component_value_label(component);
+    if !value_text.is_empty() {
         painter.text(
             layout.value_pos,
             layout.value_align,
-            &component.value,
+            value_text.as_ref(),
             value_font,
             state.theme.text_secondary,
         );
