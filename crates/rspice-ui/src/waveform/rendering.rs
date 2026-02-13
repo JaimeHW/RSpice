@@ -79,8 +79,8 @@ const LEGEND_TRACE_SHOW_SWATCH_MIN_WIDTH: f32 = 96.0;
 const LEGEND_TRACE_SHOW_SOLO_MIN_WIDTH: f32 = 132.0;
 const LEGEND_TEXT_TRUNCATION_PADDING: f32 = 8.0;
 const LEGEND_FIND_EDIT_MIN_WIDTH: f32 = 40.0;
-const LEGEND_FIND_RIGHT_GUARD: f32 = 2.0;
-const LEGEND_INSET_X: f32 = 2.0;
+const LEGEND_FIND_RIGHT_GUARD: f32 = 8.0;
+const LEGEND_INSET_X: f32 = 4.0;
 const LEGEND_INSET_Y: f32 = 8.0;
 
 // Grid line colors (using runtime values since Color32 constructors aren't const)
@@ -1446,7 +1446,6 @@ struct LegendTraceRowLayout {
     show_swatch: bool,
     show_solo: bool,
     name_width: f32,
-    spacer_width: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1472,13 +1471,11 @@ fn calculate_legend_trace_row_layout(row_width: f32, item_spacing_x: f32) -> Leg
     };
     let fixed_width = swatch_width + LEGEND_TRACE_CONTROL_WIDTH + item_spacing_x + solo_width;
     let name_width = (available - fixed_width).max(LEGEND_TRACE_LABEL_MIN_WIDTH);
-    let spacer_width = 0.0;
 
     LegendTraceRowLayout {
         show_swatch,
         show_solo,
         name_width,
-        spacer_width,
     }
 }
 
@@ -1584,14 +1581,15 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
         ui.label(egui::RichText::new("Find").size(9.0).color(Color32::from_rgb(120, 125, 135)));
         let find_layout =
             calculate_legend_find_row_layout(ui.available_width(), ui.spacing().item_spacing.x);
-        ui.add_sized(
+        let search_response = ui.add_sized(
             Vec2::new(find_layout.edit_width, LEGEND_ROW_HEIGHT),
             egui::TextEdit::singleline(&mut viewer_state.legend_state.filter).hint_text("trace"),
         );
         if find_layout.show_clear {
+            let clear_height = search_response.rect.height().max(1.0);
             if ui
                 .add_sized(
-                    Vec2::new(LEGEND_TRACE_SOLO_WIDTH, LEGEND_ROW_HEIGHT),
+                    Vec2::new(LEGEND_TRACE_SOLO_WIDTH, clear_height),
                     egui::Button::new("x"),
                 )
                 .clicked()
@@ -1619,11 +1617,10 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
             .as_deref()
             .is_some_and(|name| name == item.name);
 
-        let row_width = ui.available_width();
-        ui.allocate_ui_with_layout(
-            Vec2::new(row_width, LEGEND_ROW_HEIGHT),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
+        let row_width = ui.available_width().max(0.0);
+        let row_rect = ui.allocate_space(Vec2::new(row_width, LEGEND_ROW_HEIGHT)).1;
+        ui.allocate_new_ui(UiBuilder::new().max_rect(row_rect), |ui| {
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
             let row_layout =
                 calculate_legend_trace_row_layout(ui.available_width(), ui.spacing().item_spacing.x);
             if row_layout.show_swatch {
@@ -1681,8 +1678,9 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
                 selected_trace_name = Some(item.name.clone());
             }
 
-            if row_layout.spacer_width > 0.0 {
-                ui.add_space(row_layout.spacer_width);
+            let remaining_name_slot = (row_layout.name_width - label_response.rect.width()).max(0.0);
+            if remaining_name_slot > 0.0 {
+                ui.add_space(remaining_name_slot);
             }
 
             if row_layout.show_solo {
@@ -1698,8 +1696,8 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
                     selected_trace_name = Some(item.name.clone());
                 }
             }
-            },
-        );
+            });
+        });
     }
 
     for (idx, visible) in visibility_updates {
@@ -2360,7 +2358,6 @@ mod tests {
         assert!(layout.show_swatch);
         assert!(layout.show_solo);
         assert!(layout.name_width >= LEGEND_TRACE_LABEL_MIN_WIDTH);
-        assert!((layout.spacer_width - 0.0).abs() < f32::EPSILON);
         // 180 - (swatch+spacing=14) - (checkbox+spacing=26) - (solo+spacing=24) = 116
         assert!((layout.name_width - 116.0).abs() < f32::EPSILON);
     }
