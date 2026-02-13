@@ -79,7 +79,7 @@ const LEGEND_TRACE_SHOW_SWATCH_MIN_WIDTH: f32 = 96.0;
 const LEGEND_TRACE_SHOW_SOLO_MIN_WIDTH: f32 = 132.0;
 const LEGEND_TEXT_TRUNCATION_PADDING: f32 = 8.0;
 const LEGEND_FIND_EDIT_MIN_WIDTH: f32 = 40.0;
-const LEGEND_FIND_RIGHT_GUARD: f32 = 8.0;
+const LEGEND_FIND_RIGHT_GUARD: f32 = 6.0;
 const LEGEND_INSET_X: f32 = 4.0;
 const LEGEND_INSET_Y: f32 = 8.0;
 
@@ -1454,6 +1454,13 @@ struct LegendFindRowLayout {
     edit_width: f32,
 }
 
+fn legend_row_rect(row_left: f32, row_top: f32, row_width: f32) -> Rect {
+    Rect::from_min_size(
+        Pos2::new(row_left, row_top),
+        Vec2::new(row_width.max(0.0), LEGEND_ROW_HEIGHT),
+    )
+}
+
 fn calculate_legend_trace_row_layout(row_width: f32, item_spacing_x: f32) -> LegendTraceRowLayout {
     let available = row_width.max(0.0);
     let show_swatch = available >= LEGEND_TRACE_SHOW_SWATCH_MIN_WIDTH;
@@ -1587,19 +1594,15 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
         );
         if find_layout.show_clear {
             let clear_height = search_response.rect.height().max(1.0);
-            ui.scope(|ui| {
-                ui.spacing_mut().button_padding.y = 0.0;
-                ui.spacing_mut().button_padding.x = 4.0;
-                if ui
-                    .add_sized(
-                        Vec2::new(LEGEND_TRACE_SOLO_WIDTH, clear_height),
-                        egui::Button::new("x"),
-                    )
-                    .clicked()
-                {
-                    viewer_state.legend_state.clear_filter();
-                }
-            });
+            if ui
+                .add_sized(
+                    Vec2::new(LEGEND_TRACE_SOLO_WIDTH, clear_height),
+                    egui::Button::new("x"),
+                )
+                .clicked()
+            {
+                viewer_state.legend_state.clear_filter();
+            }
             ui.add_space(LEGEND_FIND_RIGHT_GUARD);
         }
     });
@@ -1609,6 +1612,9 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
     let mut visibility_updates: Vec<(usize, bool)> = Vec::new();
     let mut solo_trace_idx: Option<usize> = None;
     let mut selected_trace_name: Option<String> = None;
+    let trace_rows_width = ui.max_rect().width().max(0.0);
+    let trace_rows_left = ui.max_rect().min.x;
+    let item_spacing_x = ui.spacing().item_spacing.x;
 
     for item in &items {
         let color = Color32::from_rgba_unmultiplied(
@@ -1622,10 +1628,10 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
             .as_deref()
             .is_some_and(|name| name == item.name);
 
-        let row_width = ui.available_width().max(0.0);
-        let row_rect = ui.allocate_space(Vec2::new(row_width, LEGEND_ROW_HEIGHT)).1;
-        let item_spacing_x = ui.spacing().item_spacing.x;
-        let row_layout = calculate_legend_trace_row_layout(row_rect.width(), item_spacing_x);
+        let row_top = ui.cursor().min.y;
+        let row_rect = legend_row_rect(trace_rows_left, row_top, trace_rows_width);
+        ui.allocate_rect(row_rect, Sense::hover());
+        let row_layout = calculate_legend_trace_row_layout(trace_rows_width, item_spacing_x);
         let mut left = row_rect.min.x;
         let mut right = row_rect.max.x;
 
@@ -2401,6 +2407,15 @@ mod tests {
             .abs()
                 < f32::EPSILON
         );
+    }
+
+    #[test]
+    fn test_legend_row_rect_is_exact_width_and_height() {
+        let rect = legend_row_rect(12.0, 24.0, 140.0);
+        assert!((rect.min.x - 12.0).abs() < f32::EPSILON);
+        assert!((rect.min.y - 24.0).abs() < f32::EPSILON);
+        assert!((rect.width() - 140.0).abs() < f32::EPSILON);
+        assert!((rect.height() - LEGEND_ROW_HEIGHT).abs() < f32::EPSILON);
     }
 
     #[test]
