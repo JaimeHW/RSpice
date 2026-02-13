@@ -1842,7 +1842,7 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
     );
     ui.horizontal(|ui| {
         render_legend_control_label(ui, "Show");
-        if ui.small_button("Show all").clicked() {
+        if ui.small_button("All").clicked() {
             legend::show_all_traces(&mut viewer_state.traces);
         }
         if ui.small_button("Clear").clicked() {
