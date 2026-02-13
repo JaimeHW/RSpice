@@ -1556,15 +1556,14 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
     ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
     ui.spacing_mut().interact_size.y = LEGEND_ROW_HEIGHT;
 
-    ui.label(
-        egui::RichText::new("Traces")
-            .size(11.0)
-            .strong()
-            .color(Color32::from_rgb(160, 165, 175)),
-    );
-    ui.add_space(4.0);
-
-    ui.horizontal(|ui| {
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.label(
+            egui::RichText::new("Traces")
+                .size(11.0)
+                .strong()
+                .color(Color32::from_rgb(160, 165, 175)),
+        );
+        ui.add_space(6.0);
         if ui.small_button("All").clicked() {
             legend::show_all_traces(&mut viewer_state.traces);
         }
@@ -1573,7 +1572,7 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
         }
     });
 
-    ui.horizontal(|ui| {
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
         ui.label(egui::RichText::new("Sort").size(9.0).color(Color32::from_rgb(120, 125, 135)));
         let combo_width = ui.available_width().clamp(60.0, 140.0);
         egui::ComboBox::from_id_salt("waveform_legend_sort")
