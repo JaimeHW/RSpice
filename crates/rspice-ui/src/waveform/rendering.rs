@@ -80,6 +80,7 @@ const LEGEND_TRACE_SHOW_SOLO_MIN_WIDTH: f32 = 132.0;
 const LEGEND_TEXT_TRUNCATION_PADDING: f32 = 8.0;
 const LEGEND_FIND_EDIT_MIN_WIDTH: f32 = 40.0;
 const LEGEND_FIND_RIGHT_GUARD: f32 = 6.0;
+const LEGEND_CONTROL_LABEL_WIDTH: f32 = 28.0;
 const LEGEND_INSET_X: f32 = 4.0;
 const LEGEND_INSET_Y: f32 = 8.0;
 const CURSOR_INFO_PANEL_MARGIN: f32 = 8.0;
@@ -1817,6 +1818,20 @@ fn render_solo_control(ui: &mut Ui, rect: Rect, is_active: bool) -> Response {
     ui.put(rect, egui::RadioButton::new(is_active, ""))
 }
 
+fn render_legend_control_label(ui: &mut Ui, text: &str) {
+    ui.allocate_ui_with_layout(
+        Vec2::new(LEGEND_CONTROL_LABEL_WIDTH, LEGEND_ROW_HEIGHT),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.label(
+                egui::RichText::new(text)
+                    .size(9.0)
+                    .color(Color32::from_rgb(120, 125, 135)),
+            );
+        },
+    );
+}
+
 fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState) {
     ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
     ui.spacing_mut().interact_size.y = LEGEND_ROW_HEIGHT;
@@ -1828,6 +1843,7 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
             .color(Color32::from_rgb(160, 165, 175)),
     );
     ui.horizontal(|ui| {
+        render_legend_control_label(ui, "Show");
         if ui.small_button("Show all").clicked() {
             legend::show_all_traces(&mut viewer_state.traces);
         }
@@ -1837,17 +1853,7 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
     });
 
     ui.horizontal(|ui| {
-        ui.allocate_ui_with_layout(
-            Vec2::new(28.0, LEGEND_ROW_HEIGHT),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.label(
-                    egui::RichText::new("Sort")
-                        .size(9.0)
-                        .color(Color32::from_rgb(120, 125, 135)),
-                );
-            },
-        );
+        render_legend_control_label(ui, "Sort");
         let combo_width = ui.available_width().clamp(60.0, 140.0);
         egui::ComboBox::from_id_salt("waveform_legend_sort")
             .selected_text(match viewer_state.legend_state.sort_by {
@@ -1876,7 +1882,7 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
     });
 
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("Find").size(9.0).color(Color32::from_rgb(120, 125, 135)));
+        render_legend_control_label(ui, "Find");
         let find_layout =
             calculate_legend_find_row_layout(ui.available_width(), ui.spacing().item_spacing.x);
         let edit_rect = ui
