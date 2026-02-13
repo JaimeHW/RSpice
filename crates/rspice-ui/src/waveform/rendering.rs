@@ -75,12 +75,12 @@ const LEGEND_TRACE_SWATCH_WIDTH: f32 = 10.0;
 const LEGEND_TRACE_CONTROL_WIDTH: f32 = 22.0;
 const LEGEND_TRACE_SOLO_WIDTH: f32 = 20.0;
 const LEGEND_TRACE_LABEL_MIN_WIDTH: f32 = 28.0;
-const LEGEND_TRACE_LABEL_MAX_WIDTH: f32 = 120.0;
 const LEGEND_TRACE_SHOW_SWATCH_MIN_WIDTH: f32 = 96.0;
 const LEGEND_TRACE_SHOW_SOLO_MIN_WIDTH: f32 = 132.0;
 const LEGEND_TEXT_TRUNCATION_PADDING: f32 = 8.0;
 const LEGEND_FIND_EDIT_MIN_WIDTH: f32 = 40.0;
-const LEGEND_INSET_X: f32 = 4.0;
+const LEGEND_FIND_RIGHT_GUARD: f32 = 2.0;
+const LEGEND_INSET_X: f32 = 2.0;
 const LEGEND_INSET_Y: f32 = 8.0;
 
 // Grid line colors (using runtime values since Color32 constructors aren't const)
@@ -1471,11 +1471,8 @@ fn calculate_legend_trace_row_layout(row_width: f32, item_spacing_x: f32) -> Leg
         0.0
     };
     let fixed_width = swatch_width + LEGEND_TRACE_CONTROL_WIDTH + item_spacing_x + solo_width;
-    let max_name_space = (available - fixed_width).max(LEGEND_TRACE_LABEL_MIN_WIDTH);
-    let name_width = max_name_space
-        .clamp(LEGEND_TRACE_LABEL_MIN_WIDTH, LEGEND_TRACE_LABEL_MAX_WIDTH)
-        .min(max_name_space);
-    let spacer_width = (max_name_space - name_width).max(0.0);
+    let name_width = (available - fixed_width).max(LEGEND_TRACE_LABEL_MIN_WIDTH);
+    let spacer_width = 0.0;
 
     LegendTraceRowLayout {
         show_swatch,
@@ -1490,7 +1487,7 @@ fn calculate_legend_find_row_layout(row_width: f32, item_spacing_x: f32) -> Lege
     let required_for_clear = LEGEND_FIND_EDIT_MIN_WIDTH + LEGEND_TRACE_SOLO_WIDTH + item_spacing_x;
     let show_clear = available >= required_for_clear;
     let edit_width = if show_clear {
-        (available - LEGEND_TRACE_SOLO_WIDTH - item_spacing_x).max(0.0)
+        (available - LEGEND_TRACE_SOLO_WIDTH - item_spacing_x - LEGEND_FIND_RIGHT_GUARD).max(0.0)
     } else {
         available
     };
@@ -1535,6 +1532,7 @@ fn truncate_legend_trace_name(painter: &Painter, text: &str, font: FontId, max_w
 
 fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState) {
     ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
+    ui.spacing_mut().interact_size.y = LEGEND_ROW_HEIGHT;
 
     ui.label(
         egui::RichText::new("Traces")
@@ -2361,9 +2359,10 @@ mod tests {
         let layout = calculate_legend_trace_row_layout(180.0, 4.0);
         assert!(layout.show_swatch);
         assert!(layout.show_solo);
-        assert!(layout.name_width <= LEGEND_TRACE_LABEL_MAX_WIDTH);
         assert!(layout.name_width >= LEGEND_TRACE_LABEL_MIN_WIDTH);
-        assert!(layout.spacer_width >= 0.0);
+        assert!((layout.spacer_width - 0.0).abs() < f32::EPSILON);
+        // 180 - (swatch+spacing=14) - (checkbox+spacing=26) - (solo+spacing=24) = 116
+        assert!((layout.name_width - 116.0).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -2385,7 +2384,12 @@ mod tests {
     fn test_calculate_legend_find_row_layout_shows_clear_when_wide() {
         let layout = calculate_legend_find_row_layout(96.0, 4.0);
         assert!(layout.show_clear);
-        assert!((layout.edit_width - (96.0 - LEGEND_TRACE_SOLO_WIDTH - 4.0)).abs() < f32::EPSILON);
+        assert!(
+            (layout.edit_width
+                - (96.0 - LEGEND_TRACE_SOLO_WIDTH - 4.0 - LEGEND_FIND_RIGHT_GUARD))
+            .abs()
+                < f32::EPSILON
+        );
     }
 
     #[test]
