@@ -3,6 +3,7 @@
 //! Commercial-grade egui rendering for FFT/spectrum visualization.
 
 use egui::{Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2};
+#[cfg(test)]
 use std::f64::consts::PI;
 
 use super::data::{FftData, FftPoint, SpectrumNormalization};
@@ -132,7 +133,6 @@ pub fn render_fft_plot(ui: &mut Ui, state: &FftState) {
 
 #[derive(Debug, Clone)]
 struct FftLayout {
-    total: Rect,
     header_top: Rect,
     header_main: Rect,
     spectrum: Rect,
@@ -201,7 +201,6 @@ fn calculate_layout(available: Rect) -> FftLayout {
     );
 
     FftLayout {
-        total,
         header_top,
         header_main,
         spectrum,
@@ -2002,6 +2001,7 @@ fn format_freq(freq: f64) -> String {
 // Demo Data
 // =============================================================================
 
+#[cfg(test)]
 fn load_demo_data(state: &mut FftState) {
     // Generate demo signal: 1kHz fundamental + harmonics + noise
     let fs = 44100.0;

@@ -309,6 +309,7 @@ impl SimulationController {
             >= 2
     }
 
+    #[cfg(test)]
     pub(super) fn preferred_viewer_for_analysis(
         analysis_type: AnalysisType,
     ) -> crate::viewers::ActiveViewer {

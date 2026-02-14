@@ -7,7 +7,9 @@ use egui::{
     Color32, Painter, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2,
 };
 
-use super::data::{EyeDataBuilder, EyeTrace};
+#[cfg(test)]
+use super::data::EyeDataBuilder;
+use super::data::EyeTrace;
 use super::state::{EyeDiagramState, EyeDisplayMode};
 use crate::common::app::AppState;
 use crate::common::viewer_style::viewer_header_bg_color;
@@ -88,7 +90,6 @@ pub fn render_eye_diagram(ui: &mut Ui, state: &EyeDiagramState) {
 
 #[derive(Debug, Clone)]
 struct EyeLayout {
-    total: Rect,
     header: Rect,
     chart: Rect,
     measurements: Rect,
@@ -117,7 +118,6 @@ fn calculate_layout(available: Rect) -> EyeLayout {
     );
 
     EyeLayout {
-        total,
         header,
         chart,
         measurements,
@@ -522,6 +522,7 @@ fn measurement_row(ui: &mut Ui, label: &str, value: &str) {
 // Demo Data
 // =============================================================================
 
+#[cfg(test)]
 fn load_demo_data(state: &mut EyeDiagramState) {
     // Generate demo eye diagram for 10 Gbps signal
     let bit_period = 100e-12; // 100ps = 10 Gbps
@@ -581,6 +582,7 @@ fn load_demo_data(state: &mut EyeDiagramState) {
     state.load_data(data);
 }
 
+#[cfg(test)]
 fn generate_prbs7_pattern() -> Vec<u8> {
     // Generate PRBS-7 pattern (2^7 - 1 = 127 bits)
     let mut pattern = Vec::with_capacity(127);

@@ -76,7 +76,6 @@ pub fn render_pz_plot(ui: &mut Ui, state: &PoleZeroState) {
 
 #[derive(Debug, Clone)]
 struct PzLayout {
-    total: Rect,
     header: Rect,
     plot: Rect,
     info: Rect,
@@ -102,7 +101,6 @@ fn calculate_layout(available: Rect) -> PzLayout {
     );
 
     PzLayout {
-        total,
         header,
         plot,
         info,

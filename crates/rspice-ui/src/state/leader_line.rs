@@ -23,7 +23,9 @@
 //! The leader line is clipped at the first intersection with any wire segment.
 //! This prevents the visual clutter of lines crossing through the schematic.
 
-use crate::state::{Point, Wire};
+#[cfg(test)]
+use crate::state::Point;
+use crate::state::Wire;
 
 // =============================================================================
 // Bounding Box for Leader Line Calculations
@@ -271,6 +273,7 @@ pub fn find_wire_intersection(
 }
 
 /// Check if a point lies on a wire segment (grid coordinates).
+#[cfg(test)]
 fn point_on_wire_segment(p: Point, a: Point, b: Point) -> bool {
     // Horizontal segment
     if a.y == b.y && p.y == a.y {

@@ -148,22 +148,20 @@ impl JunctionCache {
             // Only endpoints contribute to junction count (first and last point)
             let endpoints = [wire.points.first(), wire.points.last()];
 
-            for maybe_point in endpoints.iter() {
-                if let Some(point) = maybe_point {
-                    endpoints_processed += 1;
+            for point in endpoints.iter().flatten() {
+                endpoints_processed += 1;
 
-                    // Skip points at component terminals
-                    if self.terminal_positions.contains(point) {
-                        continue;
-                    }
-
-                    let entry = self
-                        .junctions
-                        .entry(**point)
-                        .or_default();
-                    entry.segment_count += 1;
-                    entry.wire_ids.push(wire.id);
+                // Skip points at component terminals
+                if self.terminal_positions.contains(point) {
+                    continue;
                 }
+
+                let entry = self
+                    .junctions
+                    .entry(**point)
+                    .or_default();
+                entry.segment_count += 1;
+                entry.wire_ids.push(wire.id);
             }
         }
 

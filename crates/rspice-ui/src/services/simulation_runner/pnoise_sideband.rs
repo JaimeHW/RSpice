@@ -102,6 +102,7 @@ fn validate_sideband_shape(
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn fold_sideband_samples(
     translated_values: &[Value],
     num_offsets: usize,

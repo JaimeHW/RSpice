@@ -5,9 +5,12 @@
 use egui::{
     Color32, FontId, Painter, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2,
 };
+#[cfg(test)]
 use std::f64::consts::PI;
 
-use super::data::{BodeData, FrequencyPoint, FrequencyResponse};
+#[cfg(test)]
+use super::data::{BodeData, FrequencyPoint};
+use super::data::FrequencyResponse;
 use super::state::{BodeDisplayMode, BodePlotState};
 use crate::common::app::AppState;
 use crate::common::viewer_style::viewer_header_bg_color;
@@ -82,7 +85,6 @@ pub fn render_bode_plot(ui: &mut Ui, state: &BodePlotState) {
 
 #[derive(Debug, Clone)]
 struct BodeLayout {
-    total: Rect,
     header: Rect,
     magnitude: Option<Rect>,
     phase: Option<Rect>,
@@ -108,7 +110,6 @@ fn calculate_layout(available: Rect, state: &BodePlotState) -> BodeLayout {
             Vec2::new(total.width(), HEADER_HEIGHT.min(total.height())),
         );
         return BodeLayout {
-            total,
             header,
             magnitude: None,
             phase: None,
@@ -152,7 +153,6 @@ fn calculate_layout(available: Rect, state: &BodePlotState) -> BodeLayout {
     };
 
     BodeLayout {
-        total,
         header,
         magnitude,
         phase,
@@ -553,6 +553,7 @@ fn format_freq(freq: f64) -> String {
 // Demo Data
 // =============================================================================
 
+#[cfg(test)]
 fn load_demo_data(state: &mut BodePlotState) {
     // Create a demo second-order lowpass response
     let mut resp = FrequencyResponse::new("Demo TF");

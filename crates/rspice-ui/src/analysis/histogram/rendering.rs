@@ -6,7 +6,9 @@ use egui::{
     Color32, Painter, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2,
 };
 
-use super::data::{Histogram, HistogramBuilder};
+#[cfg(test)]
+use super::data::HistogramBuilder;
+use super::data::Histogram;
 use super::state::{AxisScale, DistributionOverlay, HistogramDisplayMode, HistogramState};
 use super::statistics::{LogNormalParams, NormalParams};
 use crate::common::app::AppState;
@@ -80,7 +82,6 @@ pub fn render_histogram(ui: &mut Ui, state: &HistogramState) {
 
 #[derive(Debug, Clone)]
 struct HistogramLayout {
-    total: Rect,
     header: Rect,
     chart: Rect,
     stats: Option<Rect>,
@@ -116,7 +117,6 @@ fn calculate_layout(available: Rect, show_stats: bool) -> HistogramLayout {
     );
 
     HistogramLayout {
-        total,
         header,
         chart,
         stats,
@@ -553,6 +553,7 @@ fn stat_row(ui: &mut Ui, label: &str, value: &str) {
 // Demo Data
 // =============================================================================
 
+#[cfg(test)]
 fn load_demo_data(state: &mut HistogramState) {
     // Generate demo data - simulated Monte Carlo results
     let data: Vec<f64> = (0..1000)

@@ -1,3 +1,4 @@
+#[cfg(test)]
 pub(super) fn parse_spice_value(s: &str) -> f64 {
     let s = s.trim();
     if s.is_empty() {

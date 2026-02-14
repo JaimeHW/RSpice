@@ -175,26 +175,6 @@ impl<'a> Parser<'a> {
         self.current = self.lexer.next_token();
     }
 
-    fn expect(&mut self, expected: Token) -> bool {
-        // Simple equality check for discriminant would be better if Token carried data
-        // For minimal check:
-        match (&self.current, &expected) {
-            (Token::Number(_), Token::Number(_)) => {
-                self.advance();
-                true
-            }
-            (Token::Ident(_), Token::Ident(_)) => {
-                self.advance();
-                true
-            }
-            (a, b) if std::mem::discriminant(a) == std::mem::discriminant(b) => {
-                self.advance();
-                true
-            }
-            _ => false,
-        }
-    }
-
     pub fn parse(&mut self) -> CalculatorExpr {
         self.parse_additive()
     }

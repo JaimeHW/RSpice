@@ -106,8 +106,6 @@ pub fn render_smith_chart(ui: &mut Ui, state: &mut SmithChartState) {
 /// Layout regions for Smith chart viewer
 #[derive(Debug, Clone)]
 struct SmithChartLayout {
-    /// Full available rectangle
-    total: Rect,
     /// Header bar
     header: Rect,
     /// Main chart area (square)
@@ -149,7 +147,6 @@ fn calculate_layout(available: Rect) -> SmithChartLayout {
     );
 
     SmithChartLayout {
-        total,
         header,
         chart,
         readout,

@@ -1040,14 +1040,14 @@ impl WaveformReader {
             let trimmed = line.trim();
 
             if in_header {
-                if trimmed.starts_with("Title:") {
-                    dataset.title = trimmed[6..].trim().to_string();
-                } else if trimmed.starts_with("Plotname:") {
-                    dataset.analysis = trimmed[9..].trim().to_string();
+                if let Some(stripped) = trimmed.strip_prefix("Title:") {
+                    dataset.title = stripped.trim().to_string();
+                } else if let Some(stripped) = trimmed.strip_prefix("Plotname:") {
+                    dataset.analysis = stripped.trim().to_string();
                 } else if trimmed.starts_with("No. Variables:") {
                     // Parse number of variables
-                } else if trimmed.starts_with("No. Points:") {
-                    num_points = trimmed[11..].trim().parse().unwrap_or(0);
+                } else if let Some(stripped) = trimmed.strip_prefix("No. Points:") {
+                    num_points = stripped.trim().parse().unwrap_or(0);
                 } else if trimmed.starts_with("Variables:") {
                     // Next lines are variable definitions
                 } else if trimmed.starts_with("Values:") {

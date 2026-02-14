@@ -485,19 +485,6 @@ impl<'a> LibraryParser<'a> {
         Ok(())
     }
 
-    /// Expect a specific token
-    fn expect(&mut self, expected: &Token) -> Result<(), String> {
-        if &self.current != expected {
-            let (line, col) = self.lexer.position();
-            return Err(format!(
-                "Expected {:?} at line {}, col {}, got {:?}",
-                expected, line, col, self.current
-            ));
-        }
-        self.advance()?;
-        Ok(())
-    }
-
     /// Parse the entire library
     pub fn parse(&mut self) -> Result<ParsedLibrary, String> {
         let mut library = ParsedLibrary::default();

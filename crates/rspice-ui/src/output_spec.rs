@@ -42,6 +42,7 @@ pub(crate) fn is_branch_current_output(output_var: &str) -> bool {
 }
 
 #[inline]
+#[cfg(test)]
 pub(crate) fn sensitivity_raw_unit(output_var: &str) -> &'static str {
     if is_branch_current_output(output_var) {
         "A/unit"
@@ -241,6 +242,7 @@ pub(crate) fn parse_output_voltage_spec(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn parse_output_node(output_var: &str, node_names: &[String]) -> Option<usize> {
     parse_output_voltage_spec(output_var, node_names).and_then(|spec| {
         if spec.neg.is_none() {

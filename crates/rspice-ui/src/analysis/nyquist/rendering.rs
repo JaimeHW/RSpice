@@ -3,9 +3,12 @@
 //! Commercial-grade egui rendering for Nyquist plot visualization.
 
 use egui::{Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2};
+#[cfg(test)]
 use std::f64::consts::PI;
 
-use super::data::{NyquistData, NyquistPoint};
+use super::data::NyquistData;
+#[cfg(test)]
+use super::data::NyquistPoint;
 use super::state::{NyquistOverlay, NyquistState};
 use crate::common::app::AppState;
 use crate::common::viewer_style::viewer_header_bg_color;
@@ -79,7 +82,6 @@ pub fn render_nyquist_plot(ui: &mut Ui, state: &NyquistState) {
 
 #[derive(Debug, Clone)]
 struct NyquistLayout {
-    total: Rect,
     header: Rect,
     plot: Rect,
     info: Rect,
@@ -105,7 +107,6 @@ fn calculate_layout(available: Rect) -> NyquistLayout {
     );
 
     NyquistLayout {
-        total,
         header,
         plot,
         info,
@@ -464,6 +465,7 @@ fn info_row(ui: &mut Ui, label: &str, value: &str) {
 // Demo Data
 // =============================================================================
 
+#[cfg(test)]
 fn load_demo_data(state: &mut NyquistState) {
     // Create demo loop gain: second-order system
     let mut data = NyquistData::new("Demo Loop Gain");
