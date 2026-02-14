@@ -124,7 +124,13 @@ pub enum AnalysisSpec {
         f2_over_f1: Option<f64>,
     },
     /// Transient analysis
-    Transient { stop_time: f64, step_time: f64 },
+    Transient {
+        stop_time: f64,
+        step_time: f64,
+        start_time: f64,
+        max_timestep: Option<f64>,
+        uic: bool,
+    },
     /// Noise analysis
     Noise {
         output_node: String,
@@ -387,6 +393,9 @@ impl AnalysisSpec {
             AnalysisSpec::Transient {
                 stop_time,
                 step_time,
+                start_time,
+                max_timestep,
+                ..
             } => {
                 if *stop_time <= 0.0 {
                     return Err("Transient stop_time must be > 0".to_string());
@@ -396,6 +405,19 @@ impl AnalysisSpec {
                 }
                 if *step_time > *stop_time {
                     return Err("Transient step_time must be <= stop_time".to_string());
+                }
+                if !start_time.is_finite() || *start_time < 0.0 {
+                    return Err("Transient start_time must be finite and >= 0".to_string());
+                }
+                if *start_time >= *stop_time {
+                    return Err("Transient start_time must be < stop_time".to_string());
+                }
+                if let Some(max_step) = max_timestep {
+                    if !max_step.is_finite() || *max_step <= 0.0 {
+                        return Err(
+                            "Transient max_timestep must be finite and > 0 when set".to_string()
+                        );
+                    }
                 }
                 Ok(())
             }

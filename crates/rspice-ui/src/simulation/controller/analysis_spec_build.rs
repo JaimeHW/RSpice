@@ -13,6 +13,11 @@ impl SimulationController {
                     .map_err(|e| format!("invalid stop time: {}", e))?,
                 step_time: parse_spice_value_checked(&state.dialogs.tran_step)
                     .map_err(|e| format!("invalid step time: {}", e))?,
+                start_time: parse_spice_value_checked(&state.dialogs.tran_start)
+                    .map_err(|e| format!("invalid start time: {}", e))?,
+                max_timestep: Self::parse_optional_spice_value(&state.dialogs.tran_maxstep)
+                    .map_err(|e| format!("invalid max step: {}", e))?,
+                uic: state.dialogs.tran_uic,
             }),
             2 => Ok(AnalysisSpec::Ac {
                 start_freq: parse_spice_value_checked(&state.dialogs.ac_fstart)
@@ -144,14 +149,15 @@ impl SimulationController {
             AnalysisSpec::Transient {
                 stop_time,
                 step_time,
+                start_time,
+                max_timestep,
+                uic,
             } => Ok(AnalysisConfig::Transient(TransientAnalysisConfig {
                 stop_time: *stop_time,
                 step_time: *step_time,
-                start_time: parse_spice_value_checked(&state.dialogs.tran_start)
-                    .map_err(|e| format!("invalid start time: {}", e))?,
-                max_timestep: Self::parse_optional_spice_value(&state.dialogs.tran_maxstep)
-                    .map_err(|e| format!("invalid max step: {}", e))?,
-                uic: state.dialogs.tran_uic,
+                start_time: *start_time,
+                max_timestep: *max_timestep,
+                uic: *uic,
             })),
             AnalysisSpec::Noise {
                 output_node,

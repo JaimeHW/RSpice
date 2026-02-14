@@ -1,6 +1,6 @@
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 
 use super::super::config::{
@@ -1009,12 +1009,15 @@ pub(super) fn analysis_config_from_spec(spec: &AnalysisSpec) -> Option<AnalysisC
         AnalysisSpec::Transient {
             stop_time,
             step_time,
+            start_time,
+            max_timestep,
+            uic,
         } => Some(AnalysisConfig::Transient(TransientAnalysisConfig {
             stop_time: *stop_time,
             step_time: *step_time,
-            start_time: 0.0,
-            max_timestep: None,
-            uic: false,
+            start_time: *start_time,
+            max_timestep: *max_timestep,
+            uic: *uic,
         })),
         AnalysisSpec::Ac {
             start_freq,

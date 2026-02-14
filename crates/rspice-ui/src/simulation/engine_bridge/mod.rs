@@ -23,10 +23,9 @@ use super::config::AnalysisConfig;
 use super::results::{DcOpResult, SimulationResult, WaveformData};
 use super::runner::SimulationError;
 use crate::output_spec::{
-    collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
+    OutputSpec, collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
     normalized_sensitivity, parse_output_spec, resolve_sensitivity_ac_frequency,
     run_ac_output_at_frequency, run_dc_output_sensitivity, validate_sensitivity_output_spec,
-    OutputSpec,
 };
 
 //=============================================================================
@@ -358,17 +357,50 @@ impl EngineBridge {
         config.max_timestep.unwrap_or(config.step_time).max(1e-18)
     }
 
+    #[inline]
+    fn transient_start_index(time: &[f64], start_time: f64) -> usize {
+        if !start_time.is_finite() || start_time <= 0.0 {
+            return 0;
+        }
+        time.partition_point(|t| *t < start_time)
+    }
+
+    #[inline]
+    fn transient_sample_count_after_index(
+        time: &[f64],
+        voltages: &[Vec<f64>],
+        start_idx: usize,
+    ) -> usize {
+        let max_time_len = time.len().saturating_sub(start_idx);
+        voltages.iter().fold(max_time_len, |acc, trace| {
+            acc.min(trace.len().saturating_sub(start_idx))
+        })
+    }
+
     /// Run transient analysis
     fn run_transient(
         &self,
         netlist: &rspice_core::Netlist,
         config: &super::config::TransientAnalysisConfig,
     ) -> Result<SimulationResult, SimulationError> {
+        if config.uic {
+            log::warn!(
+                "Transient UIC requested, but rspice-core transient startup currently uses DC operating-point initialization"
+            );
+        }
         let engine = self.engine_for_netlist(netlist);
         let max_step = Self::resolve_transient_max_step(config);
         let tran_result = engine
             .run_tran(netlist, config.stop_time, max_step)
             .map_err(|e| self.translate_error(e))?;
+
+        let start_idx = Self::transient_start_index(&tran_result.time, config.start_time);
+        let sample_count = Self::transient_sample_count_after_index(
+            &tran_result.time,
+            &tran_result.voltages,
+            start_idx,
+        );
+        let filtered_time = tran_result.time[start_idx..start_idx + sample_count].to_vec();
 
         // Convert to UI waveform format
         let mut waveforms = HashMap::new();
@@ -382,12 +414,16 @@ impl EngineBridge {
 
             waveforms.insert(
                 name.clone(),
-                WaveformData::new_time_domain(&name, tran_result.time.clone(), voltages.clone()),
+                WaveformData::new_time_domain(
+                    &name,
+                    filtered_time.clone(),
+                    voltages[start_idx..start_idx + sample_count].to_vec(),
+                ),
             );
         }
 
         Ok(SimulationResult::Transient {
-            time: tran_result.time,
+            time: filtered_time,
             waveforms,
         })
     }
@@ -402,11 +438,24 @@ impl EngineBridge {
         config: &super::config::TransientAnalysisConfig,
         abort: &dyn rspice_core::abort_signal::AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
+        if config.uic {
+            log::warn!(
+                "Transient UIC requested, but rspice-core transient startup currently uses DC operating-point initialization"
+            );
+        }
         let engine = self.engine_for_netlist(netlist);
         let max_step = Self::resolve_transient_max_step(config);
         let tran_result = engine
             .run_tran_with_abort(netlist, config.stop_time, max_step, abort)
             .map_err(|e| self.translate_error(e))?;
+
+        let start_idx = Self::transient_start_index(&tran_result.time, config.start_time);
+        let sample_count = Self::transient_sample_count_after_index(
+            &tran_result.time,
+            &tran_result.voltages,
+            start_idx,
+        );
+        let filtered_time = tran_result.time[start_idx..start_idx + sample_count].to_vec();
 
         // Convert to UI waveform format (same as run_transient)
         let mut waveforms = HashMap::new();
@@ -420,12 +469,16 @@ impl EngineBridge {
 
             waveforms.insert(
                 name.clone(),
-                WaveformData::new_time_domain(&name, tran_result.time.clone(), voltages.clone()),
+                WaveformData::new_time_domain(
+                    &name,
+                    filtered_time.clone(),
+                    voltages[start_idx..start_idx + sample_count].to_vec(),
+                ),
             );
         }
 
         Ok(SimulationResult::Transient {
-            time: tran_result.time,
+            time: filtered_time,
             waveforms,
         })
     }

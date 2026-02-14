@@ -223,6 +223,38 @@ fn test_build_transient_config_uses_output_step_without_forcing_internal_max_ste
 }
 
 #[test]
+fn test_transient_spec_and_config_preserve_window_and_uic_without_dialog_reread() {
+    let controller = SimulationController::new();
+    let mut state = AppState::default();
+    state.dialogs.tran_stop = "10u".to_string();
+    state.dialogs.tran_step = "1n".to_string();
+    state.dialogs.tran_start = "500n".to_string();
+    state.dialogs.tran_maxstep = "2n".to_string();
+    state.dialogs.tran_uic = true;
+
+    let spec = controller
+        .build_analysis_spec_for_index(&state, 1)
+        .expect("transient spec should build");
+
+    // Mutate dialog values after spec construction: mapping should use `spec`.
+    state.dialogs.tran_start = "0".to_string();
+    state.dialogs.tran_maxstep.clear();
+    state.dialogs.tran_uic = false;
+
+    let config = controller
+        .analysis_spec_to_config(&state, &spec)
+        .expect("transient config should build from spec");
+    let tran = match config {
+        AnalysisConfig::Transient(tran) => tran,
+        _ => panic!("Expected transient config"),
+    };
+
+    assert!((tran.start_time - 500e-9).abs() < 1e-18);
+    assert_eq!(tran.max_timestep, Some(2e-9));
+    assert!(tran.uic);
+}
+
+#[test]
 fn test_enabled_analysis_indices_defaults_to_dcop() {
     let state = AppState::default();
     let indices = SimulationController::enabled_analysis_indices(&state);
@@ -256,6 +288,7 @@ fn test_build_analysis_plan_includes_supported_analyses_in_order() {
     state.dialogs.enabled_analyses.extend([1, 2, 4]);
     state.dialogs.tran_stop = "5m".to_string();
     state.dialogs.tran_step = "10n".to_string();
+    state.dialogs.tran_start = "0".to_string();
     state.dialogs.ac_fstart = "1".to_string();
     state.dialogs.ac_fstop = "1Meg".to_string();
     state.dialogs.ac_points = "20".to_string();

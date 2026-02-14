@@ -214,9 +214,11 @@ R3 out 0 1k
             assert!(!waveforms.is_empty());
             assert!(waveforms.keys().any(|name| name.contains("[V2=0")));
             assert!(waveforms.keys().any(|name| name.contains("[V2=1")));
-            assert!(waveforms
-                .values()
-                .all(|wf| wf.y_values.len() == sweep_values.len()));
+            assert!(
+                waveforms
+                    .values()
+                    .all(|wf| wf.y_values.len() == sweep_values.len())
+            );
         }
         other => panic!("expected DC sweep result, got {:?}", other),
     }
@@ -327,6 +329,27 @@ fn test_resolve_transient_max_step_honors_explicit_max_timestep() {
     };
     let max_step = EngineBridge::resolve_transient_max_step(&cfg);
     assert!((max_step - 25e-9).abs() < 1e-18);
+}
+
+#[test]
+fn test_transient_start_index_uses_output_window_start_time() {
+    let time = vec![0.0, 1.0e-9, 2.0e-9, 3.0e-9, 4.0e-9];
+    assert_eq!(EngineBridge::transient_start_index(&time, 0.0), 0);
+    assert_eq!(EngineBridge::transient_start_index(&time, 1.5e-9), 2);
+    assert_eq!(EngineBridge::transient_start_index(&time, 4.0e-9), 4);
+    assert_eq!(
+        EngineBridge::transient_start_index(&time, 10.0e-9),
+        time.len()
+    );
+}
+
+#[test]
+fn test_transient_sample_count_after_index_clamps_to_shortest_series() {
+    let time = vec![0.0, 1.0, 2.0, 3.0, 4.0];
+    let voltages = vec![vec![0.0, 1.0, 2.0, 3.0, 4.0], vec![0.0, 1.0, 2.0, 3.0]];
+    let start_idx = 1;
+    let count = EngineBridge::transient_sample_count_after_index(&time, &voltages, start_idx);
+    assert_eq!(count, 3);
 }
 
 #[test]
@@ -703,9 +726,10 @@ R2 out 0 1k
     let err = bridge
         .run(&cfg, netlist)
         .expect_err("expected validation error");
-    assert!(err
-        .to_string()
-        .contains("only valid when AC mode is enabled"));
+    assert!(
+        err.to_string()
+            .contains("only valid when AC mode is enabled")
+    );
 }
 
 #[test]
@@ -753,9 +777,10 @@ R2 out 0 1k
     let err = bridge
         .run(&cfg, netlist)
         .expect_err("expected unresolved output error");
-    assert!(err
-        .to_string()
-        .contains("could not be resolved to a node or branch"));
+    assert!(
+        err.to_string()
+            .contains("could not be resolved to a node or branch")
+    );
 }
 
 #[test]
@@ -779,9 +804,10 @@ R2 out 0 1k
     let err = bridge
         .run(&cfg, netlist)
         .expect_err("expected unresolved output error");
-    assert!(err
-        .to_string()
-        .contains("could not be resolved to a node or branch"));
+    assert!(
+        err.to_string()
+            .contains("could not be resolved to a node or branch")
+    );
 }
 
 #[test]
