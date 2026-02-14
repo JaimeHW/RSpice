@@ -218,13 +218,13 @@ fn test_collect_fft_cursor_label_obstacles_samples_top_band_trace_points() {
 fn test_render_info_panel_handles_small_height_with_scroll() {
     let mut state = FftState::new();
     load_demo_data(&mut state);
-    state.set_active_marker_slot(super::super::state::MarkerSlot::M1);
-    state.set_marker_frequency(
-        state
-            .analysis
-            .as_ref()
-            .and_then(|a| a.fundamental_frequency),
-    );
+    if let Some(f0) = state
+        .analysis
+        .as_ref()
+        .and_then(|a| a.fundamental_frequency)
+    {
+        state.add_marker(f0);
+    }
     assert!(state.analysis.is_some());
     assert!(state.source_cache.is_some());
 
@@ -240,6 +240,33 @@ fn test_render_info_panel_handles_small_height_with_scroll() {
         !output.shapes.is_empty(),
         "render should produce clipped shapes for constrained-height info panels"
     );
+}
+
+#[test]
+fn test_marker_frequency_removal_tolerance_linear_is_span_relative() {
+    let plot = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 300.0));
+    let mut state = FftState::new();
+    state.freq_scale = FrequencyScale::Linear;
+    state.freq_min = 0.0;
+    state.freq_max = 100_000.0;
+
+    let tol = marker_frequency_removal_tolerance(&state, plot, plot.center().x);
+    // 1% of plot width each side => 2% of visible span in linear mode.
+    assert!((tol - 2_000.0).abs() < 5.0, "unexpected tolerance: {}", tol);
+}
+
+#[test]
+fn test_marker_frequency_removal_tolerance_log_is_positive_and_finite() {
+    let plot = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 300.0));
+    let mut state = FftState::new();
+    state.freq_scale = FrequencyScale::Log;
+    state.freq_min = 10.0;
+    state.freq_max = 1_000_000.0;
+
+    let left_tol = marker_frequency_removal_tolerance(&state, plot, plot.min.x + 20.0);
+    let right_tol = marker_frequency_removal_tolerance(&state, plot, plot.max.x - 20.0);
+    assert!(left_tol.is_finite() && left_tol > 0.0);
+    assert!(right_tol.is_finite() && right_tol > 0.0);
 }
 
 #[test]

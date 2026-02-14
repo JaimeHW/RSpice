@@ -7,7 +7,7 @@ use egui::{Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, 
 use std::f64::consts::PI;
 
 use super::data::{FftData, FftPoint, SpectrumNormalization};
-use super::state::{FftState, FrequencyScale, InputFidelity, MagnitudeScale, MarkerSlot};
+use super::state::{FftState, FrequencyScale, InputFidelity, MagnitudeScale};
 use super::window::WindowFunction;
 use crate::common::app::AppState;
 use crate::common::viewer_style::{viewer_chart_bg_color, viewer_header_bg_color};
@@ -722,30 +722,10 @@ fn render_header(
             }
 
             ui.separator();
-            ui.label("Marker");
-            let mut active_marker_index =
-                state.active_marker_slot.index().min(state.marker_count());
-            let active_marker_text = MarkerSlot::new(active_marker_index).display_name();
-            egui::ComboBox::from_id_salt("fft_marker_slot")
-                .selected_text(active_marker_text)
-                .width(68.0)
-                .show_ui(ui, |ui| {
-                    for marker_idx in 0..=state.marker_count() {
-                        let slot = MarkerSlot::new(marker_idx);
-                        ui.selectable_value(
-                            &mut active_marker_index,
-                            marker_idx,
-                            slot.display_name(),
-                        );
-                    }
-                });
-            state.set_active_marker_slot(MarkerSlot::new(active_marker_index));
-            if ui.small_button("Del Mk").clicked() {
-                state.set_marker_frequency_for_slot(state.active_marker_slot, None);
-            }
-            if ui.small_button("Clear Mk").clicked() {
+            if ui.button("Clear Markers").clicked() {
                 state.clear_markers();
             }
+            ui.label(egui::RichText::new("Alt+LMB add, Alt+RMB remove").small());
 
             ui.separator();
 
@@ -877,14 +857,9 @@ fn render_spectrum_core(ui: &mut Ui, layout: &FftLayout, state: &FftState) {
         }
 
         for (slot_idx, marker_freq) in state.marker_frequencies.iter().copied().enumerate() {
-            if let Some(label) = render_user_marker(
-                plot_rect,
-                marker_freq,
-                data,
-                state,
-                &painter,
-                MarkerSlot::new(slot_idx),
-            ) {
+            if let Some(label) =
+                render_user_marker(plot_rect, marker_freq, data, state, &painter, slot_idx)
+            {
                 line_x_positions.push(label.anchor_x);
                 cursor_labels.push(label);
             }
@@ -1374,14 +1349,14 @@ fn render_user_marker(
     data: &FftData,
     state: &FftState,
     painter: &egui::Painter,
-    slot: MarkerSlot,
+    slot_index: usize,
 ) -> Option<PlotCursorLabelSpec> {
     let x = freq_to_x(marker_freq, plot_rect, state);
     if !x.is_finite() || x < plot_rect.min.x || x > plot_rect.max.x {
         return None;
     }
-    let marker_name = slot.display_name();
-    let marker_color = marker_color_for_slot(slot.index());
+    let marker_name = format!("M{}", slot_index + 1);
+    let marker_color = marker_color_for_slot(slot_index);
     painter.line_segment(
         [Pos2::new(x, plot_rect.min.y), Pos2::new(x, plot_rect.max.y)],
         Stroke::new(1.0, marker_color),
@@ -1582,8 +1557,22 @@ fn handle_spectrum_interactions(
         if let Some(pos) = response.interact_pointer_pos() {
             if plot_rect.contains(pos) {
                 let freq = x_to_freq(pos.x, plot_rect, state);
-                if freq.is_finite() {
-                    state.set_marker_frequency(Some(freq));
+                let modifiers = ui.input(|i| i.modifiers);
+                if modifiers.alt && freq.is_finite() {
+                    state.add_marker(freq);
+                }
+            }
+        }
+    }
+
+    if response.secondary_clicked() {
+        if let Some(pos) = response.interact_pointer_pos() {
+            if plot_rect.contains(pos) {
+                let modifiers = ui.input(|i| i.modifiers);
+                if modifiers.alt {
+                    let freq = x_to_freq(pos.x, plot_rect, state);
+                    let tolerance = marker_frequency_removal_tolerance(state, plot_rect, pos.x);
+                    state.remove_nearest_marker(freq, tolerance);
                 }
             }
         }
@@ -1617,6 +1606,22 @@ fn handle_spectrum_interactions(
             pan_frequency_range(state, delta.x as f64, plot_rect.width() as f64);
             pan_magnitude_range(state, delta.y as f64, plot_rect.height() as f64);
         }
+    }
+}
+
+fn marker_frequency_removal_tolerance(state: &FftState, plot_rect: Rect, pointer_x: f32) -> f64 {
+    // Mirror waveform behavior (remove nearest within ~1% of visible span),
+    // while adapting correctly for logarithmic frequency axes.
+    let x_radius = (plot_rect.width() * 0.01).max(4.0);
+    let x0 = (pointer_x - x_radius).clamp(plot_rect.min.x, plot_rect.max.x);
+    let x1 = (pointer_x + x_radius).clamp(plot_rect.min.x, plot_rect.max.x);
+    let f0 = x_to_freq(x0, plot_rect, state);
+    let f1 = x_to_freq(x1, plot_rect, state);
+    let tolerance = (f1 - f0).abs();
+    if tolerance.is_finite() {
+        tolerance.max(1e-12)
+    } else {
+        1e-12
     }
 }
 

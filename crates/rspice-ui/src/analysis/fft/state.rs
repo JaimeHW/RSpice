@@ -44,32 +44,6 @@ impl MagnitudeScale {
     }
 }
 
-/// Active FFT user marker slot.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub struct MarkerSlot(usize);
-
-impl MarkerSlot {
-    /// Primary user marker slot.
-    pub const M1: Self = Self(0);
-    /// Secondary user marker slot.
-    pub const M2: Self = Self(1);
-
-    /// Create a slot from zero-based index.
-    pub const fn new(index: usize) -> Self {
-        Self(index)
-    }
-
-    /// Zero-based slot index.
-    pub const fn index(self) -> usize {
-        self.0
-    }
-
-    /// Display name for UI.
-    pub fn display_name(self) -> String {
-        format!("M{}", self.0 + 1)
-    }
-}
-
 /// Frequency axis mode
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum FrequencyScale {
@@ -129,6 +103,8 @@ impl InputFidelity {
 }
 
 const DEFAULT_MANUAL_SAMPLE_COUNT: usize = 4096;
+const MAX_USER_MARKERS: usize = 16;
+const MARKER_MERGE_EPS_HZ: f64 = 1e-12;
 
 #[derive(Debug, Clone)]
 pub struct FftSourceCache {
@@ -200,8 +176,6 @@ pub struct FftState {
     pub z0: f64,
     /// Interactive marker frequencies (Hz) placed by user.
     pub marker_frequencies: Vec<f64>,
-    /// Active marker slot used by click placement.
-    pub active_marker_slot: MarkerSlot,
 }
 
 impl Default for FftState {
@@ -234,7 +208,6 @@ impl Default for FftState {
             freq_auto: true,
             z0: 50.0,
             marker_frequencies: Vec::new(),
-            active_marker_slot: MarkerSlot::M1,
         }
     }
 }
@@ -547,50 +520,45 @@ impl FftState {
         self.show_harmonics = !self.show_harmonics;
     }
 
-    /// Set marker frequency.
-    pub fn set_marker_frequency(&mut self, marker_frequency: Option<f64>) {
-        self.set_marker_frequency_for_slot(self.active_marker_slot, marker_frequency);
-    }
-
-    /// Set marker frequency in a specific slot.
-    pub fn set_marker_frequency_for_slot(
-        &mut self,
-        slot: MarkerSlot,
-        marker_frequency: Option<f64>,
-    ) {
-        let slot_index = slot.index();
-        match marker_frequency {
-            Some(freq) => {
-                if slot_index < self.marker_frequencies.len() {
-                    self.marker_frequencies[slot_index] = freq;
-                } else {
-                    self.marker_frequencies.push(freq);
-                    self.active_marker_slot =
-                        MarkerSlot::new(self.marker_frequencies.len().saturating_sub(1));
-                }
-            }
-            None => {
-                if slot_index < self.marker_frequencies.len() {
-                    self.marker_frequencies.remove(slot_index);
-                }
-                if self.marker_frequencies.is_empty() {
-                    self.active_marker_slot = MarkerSlot::M1;
-                } else if self.active_marker_slot.index() >= self.marker_frequencies.len() {
-                    self.active_marker_slot =
-                        MarkerSlot::new(self.marker_frequencies.len().saturating_sub(1));
-                }
-            }
+    /// Add a user marker frequency. Maintains sorted order and bounded count.
+    pub fn add_marker(&mut self, frequency_hz: f64) {
+        if !frequency_hz.is_finite() || frequency_hz < 0.0 {
+            return;
+        }
+        if self
+            .marker_frequencies
+            .iter()
+            .any(|f| (*f - frequency_hz).abs() <= MARKER_MERGE_EPS_HZ)
+        {
+            return;
+        }
+        self.marker_frequencies.push(frequency_hz);
+        self.marker_frequencies.sort_by(|a, b| a.total_cmp(b));
+        if self.marker_frequencies.len() > MAX_USER_MARKERS {
+            self.marker_frequencies.remove(0);
         }
     }
 
-    /// Read marker frequency from a specific slot.
-    pub fn marker_frequency_for_slot(&self, slot: MarkerSlot) -> Option<f64> {
-        self.marker_frequencies.get(slot.index()).copied()
-    }
-
-    /// Set active marker slot used by click placement.
-    pub fn set_active_marker_slot(&mut self, slot: MarkerSlot) {
-        self.active_marker_slot = MarkerSlot::new(slot.index().min(self.marker_frequencies.len()));
+    /// Remove the nearest marker within a tolerance window.
+    pub fn remove_nearest_marker(&mut self, frequency_hz: f64, tolerance_hz: f64) -> bool {
+        if !frequency_hz.is_finite() || !tolerance_hz.is_finite() || tolerance_hz < 0.0 {
+            return false;
+        }
+        let Some((idx, dist)) = self
+            .marker_frequencies
+            .iter()
+            .enumerate()
+            .map(|(idx, marker)| (idx, (*marker - frequency_hz).abs()))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+        else {
+            return false;
+        };
+        if dist <= tolerance_hz {
+            self.marker_frequencies.remove(idx);
+            true
+        } else {
+            false
+        }
     }
 
     /// Number of user marker slots with assigned frequencies.
@@ -601,7 +569,6 @@ impl FftState {
     /// Clear all user markers.
     pub fn clear_markers(&mut self) {
         self.marker_frequencies.clear();
-        self.active_marker_slot = MarkerSlot::M1;
     }
 
     /// Get fundamental frequency
@@ -673,13 +640,6 @@ mod tests {
     fn test_mag_scale_all() {
         let all = MagnitudeScale::all();
         assert_eq!(all.len(), 4);
-    }
-
-    #[test]
-    fn test_marker_slot_display_names() {
-        assert_eq!(MarkerSlot::M1.display_name(), "M1");
-        assert_eq!(MarkerSlot::M2.display_name(), "M2");
-        assert_eq!(MarkerSlot::new(5).display_name(), "M6");
     }
 
     // =========================================================================
@@ -762,7 +722,6 @@ mod tests {
         assert!(state.freq_auto);
         assert_eq!(state.z0, 50.0);
         assert!(state.marker_frequencies.is_empty());
-        assert_eq!(state.active_marker_slot, MarkerSlot::M1);
     }
 
     #[test]
@@ -960,45 +919,36 @@ mod tests {
     }
 
     #[test]
-    fn test_state_marker_slots_track_independent_frequencies() {
+    fn test_state_markers_are_sorted_deduplicated_and_capped() {
         let mut state = FftState::new();
-        state.set_active_marker_slot(MarkerSlot::M1);
-        state.set_marker_frequency(Some(1_000.0));
-        state.set_active_marker_slot(MarkerSlot::M2);
-        state.set_marker_frequency(Some(2_500.0));
+        state.add_marker(2_500.0);
+        state.add_marker(1_000.0);
+        state.add_marker(2_500.0); // duplicate ignored
+        state.add_marker(f64::NAN); // invalid ignored
 
-        assert_eq!(
-            state.marker_frequency_for_slot(MarkerSlot::M1),
-            Some(1_000.0)
-        );
-        assert_eq!(
-            state.marker_frequency_for_slot(MarkerSlot::M2),
-            Some(2_500.0)
-        );
+        assert_eq!(state.marker_frequencies, vec![1_000.0, 2_500.0]);
 
-        state.clear_markers();
-        assert!(state.marker_frequency_for_slot(MarkerSlot::M1).is_none());
-        assert!(state.marker_frequency_for_slot(MarkerSlot::M2).is_none());
+        // Keep only the latest MAX_USER_MARKERS entries (lowest is discarded due sort+truncate).
+        for i in 0..32 {
+            state.add_marker(10_000.0 + i as f64);
+        }
+        assert_eq!(state.marker_count(), MAX_USER_MARKERS);
+        assert!(!state.marker_frequencies.contains(&1_000.0));
     }
 
     #[test]
-    fn test_state_marker_slot_can_append_beyond_secondary() {
+    fn test_state_remove_nearest_marker_respects_tolerance() {
         let mut state = FftState::new();
-        state.set_active_marker_slot(MarkerSlot::new(2));
-        state.set_marker_frequency(Some(5_000.0));
-        assert_eq!(state.marker_count(), 1);
-        assert_eq!(
-            state.marker_frequency_for_slot(MarkerSlot::M1),
-            Some(5_000.0)
-        );
+        state.add_marker(1_000.0);
+        state.add_marker(2_000.0);
+        state.add_marker(3_000.0);
 
-        state.set_active_marker_slot(MarkerSlot::new(1));
-        state.set_marker_frequency(Some(2_000.0));
-        assert_eq!(state.marker_count(), 2);
-        assert_eq!(
-            state.marker_frequency_for_slot(MarkerSlot::M2),
-            Some(2_000.0)
-        );
+        assert!(state.remove_nearest_marker(2_010.0, 20.0));
+        assert_eq!(state.marker_frequencies, vec![1_000.0, 3_000.0]);
+        assert!(!state.remove_nearest_marker(2_010.0, 5.0));
+
+        state.clear_markers();
+        assert!(state.marker_frequencies.is_empty());
     }
 
     #[test]
