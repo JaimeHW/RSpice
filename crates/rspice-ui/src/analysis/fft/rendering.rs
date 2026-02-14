@@ -1933,6 +1933,7 @@ fn render_info_panel_content(ui: &mut Ui, state: &mut FftState) {
             info_row(ui, "Fs", &format_freq(source.sample_rate));
         }
 
+        ui.add_space(8.0);
         render_fft_markers_panel(ui, state);
     });
 }
@@ -1976,63 +1977,32 @@ fn render_fft_markers_panel(ui: &mut Ui, state: &mut FftState) {
         return;
     }
 
-    let marker_rows: Vec<(usize, f64, Option<String>)> = state
-        .marker_frequencies
-        .iter()
-        .copied()
-        .enumerate()
-        .map(|(idx, marker_freq)| {
-            let marker_mag = state
-                .data
-                .as_ref()
-                .and_then(|data| data.interpolate(marker_freq))
-                .map(|point| format_marker_magnitude(state, &point));
-            (idx, marker_freq, marker_mag)
-        })
-        .collect();
-
-    let delta_summary: Option<(String, String)> = if let [(_, m1, _), (_, m2, _), ..] =
-        marker_rows.as_slice()
-    {
-        let d_freq = format_freq((m2 - m1).abs());
-        let d_mag = if let Some(ref data) = state.data {
-            let m1_mag = data.interpolate(*m1).map(|p| state.display_magnitude(&p));
-            let m2_mag = data.interpolate(*m2).map(|p| state.display_magnitude(&p));
-            if let (Some(v1), Some(v2)) = (m1_mag, m2_mag) {
-                format_marker_delta(state, v2 - v1)
-            } else {
-                "--".to_string()
-            }
-        } else {
-            "--".to_string()
-        };
-        Some((d_freq, d_mag))
-    } else {
-        None
-    };
-
     let mut jump_to_freq: Option<f64> = None;
     let mut remove_idx: Option<usize> = None;
-    for (idx, marker_freq, marker_mag) in marker_rows {
+    let markers: Vec<f64> = state.marker_frequencies.clone();
+    for (idx, marker_freq) in markers.iter().copied().enumerate() {
         ui.horizontal(|ui| {
             ui.label(
                 egui::RichText::new(format!("M{}", idx + 1))
                     .size(10.0)
                     .color(marker_color_for_slot(idx)),
             );
-            if ui
-                .small_button(format_freq(marker_freq))
-                .on_hover_text("Center frequency view on marker")
-                .clicked()
+            let mut jump_btn = ui.small_button(format_freq(marker_freq));
+            if let Some(marker_mag) = state
+                .data
+                .as_ref()
+                .and_then(|data| data.interpolate(marker_freq))
+                .map(|point| format_marker_magnitude(state, &point))
             {
-                jump_to_freq = Some(marker_freq);
+                jump_btn = jump_btn.on_hover_text(format!(
+                    "Center frequency view on marker\nMagnitude: {}",
+                    marker_mag
+                ));
+            } else {
+                jump_btn = jump_btn.on_hover_text("Center frequency view on marker");
             }
-            if let Some(marker_mag) = marker_mag {
-                ui.label(
-                    egui::RichText::new(marker_mag)
-                        .size(9.0)
-                        .color(Color32::from_rgb(200, 205, 215)),
-                );
+            if jump_btn.clicked() {
+                jump_to_freq = Some(marker_freq);
             }
             if ui
                 .small_button("x")
@@ -2042,14 +2012,6 @@ fn render_fft_markers_panel(ui: &mut Ui, state: &mut FftState) {
                 remove_idx = Some(idx);
             }
         });
-    }
-
-    if let Some((d_freq, d_mag)) = delta_summary {
-        ui.label(
-            egui::RichText::new(format!("dF {}   dM {}", d_freq, d_mag))
-                .size(9.0)
-                .color(Color32::from_rgb(120, 125, 135)),
-        );
     }
 
     if let Some(idx) = remove_idx {
@@ -2106,15 +2068,6 @@ fn format_marker_magnitude(state: &FftState, point: &FftPoint) -> String {
         MagnitudeScale::DB => format!("{:.2} dB", state.display_magnitude(point)),
         MagnitudeScale::DBc => format!("{:.2} dBc", state.display_magnitude(point)),
         MagnitudeScale::DBm => format!("{:.2} dBm", state.display_magnitude(point)),
-    }
-}
-
-fn format_marker_delta(state: &FftState, delta: f64) -> String {
-    match state.mag_scale {
-        MagnitudeScale::Linear => format!("{:+.5}", delta),
-        MagnitudeScale::DB => format!("{:+.2} dB", delta),
-        MagnitudeScale::DBc => format!("{:+.2} dBc", delta),
-        MagnitudeScale::DBm => format!("{:+.2} dBm", delta),
     }
 }
 
