@@ -4,8 +4,8 @@
 
 use super::data::{FftData, SpectrumAnalysis, SpectrumNormalization};
 use super::pipeline::{
-    FftInputOptions, FftInputPolicy, FftTimeWindow, MAX_REFERENCE_RESAMPLE_POINTS, MIN_FFT_SAMPLES,
-    PreparedFftInput,
+    FftInputOptions, FftInputPolicy, FftTimeWindow, PreparedFftInput,
+    MAX_REFERENCE_RESAMPLE_POINTS, MIN_FFT_SAMPLES,
 };
 use super::window::WindowFunction;
 
@@ -176,6 +176,10 @@ pub struct FftState {
     pub z0: f64,
     /// Interactive marker frequencies (Hz) placed by user.
     pub marker_frequencies: Vec<f64>,
+    /// Optional user-resized right info pane width in pixels. `None` means auto-fit.
+    pub info_pane_width: Option<f32>,
+    /// Runtime auto-fit width hint captured from rendered content.
+    pub info_pane_auto_width_hint: f32,
 }
 
 impl Default for FftState {
@@ -208,6 +212,8 @@ impl Default for FftState {
             freq_auto: true,
             z0: 50.0,
             marker_frequencies: Vec::new(),
+            info_pane_width: None,
+            info_pane_auto_width_hint: 0.0,
         }
     }
 }

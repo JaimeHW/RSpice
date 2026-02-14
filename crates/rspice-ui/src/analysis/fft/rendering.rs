@@ -2,7 +2,7 @@
 //!
 //! Commercial-grade egui rendering for FFT/spectrum visualization.
 
-use egui::{Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2};
+use egui::{Color32, CursorIcon, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2};
 #[cfg(test)]
 use std::f64::consts::PI;
 
@@ -13,8 +13,8 @@ use crate::common::app::AppState;
 use crate::common::viewer_style::{viewer_chart_bg_color, viewer_header_bg_color};
 use crate::state::AnalysisType;
 use crate::utils::vertical_label_layout::{
-    LabelSide, VerticalLabelLayoutConfig, VerticalLabelPlacement, VerticalLabelRequest,
-    place_vertical_line_labels,
+    place_vertical_line_labels, LabelSide, VerticalLabelLayoutConfig, VerticalLabelPlacement,
+    VerticalLabelRequest,
 };
 
 // =============================================================================
@@ -111,7 +111,17 @@ pub fn render_fft_viewer(ui: &mut Ui, app_state: &mut AppState) {
     // Claim full available space so the parent resizable panel keeps user height
     // instead of collapsing to a content-driven "natural" size.
     let (_id, _rect) = ui.allocate_space(available_rect.size());
-    let layout = calculate_layout(available_rect);
+    let auto_info_width = preferred_fft_info_pane_width(ui, &app_state.fft_state);
+    app_state.fft_state.info_pane_auto_width_hint = auto_info_width;
+    let info_width = resolve_fft_info_pane_width(
+        available_rect,
+        app_state.fft_state.info_pane_width,
+        auto_info_width,
+    );
+    if app_state.fft_state.info_pane_width.is_some() {
+        app_state.fft_state.info_pane_width = Some(info_width);
+    }
+    let layout = calculate_layout_with_info_width(available_rect, info_width);
     let source_names = collect_fft_source_names(app_state);
     let source_time_bounds = current_fft_source_time_bounds(app_state);
 
@@ -135,6 +145,7 @@ pub fn render_fft_viewer(ui: &mut Ui, app_state: &mut AppState) {
     let state = &mut app_state.fft_state;
     render_spectrum(ui, &layout, state);
     render_info_panel(ui, &layout, state);
+    handle_fft_info_splitter(ui, &layout, state);
 }
 
 /// Public render function
@@ -152,6 +163,7 @@ pub fn render_fft_plot(ui: &mut Ui, state: &FftState) {
 
 #[derive(Debug, Clone)]
 struct FftLayout {
+    total: Rect,
     header_top: Rect,
     header_main: Rect,
     spectrum: Rect,
@@ -161,7 +173,14 @@ struct FftLayout {
 const HEADER_ROW_HEIGHT: f32 = 34.0;
 const HEADER_TOP_HEIGHT: f32 = HEADER_ROW_HEIGHT;
 const HEADER_MAIN_HEIGHT: f32 = HEADER_ROW_HEIGHT;
-const INFO_WIDTH: f32 = 150.0;
+const INFO_WIDTH_MIN: f32 = 150.0;
+const INFO_WIDTH_MAX: f32 = 420.0;
+const INFO_WIDTH_FRACTION: f32 = 0.20;
+const INFO_WIDTH_MAX_FRACTION: f32 = 0.45;
+const FFT_MIN_PLOT_WIDTH: f32 = 220.0;
+const INFO_SPLITTER_HIT_WIDTH: f32 = 8.0;
+const INFO_SPLITTER_STROKE_WIDTH: f32 = 1.0;
+const INFO_SCROLLBAR_ALLOWANCE: f32 = 14.0;
 const CHART_LEFT_PADDING: f32 = 8.0;
 const CHART_RIGHT_PADDING: f32 = 0.0;
 const CHART_TOP_GAP: f32 = 0.0;
@@ -191,7 +210,16 @@ const CURSOR_LABEL_FONT_SIZE: f32 = 9.0;
 const CURSOR_LABEL_BG_ALPHA: u8 = 220;
 
 fn calculate_layout(available: Rect) -> FftLayout {
+    let info_width = clamp_fft_info_pane_width(
+        available,
+        (available.width() * INFO_WIDTH_FRACTION).clamp(INFO_WIDTH_MIN, INFO_WIDTH_MAX),
+    );
+    calculate_layout_with_info_width(available, info_width)
+}
+
+fn calculate_layout_with_info_width(available: Rect, info_width: f32) -> FftLayout {
     let total = available;
+    let info_width = clamp_fft_info_pane_width(total, info_width);
     let total_header_height = (HEADER_TOP_HEIGHT + HEADER_MAIN_HEIGHT).min(total.height());
     let top_height = HEADER_TOP_HEIGHT.min(total_header_height);
     let main_height = (total_header_height - top_height).max(0.0);
@@ -204,8 +232,8 @@ fn calculate_layout(available: Rect) -> FftLayout {
     let content_top = header_main.max.y;
 
     let info = Rect::from_min_size(
-        Pos2::new(total.max.x - INFO_WIDTH, content_top),
-        Vec2::new(INFO_WIDTH, (total.max.y - content_top).max(0.0)),
+        Pos2::new(total.max.x - info_width, content_top),
+        Vec2::new(info_width, (total.max.y - content_top).max(0.0)),
     );
 
     let spectrum = Rect::from_min_max(
@@ -220,11 +248,34 @@ fn calculate_layout(available: Rect) -> FftLayout {
     );
 
     FftLayout {
+        total,
         header_top,
         header_main,
         spectrum,
         info,
     }
+}
+
+fn fft_info_pane_width_bounds(total: Rect) -> (f32, f32) {
+    let min = INFO_WIDTH_MIN;
+    let max_by_fraction = (total.width() * INFO_WIDTH_MAX_FRACTION).max(min);
+    let max_by_plot = (total.width() - CHART_LEFT_PADDING - FFT_MIN_PLOT_WIDTH).max(min);
+    let max = max_by_fraction
+        .min(max_by_plot)
+        .min(INFO_WIDTH_MAX)
+        .max(min);
+    (min, max)
+}
+
+fn clamp_fft_info_pane_width(total: Rect, width: f32) -> f32 {
+    let (min, max) = fft_info_pane_width_bounds(total);
+    width.clamp(min, max)
+}
+
+fn resolve_fft_info_pane_width(total: Rect, manual_width: Option<f32>, auto_width: f32) -> f32 {
+    let base = (total.width() * INFO_WIDTH_FRACTION).clamp(INFO_WIDTH_MIN, INFO_WIDTH_MAX);
+    let desired = manual_width.unwrap_or_else(|| base.max(auto_width));
+    clamp_fft_info_pane_width(total, desired)
 }
 
 fn spectrum_plot_rect(spectrum_rect: Rect) -> Rect {
@@ -316,6 +367,139 @@ where
     }
 
     (max_text_width + HEADER_DROPDOWN_TEXT_PADDING).clamp(min_width, max_width)
+}
+
+fn fft_button_width_for_text(
+    painter: &egui::Painter,
+    text: &str,
+    font: FontId,
+    color: Color32,
+) -> f32 {
+    measure_text_width(painter, text, font, color) + 16.0
+}
+
+fn preferred_fft_info_pane_width(ui: &Ui, state: &FftState) -> f32 {
+    let painter = ui.painter();
+    let label_font = FontId::proportional(10.0);
+    let value_font = FontId::proportional(11.0);
+    let small_font = FontId::proportional(9.0);
+    let label_color = Color32::from_rgb(120, 125, 135);
+    let value_color = Color32::from_rgb(200, 205, 215);
+
+    const INFO_LABELS: &[&str] = &[
+        "Fund.",
+        "Level",
+        "THD",
+        "SFDR",
+        "SNR",
+        "SINAD",
+        "Noise",
+        "Harmonics",
+        "Type",
+        "Norm",
+        "Fidelity",
+        "Tstart",
+        "Tstop",
+        "N set",
+        "Sidelobe",
+        "ENBW",
+        "Trace",
+        "Input N",
+        "Samples",
+        "Decim",
+        "Fs",
+    ];
+
+    let mut max_label_width = 0.0f32;
+    for label in INFO_LABELS {
+        let width = measure_text_width(
+            painter,
+            &format!("{}:", label),
+            label_font.clone(),
+            label_color,
+        );
+        max_label_width = max_label_width.max(width);
+    }
+
+    let mut value_samples: Vec<String> = vec![
+        state.window.display_name().to_owned(),
+        state.normalization.display_name().to_owned(),
+        state.input_fidelity.display_name().to_owned(),
+        format!("{:.0} dB", state.window.sidelobe_level()),
+        format!("{:.2} bins", state.window.noise_bandwidth()),
+        format!("{}", state.num_harmonics),
+        "--".to_string(),
+    ];
+
+    if !state.time_window_auto {
+        value_samples.push(crate::waveform::axis::format_time(state.time_window_start));
+        value_samples.push(crate::waveform::axis::format_time(state.time_window_end));
+    }
+    if !state.sample_count_auto {
+        value_samples.push(format!("{}", state.sample_count));
+    }
+    if let Some(ref analysis) = state.analysis {
+        if let Some(v) = analysis.fundamental_frequency {
+            value_samples.push(format_freq(v));
+        }
+        if let Some(v) = analysis.fundamental_db {
+            value_samples.push(format!("{:.1} dB", v));
+        }
+        if let Some(v) = analysis.thd_percent {
+            value_samples.push(format!("{:.3}%", v));
+        }
+        if let Some(v) = analysis.sfdr_db {
+            value_samples.push(format!("{:.1} dB", v));
+        }
+        if let Some(v) = analysis.snr_db {
+            value_samples.push(format!("{:.1} dB", v));
+        }
+        if let Some(v) = analysis.sinad_db {
+            value_samples.push(format!("{:.1} dB", v));
+        }
+        if let Some(v) = analysis.noise_floor_db {
+            value_samples.push(format!("{:.1} dB", v));
+        }
+        value_samples.push(format!("{}", analysis.harmonics.len()));
+    }
+    if let Some(ref source) = state.source_cache {
+        value_samples.push(source.name.clone());
+        value_samples.push(format!("{}", source.original_count));
+        value_samples.push(format!("{}", source.samples.len()));
+        if source.decimation_factor > 1 {
+            value_samples.push(format!("x{}", source.decimation_factor));
+        }
+        value_samples.push(format_freq(source.sample_rate));
+    }
+
+    let mut max_value_width = 0.0f32;
+    for value in &value_samples {
+        let width = measure_text_width(painter, value, value_font.clone(), value_color);
+        max_value_width = max_value_width.max(width);
+    }
+    let info_rows_width = max_label_width + 8.0 + max_value_width;
+
+    let markers_hint = measure_text_width(
+        painter,
+        "Alt+LMB add, Alt+RMB remove",
+        small_font.clone(),
+        label_color,
+    );
+    let marker_freq_text = state
+        .marker_frequencies
+        .iter()
+        .copied()
+        .last()
+        .map(format_freq)
+        .unwrap_or_else(|| "1.00 kHz".to_string());
+    let marker_row_width = measure_text_width(painter, "M16", value_font.clone(), value_color)
+        + 4.0
+        + fft_button_width_for_text(painter, &marker_freq_text, value_font.clone(), value_color)
+        + 4.0
+        + fft_button_width_for_text(painter, "x", value_font, value_color);
+
+    let content_width = info_rows_width.max(markers_hint).max(marker_row_width);
+    content_width + INFO_PANEL_PADDING * 2.0 + INFO_SCROLLBAR_ALLOWANCE
 }
 
 #[derive(Debug, Default)]
@@ -1804,6 +1988,61 @@ fn mag_to_y(point: &FftPoint, rect: Rect, state: &FftState) -> f32 {
 
     let t = (value - min) / range;
     rect.max.y - t as f32 * rect.height()
+}
+
+fn handle_fft_info_splitter(ui: &mut Ui, layout: &FftLayout, state: &mut FftState) {
+    let splitter_rect = Rect::from_min_max(
+        Pos2::new(layout.info.min.x, layout.info.min.y),
+        Pos2::new(
+            layout.info.min.x + INFO_SPLITTER_HIT_WIDTH,
+            layout.info.max.y,
+        ),
+    );
+
+    let splitter_id = ui.id().with("fft_info_pane_splitter");
+    let start_width_id = splitter_id.with("drag_start_width");
+    let mut response = ui.interact(splitter_rect, splitter_id, Sense::click_and_drag());
+    response = response.on_hover_cursor(CursorIcon::ResizeHorizontal);
+
+    if response.double_clicked() {
+        state.info_pane_width = None;
+    }
+
+    if response.drag_started() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(start_width_id, layout.info.width());
+        });
+    }
+
+    if response.dragged() {
+        let start_width = ui
+            .ctx()
+            .data(|data| data.get_temp::<f32>(start_width_id))
+            .unwrap_or(layout.info.width());
+        let target = start_width - response.drag_delta().x;
+        state.info_pane_width = Some(clamp_fft_info_pane_width(layout.total, target));
+    }
+
+    if response.drag_stopped() {
+        ui.ctx().data_mut(|data| {
+            data.remove::<f32>(start_width_id);
+        });
+    }
+
+    let stroke_color = if response.dragged() {
+        Color32::from_rgb(115, 150, 220)
+    } else if response.hovered() {
+        Color32::from_rgb(90, 115, 165)
+    } else {
+        panel_border_color()
+    };
+    ui.painter().line_segment(
+        [
+            Pos2::new(layout.info.min.x, layout.info.min.y),
+            Pos2::new(layout.info.min.x, layout.info.max.y),
+        ],
+        Stroke::new(INFO_SPLITTER_STROKE_WIDTH, stroke_color),
+    );
 }
 
 // =============================================================================

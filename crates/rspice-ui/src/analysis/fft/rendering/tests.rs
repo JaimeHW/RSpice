@@ -14,6 +14,29 @@ fn test_layout_calculation() {
 }
 
 #[test]
+fn test_fft_info_pane_width_bounds_reserve_plot_width() {
+    let total = Rect::from_min_size(Pos2::ZERO, Vec2::new(1100.0, 620.0));
+    let (_min, max) = fft_info_pane_width_bounds(total);
+    let remaining_plot_width = total.width() - CHART_LEFT_PADDING - max;
+    assert!(remaining_plot_width >= FFT_MIN_PLOT_WIDTH - f32::EPSILON);
+}
+
+#[test]
+fn test_resolve_fft_info_pane_width_uses_auto_hint_without_override() {
+    let total = Rect::from_min_size(Pos2::ZERO, Vec2::new(1200.0, 700.0));
+    let resolved = resolve_fft_info_pane_width(total, None, 300.0);
+    assert!((resolved - clamp_fft_info_pane_width(total, 300.0)).abs() < f32::EPSILON);
+}
+
+#[test]
+fn test_resolve_fft_info_pane_width_clamps_manual_override() {
+    let total = Rect::from_min_size(Pos2::ZERO, Vec2::new(760.0, 520.0));
+    let resolved = resolve_fft_info_pane_width(total, Some(5_000.0), 0.0);
+    let (_min, max) = fft_info_pane_width_bounds(total);
+    assert!((resolved - max).abs() < f32::EPSILON);
+}
+
+#[test]
 fn test_layout_uses_two_stacked_header_rows() {
     let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
     let layout = calculate_layout(rect);
@@ -207,11 +230,9 @@ fn test_collect_fft_cursor_label_obstacles_samples_top_band_trace_points() {
     let obstacles = collect_fft_cursor_label_obstacles(plot, &data, &state, plot.min.y + 64.0);
 
     assert!(!obstacles.is_empty());
-    assert!(
-        obstacles
-            .iter()
-            .all(|r| r.max.y <= plot.min.y + 64.0 + 1e-3)
-    );
+    assert!(obstacles
+        .iter()
+        .all(|r| r.max.y <= plot.min.y + 64.0 + 1e-3));
 }
 
 #[test]
@@ -651,21 +672,15 @@ fn test_frequency_ticks_log_has_major_decades() {
     state.freq_max = 1_000_000.0;
 
     let ticks = frequency_ticks(&state, 10);
-    assert!(
-        ticks
-            .iter()
-            .any(|t| t.major && (t.value - 10.0).abs() < 1e-9)
-    );
-    assert!(
-        ticks
-            .iter()
-            .any(|t| t.major && (t.value - 1000.0).abs() < 1e-9)
-    );
-    assert!(
-        ticks
-            .iter()
-            .any(|t| t.major && (t.value - 100000.0).abs() < 1e-9)
-    );
+    assert!(ticks
+        .iter()
+        .any(|t| t.major && (t.value - 10.0).abs() < 1e-9));
+    assert!(ticks
+        .iter()
+        .any(|t| t.major && (t.value - 1000.0).abs() < 1e-9));
+    assert!(ticks
+        .iter()
+        .any(|t| t.major && (t.value - 100000.0).abs() < 1e-9));
 }
 
 #[test]
@@ -676,21 +691,15 @@ fn test_frequency_ticks_log_contains_minor_subdivisions() {
     state.freq_max = 100.0;
 
     let ticks = frequency_ticks(&state, 10);
-    assert!(
-        ticks
-            .iter()
-            .any(|t| !t.major && (t.value - 20.0).abs() < 1e-9)
-    );
-    assert!(
-        ticks
-            .iter()
-            .any(|t| !t.major && (t.value - 50.0).abs() < 1e-9)
-    );
-    assert!(
-        ticks
-            .iter()
-            .any(|t| !t.major && (t.value - 90.0).abs() < 1e-9)
-    );
+    assert!(ticks
+        .iter()
+        .any(|t| !t.major && (t.value - 20.0).abs() < 1e-9));
+    assert!(ticks
+        .iter()
+        .any(|t| !t.major && (t.value - 50.0).abs() < 1e-9));
+    assert!(ticks
+        .iter()
+        .any(|t| !t.major && (t.value - 90.0).abs() < 1e-9));
 }
 
 #[test]
@@ -706,12 +715,10 @@ fn test_frequency_ticks_linear_contains_minor_gridlines() {
 
     assert!(major_count >= 3);
     assert!(minor_count > 0);
-    assert!(
-        ticks
-            .iter()
-            .filter(|t| !t.major)
-            .all(|t| t.label.is_empty())
-    );
+    assert!(ticks
+        .iter()
+        .filter(|t| !t.major)
+        .all(|t| t.label.is_empty()));
 }
 
 #[test]
@@ -732,11 +739,9 @@ fn test_linear_ticks_minor_do_not_overlap_major_values() {
     let majors: Vec<f64> = ticks.iter().filter(|t| t.major).map(|t| t.value).collect();
     let epsilon = 1e-9;
     for minor in ticks.iter().filter(|t| !t.major) {
-        assert!(
-            majors
-                .iter()
-                .all(|&major| (major - minor.value).abs() > epsilon)
-        );
+        assert!(majors
+            .iter()
+            .all(|&major| (major - minor.value).abs() > epsilon));
     }
 }
 
