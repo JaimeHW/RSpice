@@ -21,19 +21,20 @@
 //! commercial tools like Cadence ViVA.
 
 use egui::{
-    Color32, FontId, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2,
+    Color32, CursorIcon, FontId, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui,
+    UiBuilder, Vec2,
 };
 
 use super::axis::{self, GridLineType};
-use super::export::{ExportFormat, calculate_export_stats, export_to_csv, export_to_spice_raw};
+use super::export::{calculate_export_stats, export_to_csv, export_to_spice_raw, ExportFormat};
 use super::legend::{self, LegendSortOrder};
 use super::measurements::TraceMeasurements;
 use super::state::{MeasurementScope, TraceData, ViewTransform, WaveformViewerState};
 use crate::common::app::AppState;
 use crate::common::viewer_style::{viewer_chart_bg_color, viewer_header_bg_color};
 use crate::utils::vertical_label_layout::{
-    LabelSide, VerticalLabelLayoutConfig, VerticalLabelPlacement, VerticalLabelRequest,
-    place_vertical_line_labels,
+    place_vertical_line_labels, LabelSide, VerticalLabelLayoutConfig, VerticalLabelPlacement,
+    VerticalLabelRequest,
 };
 
 // =============================================================================
@@ -51,8 +52,13 @@ const HEADER_HEIGHT: f32 = 32.0;
 
 /// Legend width policy (pixels)
 const LEGEND_WIDTH_MIN: f32 = 140.0;
-const LEGEND_WIDTH_MAX: f32 = 220.0;
+const LEGEND_WIDTH_MAX: f32 = 420.0;
 const LEGEND_WIDTH_FRACTION: f32 = 0.18;
+const LEGEND_WIDTH_MAX_FRACTION: f32 = 0.45;
+const LEGEND_MIN_PLOT_WIDTH: f32 = 220.0;
+const LEGEND_SPLITTER_HIT_WIDTH: f32 = 8.0;
+const LEGEND_SPLITTER_STROKE_WIDTH: f32 = 1.0;
+const LEGEND_SCROLLBAR_ALLOWANCE: f32 = 14.0;
 const CHART_TOP_GAP: f32 = 2.0;
 
 /// Maximum points to render before decimation
@@ -185,7 +191,17 @@ pub fn render_waveform_viewer(ui: &mut Ui, app_state: &mut AppState) {
     // Calculate layout regions and CLAIM the full available space
     // This is crucial for the panel to maintain its size properly
     let available_rect = ui.available_rect_before_wrap();
-    let layout = calculate_layout(available_rect);
+    let auto_width = preferred_waveform_right_pane_width(ui, &app_state.waveform_viewer);
+    app_state.waveform_viewer.right_pane_auto_width_hint = auto_width;
+    let legend_width = resolve_waveform_right_pane_width(
+        available_rect,
+        app_state.waveform_viewer.right_pane_width,
+        auto_width,
+    );
+    if app_state.waveform_viewer.right_pane_width.is_some() {
+        app_state.waveform_viewer.right_pane_width = Some(legend_width);
+    }
+    let layout = calculate_layout_with_legend_width(available_rect, legend_width);
 
     // Allocate the total available space to claim it
     // This tells egui we're using all the space
@@ -198,6 +214,7 @@ pub fn render_waveform_viewer(ui: &mut Ui, app_state: &mut AppState) {
     render_plot_area(ui, &layout, &mut app_state.waveform_viewer);
     render_x_axis(ui, &layout, &app_state.waveform_viewer);
     render_legend(ui, &layout, &mut app_state.waveform_viewer);
+    handle_waveform_right_pane_splitter(ui, &layout, &mut app_state.waveform_viewer);
 }
 
 // =============================================================================
@@ -222,10 +239,18 @@ pub struct ViewerLayout {
 }
 
 /// Calculate layout regions from available space
+#[allow(dead_code)]
 fn calculate_layout(available: Rect) -> ViewerLayout {
+    let legend_width = clamp_waveform_right_pane_width(
+        available,
+        (available.width() * LEGEND_WIDTH_FRACTION).clamp(LEGEND_WIDTH_MIN, LEGEND_WIDTH_MAX),
+    );
+    calculate_layout_with_legend_width(available, legend_width)
+}
+
+fn calculate_layout_with_legend_width(available: Rect, legend_width: f32) -> ViewerLayout {
     let total = available;
-    let legend_width =
-        (total.width() * LEGEND_WIDTH_FRACTION).clamp(LEGEND_WIDTH_MIN, LEGEND_WIDTH_MAX);
+    let legend_width = clamp_waveform_right_pane_width(total, legend_width);
 
     // Header at top
     let header = Rect::from_min_size(total.min, Vec2::new(total.width(), HEADER_HEIGHT));
@@ -2020,6 +2045,160 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
                 .color(Color32::from_rgb(100, 105, 115)),
         );
     }
+}
+
+fn waveform_right_pane_width_bounds(total: Rect) -> (f32, f32) {
+    let min = LEGEND_WIDTH_MIN;
+    let max_by_fraction = (total.width() * LEGEND_WIDTH_MAX_FRACTION).max(min);
+    let max_by_plot = (total.width() - Y_AXIS_WIDTH - LEGEND_MIN_PLOT_WIDTH).max(min);
+    let max = max_by_fraction
+        .min(max_by_plot)
+        .min(LEGEND_WIDTH_MAX)
+        .max(min);
+    (min, max)
+}
+
+fn clamp_waveform_right_pane_width(total: Rect, width: f32) -> f32 {
+    let (min, max) = waveform_right_pane_width_bounds(total);
+    width.clamp(min, max)
+}
+
+fn resolve_waveform_right_pane_width(
+    total: Rect,
+    manual_width: Option<f32>,
+    auto_width: f32,
+) -> f32 {
+    let base = (total.width() * LEGEND_WIDTH_FRACTION).clamp(LEGEND_WIDTH_MIN, LEGEND_WIDTH_MAX);
+    let desired = manual_width.unwrap_or_else(|| base.max(auto_width));
+    clamp_waveform_right_pane_width(total, desired)
+}
+
+fn button_width_for_text(painter: &Painter, text: &str, font: FontId, color: Color32) -> f32 {
+    measure_text_width(painter, text, font, color) + 16.0
+}
+
+fn preferred_waveform_right_pane_width(ui: &Ui, viewer_state: &WaveformViewerState) -> f32 {
+    let painter = ui.painter();
+    let label_color = Color32::from_rgb(120, 125, 135);
+    let body_color = Color32::from_rgb(200, 205, 215);
+    let label_font = FontId::proportional(10.0);
+    let body_font = FontId::proportional(11.0);
+    let spacing = 4.0;
+
+    let show_row = measure_text_width(painter, "Show", label_font.clone(), label_color)
+        + spacing
+        + button_width_for_text(painter, "All", body_font.clone(), body_color)
+        + spacing
+        + button_width_for_text(painter, "Clear", body_font.clone(), body_color);
+    let sort_row =
+        measure_text_width(painter, "Sort", label_font.clone(), label_color) + spacing + 120.0;
+    let find_row = measure_text_width(painter, "Find", label_font.clone(), label_color)
+        + spacing
+        + LEGEND_FIND_EDIT_MIN_WIDTH.max(76.0)
+        + spacing
+        + LEGEND_TRACE_SOLO_WIDTH
+        + LEGEND_FIND_RIGHT_GUARD;
+
+    let max_trace_name_width = viewer_state
+        .traces
+        .iter()
+        .map(|trace| measure_text_width(painter, &trace.name, body_font.clone(), body_color))
+        .fold(72.0f32, f32::max)
+        .clamp(72.0, 240.0);
+    let trace_row = LEGEND_TRACE_SWATCH_WIDTH
+        + spacing
+        + LEGEND_TRACE_CONTROL_WIDTH
+        + spacing
+        + LEGEND_TRACE_SOLO_WIDTH
+        + spacing
+        + max_trace_name_width
+        + LEGEND_TEXT_TRUNCATION_PADDING;
+
+    let marker_button_text = viewer_state
+        .markers
+        .iter()
+        .copied()
+        .last()
+        .map(axis::format_time)
+        .unwrap_or_else(|| "1.00 us".to_string());
+    let marker_row = measure_text_width(painter, "M16", body_font.clone(), body_color)
+        + spacing
+        + button_width_for_text(painter, &marker_button_text, body_font.clone(), body_color)
+        + spacing
+        + button_width_for_text(painter, "x", body_font.clone(), body_color);
+    let markers_hint = measure_text_width(
+        painter,
+        "Alt+LMB add, Alt+RMB remove",
+        FontId::proportional(9.0),
+        label_color,
+    );
+
+    let content_width = show_row
+        .max(sort_row)
+        .max(find_row)
+        .max(trace_row)
+        .max(marker_row)
+        .max(markers_hint);
+    content_width + LEGEND_SCROLLBAR_ALLOWANCE + LEGEND_INSET_X * 2.0
+}
+
+fn handle_waveform_right_pane_splitter(
+    ui: &mut Ui,
+    layout: &ViewerLayout,
+    viewer_state: &mut WaveformViewerState,
+) {
+    let splitter_rect = Rect::from_min_max(
+        Pos2::new(layout.legend.min.x, layout.legend.min.y),
+        Pos2::new(
+            layout.legend.min.x + LEGEND_SPLITTER_HIT_WIDTH,
+            layout.legend.max.y,
+        ),
+    );
+
+    let splitter_id = ui.id().with("waveform_right_pane_splitter");
+    let start_width_id = splitter_id.with("drag_start_width");
+    let mut response = ui.interact(splitter_rect, splitter_id, Sense::click_and_drag());
+    response = response.on_hover_cursor(CursorIcon::ResizeHorizontal);
+
+    if response.double_clicked() {
+        viewer_state.right_pane_width = None;
+    }
+
+    if response.drag_started() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(start_width_id, layout.legend.width());
+        });
+    }
+
+    if response.dragged() {
+        let start_width = ui
+            .ctx()
+            .data(|data| data.get_temp::<f32>(start_width_id))
+            .unwrap_or(layout.legend.width());
+        let target = start_width - response.drag_delta().x;
+        viewer_state.right_pane_width = Some(clamp_waveform_right_pane_width(layout.total, target));
+    }
+
+    if response.drag_stopped() {
+        ui.ctx().data_mut(|data| {
+            data.remove::<f32>(start_width_id);
+        });
+    }
+
+    let stroke_color = if response.dragged() {
+        Color32::from_rgb(115, 150, 220)
+    } else if response.hovered() {
+        Color32::from_rgb(90, 115, 165)
+    } else {
+        plot_border_color()
+    };
+    ui.painter().line_segment(
+        [
+            Pos2::new(layout.legend.min.x, layout.legend.min.y),
+            Pos2::new(layout.legend.min.x, layout.legend.max.y),
+        ],
+        Stroke::new(LEGEND_SPLITTER_STROKE_WIDTH, stroke_color),
+    );
 }
 
 fn center_waveform_view_x_on_marker(

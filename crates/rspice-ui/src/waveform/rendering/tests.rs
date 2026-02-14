@@ -305,6 +305,29 @@ fn test_layout_legend_width_tracks_dynamic_policy() {
 }
 
 #[test]
+fn test_waveform_right_pane_width_bounds_reserve_plot_width() {
+    let total = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 600.0));
+    let (_min, max) = waveform_right_pane_width_bounds(total);
+    let remaining_plot_width = total.width() - Y_AXIS_WIDTH - max;
+    assert!(remaining_plot_width >= LEGEND_MIN_PLOT_WIDTH - f32::EPSILON);
+}
+
+#[test]
+fn test_resolve_waveform_right_pane_width_uses_auto_hint_when_not_overridden() {
+    let total = Rect::from_min_size(Pos2::ZERO, Vec2::new(1200.0, 700.0));
+    let resolved = resolve_waveform_right_pane_width(total, None, 320.0);
+    assert!((resolved - clamp_waveform_right_pane_width(total, 320.0)).abs() < f32::EPSILON);
+}
+
+#[test]
+fn test_resolve_waveform_right_pane_width_clamps_manual_override() {
+    let total = Rect::from_min_size(Pos2::ZERO, Vec2::new(700.0, 500.0));
+    let resolved = resolve_waveform_right_pane_width(total, Some(9_999.0), 0.0);
+    let (_min, max) = waveform_right_pane_width_bounds(total);
+    assert!((resolved - max).abs() < f32::EPSILON);
+}
+
+#[test]
 fn test_legend_inner_rect_uses_tighter_horizontal_inset() {
     let legend = Rect::from_min_size(Pos2::new(10.0, 20.0), Vec2::new(200.0, 300.0));
     let inner = legend_inner_rect(legend);

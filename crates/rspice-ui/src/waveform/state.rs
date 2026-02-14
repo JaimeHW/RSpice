@@ -1024,6 +1024,12 @@ pub struct WaveformViewerState {
     /// Cached per-trace measurement results used by the measurements panel.
     #[serde(skip)]
     pub measurement_cache: MeasurementCache,
+    /// Optional user-resized right pane width in pixels. `None` means auto-fit.
+    #[serde(default)]
+    pub right_pane_width: Option<f32>,
+    /// Runtime auto-fit width hint captured from rendered content.
+    #[serde(skip)]
+    pub right_pane_auto_width_hint: f32,
 }
 
 /// Scope for waveform measurement display.
