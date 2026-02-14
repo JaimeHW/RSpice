@@ -1933,71 +1933,131 @@ fn render_info_panel_content(ui: &mut Ui, state: &mut FftState) {
             info_row(ui, "Fs", &format_freq(source.sample_rate));
         }
 
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new("Markers")
-                    .size(10.0)
-                    .color(text_color()),
-            );
-            if ui.small_button("Clear").clicked() {
-                state.clear_markers();
-            }
-        });
+        render_fft_markers_panel(ui, state);
+    });
+}
+
+fn render_fft_markers_panel(ui: &mut Ui, state: &mut FftState) {
+    ui.separator();
+    ui.label(
+        egui::RichText::new("Markers")
+            .size(11.0)
+            .strong()
+            .color(Color32::from_rgb(160, 165, 175)),
+    );
+
+    ui.horizontal(|ui| {
         ui.label(
-            egui::RichText::new(format!("{} entries", state.marker_count()))
+            egui::RichText::new(format!("{}", state.marker_count()))
                 .size(9.0)
                 .color(Color32::from_rgb(120, 125, 135)),
         );
-
-        if state.marker_frequencies.is_empty() {
-            ui.label(
-                egui::RichText::new("No markers")
-                    .size(10.0)
-                    .color(Color32::from_rgb(100, 105, 115)),
-            );
-        } else {
-            let mut jump_to_freq: Option<f64> = None;
-            let mut remove_idx: Option<usize> = None;
-            let marker_frequencies = state.marker_frequencies.clone();
-            if let Some(ref data) = state.data {
-                for (idx, marker_freq) in marker_frequencies.iter().copied().enumerate() {
-                    let marker_name = format!("M{}", idx + 1);
-                    info_row(ui, &format!("{} F", marker_name), &format_freq(marker_freq));
-                    if let Some(point) = data.interpolate(marker_freq) {
-                        info_row(
-                            ui,
-                            &format!("{} M", marker_name),
-                            &format_marker_magnitude(state, &point),
-                        );
-                    }
-                    ui.horizontal(|ui| {
-                        ui.add_space(8.0);
-                        if ui.small_button("Go").clicked() {
-                            jump_to_freq = Some(marker_freq);
-                        }
-                        if ui.small_button("x").clicked() {
-                            remove_idx = Some(idx);
-                        }
-                    });
-                }
-                if let [m1, m2, ..] = marker_frequencies.as_slice() {
-                    info_row(ui, "dF", &format_freq((m2 - m1).abs()));
-                    let m1_mag = data.interpolate(*m1).map(|p| state.display_magnitude(&p));
-                    let m2_mag = data.interpolate(*m2).map(|p| state.display_magnitude(&p));
-                    if let (Some(v1), Some(v2)) = (m1_mag, m2_mag) {
-                        info_row(ui, "dM", &format_marker_delta(state, v2 - v1));
-                    }
-                }
-            }
-            if let Some(idx) = remove_idx {
-                state.remove_marker_at(idx);
-            }
-            if let Some(freq) = jump_to_freq {
-                center_fft_frequency_view_on_marker(state, freq);
-            }
+        ui.label(
+            egui::RichText::new("entries")
+                .size(9.0)
+                .color(Color32::from_rgb(120, 125, 135)),
+        );
+        if ui.small_button("Clear").clicked() {
+            state.clear_markers();
         }
     });
+    ui.label(
+        egui::RichText::new("Alt+LMB add, Alt+RMB remove")
+            .size(9.0)
+            .color(Color32::from_rgb(120, 125, 135)),
+    );
+
+    if state.marker_frequencies.is_empty() {
+        ui.label(
+            egui::RichText::new("No markers")
+                .size(10.0)
+                .color(Color32::from_rgb(100, 105, 115)),
+        );
+        return;
+    }
+
+    let marker_rows: Vec<(usize, f64, Option<String>)> = state
+        .marker_frequencies
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(idx, marker_freq)| {
+            let marker_mag = state
+                .data
+                .as_ref()
+                .and_then(|data| data.interpolate(marker_freq))
+                .map(|point| format_marker_magnitude(state, &point));
+            (idx, marker_freq, marker_mag)
+        })
+        .collect();
+
+    let delta_summary: Option<(String, String)> = if let [(_, m1, _), (_, m2, _), ..] =
+        marker_rows.as_slice()
+    {
+        let d_freq = format_freq((m2 - m1).abs());
+        let d_mag = if let Some(ref data) = state.data {
+            let m1_mag = data.interpolate(*m1).map(|p| state.display_magnitude(&p));
+            let m2_mag = data.interpolate(*m2).map(|p| state.display_magnitude(&p));
+            if let (Some(v1), Some(v2)) = (m1_mag, m2_mag) {
+                format_marker_delta(state, v2 - v1)
+            } else {
+                "--".to_string()
+            }
+        } else {
+            "--".to_string()
+        };
+        Some((d_freq, d_mag))
+    } else {
+        None
+    };
+
+    let mut jump_to_freq: Option<f64> = None;
+    let mut remove_idx: Option<usize> = None;
+    for (idx, marker_freq, marker_mag) in marker_rows {
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new(format!("M{}", idx + 1))
+                    .size(10.0)
+                    .color(marker_color_for_slot(idx)),
+            );
+            if ui
+                .small_button(format_freq(marker_freq))
+                .on_hover_text("Center frequency view on marker")
+                .clicked()
+            {
+                jump_to_freq = Some(marker_freq);
+            }
+            if let Some(marker_mag) = marker_mag {
+                ui.label(
+                    egui::RichText::new(marker_mag)
+                        .size(9.0)
+                        .color(Color32::from_rgb(200, 205, 215)),
+                );
+            }
+            if ui
+                .small_button("x")
+                .on_hover_text("Delete marker")
+                .clicked()
+            {
+                remove_idx = Some(idx);
+            }
+        });
+    }
+
+    if let Some((d_freq, d_mag)) = delta_summary {
+        ui.label(
+            egui::RichText::new(format!("dF {}   dM {}", d_freq, d_mag))
+                .size(9.0)
+                .color(Color32::from_rgb(120, 125, 135)),
+        );
+    }
+
+    if let Some(idx) = remove_idx {
+        state.remove_marker_at(idx);
+    }
+    if let Some(freq) = jump_to_freq {
+        center_fft_frequency_view_on_marker(state, freq);
+    }
 }
 
 fn center_fft_frequency_view_on_marker(state: &mut FftState, marker_freq: f64) {
