@@ -1810,7 +1810,7 @@ fn mag_to_y(point: &FftPoint, rect: Rect, state: &FftState) -> f32 {
 // Info Panel
 // =============================================================================
 
-fn render_info_panel(ui: &mut Ui, layout: &FftLayout, state: &FftState) {
+fn render_info_panel(ui: &mut Ui, layout: &FftLayout, state: &mut FftState) {
     ui.painter()
         .rect_filled(layout.info, Rounding::ZERO, panel_bg_color());
     if let Some(outline_rect) = info_outline_rect(layout) {
@@ -1834,7 +1834,7 @@ fn render_info_panel(ui: &mut Ui, layout: &FftLayout, state: &FftState) {
     });
 }
 
-fn render_info_panel_content(ui: &mut Ui, state: &FftState) {
+fn render_info_panel_content(ui: &mut Ui, state: &mut FftState) {
     ui.vertical(|ui| {
         ui.label(
             egui::RichText::new("Analysis")
@@ -1933,15 +1933,35 @@ fn render_info_panel_content(ui: &mut Ui, state: &FftState) {
             info_row(ui, "Fs", &format_freq(source.sample_rate));
         }
 
-        if !state.marker_frequencies.is_empty() {
-            ui.add_space(6.0);
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
             ui.label(
                 egui::RichText::new("Markers")
                     .size(10.0)
                     .color(text_color()),
             );
+            if ui.small_button("Clear").clicked() {
+                state.clear_markers();
+            }
+        });
+        ui.label(
+            egui::RichText::new(format!("{} entries", state.marker_count()))
+                .size(9.0)
+                .color(Color32::from_rgb(120, 125, 135)),
+        );
+
+        if state.marker_frequencies.is_empty() {
+            ui.label(
+                egui::RichText::new("No markers")
+                    .size(10.0)
+                    .color(Color32::from_rgb(100, 105, 115)),
+            );
+        } else {
+            let mut jump_to_freq: Option<f64> = None;
+            let mut remove_idx: Option<usize> = None;
+            let marker_frequencies = state.marker_frequencies.clone();
             if let Some(ref data) = state.data {
-                for (idx, marker_freq) in state.marker_frequencies.iter().copied().enumerate() {
+                for (idx, marker_freq) in marker_frequencies.iter().copied().enumerate() {
                     let marker_name = format!("M{}", idx + 1);
                     info_row(ui, &format!("{} F", marker_name), &format_freq(marker_freq));
                     if let Some(point) = data.interpolate(marker_freq) {
@@ -1951,8 +1971,17 @@ fn render_info_panel_content(ui: &mut Ui, state: &FftState) {
                             &format_marker_magnitude(state, &point),
                         );
                     }
+                    ui.horizontal(|ui| {
+                        ui.add_space(8.0);
+                        if ui.small_button("Go").clicked() {
+                            jump_to_freq = Some(marker_freq);
+                        }
+                        if ui.small_button("x").clicked() {
+                            remove_idx = Some(idx);
+                        }
+                    });
                 }
-                if let [m1, m2, ..] = state.marker_frequencies.as_slice() {
+                if let [m1, m2, ..] = marker_frequencies.as_slice() {
                     info_row(ui, "dF", &format_freq((m2 - m1).abs()));
                     let m1_mag = data.interpolate(*m1).map(|p| state.display_magnitude(&p));
                     let m2_mag = data.interpolate(*m2).map(|p| state.display_magnitude(&p));
@@ -1961,8 +1990,54 @@ fn render_info_panel_content(ui: &mut Ui, state: &FftState) {
                     }
                 }
             }
+            if let Some(idx) = remove_idx {
+                state.remove_marker_at(idx);
+            }
+            if let Some(freq) = jump_to_freq {
+                center_fft_frequency_view_on_marker(state, freq);
+            }
         }
     });
+}
+
+fn center_fft_frequency_view_on_marker(state: &mut FftState, marker_freq: f64) {
+    if !marker_freq.is_finite() {
+        return;
+    }
+    state.freq_auto = false;
+    match state.freq_scale {
+        FrequencyScale::Linear => {
+            let span = (state.freq_max - state.freq_min).max(1e-12);
+            if !span.is_finite() {
+                return;
+            }
+            let mut min = marker_freq - span * 0.5;
+            let mut max = marker_freq + span * 0.5;
+            if min < 0.0 {
+                max -= min;
+                min = 0.0;
+            }
+            if max <= min {
+                max = min + span;
+            }
+            state.freq_min = min;
+            state.freq_max = max;
+        }
+        FrequencyScale::Log => {
+            if marker_freq <= 0.0 {
+                return;
+            }
+            let min = state.freq_min.max(1e-12);
+            let max = state.freq_max.max(min * 1.000_001);
+            let span_log = (max.log10() - min.log10()).max(1e-9);
+            let center_log = marker_freq.max(1e-12).log10();
+            let half_span_log = span_log * 0.5;
+            let min_log = center_log - half_span_log;
+            let max_log = center_log + half_span_log;
+            state.freq_min = 10.0_f64.powf(min_log).max(1e-12);
+            state.freq_max = 10.0_f64.powf(max_log).max(state.freq_min * 1.000_001);
+        }
+    }
 }
 
 fn format_marker_magnitude(state: &FftState, point: &FftPoint) -> String {

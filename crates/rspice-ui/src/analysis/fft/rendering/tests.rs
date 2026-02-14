@@ -232,7 +232,7 @@ fn test_render_info_panel_handles_small_height_with_scroll() {
     let output = ctx.run(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             let layout = calculate_layout(Rect::from_min_size(Pos2::ZERO, Vec2::new(640.0, 96.0)));
-            render_info_panel(ui, &layout, &state);
+            render_info_panel(ui, &layout, &mut state);
         });
     });
 
@@ -271,12 +271,12 @@ fn test_marker_frequency_removal_tolerance_log_is_positive_and_finite() {
 
 #[test]
 fn test_render_info_panel_handles_empty_state_with_scroll_container() {
-    let state = FftState::new();
+    let mut state = FftState::new();
     let ctx = egui::Context::default();
     let output = ctx.run(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             let layout = calculate_layout(Rect::from_min_size(Pos2::ZERO, Vec2::new(480.0, 88.0)));
-            render_info_panel(ui, &layout, &state);
+            render_info_panel(ui, &layout, &mut state);
         });
     });
 
@@ -284,6 +284,51 @@ fn test_render_info_panel_handles_empty_state_with_scroll_container() {
         !output.shapes.is_empty(),
         "empty-state info panel should still render header/body within constrained space"
     );
+}
+
+#[test]
+fn test_center_fft_frequency_view_on_marker_linear_preserves_span() {
+    let mut state = FftState::new();
+    state.freq_scale = FrequencyScale::Linear;
+    state.freq_min = 100.0;
+    state.freq_max = 1_100.0;
+    let span_before = state.freq_max - state.freq_min;
+
+    center_fft_frequency_view_on_marker(&mut state, 2_000.0);
+
+    let span_after = state.freq_max - state.freq_min;
+    assert!((span_after - span_before).abs() < 1e-9);
+    assert!((state.freq_min + state.freq_max) * 0.5 >= 1_999.0);
+    assert!(!state.freq_auto);
+}
+
+#[test]
+fn test_center_fft_frequency_view_on_marker_linear_clamps_to_zero() {
+    let mut state = FftState::new();
+    state.freq_scale = FrequencyScale::Linear;
+    state.freq_min = 0.0;
+    state.freq_max = 100.0;
+
+    center_fft_frequency_view_on_marker(&mut state, 1.0);
+    assert!(state.freq_min >= 0.0);
+    assert!(state.freq_max > state.freq_min);
+}
+
+#[test]
+fn test_center_fft_frequency_view_on_marker_log_preserves_log_span() {
+    let mut state = FftState::new();
+    state.freq_scale = FrequencyScale::Log;
+    state.freq_min = 10.0;
+    state.freq_max = 1_000_000.0;
+    let span_before = state.freq_max.log10() - state.freq_min.log10();
+
+    center_fft_frequency_view_on_marker(&mut state, 1_000.0);
+
+    let span_after = state.freq_max.log10() - state.freq_min.log10();
+    assert!((span_after - span_before).abs() < 1e-9);
+    let center_log = (state.freq_min.log10() + state.freq_max.log10()) * 0.5;
+    assert!((center_log - 1_000.0f64.log10()).abs() < 1e-9);
+    assert!(!state.freq_auto);
 }
 
 #[test]
