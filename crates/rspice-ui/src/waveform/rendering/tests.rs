@@ -100,6 +100,39 @@ fn test_measurement_trace_indices_respect_scope() {
 }
 
 #[test]
+fn test_center_waveform_view_x_on_marker_preserves_span_and_clamps() {
+    let mut view = ViewTransform::new(20.0, 40.0, -1.0, 1.0);
+    let bounds = crate::waveform::state::DataBounds {
+        x_min: 0.0,
+        x_max: 100.0,
+        y_min: -1.0,
+        y_max: 1.0,
+        valid: true,
+    };
+
+    center_waveform_view_x_on_marker(&mut view, &bounds, 10.0);
+    assert!((view.x_max - view.x_min - 20.0).abs() < 1e-9);
+    assert!((view.x_min - 0.0).abs() < 1e-9);
+    assert!((view.x_max - 20.0).abs() < 1e-9);
+}
+
+#[test]
+fn test_center_waveform_view_x_on_marker_ignores_non_finite_inputs() {
+    let mut view = ViewTransform::new(5.0, 15.0, -1.0, 1.0);
+    let bounds = crate::waveform::state::DataBounds {
+        x_min: 0.0,
+        x_max: 100.0,
+        y_min: -1.0,
+        y_max: 1.0,
+        valid: true,
+    };
+
+    center_waveform_view_x_on_marker(&mut view, &bounds, f64::NAN);
+    assert!((view.x_min - 5.0).abs() < 1e-9);
+    assert!((view.x_max - 15.0).abs() < 1e-9);
+}
+
+#[test]
 fn test_build_export_payload_routes_by_format() {
     let traces = vec![TraceData::new("V(out)", vec![0.0, 1e-6], vec![0.0, 1.0])];
 
