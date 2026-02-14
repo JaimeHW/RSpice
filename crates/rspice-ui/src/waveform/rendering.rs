@@ -25,15 +25,15 @@ use egui::{
 };
 
 use super::axis::{self, GridLineType};
-use super::export::{calculate_export_stats, export_to_csv, export_to_spice_raw, ExportFormat};
+use super::export::{ExportFormat, calculate_export_stats, export_to_csv, export_to_spice_raw};
 use super::legend::{self, LegendSortOrder};
 use super::measurements::TraceMeasurements;
 use super::state::{MeasurementScope, TraceData, ViewTransform, WaveformViewerState};
 use crate::common::app::AppState;
 use crate::common::viewer_style::{viewer_chart_bg_color, viewer_header_bg_color};
 use crate::utils::vertical_label_layout::{
-    place_vertical_line_labels, LabelSide, VerticalLabelLayoutConfig, VerticalLabelPlacement,
-    VerticalLabelRequest,
+    LabelSide, VerticalLabelLayoutConfig, VerticalLabelPlacement, VerticalLabelRequest,
+    place_vertical_line_labels,
 };
 
 // =============================================================================
@@ -152,12 +152,6 @@ pub fn render_waveform_viewer(ui: &mut Ui, app_state: &mut AppState) {
         || (has_waveforms && !has_traces);
 
     if needs_reload {
-        log::info!(
-            "Waveform data changed: {} -> {}, reloading {} traces",
-            app_state.waveform_viewer.data_version,
-            sim_data_version,
-            app_state.simulation.waveforms.len()
-        );
         // Clone waveforms to avoid borrow issues
         let waveforms: Vec<_> = app_state.simulation.waveforms.clone();
         app_state.waveform_viewer.load_from_simulation(&waveforms);
@@ -180,22 +174,6 @@ pub fn render_waveform_viewer(ui: &mut Ui, app_state: &mut AppState) {
                 }
             }
         }
-
-        log::info!(
-            "Data bounds: x=[{:.6e}, {:.6e}], y=[{:.3e}, {:.3e}], valid={}",
-            app_state.waveform_viewer.data_bounds.x_min,
-            app_state.waveform_viewer.data_bounds.x_max,
-            app_state.waveform_viewer.data_bounds.y_min,
-            app_state.waveform_viewer.data_bounds.y_max,
-            app_state.waveform_viewer.data_bounds.valid
-        );
-        log::info!(
-            "View after fit: x=[{:.6e}, {:.6e}], y=[{:.3e}, {:.3e}]",
-            app_state.waveform_viewer.view.x_min,
-            app_state.waveform_viewer.view.x_max,
-            app_state.waveform_viewer.view.y_min,
-            app_state.waveform_viewer.view.y_max,
-        );
     }
 
     // Clamp view to data bounds every frame to enforce limits
