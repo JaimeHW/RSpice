@@ -437,7 +437,7 @@ mod tests {
     #[test]
     fn test_probe_target_schematic_node() {
         let target = ProbeTarget::SchematicNode {
-            path: SignalPath::from_str("top.amp"),
+            path: SignalPath::from("top.amp"),
             node_name: "out".to_string(),
         };
         match target {
@@ -707,7 +707,7 @@ mod tests {
     #[test]
     fn test_navigate_to() {
         let mut reg = CrossProbeRegistry::new();
-        let path = SignalPath::from_str("top.amp");
+        let path = SignalPath::from("top.amp");
 
         reg.navigate_to(path);
 
@@ -717,7 +717,7 @@ mod tests {
     #[test]
     fn test_navigate_up() {
         let mut reg = CrossProbeRegistry::new();
-        reg.navigate_to(SignalPath::from_str("top.amp.stage1"));
+        reg.navigate_to(SignalPath::from("top.amp.stage1"));
 
         reg.navigate_up();
 

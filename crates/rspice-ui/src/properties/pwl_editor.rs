@@ -538,11 +538,6 @@ impl PwlEditorState {
         }
     }
 
-    /// Get the serialized PWL data string.
-    pub fn to_string(&self) -> String {
-        self.data.serialize()
-    }
-
     /// Sync edit buffers from data.
     pub fn sync_buffers_from_data(&mut self) {
         self.edit_buffers = self
@@ -617,6 +612,12 @@ impl PwlEditorState {
     /// Check if data has been modified.
     pub fn is_valid(&self) -> bool {
         self.validation_error.is_none() && self.data.validate().is_ok()
+    }
+}
+
+impl fmt::Display for PwlEditorState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.data.serialize())
     }
 }
 

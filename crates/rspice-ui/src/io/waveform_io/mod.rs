@@ -200,8 +200,7 @@ impl SignalType {
         }
     }
 
-    /// Parse from string
-    pub fn from_str(s: &str) -> Self {
+    fn from_label(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "time" => SignalType::Time,
             "frequency" | "freq" => SignalType::Frequency,
@@ -210,6 +209,20 @@ impl SignalType {
             "power" | "p" => SignalType::Power,
             _ => SignalType::Unknown,
         }
+    }
+}
+
+impl std::str::FromStr for SignalType {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from_label(s))
+    }
+}
+
+impl From<&str> for SignalType {
+    fn from(s: &str) -> Self {
+        Self::from_label(s)
     }
 }
 
@@ -1046,7 +1059,7 @@ impl WaveformReader {
                     let parts: Vec<&str> = trimmed.split('\t').collect();
                     if parts.len() >= 3 {
                         let name = parts[1].trim().to_string();
-                        let sig_type = SignalType::from_str(parts[2].trim());
+                        let sig_type = SignalType::from(parts[2].trim());
                         variables.push((name, sig_type));
                     }
                 }

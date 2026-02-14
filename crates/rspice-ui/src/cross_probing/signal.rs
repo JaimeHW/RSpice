@@ -3,6 +3,7 @@
 //! Core types for identifying probeable signals in the design.
 
 use std::collections::hash_map::DefaultHasher;
+use std::convert::Infallible;
 use std::hash::{Hash, Hasher};
 
 // =============================================================================
@@ -89,8 +90,8 @@ impl SignalPath {
         Self::default()
     }
 
-    /// Create from full path string
-    pub fn from_str(path: &str) -> Self {
+    /// Create from dotted path string (e.g. `top.block.node`).
+    pub fn from_dotted(path: &str) -> Self {
         if path.is_empty() {
             return Self::new();
         }
@@ -167,6 +168,20 @@ impl SignalPath {
 impl std::fmt::Display for SignalPath {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.full_path())
+    }
+}
+
+impl std::str::FromStr for SignalPath {
+    type Err = Infallible;
+
+    fn from_str(path: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from_dotted(path))
+    }
+}
+
+impl From<&str> for SignalPath {
+    fn from(path: &str) -> Self {
+        Self::from_dotted(path)
     }
 }
 
@@ -410,7 +425,7 @@ mod tests {
 
     #[test]
     fn test_signal_path_from_str() {
-        let path = SignalPath::from_str("top.amp.stage1");
+        let path = SignalPath::from("top.amp.stage1");
         assert_eq!(path.depth(), 3);
         assert_eq!(path.full_path(), "top.amp.stage1");
     }
@@ -424,41 +439,41 @@ mod tests {
 
     #[test]
     fn test_signal_path_parent() {
-        let path = SignalPath::from_str("top.amp.stage1");
+        let path = SignalPath::from("top.amp.stage1");
         let parent = path.parent().unwrap();
         assert_eq!(parent.full_path(), "top.amp");
     }
 
     #[test]
     fn test_signal_path_parent_root() {
-        let path = SignalPath::from_str("top");
+        let path = SignalPath::from("top");
         assert!(path.parent().is_none());
     }
 
     #[test]
     fn test_signal_path_leaf() {
-        let path = SignalPath::from_str("top.amp.stage1");
+        let path = SignalPath::from("top.amp.stage1");
         assert_eq!(path.leaf(), Some("stage1"));
     }
 
     #[test]
     fn test_signal_path_child() {
-        let path = SignalPath::from_str("top.amp");
+        let path = SignalPath::from("top.amp");
         let child = path.child("stage1");
         assert_eq!(child.full_path(), "top.amp.stage1");
     }
 
     #[test]
     fn test_signal_path_is_ancestor() {
-        let parent = SignalPath::from_str("top");
-        let child = SignalPath::from_str("top.amp.stage1");
+        let parent = SignalPath::from("top");
+        let child = SignalPath::from("top.amp.stage1");
         assert!(parent.is_ancestor_of(&child));
         assert!(!child.is_ancestor_of(&parent));
     }
 
     #[test]
     fn test_signal_path_iter() {
-        let path = SignalPath::from_str("top.amp.stage1");
+        let path = SignalPath::from("top.amp.stage1");
         let parts: Vec<&str> = path.iter().collect();
         assert_eq!(parts, vec!["top", "amp", "stage1"]);
     }
@@ -511,7 +526,7 @@ mod tests {
 
     #[test]
     fn test_probeable_signal_with_path() {
-        let path = SignalPath::from_str("top.amp");
+        let path = SignalPath::from("top.amp");
         let sig = ProbeableSignal::with_path("out", path);
         assert_eq!(sig.qualified_name(), "top.amp.out");
     }

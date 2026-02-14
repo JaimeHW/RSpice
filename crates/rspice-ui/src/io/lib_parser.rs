@@ -207,7 +207,9 @@ impl<'a> Lexer<'a> {
 
     /// Read quoted string
     fn read_string(&mut self) -> Result<String, String> {
-        let quote = self.advance().unwrap(); // ' or "
+        let quote = self
+            .advance()
+            .ok_or_else(|| "Expected opening quote".to_string())?; // ' or "
         let mut result = String::new();
 
         while let Some(ch) = self.peek() {
@@ -866,7 +868,7 @@ pub struct ParsedLibrary {
 
 impl ParsedLibrary {
     /// Parse from string
-    pub fn from_str(input: &str) -> Result<Self, String> {
+    pub fn parse(input: &str) -> Result<Self, String> {
         let mut parser = LibraryParser::new(input)?;
         parser.parse()
     }
@@ -875,7 +877,7 @@ impl ParsedLibrary {
     pub fn from_file(path: &Path) -> Result<Self, String> {
         let content =
             std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
-        let mut library = Self::from_str(&content)?;
+        let mut library = content.parse::<Self>()?;
         library.source_path = Some(path.to_path_buf());
         Ok(library)
     }
@@ -919,6 +921,14 @@ impl ParsedLibrary {
     pub fn subcircuit_count(&self) -> usize {
         let section_subcircuits: usize = self.sections.values().map(|s| s.subcircuits.len()).sum();
         self.global_subcircuits.len() + section_subcircuits
+    }
+}
+
+impl std::str::FromStr for ParsedLibrary {
+    type Err = String;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        Self::parse(input)
     }
 }
 
@@ -1015,7 +1025,7 @@ mod tests {
 
     #[test]
     fn test_parse_empty() {
-        let lib = ParsedLibrary::from_str("").unwrap();
+        let lib = ParsedLibrary::parse("").unwrap();
         assert!(lib.sections.is_empty());
         assert!(lib.global_models.is_empty());
     }
@@ -1025,7 +1035,7 @@ mod tests {
         let input = r#"
 model nmos1 nmos level=54 version=4.5 vth0=0.4
 "#;
-        let lib = ParsedLibrary::from_str(input).unwrap();
+        let lib = ParsedLibrary::parse(input).unwrap();
         assert_eq!(lib.global_models.len(), 1);
 
         let model = lib.global_models.get("nmos1").unwrap();
@@ -1040,7 +1050,7 @@ section tt
 model nmos_tt nmos level=54 vth0=0.4
 endsection tt
 "#;
-        let lib = ParsedLibrary::from_str(input).unwrap();
+        let lib = ParsedLibrary::parse(input).unwrap();
         assert_eq!(lib.sections.len(), 1);
         assert!(lib.sections.contains_key("tt"));
 
@@ -1063,7 +1073,7 @@ section ss
 model nmos_ss nmos vth0=0.45
 endsection ss
 "#;
-        let lib = ParsedLibrary::from_str(input).unwrap();
+        let lib = ParsedLibrary::parse(input).unwrap();
         assert_eq!(lib.sections.len(), 3);
         assert!(lib.sections.contains_key("tt"));
         assert!(lib.sections.contains_key("ff"));
@@ -1075,7 +1085,7 @@ endsection ss
         let input = r#"
 parameters vdd=1.8 vth=0.4 tox=2e-9
 "#;
-        let lib = ParsedLibrary::from_str(input).unwrap();
+        let lib = ParsedLibrary::parse(input).unwrap();
         assert_eq!(lib.global_parameters.len(), 3);
 
         let vdd = lib.global_parameters.get("vdd").unwrap();
@@ -1088,7 +1098,7 @@ parameters vdd=1.8 vth=0.4 tox=2e-9
 include 'models/nmos.scs'
 lib 'corners.lib' tt
 "#;
-        let lib = ParsedLibrary::from_str(input).unwrap();
+        let lib = ParsedLibrary::parse(input).unwrap();
         assert_eq!(lib.includes.len(), 2);
 
         assert_eq!(lib.includes[0].directive_type, IncludeType::Include);
@@ -1104,7 +1114,7 @@ M1 out in vdd vdd pmos
 M2 out in vss vss nmos
 ends inv
 "#;
-        let lib = ParsedLibrary::from_str(input).unwrap();
+        let lib = ParsedLibrary::parse(input).unwrap();
         assert_eq!(lib.global_subcircuits.len(), 1);
 
         let subckt = lib.global_subcircuits.get("inv").unwrap();
@@ -1122,7 +1132,7 @@ endsection
 section ss
 endsection
 "#;
-        let lib = ParsedLibrary::from_str(input).unwrap();
+        let lib = ParsedLibrary::parse(input).unwrap();
         let names = lib.section_names();
         assert!(names.contains(&"tt"));
         assert!(names.contains(&"ff"));
@@ -1138,7 +1148,7 @@ section tt
 model nmos_tt nmos vth0=0.4
 endsection tt
 "#;
-        let lib = ParsedLibrary::from_str(input).unwrap();
+        let lib = ParsedLibrary::parse(input).unwrap();
         let models = lib.models_for_section("tt");
 
         assert!(models.contains_key("global_nmos"));
@@ -1155,7 +1165,7 @@ section tt
 model m3 nmos
 endsection
 "#;
-        let lib = ParsedLibrary::from_str(input).unwrap();
+        let lib = ParsedLibrary::parse(input).unwrap();
         assert_eq!(lib.model_count(), 3);
     }
 

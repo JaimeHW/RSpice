@@ -52,10 +52,11 @@ impl SessionVersion {
     pub fn is_compatible(&self) -> bool {
         self.major == Self::current().major
     }
+}
 
-    /// Display as string
-    pub fn to_string(&self) -> String {
-        format!("{}.{}.{}", self.major, self.minor, self.patch)
+impl std::fmt::Display for SessionVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
     }
 }
 

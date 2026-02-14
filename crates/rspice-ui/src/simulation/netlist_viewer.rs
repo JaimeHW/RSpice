@@ -415,15 +415,6 @@ impl NetlistDocument {
         result
     }
 
-    /// Convert to string
-    pub fn to_string(&self) -> String {
-        self.lines
-            .iter()
-            .map(|l| l.content.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
     /// Update a line's content
     pub fn update_line(&mut self, line_number: usize, content: String) {
         if let Some(line) = self.get_line_mut(line_number) {
@@ -481,6 +472,19 @@ impl NetlistDocument {
             }
         }
         stats
+    }
+}
+
+impl std::fmt::Display for NetlistDocument {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut iter = self.lines.iter();
+        if let Some(first) = iter.next() {
+            write!(f, "{}", first.content)?;
+        }
+        for line in iter {
+            write!(f, "\n{}", line.content)?;
+        }
+        Ok(())
     }
 }
 

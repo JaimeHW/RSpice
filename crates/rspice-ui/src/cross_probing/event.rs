@@ -247,7 +247,7 @@ mod tests {
     #[test]
     fn test_probe_event_node_clicked() {
         let event = ProbeEvent::NodeClicked {
-            path: SignalPath::from_str("top.amp"),
+            path: SignalPath::from("top.amp"),
             node_name: "out".to_string(),
         };
 

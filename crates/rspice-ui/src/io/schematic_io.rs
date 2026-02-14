@@ -75,10 +75,11 @@ impl SchematicVersion {
             || self.minor < Self::current().minor
             || self.patch < Self::current().patch
     }
+}
 
-    /// Display as version string
-    pub fn to_string(&self) -> String {
-        format!("{}.{}.{}", self.major, self.minor, self.patch)
+impl std::fmt::Display for SchematicVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
     }
 }
 
@@ -273,7 +274,11 @@ pub fn show_save_dialog(default_name: Option<&str>) -> Result<PathBuf, Schematic
     let mut path = dialog.save_file().ok_or(SchematicIoError::Cancelled)?;
 
     // Ensure .rsch extension
-    if path.extension().is_none() || path.extension().unwrap() != "rsch" {
+    let has_rsch_extension = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("rsch"));
+    if !has_rsch_extension {
         path.set_extension("rsch");
     }
 

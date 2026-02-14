@@ -59,9 +59,9 @@ fn test_format_capabilities() {
 
 #[test]
 fn test_signal_type_from_str() {
-    assert_eq!(SignalType::from_str("time"), SignalType::Time);
-    assert_eq!(SignalType::from_str("voltage"), SignalType::Voltage);
-    assert_eq!(SignalType::from_str("unknown_type"), SignalType::Unknown);
+    assert_eq!(SignalType::from("time"), SignalType::Time);
+    assert_eq!(SignalType::from("voltage"), SignalType::Voltage);
+    assert_eq!(SignalType::from("unknown_type"), SignalType::Unknown);
 }
 
 #[test]

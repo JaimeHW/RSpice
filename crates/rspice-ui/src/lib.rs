@@ -20,10 +20,8 @@
 //! - `state/` - Application state management
 //! - `utils/` - Utility functions
 
-// Suppress warnings during development
+// Temporary allowance for existing external/SPICE naming conventions.
 #![allow(non_snake_case)]
-#![allow(dead_code)]
-#![allow(unused_imports)]
 
 // =============================================================================
 // Domain Modules (Organized by Feature)
