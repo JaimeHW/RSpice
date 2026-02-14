@@ -425,7 +425,7 @@ pub enum CompileTaskResult {
     /// Compilation succeeded
     Success {
         module_info: CompiledModuleInfo,
-        compiled_model: rspice_veriloga::CompiledModel,
+        compiled_model: Box<rspice_veriloga::CompiledModel>,
         dependencies: Vec<PathBuf>,
     },
     /// Compilation failed with errors
@@ -885,7 +885,7 @@ fn start_compile(state: &mut VerilogALoadDialogState) {
                         internal_nodes: model.internal_nodes,
                         num_variables: model.num_variables,
                     },
-                    compiled_model: model,
+                    compiled_model: Box::new(model),
                     dependencies: compiled.dependencies,
                 }
             }
@@ -942,7 +942,7 @@ fn poll_compile(state: &mut VerilogALoadDialogState) {
                 dependencies,
             } => {
                 state.compiled_module = Some(module_info);
-                state.compiled_artifact = Some(compiled_model);
+                state.compiled_artifact = Some(*compiled_model);
                 state.compiled_dependencies = Some(dependencies);
                 state.compilation_state = CompilationState::Success;
             }

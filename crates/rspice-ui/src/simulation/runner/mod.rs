@@ -37,10 +37,10 @@ pub struct SpecExecutionOptions {
 
 #[derive(Debug, Clone)]
 enum SimulationRequest {
-    Config(AnalysisConfig),
+    Config(Box<AnalysisConfig>),
     Spec {
-        spec: AnalysisSpec,
-        options: SpecExecutionOptions,
+        spec: Box<AnalysisSpec>,
+        options: Box<SpecExecutionOptions>,
     },
 }
 
@@ -158,7 +158,7 @@ impl SimulationRunner {
         config: AnalysisConfig,
         netlist: String,
     ) -> Result<(), SimulationError> {
-        self.start_request(SimulationRequest::Config(config), netlist)
+        self.start_request(SimulationRequest::Config(Box::new(config)), netlist)
     }
 
     /// Start a simulation from strongly-typed analysis spec.
@@ -177,7 +177,13 @@ impl SimulationRunner {
         netlist: String,
         options: SpecExecutionOptions,
     ) -> Result<(), SimulationError> {
-        self.start_request(SimulationRequest::Spec { spec, options }, netlist)
+        self.start_request(
+            SimulationRequest::Spec {
+                spec: Box::new(spec),
+                options: Box::new(options),
+            },
+            netlist,
+        )
     }
 
     fn start_request(
@@ -279,7 +285,7 @@ fn run_simulation_thread(
     {
         let mut p = lock_progress(&progress, "run_simulation_thread(status-by-analysis)");
         match &request {
-            SimulationRequest::Config(config) => match config {
+            SimulationRequest::Config(config) => match config.as_ref() {
                 AnalysisConfig::DcOp => p.update_status(SimulationStatus::DcOperatingPoint),
                 AnalysisConfig::DcSweep(dc) => p.update_status(SimulationStatus::DcSweep {
                     source: dc.source.clone(),
@@ -295,7 +301,7 @@ fn run_simulation_thread(
                 }),
                 _ => p.update_status(SimulationStatus::DcOperatingPoint),
             },
-            SimulationRequest::Spec { spec, options } => match spec {
+            SimulationRequest::Spec { spec, options } => match spec.as_ref() {
                 AnalysisSpec::DcOp => p.update_status(SimulationStatus::DcOperatingPoint),
                 AnalysisSpec::DcSweep { source_name, .. } => {
                     p.update_status(SimulationStatus::DcSweep {
@@ -356,7 +362,7 @@ fn run_simulation_thread(
                     })
                 }
                 AnalysisSpec::Pac => {
-                    if let Some(pac) = &options.pac {
+                    if let Some(pac) = &options.as_ref().pac {
                         p.update_status(SimulationStatus::AcAnalysis {
                             freq: pac.start_freq,
                             stop_freq: pac.stop_freq,
@@ -369,7 +375,7 @@ fn run_simulation_thread(
                     }
                 }
                 AnalysisSpec::Pxf => {
-                    if let Some(pxf) = &options.pxf {
+                    if let Some(pxf) = &options.as_ref().pxf {
                         p.update_status(SimulationStatus::AcAnalysis {
                             freq: pxf.start_freq,
                             stop_freq: pxf.stop_freq,
@@ -390,7 +396,7 @@ fn run_simulation_thread(
                     stop_freq: *stop_freq,
                 }),
                 AnalysisSpec::Pstb => {
-                    if let Some(pstb) = &options.pstb {
+                    if let Some(pstb) = &options.as_ref().pstb {
                         p.update_status(SimulationStatus::AcAnalysis {
                             freq: pstb.pss_fundamental_freq,
                             stop_freq: pstb.pss_fundamental_freq,
@@ -476,7 +482,7 @@ fn run_simulation_thread(
         }
         SimulationRequest::Spec { spec, options } => {
             log::info!("Running simulation via spec path: {:?}", spec.run_type());
-            spec::run_spec_request(&bridge, spec, options, &netlist, &abort_flag)?
+            spec::run_spec_request(&bridge, *spec, *options, &netlist, &abort_flag)?
         }
     };
 
