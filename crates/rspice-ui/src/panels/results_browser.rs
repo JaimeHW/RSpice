@@ -78,7 +78,6 @@ pub fn render_results_browser(ui: &mut Ui, state: &mut AppState) {
                 .enumerate()
                 .map(|(idx, run)| RunDisplayData {
                     index: idx,
-                    id: run.id,
                     label: run.label.clone(),
                     success: run.success,
                     is_current: idx == 0,
@@ -164,7 +163,6 @@ fn activate_analysis_view(
 /// Display data for a run (extracted to avoid borrow conflicts)
 struct RunDisplayData {
     index: usize,
-    id: u64,
     label: String,
     success: bool,
     is_current: bool,

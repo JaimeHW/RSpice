@@ -8,8 +8,7 @@
 //! - Integration with component parameter expressions
 
 use egui::{
-    Align, Frame, Layout, Margin, RichText, Rounding, ScrollArea, Sense, Stroke, TextEdit,
-    Ui, Vec2,
+    Align, Frame, Layout, Margin, RichText, Rounding, ScrollArea, Sense, Stroke, TextEdit, Ui, Vec2,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -25,7 +24,6 @@ mod theme {
     pub const HEADER_BG: Color32 = Color32::from_rgb(38, 38, 40);
     pub const ROW_BG: Color32 = Color32::from_rgb(50, 50, 54);
     pub const ROW_BG_ALT: Color32 = Color32::from_rgb(46, 46, 50);
-    pub const INPUT_BG: Color32 = Color32::from_rgb(30, 30, 32);
 
     pub const TEXT_PRIMARY: Color32 = Color32::from_rgb(220, 220, 220);
     pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(160, 160, 160);
@@ -33,13 +31,9 @@ mod theme {
     pub const TEXT_VALUE: Color32 = Color32::from_rgb(180, 230, 180);
     pub const TEXT_ERROR: Color32 = Color32::from_rgb(255, 120, 120);
 
-    pub const ACCENT_BLUE: Color32 = Color32::from_rgb(66, 133, 244);
-    pub const ACCENT_GREEN: Color32 = Color32::from_rgb(52, 168, 83);
     pub const ACCENT_RED: Color32 = Color32::from_rgb(234, 67, 53);
 
     pub const BORDER: Color32 = Color32::from_rgb(70, 70, 75);
-    pub const BUTTON_BG: Color32 = Color32::from_rgb(60, 60, 65);
-    pub const BUTTON_HOVER: Color32 = Color32::from_rgb(75, 75, 80);
 }
 
 // =============================================================================
@@ -47,8 +41,7 @@ mod theme {
 // =============================================================================
 
 /// A design variable with name, expression, and evaluated value
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DesignVariable {
     /// Variable name (e.g., "W1", "Vdd", "gm_target")
     pub name: String,
@@ -71,7 +64,6 @@ pub struct DesignVariable {
     #[serde(skip)]
     pub editing: bool,
 }
-
 
 impl DesignVariable {
     /// Create a new design variable

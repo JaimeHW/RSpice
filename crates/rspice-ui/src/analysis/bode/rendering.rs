@@ -2,15 +2,13 @@
 //!
 //! Commercial-grade egui rendering for Bode plot visualization.
 
-use egui::{
-    Color32, FontId, Painter, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2,
-};
+use egui::{Color32, FontId, Painter, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2};
 #[cfg(test)]
 use std::f64::consts::PI;
 
+use super::data::FrequencyResponse;
 #[cfg(test)]
 use super::data::{BodeData, FrequencyPoint};
-use super::data::FrequencyResponse;
 use super::state::{BodeDisplayMode, BodePlotState};
 use crate::common::app::AppState;
 use crate::common::viewer_style::viewer_header_bg_color;
@@ -39,16 +37,8 @@ fn crossover_color() -> Color32 {
     Color32::from_rgb(255, 255, 100)
 }
 
-fn margin_color() -> Color32 {
-    Color32::from_rgba_unmultiplied(100, 255, 100, 150)
-}
-
 fn text_color() -> Color32 {
     Color32::from_rgb(180, 185, 195)
-}
-
-fn axis_color() -> Color32 {
-    Color32::from_rgb(100, 105, 115)
 }
 
 // =============================================================================

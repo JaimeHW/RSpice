@@ -30,6 +30,7 @@ impl SectionKind {
 #[derive(Debug, Clone, Copy)]
 pub(super) struct TocEntry {
     pub(super) start: usize,
+    #[allow(dead_code)]
     pub(super) end: usize,
 }
 

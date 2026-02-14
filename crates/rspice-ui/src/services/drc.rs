@@ -839,7 +839,6 @@ pub struct NetLabelInfo {
 /// Internal net tracking info.
 #[derive(Debug, Clone, Default)]
 struct NetInfo {
-    name: String,
     connection_count: usize,
     has_voltage_source: bool,
     has_current_source: bool,
@@ -1028,7 +1027,6 @@ fn merge_net_accumulator(
     let entry = net_map
         .entry(canonical_name.clone())
         .or_insert_with(|| NetInfo {
-            name: canonical_name.clone(),
             ..NetInfo::default()
         });
 

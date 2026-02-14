@@ -94,6 +94,7 @@ impl DataType {
         }
     }
 
+    #[cfg(test)]
     fn to_u32(self) -> u32 {
         match self {
             Self::Int8 => 1,
@@ -932,7 +933,8 @@ fn resolve_implicit_composite_array_element(
     }
 
     candidates.sort_unstable();
-    Err(CadencePsfError::new((if want_array {
+    Err(CadencePsfError::new(
+        (if want_array {
             format!(
                 "array element descriptor ARRAY is ambiguous across type ids {:?}",
                 candidates
@@ -942,7 +944,9 @@ fn resolve_implicit_composite_array_element(
                 "array element descriptor STRUCT is ambiguous across type ids {:?}",
                 candidates
             )
-        }).to_string()))
+        })
+        .to_string(),
+    ))
 }
 
 fn collect_channel_specs_for_type(

@@ -96,7 +96,7 @@ pub struct ReliabilityResult {
 /// Engine for calculating and managing reliability simulations
 pub struct ReliabilityEngine {
     /// Device model age parameters
-    model_params: HashMap<String, AgingParams>,
+    _model_params: HashMap<String, AgingParams>,
 }
 
 impl Default for ReliabilityEngine {
@@ -108,7 +108,7 @@ impl Default for ReliabilityEngine {
 impl ReliabilityEngine {
     pub fn new() -> Self {
         Self {
-            model_params: HashMap::new(),
+            _model_params: HashMap::new(),
         }
     }
 

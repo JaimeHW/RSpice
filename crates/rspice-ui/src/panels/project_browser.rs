@@ -327,6 +327,7 @@ fn render_library_cell(
     ));
 }
 
+#[cfg(test)]
 fn build_placeable_instance(
     lib_name: &str,
     cell: &Cell,

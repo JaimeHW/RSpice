@@ -586,40 +586,6 @@ fn draw_path_segment(painter: &Painter, points: &[Pos2], stroke: Stroke) {
     }
 }
 
-/// Transform a point with rotation around symbol center and uniform scale.
-fn transform_point(
-    x: f32,
-    y: f32,
-    cx: f32,
-    cy: f32,
-    cos_r: f32,
-    sin_r: f32,
-    scale: f32,
-    center: Pos2,
-) -> (f32, f32) {
-    // Translate to symbol origin
-    let dx = x - cx;
-    let dy = y - cy;
-
-    // Rotate around origin
-    let rx = dx * cos_r - dy * sin_r;
-    let ry = dx * sin_r + dy * cos_r;
-
-    // Scale and translate to screen position
-    (center.x + rx * scale, center.y + ry * scale)
-}
-
-/// Simple transform for lead lines: rotate and scale an offset from component center.
-/// This is used for extending leads from the symbol body to terminal positions.
-fn transform_simple(dx: f32, dy: f32, cos_r: f32, sin_r: f32, scale: f32, center: Pos2) -> Pos2 {
-    // Rotate the offset
-    let rx = dx * cos_r - dy * sin_r;
-    let ry = dx * sin_r + dy * cos_r;
-
-    // Scale and translate to screen position
-    Pos2::new(center.x + rx * scale, center.y + ry * scale)
-}
-
 /// Transform a point with rotation around symbol center and non-uniform scale.
 /// Non-uniform scaling is applied BEFORE rotation to ensure the symbol fills
 /// exactly its target dimensions. This guarantees terminals land on grid lines.

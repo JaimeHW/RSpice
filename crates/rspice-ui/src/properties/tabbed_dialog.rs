@@ -121,8 +121,7 @@ impl TabInfo {
 // =============================================================================
 
 /// Result of the tabbed property dialog interaction.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum TabbedDialogResult {
     /// No action taken
     #[default]
@@ -134,7 +133,6 @@ pub enum TabbedDialogResult {
     /// User clicked Revert - restore original values
     Reverted,
 }
-
 
 // =============================================================================
 // State Implementation
@@ -557,11 +555,10 @@ pub fn render_tabbed_property_dialog(
 
             // Button row
             ui.horizontal(|ui| {
-                if ui.button("Apply").clicked()
-                    && state.validate_all(sheet) {
-                        result = TabbedDialogResult::Applied;
-                        should_close = true;
-                    }
+                if ui.button("Apply").clicked() && state.validate_all(sheet) {
+                    result = TabbedDialogResult::Applied;
+                    should_close = true;
+                }
 
                 if ui.button("Cancel").clicked() {
                     result = TabbedDialogResult::Cancelled;
@@ -624,24 +621,6 @@ pub fn render_tabbed_property_dialog(
     result
 }
 
-/// Render the tab bar
-fn render_tab_bar(ui: &mut Ui, state: &mut TabbedPropertyDialogState) {
-    ui.horizontal(|ui| {
-        for tab in state.tabs.clone() {
-            let is_active = state.active_tab == tab.name;
-            let label = if tab.modified_count > 0 {
-                format!("{}*", tab.display_name)
-            } else {
-                tab.display_name.clone()
-            };
-
-            if ui.selectable_label(is_active, &label).clicked() {
-                state.active_tab = tab.name.clone();
-            }
-        }
-    });
-}
-
 /// Render a single property row
 fn render_property_row(
     ui: &mut Ui,
@@ -694,10 +673,9 @@ fn render_property_row(
         // Model Browser button for "model" property on semiconductor components
         if def.name == "model" {
             if let Some(comp_type) = state.component_type {
-                if comp_type.is_semiconductor()
-                    && ui.small_button("📖 Browse...").clicked() {
-                        state.model_browser.open = true;
-                    }
+                if comp_type.is_semiconductor() && ui.small_button("📖 Browse...").clicked() {
+                    state.model_browser.open = true;
+                }
             }
         }
 
