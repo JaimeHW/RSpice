@@ -571,6 +571,15 @@ impl FftState {
         self.marker_frequencies.clear();
     }
 
+    /// Remove marker at explicit index.
+    pub fn remove_marker_at(&mut self, index: usize) -> bool {
+        if index >= self.marker_frequencies.len() {
+            return false;
+        }
+        self.marker_frequencies.remove(index);
+        true
+    }
+
     /// Get fundamental frequency
     pub fn fundamental_freq(&self) -> Option<f64> {
         self.analysis.as_ref()?.fundamental_frequency
@@ -949,6 +958,18 @@ mod tests {
 
         state.clear_markers();
         assert!(state.marker_frequencies.is_empty());
+    }
+
+    #[test]
+    fn test_state_remove_marker_at_checks_bounds() {
+        let mut state = FftState::new();
+        state.add_marker(1_000.0);
+        state.add_marker(2_000.0);
+        state.add_marker(3_000.0);
+
+        assert!(!state.remove_marker_at(3));
+        assert!(state.remove_marker_at(1));
+        assert_eq!(state.marker_frequencies, vec![1_000.0, 3_000.0]);
     }
 
     #[test]

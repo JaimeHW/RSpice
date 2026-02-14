@@ -1082,6 +1082,15 @@ impl WaveformViewerState {
         self.markers.clear();
     }
 
+    /// Remove marker at explicit index.
+    pub fn remove_marker_at(&mut self, index: usize) -> bool {
+        if index >= self.markers.len() {
+            return false;
+        }
+        self.markers.remove(index);
+        true
+    }
+
     /// Remove the nearest marker within a tolerance window.
     pub fn remove_nearest_marker(&mut self, x: f64, tolerance: f64) -> bool {
         if !x.is_finite() || !tolerance.is_finite() || tolerance < 0.0 {
@@ -1674,6 +1683,29 @@ mod tests {
         assert!(!state.remove_nearest_marker(9.8, 0.1));
         state.clear_markers();
         assert!(state.markers.is_empty());
+    }
+
+    #[test]
+    fn test_waveform_markers_are_bounded_to_sixteen_entries() {
+        let mut state = WaveformViewerState::new();
+        for i in 0..32 {
+            state.add_marker(i as f64);
+        }
+        assert_eq!(state.markers.len(), 16);
+        assert!(!state.markers.contains(&0.0));
+        assert!(state.markers.contains(&31.0));
+    }
+
+    #[test]
+    fn test_waveform_remove_marker_at_bounds_checks_index() {
+        let mut state = WaveformViewerState::new();
+        state.add_marker(1.0);
+        state.add_marker(2.0);
+        state.add_marker(3.0);
+
+        assert!(!state.remove_marker_at(3));
+        assert!(state.remove_marker_at(1));
+        assert_eq!(state.markers, vec![1.0, 3.0]);
     }
 
     #[test]
