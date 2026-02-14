@@ -60,8 +60,12 @@ fn highlight_color() -> Color32 {
 
 /// Render the eye diagram viewer panel
 pub fn render_eye_diagram_viewer(ui: &mut Ui, app_state: &mut AppState) {
-    // Calculate layout
     let available_rect = ui.available_rect_before_wrap();
+    // Claim full available space so parent resizable panels keep user-set size
+    // instead of snapping back to a content-driven natural size.
+    let (_id, _rect) = ui.allocate_space(available_rect.size());
+
+    // Calculate layout
     let layout = calculate_layout(available_rect);
 
     let close_requested = {
@@ -79,6 +83,7 @@ pub fn render_eye_diagram_viewer(ui: &mut Ui, app_state: &mut AppState) {
 /// Public render function for external use
 pub fn render_eye_diagram(ui: &mut Ui, state: &EyeDiagramState) {
     let available_rect = ui.available_rect_before_wrap();
+    let (_id, _rect) = ui.allocate_space(available_rect.size());
     let layout = calculate_layout(available_rect);
 
     render_chart_core(ui, &layout, state);
