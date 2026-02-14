@@ -148,9 +148,9 @@ impl MeasurementCache {
         let signature = TraceSignature::from_trace(trace);
         let range_key = range.map(RangeKey::from_range);
 
-        let refresh_required = self.entries[trace_index].as_ref().is_none_or(|entry| {
-            entry.signature != signature || entry.range != range_key
-        });
+        let refresh_required = self.entries[trace_index]
+            .as_ref()
+            .is_none_or(|entry| entry.signature != signature || entry.range != range_key);
 
         if refresh_required {
             let measurements = if let Some((start, end)) = range {

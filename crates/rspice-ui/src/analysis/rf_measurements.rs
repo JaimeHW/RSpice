@@ -381,7 +381,7 @@ mod tests {
     #[test]
     fn test_s_param_creation() {
         let s = SParameter::new(0.5, 0.5);
-        assert!((s.magnitude() - 0.7071).abs() < 0.001);
+        assert!((s.magnitude() - std::f64::consts::FRAC_1_SQRT_2).abs() < 0.001);
     }
 
     #[test]

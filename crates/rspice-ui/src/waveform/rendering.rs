@@ -264,7 +264,10 @@ fn calculate_layout(available: Rect) -> ViewerLayout {
     // X-axis at bottom (excluding legend)
     let x_axis = Rect::from_min_size(
         Pos2::new(total.min.x + Y_AXIS_WIDTH, total.max.y - X_AXIS_HEIGHT),
-        Vec2::new((total.width() - Y_AXIS_WIDTH - legend_width).max(0.0), X_AXIS_HEIGHT),
+        Vec2::new(
+            (total.width() - Y_AXIS_WIDTH - legend_width).max(0.0),
+            X_AXIS_HEIGHT,
+        ),
     );
 
     // Y-axis on left side (between header and x-axis)
@@ -792,7 +795,10 @@ fn visible_trace_index_window(trace: &TraceData, view: &ViewTransform) -> Option
         return None;
     }
 
-    let start = trace.x.partition_point(|x| *x < view.x_min).saturating_sub(1);
+    let start = trace
+        .x
+        .partition_point(|x| *x < view.x_min)
+        .saturating_sub(1);
     let end = (trace.x.partition_point(|x| *x <= view.x_max) + 1).min(trace.len());
     if end <= start {
         return None;
@@ -845,15 +851,10 @@ fn update_trace_bucket(bucket: &mut TraceBucket, sample: TraceScreenSample) {
 }
 
 fn collect_bucket_points(points: &mut Vec<Pos2>, bucket: &TraceBucket) {
-    let mut bucket_samples = [
-        bucket.first,
-        bucket.min,
-        bucket.max,
-        bucket.last,
-    ]
-    .into_iter()
-    .flatten()
-    .collect::<Vec<_>>();
+    let mut bucket_samples = [bucket.first, bucket.min, bucket.max, bucket.last]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
     if bucket_samples.is_empty() {
         return;
     }
@@ -1005,10 +1006,8 @@ fn render_cursor_info_panel(
         - CURSOR_INFO_PANEL_VALUE_WIDTH * value_cols as f32)
         .max(44.0);
 
-    let meta_rows = 1usize
-        + (show_c1 as usize)
-        + (show_c2 as usize)
-        + if show_c1 && show_c2 { 2 } else { 0 };
+    let meta_rows =
+        1usize + (show_c1 as usize) + (show_c2 as usize) + if show_c1 && show_c2 { 2 } else { 0 };
     let max_panel_height = (layout.plot.height() - 2.0 * CURSOR_INFO_PANEL_MARGIN).max(120.0);
     let fixed_height = CURSOR_INFO_PANEL_PADDING * 2.0
         + CURSOR_INFO_PANEL_ROW_HEIGHT * (meta_rows as f32 + 1.0)
@@ -1765,7 +1764,12 @@ fn calculate_legend_find_row_layout(row_width: f32, item_spacing_x: f32) -> Lege
     }
 }
 
-fn truncate_legend_trace_name(painter: &Painter, text: &str, font: FontId, max_width: f32) -> String {
+fn truncate_legend_trace_name(
+    painter: &Painter,
+    text: &str,
+    font: FontId,
+    max_width: f32,
+) -> String {
     const ELLIPSIS: &str = "...";
     if text.is_empty() || max_width <= 0.0 {
         return String::new();
@@ -1947,11 +1951,8 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
                 ui.painter()
                     .rect_filled(swatch_rect, Rounding::same(2.0), color);
             } else {
-                ui.painter().rect_stroke(
-                    swatch_rect,
-                    Rounding::same(2.0),
-                    Stroke::new(1.0, color),
-                );
+                ui.painter()
+                    .rect_stroke(swatch_rect, Rounding::same(2.0), Stroke::new(1.0, color));
             }
             left += LEGEND_TRACE_SWATCH_WIDTH + item_spacing_x;
         }
@@ -2001,7 +2002,9 @@ fn render_trace_list_section(ui: &mut Ui, viewer_state: &mut WaveformViewerState
             FontId::proportional(10.0),
             (name_slot_width - LEGEND_TEXT_TRUNCATION_PADDING).max(0.0),
         );
-        let label = egui::RichText::new(&display_name).size(10.0).color(text_color);
+        let label = egui::RichText::new(&display_name)
+            .size(10.0)
+            .color(text_color);
         let label_response = ui
             .allocate_new_ui(UiBuilder::new().max_rect(name_rect), |ui| {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
@@ -2135,10 +2138,22 @@ fn render_trace_measurements(
     );
     measurement_row(ui, "Min", &format_optional_value(measurements.min, y_unit));
     measurement_row(ui, "Max", &format_optional_value(measurements.max, y_unit));
-    measurement_row(ui, "PkPk", &format_optional_value(measurements.pk_pk, y_unit));
-    measurement_row(ui, "Mean", &format_optional_value(measurements.mean, y_unit));
+    measurement_row(
+        ui,
+        "PkPk",
+        &format_optional_value(measurements.pk_pk, y_unit),
+    );
+    measurement_row(
+        ui,
+        "Mean",
+        &format_optional_value(measurements.mean, y_unit),
+    );
     measurement_row(ui, "RMS", &format_optional_value(measurements.rms, y_unit));
-    measurement_row(ui, "Std", &format_optional_value(measurements.std_dev, y_unit));
+    measurement_row(
+        ui,
+        "Std",
+        &format_optional_value(measurements.std_dev, y_unit),
+    );
     measurement_row(ui, "Rise", &format_optional_time(measurements.rise_time));
     measurement_row(ui, "Fall", &format_optional_time(measurements.fall_time));
     measurement_row(ui, "Period", &format_optional_time(measurements.period));
@@ -2285,7 +2300,9 @@ fn render_export_panel(ui: &mut Ui, viewer_state: &mut WaveformViewerState) {
                 .color(Color32::from_rgb(120, 125, 135)),
         );
         egui::ComboBox::from_id_salt("waveform_export_format")
-            .selected_text(export_format_display_name(viewer_state.export_options.format))
+            .selected_text(export_format_display_name(
+                viewer_state.export_options.format,
+            ))
             .width(96.0)
             .show_ui(ui, |ui| {
                 for format in [ExportFormat::Csv, ExportFormat::Tsv, ExportFormat::SpiceRaw] {
@@ -2335,7 +2352,10 @@ fn render_export_panel(ui: &mut Ui, viewer_state: &mut WaveformViewerState) {
                 .export_options
                 .x_start
                 .unwrap_or(viewer_state.view.x_min);
-            if ui.add(egui::DragValue::new(&mut value).speed(1e-9)).changed() {
+            if ui
+                .add(egui::DragValue::new(&mut value).speed(1e-9))
+                .changed()
+            {
                 viewer_state.export_options.x_start = Some(value);
             }
         }
@@ -2353,7 +2373,10 @@ fn render_export_panel(ui: &mut Ui, viewer_state: &mut WaveformViewerState) {
                 .export_options
                 .x_end
                 .unwrap_or(viewer_state.view.x_max);
-            if ui.add(egui::DragValue::new(&mut value).speed(1e-9)).changed() {
+            if ui
+                .add(egui::DragValue::new(&mut value).speed(1e-9))
+                .changed()
+            {
                 viewer_state.export_options.x_end = Some(value);
             }
         }
@@ -2385,13 +2408,12 @@ fn render_export_panel(ui: &mut Ui, viewer_state: &mut WaveformViewerState) {
         }
         if ui.button("Save...").clicked() {
             let payload = build_export_payload(&viewer_state.traces, &viewer_state.export_options);
-            viewer_state.export_status = match save_export_payload_with_dialog(
-                &payload,
-                viewer_state.export_options.format,
-            ) {
-                Ok(path) => Some(format!("Saved {}", path.display())),
-                Err(err) => Some(err),
-            };
+            viewer_state.export_status =
+                match save_export_payload_with_dialog(&payload, viewer_state.export_options.format)
+                {
+                    Ok(path) => Some(format!("Saved {}", path.display())),
+                    Err(err) => Some(err),
+                };
         }
     });
 
@@ -2460,11 +2482,7 @@ mod tests {
 
     #[test]
     fn test_visible_trace_index_window_returns_none_when_trace_is_outside_view() {
-        let trace = TraceData::new(
-            "T",
-            vec![0.0, 1.0, 2.0],
-            vec![0.0, 0.0, 0.0],
-        );
+        let trace = TraceData::new("T", vec![0.0, 1.0, 2.0], vec![0.0, 0.0, 0.0]);
         let mut view = ViewTransform::default();
         view.x_min = 10.0;
         view.x_max = 11.0;
@@ -2517,11 +2535,7 @@ mod tests {
 
     #[test]
     fn test_build_export_payload_routes_by_format() {
-        let traces = vec![TraceData::new(
-            "V(out)",
-            vec![0.0, 1e-6],
-            vec![0.0, 1.0],
-        )];
+        let traces = vec![TraceData::new("V(out)", vec![0.0, 1e-6], vec![0.0, 1.0])];
 
         let mut csv_opts = super::super::export::ExportOptions::default();
         csv_opts.format = ExportFormat::Csv;
@@ -2620,7 +2634,10 @@ mod tests {
 
         let polyline = build_trace_polyline(&layout, &view, &trace);
         assert!(polyline.points.len() >= 2);
-        assert!(polyline.points.iter().all(|p| p.x.is_finite() && p.y.is_finite()));
+        assert!(polyline
+            .points
+            .iter()
+            .all(|p| p.x.is_finite() && p.y.is_finite()));
     }
 
     #[test]
@@ -2728,9 +2745,8 @@ mod tests {
         let layout = calculate_legend_find_row_layout(96.0, 4.0);
         assert!(layout.show_clear);
         assert!(
-            (layout.edit_width
-                - (96.0 - LEGEND_TRACE_SOLO_WIDTH - 4.0 - LEGEND_FIND_RIGHT_GUARD))
-            .abs()
+            (layout.edit_width - (96.0 - LEGEND_TRACE_SOLO_WIDTH - 4.0 - LEGEND_FIND_RIGHT_GUARD))
+                .abs()
                 < f32::EPSILON
         );
     }

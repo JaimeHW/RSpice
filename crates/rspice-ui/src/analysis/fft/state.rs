@@ -335,8 +335,13 @@ impl FftState {
     /// - In manual mode, clamp to valid FFT bounds.
     pub fn sync_sample_count_control_value(&mut self) {
         if self.sample_count_auto {
-            if let Some(sample_len) = self.source_cache.as_ref().map(|source| source.samples.len()) {
-                self.sample_count = sample_len.clamp(MIN_FFT_SAMPLES, MAX_REFERENCE_RESAMPLE_POINTS);
+            if let Some(sample_len) = self
+                .source_cache
+                .as_ref()
+                .map(|source| source.samples.len())
+            {
+                self.sample_count =
+                    sample_len.clamp(MIN_FFT_SAMPLES, MAX_REFERENCE_RESAMPLE_POINTS);
             }
         } else {
             self.sample_count = self
@@ -938,8 +943,14 @@ mod tests {
         state.set_active_marker_slot(MarkerSlot::M2);
         state.set_marker_frequency(Some(2_500.0));
 
-        assert_eq!(state.marker_frequency_for_slot(MarkerSlot::M1), Some(1_000.0));
-        assert_eq!(state.marker_frequency_for_slot(MarkerSlot::M2), Some(2_500.0));
+        assert_eq!(
+            state.marker_frequency_for_slot(MarkerSlot::M1),
+            Some(1_000.0)
+        );
+        assert_eq!(
+            state.marker_frequency_for_slot(MarkerSlot::M2),
+            Some(2_500.0)
+        );
 
         state.clear_markers();
         assert!(state.marker_frequency_for_slot(MarkerSlot::M1).is_none());

@@ -1918,7 +1918,11 @@ fn render_info_panel_content(ui: &mut Ui, state: &FftState) {
 
         if state.marker_frequency.is_some() || state.marker_frequency_secondary.is_some() {
             ui.add_space(6.0);
-            ui.label(egui::RichText::new("Markers").size(10.0).color(text_color()));
+            ui.label(
+                egui::RichText::new("Markers")
+                    .size(10.0)
+                    .color(text_color()),
+            );
             if let Some(ref data) = state.data {
                 if let Some(marker_freq) = state.marker_frequency {
                     info_row(ui, "M1 F", &format_freq(marker_freq));
@@ -1932,13 +1936,10 @@ fn render_info_panel_content(ui: &mut Ui, state: &FftState) {
                         info_row(ui, "M2 M", &format_marker_magnitude(state, &point));
                     }
                 }
-                if let (Some(m1), Some(m2)) = (state.marker_frequency, state.marker_frequency_secondary)
+                if let (Some(m1), Some(m2)) =
+                    (state.marker_frequency, state.marker_frequency_secondary)
                 {
-                    info_row(
-                        ui,
-                        "ΔF",
-                        &format_freq((m2 - m1).abs()),
-                    );
+                    info_row(ui, "ΔF", &format_freq((m2 - m1).abs()));
                     let m1_mag = data.interpolate(m1).map(|p| state.display_magnitude(&p));
                     let m2_mag = data.interpolate(m2).map(|p| state.display_magnitude(&p));
                     if let (Some(v1), Some(v2)) = (m1_mag, m2_mag) {

@@ -355,10 +355,7 @@ impl EngineBridge {
         // emits accepted timesteps directly (without a separate output
         // interpolation stage), keep internal max-step at or below the
         // requested output step by default to preserve waveform fidelity.
-        config
-            .max_timestep
-            .unwrap_or(config.step_time)
-            .max(1e-18)
+        config.max_timestep.unwrap_or(config.step_time).max(1e-18)
     }
 
     /// Run transient analysis
