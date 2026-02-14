@@ -1939,87 +1939,93 @@ fn render_info_panel_content(ui: &mut Ui, state: &mut FftState) {
 }
 
 fn render_fft_markers_panel(ui: &mut Ui, state: &mut FftState) {
-    ui.separator();
-    ui.label(
-        egui::RichText::new("Markers")
-            .size(11.0)
-            .strong()
-            .color(Color32::from_rgb(160, 165, 175)),
-    );
+    ui.scope(|ui| {
+        // Match waveform legend marker manager spacing exactly.
+        ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+        ui.spacing_mut().interact_size.y = 18.0;
 
-    ui.horizontal(|ui| {
+        ui.separator();
         ui.label(
-            egui::RichText::new(format!("{}", state.marker_count()))
-                .size(9.0)
-                .color(Color32::from_rgb(120, 125, 135)),
+            egui::RichText::new("Markers")
+                .size(11.0)
+                .strong()
+                .color(Color32::from_rgb(160, 165, 175)),
         );
-        ui.label(
-            egui::RichText::new("entries")
-                .size(9.0)
-                .color(Color32::from_rgb(120, 125, 135)),
-        );
-        if ui.small_button("Clear").clicked() {
-            state.clear_markers();
-        }
-    });
-    ui.label(
-        egui::RichText::new("Alt+LMB add, Alt+RMB remove")
-            .size(9.0)
-            .color(Color32::from_rgb(120, 125, 135)),
-    );
 
-    if state.marker_frequencies.is_empty() {
-        ui.label(
-            egui::RichText::new("No markers")
-                .size(10.0)
-                .color(Color32::from_rgb(100, 105, 115)),
-        );
-        return;
-    }
-
-    let mut jump_to_freq: Option<f64> = None;
-    let mut remove_idx: Option<usize> = None;
-    let markers: Vec<f64> = state.marker_frequencies.clone();
-    for (idx, marker_freq) in markers.iter().copied().enumerate() {
         ui.horizontal(|ui| {
             ui.label(
-                egui::RichText::new(format!("M{}", idx + 1))
-                    .size(10.0)
-                    .color(marker_color_for_slot(idx)),
+                egui::RichText::new(format!("{}", state.marker_count()))
+                    .size(9.0)
+                    .color(Color32::from_rgb(120, 125, 135)),
             );
-            let mut jump_btn = ui.small_button(format_freq(marker_freq));
-            if let Some(marker_mag) = state
-                .data
-                .as_ref()
-                .and_then(|data| data.interpolate(marker_freq))
-                .map(|point| format_marker_magnitude(state, &point))
-            {
-                jump_btn = jump_btn.on_hover_text(format!(
-                    "Center frequency view on marker\nMagnitude: {}",
-                    marker_mag
-                ));
-            } else {
-                jump_btn = jump_btn.on_hover_text("Center frequency view on marker");
-            }
-            if jump_btn.clicked() {
-                jump_to_freq = Some(marker_freq);
-            }
-            if ui
-                .small_button("x")
-                .on_hover_text("Delete marker")
-                .clicked()
-            {
-                remove_idx = Some(idx);
+            ui.label(
+                egui::RichText::new("entries")
+                    .size(9.0)
+                    .color(Color32::from_rgb(120, 125, 135)),
+            );
+            if ui.small_button("Clear").clicked() {
+                state.clear_markers();
             }
         });
-    }
+        ui.label(
+            egui::RichText::new("Alt+LMB add, Alt+RMB remove")
+                .size(9.0)
+                .color(Color32::from_rgb(120, 125, 135)),
+        );
 
-    if let Some(idx) = remove_idx {
-        state.remove_marker_at(idx);
-    }
-    if let Some(freq) = jump_to_freq {
-        center_fft_frequency_view_on_marker(state, freq);
-    }
+        if state.marker_frequencies.is_empty() {
+            ui.label(
+                egui::RichText::new("No markers")
+                    .size(10.0)
+                    .color(Color32::from_rgb(100, 105, 115)),
+            );
+            return;
+        }
+
+        let mut jump_to_freq: Option<f64> = None;
+        let mut remove_idx: Option<usize> = None;
+        let markers: Vec<f64> = state.marker_frequencies.clone();
+        for (idx, marker_freq) in markers.iter().copied().enumerate() {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(format!("M{}", idx + 1))
+                        .size(10.0)
+                        .color(marker_color_for_slot(idx)),
+                );
+                let mut jump_btn = ui.small_button(format_freq(marker_freq));
+                if let Some(marker_mag) = state
+                    .data
+                    .as_ref()
+                    .and_then(|data| data.interpolate(marker_freq))
+                    .map(|point| format_marker_magnitude(state, &point))
+                {
+                    jump_btn = jump_btn.on_hover_text(format!(
+                        "Center frequency view on marker\nMagnitude: {}",
+                        marker_mag
+                    ));
+                } else {
+                    jump_btn = jump_btn.on_hover_text("Center frequency view on marker");
+                }
+                if jump_btn.clicked() {
+                    jump_to_freq = Some(marker_freq);
+                }
+                if ui
+                    .small_button("x")
+                    .on_hover_text("Delete marker")
+                    .clicked()
+                {
+                    remove_idx = Some(idx);
+                }
+            });
+        }
+
+        if let Some(idx) = remove_idx {
+            state.remove_marker_at(idx);
+        }
+        if let Some(freq) = jump_to_freq {
+            center_fft_frequency_view_on_marker(state, freq);
+        }
+    });
 }
 
 fn center_fft_frequency_view_on_marker(state: &mut FftState, marker_freq: f64) {
