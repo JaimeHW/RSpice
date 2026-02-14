@@ -379,10 +379,9 @@ impl Library {
 
     /// Get or create cell
     pub fn get_or_create_cell(&mut self, name: &str) -> &mut Cell {
-        if !self.cells.contains_key(name) {
-            self.cells.insert(name.to_string(), Cell::new(name));
-        }
-        self.cells.get_mut(name).unwrap()
+        self.cells
+            .entry(name.to_string())
+            .or_insert_with(|| Cell::new(name))
     }
 
     /// Get cells sorted by name

@@ -307,9 +307,8 @@ pub fn render_schematic_view(
                             .drag
                             .update((wire_grid_pos.x, wire_grid_pos.y));
                     }
-                } else if state.dialogs.last_drag_pos.is_some() {
+                } else if let Some((last_x, last_y)) = state.dialogs.last_drag_pos {
                     // Moving selection with rubber-banding
-                    let (last_x, last_y) = state.dialogs.last_drag_pos.unwrap();
                     let delta = Point::new(grid_pos.x - last_x, grid_pos.y - last_y);
 
                     if delta.x != 0 || delta.y != 0 {

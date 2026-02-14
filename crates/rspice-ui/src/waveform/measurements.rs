@@ -167,8 +167,15 @@ impl MeasurementCache {
         }
 
         &self.entries[trace_index]
-            .as_ref()
-            .expect("measurement cache entry must exist")
+            .get_or_insert_with(|| MeasurementCacheEntry {
+                signature,
+                range: range_key,
+                measurements: if let Some((start, end)) = range {
+                    calculate_measurements_in_range(trace, start, end)
+                } else {
+                    calculate_all_measurements(trace)
+                },
+            })
             .measurements
     }
 }

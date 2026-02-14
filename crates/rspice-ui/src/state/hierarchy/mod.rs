@@ -121,9 +121,10 @@ impl Library {
 
     /// Create a new cell in this library
     pub fn create_cell(&mut self, name: &str) -> &mut Cell {
-        let cell = Cell::new(name, &self.name);
-        self.cells.insert(name.to_string(), cell);
-        self.cells.get_mut(name).unwrap()
+        self.cells
+            .entry(name.to_string())
+            .and_modify(|cell| *cell = Cell::new(name, &self.name))
+            .or_insert_with(|| Cell::new(name, &self.name))
     }
 
     /// Get cell by name

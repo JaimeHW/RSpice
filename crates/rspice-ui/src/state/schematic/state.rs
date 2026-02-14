@@ -413,16 +413,12 @@ impl SchematicState {
     /// - `viewport_height`: Height of the schematic canvas in pixels
     pub fn zoom_to_fit(&mut self, viewport_width: f64, viewport_height: f64) {
         // Calculate bounding box of all content (in schematic pixel coordinates)
-        let bounds = self.content_bounds();
-
-        if bounds.is_none() {
+        let Some((min_x, min_y, max_x, max_y)) = self.content_bounds() else {
             // No content - reset to default view
             self.zoom = 1.0;
             self.pan = (0.0, 0.0);
             return;
-        }
-
-        let (min_x, min_y, max_x, max_y) = bounds.unwrap();
+        };
 
         // content_bounds returns schematic pixel coordinates, not grid cell indices
         // So we use them directly without multiplying by grid_size
