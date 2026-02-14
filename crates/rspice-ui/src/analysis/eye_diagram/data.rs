@@ -3,7 +3,6 @@
 //! Core data types for eye diagram construction and analysis.
 //! Supports alignment of transient waveforms to bit period for overlay display.
 
-
 // =============================================================================
 // Eye Trace
 // =============================================================================
@@ -271,32 +270,118 @@ impl EyeDataBuilder {
         eye_data.v_cross = (v_max + v_min) / 2.0;
         eye_data.data_rate = 1.0 / self.bit_period;
 
-        // Build traces by slicing waveform into windows
+        let resampled_points = (self.ui_count as usize)
+            .saturating_mul(self.points_per_ui)
+            .saturating_add(1)
+            .max(2);
+
+        // Build traces by slicing waveform into windows and resampling each window
+        // to a consistent point count for stable rendering and measurement fidelity.
         let mut window_start = first_time;
+        let mut sample_start_idx = start_idx;
+        let mut sample_end_idx = start_idx;
         while window_start + window_duration <= last_time {
             let window_end = window_start + window_duration;
 
-            // Find samples within this window
-            let mut trace_time = Vec::new();
-            let mut trace_amp = Vec::new();
-
-            for i in 0..n {
-                if time[i] >= window_start && time[i] <= window_end {
-                    // Normalize time to 0..ui_count
-                    let t_norm = (time[i] - window_start) / self.bit_period;
-                    trace_time.push(t_norm);
-                    trace_amp.push(signal[i]);
-                }
+            while sample_start_idx < n && time[sample_start_idx] < window_start {
+                sample_start_idx += 1;
+            }
+            if sample_end_idx < sample_start_idx {
+                sample_end_idx = sample_start_idx;
+            }
+            while sample_end_idx < n && time[sample_end_idx] <= window_end {
+                sample_end_idx += 1;
             }
 
-            if trace_time.len() >= 2 {
-                eye_data.add_trace(EyeTrace::new(trace_time, trace_amp));
+            let interp_start_idx = sample_start_idx.saturating_sub(1);
+            let interp_end_idx = (sample_end_idx + 1).min(n);
+            if interp_end_idx.saturating_sub(interp_start_idx) >= 2 {
+                if let Some(trace) = resample_window_trace(
+                    &time[..n],
+                    &signal[..n],
+                    interp_start_idx,
+                    interp_end_idx,
+                    window_start,
+                    window_duration,
+                    self.bit_period,
+                    resampled_points,
+                ) {
+                    eye_data.add_trace(trace);
+                }
             }
 
             window_start += self.bit_period;
         }
 
         eye_data
+    }
+}
+
+fn resample_window_trace(
+    time: &[f64],
+    signal: &[f64],
+    start_idx: usize,
+    end_idx: usize,
+    window_start: f64,
+    window_duration: f64,
+    bit_period: f64,
+    sample_count: usize,
+) -> Option<EyeTrace> {
+    if end_idx <= start_idx + 1 || sample_count < 2 || !window_duration.is_finite() {
+        return None;
+    }
+
+    let first_t = time[start_idx];
+    let last_t = time[end_idx - 1];
+    if !first_t.is_finite() || !last_t.is_finite() || last_t <= first_t {
+        return None;
+    }
+
+    let mut trace_time = Vec::with_capacity(sample_count);
+    let mut trace_amp = Vec::with_capacity(sample_count);
+    let step = window_duration / (sample_count - 1) as f64;
+    let mut segment_idx = start_idx;
+
+    for j in 0..sample_count {
+        let target_t = window_start + j as f64 * step;
+        if target_t < first_t || target_t > last_t {
+            continue;
+        }
+
+        while segment_idx + 1 < end_idx && time[segment_idx + 1] < target_t {
+            segment_idx += 1;
+        }
+        if segment_idx + 1 >= end_idx {
+            break;
+        }
+
+        let t0 = time[segment_idx];
+        let t1 = time[segment_idx + 1];
+        let v0 = signal[segment_idx];
+        let v1 = signal[segment_idx + 1];
+        if !t0.is_finite() || !t1.is_finite() || !v0.is_finite() || !v1.is_finite() {
+            continue;
+        }
+
+        let dt = t1 - t0;
+        if dt <= 0.0 {
+            continue;
+        }
+
+        let alpha = ((target_t - t0) / dt).clamp(0.0, 1.0);
+        let amplitude = v0 + alpha * (v1 - v0);
+        let normalized_t = (target_t - window_start) / bit_period;
+
+        if normalized_t.is_finite() && amplitude.is_finite() {
+            trace_time.push(normalized_t);
+            trace_amp.push(amplitude);
+        }
+    }
+
+    if trace_time.len() >= 2 {
+        Some(EyeTrace::new(trace_time, trace_amp))
+    } else {
+        None
     }
 }
 
@@ -612,6 +697,71 @@ mod tests {
     }
 
     #[test]
+    fn test_builder_points_per_ui_controls_trace_resolution() {
+        let bit_period = 1.0e-9;
+        let n_bits = 8;
+        let samples_per_bit = 16;
+        let n_samples = n_bits * samples_per_bit;
+
+        let mut time = Vec::with_capacity(n_samples + 1);
+        let mut signal = Vec::with_capacity(n_samples + 1);
+        for i in 0..=n_samples {
+            let t = i as f64 * bit_period / samples_per_bit as f64;
+            let bit = (i / samples_per_bit) % 2;
+            time.push(t);
+            signal.push(if bit == 0 { -0.4 } else { 0.4 });
+        }
+
+        let low_points = 12usize;
+        let high_points = 48usize;
+        let low = EyeDataBuilder::new()
+            .bit_period(bit_period)
+            .ui_count(2)
+            .skip_initial(0)
+            .points_per_ui(low_points)
+            .build(&time, &signal);
+        let high = EyeDataBuilder::new()
+            .bit_period(bit_period)
+            .ui_count(2)
+            .skip_initial(0)
+            .points_per_ui(high_points)
+            .build(&time, &signal);
+
+        assert!(!low.traces.is_empty());
+        assert!(!high.traces.is_empty());
+        assert_eq!(low.traces[0].len(), 2 * low_points + 1);
+        assert_eq!(high.traces[0].len(), 2 * high_points + 1);
+    }
+
+    #[test]
+    fn test_builder_resampled_trace_time_is_monotonic() {
+        let bit_period = 1.0e-9;
+        let n_bits = 6;
+        let samples_per_bit = 20;
+        let n_samples = n_bits * samples_per_bit;
+        let mut time = Vec::with_capacity(n_samples + 1);
+        let mut signal = Vec::with_capacity(n_samples + 1);
+        for i in 0..=n_samples {
+            let t = i as f64 * bit_period / samples_per_bit as f64;
+            let phase = (i % samples_per_bit) as f64 / samples_per_bit as f64;
+            time.push(t);
+            signal.push((phase * std::f64::consts::TAU).sin() * 0.4);
+        }
+
+        let data = EyeDataBuilder::new()
+            .bit_period(bit_period)
+            .ui_count(2)
+            .skip_initial(0)
+            .points_per_ui(64)
+            .build(&time, &signal);
+
+        assert!(!data.traces.is_empty());
+        for trace in &data.traces {
+            assert!(trace.time.windows(2).all(|w| w[1] > w[0]));
+        }
+    }
+
+    #[test]
     fn test_builder_empty_input() {
         let builder = EyeDataBuilder::new();
         let data = builder.build(&[], &[]);
@@ -623,6 +773,21 @@ mod tests {
         let builder = EyeDataBuilder::new();
         let data = builder.build(&[0.0], &[0.5]);
         assert_eq!(data.trace_count(), 0);
+    }
+
+    #[test]
+    fn test_resample_window_trace_interpolates_linear_signal() {
+        let time = [0.0, 1.0, 2.0];
+        let signal = [0.0, 1.0, 2.0];
+        let trace =
+            resample_window_trace(&time, &signal, 0, 3, 0.0, 2.0, 1.0, 5).expect("resampled trace");
+        assert_eq!(trace.time.len(), 5);
+        assert_eq!(trace.amplitude.len(), 5);
+        assert!(approx_eq(trace.time[0], 0.0));
+        assert!(approx_eq(trace.time[4], 2.0));
+        assert!(approx_eq(trace.amplitude[0], 0.0));
+        assert!(approx_eq(trace.amplitude[2], 1.0));
+        assert!(approx_eq(trace.amplitude[4], 2.0));
     }
 
     // =========================================================================

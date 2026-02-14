@@ -260,17 +260,17 @@ fn calculate_eye_opening_at_center(data: &EyeData) -> CenterOpening {
 
     for trace in &data.traces {
         for (i, &t) in trace.time.iter().enumerate() {
-            if (t - center_ui).abs() < tolerance * data.ui_count as f64
-                && i < trace.amplitude.len() {
-                    let v = trace.amplitude[i];
-                    if v.is_finite() {
-                        if v >= data.v_cross {
-                            high_samples.push(v);
-                        } else {
-                            low_samples.push(v);
-                        }
+            if (t - center_ui).abs() < tolerance * data.ui_count as f64 && i < trace.amplitude.len()
+            {
+                let v = trace.amplitude[i];
+                if v.is_finite() {
+                    if v >= data.v_cross {
+                        high_samples.push(v);
+                    } else {
+                        low_samples.push(v);
                     }
                 }
+            }
         }
     }
 
@@ -343,7 +343,9 @@ fn calculate_horizontal_opening(data: &EyeData) -> HorizontalOpening {
 
     // Eye opening is space between latest rising edge and earliest falling edge
     let opening = (falling_min - rising_max).max(0.0);
-    let width_fraction = opening / data.bit_period;
+    // Crossing times are already normalized in UI units, so opening is directly
+    // the eye width in UI fractions.
+    let width_fraction = opening;
 
     HorizontalOpening {
         width_fraction: width_fraction.min(1.0),
@@ -451,17 +453,16 @@ fn calculate_noise_stats(data: &EyeData) -> NoiseStats {
 
     for trace in &data.traces {
         for (i, &t) in trace.time.iter().enumerate() {
-            if (t - center_ui).abs() < tolerance
-                && i < trace.amplitude.len() {
-                    let v = trace.amplitude[i];
-                    if v.is_finite() {
-                        if v >= data.v_cross {
-                            high_samples.push(v);
-                        } else {
-                            low_samples.push(v);
-                        }
+            if (t - center_ui).abs() < tolerance && i < trace.amplitude.len() {
+                let v = trace.amplitude[i];
+                if v.is_finite() {
+                    if v >= data.v_cross {
+                        high_samples.push(v);
+                    } else {
+                        low_samples.push(v);
                     }
                 }
+            }
         }
     }
 
@@ -772,6 +773,27 @@ mod tests {
 
         assert!(m.data_rate > 0.0);
         assert!(m.unit_interval > 0.0);
+    }
+
+    #[test]
+    fn test_horizontal_eye_width_uses_ui_fraction_units() {
+        let mut data = EyeData::new(1e-9, 2);
+        data.v_high = 1.0;
+        data.v_low = -1.0;
+        data.v_cross = 0.0;
+        data.swing = 2.0;
+        data.add_trace(EyeTrace::new(
+            vec![0.0, 0.25, 0.75, 1.0],
+            vec![-1.0, 1.0, 1.0, -1.0],
+        ));
+        data.add_trace(EyeTrace::new(
+            vec![0.0, 0.25, 0.75, 1.0],
+            vec![-1.0, 1.0, 1.0, -1.0],
+        ));
+
+        let m = calculate_eye_measurements(&data);
+        assert!(approx_eq_rel(m.eye_width, 0.75, 1e-9));
+        assert!(m.eye_width < 1.0);
     }
 
     #[test]
