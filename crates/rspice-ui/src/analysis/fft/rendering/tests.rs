@@ -37,6 +37,20 @@ fn test_resolve_fft_info_pane_width_clamps_manual_override() {
 }
 
 #[test]
+fn test_next_fft_info_pane_width_drag_direction_matches_splitter_motion() {
+    let total = Rect::from_min_size(Pos2::ZERO, Vec2::new(1100.0, 620.0));
+    let base = 200.0;
+
+    // Dragging pointer right should shrink the right pane.
+    let shrink = next_fft_info_pane_width(Some(base), base, 10.0, total);
+    assert!(shrink < base);
+
+    // Dragging pointer left should expand the right pane.
+    let grow = next_fft_info_pane_width(Some(base), base, -10.0, total);
+    assert!(grow > base);
+}
+
+#[test]
 fn test_layout_uses_two_stacked_header_rows() {
     let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
     let layout = calculate_layout(rect);

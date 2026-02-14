@@ -143,9 +143,9 @@ pub fn render_fft_viewer(ui: &mut Ui, app_state: &mut AppState) {
     }
 
     let state = &mut app_state.fft_state;
+    handle_fft_info_splitter(ui, &layout, state);
     render_spectrum(ui, &layout, state);
     render_info_panel(ui, &layout, state);
-    handle_fft_info_splitter(ui, &layout, state);
 }
 
 /// Public render function
@@ -1991,16 +1991,13 @@ fn mag_to_y(point: &FftPoint, rect: Rect, state: &FftState) -> f32 {
 }
 
 fn handle_fft_info_splitter(ui: &mut Ui, layout: &FftLayout, state: &mut FftState) {
+    let half_hit = INFO_SPLITTER_HIT_WIDTH * 0.5;
     let splitter_rect = Rect::from_min_max(
-        Pos2::new(layout.info.min.x, layout.info.min.y),
-        Pos2::new(
-            layout.info.min.x + INFO_SPLITTER_HIT_WIDTH,
-            layout.info.max.y,
-        ),
+        Pos2::new(layout.info.min.x - half_hit, layout.info.min.y),
+        Pos2::new(layout.info.min.x + half_hit, layout.info.max.y),
     );
 
     let splitter_id = ui.id().with("fft_info_pane_splitter");
-    let start_width_id = splitter_id.with("drag_start_width");
     let mut response = ui.interact(splitter_rect, splitter_id, Sense::click_and_drag());
     response = response.on_hover_cursor(CursorIcon::ResizeHorizontal);
 
@@ -2008,25 +2005,15 @@ fn handle_fft_info_splitter(ui: &mut Ui, layout: &FftLayout, state: &mut FftStat
         state.info_pane_width = None;
     }
 
-    if response.drag_started() {
-        ui.ctx().data_mut(|data| {
-            data.insert_temp(start_width_id, layout.info.width());
-        });
-    }
-
     if response.dragged() {
-        let start_width = ui
-            .ctx()
-            .data(|data| data.get_temp::<f32>(start_width_id))
-            .unwrap_or(layout.info.width());
-        let target = start_width - response.drag_delta().x;
-        state.info_pane_width = Some(clamp_fft_info_pane_width(layout.total, target));
-    }
-
-    if response.drag_stopped() {
-        ui.ctx().data_mut(|data| {
-            data.remove::<f32>(start_width_id);
-        });
+        let delta_x = ui.ctx().input(|i| i.pointer.delta().x);
+        let next = next_fft_info_pane_width(
+            state.info_pane_width,
+            layout.info.width(),
+            delta_x,
+            layout.total,
+        );
+        state.info_pane_width = Some(next);
     }
 
     let stroke_color = if response.dragged() {
@@ -2043,6 +2030,16 @@ fn handle_fft_info_splitter(ui: &mut Ui, layout: &FftLayout, state: &mut FftStat
         ],
         Stroke::new(INFO_SPLITTER_STROKE_WIDTH, stroke_color),
     );
+}
+
+fn next_fft_info_pane_width(
+    current_width: Option<f32>,
+    fallback_layout_width: f32,
+    drag_delta_x: f32,
+    total: Rect,
+) -> f32 {
+    let base = current_width.unwrap_or(fallback_layout_width);
+    clamp_fft_info_pane_width(total, base - drag_delta_x)
 }
 
 // =============================================================================

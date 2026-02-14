@@ -328,6 +328,20 @@ fn test_resolve_waveform_right_pane_width_clamps_manual_override() {
 }
 
 #[test]
+fn test_next_waveform_right_pane_width_drag_direction_matches_splitter_motion() {
+    let total = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 600.0));
+    let base = 220.0;
+
+    // Dragging pointer right should shrink the right pane.
+    let shrink = next_waveform_right_pane_width(Some(base), base, 12.0, total);
+    assert!(shrink < base);
+
+    // Dragging pointer left should expand the right pane.
+    let grow = next_waveform_right_pane_width(Some(base), base, -12.0, total);
+    assert!(grow > base);
+}
+
+#[test]
 fn test_legend_inner_rect_uses_tighter_horizontal_inset() {
     let legend = Rect::from_min_size(Pos2::new(10.0, 20.0), Vec2::new(200.0, 300.0));
     let inner = legend_inner_rect(legend);

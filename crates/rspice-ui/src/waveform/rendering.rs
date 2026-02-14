@@ -211,10 +211,10 @@ pub fn render_waveform_viewer(ui: &mut Ui, app_state: &mut AppState) {
     // Use split borrows to avoid borrow checker issues
     render_header(ui, &layout, &mut app_state.waveform_viewer);
     render_y_axis(ui, &layout, &app_state.waveform_viewer);
+    handle_waveform_right_pane_splitter(ui, &layout, &mut app_state.waveform_viewer);
     render_plot_area(ui, &layout, &mut app_state.waveform_viewer);
     render_x_axis(ui, &layout, &app_state.waveform_viewer);
     render_legend(ui, &layout, &mut app_state.waveform_viewer);
-    handle_waveform_right_pane_splitter(ui, &layout, &mut app_state.waveform_viewer);
 }
 
 // =============================================================================
@@ -2147,16 +2147,13 @@ fn handle_waveform_right_pane_splitter(
     layout: &ViewerLayout,
     viewer_state: &mut WaveformViewerState,
 ) {
+    let half_hit = LEGEND_SPLITTER_HIT_WIDTH * 0.5;
     let splitter_rect = Rect::from_min_max(
-        Pos2::new(layout.legend.min.x, layout.legend.min.y),
-        Pos2::new(
-            layout.legend.min.x + LEGEND_SPLITTER_HIT_WIDTH,
-            layout.legend.max.y,
-        ),
+        Pos2::new(layout.legend.min.x - half_hit, layout.legend.min.y),
+        Pos2::new(layout.legend.min.x + half_hit, layout.legend.max.y),
     );
 
     let splitter_id = ui.id().with("waveform_right_pane_splitter");
-    let start_width_id = splitter_id.with("drag_start_width");
     let mut response = ui.interact(splitter_rect, splitter_id, Sense::click_and_drag());
     response = response.on_hover_cursor(CursorIcon::ResizeHorizontal);
 
@@ -2164,25 +2161,15 @@ fn handle_waveform_right_pane_splitter(
         viewer_state.right_pane_width = None;
     }
 
-    if response.drag_started() {
-        ui.ctx().data_mut(|data| {
-            data.insert_temp(start_width_id, layout.legend.width());
-        });
-    }
-
     if response.dragged() {
-        let start_width = ui
-            .ctx()
-            .data(|data| data.get_temp::<f32>(start_width_id))
-            .unwrap_or(layout.legend.width());
-        let target = start_width - response.drag_delta().x;
-        viewer_state.right_pane_width = Some(clamp_waveform_right_pane_width(layout.total, target));
-    }
-
-    if response.drag_stopped() {
-        ui.ctx().data_mut(|data| {
-            data.remove::<f32>(start_width_id);
-        });
+        let delta_x = ui.ctx().input(|i| i.pointer.delta().x);
+        let next = next_waveform_right_pane_width(
+            viewer_state.right_pane_width,
+            layout.legend.width(),
+            delta_x,
+            layout.total,
+        );
+        viewer_state.right_pane_width = Some(next);
     }
 
     let stroke_color = if response.dragged() {
@@ -2199,6 +2186,16 @@ fn handle_waveform_right_pane_splitter(
         ],
         Stroke::new(LEGEND_SPLITTER_STROKE_WIDTH, stroke_color),
     );
+}
+
+fn next_waveform_right_pane_width(
+    current_width: Option<f32>,
+    fallback_layout_width: f32,
+    drag_delta_x: f32,
+    total: Rect,
+) -> f32 {
+    let base = current_width.unwrap_or(fallback_layout_width);
+    clamp_waveform_right_pane_width(total, base - drag_delta_x)
 }
 
 fn center_waveform_view_x_on_marker(
