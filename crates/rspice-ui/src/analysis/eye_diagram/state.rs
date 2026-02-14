@@ -178,6 +178,10 @@ pub struct EyeDiagramState {
     pub v_scale: f64,
     /// Number of UI to display
     pub ui_count: u32,
+    /// Optional user-resized measurements pane width in pixels. `None` means auto-fit.
+    pub measurements_pane_width: Option<f32>,
+    /// Runtime auto-fit width hint captured from rendered content.
+    pub measurements_pane_auto_width_hint: f32,
 }
 
 impl Default for EyeDiagramState {
@@ -196,6 +200,8 @@ impl Default for EyeDiagramState {
             h_scale: 0.5,
             v_scale: 0.2,
             ui_count: 2,
+            measurements_pane_width: None,
+            measurements_pane_auto_width_hint: 0.0,
         }
     }
 }
@@ -208,8 +214,18 @@ impl EyeDiagramState {
 
     /// Load eye data and recalculate measurements
     pub fn load_data(&mut self, data: EyeData) {
+        self.ui_count = data.ui_count.max(1) as u32;
         self.data = data;
+        if let Some(idx) = self.selected_trace {
+            if idx >= self.data.traces.len() {
+                self.selected_trace = None;
+            }
+        }
         self.recalculate_measurements();
+        if self.show_mask {
+            self.mask.enabled = true;
+            self.run_mask_test();
+        }
     }
 
     /// Recalculate measurements from current data
@@ -222,6 +238,7 @@ impl EyeDiagramState {
         if !self.mask.enabled {
             return;
         }
+        let ui_count = self.ui_count.max(1) as f64;
 
         self.mask.violation_count = 0;
         self.mask.total_samples = 0;
@@ -229,7 +246,7 @@ impl EyeDiagramState {
         for trace in &self.data.traces {
             let n = trace.time.len().min(trace.amplitude.len());
             for i in 0..n {
-                let t_norm = trace.time[i] / self.data.ui_count as f64;
+                let t_norm = trace.time[i] / ui_count;
                 let v_norm = if self.data.swing > 0.0 {
                     (trace.amplitude[i] - self.data.v_cross) / self.data.swing
                 } else {
@@ -267,8 +284,8 @@ impl EyeDiagramState {
     /// Toggle mask display
     pub fn toggle_mask(&mut self) {
         self.show_mask = !self.show_mask;
+        self.mask.enabled = self.show_mask;
         if self.show_mask {
-            self.mask.enabled = true;
             self.run_mask_test();
         }
     }
@@ -294,8 +311,7 @@ impl EyeDiagramState {
 // =============================================================================
 
 /// Color map for persistence/density display
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ColorMap {
     /// Hot (black -> red -> yellow -> white)
     Hot,
@@ -309,7 +325,6 @@ pub enum ColorMap {
     #[default]
     Phosphor,
 }
-
 
 impl ColorMap {
     /// Get display name
@@ -550,6 +565,16 @@ mod tests {
     }
 
     #[test]
+    fn test_state_toggle_mask_off_disables_mask_engine() {
+        let mut state = EyeDiagramState::new();
+        state.toggle_mask();
+        assert!(state.mask.enabled);
+        state.toggle_mask();
+        assert!(!state.show_mask);
+        assert!(!state.mask.enabled);
+    }
+
+    #[test]
     fn test_state_toggle_measurements() {
         let mut state = EyeDiagramState::new();
         let initial = state.show_measurements;
@@ -574,6 +599,20 @@ mod tests {
     fn test_state_trace_count() {
         let state = EyeDiagramState::new();
         assert_eq!(state.trace_count(), 0);
+    }
+
+    #[test]
+    fn test_load_data_syncs_ui_count_and_clamps_selected_trace() {
+        let mut state = EyeDiagramState::new();
+        state.selected_trace = Some(99);
+        let mut data = EyeData::new(100e-12, 3);
+        data.add_trace(super::super::data::EyeTrace::new(
+            vec![0.0, 0.5, 1.0],
+            vec![-0.1, 0.1, -0.1],
+        ));
+        state.load_data(data);
+        assert_eq!(state.ui_count, 3);
+        assert_eq!(state.selected_trace, None);
     }
 
     #[test]
