@@ -13,8 +13,8 @@ use crate::common::app::AppState;
 use crate::common::viewer_style::{viewer_chart_bg_color, viewer_header_bg_color};
 use crate::state::AnalysisType;
 use crate::utils::vertical_label_layout::{
-    place_vertical_line_labels, LabelSide, VerticalLabelLayoutConfig, VerticalLabelPlacement,
-    VerticalLabelRequest,
+    LabelSide, VerticalLabelLayoutConfig, VerticalLabelPlacement, VerticalLabelRequest,
+    place_vertical_line_labels,
 };
 
 // =============================================================================
@@ -72,6 +72,25 @@ fn marker_primary_color() -> Color32 {
 
 fn marker_secondary_color() -> Color32 {
     Color32::from_rgb(255, 175, 95)
+}
+
+fn marker_color_for_slot(slot_index: usize) -> Color32 {
+    match slot_index {
+        0 => marker_primary_color(),
+        1 => marker_secondary_color(),
+        _ => {
+            const EXTRA_COLORS: &[(u8, u8, u8)] = &[
+                (146, 196, 255),
+                (255, 214, 102),
+                (162, 230, 135),
+                (255, 145, 112),
+                (201, 168, 255),
+                (119, 221, 219),
+            ];
+            let (r, g, b) = EXTRA_COLORS[(slot_index - 2) % EXTRA_COLORS.len()];
+            Color32::from_rgb(r, g, b)
+        }
+    }
 }
 
 fn text_color() -> Color32 {
@@ -704,17 +723,25 @@ fn render_header(
 
             ui.separator();
             ui.label("Marker");
-            if ui
-                .selectable_label(state.active_marker_slot == MarkerSlot::M1, "M1")
-                .clicked()
-            {
-                state.set_active_marker_slot(MarkerSlot::M1);
-            }
-            if ui
-                .selectable_label(state.active_marker_slot == MarkerSlot::M2, "M2")
-                .clicked()
-            {
-                state.set_active_marker_slot(MarkerSlot::M2);
+            let mut active_marker_index =
+                state.active_marker_slot.index().min(state.marker_count());
+            let active_marker_text = MarkerSlot::new(active_marker_index).display_name();
+            egui::ComboBox::from_id_salt("fft_marker_slot")
+                .selected_text(active_marker_text)
+                .width(68.0)
+                .show_ui(ui, |ui| {
+                    for marker_idx in 0..=state.marker_count() {
+                        let slot = MarkerSlot::new(marker_idx);
+                        ui.selectable_value(
+                            &mut active_marker_index,
+                            marker_idx,
+                            slot.display_name(),
+                        );
+                    }
+                });
+            state.set_active_marker_slot(MarkerSlot::new(active_marker_index));
+            if ui.small_button("Del Mk").clicked() {
+                state.set_marker_frequency_for_slot(state.active_marker_slot, None);
             }
             if ui.small_button("Clear Mk").clicked() {
                 state.clear_markers();
@@ -812,7 +839,8 @@ fn render_spectrum_core(ui: &mut Ui, layout: &FftLayout, state: &FftState) {
     // Spectrum trace
     if let Some(ref data) = state.data {
         render_trace(&painter, plot_rect, data, state);
-        let mut cursor_labels: Vec<PlotCursorLabelSpec> = Vec::with_capacity(2);
+        let mut cursor_labels: Vec<PlotCursorLabelSpec> =
+            Vec::with_capacity(state.marker_count().saturating_add(1));
         let mut line_x_positions: Vec<f32> = Vec::new();
 
         // Fundamental marker
@@ -848,27 +876,14 @@ fn render_spectrum_core(ui: &mut Ui, layout: &FftLayout, state: &FftState) {
             }
         }
 
-        if let Some(marker_freq) = state.marker_frequency {
+        for (slot_idx, marker_freq) in state.marker_frequencies.iter().copied().enumerate() {
             if let Some(label) = render_user_marker(
                 plot_rect,
                 marker_freq,
                 data,
                 state,
                 &painter,
-                MarkerSlot::M1,
-            ) {
-                line_x_positions.push(label.anchor_x);
-                cursor_labels.push(label);
-            }
-        }
-        if let Some(marker_freq) = state.marker_frequency_secondary {
-            if let Some(label) = render_user_marker(
-                plot_rect,
-                marker_freq,
-                data,
-                state,
-                &painter,
-                MarkerSlot::M2,
+                MarkerSlot::new(slot_idx),
             ) {
                 line_x_positions.push(label.anchor_x);
                 cursor_labels.push(label);
@@ -1365,10 +1380,8 @@ fn render_user_marker(
     if !x.is_finite() || x < plot_rect.min.x || x > plot_rect.max.x {
         return None;
     }
-    let (marker_name, marker_color) = match slot {
-        MarkerSlot::M1 => ("M1", marker_primary_color()),
-        MarkerSlot::M2 => ("M2", marker_secondary_color()),
-    };
+    let marker_name = slot.display_name();
+    let marker_color = marker_color_for_slot(slot.index());
     painter.line_segment(
         [Pos2::new(x, plot_rect.min.y), Pos2::new(x, plot_rect.max.y)],
         Stroke::new(1.0, marker_color),
@@ -1915,7 +1928,7 @@ fn render_info_panel_content(ui: &mut Ui, state: &FftState) {
             info_row(ui, "Fs", &format_freq(source.sample_rate));
         }
 
-        if state.marker_frequency.is_some() || state.marker_frequency_secondary.is_some() {
+        if !state.marker_frequencies.is_empty() {
             ui.add_space(6.0);
             ui.label(
                 egui::RichText::new("Markers")
@@ -1923,26 +1936,23 @@ fn render_info_panel_content(ui: &mut Ui, state: &FftState) {
                     .color(text_color()),
             );
             if let Some(ref data) = state.data {
-                if let Some(marker_freq) = state.marker_frequency {
-                    info_row(ui, "M1 F", &format_freq(marker_freq));
+                for (idx, marker_freq) in state.marker_frequencies.iter().copied().enumerate() {
+                    let marker_name = format!("M{}", idx + 1);
+                    info_row(ui, &format!("{} F", marker_name), &format_freq(marker_freq));
                     if let Some(point) = data.interpolate(marker_freq) {
-                        info_row(ui, "M1 M", &format_marker_magnitude(state, &point));
+                        info_row(
+                            ui,
+                            &format!("{} M", marker_name),
+                            &format_marker_magnitude(state, &point),
+                        );
                     }
                 }
-                if let Some(marker_freq) = state.marker_frequency_secondary {
-                    info_row(ui, "M2 F", &format_freq(marker_freq));
-                    if let Some(point) = data.interpolate(marker_freq) {
-                        info_row(ui, "M2 M", &format_marker_magnitude(state, &point));
-                    }
-                }
-                if let (Some(m1), Some(m2)) =
-                    (state.marker_frequency, state.marker_frequency_secondary)
-                {
-                    info_row(ui, "ΔF", &format_freq((m2 - m1).abs()));
-                    let m1_mag = data.interpolate(m1).map(|p| state.display_magnitude(&p));
-                    let m2_mag = data.interpolate(m2).map(|p| state.display_magnitude(&p));
+                if let [m1, m2, ..] = state.marker_frequencies.as_slice() {
+                    info_row(ui, "dF", &format_freq((m2 - m1).abs()));
+                    let m1_mag = data.interpolate(*m1).map(|p| state.display_magnitude(&p));
+                    let m2_mag = data.interpolate(*m2).map(|p| state.display_magnitude(&p));
                     if let (Some(v1), Some(v2)) = (m1_mag, m2_mag) {
-                        info_row(ui, "ΔM", &format_marker_delta(state, v2 - v1));
+                        info_row(ui, "dM", &format_marker_delta(state, v2 - v1));
                     }
                 }
             }

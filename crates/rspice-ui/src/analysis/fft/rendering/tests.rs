@@ -207,19 +207,24 @@ fn test_collect_fft_cursor_label_obstacles_samples_top_band_trace_points() {
     let obstacles = collect_fft_cursor_label_obstacles(plot, &data, &state, plot.min.y + 64.0);
 
     assert!(!obstacles.is_empty());
-    assert!(obstacles
-        .iter()
-        .all(|r| r.max.y <= plot.min.y + 64.0 + 1e-3));
+    assert!(
+        obstacles
+            .iter()
+            .all(|r| r.max.y <= plot.min.y + 64.0 + 1e-3)
+    );
 }
 
 #[test]
 fn test_render_info_panel_handles_small_height_with_scroll() {
     let mut state = FftState::new();
     load_demo_data(&mut state);
-    state.marker_frequency = state
-        .analysis
-        .as_ref()
-        .and_then(|a| a.fundamental_frequency);
+    state.set_active_marker_slot(super::super::state::MarkerSlot::M1);
+    state.set_marker_frequency(
+        state
+            .analysis
+            .as_ref()
+            .and_then(|a| a.fundamental_frequency),
+    );
     assert!(state.analysis.is_some());
     assert!(state.source_cache.is_some());
 
@@ -574,15 +579,21 @@ fn test_frequency_ticks_log_has_major_decades() {
     state.freq_max = 1_000_000.0;
 
     let ticks = frequency_ticks(&state, 10);
-    assert!(ticks
-        .iter()
-        .any(|t| t.major && (t.value - 10.0).abs() < 1e-9));
-    assert!(ticks
-        .iter()
-        .any(|t| t.major && (t.value - 1000.0).abs() < 1e-9));
-    assert!(ticks
-        .iter()
-        .any(|t| t.major && (t.value - 100000.0).abs() < 1e-9));
+    assert!(
+        ticks
+            .iter()
+            .any(|t| t.major && (t.value - 10.0).abs() < 1e-9)
+    );
+    assert!(
+        ticks
+            .iter()
+            .any(|t| t.major && (t.value - 1000.0).abs() < 1e-9)
+    );
+    assert!(
+        ticks
+            .iter()
+            .any(|t| t.major && (t.value - 100000.0).abs() < 1e-9)
+    );
 }
 
 #[test]
@@ -593,15 +604,21 @@ fn test_frequency_ticks_log_contains_minor_subdivisions() {
     state.freq_max = 100.0;
 
     let ticks = frequency_ticks(&state, 10);
-    assert!(ticks
-        .iter()
-        .any(|t| !t.major && (t.value - 20.0).abs() < 1e-9));
-    assert!(ticks
-        .iter()
-        .any(|t| !t.major && (t.value - 50.0).abs() < 1e-9));
-    assert!(ticks
-        .iter()
-        .any(|t| !t.major && (t.value - 90.0).abs() < 1e-9));
+    assert!(
+        ticks
+            .iter()
+            .any(|t| !t.major && (t.value - 20.0).abs() < 1e-9)
+    );
+    assert!(
+        ticks
+            .iter()
+            .any(|t| !t.major && (t.value - 50.0).abs() < 1e-9)
+    );
+    assert!(
+        ticks
+            .iter()
+            .any(|t| !t.major && (t.value - 90.0).abs() < 1e-9)
+    );
 }
 
 #[test]
@@ -617,10 +634,12 @@ fn test_frequency_ticks_linear_contains_minor_gridlines() {
 
     assert!(major_count >= 3);
     assert!(minor_count > 0);
-    assert!(ticks
-        .iter()
-        .filter(|t| !t.major)
-        .all(|t| t.label.is_empty()));
+    assert!(
+        ticks
+            .iter()
+            .filter(|t| !t.major)
+            .all(|t| t.label.is_empty())
+    );
 }
 
 #[test]
@@ -641,9 +660,11 @@ fn test_linear_ticks_minor_do_not_overlap_major_values() {
     let majors: Vec<f64> = ticks.iter().filter(|t| t.major).map(|t| t.value).collect();
     let epsilon = 1e-9;
     for minor in ticks.iter().filter(|t| !t.major) {
-        assert!(majors
-            .iter()
-            .all(|&major| (major - minor.value).abs() > epsilon));
+        assert!(
+            majors
+                .iter()
+                .all(|&major| (major - minor.value).abs() > epsilon)
+        );
     }
 }
 
