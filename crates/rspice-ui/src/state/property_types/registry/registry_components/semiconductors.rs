@@ -16,7 +16,6 @@ impl PropertyRegistry {
     }
 
     /// Register diode with all SPICE-standard parameters
-
     pub(in super::super) fn register_diode(&mut self) {
         let mut diode = PropertySheet::new();
 
@@ -112,7 +111,6 @@ impl PropertyRegistry {
     }
 
     /// Register MOSFET (NMOS/PMOS) with all Spectre-compatible parameters
-
     pub(in super::super) fn register_mosfet(&mut self) {
         let nmos = self.create_mosfet_sheet("M1", "nmos");
         self.sheets.insert(ComponentType::Nmos, nmos);
@@ -407,7 +405,6 @@ impl PropertyRegistry {
     }
 
     /// Register BJT (NPN/PNP) with commercial-grade parameters
-
     pub(in super::super) fn register_bjt(&mut self) {
         let npn = self.create_bjt_sheet("Q1", "npn");
         self.sheets.insert(ComponentType::NpnBjt, npn);
@@ -554,7 +551,6 @@ impl PropertyRegistry {
     }
 
     /// Register JFET (NJFET/PJFET) with commercial-grade parameters
-
     pub(in super::super) fn register_jfet(&mut self) {
         let njfet = self.create_jfet_sheet("J1", "njfet");
         self.sheets.insert(ComponentType::Njfet, njfet);

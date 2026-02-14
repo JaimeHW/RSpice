@@ -788,7 +788,7 @@ impl<'a> NetlistGenerator<'a> {
         // Floating terminal - assign a unique net
         format!(
             "float_{}",
-            point.x.abs() as u32 * 10000 + point.y.abs() as u32
+            point.x.unsigned_abs() * 10000 + point.y.unsigned_abs()
         )
     }
 
@@ -1055,7 +1055,7 @@ impl<'a> NetlistGenerator<'a> {
         if !self.models.is_empty() {
             self.lines.push(String::new());
             self.lines.push("* Models".to_string());
-            for (_, model_line) in &self.models {
+            for model_line in self.models.values() {
                 self.lines.push(model_line.clone());
             }
         }

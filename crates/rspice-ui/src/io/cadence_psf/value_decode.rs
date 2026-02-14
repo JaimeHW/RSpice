@@ -1,7 +1,7 @@
 use super::{
     parse_string, push_named_channel_cached, read_f64, read_i32, read_u32, read_u8_padded,
     resolve_array_element_type, skip_opaque_scalar, ArrayElementType, CadencePsfError, DataType,
-    NumericSample, SignalChannel, SignalRef, SignalValues, TypeDecl, TypeKind, TypeMetaCache,
+    NumericSample, SignalChannel, SignalRef, TypeDecl, TypeKind, TypeMetaCache,
 };
 use std::collections::HashMap;
 

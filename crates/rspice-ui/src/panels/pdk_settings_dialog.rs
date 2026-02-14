@@ -13,7 +13,7 @@
 
 use std::path::PathBuf;
 
-use crate::state::pdk_config::{DiscoveredFile, LibraryPathEntry, PdkConfig};
+use crate::state::pdk_config::{DiscoveredFile, PdkConfig};
 
 // =============================================================================
 // Dialog State
@@ -539,13 +539,11 @@ fn render_library_paths_tab(ui: &mut Ui, state: &mut PdkSettingsDialogState) {
             .hint_text("Add library path...");
         let response = ui.add(text_edit);
 
-        if ui.button("Add").clicked()
-            || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-        {
-            if !state.new_path_input.is_empty() {
+        if (ui.button("Add").clicked()
+            || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))))
+            && !state.new_path_input.is_empty() {
                 state.add_library_path(state.new_path_input.clone());
             }
-        }
 
         if ui.button("Browse...").clicked() {
             if let Some(path) = rfd::FileDialog::new().pick_folder() {
@@ -647,11 +645,10 @@ fn render_environment_tab(ui: &mut Ui, state: &mut PdkSettingsDialogState) {
                 .hint_text("value or path"),
         );
 
-        if ui.button("Add").clicked() {
-            if !state.new_env_name.is_empty() {
+        if ui.button("Add").clicked()
+            && !state.new_env_name.is_empty() {
                 state.add_env_override(state.new_env_name.clone(), state.new_env_value.clone());
             }
-        }
     });
 
     // System environment variables section

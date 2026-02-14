@@ -3,13 +3,12 @@
 //! Commercial-grade egui rendering for histogram visualization.
 
 use egui::{
-    Color32, FontId, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2,
+    Color32, Painter, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2,
 };
-use std::f64::consts::PI;
 
 use super::data::{Histogram, HistogramBuilder};
 use super::state::{AxisScale, DistributionOverlay, HistogramDisplayMode, HistogramState};
-use super::statistics::{HistogramStats, LogNormalParams, NormalParams};
+use super::statistics::{LogNormalParams, NormalParams};
 use crate::common::app::AppState;
 use crate::common::viewer_style::viewer_header_bg_color;
 
@@ -560,8 +559,8 @@ fn load_demo_data(state: &mut HistogramState) {
         .map(|i| {
             // Pseudo-random with some structure
             let x = i as f64 * 0.1;
-            let val = 50.0 + 10.0 * (x * 0.1).sin() + 5.0 * ((i % 7) as f64 - 3.0);
-            val
+            
+            50.0 + 10.0 * (x * 0.1).sin() + 5.0 * ((i % 7) as f64 - 3.0)
         })
         .collect();
 

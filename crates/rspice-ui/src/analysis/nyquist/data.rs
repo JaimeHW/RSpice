@@ -65,6 +65,7 @@ impl NyquistPoint {
 
 /// Complete Nyquist plot data
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct NyquistData {
     /// Name/label
     pub name: String,
@@ -72,14 +73,6 @@ pub struct NyquistData {
     pub points: Vec<NyquistPoint>,
 }
 
-impl Default for NyquistData {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            points: Vec::new(),
-        }
-    }
-}
 
 impl NyquistData {
     /// Create new empty data

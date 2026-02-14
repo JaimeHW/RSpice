@@ -116,7 +116,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                         || c == '.'
                         || c == 'e'
                         || c == 'E'
-                        || (c == '-' && num_str.ends_with(|x| x == 'e' || x == 'E'))
+                        || (c == '-' && num_str.ends_with(['e', 'E']))
                     {
                         num_str.push(c);
                         chars.next();
@@ -304,7 +304,7 @@ fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<Expr, String> {
 
             // Expect ')'
             if *pos >= tokens.len() || tokens[*pos] != Token::RParen {
-                return Err(format!("Expected ')' after function arguments"));
+                return Err("Expected ')' after function arguments".to_string());
             }
             *pos += 1;
 

@@ -8,7 +8,6 @@ impl PropertyRegistry {
     }
 
     /// Register Resistor with commercial-grade parameters
-
     pub(in super::super) fn register_resistor(&mut self) {
         let mut sheet = PropertySheet::new();
 
@@ -114,7 +113,6 @@ impl PropertyRegistry {
     }
 
     /// Register Capacitor with commercial-grade parameters
-
     pub(in super::super) fn register_capacitor(&mut self) {
         let mut sheet = PropertySheet::new();
 
@@ -232,7 +230,6 @@ impl PropertyRegistry {
     }
 
     /// Register Inductor with commercial-grade parameters
-
     pub(in super::super) fn register_inductor(&mut self) {
         let mut sheet = PropertySheet::new();
 

@@ -10,7 +10,7 @@ use egui::Ui;
 /// Render the properties panel in the right sidebar
 pub fn render_properties_panel(ui: &mut Ui, state: &mut AppState) {
     // Check if we have a selected component
-    let selected_comp = state.schematic.selection.components.iter().next().copied();
+    let selected_comp = state.schematic.selection.components.first().copied();
 
     if let Some(comp_id) = selected_comp {
         // Find the selected component

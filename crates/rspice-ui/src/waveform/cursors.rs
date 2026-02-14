@@ -11,7 +11,7 @@
 //! - Draggable cursor positioning
 
 use super::axis;
-use super::state::{CursorMode, CursorState, TraceData, ViewTransform};
+use super::state::{CursorState, TraceData, ViewTransform};
 
 // =============================================================================
 // Cursor Readout

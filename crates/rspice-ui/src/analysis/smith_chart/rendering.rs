@@ -10,7 +10,6 @@ use egui::{
 use std::f64::consts::PI;
 
 use super::complex::Complex;
-use super::impedance::{Impedance, Z0_DEFAULT};
 use super::state::{
     constant_r_circle, constant_x_circle, standard_r_values, standard_x_values, SmithChartMode,
     SmithChartState,

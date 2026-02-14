@@ -8,7 +8,7 @@
 //! - Integration with component parameter expressions
 
 use egui::{
-    Align, Color32, Frame, Layout, Margin, RichText, Rounding, ScrollArea, Sense, Stroke, TextEdit,
+    Align, Frame, Layout, Margin, RichText, Rounding, ScrollArea, Sense, Stroke, TextEdit,
     Ui, Vec2,
 };
 use serde::{Deserialize, Serialize};
@@ -48,6 +48,7 @@ mod theme {
 
 /// A design variable with name, expression, and evaluated value
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct DesignVariable {
     /// Variable name (e.g., "W1", "Vdd", "gm_target")
     pub name: String,
@@ -71,18 +72,6 @@ pub struct DesignVariable {
     pub editing: bool,
 }
 
-impl Default for DesignVariable {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            expression: String::new(),
-            evaluated_value: None,
-            error: None,
-            description: String::new(),
-            editing: false,
-        }
-    }
-}
 
 impl DesignVariable {
     /// Create a new design variable

@@ -9,7 +9,6 @@ impl PropertyRegistry {
     }
 
     /// Register VCVS (Voltage-Controlled Voltage Source) with commercial parameters
-
     pub(in super::super) fn register_vcvs(&mut self) {
         let mut sheet = PropertySheet::new();
 
@@ -104,7 +103,6 @@ impl PropertyRegistry {
     }
 
     /// Register VCCS (Voltage-Controlled Current Source) with commercial parameters
-
     pub(in super::super) fn register_vccs(&mut self) {
         let mut sheet = PropertySheet::new();
 
@@ -187,7 +185,6 @@ impl PropertyRegistry {
     }
 
     /// Register CCVS (Current-Controlled Voltage Source) with commercial parameters
-
     pub(in super::super) fn register_ccvs(&mut self) {
         let mut sheet = PropertySheet::new();
 
@@ -267,7 +264,6 @@ impl PropertyRegistry {
     }
 
     /// Register CCCS (Current-Controlled Current Source) with commercial parameters
-
     pub(in super::super) fn register_cccs(&mut self) {
         let mut sheet = PropertySheet::new();
 

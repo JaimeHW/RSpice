@@ -130,8 +130,8 @@ impl PhaseNoiseData {
 
         // Convert to RMS jitter
         // jitter_rms = sqrt(2 * integral) / (2 * pi * f_carrier)
-        let jitter_rms = (2.0 * integral).sqrt() / (2.0 * PI * self.carrier_freq);
-        jitter_rms
+        
+        (2.0 * integral).sqrt() / (2.0 * PI * self.carrier_freq)
     }
 
     /// Get minimum phase noise and its offset

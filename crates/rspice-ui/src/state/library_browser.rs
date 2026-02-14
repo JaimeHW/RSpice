@@ -34,8 +34,10 @@ use std::path::PathBuf;
 
 /// Standard view types matching Cadence conventions
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ViewType {
     /// Schematic view (circuit diagram)
+    #[default]
     Schematic,
     /// Symbol view (block symbol for hierarchical use)
     Symbol,
@@ -61,11 +63,6 @@ pub enum ViewType {
     Custom,
 }
 
-impl Default for ViewType {
-    fn default() -> Self {
-        ViewType::Schematic
-    }
-}
 
 impl ViewType {
     /// Display name for view type
@@ -215,6 +212,7 @@ impl View {
 
 /// A design cell containing multiple views
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct Cell {
     /// Cell name (e.g., "opamp", "bandgap")
     pub name: String,
@@ -230,18 +228,6 @@ pub struct Cell {
     pub metadata: HashMap<String, String>,
 }
 
-impl Default for Cell {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            views: HashMap::new(),
-            description: String::new(),
-            category: String::new(),
-            expanded: false,
-            metadata: HashMap::new(),
-        }
-    }
-}
 
 impl Cell {
     /// Create a new cell
@@ -296,6 +282,7 @@ impl Cell {
 
 /// A design library containing multiple cells
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct Library {
     /// Library name (e.g., "my_designs", "analog_lib")
     pub name: String,
@@ -313,19 +300,6 @@ pub struct Library {
     pub metadata: HashMap<String, String>,
 }
 
-impl Default for Library {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            path: None,
-            cells: HashMap::new(),
-            technology: String::new(),
-            read_only: false,
-            expanded: false,
-            metadata: HashMap::new(),
-        }
-    }
-}
 
 impl Library {
     /// Create a new library

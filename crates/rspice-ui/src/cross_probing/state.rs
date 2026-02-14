@@ -3,7 +3,7 @@
 //! UI state for cross-probe system.
 
 use super::registry::CrossProbeRegistry;
-use super::signal::{ProbeableSignal, SignalPath, SignalType};
+use super::signal::{ProbeableSignal, SignalType};
 
 // =============================================================================
 // Selection Mode

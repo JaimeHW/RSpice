@@ -3,7 +3,7 @@
 //! Commercial-grade egui rendering for Bode plot visualization.
 
 use egui::{
-    Color32, FontId, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2,
+    Color32, FontId, Painter, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2,
 };
 use std::f64::consts::PI;
 

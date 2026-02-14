@@ -355,23 +355,23 @@ impl WaveformReader {
 
         // First try rspice PSF-Lite binary.
         match self.read_psf_lite_file(path) {
-            Ok(dataset) => return Ok(dataset),
+            Ok(dataset) => Ok(dataset),
             Err(psf_lite_err) => {
                 // Then try Cadence native binary PSF.
                 match self.read_cadence_psf_binary_file(path) {
-                    Ok(dataset) => return Ok(dataset),
+                    Ok(dataset) => Ok(dataset),
                     Err(cadence_bin_err) => {
                         // Finally fall back to PSF ASCII text parsing.
                         match self.read_psf_ascii_file(path) {
-                            Ok(dataset) => return Ok(dataset),
+                            Ok(dataset) => Ok(dataset),
                             Err(psf_ascii_err) => {
-                                return Err(format!(
+                                Err(format!(
                                     "Failed to read PSF '{}': {}; Cadence PSF binary parse failed: {}; PSF ASCII parse failed: {}",
                                     path.display(),
                                     psf_lite_err,
                                     cadence_bin_err,
                                     psf_ascii_err
-                                ));
+                                ))
                             }
                         }
                     }
@@ -1207,7 +1207,7 @@ impl WaveformReader {
 
         let values_per_freq = Self::touchstone_values_per_frequency(num_ports, matrix_format)
             .ok_or_else(|| "Touchstone matrix dimensions overflow".to_string())?;
-        if numeric_tokens.len() % values_per_freq != 0 {
+        if !numeric_tokens.len().is_multiple_of(values_per_freq) {
             return Err(format!(
                 "Touchstone numeric data length {} is not divisible by record width {}",
                 numeric_tokens.len(),

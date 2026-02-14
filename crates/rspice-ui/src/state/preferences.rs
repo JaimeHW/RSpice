@@ -29,6 +29,7 @@ use std::path::PathBuf;
 
 /// Application preferences with all configurable settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct Preferences {
     /// General application preferences
     pub general: GeneralPreferences,
@@ -42,17 +43,6 @@ pub struct Preferences {
     pub files: FilePreferences,
 }
 
-impl Default for Preferences {
-    fn default() -> Self {
-        Self {
-            general: GeneralPreferences::default(),
-            schematic: SchematicPreferences::default(),
-            waveform: WaveformPreferences::default(),
-            simulation: SimulationPreferences::default(),
-            files: FilePreferences::default(),
-        }
-    }
-}
 
 //=============================================================================
 // General Preferences

@@ -160,7 +160,7 @@ impl JunctionCache {
                     let entry = self
                         .junctions
                         .entry(**point)
-                        .or_insert_with(JunctionData::new);
+                        .or_default();
                     entry.segment_count += 1;
                     entry.wire_ids.push(wire.id);
                 }
@@ -181,7 +181,7 @@ impl JunctionCache {
     /// Mark explicit junctions from the schematic's junction list
     pub fn mark_explicit_junctions(&mut self, junction_positions: &[Point]) {
         for pos in junction_positions {
-            let entry = self.junctions.entry(*pos).or_insert_with(JunctionData::new);
+            let entry = self.junctions.entry(*pos).or_default();
             entry.is_explicit = true;
         }
     }
@@ -207,7 +207,7 @@ impl JunctionCache {
 
     /// Check if a point is a junction
     pub fn is_junction(&self, point: &Point) -> bool {
-        self.junctions.get(point).map_or(false, |d| d.is_junction())
+        self.junctions.get(point).is_some_and(|d| d.is_junction())
     }
 
     /// Check if a point is at a component terminal

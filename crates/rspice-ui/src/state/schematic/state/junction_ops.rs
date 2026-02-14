@@ -206,7 +206,7 @@ impl SchematicState {
                 let intersections = wire.intersections_with_wire(other_wire);
                 for point in intersections {
                     // Check if this intersection point is already a vertex on wire
-                    let is_vertex = wire.points.iter().any(|p| *p == point);
+                    let is_vertex = wire.points.contains(&point);
                     if !is_vertex {
                         splits.push((wire.id, point));
                     }
@@ -238,7 +238,7 @@ impl SchematicState {
 
                     // Check if endpoint is on other_wire but not at a vertex
                     if other_wire.contains_point(endpoint) {
-                        let is_at_vertex = other_wire.points.iter().any(|p| *p == endpoint);
+                        let is_at_vertex = other_wire.points.contains(&endpoint);
                         if !is_at_vertex {
                             splits_needed.push((other_wire.id, endpoint));
                         }

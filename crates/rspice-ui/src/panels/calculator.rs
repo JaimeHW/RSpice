@@ -9,7 +9,7 @@
 
 use crate::analysis::calculator::{evaluator, parser, CalcValue, SimulationContext};
 use crate::state::SimulationState;
-use egui::{Button, Color32, RichText, ScrollArea, TextEdit, Ui, Vec2};
+use egui::{Button, Color32, ScrollArea, TextEdit, Ui, Vec2};
 
 #[derive(Default, Clone)]
 pub struct CalculatorPanel {

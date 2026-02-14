@@ -146,8 +146,10 @@ pub enum DisplayMode {
 /// Enables dynamic property visibility based on other property values,
 /// matching Cadence CDF conditional visibility behavior.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum VisibilityCondition {
     /// Always visible (default)
+    #[default]
     Always,
     /// Only visible when value differs from default
     WhenNonDefault,
@@ -157,11 +159,6 @@ pub enum VisibilityCondition {
     WhenPropertySet(String),
 }
 
-impl Default for VisibilityCondition {
-    fn default() -> Self {
-        VisibilityCondition::Always
-    }
-}
 
 // =============================================================================
 // Property Definition

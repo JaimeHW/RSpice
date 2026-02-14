@@ -55,8 +55,8 @@ impl<'a> SimulationContext<'a> {
     /// Convert WaveformData to CalcValue format
     fn waveform_to_calc_value(wf: &WaveformData) -> CalcValue {
         // Convert x/y vectors from Value (f64) to Vec<f64>
-        let x: Vec<f64> = wf.x.iter().map(|v| *v as f64).collect();
-        let y: Vec<f64> = wf.y.iter().map(|v| *v as f64).collect();
+        let x: Vec<f64> = wf.x.to_vec();
+        let y: Vec<f64> = wf.y.to_vec();
         CalcValue::create_waveform(x, y)
     }
 
@@ -108,7 +108,7 @@ impl<'a> EvaluationContext for SimulationContext<'a> {
             "TIME" | "T" => {
                 // Look for any transient waveform and return its X axis as time
                 if let Some(wf) = self.simulation.waveforms.first() {
-                    let x: Vec<f64> = wf.x.iter().map(|v| *v as f64).collect();
+                    let x: Vec<f64> = wf.x.to_vec();
                     let y = x.clone(); // TIME returns x as both x and y
                     return Ok(CalcValue::create_waveform(x, y));
                 }
@@ -119,7 +119,7 @@ impl<'a> EvaluationContext for SimulationContext<'a> {
             "FREQ" | "FREQUENCY" => {
                 // Look for AC waveform and return its X axis as frequency
                 if let Some(wf) = self.simulation.waveforms.first() {
-                    let x: Vec<f64> = wf.x.iter().map(|v| *v as f64).collect();
+                    let x: Vec<f64> = wf.x.to_vec();
                     let y = x.clone();
                     return Ok(CalcValue::create_waveform(x, y));
                 }

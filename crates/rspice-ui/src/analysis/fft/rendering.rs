@@ -5,7 +5,7 @@
 use egui::{Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2};
 use std::f64::consts::PI;
 
-use super::data::{FftData, FftPoint, SpectrumAnalysis, SpectrumNormalization};
+use super::data::{FftData, FftPoint, SpectrumNormalization};
 use super::state::{FftState, FrequencyScale, InputFidelity, MagnitudeScale, MarkerSlot};
 use super::window::WindowFunction;
 use crate::common::app::AppState;
@@ -2037,6 +2037,7 @@ fn load_demo_data(state: &mut FftState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analysis::fft::data::SpectrumAnalysis;
 
     #[test]
     fn test_layout_calculation() {

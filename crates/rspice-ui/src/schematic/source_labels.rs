@@ -213,15 +213,13 @@ fn format_exp_label(params: &HashMap<String, String>, primary: &str, is_voltage:
     let td2 = get_param_with_aliases(params, &["td2"], "", "5u");
     let tau2 = get_param_with_aliases(params, &["tau2"], "", "1u");
 
-    vec![
-        "EXP".to_string(),
+    ["EXP".to_string(),
         format!("Low: {} {}", low, unit),
         format!("High: {} {}", high, unit),
         format!("TD1: {}", td1),
         format!("TAU1: {}", tau1),
         format!("TD2: {}", td2),
-        format!("TAU2: {}", tau2),
-    ]
+        format!("TAU2: {}", tau2)]
     .join("\n")
 }
 
@@ -298,7 +296,7 @@ fn push_parasitic_lines(lines: &mut Vec<String>, params: &HashMap<String, String
 
 fn summarize_pwl(data: &str) -> (usize, String, String) {
     let tokens: Vec<&str> = data.split_whitespace().collect();
-    if tokens.len() < 2 || tokens.len() % 2 != 0 {
+    if tokens.len() < 2 || !tokens.len().is_multiple_of(2) {
         return (0, "-".to_string(), "-".to_string());
     }
     let points = tokens.len() / 2;

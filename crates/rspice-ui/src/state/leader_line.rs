@@ -193,7 +193,7 @@ fn segment_intersection(
     // Check if intersection is within both segments
     // Use small epsilon for robustness at endpoints
     const EPS: f64 = 1e-9;
-    if t >= -EPS && t <= 1.0 + EPS && u >= -EPS && u <= 1.0 + EPS {
+    if (-EPS..=1.0 + EPS).contains(&t) && (-EPS..=1.0 + EPS).contains(&u) {
         let ix = x1 + t * d1x;
         let iy = y1 + t * d1y;
         Some((ix, iy, t.clamp(0.0, 1.0)))

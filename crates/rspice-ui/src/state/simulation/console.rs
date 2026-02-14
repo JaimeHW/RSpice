@@ -1,4 +1,3 @@
-use super::*;
 
 /// Console message severity
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -259,8 +259,8 @@ impl PerformanceMetric {
     /// Check if value meets specification and update status
     pub fn check_spec(&mut self) {
         if let Some(value) = self.value {
-            let meets_min = self.spec_min.map_or(true, |min| value >= min);
-            let meets_max = self.spec_max.map_or(true, |max| value <= max);
+            let meets_min = self.spec_min.is_none_or(|min| value >= min);
+            let meets_max = self.spec_max.is_none_or(|max| value <= max);
             self.status = if meets_min && meets_max {
                 MetricStatus::Pass
             } else {

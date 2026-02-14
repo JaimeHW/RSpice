@@ -246,7 +246,7 @@ impl Component {
             return vec![Point::new(-hw, 0), Point::new(hw, 0)];
         }
 
-        let left_count = (pin_count + 1) / 2;
+        let left_count = pin_count.div_ceil(2);
         let right_count = pin_count - left_count;
         let left_y = Self::distributed_pin_axis(left_count, hh);
         let right_y = Self::distributed_pin_axis(right_count, hh);
@@ -291,7 +291,7 @@ impl Component {
             } else {
                 cell.terminal_order.len()
             };
-            let rows = ((pin_count + 1) / 2).max(2) as i32;
+            let rows = pin_count.div_ceil(2).max(2) as i32;
             let height = (rows * 20).max(40);
             return (60, height);
         }

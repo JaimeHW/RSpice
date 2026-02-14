@@ -140,7 +140,7 @@ where
 
     Ok(translated_results
         .chunks_exact(sideband_stride)
-        .map(|chunk| chunk.iter().map(|point| sample(point)).sum())
+        .map(|chunk| chunk.iter().map(&mut sample).sum())
         .collect())
 }
 
@@ -154,7 +154,7 @@ pub(super) fn fold_sideband_contributors(
     if sideband_stride == 0 {
         return Err("PNOISE contributor folding requires a positive sideband stride".to_string());
     }
-    if translated_results.len() % sideband_stride != 0 {
+    if !translated_results.len().is_multiple_of(sideband_stride) {
         return Err(format!(
             "PNOISE contributor folding expected translated results to be divisible by sideband stride (len={}, stride={})",
             translated_results.len(),

@@ -33,7 +33,6 @@ impl PropertyRegistry {
     /// - Advanced AC analysis (XF, PAC)
     /// - Parasitics (series/parallel resistance, capacitance)
     /// - Noise contribution control
-
     pub(in super::super) fn register_vsource_dc(&mut self) {
         let mut sheet = PropertySheet::new();
 
@@ -196,7 +195,6 @@ impl PropertyRegistry {
     ///
     /// Similar to DC source but with AC magnitude = 1V by default (the primary parameter).
     /// Used primarily for AC small-signal analysis.
-
     pub(in super::super) fn register_vsource_ac(&mut self) {
         let mut sheet = PropertySheet::new();
 
@@ -356,7 +354,6 @@ impl PropertyRegistry {
     }
 
     /// Register Pulse Voltage Source with all SPICE PULSE parameters
-
     pub(in super::super) fn register_vsource_pulse(&mut self) {
         let mut sheet = PropertySheet::new();
 
@@ -454,7 +451,6 @@ impl PropertyRegistry {
     }
 
     /// Register Sinusoidal Voltage Source with all SPICE SIN parameters
-
     pub(in super::super) fn register_vsource_sin(&mut self) {
         let mut sheet = PropertySheet::new();
 
@@ -543,7 +539,6 @@ impl PropertyRegistry {
     }
 
     /// Register PWL (Piecewise Linear) Voltage Source
-
     pub(in super::super) fn register_vsource_pwl(&mut self) {
         let mut sheet = PropertySheet::new();
 
@@ -598,7 +593,6 @@ impl PropertyRegistry {
     }
 
     /// Register Exponential Voltage Source
-
     pub(in super::super) fn register_vsource_exp(&mut self) {
         let mut sheet = PropertySheet::new();
 
@@ -686,7 +680,6 @@ impl PropertyRegistry {
     }
 
     /// Register SFFM (Single-Frequency FM) Voltage Source
-
     pub(in super::super) fn register_vsource_sffm(&mut self) {
         let mut sheet = PropertySheet::new();
 
@@ -766,7 +759,6 @@ impl PropertyRegistry {
     /// Register DC Current Source with Spectre-parity parameters.
     ///
     /// Mirror of vsource DC parameters but with current units (A instead of V).
-
     pub(in super::super) fn register_isource_dc(&mut self) {
         let mut sheet = PropertySheet::new();
 
@@ -917,7 +909,6 @@ impl PropertyRegistry {
     /// Register AC Current Source with Spectre-parity parameters.
     ///
     /// Similar to DC current source but with AC magnitude = 1A by default.
-
     pub(in super::super) fn register_isource_ac(&mut self) {
         let mut sheet = PropertySheet::new();
 
@@ -1066,7 +1057,6 @@ impl PropertyRegistry {
     }
 
     /// Register Pulse Current Source
-
     pub(in super::super) fn register_isource_pulse(&mut self) {
         let mut sheet = PropertySheet::new();
 
@@ -1160,7 +1150,6 @@ impl PropertyRegistry {
     }
 
     /// Register Sinusoidal Current Source
-
     pub(in super::super) fn register_isource_sin(&mut self) {
         let mut sheet = PropertySheet::new();
 
@@ -1243,7 +1232,6 @@ impl PropertyRegistry {
     }
 
     /// Register PWL Current Source
-
     pub(in super::super) fn register_isource_pwl(&mut self) {
         let mut sheet = PropertySheet::new();
 
@@ -1294,7 +1282,6 @@ impl PropertyRegistry {
     }
 
     /// Register Exponential Current Source
-
     pub(in super::super) fn register_isource_exp(&mut self) {
         let mut sheet = PropertySheet::new();
 
@@ -1376,7 +1363,6 @@ impl PropertyRegistry {
     }
 
     /// Register Noise Current Source (for noise analysis)
-
     pub(in super::super) fn register_isource_noise(&mut self) {
         let mut sheet = PropertySheet::new();
 

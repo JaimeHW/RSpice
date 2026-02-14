@@ -66,6 +66,7 @@ impl FrequencyPoint {
 
 /// Complete frequency response data
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct FrequencyResponse {
     /// Name/label
     pub name: String,
@@ -73,14 +74,6 @@ pub struct FrequencyResponse {
     pub points: Vec<FrequencyPoint>,
 }
 
-impl Default for FrequencyResponse {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            points: Vec::new(),
-        }
-    }
-}
 
 impl FrequencyResponse {
     /// Create new empty response
@@ -353,8 +346,8 @@ impl StabilityMargins {
         }
 
         // Determine stability
-        margins.is_stable = margins.gain_margin_db.map_or(true, |gm| gm > 0.0)
-            && margins.phase_margin_deg.map_or(true, |pm| pm > 0.0);
+        margins.is_stable = margins.gain_margin_db.is_none_or(|gm| gm > 0.0)
+            && margins.phase_margin_deg.is_none_or(|pm| pm > 0.0);
 
         margins
     }

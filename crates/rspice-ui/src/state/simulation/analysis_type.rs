@@ -1,4 +1,3 @@
-use super::*;
 
 /// Analysis type identifier for viewer selection and result organization.
 ///

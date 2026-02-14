@@ -27,7 +27,7 @@ use egui::{
 use super::axis::{self, GridLineType};
 use super::export::{calculate_export_stats, export_to_csv, export_to_spice_raw, ExportFormat};
 use super::legend::{self, LegendSortOrder};
-use super::measurements::{self, TraceMeasurements};
+use super::measurements::TraceMeasurements;
 use super::state::{MeasurementScope, TraceData, ViewTransform, WaveformViewerState};
 use crate::common::app::AppState;
 use crate::common::viewer_style::{viewer_chart_bg_color, viewer_header_bg_color};
@@ -1532,15 +1532,15 @@ fn handle_plot_interactions(
                 // Check modifier keys - all zoom operations get clamped
                 let modifiers = response.ctx.input(|i| i.modifiers);
                 if modifiers.shift {
-                    viewer_state.view.zoom_x_only(factor as f64, x_frac);
+                    viewer_state.view.zoom_x_only(factor, x_frac);
                     viewer_state.view.clamp_to_bounds(&data_bounds);
                 } else if modifiers.ctrl {
-                    viewer_state.view.zoom_y_only(factor as f64, y_frac);
+                    viewer_state.view.zoom_y_only(factor, y_frac);
                     viewer_state.view.clamp_to_bounds(&data_bounds);
                 } else {
                     viewer_state
                         .view
-                        .zoom_clamped(factor as f64, x_frac, y_frac, &data_bounds);
+                        .zoom_clamped(factor, x_frac, y_frac, &data_bounds);
                 }
             }
         }
@@ -1787,7 +1787,7 @@ fn truncate_legend_trace_name(
     let mut low = 0usize;
     let mut high = chars.len();
     while low < high {
-        let mid = (low + high + 1) / 2;
+        let mid = (low + high).div_ceil(2);
         let prefix: String = chars.iter().take(mid).collect();
         let candidate = format!("{prefix}{ELLIPSIS}");
         let width = measure_text_width(painter, &candidate, font.clone(), Color32::WHITE);

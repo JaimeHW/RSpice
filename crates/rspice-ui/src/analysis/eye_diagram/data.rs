@@ -3,7 +3,6 @@
 //! Core data types for eye diagram construction and analysis.
 //! Supports alignment of transient waveforms to bit period for overlay display.
 
-use std::f64::consts::PI;
 
 // =============================================================================
 // Eye Trace

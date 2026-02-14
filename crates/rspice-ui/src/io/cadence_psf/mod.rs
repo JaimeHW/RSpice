@@ -15,7 +15,7 @@ use binary_io::{
 };
 
 mod toc;
-use toc::{parse_toc, SectionKind, Toc, TocEntry};
+use toc::{parse_toc, SectionKind, TocEntry};
 
 mod value_decode;
 use value_decode::{decode_windowed_dynamic_signal_samples, read_type_value_with_numeric_visit};
@@ -647,11 +647,7 @@ fn parse_windowed_values<'a>(
                 let data_len = window_count
                     .checked_mul(sample_width)
                     .ok_or_else(|| CadencePsfError::new("windowed PSF data length overflow"))?;
-                let idx = if data_len > window_size {
-                    0
-                } else {
-                    window_size - data_len
-                };
+                let idx = window_size.saturating_sub(data_len);
                 if idx >= segment.len() {
                     return Err(CadencePsfError::new(
                         "windowed signal offset out of block bounds",
@@ -936,9 +932,7 @@ fn resolve_implicit_composite_array_element(
     }
 
     candidates.sort_unstable();
-    Err(CadencePsfError::new(format!(
-        "{}",
-        if want_array {
+    Err(CadencePsfError::new((if want_array {
             format!(
                 "array element descriptor ARRAY is ambiguous across type ids {:?}",
                 candidates
@@ -948,8 +942,7 @@ fn resolve_implicit_composite_array_element(
                 "array element descriptor STRUCT is ambiguous across type ids {:?}",
                 candidates
             )
-        }
-    )))
+        }).to_string()))
 }
 
 fn collect_channel_specs_for_type(

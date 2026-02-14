@@ -2,7 +2,7 @@
 
 use super::{
     build_engine_config, build_voltage_output_expr, generate_freq_points,
-    infer_primary_output_node, infer_primary_source_name, netlist_has_independent_source_named,
+    infer_primary_output_node, infer_primary_source_name,
 };
 use crate::output_spec::{ac_output_value, parse_output_spec};
 use num_complex::Complex64;

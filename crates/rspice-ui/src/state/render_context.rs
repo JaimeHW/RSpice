@@ -30,8 +30,6 @@ use std::collections::{HashMap, HashSet};
 use crate::state::schematic::{Component, Point, Wire};
 use crate::state::Viewport;
 
-use super::junction_cache::JunctionCache;
-use super::label_cache::LabelPositionCache;
 use super::spatial_index::SpatialIndex;
 
 // =============================================================================

@@ -3,7 +3,7 @@
 //! Commercial-grade signal integrity measurements from eye diagrams.
 //! Includes eye opening, jitter, rise/fall times, and bit error rate estimation.
 
-use super::data::{calculate_edge_rate, find_edges, EyeData};
+use super::data::{calculate_edge_rate, EyeData};
 use std::f64::consts::PI;
 
 // =============================================================================
@@ -260,8 +260,8 @@ fn calculate_eye_opening_at_center(data: &EyeData) -> CenterOpening {
 
     for trace in &data.traces {
         for (i, &t) in trace.time.iter().enumerate() {
-            if (t - center_ui).abs() < tolerance * data.ui_count as f64 {
-                if i < trace.amplitude.len() {
+            if (t - center_ui).abs() < tolerance * data.ui_count as f64
+                && i < trace.amplitude.len() {
                     let v = trace.amplitude[i];
                     if v.is_finite() {
                         if v >= data.v_cross {
@@ -271,7 +271,6 @@ fn calculate_eye_opening_at_center(data: &EyeData) -> CenterOpening {
                         }
                     }
                 }
-            }
         }
     }
 
@@ -452,8 +451,8 @@ fn calculate_noise_stats(data: &EyeData) -> NoiseStats {
 
     for trace in &data.traces {
         for (i, &t) in trace.time.iter().enumerate() {
-            if (t - center_ui).abs() < tolerance {
-                if i < trace.amplitude.len() {
+            if (t - center_ui).abs() < tolerance
+                && i < trace.amplitude.len() {
                     let v = trace.amplitude[i];
                     if v.is_finite() {
                         if v >= data.v_cross {
@@ -463,7 +462,6 @@ fn calculate_noise_stats(data: &EyeData) -> NoiseStats {
                         }
                     }
                 }
-            }
         }
     }
 

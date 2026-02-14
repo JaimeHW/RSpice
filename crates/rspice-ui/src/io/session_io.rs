@@ -383,8 +383,8 @@ impl SessionFile {
         if !self.metadata.version.is_compatible() {
             return Err(format!(
                 "Session version {} is not compatible with current version {}",
-                self.metadata.version.to_string(),
-                SessionVersion::current().to_string()
+                self.metadata.version,
+                SessionVersion::current()
             ));
         }
         Ok(())

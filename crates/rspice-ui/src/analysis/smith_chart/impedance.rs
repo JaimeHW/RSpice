@@ -4,7 +4,6 @@
 //! Supports normalized/denormalized impedance and reflection coefficient (Gamma).
 
 use super::complex::Complex;
-use std::f64::consts::PI;
 
 // =============================================================================
 // Constants

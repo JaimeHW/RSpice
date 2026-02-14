@@ -8,7 +8,7 @@
 
 use std::fmt::Write;
 
-use crate::state::{Component, ComponentType, Point, Rotation, SchematicState, Wire};
+use crate::state::{Component, ComponentType, Rotation, SchematicState, Wire};
 
 // =============================================================================
 // SVG Export Configuration
@@ -1316,6 +1316,7 @@ fn write_xspice_symbol(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::Point;
 
     #[test]
     fn test_export_empty_schematic() {

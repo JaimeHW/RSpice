@@ -558,8 +558,8 @@ pub fn generate_wire_midpoint_candidates(
         let first = wire.points.first().copied();
         let last = wire.points.last().copied();
 
-        let connects_via_endpoints = first.map_or(false, |p| terminal_set.contains(&p))
-            || last.map_or(false, |p| terminal_set.contains(&p));
+        let connects_via_endpoints = first.is_some_and(|p| terminal_set.contains(&p))
+            || last.is_some_and(|p| terminal_set.contains(&p));
 
         // Also check if any terminal point lies ON any segment of this wire (T-junction)
         let connects_via_segment = terminal_points.iter().any(|term| {

@@ -277,7 +277,7 @@ fn resolve_pstb_probe(
             probe: probe_name.to_string(),
             available,
         }
-    })? as usize;
+    })?;
 
     let inductor_index = circuit
         .inductors

@@ -14,8 +14,10 @@ use std::time::{Duration, Instant};
 
 /// Current status of the simulation
 #[derive(Debug, Clone, PartialEq)]
+#[derive(Default)]
 pub enum SimulationStatus {
     /// No simulation running
+    #[default]
     Idle,
 
     /// Simulation queued but not started
@@ -159,11 +161,6 @@ impl SimulationStatus {
     }
 }
 
-impl Default for SimulationStatus {
-    fn default() -> Self {
-        SimulationStatus::Idle
-    }
-}
 
 //=============================================================================
 // Simulation Progress

@@ -15,10 +15,9 @@
 //! device models from loaded PDK libraries.
 
 use crate::state::model_library::{
-    DeviceModel, ModelLevel, ModelLibrary, ModelLibraryManager, ModelType,
+    DeviceModel, ModelLibrary, ModelLibraryManager, ModelType,
 };
-use egui::{Color32, Context, RichText, ScrollArea, Ui};
-use serde::{Deserialize, Serialize};
+use egui::{Context, RichText, ScrollArea, Ui};
 use std::collections::HashSet;
 
 // =============================================================================
@@ -160,8 +159,10 @@ impl ModelBrowserState {
 
 /// Result of the model browser dialog.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default)]
 pub enum ModelBrowserResult {
     /// No action taken (dialog still open or closed without selection).
+    #[default]
     None,
     /// User cancelled the dialog.
     Cancelled,
@@ -176,11 +177,6 @@ pub enum ModelBrowserResult {
     },
 }
 
-impl Default for ModelBrowserResult {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 // =============================================================================
 // Model Browser Rendering
@@ -621,6 +617,7 @@ fn format_si_value(value: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::model_library::ModelLevel;
 
     // =========================================================================
     // ModelBrowserState Tests

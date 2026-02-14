@@ -278,7 +278,7 @@ impl SubcircuitExport {
 
         // Comment
         if let Some(ref comment) = self.comment {
-            write!(s, "{}{}\n", fmt.comment_prefix(), comment).ok();
+            writeln!(s, "{}{}", fmt.comment_prefix(), comment).ok();
         }
 
         // Header
@@ -324,7 +324,7 @@ impl SubcircuitExport {
         }
 
         // End
-        write!(s, "{} {}\n", fmt.ends_keyword(), self.name).ok();
+        writeln!(s, "{} {}", fmt.ends_keyword(), self.name).ok();
 
         s
     }
@@ -460,15 +460,15 @@ impl NetlistExporter {
     fn write_header(&self, output: &mut String) {
         let prefix = self.options.format.comment_prefix();
 
-        write!(output, "{}{}\n", prefix, "=".repeat(70)).ok();
+        writeln!(output, "{}{}", prefix, "=".repeat(70)).ok();
 
         if !self.title.is_empty() {
-            write!(output, "{}{}\n", prefix, self.title).ok();
+            writeln!(output, "{}{}", prefix, self.title).ok();
         }
 
         if self.options.include_timestamp {
             let now = chrono_lite_now();
-            write!(output, "{}Generated: {}\n", prefix, now).ok();
+            writeln!(output, "{}Generated: {}", prefix, now).ok();
         }
 
         write!(output, "{}{}\n\n", prefix, "=".repeat(70)).ok();
@@ -480,22 +480,22 @@ impl NetlistExporter {
             match self.options.format {
                 NetlistFormat::Spectre => {
                     if let Some(corner) = &self.options.corner {
-                        write!(
+                        writeln!(
                             output,
-                            "include \"{}\" section={}\n",
+                            "include \"{}\" section={}",
                             path.display(),
                             corner
                         )
                         .ok();
                     } else {
-                        write!(output, "include \"{}\"\n", path.display()).ok();
+                        writeln!(output, "include \"{}\"", path.display()).ok();
                     }
                 }
                 _ => {
                     if let Some(corner) = &self.options.corner {
-                        write!(output, ".LIB \"{}\" {}\n", path.display(), corner).ok();
+                        writeln!(output, ".LIB \"{}\" {}", path.display(), corner).ok();
                     } else {
-                        write!(output, ".INCLUDE \"{}\"\n", path.display()).ok();
+                        writeln!(output, ".INCLUDE \"{}\"", path.display()).ok();
                     }
                 }
             }

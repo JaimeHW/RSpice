@@ -92,11 +92,11 @@ impl YieldSpec {
     /// Check if a value passes the specification
     pub fn evaluates(&self, value: f64) -> bool {
         match self.limit_type {
-            SpecLimitType::Lower => self.min.map_or(true, |m| value >= m),
-            SpecLimitType::Upper => self.max.map_or(true, |m| value <= m),
+            SpecLimitType::Lower => self.min.is_none_or(|m| value >= m),
+            SpecLimitType::Upper => self.max.is_none_or(|m| value <= m),
             SpecLimitType::Range => {
-                let lower = self.min.map_or(true, |m| value >= m);
-                let upper = self.max.map_or(true, |m| value <= m);
+                let lower = self.min.is_none_or(|m| value >= m);
+                let upper = self.max.is_none_or(|m| value <= m);
                 lower && upper
             }
         }

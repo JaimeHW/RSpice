@@ -31,12 +31,14 @@ use serde::{Deserialize, Serialize};
 
 /// Log severity level following Spectre conventions
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum LogSeverity {
     /// Critical errors that halt simulation
     Error,
     /// Non-fatal issues that may affect results
     Warning,
     /// Important status information
+    #[default]
     Info,
     /// Detailed diagnostic information
     Debug,
@@ -79,11 +81,6 @@ impl LogSeverity {
     }
 }
 
-impl Default for LogSeverity {
-    fn default() -> Self {
-        Self::Info
-    }
-}
 
 // =============================================================================
 // Log Source Attribution
@@ -91,6 +88,7 @@ impl Default for LogSeverity {
 
 /// Source of the log entry for filtering and attribution
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum LogSource {
     /// Simulation controller events (start, stop, progress)
     Simulation,
@@ -103,6 +101,7 @@ pub enum LogSource {
     /// User-initiated actions
     User,
     /// System/infrastructure messages
+    #[default]
     System,
 }
 
@@ -132,11 +131,6 @@ impl LogSource {
     }
 }
 
-impl Default for LogSource {
-    fn default() -> Self {
-        Self::System
-    }
-}
 
 // =============================================================================
 // Log Entry

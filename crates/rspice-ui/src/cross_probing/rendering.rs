@@ -4,9 +4,8 @@
 
 use egui::{Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, Vec2};
 
-use super::event::ProbeSource;
-use super::signal::{ProbeableSignal, SignalPath, SignalType};
-use super::state::{CrossProbeState, SelectionMode, SignalFilter};
+use super::signal::{ProbeableSignal, SignalType};
+use super::state::{CrossProbeState, SelectionMode};
 
 // =============================================================================
 // Colors

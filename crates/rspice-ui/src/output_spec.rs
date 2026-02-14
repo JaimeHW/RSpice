@@ -188,7 +188,7 @@ pub(crate) fn parse_output_spec(
 ) -> Option<OutputSpec> {
     let trimmed = output_var.trim();
     if let Some(branch_name) = parse_branch_current_name(trimmed) {
-        let branch_ordinal = circuit.get_branch_by_name(branch_name)? as usize;
+        let branch_ordinal = circuit.get_branch_by_name(branch_name)?;
         return Some(OutputSpec::BranchCurrent {
             branch_ordinal,
             branch_name: branch_name.to_string(),

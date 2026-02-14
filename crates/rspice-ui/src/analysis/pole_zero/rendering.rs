@@ -3,9 +3,8 @@
 //! Commercial-grade egui rendering for pole-zero visualization.
 
 use egui::{Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2};
-use std::f64::consts::PI;
 
-use super::data::{ComplexRoot, PoleZeroData, RootType};
+use super::data::{PoleZeroData, RootType};
 use super::state::{DomainType, PoleZeroState};
 use crate::common::app::AppState;
 use crate::common::viewer_style::viewer_header_bg_color;

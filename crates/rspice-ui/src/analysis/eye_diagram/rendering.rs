@@ -4,13 +4,11 @@
 //! Supports overlay, persistence, and single-trace display modes.
 
 use egui::{
-    Color32, FontId, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2,
+    Color32, Painter, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2,
 };
-use std::f64::consts::PI;
 
-use super::data::{EyeData, EyeDataBuilder, EyeTrace};
-use super::measurements::{calculate_eye_measurements, EyeMeasurements};
-use super::state::{ColorMap, EyeDiagramState, EyeDisplayMode, EyeMask};
+use super::data::{EyeDataBuilder, EyeTrace};
+use super::state::{EyeDiagramState, EyeDisplayMode};
 use crate::common::app::AppState;
 use crate::common::viewer_style::viewer_header_bg_color;
 

@@ -360,6 +360,7 @@ pub struct LibrarySection {
 
 /// Model definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct ModelDef {
     /// Model name
     pub name: String,
@@ -375,18 +376,6 @@ pub struct ModelDef {
     pub line: usize,
 }
 
-impl Default for ModelDef {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            model_type: String::new(),
-            level: None,
-            version: None,
-            parameters: HashMap::new(),
-            line: 0,
-        }
-    }
-}
 
 /// Subcircuit definition
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

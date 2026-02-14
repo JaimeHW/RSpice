@@ -399,7 +399,7 @@ impl RSpiceApp {
 
     /// Render the Pole-Zero map panel.
     pub(super) fn render_polezero_panel(&mut self, ui: &mut Ui) {
-        crate::analysis::pole_zero::render_pz_plot(ui, &mut self.state.pole_zero_state);
+        crate::analysis::pole_zero::render_pz_plot(ui, &self.state.pole_zero_state);
     }
 
     /// Render the Nyquist panel.

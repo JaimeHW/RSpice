@@ -10,7 +10,6 @@
 //! - **Data API**: Direct access to SimulationResult and WaveformData.
 //! - **Plotting API**: programmatically control WaveformViewer state.
 
-use crate::services::simulation_runner::SimulationResult;
 use crate::state::SimulationState;
 use std::collections::HashMap;
 

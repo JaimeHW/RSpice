@@ -583,7 +583,7 @@ impl DigitalBus {
     pub fn format_value(&self, value: u64) -> String {
         match self.display_radix {
             BusRadix::Binary => format!("{:0width$b}", value, width = self.width()),
-            BusRadix::Hex => format!("{:0width$X}", value, width = (self.width() + 3) / 4),
+            BusRadix::Hex => format!("{:0width$X}", value, width = self.width().div_ceil(4)),
             BusRadix::Decimal => format!("{}", value),
             BusRadix::SignedDecimal => {
                 let width = self.width();

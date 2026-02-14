@@ -33,8 +33,10 @@ use std::path::PathBuf;
 
 /// Type/category of device model
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ModelType {
     /// NMOS transistor
+    #[default]
     Nmos,
     /// PMOS transistor
     Pmos,
@@ -60,11 +62,6 @@ pub enum ModelType {
     Other,
 }
 
-impl Default for ModelType {
-    fn default() -> Self {
-        ModelType::Nmos
-    }
-}
 
 impl ModelType {
     /// Display name
@@ -124,10 +121,12 @@ impl ModelType {
 
 /// SPICE model level/type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ModelLevel {
     /// BSIM3 v3.3
     Bsim3v3,
     /// BSIM4
+    #[default]
     Bsim4,
     /// BSIM CMG (FinFET)
     BsimCmg,
@@ -145,11 +144,6 @@ pub enum ModelLevel {
     Unknown,
 }
 
-impl Default for ModelLevel {
-    fn default() -> Self {
-        ModelLevel::Bsim4
-    }
-}
 
 impl ModelLevel {
     /// Display name
@@ -387,6 +381,7 @@ impl ProcessCorner {
 
 /// A PDK model library
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct ModelLibrary {
     /// Library name (e.g., "tsmc180_1p8v")
     pub name: String,
@@ -408,21 +403,6 @@ pub struct ModelLibrary {
     pub expanded: bool,
 }
 
-impl Default for ModelLibrary {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            pdk_name: String::new(),
-            technology_node: String::new(),
-            root_path: None,
-            models: HashMap::new(),
-            corners: HashMap::new(),
-            selected_corner: None,
-            version: String::new(),
-            expanded: false,
-        }
-    }
-}
 
 impl ModelLibrary {
     /// Create a new library

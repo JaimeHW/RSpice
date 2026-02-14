@@ -2,7 +2,7 @@
 //!
 //! Manages simulation execution state and results.
 
-use super::dc_annotation::{AnnotationMode, DcAnnotationState};
+use super::dc_annotation::DcAnnotationState;
 use super::schematic::Point;
 use crate::services::safety::SoAViolation;
 use crate::services::yield_manager::YieldResult;

@@ -111,7 +111,7 @@ impl RSpiceApp {
                         emit_pdk_file_load_error_message(
                             &mut self.state,
                             path.as_path(),
-                            error.to_string(),
+                            &error,
                         );
                     }
                 }

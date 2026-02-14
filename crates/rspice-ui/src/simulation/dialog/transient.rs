@@ -130,7 +130,7 @@ impl TransientConfig {
 
     /// Generate SPICE directive
     pub fn to_spice(&self) -> String {
-        let mut cmd = format!(".tran ");
+        let mut cmd = ".tran ".to_string();
 
         if let Some(step) = self.max_step {
             cmd.push_str(&format!("{} ", format_time(step)));

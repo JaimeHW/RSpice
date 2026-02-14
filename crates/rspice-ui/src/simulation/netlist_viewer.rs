@@ -114,7 +114,7 @@ impl LineType {
             LineType::Analysis
         } else if upper.starts_with(".END") {
             LineType::End
-        } else if trimmed.len() > 0 && !trimmed.starts_with('.') {
+        } else if !trimmed.is_empty() && !trimmed.starts_with('.') {
             // Check for component prefixes
             let first_char = trimmed
                 .chars()

@@ -179,7 +179,7 @@ impl PwlData {
         let tokens: Vec<&str> = s.split_whitespace().collect();
 
         // Must have even number of tokens (time-value pairs)
-        if tokens.len() % 2 != 0 {
+        if !tokens.len().is_multiple_of(2) {
             return Err(PwlValidationError::ValueParseError {
                 index: tokens.len() / 2,
                 text: "Odd number of values - expected time-value pairs".to_string(),
@@ -648,12 +648,11 @@ pub fn render_pwl_editor(ui: &mut Ui, state: &mut PwlEditorState) -> PwlEditorRe
             if ui.button("➕ Add Point").clicked() {
                 state.adding_point = true;
             }
-            if state.selected_row.is_some() {
-                if ui.button("🗑 Delete").clicked() {
+            if state.selected_row.is_some()
+                && ui.button("🗑 Delete").clicked() {
                     state.delete_selected();
                     result = PwlEditorResult::Modified;
                 }
-            }
         });
 
         ui.separator();

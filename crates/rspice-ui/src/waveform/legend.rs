@@ -3,7 +3,7 @@
 //! Provides the trace legend for the waveform viewer with visibility toggle,
 //! cross-probe highlighting, and color management.
 
-use super::state::{TraceData, TraceStyle};
+use super::state::TraceData;
 
 // =============================================================================
 // Legend Item

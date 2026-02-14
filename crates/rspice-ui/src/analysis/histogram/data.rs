@@ -239,7 +239,7 @@ impl Histogram {
 
     /// Get percentile value (0.0 to 1.0)
     pub fn percentile(&self, p: f64) -> Option<f64> {
-        if self.total_count == 0 || p < 0.0 || p > 1.0 {
+        if self.total_count == 0 || !(0.0..=1.0).contains(&p) {
             return None;
         }
 

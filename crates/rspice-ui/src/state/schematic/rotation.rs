@@ -74,7 +74,7 @@ impl Rotation {
     /// Other values are normalized to the nearest valid rotation.
     pub fn from_degrees(degrees: i32) -> Self {
         // Normalize to 0-360 range
-        let normalized = ((degrees % 360) + 360) % 360;
+        let normalized = degrees.rem_euclid(360);
         match normalized {
             0..=44 => Rotation::R0,
             45..=134 => Rotation::R90,

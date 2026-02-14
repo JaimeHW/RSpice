@@ -17,8 +17,8 @@
 //! 2. Tab rendering with category-based grouping
 //! 3. Type-specific property editors
 
-use crate::properties::model_browser::{ModelBrowserResult, ModelBrowserState};
-use crate::properties::pwl_editor::{PwlData, PwlEditorState};
+use crate::properties::model_browser::ModelBrowserState;
+use crate::properties::pwl_editor::PwlEditorState;
 use crate::state::property_types::{
     format_engineering, DisplayMode, PropertyDefinition, PropertyRegistry, PropertySheet,
     PropertyType, PropertyValue, VisibilityCondition,
@@ -122,8 +122,10 @@ impl TabInfo {
 
 /// Result of the tabbed property dialog interaction.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default)]
 pub enum TabbedDialogResult {
     /// No action taken
+    #[default]
     None,
     /// User clicked Apply - changes should be committed
     Applied,
@@ -133,11 +135,6 @@ pub enum TabbedDialogResult {
     Reverted,
 }
 
-impl Default for TabbedDialogResult {
-    fn default() -> Self {
-        TabbedDialogResult::None
-    }
-}
 
 // =============================================================================
 // State Implementation
@@ -560,12 +557,11 @@ pub fn render_tabbed_property_dialog(
 
             // Button row
             ui.horizontal(|ui| {
-                if ui.button("Apply").clicked() {
-                    if state.validate_all(sheet) {
+                if ui.button("Apply").clicked()
+                    && state.validate_all(sheet) {
                         result = TabbedDialogResult::Applied;
                         should_close = true;
                     }
-                }
 
                 if ui.button("Cancel").clicked() {
                     result = TabbedDialogResult::Cancelled;
@@ -698,11 +694,10 @@ fn render_property_row(
         // Model Browser button for "model" property on semiconductor components
         if def.name == "model" {
             if let Some(comp_type) = state.component_type {
-                if comp_type.is_semiconductor() {
-                    if ui.small_button("📖 Browse...").clicked() {
+                if comp_type.is_semiconductor()
+                    && ui.small_button("📖 Browse...").clicked() {
                         state.model_browser.open = true;
                     }
-                }
             }
         }
 

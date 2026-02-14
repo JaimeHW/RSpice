@@ -31,7 +31,7 @@
 
 use rstar::{RTree, RTreeObject, AABB};
 
-use crate::state::schematic::{Component, Point, Wire};
+use crate::state::schematic::{Component, Wire};
 use crate::state::Viewport;
 
 // =============================================================================
@@ -349,6 +349,7 @@ impl SpatialIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::Point;
     use crate::state::schematic::ComponentType;
 
     /// Helper to create a test component

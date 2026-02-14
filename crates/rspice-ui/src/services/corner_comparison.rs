@@ -222,8 +222,8 @@ impl ComparisonRow {
         // Check specs
         for result in self.results.values_mut() {
             if let Some(v) = result.value {
-                let meets_min = self.spec_min.map_or(true, |min| v >= min);
-                let meets_max = self.spec_max.map_or(true, |max| v <= max);
+                let meets_min = self.spec_min.is_none_or(|min| v >= min);
+                let meets_max = self.spec_max.is_none_or(|max| v <= max);
                 result.spec_pass = Some(meets_min && meets_max);
             }
         }

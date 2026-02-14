@@ -64,7 +64,7 @@ pub(super) fn parse_toc(data: &[u8]) -> Result<Toc, CadencePsfError> {
     }
 
     let toc_bytes = data.len().saturating_sub(toc_offset + 12);
-    if toc_bytes == 0 || toc_bytes % 8 != 0 {
+    if toc_bytes == 0 || !toc_bytes.is_multiple_of(8) {
         return Err(CadencePsfError::new(format!(
             "invalid TOC span {} bytes",
             toc_bytes

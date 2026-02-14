@@ -161,6 +161,7 @@ impl WaveformData {
 
 /// DC operating point result
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct DcOpResult {
     /// Node voltages
     pub node_voltages: HashMap<String, f64>,
@@ -172,15 +173,6 @@ pub struct DcOpResult {
     pub device_ops: HashMap<String, DeviceOpPoint>,
 }
 
-impl Default for DcOpResult {
-    fn default() -> Self {
-        Self {
-            node_voltages: HashMap::new(),
-            branch_currents: HashMap::new(),
-            device_ops: HashMap::new(),
-        }
-    }
-}
 
 impl DcOpResult {
     /// Get voltage at a node

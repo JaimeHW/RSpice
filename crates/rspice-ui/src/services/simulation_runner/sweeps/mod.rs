@@ -3,8 +3,10 @@
 use super::{build_engine_config, generate_freq_points};
 use rspice_core::engine::{Engine, TransientResult};
 use rspice_core::netlist::{
-    AnalysisCommand, ElementKind, SourceSpec, StepCommand, StepSweep, StepTarget,
+    AnalysisCommand, ElementKind, SourceSpec, StepCommand, StepTarget,
 };
+#[cfg(test)]
+use rspice_core::netlist::StepSweep;
 use rspice_core::solver::SimulationResult as CoreSimulationResult;
 use rspice_core::Value;
 
@@ -205,8 +207,10 @@ impl CornerFrequencySweep {
 
 /// Base analysis executed at each corner point.
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub enum CornerBaseMode {
     /// Run DC operating point directly at each corner.
+    #[default]
     Op,
     /// Run DC sweep and record the final converged point at each corner.
     DcSweep {
@@ -244,11 +248,6 @@ impl CornerBaseMode {
     }
 }
 
-impl Default for CornerBaseMode {
-    fn default() -> Self {
-        Self::Op
-    }
-}
 
 impl Default for CornerRunConfig {
     fn default() -> Self {

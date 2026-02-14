@@ -9,7 +9,7 @@
 //! Follows Cadence Spectre patterns for symbol management.
 
 use crate::state::ComponentType;
-use egui::{Color32, Painter, Pos2, Stroke, Vec2};
+use egui::{Painter, Pos2, Stroke};
 use std::collections::HashMap;
 use std::f32::consts::PI;
 
@@ -339,7 +339,7 @@ impl SymbolLibrary {
         rotation_degrees: i32,
     ) -> Option<(&Symbol, i32)> {
         // Normalize rotation to 0-359
-        let normalized = ((rotation_degrees % 360) + 360) % 360;
+        let normalized = rotation_degrees.rem_euclid(360);
 
         // For 90° or 270° rotation, use horizontal variant if available
         if normalized == 90 || normalized == 270 {
@@ -763,7 +763,7 @@ pub fn parse_svg(svg_data: &str) -> Result<Symbol, SymbolError> {
 
     // Get viewBox
     let view_box = tree.size();
-    let vb = (0.0, 0.0, view_box.width() as f32, view_box.height() as f32);
+    let vb = (0.0, 0.0, view_box.width(), view_box.height());
 
     // Scale paths to match viewBox coordinate space
     // usvg may extract paths at different DPI than viewBox dimensions

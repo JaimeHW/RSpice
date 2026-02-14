@@ -2,7 +2,7 @@
 //!
 //! Base framework for simulation configuration dialogs.
 
-use egui::{Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, Vec2};
+use egui::{Color32, Pos2, Rounding, Sense, Stroke, Ui};
 
 // =============================================================================
 // Dialog Result
@@ -10,12 +10,14 @@ use egui::{Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, Vec2};
 
 /// Result of dialog interaction
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default)]
 pub enum DialogResult {
     /// User cancelled
     Cancelled,
     /// User accepted/confirmed
     Accepted,
     /// Dialog still open
+    #[default]
     Open,
 }
 
@@ -242,11 +244,6 @@ impl SimulationDialog {
     }
 }
 
-impl Default for DialogResult {
-    fn default() -> Self {
-        Self::Open
-    }
-}
 
 // =============================================================================
 // Common Input Widgets

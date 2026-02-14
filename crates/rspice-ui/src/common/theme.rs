@@ -10,7 +10,7 @@
 //! 3. **Consistent Colors** - Same colors for same concepts across all views
 //! 4. **Accessibility** - Colorblind-friendly palettes where possible
 
-use egui::{Color32, FontFamily, FontId, Rounding, Stroke, Style, Visuals};
+use egui::{Color32, Rounding, Stroke, Visuals};
 
 // =============================================================================
 // Color Definitions

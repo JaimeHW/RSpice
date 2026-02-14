@@ -42,7 +42,9 @@ mod results_update;
 mod spice_value;
 mod touchstone;
 
-use self::spice_value::{parse_spice_value, parse_spice_value_checked};
+use self::spice_value::parse_spice_value_checked;
+#[cfg(test)]
+use self::spice_value::parse_spice_value;
 
 #[cfg(test)]
 mod tests;
@@ -622,7 +624,7 @@ impl SimulationController {
                         );
                         self.start_next_analysis(state);
                     } else {
-                        state.simulation.status = format!("Completed with errors");
+                        state.simulation.status = "Completed with errors".to_string();
                         self.finish_simulation_batch(state);
                     }
                 }

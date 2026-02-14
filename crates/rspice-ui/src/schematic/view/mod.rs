@@ -6,7 +6,7 @@
 use egui::{Color32, Painter, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use crate::common::app::AppState;
-use crate::state::{ComponentType, Point, Rotation};
+use crate::state::{ComponentType, Point};
 
 use super::symbols::SymbolLibrary;
 mod symbol_primitives;
@@ -14,7 +14,7 @@ use symbol_primitives::{
     draw_capacitor_symbol, draw_cccs_symbol, draw_ccvs_symbol, draw_diode_symbol,
     draw_ground_symbol, draw_inductor_symbol, draw_isource_symbol, draw_nmos_symbol,
     draw_npn_symbol, draw_pmos_symbol, draw_pnp_symbol, draw_resistor_symbol, draw_vccs_symbol,
-    draw_vcvs_symbol, draw_vsource_symbol, rotation_to_delta, rotation_to_index,
+    draw_vcvs_symbol, draw_vsource_symbol, rotation_to_index,
 };
 
 /// Render the schematic view (central canvas)
@@ -152,7 +152,7 @@ pub fn render_schematic_view(
             if let Some(cursor_pos) = response.hover_pos() {
                 let zoom_factor = if scroll > 0.0 { 1.1 } else { 1.0 / 1.1 };
                 let old_zoom = state.schematic.zoom;
-                let new_zoom = (old_zoom * zoom_factor as f64).clamp(0.1, 10.0);
+                let new_zoom = (old_zoom * zoom_factor).clamp(0.1, 10.0);
 
                 // Calculate the schematic coordinate under the cursor (before zoom)
                 // screen_pos = bounds.min + pan + schematic_pos * zoom
@@ -206,7 +206,7 @@ pub fn render_schematic_view(
         // Snap to full grid
         let grid_x = (schematic_x / grid_size as f64).round() as i32;
         let grid_y = (schematic_y / grid_size as f64).round() as i32;
-        Point::new(grid_x * grid_size as i32, grid_y * grid_size as i32)
+        Point::new(grid_x * grid_size, grid_y * grid_size)
     };
 
     // Convert screen position to grid snapped position (for wires)
@@ -224,7 +224,7 @@ pub fn render_schematic_view(
         // Snap to full grid (same as components) for commercial-grade alignment
         let grid_x = (schematic_x / grid_size as f64).round() as i32;
         let grid_y = (schematic_y / grid_size as f64).round() as i32;
-        Point::new(grid_x * grid_size as i32, grid_y * grid_size as i32)
+        Point::new(grid_x * grid_size, grid_y * grid_size)
     };
 
     // Left click handling - now includes drag detection for box selection
@@ -602,11 +602,10 @@ pub fn render_schematic_view(
     }
 
     // Right click to finish wire or cancel
-    if response.clicked_by(egui::PointerButton::Secondary) {
-        if state.schematic.wire_drawing.active {
+    if response.clicked_by(egui::PointerButton::Secondary)
+        && state.schematic.wire_drawing.active {
             state.schematic.finish_wire();
         }
-    }
 
     // Draw wire preview if active
     let wire_active = state.schematic.wire_drawing.active;
@@ -1369,6 +1368,8 @@ fn nearest_terminal(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::symbol_primitives::rotation_to_delta;
+    use crate::state::Rotation;
 
     #[test]
     fn test_rotation_to_delta_0() {

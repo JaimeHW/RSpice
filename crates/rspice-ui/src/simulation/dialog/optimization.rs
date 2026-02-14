@@ -498,7 +498,7 @@ fn is_valid_identifier(name: &str) -> bool {
 
 fn parse_variable_specs(input: &str) -> Result<Vec<OptimizationVariableConfig>, String> {
     let mut variables = Vec::new();
-    for token in input.split(|c: char| c == '\n' || c == ',' || c == ';') {
+    for token in input.split(['\n', ',', ';']) {
         let raw = token.trim();
         if raw.is_empty() {
             continue;

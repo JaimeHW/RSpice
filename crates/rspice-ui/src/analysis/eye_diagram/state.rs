@@ -295,6 +295,7 @@ impl EyeDiagramState {
 
 /// Color map for persistence/density display
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum ColorMap {
     /// Hot (black -> red -> yellow -> white)
     Hot,
@@ -305,14 +306,10 @@ pub enum ColorMap {
     /// Rainbow
     Rainbow,
     /// Green phosphor (classic scope look)
+    #[default]
     Phosphor,
 }
 
-impl Default for ColorMap {
-    fn default() -> Self {
-        Self::Phosphor
-    }
-}
 
 impl ColorMap {
     /// Get display name
