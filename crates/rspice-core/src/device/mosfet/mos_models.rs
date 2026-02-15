@@ -15,6 +15,9 @@ use super::mosfet::{MosRegion, Mosfet};
 use super::smooth::{SMOOTH_VOLTAGE, smooth_max, smooth_min, smooth_positive, smooth_step};
 use crate::Value;
 
+/// Separate smoothing width for Vds-dependent region transitions.
+const VDS_SMOOTHING: Value = SMOOTH_VOLTAGE * 1e-1;
+
 //=============================================================================
 // MOS Model Parameters - extracted from Mosfet for calculation use
 //=============================================================================
@@ -132,7 +135,7 @@ pub fn calculate_id_level1(
 ) -> (Value, MosRegion) {
     let p = params.polarity;
     let vgs_eff = p * vgs;
-    let vds_eff = smooth_positive(p * vds, SMOOTH_VOLTAGE * 0.1); // Ensure positive Vds
+    let vds_eff = smooth_positive(p * vds, VDS_SMOOTHING); // Ensure positive Vds
     let _ = vbs; // Used for vth calculation externally
 
     // Gate overdrive with smooth cutoff transition
@@ -197,7 +200,7 @@ pub fn calculate_id_bsim3(
 ) -> (Value, MosRegion) {
     let p = params.polarity;
     let vgs_eff = p * vgs;
-    let vds_eff = smooth_positive(p * vds, SMOOTH_VOLTAGE * 0.1);
+    let vds_eff = smooth_positive(p * vds, VDS_SMOOTHING);
     let vbs_eff = p * vbs;
 
     // DIBL: threshold voltage reduction with drain bias (smooth minimum for Vth)
@@ -264,7 +267,7 @@ pub fn calculate_id_bsim3(
 pub fn calculate_gm(params: &MosParams, vgs: Value, vds: Value, vth: Value) -> Value {
     let p = params.polarity;
     let vgs_eff = p * vgs;
-    let vds_eff = smooth_positive(p * vds, SMOOTH_VOLTAGE * 0.1);
+    let vds_eff = smooth_positive(p * vds, VDS_SMOOTHING);
 
     // Smooth gate overdrive
     let vgt_raw = vgs_eff - vth;
@@ -299,7 +302,7 @@ pub fn calculate_gm(params: &MosParams, vgs: Value, vds: Value, vth: Value) -> V
 pub fn calculate_gds(params: &MosParams, vgs: Value, vds: Value, vth: Value) -> Value {
     let p = params.polarity;
     let vgs_eff = p * vgs;
-    let vds_eff = smooth_positive(p * vds, SMOOTH_VOLTAGE * 0.1);
+    let vds_eff = smooth_positive(p * vds, VDS_SMOOTHING);
 
     // Smooth gate overdrive
     let vgt_raw = vgs_eff - vth;
@@ -360,10 +363,15 @@ pub fn calculate_gmb(params: &MosParams, vgs: Value, vds: Value, vbs: Value, vth
 pub fn calculate_vth(params: &MosParams, vbs: Value) -> Value {
     let p = params.polarity;
     let vbs_eff = p * vbs;
+    let vto_eff = if p < 0.0 {
+        params.vto.abs()
+    } else {
+        params.vto
+    };
 
     // Base body effect: Vth = Vto + gamma * (sqrt(phi - Vbs) - sqrt(phi))
     let phi_vbs = (params.phi - vbs_eff).max(0.0);
-    let vth_base = params.vto + params.gamma * (phi_vbs.sqrt() - params.phi.sqrt());
+    let vth_base = vto_eff + params.gamma * (phi_vbs.sqrt() - params.phi.sqrt());
 
     if params.level < 3 {
         return vth_base;
@@ -380,7 +388,7 @@ pub fn calculate_vth(params: &MosParams, vbs: Value) -> Value {
 
     // Enhanced body effect using K1/K2 (BSIM4 style)
     // Vth = Vto + K1 * sqrt(phi - Vbs) + K2 * (phi - Vbs)
-    let vth_k1k2 = params.vto + params.k1 * phi_vbs.sqrt() + params.k2 * (params.phi - vbs_eff);
+    let vth_k1k2 = vto_eff + params.k1 * phi_vbs.sqrt() + params.k2 * (params.phi - vbs_eff);
 
     // Blend between GAMMA-based and K1/K2-based body effect based on model level
     // Use K1/K2 formulation for short channels (level 3+)

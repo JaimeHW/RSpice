@@ -8,6 +8,12 @@ use crate::device::traits::{MatrixStamper, NonlinearDevice};
 use crate::solver::{CscIndex, StaticMatrix};
 use crate::{Value, circuit::NodeId};
 
+/// Separate smoothing width for Vds-dependent region transitions.
+///
+/// Keep this much smaller than threshold smoothing to avoid artificial channel
+/// current at Vdsâ‰ˆ0 while retaining C1 continuity for Newton.
+const VDS_SMOOTHING: Value = SMOOTH_VOLTAGE * 1e-1;
+
 /// MOSFET type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MosType {
@@ -423,9 +429,7 @@ impl Mosfet {
         let vbs = vb - vs;
 
         // Conductances
-        let gm = self.gm(vgs, vds, vbs);
-        let gds = self.gds(vgs, vds, vbs);
-        let gmb = self.gmb(vgs, vds, vbs);
+        let (gm, gds, gmb) = self.small_signal(vgs, vds, vbs);
 
         // Drain current and equivalent current source
         let (id, _) = self.calculate_id(vgs, vds, vbs);
@@ -483,10 +487,16 @@ impl Mosfet {
     fn vth(&self, vbs: Value) -> Value {
         let p = self.polarity();
         let vbs_eff = p * vbs;
+        let vto_eff = match self.mos_type {
+            MosType::Nmos => self.vto,
+            // SPICE PMOS cards conventionally provide negative VTO; internal
+            // p-polarity equations use a positive-magnitude threshold.
+            MosType::Pmos => self.vto.abs(),
+        };
 
         // Base body effect: Vth = Vto + gamma * (sqrt(phi - Vbs) - sqrt(phi))
         let phi_vbs = (self.phi - vbs_eff).max(0.0);
-        let vth_base = self.vto + self.gamma * (phi_vbs.sqrt() - self.phi.sqrt());
+        let vth_base = vto_eff + self.gamma * (phi_vbs.sqrt() - self.phi.sqrt());
 
         if self.level < 3 || self.level == 6 {
             // Level 1 and Level 6 use simple body effect
@@ -504,7 +514,7 @@ impl Mosfet {
 
         // Enhanced body effect using K1/K2 (BSIM4 style)
         // Vth = Vto + K1 * sqrt(phi - Vbs) + K2 * (phi - Vbs)
-        let vth_k1k2 = self.vto + self.k1 * phi_vbs.sqrt() + self.k2 * (self.phi - vbs_eff);
+        let vth_k1k2 = vto_eff + self.k1 * phi_vbs.sqrt() + self.k2 * (self.phi - vbs_eff);
 
         // Blend between GAMMA-based and K1/K2-based body effect based on model level
         // Use K1/K2 formulation for short channels (level 3+)
@@ -678,8 +688,37 @@ impl Mosfet {
         self.kp * self.wl_ratio()
     }
 
+    /// Voltages with intrinsic source/drain swapped.
+    ///
+    /// (Vgs', Vds', Vbs') correspond to using original drain as intrinsic source:
+    /// - Vgs' = Vgs - Vds = Vg - Vd
+    /// - Vds' = -Vds = Vs - Vd
+    /// - Vbs' = Vbs - Vds = Vb - Vd
+    fn reverse_voltages(vgs: Value, vds: Value, vbs: Value) -> (Value, Value, Value) {
+        (vgs - vds, -vds, vbs - vds)
+    }
+
     /// Determine operating region and calculate drain current
     fn calculate_id(&self, vgs: Value, vds: Value, vbs: Value) -> (Value, MosRegion) {
+        // Superimpose forward and reverse-oriented channel currents to preserve
+        // source/drain symmetry while maintaining smooth behavior around Vds = 0.
+        let (id_forward, region_forward) = self.calculate_id_forward(vgs, vds, vbs);
+
+        let (vgs_rev, vds_rev, vbs_rev) = Self::reverse_voltages(vgs, vds, vbs);
+        let (id_reverse_fwd, region_reverse) = self.calculate_id_forward(vgs_rev, vds_rev, vbs_rev);
+        let id = id_forward - id_reverse_fwd;
+
+        // Region is used for reporting only; choose the dominant orientation.
+        let region = if id_forward.abs() >= id_reverse_fwd.abs() {
+            region_forward
+        } else {
+            region_reverse
+        };
+
+        (id, region)
+    }
+
+    fn calculate_id_forward(&self, vgs: Value, vds: Value, vbs: Value) -> (Value, MosRegion) {
         if self.level == 6 {
             self.calculate_id_level6(vgs, vds, vbs)
         } else if self.level >= 3 {
@@ -696,7 +735,7 @@ impl Mosfet {
     fn calculate_id_level1(&self, vgs: Value, vds: Value, vbs: Value) -> (Value, MosRegion) {
         let p = self.polarity();
         let vgs_eff = p * vgs;
-        let vds_eff = smooth_positive(p * vds, SMOOTH_VOLTAGE * 0.1); // Ensure positive Vds
+        let vds_eff = smooth_positive(p * vds, VDS_SMOOTHING); // Ensure positive Vds
         let vth = self.vth(vbs);
 
         // Gate overdrive with smooth cutoff transition
@@ -739,7 +778,7 @@ impl Mosfet {
     fn calculate_id_bsim3(&self, vgs: Value, vds: Value, vbs: Value) -> (Value, MosRegion) {
         let p = self.polarity();
         let vgs_eff = p * vgs;
-        let vds_eff = smooth_positive(p * vds, SMOOTH_VOLTAGE * 0.1);
+        let vds_eff = smooth_positive(p * vds, VDS_SMOOTHING);
         let vbs_eff = p * vbs;
 
         // DIBL: threshold voltage reduction with drain bias (smooth minimum for Vth)
@@ -806,7 +845,7 @@ impl Mosfet {
     fn calculate_id_level6(&self, vgs: Value, vds: Value, vbs: Value) -> (Value, MosRegion) {
         let p = self.polarity();
         let vgs_eff = p * vgs;
-        let vds_eff = smooth_positive(p * vds, SMOOTH_VOLTAGE * 0.1);
+        let vds_eff = smooth_positive(p * vds, VDS_SMOOTHING);
         let vth = self.vth(vbs);
 
         // Gate overdrive with smooth cutoff transition
@@ -841,13 +880,35 @@ impl Mosfet {
         (id, region)
     }
 
-    /// Calculate transconductance gm = dId/dVgs
+    /// Calculate (gm, gds, gmb) including both forward and reverse-oriented
+    /// channel contributions for source/drain symmetry.
     ///
-    /// Uses analytical formulas for all model levels for performance
-    fn gm(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
+    /// If `f` is the forward-oriented current and:
+    /// `Id = f(Vgs, Vds, Vbs) - f(Vgs - Vds, -Vds, Vbs - Vds)`,
+    /// then for the reverse term chain rule yields:
+    /// - gm_rev  = -gm_fwd_rev
+    /// - gds_rev = gm_fwd_rev + gds_fwd_rev + gmb_fwd_rev
+    /// - gmb_rev = -gmb_fwd_rev
+    fn small_signal(&self, vgs: Value, vds: Value, vbs: Value) -> (Value, Value, Value) {
+        let gm_forward = self.gm_forward(vgs, vds, vbs);
+        let gds_forward = self.gds_forward(vgs, vds, vbs);
+        let gmb_forward = self.gmb_forward(vgs, vds, vbs);
+
+        let (vgs_rev, vds_rev, vbs_rev) = Self::reverse_voltages(vgs, vds, vbs);
+        let gm_fwd_rev = self.gm_forward(vgs_rev, vds_rev, vbs_rev);
+        let gds_fwd_rev = self.gds_forward(vgs_rev, vds_rev, vbs_rev);
+        let gmb_fwd_rev = self.gmb_forward(vgs_rev, vds_rev, vbs_rev);
+
+        let gm = gm_forward - gm_fwd_rev;
+        let gds = gds_forward + gm_fwd_rev + gds_fwd_rev + gmb_fwd_rev;
+        let gmb = gmb_forward - gmb_fwd_rev;
+        (gm, gds, gmb)
+    }
+
+    fn gm_forward(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
         let p = self.polarity();
         let vgs_eff = p * vgs;
-        let _vds_eff = smooth_positive(p * vds, SMOOTH_VOLTAGE * 0.1);
+        let _vds_eff = smooth_positive(p * vds, VDS_SMOOTHING);
         let vth = self.vth(vbs);
         let vgt_raw = vgs_eff - vth;
         let vgt = smooth_positive(vgt_raw, SMOOTH_VOLTAGE);
@@ -855,7 +916,7 @@ impl Mosfet {
 
         // Level 6: gm = dId/dVgs = Id / Vgt * NC * dVgt/dVgs (when Vgt > 0)
         if self.level == 6 {
-            let (id, _) = self.calculate_id(vgs, vds, vbs);
+            let (id, _) = self.calculate_id_forward(vgs, vds, vbs);
             let gm = if vgt > 1e-12 {
                 id.abs() / vgt * self.nc * dvgt_dvgs
             } else {
@@ -867,7 +928,7 @@ impl Mosfet {
         // Analytical formula for Level 1/3 (optimized path)
         let p = self.polarity();
         let vgs_eff = p * vgs;
-        let vds_eff = smooth_positive(p * vds, SMOOTH_VOLTAGE * 0.1);
+        let vds_eff = smooth_positive(p * vds, VDS_SMOOTHING);
         let vth = self.vth(vbs);
         let vgt_raw = vgs_eff - vth;
         let vgt = smooth_positive(vgt_raw, SMOOTH_VOLTAGE);
@@ -879,20 +940,17 @@ impl Mosfet {
         (gm_core * (1.0 + self.lambda * vds_eff)).max(1e-12)
     }
 
-    /// Calculate output conductance gds = dId/dVds
-    ///
-    /// Uses analytical formulas for all model levels for performance
-    fn gds(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
+    fn gds_forward(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
         let p = self.polarity();
         let vgs_eff = p * vgs;
-        let vds_eff = smooth_positive(p * vds, SMOOTH_VOLTAGE * 0.1);
+        let vds_eff = smooth_positive(p * vds, VDS_SMOOTHING);
         let vth = self.vth(vbs);
         let vgt_raw = vgs_eff - vth;
         let vgt = smooth_positive(vgt_raw, SMOOTH_VOLTAGE);
 
         // Level 6: analytical gds from saturation factor and CLM derivatives
         if self.level == 6 {
-            let (id, _) = self.calculate_id(vgs, vds, vbs);
+            let (id, _) = self.calculate_id_forward(vgs, vds, vbs);
 
             // gds has two components:
             // 1. From saturation factor: d/dVds[(1-exp(-KV*Vds))^NV]
@@ -923,14 +981,13 @@ impl Mosfet {
         (gds_core * (1.0 + self.lambda * vds_eff) + gds_clm).max(1e-12)
     }
 
-    /// Calculate body transconductance gmb = dId/dVbs with C1 continuity
-    fn gmb(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
+    fn gmb_forward(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
         let p = self.polarity();
         let vbs_eff = p * vbs;
 
         // gmb = -gm * (gamma / (2 * sqrt(phi - Vbs)))
         // The gm function is already smooth, so gmb inherits smoothness
-        let gm = self.gm(vgs, vds, vbs);
+        let gm = self.gm_forward(vgs, vds, vbs);
 
         // Smooth the phi - Vbs term to avoid singularity
         let phi_vbs = smooth_max(self.phi - vbs_eff, SMOOTH_VOLTAGE, SMOOTH_VOLTAGE);
@@ -1006,9 +1063,7 @@ impl NonlinearDevice for Mosfet {
         let vbs = vb - vs;
 
         // Conductances
-        let gm = self.gm(vgs, vds, vbs);
-        let gds = self.gds(vgs, vds, vbs);
-        let gmb = self.gmb(vgs, vds, vbs);
+        let (gm, gds, gmb) = self.small_signal(vgs, vds, vbs);
 
         // Drain current and equivalent current source
         let (id, _) = self.calculate_id(vgs, vds, vbs);
@@ -1205,7 +1260,7 @@ mod tests {
 
         for i in -50..=50 {
             let vgs = vth + (i as f64) * delta;
-            let gm = m.gm(vgs, vds, vbs);
+            let gm = m.small_signal(vgs, vds, vbs).0;
 
             if let Some(prev) = prev_gm {
                 let change = (gm - prev).abs();
@@ -1238,7 +1293,7 @@ mod tests {
                 continue;
             }
 
-            let gds = m.gds(vgs, vds, vbs);
+            let gds = m.small_signal(vgs, vds, vbs).1;
 
             if let Some(prev) = prev_gds {
                 let change = (gds - prev).abs();
@@ -1251,5 +1306,107 @@ mod tests {
             }
             prev_gds = Some(gds);
         }
+    }
+
+    #[test]
+    fn test_pmos_with_swapped_terminals_conducts() {
+        // Regression for decks that instantiate PMOS with D/S reversed.
+        // Example operating point: Vd=5V, Vs=0V, Vg=0V, Vb=5V.
+        let mut m = Mosfet::new_pmos("M1".to_string(), 3, 2, 1, 0);
+        m.vto = -0.8;
+        m.kp = 21e-6;
+        m.gamma = 0.45;
+        m.phi = 0.61;
+        m.lambda = 0.0;
+
+        // In original variables: vgs = Vg-Vs = 0, vds = Vd-Vs = 5, vbs = Vb-Vs = 5.
+        let (id, region) = m.calculate_id(0.0, 5.0, 5.0);
+        assert!(
+            id.abs() > 1e-4,
+            "PMOS should conduct strongly with swapped D/S, got Id={id}"
+        );
+        assert_ne!(region, MosRegion::Cutoff);
+    }
+
+    #[test]
+    fn test_pmos_with_swapped_terminals_turns_off_when_gate_high() {
+        // With D/S reversed and gate tied high (to the intrinsic source), PMOS
+        // should be off: Vsg ~= 0.
+        let mut m = Mosfet::new_pmos("M1".to_string(), 3, 2, 1, 0);
+        m.vto = -0.8;
+        m.kp = 21e-6;
+        m.gamma = 0.45;
+        m.phi = 0.61;
+        m.lambda = 0.0;
+
+        // Original-variable bias for Vd=5V, Vs=0V, Vg=5V, Vb=5V.
+        let (id, _) = m.calculate_id(5.0, 5.0, 5.0);
+        assert!(
+            id.abs() < 1e-6,
+            "PMOS should be off for Vsg~0 in swapped orientation, got Id={id}"
+        );
+    }
+
+    #[test]
+    fn test_source_drain_permutation_invariance_level1() {
+        let mut m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0);
+        m.lambda = 0.0;
+
+        // Symmetry identity:
+        // Id(Vgs, Vds, Vbs) = -Id(Vgs - Vds, -Vds, Vbs - Vds)
+        let test_points = [
+            (2.0, 1.0, 0.0),
+            (1.8, -0.8, -0.2),
+            (0.6, 0.2, 0.0),
+            (2.5, -1.7, -0.4),
+        ];
+
+        for (vgs, vds, vbs) in test_points {
+            let (id_a, _) = m.calculate_id(vgs, vds, vbs);
+            let (id_b, _) = m.calculate_id(vgs - vds, -vds, vbs - vds);
+            let err = (id_a + id_b).abs();
+            let scale = id_a.abs().max(id_b.abs());
+            let tol = 1e-12 + 1e-3 * scale;
+            assert!(
+                err <= tol,
+                "Permutation invariance failed at (vgs={vgs}, vds={vds}, vbs={vbs}): \
+                 Id={id_a}, swapped={id_b}, err={err}, tol={tol}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_small_signal_matches_numeric_derivatives_in_swapped_mode() {
+        let mut m = Mosfet::new_pmos("M1".to_string(), 3, 2, 1, 0);
+        m.vto = -0.8;
+        m.kp = 21e-6;
+        m.gamma = 0.45;
+        m.phi = 0.61;
+        m.lambda = 0.0;
+
+        let vgs = 0.0;
+        let vds = 5.0;
+        let vbs = 5.0;
+        let (gm, gds, gmb) = m.small_signal(vgs, vds, vbs);
+
+        let h = 1e-6;
+        let id = |vgs: Value, vds: Value, vbs: Value| -> Value { m.calculate_id(vgs, vds, vbs).0 };
+        let gm_num = (id(vgs + h, vds, vbs) - id(vgs - h, vds, vbs)) / (2.0 * h);
+        let gds_num = (id(vgs, vds + h, vbs) - id(vgs, vds - h, vbs)) / (2.0 * h);
+        let gmb_num = (id(vgs, vds, vbs + h) - id(vgs, vds, vbs - h)) / (2.0 * h);
+
+        let rel = |a: Value, b: Value| -> Value { (a - b).abs() / (b.abs().max(1e-12)) };
+        assert!(
+            rel(gm, gm_num) < 2e-1,
+            "gm mismatch in swapped mode: analytical={gm}, numeric={gm_num}"
+        );
+        assert!(
+            rel(gds, gds_num) < 2e-1,
+            "gds mismatch in swapped mode: analytical={gds}, numeric={gds_num}"
+        );
+        assert!(
+            rel(gmb, gmb_num) < 2e-1,
+            "gmb mismatch in swapped mode: analytical={gmb}, numeric={gmb_num}"
+        );
     }
 }
