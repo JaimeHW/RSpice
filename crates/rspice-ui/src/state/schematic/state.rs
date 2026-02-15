@@ -640,10 +640,11 @@ impl SchematicState {
                 && comp.pos.x <= max_x
                 && comp.pos.y >= min_y
                 && comp.pos.y <= max_y
-                && !self.selection.has_component(comp.id) {
-                    self.selection.select_component(comp.id);
-                    count += 1;
-                }
+                && !self.selection.has_component(comp.id)
+            {
+                self.selection.select_component(comp.id);
+                count += 1;
+            }
         }
 
         // Select wires that have at least one point within the rectangle
@@ -664,10 +665,11 @@ impl SchematicState {
                 && junction.pos.x <= max_x
                 && junction.pos.y >= min_y
                 && junction.pos.y <= max_y
-                && !self.selection.has_junction(junction.pos) {
-                    self.selection.select_junction(junction.pos);
-                    count += 1;
-                }
+                && !self.selection.has_junction(junction.pos)
+            {
+                self.selection.select_junction(junction.pos);
+                count += 1;
+            }
         }
 
         count

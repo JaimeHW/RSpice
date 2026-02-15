@@ -213,13 +213,15 @@ fn format_exp_label(params: &HashMap<String, String>, primary: &str, is_voltage:
     let td2 = get_param_with_aliases(params, &["td2"], "", "5u");
     let tau2 = get_param_with_aliases(params, &["tau2"], "", "1u");
 
-    ["EXP".to_string(),
+    [
+        "EXP".to_string(),
         format!("Low: {} {}", low, unit),
         format!("High: {} {}", high, unit),
         format!("TD1: {}", td1),
         format!("TAU1: {}", tau1),
         format!("TD2: {}", td2),
-        format!("TAU2: {}", tau2)]
+        format!("TAU2: {}", tau2),
+    ]
     .join("\n")
 }
 

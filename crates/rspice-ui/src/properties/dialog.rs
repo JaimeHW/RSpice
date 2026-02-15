@@ -151,8 +151,7 @@ pub fn parse_engineering_value(input: &str) -> Result<f64, String> {
 
     // Normalize micro sign: U+00B5 (µ MICRO SIGN) and U+03BC (μ GREEK SMALL LETTER MU) both map to 'u'
     // Using explicit unicode escape sequences for reliability
-    let normalized_suffix = suffix_lower
-        .replace(['\u{00B5}', '\u{03BC}'], "u"); // GREEK SMALL LETTER MU
+    let normalized_suffix = suffix_lower.replace(['\u{00B5}', '\u{03BC}'], "u"); // GREEK SMALL LETTER MU
 
     let multiplier = match normalized_suffix.as_str() {
         "" => 1.0,
@@ -333,15 +332,13 @@ pub fn render_properties_dialog(
                         });
 
                         // OK button
-                        if ui.button("OK").clicked()
-                            && state.validate() {
-                                if let Some(id) = state.component_id {
-                                    result =
-                                        PropertiesDialogResult::Apply(id, state.edited.clone());
-                                    state.open = false;
-                                    state.component_id = None;
-                                }
+                        if ui.button("OK").clicked() && state.validate() {
+                            if let Some(id) = state.component_id {
+                                result = PropertiesDialogResult::Apply(id, state.edited.clone());
+                                state.open = false;
+                                state.component_id = None;
                             }
+                        }
                     });
                 });
             });

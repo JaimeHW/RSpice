@@ -65,15 +65,13 @@ impl FrequencyPoint {
 // =============================================================================
 
 /// Complete frequency response data
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct FrequencyResponse {
     /// Name/label
     pub name: String,
     /// Data points (sorted by frequency)
     pub points: Vec<FrequencyPoint>,
 }
-
 
 impl FrequencyResponse {
     /// Create new empty response

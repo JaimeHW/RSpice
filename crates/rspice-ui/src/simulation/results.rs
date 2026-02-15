@@ -160,8 +160,7 @@ impl WaveformData {
 //=============================================================================
 
 /// DC operating point result
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct DcOpResult {
     /// Node voltages
     pub node_voltages: HashMap<String, f64>,
@@ -172,7 +171,6 @@ pub struct DcOpResult {
     /// Device operating points
     pub device_ops: HashMap<String, DeviceOpPoint>,
 }
-
 
 impl DcOpResult {
     /// Get voltage at a node

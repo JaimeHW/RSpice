@@ -13,8 +13,7 @@ use std::time::{Duration, Instant};
 //=============================================================================
 
 /// Current status of the simulation
-#[derive(Debug, Clone, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum SimulationStatus {
     /// No simulation running
     #[default]
@@ -160,7 +159,6 @@ impl SimulationStatus {
         }
     }
 }
-
 
 //=============================================================================
 // Simulation Progress

@@ -109,8 +109,7 @@ impl Point {
 ///
 /// Implements smart auto-placement with user override capability.
 /// Auto mode uses heuristics to avoid collisions with wires and components.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub enum LabelPosition {
     /// Automatic smart placement - avoids collisions with wires and components
     #[default]
@@ -118,7 +117,6 @@ pub enum LabelPosition {
     /// User-defined custom offset from default position (in pixels)
     Custom { x_offset: f64, y_offset: f64 },
 }
-
 
 impl LabelPosition {
     /// Create a custom label position with the given offsets

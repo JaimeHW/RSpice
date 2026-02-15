@@ -479,13 +479,7 @@ impl NetlistExporter {
             match self.options.format {
                 NetlistFormat::Spectre => {
                     if let Some(corner) = &self.options.corner {
-                        writeln!(
-                            output,
-                            "include \"{}\" section={}",
-                            path.display(),
-                            corner
-                        )
-                        .ok();
+                        writeln!(output, "include \"{}\" section={}", path.display(), corner).ok();
                     } else {
                         writeln!(output, "include \"{}\"", path.display()).ok();
                     }

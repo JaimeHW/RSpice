@@ -100,11 +100,7 @@ fn calculate_layout(available: Rect) -> PzLayout {
         Pos2::new(info.min.x - CHART_PADDING, total.max.y - CHART_PADDING),
     );
 
-    PzLayout {
-        header,
-        plot,
-        info,
-    }
+    PzLayout { header, plot, info }
 }
 
 // =============================================================================

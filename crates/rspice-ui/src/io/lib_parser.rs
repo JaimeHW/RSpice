@@ -359,8 +359,7 @@ pub struct LibrarySection {
 }
 
 /// Model definition
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ModelDef {
     /// Model name
     pub name: String,
@@ -375,7 +374,6 @@ pub struct ModelDef {
     /// Source line number
     pub line: usize,
 }
-
 
 /// Subcircuit definition
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

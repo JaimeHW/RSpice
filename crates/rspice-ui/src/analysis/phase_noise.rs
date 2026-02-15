@@ -130,7 +130,7 @@ impl PhaseNoiseData {
 
         // Convert to RMS jitter
         // jitter_rms = sqrt(2 * integral) / (2 * pi * f_carrier)
-        
+
         (2.0 * integral).sqrt() / (2.0 * PI * self.carrier_freq)
     }
 

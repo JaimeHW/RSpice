@@ -81,12 +81,10 @@ impl SchematicState {
             let end = wire.points.last().copied();
 
             // Check if endpoints connect to selected components
-            let start_connected = start.is_some_and(|p| {
-                all_terminals.iter().any(|(_, term_pos)| *term_pos == p)
-            });
-            let end_connected = end.is_some_and(|p| {
-                all_terminals.iter().any(|(_, term_pos)| *term_pos == p)
-            });
+            let start_connected =
+                start.is_some_and(|p| all_terminals.iter().any(|(_, term_pos)| *term_pos == p));
+            let end_connected =
+                end.is_some_and(|p| all_terminals.iter().any(|(_, term_pos)| *term_pos == p));
 
             if start_connected && end_connected {
                 // Both ends connected to selection - move entire wire

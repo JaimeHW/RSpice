@@ -349,8 +349,8 @@ impl SpatialIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::Point;
     use crate::state::schematic::ComponentType;
+    use crate::state::Point;
 
     /// Helper to create a test component
     fn make_component(id: u64, x: i32, y: i32) -> Component {

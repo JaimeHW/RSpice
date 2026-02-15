@@ -28,8 +28,7 @@ use std::path::PathBuf;
 //=============================================================================
 
 /// Application preferences with all configurable settings.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Preferences {
     /// General application preferences
     pub general: GeneralPreferences,
@@ -42,7 +41,6 @@ pub struct Preferences {
     /// File preferences
     pub files: FilePreferences,
 }
-
 
 //=============================================================================
 // General Preferences

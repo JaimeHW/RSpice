@@ -14,9 +14,7 @@
 //! Used by the tabbed property dialog to allow users to browse and select
 //! device models from loaded PDK libraries.
 
-use crate::state::model_library::{
-    DeviceModel, ModelLibrary, ModelLibraryManager, ModelType,
-};
+use crate::state::model_library::{DeviceModel, ModelLibrary, ModelLibraryManager, ModelType};
 use egui::{Context, RichText, ScrollArea, Ui};
 use std::collections::HashSet;
 
@@ -158,8 +156,7 @@ impl ModelBrowserState {
 // =============================================================================
 
 /// Result of the model browser dialog.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ModelBrowserResult {
     /// No action taken (dialog still open or closed without selection).
     #[default]
@@ -176,7 +173,6 @@ pub enum ModelBrowserResult {
         corner: Option<String>,
     },
 }
-
 
 // =============================================================================
 // Model Browser Rendering

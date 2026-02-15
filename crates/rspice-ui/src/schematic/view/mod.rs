@@ -602,10 +602,9 @@ pub fn render_schematic_view(
     }
 
     // Right click to finish wire or cancel
-    if response.clicked_by(egui::PointerButton::Secondary)
-        && state.schematic.wire_drawing.active {
-            state.schematic.finish_wire();
-        }
+    if response.clicked_by(egui::PointerButton::Secondary) && state.schematic.wire_drawing.active {
+        state.schematic.finish_wire();
+    }
 
     // Draw wire preview if active
     let wire_active = state.schematic.wire_drawing.active;
@@ -1367,8 +1366,8 @@ fn nearest_terminal(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::symbol_primitives::rotation_to_delta;
+    use super::*;
     use crate::state::Rotation;
 
     #[test]

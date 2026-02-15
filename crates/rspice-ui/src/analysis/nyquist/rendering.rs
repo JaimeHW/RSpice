@@ -106,11 +106,7 @@ fn calculate_layout(available: Rect) -> NyquistLayout {
         Pos2::new(info.min.x - CHART_PADDING, total.max.y - CHART_PADDING),
     );
 
-    NyquistLayout {
-        header,
-        plot,
-        info,
-    }
+    NyquistLayout { header, plot, info }
 }
 
 // =============================================================================

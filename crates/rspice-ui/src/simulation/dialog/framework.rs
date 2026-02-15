@@ -9,8 +9,7 @@ use egui::{Color32, Pos2, Rounding, Sense, Stroke, Ui};
 // =============================================================================
 
 /// Result of dialog interaction
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum DialogResult {
     /// User cancelled
     Cancelled,
@@ -243,7 +242,6 @@ impl SimulationDialog {
         self.result.clone()
     }
 }
-
 
 // =============================================================================
 // Common Input Widgets

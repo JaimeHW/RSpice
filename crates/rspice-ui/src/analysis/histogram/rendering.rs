@@ -2,13 +2,11 @@
 //!
 //! Commercial-grade egui rendering for histogram visualization.
 
-use egui::{
-    Color32, Painter, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2,
-};
+use egui::{Color32, Painter, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2};
 
+use super::data::Histogram;
 #[cfg(test)]
 use super::data::HistogramBuilder;
-use super::data::Histogram;
 use super::state::{AxisScale, DistributionOverlay, HistogramDisplayMode, HistogramState};
 use super::statistics::{LogNormalParams, NormalParams};
 use crate::common::app::AppState;
@@ -560,7 +558,7 @@ fn load_demo_data(state: &mut HistogramState) {
         .map(|i| {
             // Pseudo-random with some structure
             let x = i as f64 * 0.1;
-            
+
             50.0 + 10.0 * (x * 0.1).sin() + 5.0 * ((i % 7) as f64 - 3.0)
         })
         .collect();

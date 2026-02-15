@@ -42,9 +42,9 @@ mod results_update;
 mod spice_value;
 mod touchstone;
 
-use self::spice_value::parse_spice_value_checked;
 #[cfg(test)]
 use self::spice_value::parse_spice_value;
+use self::spice_value::parse_spice_value_checked;
 
 #[cfg(test)]
 mod tests;

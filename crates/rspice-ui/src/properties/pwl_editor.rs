@@ -648,11 +648,10 @@ pub fn render_pwl_editor(ui: &mut Ui, state: &mut PwlEditorState) -> PwlEditorRe
             if ui.button("➕ Add Point").clicked() {
                 state.adding_point = true;
             }
-            if state.selected_row.is_some()
-                && ui.button("🗑 Delete").clicked() {
-                    state.delete_selected();
-                    result = PwlEditorResult::Modified;
-                }
+            if state.selected_row.is_some() && ui.button("🗑 Delete").clicked() {
+                state.delete_selected();
+                result = PwlEditorResult::Modified;
+            }
         });
 
         ui.separator();

@@ -1,4 +1,3 @@
-
 /// Console message severity
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MessageSeverity {

@@ -32,8 +32,7 @@ use std::path::PathBuf;
 // =============================================================================
 
 /// Type/category of device model
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum ModelType {
     /// NMOS transistor
     #[default]
@@ -61,7 +60,6 @@ pub enum ModelType {
     /// Custom/other
     Other,
 }
-
 
 impl ModelType {
     /// Display name
@@ -120,8 +118,7 @@ impl ModelType {
 }
 
 /// SPICE model level/type
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum ModelLevel {
     /// BSIM3 v3.3
     Bsim3v3,
@@ -143,7 +140,6 @@ pub enum ModelLevel {
     /// Unknown/custom
     Unknown,
 }
-
 
 impl ModelLevel {
     /// Display name
@@ -380,8 +376,7 @@ impl ProcessCorner {
 // =============================================================================
 
 /// A PDK model library
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ModelLibrary {
     /// Library name (e.g., "tsmc180_1p8v")
     pub name: String,
@@ -402,7 +397,6 @@ pub struct ModelLibrary {
     /// Is expanded in browser
     pub expanded: bool,
 }
-
 
 impl ModelLibrary {
     /// Create a new library

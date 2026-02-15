@@ -19,8 +19,7 @@ use std::collections::HashMap;
 // =============================================================================
 
 /// Type of RF tone
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum ToneType {
     /// Local oscillator tone
     Lo,
@@ -50,7 +49,6 @@ impl ToneType {
         }
     }
 }
-
 
 // =============================================================================
 // Tone Definition

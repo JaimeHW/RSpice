@@ -33,8 +33,7 @@ use std::path::PathBuf;
 // =============================================================================
 
 /// Standard view types matching Cadence conventions
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum ViewType {
     /// Schematic view (circuit diagram)
     #[default]
@@ -62,7 +61,6 @@ pub enum ViewType {
     /// Custom/user-defined view
     Custom,
 }
-
 
 impl ViewType {
     /// Display name for view type
@@ -211,8 +209,7 @@ impl View {
 // =============================================================================
 
 /// A design cell containing multiple views
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Cell {
     /// Cell name (e.g., "opamp", "bandgap")
     pub name: String,
@@ -227,7 +224,6 @@ pub struct Cell {
     /// Cell-level metadata
     pub metadata: HashMap<String, String>,
 }
-
 
 impl Cell {
     /// Create a new cell
@@ -281,8 +277,7 @@ impl Cell {
 // =============================================================================
 
 /// A design library containing multiple cells
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Library {
     /// Library name (e.g., "my_designs", "analog_lib")
     pub name: String,
@@ -299,7 +294,6 @@ pub struct Library {
     /// Library-level metadata
     pub metadata: HashMap<String, String>,
 }
-
 
 impl Library {
     /// Create a new library

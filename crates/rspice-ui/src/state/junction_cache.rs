@@ -156,10 +156,7 @@ impl JunctionCache {
                     continue;
                 }
 
-                let entry = self
-                    .junctions
-                    .entry(**point)
-                    .or_default();
+                let entry = self.junctions.entry(**point).or_default();
                 entry.segment_count += 1;
                 entry.wire_ids.push(wire.id);
             }

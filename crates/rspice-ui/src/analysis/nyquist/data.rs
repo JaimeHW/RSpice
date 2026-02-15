@@ -64,15 +64,13 @@ impl NyquistPoint {
 // =============================================================================
 
 /// Complete Nyquist plot data
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct NyquistData {
     /// Name/label
     pub name: String,
     /// Data points (sorted by frequency)
     pub points: Vec<NyquistPoint>,
 }
-
 
 impl NyquistData {
     /// Create new empty data

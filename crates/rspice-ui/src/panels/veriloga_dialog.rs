@@ -599,11 +599,10 @@ pub fn render_veriloga_load_dialog(
                         result = VerilogADialogResult::Cancelled;
                     }
 
-                    if state.is_success()
-                        && ui.button("Add to Library").clicked() {
-                            result = VerilogADialogResult::AddToLibrary;
-                            should_close = true;
-                        }
+                    if state.is_success() && ui.button("Add to Library").clicked() {
+                        result = VerilogADialogResult::AddToLibrary;
+                        should_close = true;
+                    }
                 });
             });
         });
