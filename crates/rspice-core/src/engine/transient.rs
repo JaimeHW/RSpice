@@ -292,11 +292,19 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         time: Value,
+        tline_dc_refs: &[(Value, Value)],
     ) {
-        for tl in &circuit.tlines {
+        for (idx, tl) in circuit.tlines.iter().enumerate() {
             let g = tl.conductance();
-            let i_eq_p1 = g * tl.delayed_backward_at(time);
-            let i_eq_p2 = g * tl.delayed_forward_at(time);
+            let (v1_ref, v2_ref) = tline_dc_refs.get(idx).copied().unwrap_or((0.0, 0.0));
+            let atten = tl.attenuation();
+
+            // Propagate deviations from the initial DC operating point so
+            // constant biases remain invariant even on attenuated lines.
+            let incoming1 = tl.delayed_backward_at(time) + (1.0 - atten) * v2_ref;
+            let incoming2 = tl.delayed_forward_at(time) + (1.0 - atten) * v1_ref;
+            let i_eq_p1 = g * incoming1;
+            let i_eq_p2 = g * incoming2;
 
             Self::stamp_tline_port(matrix, rhs, tl.node1_pos, tl.node1_neg, g, i_eq_p1);
             Self::stamp_tline_port(matrix, rhs, tl.node2_pos, tl.node2_neg, g, i_eq_p2);
@@ -308,18 +316,24 @@ impl Engine {
         circuit: &mut crate::circuit::Circuit,
         initial_solution: &[Value],
         initial_time: Value,
-    ) {
+    ) -> Vec<(Value, Value)> {
+        let mut refs = Vec::with_capacity(circuit.tlines.len());
         for tl in &mut circuit.tlines {
             tl.reset();
             let g = tl.conductance();
             let v1 = Self::differential_voltage(initial_solution, tl.node1_pos, tl.node1_neg);
             let v2 = Self::differential_voltage(initial_solution, tl.node2_pos, tl.node2_neg);
+            refs.push((v1, v2));
 
-            // Start with zero incoming delayed waves at t=0.
-            let i1 = g * v1;
-            let i2 = g * v2;
+            // Seed delayed-wave state from the initial OP so pre-edge steady states
+            // are preserved (avoids artificial startup droop/ringing).
+            // Port equations: i1 = g*(v1 - incoming1), i2 = g*(v2 - incoming2),
+            // with incoming1 <- v2 and incoming2 <- v1 at t=0.
+            let i1 = g * (v1 - v2);
+            let i2 = g * (v2 - v1);
             tl.update_history(initial_time, v1, i1, v2, i2);
         }
+        refs
     }
 
     #[inline]
@@ -330,6 +344,7 @@ impl Engine {
         dt: Value,
         method: IntegrationMethod,
         jfet_history: &mut JfetTransientHistory,
+        tline_dc_refs: &[(Value, Value)],
     ) {
         for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
             let np = cap.pp.row;
@@ -371,12 +386,14 @@ impl Engine {
         circuit.refresh_jiles_atherton_inductances(accepted_solution);
 
         // Update transmission-line delayed-wave history from the accepted state.
-        for tl in &mut circuit.tlines {
+        for (idx, tl) in circuit.tlines.iter_mut().enumerate() {
             let g = tl.conductance();
             let v1 = Self::differential_voltage(accepted_solution, tl.node1_pos, tl.node1_neg);
             let v2 = Self::differential_voltage(accepted_solution, tl.node2_pos, tl.node2_neg);
-            let incoming_port1 = tl.delayed_backward_at(accepted_time);
-            let incoming_port2 = tl.delayed_forward_at(accepted_time);
+            let (v1_ref, v2_ref) = tline_dc_refs.get(idx).copied().unwrap_or((0.0, 0.0));
+            let atten = tl.attenuation();
+            let incoming_port1 = tl.delayed_backward_at(accepted_time) + (1.0 - atten) * v2_ref;
+            let incoming_port2 = tl.delayed_forward_at(accepted_time) + (1.0 - atten) * v1_ref;
             let i1 = g * v1 - g * incoming_port1;
             let i2 = g * v2 - g * incoming_port2;
             tl.update_history(accepted_time, v1, i1, v2, i2);
@@ -585,7 +602,7 @@ impl Engine {
                 circuit.inductors.i_prev_prev[l_idx] = i_dc;
             }
         }
-        Self::initialize_tline_history(&mut circuit, &solution, 0.0);
+        let tline_dc_refs = Self::initialize_tline_history(&mut circuit, &solution, 0.0);
         let mut jfet_history = Self::initialize_jfet_history(&circuit, &solution);
 
         // Main transient loop
@@ -707,7 +724,13 @@ impl Engine {
                     &coeff,
                     &jfet_history,
                 );
-                Self::stamp_tline_companions(&circuit, &mut matrix, &mut rhs, t + dt);
+                Self::stamp_tline_companions(
+                    &circuit,
+                    &mut matrix,
+                    &mut rhs,
+                    t + dt,
+                    &tline_dc_refs,
+                );
 
                 // Stamp nonlinear devices if present
                 if circuit.has_nonlinear_devices() {
@@ -956,6 +979,7 @@ impl Engine {
                         dt,
                         trapgear.current_method(),
                         &mut jfet_history,
+                        &tline_dc_refs,
                     );
                     if circuit.has_xspice_devices() {
                         circuit.accept_xspice_timestep();
@@ -1080,6 +1104,7 @@ impl Engine {
                         dt,
                         trapgear.current_method(),
                         &mut jfet_history,
+                        &tline_dc_refs,
                     );
                     if circuit.has_xspice_devices() {
                         circuit.accept_xspice_timestep();
@@ -1148,6 +1173,7 @@ impl Engine {
                 dt,
                 trapgear.current_method(),
                 &mut jfet_history,
+                &tline_dc_refs,
             );
 
             // Accept XSPICE timestep (commit state changes)

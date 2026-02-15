@@ -2806,6 +2806,55 @@ O1 1 0 2 0 LLOSS
     }
 
     #[test]
+    fn test_transient_tline_initial_dc_level_is_preserved_before_first_edge() {
+        let netlist_str = r#"
+* Hold source high; first edge occurs well after simulation window.
+V1 src 0 PULSE(5 0 10n 100p 100p 10n 20n)
+Rsrc src n1 50
+T1 n1 0 n2 0 Z0=50 TD=1n
+C1 n1 0 25f
+C2 n2 0 7f
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let result = engine
+            .run_tran(&netlist, 2e-9, 2e-12)
+            .expect("transient tline startup should converge");
+
+        let n1_idx = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("n1"))
+            .expect("n1 should exist");
+        let n2_idx = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("n2"))
+            .expect("n2 should exist");
+
+        let mut n1_min = Value::INFINITY;
+        let mut n2_min = Value::INFINITY;
+        for (i, &time) in result.time.iter().enumerate() {
+            if time <= 2e-9 {
+                n1_min = n1_min.min(result.voltages[n1_idx][i]);
+                n2_min = n2_min.min(result.voltages[n2_idx][i]);
+            }
+        }
+
+        assert!(
+            n1_min > 4.95,
+            "near-end node drooped before first edge: min={}",
+            n1_min
+        );
+        assert!(
+            n2_min > 4.95,
+            "far-end node drooped before first edge: min={}",
+            n2_min
+        );
+    }
+
+    #[test]
     fn test_transient_tline_enforces_delay_before_load_rises() {
         let netlist_str = r#"
 * Matched source/load around a 1ns transmission line
