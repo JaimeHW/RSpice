@@ -9,6 +9,32 @@
 use crate::Value;
 use std::collections::HashMap;
 
+#[inline]
+fn interpolate_over_frequency(
+    query_freq: Value,
+    f0: Value,
+    y0: Value,
+    f1: Value,
+    y1: Value,
+) -> Value {
+    if (f1 - f0).abs() < 1e-18 {
+        return y0;
+    }
+
+    let (x, x0, x1) = if query_freq > 0.0 && f0 > 0.0 && f1 > 0.0 {
+        (query_freq.log10(), f0.log10(), f1.log10())
+    } else {
+        (query_freq, f0, f1)
+    };
+
+    if (x1 - x0).abs() < 1e-18 {
+        return y0;
+    }
+
+    let t = (x - x0) / (x1 - x0);
+    y0 + t * (y1 - y0)
+}
+
 /// Complete phase noise analysis result
 #[derive(Debug, Clone)]
 pub struct PnoiseResult {
@@ -71,19 +97,27 @@ impl PnoiseResult {
 
     /// Get phase noise at specific offset frequency (interpolated)
     pub fn phase_noise_at(&self, offset_freq: Value) -> Option<Value> {
-        if self.spectral_points.is_empty() {
+        if self.spectral_points.is_empty() || !offset_freq.is_finite() {
             return None;
         }
 
         // Find bracketing points for interpolation
-        let mut below = None;
-        let mut above = None;
+        let mut below: Option<&PhaseNoisePoint> = None;
+        let mut above: Option<&PhaseNoisePoint> = None;
 
         for point in &self.spectral_points {
-            if point.offset_freq <= offset_freq {
+            if point.offset_freq <= offset_freq
+                && below
+                    .map(|b| point.offset_freq > b.offset_freq)
+                    .unwrap_or(true)
+            {
                 below = Some(point);
             }
-            if point.offset_freq >= offset_freq && above.is_none() {
+            if point.offset_freq >= offset_freq
+                && above
+                    .map(|a| point.offset_freq < a.offset_freq)
+                    .unwrap_or(true)
+            {
                 above = Some(point);
             }
         }
@@ -92,14 +126,13 @@ impl PnoiseResult {
             (Some(b), Some(a)) if (a.offset_freq - b.offset_freq).abs() < 1e-10 => {
                 Some(b.pn_dbc_hz)
             }
-            (Some(b), Some(a)) => {
-                // Log-linear interpolation (common for phase noise)
-                let log_f = offset_freq.log10();
-                let log_fb = b.offset_freq.log10();
-                let log_fa = a.offset_freq.log10();
-                let t = (log_f - log_fb) / (log_fa - log_fb);
-                Some(b.pn_dbc_hz + t * (a.pn_dbc_hz - b.pn_dbc_hz))
-            }
+            (Some(b), Some(a)) => Some(interpolate_over_frequency(
+                offset_freq,
+                b.offset_freq,
+                b.pn_dbc_hz,
+                a.offset_freq,
+                a.pn_dbc_hz,
+            )),
             (Some(b), None) => Some(b.pn_dbc_hz),
             (None, Some(a)) => Some(a.pn_dbc_hz),
             (None, None) => None,
@@ -275,20 +308,31 @@ impl NoiseContributor {
 
     /// Get contribution at specific offset (interpolated)
     pub fn contribution_at(&self, offset_freq: Value) -> Option<Value> {
-        if self.contributions.is_empty() {
+        if self.contributions.is_empty() || !offset_freq.is_finite() {
             return None;
         }
 
-        // Simple nearest-neighbor for now
-        self.contributions
-            .iter()
-            .min_by(|a, b| {
-                (a.0 - offset_freq)
-                    .abs()
-                    .partial_cmp(&(b.0 - offset_freq).abs())
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .map(|&(_, c)| c)
+        let mut below: Option<(Value, Value)> = None;
+        let mut above: Option<(Value, Value)> = None;
+
+        for &(freq, contrib) in &self.contributions {
+            if freq <= offset_freq && below.map(|(f, _)| freq > f).unwrap_or(true) {
+                below = Some((freq, contrib));
+            }
+            if freq >= offset_freq && above.map(|(f, _)| freq < f).unwrap_or(true) {
+                above = Some((freq, contrib));
+            }
+        }
+
+        match (below, above) {
+            (Some((fb, cb)), Some((fa, _ca))) if (fa - fb).abs() < 1e-10 => Some(cb),
+            (Some((fb, cb)), Some((fa, ca))) => {
+                Some(interpolate_over_frequency(offset_freq, fb, cb, fa, ca))
+            }
+            (Some((_, cb)), None) => Some(cb),
+            (None, Some((_, ca))) => Some(ca),
+            (None, None) => None,
+        }
     }
 }
 
@@ -426,9 +470,39 @@ mod result_tests {
         contrib.add_contribution(1e3, -90.0);
         contrib.add_contribution(10e3, -110.0);
 
-        // Nearest neighbor
+        // Log-frequency interpolation between 1k and 10k.
         let c = contrib.contribution_at(5e3).unwrap();
-        assert!(c == -90.0 || c == -110.0);
+        assert!(
+            c < -102.0 && c > -106.0,
+            "expected interpolated contribution near -104 dBc/Hz, got {}",
+            c
+        );
+    }
+
+    #[test]
+    fn test_noise_contributor_interpolation_extrapolates_to_edges() {
+        let mut contrib = NoiseContributor::new("R1", "resistor");
+        contrib.add_contribution(1e3, -90.0);
+        contrib.add_contribution(10e3, -110.0);
+
+        assert_eq!(contrib.contribution_at(100.0), Some(-90.0));
+        assert_eq!(contrib.contribution_at(1e6), Some(-110.0));
+    }
+
+    #[test]
+    fn test_phase_noise_interpolation_handles_unsorted_points() {
+        let mut result = PnoiseResult::new(1e9, "out");
+        result.add_point(PhaseNoisePoint::new(100e3, -120.0));
+        result.add_point(PhaseNoisePoint::new(1e3, -80.0));
+        result.add_point(PhaseNoisePoint::new(10e3, -100.0));
+
+        let pn = result
+            .phase_noise_at(5e3)
+            .expect("interpolation should work with unsorted points");
+        assert!(
+            pn < -90.0 && pn > -98.0,
+            "unexpected interpolated value: {pn}"
+        );
     }
 
     #[test]
