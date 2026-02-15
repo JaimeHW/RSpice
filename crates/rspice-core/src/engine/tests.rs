@@ -1248,9 +1248,46 @@ RLOAD out 0 1k
         let result = Engine::default().run_dc_op(&netlist).unwrap();
         let vout = result.voltage(2);
         assert!(
-            vout > 0.8 && vout < 1.2,
-            "expected XSPICE gain to drive non-zero DC output near 1V, got {}",
+            (vout - 2.0).abs() < 1e-6,
+            "expected XSPICE gain to stamp as a controlled voltage source (2V), got {}",
             vout
+        );
+    }
+
+    #[test]
+    fn test_matrix_topology_includes_xspice_voltage_output_branch_couplings() {
+        let netlist = Netlist::parse(
+            r#"
+* Matrix topology must include branch couplings for XSPICE voltage outputs
+V1 in 0 1
+A1 in out gain gain=2
+RLOAD out 0 1k
+.end
+"#,
+        )
+        .unwrap();
+
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+        assert_eq!(circuit.xspice_instances.len(), 1);
+
+        let inst = &circuit.xspice_instances[0];
+        let branch_ordinal = inst
+            .branch_ordinal_at(1)
+            .expect("xspice gain output should allocate branch ordinal");
+        let branch_mna = circuit.get_branch_matrix_index(branch_ordinal);
+        let out_node = circuit
+            .get_node_by_name("out")
+            .expect("out node should exist in node map");
+
+        let matrix = engine.build_matrix(&circuit).unwrap();
+        assert!(
+            matrix.get_index(branch_mna - 1, out_node - 1).is_some(),
+            "expected branch-row to output-node coupling in matrix topology"
+        );
+        assert!(
+            matrix.get_index(out_node - 1, branch_mna - 1).is_some(),
+            "expected output-node to branch-column coupling in matrix topology"
         );
     }
 
