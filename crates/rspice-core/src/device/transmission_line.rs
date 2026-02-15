@@ -26,6 +26,10 @@
 use crate::{Value, circuit::NodeId};
 use std::collections::VecDeque;
 
+/// DC fallback resistance for ideal/lossless lines when no explicit series
+/// resistance is available from model parameters.
+const TLINE_DC_SHORT_RESISTANCE: Value = 1e-3;
+
 //=============================================================================
 // History Buffer for Delay with Cubic Hermite Interpolation
 //=============================================================================
@@ -188,6 +192,9 @@ pub struct TransmissionLine {
     pub nl: Option<Value>,
     /// One-way attenuation factor (0 < a <= 1)
     attenuation: Value,
+    /// DC equivalent series resistance used to couple near/far conductors
+    /// during operating-point solves. `0` means "ideal short fallback".
+    dc_series_resistance: Value,
 
     // Internal state
     /// Branch indices for current variables
@@ -226,6 +233,7 @@ impl TransmissionLine {
             freq: None,
             nl: None,
             attenuation: 1.0,
+            dc_series_resistance: 0.0,
             branch1: None,
             branch2: None,
             history_forward: DelayBuffer::new(td),
@@ -283,6 +291,32 @@ impl TransmissionLine {
     #[inline]
     pub fn attenuation(&self) -> Value {
         self.attenuation
+    }
+
+    /// Configure the DC equivalent series resistance used by OP/DC analyses.
+    pub fn set_dc_series_resistance(&mut self, resistance: Value) {
+        if resistance.is_finite() && resistance > 0.0 {
+            self.dc_series_resistance = resistance;
+        } else {
+            self.dc_series_resistance = 0.0;
+        }
+    }
+
+    /// Get the configured DC series resistance.
+    #[inline]
+    pub fn dc_series_resistance(&self) -> Value {
+        self.dc_series_resistance
+    }
+
+    /// Get DC equivalent conductance used by OP/DC fallback stamping.
+    #[inline]
+    pub fn dc_series_conductance(&self) -> Value {
+        let r = if self.dc_series_resistance > 0.0 {
+            self.dc_series_resistance
+        } else {
+            TLINE_DC_SHORT_RESISTANCE
+        };
+        1.0 / r
     }
 
     /// Get propagation velocity (if freq and nl are set)
@@ -532,6 +566,19 @@ mod tests {
         // Should have some attenuation
         assert!(tl.attenuation() < 1.0);
         assert!(tl.attenuation() > 0.0);
+    }
+
+    #[test]
+    fn test_tline_dc_series_conductance_defaults_to_short() {
+        let tl = TransmissionLine::new("T1".to_string(), 1, 0, 2, 0, 50.0, 1e-9);
+        assert!((tl.dc_series_conductance() - 1_000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_tline_dc_series_conductance_uses_configured_resistance() {
+        let mut tl = TransmissionLine::new("T1".to_string(), 1, 0, 2, 0, 50.0, 1e-9);
+        tl.set_dc_series_resistance(200.0);
+        assert!((tl.dc_series_conductance() - 0.005).abs() < 1e-12);
     }
 
     #[test]
