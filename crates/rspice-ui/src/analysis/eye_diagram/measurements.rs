@@ -354,8 +354,9 @@ fn calculate_horizontal_opening(data: &EyeData) -> HorizontalOpening {
 }
 
 fn calculate_jitter_stats(data: &EyeData) -> JitterStats {
-    // Collect all edge crossings
-    let mut crossing_times = Vec::new();
+    // Collect edge crossings per edge polarity to avoid mixing two eye edges.
+    let mut rising_crossings = Vec::new();
+    let mut falling_crossings = Vec::new();
 
     for trace in &data.traces {
         let n = trace.time.len().min(trace.amplitude.len());
@@ -383,37 +384,120 @@ fn calculate_jitter_stats(data: &EyeData) -> JitterStats {
                 } else {
                     t0 + (v0 - data.v_cross) / (v0 - v1) * dt
                 };
-                // Normalize to bit period
-                let t_normalized = t % 1.0;
-                crossing_times.push(t_normalized);
+                let t_normalized = t.rem_euclid(1.0);
+                if v0 < v1 {
+                    rising_crossings.push(t_normalized);
+                } else {
+                    falling_crossings.push(t_normalized);
+                }
             }
         }
     }
 
-    if crossing_times.is_empty() {
+    let rising = crossing_phase_stats(&rising_crossings);
+    let falling = crossing_phase_stats(&falling_crossings);
+    if rising.count == 0 && falling.count == 0 {
         return JitterStats::default();
     }
 
-    let min = crossing_times.iter().copied().fold(f64::MAX, f64::min);
-    let max = crossing_times.iter().copied().fold(f64::MIN, f64::max);
-    let peak_to_peak = (max - min) * data.bit_period;
+    let peak_to_peak_ui = rising.peak_to_peak_ui.max(falling.peak_to_peak_ui);
+    let total_count = rising.count + falling.count;
+    let rms_ui = if total_count > 0 {
+        ((rising.rms_ui.powi(2) * rising.count as f64
+            + falling.rms_ui.powi(2) * falling.count as f64)
+            / total_count as f64)
+            .sqrt()
+    } else {
+        0.0
+    };
 
-    let mean = crossing_times.iter().sum::<f64>() / crossing_times.len() as f64;
-    let variance = crossing_times
-        .iter()
-        .map(|t| (t - mean).powi(2))
-        .sum::<f64>()
-        / crossing_times.len() as f64;
-    let rms = variance.sqrt() * data.bit_period;
-
-    // Simplified DJ estimation (proper method requires histogram analysis)
-    let dj = peak_to_peak * 0.3; // Rough estimate
+    let peak_to_peak = peak_to_peak_ui * data.bit_period;
+    let rms = rms_ui * data.bit_period;
+    // Approximate DDJ by removing RJ envelope from measured total jitter.
+    let dj = (peak_to_peak - 14.0 * rms).max(0.0);
 
     JitterStats {
         peak_to_peak,
         rms,
         deterministic: dj,
     }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct CrossingPhaseStats {
+    peak_to_peak_ui: f64,
+    rms_ui: f64,
+    count: usize,
+}
+
+fn crossing_phase_stats(phases_ui: &[f64]) -> CrossingPhaseStats {
+    let mut phases: Vec<f64> = phases_ui
+        .iter()
+        .copied()
+        .filter(|v| v.is_finite())
+        .map(|v| v.rem_euclid(1.0))
+        .collect();
+    if phases.len() < 2 {
+        return CrossingPhaseStats {
+            count: phases.len(),
+            ..CrossingPhaseStats::default()
+        };
+    }
+    phases.sort_by(|a, b| a.total_cmp(b));
+    let unwrapped = unwrap_circular_phases(&phases);
+    if unwrapped.len() < 2 {
+        return CrossingPhaseStats {
+            count: unwrapped.len(),
+            ..CrossingPhaseStats::default()
+        };
+    }
+
+    let min = unwrapped[0];
+    let max = *unwrapped.last().unwrap_or(&min);
+    let peak_to_peak_ui = (max - min).max(0.0);
+    let mean = unwrapped.iter().sum::<f64>() / unwrapped.len() as f64;
+    let variance =
+        unwrapped.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / unwrapped.len() as f64;
+    CrossingPhaseStats {
+        peak_to_peak_ui,
+        rms_ui: variance.sqrt(),
+        count: unwrapped.len(),
+    }
+}
+
+fn unwrap_circular_phases(sorted_phases: &[f64]) -> Vec<f64> {
+    if sorted_phases.len() < 2 {
+        return sorted_phases.to_vec();
+    }
+
+    let mut max_gap = f64::MIN;
+    let mut cut_after = 0usize;
+    for idx in 0..sorted_phases.len() {
+        let next_idx = (idx + 1) % sorted_phases.len();
+        let current = sorted_phases[idx];
+        let next = if next_idx == 0 {
+            sorted_phases[next_idx] + 1.0
+        } else {
+            sorted_phases[next_idx]
+        };
+        let gap = next - current;
+        if gap > max_gap {
+            max_gap = gap;
+            cut_after = idx;
+        }
+    }
+
+    let start = (cut_after + 1) % sorted_phases.len();
+    let mut out = Vec::with_capacity(sorted_phases.len());
+    for i in 0..sorted_phases.len() {
+        let idx = (start + i) % sorted_phases.len();
+        let mut value = sorted_phases[idx];
+        if idx < start {
+            value += 1.0;
+        }
+        out.push(value);
+    }
+    out
 }
 
 fn calculate_edge_times(data: &EyeData) -> EdgeTimes {
@@ -737,6 +821,24 @@ mod tests {
         let pos = erfc_approx(1.0);
         let neg = erfc_approx(-1.0);
         assert!(approx_eq_rel(neg, 2.0 - pos, 0.01));
+    }
+
+    #[test]
+    fn test_unwrap_circular_phases_handles_wraparound_cluster() {
+        let wrapped: Vec<f64> = vec![0.98, 0.99, 0.01, 0.02];
+        let mut sorted = wrapped.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let unwrapped = unwrap_circular_phases(&sorted);
+        let min = unwrapped.iter().copied().fold(f64::MAX, f64::min);
+        let max = unwrapped.iter().copied().fold(f64::MIN, f64::max);
+        assert!((max - min) < 0.05);
+    }
+
+    #[test]
+    fn test_crossing_phase_stats_returns_small_pp_for_wrapped_cluster() {
+        let stats = crossing_phase_stats(&[0.99, 0.01, 0.00, 0.98]);
+        assert_eq!(stats.count, 4);
+        assert!(stats.peak_to_peak_ui < 0.05);
     }
 
     // =========================================================================
