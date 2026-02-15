@@ -6,6 +6,10 @@
 use super::data::EyeData;
 use super::measurements::EyeMeasurements;
 
+const EYE_VIEW_TIME_DIVISIONS: f64 = 10.0;
+const EYE_VIEW_VOLTAGE_DIVISIONS: f64 = 8.0;
+const EYE_MAX_MARKERS: usize = 16;
+
 // =============================================================================
 // Display Mode
 // =============================================================================
@@ -146,6 +150,149 @@ impl MaskPolygon {
 }
 
 // =============================================================================
+// Cursor / View State
+// =============================================================================
+
+/// Cursor mode for eye viewer measurements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EyeCursorMode {
+    /// No cursors active.
+    #[default]
+    None,
+    /// Single cursor active.
+    Single,
+    /// Two cursors active (delta mode).
+    Delta,
+}
+
+/// Cursor state for eye viewer measurements.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct EyeCursorState {
+    /// Current cursor mode.
+    pub mode: EyeCursorMode,
+    /// Cursor 1 time in seconds.
+    pub cursor1_time_s: Option<f64>,
+    /// Cursor 2 time in seconds.
+    pub cursor2_time_s: Option<f64>,
+}
+
+impl EyeCursorState {
+    /// Place cursor in waveform-style sequential behavior.
+    pub fn place(&mut self, time_s: f64) {
+        if !time_s.is_finite() {
+            return;
+        }
+        match self.mode {
+            EyeCursorMode::None => {
+                self.cursor1_time_s = Some(time_s);
+                self.mode = EyeCursorMode::Single;
+            }
+            EyeCursorMode::Single => {
+                self.cursor2_time_s = Some(time_s);
+                self.mode = EyeCursorMode::Delta;
+            }
+            EyeCursorMode::Delta => {
+                self.cursor2_time_s = Some(time_s);
+            }
+        }
+    }
+
+    /// Clear both cursors.
+    pub fn clear(&mut self) {
+        self.mode = EyeCursorMode::None;
+        self.cursor1_time_s = None;
+        self.cursor2_time_s = None;
+    }
+
+    /// Delta time between two active cursors.
+    pub fn delta_time(&self) -> Option<f64> {
+        match (self.cursor1_time_s, self.cursor2_time_s) {
+            (Some(a), Some(b)) => Some((b - a).abs()),
+            _ => None,
+        }
+    }
+}
+
+/// Active eye-plot view range (time and voltage).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EyeViewRange {
+    /// Visible time minimum in seconds.
+    pub time_min_s: f64,
+    /// Visible time maximum in seconds.
+    pub time_max_s: f64,
+    /// Visible voltage minimum.
+    pub voltage_min: f64,
+    /// Visible voltage maximum.
+    pub voltage_max: f64,
+}
+
+impl Default for EyeViewRange {
+    fn default() -> Self {
+        Self {
+            time_min_s: 0.0,
+            time_max_s: 1e-9,
+            voltage_min: -0.5,
+            voltage_max: 0.5,
+        }
+    }
+}
+
+impl EyeViewRange {
+    /// Time span in seconds.
+    pub fn time_span(self) -> f64 {
+        self.time_max_s - self.time_min_s
+    }
+
+    /// Voltage span.
+    pub fn voltage_span(self) -> f64 {
+        self.voltage_max - self.voltage_min
+    }
+
+    /// Enforce finite non-degenerate range.
+    pub fn sanitize(&mut self) {
+        if !self.time_min_s.is_finite()
+            || !self.time_max_s.is_finite()
+            || self.time_max_s <= self.time_min_s
+        {
+            self.time_min_s = 0.0;
+            self.time_max_s = 1e-9;
+        }
+        if !self.voltage_min.is_finite()
+            || !self.voltage_max.is_finite()
+            || self.voltage_max <= self.voltage_min
+        {
+            self.voltage_min = -0.5;
+            self.voltage_max = 0.5;
+        }
+    }
+}
+
+/// Cache key for persistence rendering.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EyePersistenceCacheKey {
+    pub width: usize,
+    pub height: usize,
+    pub trace_count: usize,
+    pub total_points: usize,
+    pub ui_count: u32,
+    pub time_min_s: f64,
+    pub time_max_s: f64,
+    pub voltage_min: f64,
+    pub voltage_max: f64,
+    pub decay_quantized: u16,
+}
+
+/// Cached persistence grid.
+#[derive(Debug, Clone)]
+pub struct EyePersistenceCache {
+    pub key: EyePersistenceCacheKey,
+    pub width: usize,
+    pub height: usize,
+    pub nonzero_bins: Vec<(usize, usize, u32)>,
+    pub max_count: u32,
+}
+
+// =============================================================================
 // Eye Diagram State
 // =============================================================================
 
@@ -178,6 +325,14 @@ pub struct EyeDiagramState {
     pub v_scale: f64,
     /// Number of UI to display
     pub ui_count: u32,
+    /// Interactive view range for time/voltage axes.
+    pub view: EyeViewRange,
+    /// Eye measurement cursors.
+    pub cursors: EyeCursorState,
+    /// User markers on the eye time axis.
+    pub markers: Vec<f64>,
+    /// Cached persistence grid for current view/data signature.
+    pub persistence_cache: Option<EyePersistenceCache>,
     /// Optional user-resized measurements pane width in pixels. `None` means auto-fit.
     pub measurements_pane_width: Option<f32>,
     /// Runtime auto-fit width hint captured from rendered content.
@@ -200,6 +355,10 @@ impl Default for EyeDiagramState {
             h_scale: 0.5,
             v_scale: 0.2,
             ui_count: 2,
+            view: EyeViewRange::default(),
+            cursors: EyeCursorState::default(),
+            markers: Vec::new(),
+            persistence_cache: None,
             measurements_pane_width: None,
             measurements_pane_auto_width_hint: 0.0,
         }
@@ -221,6 +380,10 @@ impl EyeDiagramState {
                 self.selected_trace = None;
             }
         }
+        self.cursors.clear();
+        self.clear_markers();
+        self.reset_view_to_data();
+        self.invalidate_persistence_cache();
         self.recalculate_measurements();
         if self.show_mask {
             self.mask.enabled = true;
@@ -278,7 +441,10 @@ impl EyeDiagramState {
 
     /// Set display mode
     pub fn set_mode(&mut self, mode: EyeDisplayMode) {
-        self.mode = mode;
+        if self.mode != mode {
+            self.mode = mode;
+            self.invalidate_persistence_cache();
+        }
     }
 
     /// Toggle mask display
@@ -303,6 +469,199 @@ impl EyeDiagramState {
     /// Get number of traces
     pub fn trace_count(&self) -> usize {
         self.data.trace_count()
+    }
+
+    /// Full eye time span in seconds represented by loaded data.
+    pub fn full_time_span_seconds(&self) -> f64 {
+        self.ui_count.max(1) as f64 * self.data.bit_period.max(1e-18)
+    }
+
+    /// Full voltage bounds inferred from loaded data.
+    pub fn full_voltage_bounds(&self) -> (f64, f64) {
+        let swing = if self.data.swing.is_finite() && self.data.swing > 0.0 {
+            self.data.swing
+        } else {
+            (self.data.v_high - self.data.v_low).abs().max(1e-3)
+        };
+        let half = swing * 0.5;
+        (self.data.v_cross - half, self.data.v_cross + half)
+    }
+
+    /// Reset current view to full data range.
+    pub fn reset_view_to_data(&mut self) {
+        let time_span = self.full_time_span_seconds().max(1e-18);
+        let (v_min, v_max) = self.full_voltage_bounds();
+        self.view = EyeViewRange {
+            time_min_s: 0.0,
+            time_max_s: time_span,
+            voltage_min: v_min,
+            voltage_max: v_max,
+        };
+        self.sync_scales_from_view();
+    }
+
+    /// Clamp interactive view to full data bounds.
+    pub fn clamp_view_to_data(&mut self) {
+        let full_time = self.full_time_span_seconds().max(1e-18);
+        let (full_v_min, full_v_max) = self.full_voltage_bounds();
+
+        self.view.sanitize();
+
+        let t_span = self.view.time_span().clamp(1e-18, full_time);
+        if self.view.time_min_s < 0.0 {
+            self.view.time_min_s = 0.0;
+        }
+        if self.view.time_max_s > full_time {
+            self.view.time_max_s = full_time;
+        }
+        if self.view.time_span() != t_span {
+            self.view.time_max_s = (self.view.time_min_s + t_span).min(full_time);
+        }
+        if self.view.time_span() < t_span {
+            self.view.time_min_s = (self.view.time_max_s - t_span).max(0.0);
+        }
+
+        let full_v_span = (full_v_max - full_v_min).max(1e-9);
+        let v_span = self.view.voltage_span().clamp(1e-9, full_v_span);
+        if self.view.voltage_min < full_v_min {
+            self.view.voltage_min = full_v_min;
+        }
+        if self.view.voltage_max > full_v_max {
+            self.view.voltage_max = full_v_max;
+        }
+        if self.view.voltage_span() != v_span {
+            self.view.voltage_max = (self.view.voltage_min + v_span).min(full_v_max);
+        }
+        if self.view.voltage_span() < v_span {
+            self.view.voltage_min = (self.view.voltage_max - v_span).max(full_v_min);
+        }
+
+        self.sync_scales_from_view();
+    }
+
+    /// Pan view by time and voltage deltas.
+    pub fn pan_view(&mut self, delta_time_s: f64, delta_voltage: f64) {
+        if !delta_time_s.is_finite() || !delta_voltage.is_finite() {
+            return;
+        }
+        self.view.time_min_s += delta_time_s;
+        self.view.time_max_s += delta_time_s;
+        self.view.voltage_min += delta_voltage;
+        self.view.voltage_max += delta_voltage;
+        self.clamp_view_to_data();
+    }
+
+    /// Zoom view around a time/voltage anchor.
+    pub fn zoom_view(&mut self, factor: f64, center_time_s: f64, center_voltage: f64) {
+        if !factor.is_finite() || factor <= 0.0 {
+            return;
+        }
+        let t_span = (self.view.time_span() * factor).max(1e-18);
+        let v_span = (self.view.voltage_span() * factor).max(1e-9);
+
+        let x_frac = if self.view.time_span() > 0.0 {
+            ((center_time_s - self.view.time_min_s) / self.view.time_span()).clamp(0.0, 1.0)
+        } else {
+            0.5
+        };
+        let y_frac = if self.view.voltage_span() > 0.0 {
+            ((center_voltage - self.view.voltage_min) / self.view.voltage_span()).clamp(0.0, 1.0)
+        } else {
+            0.5
+        };
+
+        self.view.time_min_s = center_time_s - x_frac * t_span;
+        self.view.time_max_s = self.view.time_min_s + t_span;
+        self.view.voltage_min = center_voltage - y_frac * v_span;
+        self.view.voltage_max = self.view.voltage_min + v_span;
+        self.clamp_view_to_data();
+    }
+
+    /// Add a marker at the given time coordinate.
+    pub fn add_marker(&mut self, time_s: f64) {
+        if !time_s.is_finite() {
+            return;
+        }
+        const MERGE_EPS: f64 = 1e-18;
+        if self
+            .markers
+            .iter()
+            .any(|m| (*m - time_s).abs() <= MERGE_EPS)
+        {
+            return;
+        }
+        self.markers.push(time_s);
+        self.markers.sort_by(|a, b| a.total_cmp(b));
+        if self.markers.len() > EYE_MAX_MARKERS {
+            self.markers.remove(0);
+        }
+    }
+
+    /// Remove marker nearest to target if within tolerance.
+    pub fn remove_nearest_marker(&mut self, time_s: f64, tolerance_s: f64) -> bool {
+        if !time_s.is_finite() || !tolerance_s.is_finite() || tolerance_s < 0.0 {
+            return false;
+        }
+        let Some((idx, dist)) = self
+            .markers
+            .iter()
+            .enumerate()
+            .map(|(idx, marker)| (idx, (*marker - time_s).abs()))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+        else {
+            return false;
+        };
+        if dist <= tolerance_s {
+            self.markers.remove(idx);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove marker at index.
+    pub fn remove_marker_at(&mut self, index: usize) -> bool {
+        if index >= self.markers.len() {
+            return false;
+        }
+        self.markers.remove(index);
+        true
+    }
+
+    /// Clear all markers.
+    pub fn clear_markers(&mut self) {
+        self.markers.clear();
+    }
+
+    /// Invalidate persistence render cache.
+    pub fn invalidate_persistence_cache(&mut self) {
+        self.persistence_cache = None;
+    }
+
+    /// Update axis scale display values from current view.
+    pub fn sync_scales_from_view(&mut self) {
+        self.h_scale = (self.view.time_span() / EYE_VIEW_TIME_DIVISIONS).max(1e-18);
+        self.v_scale = (self.view.voltage_span() / EYE_VIEW_VOLTAGE_DIVISIONS).max(1e-9);
+    }
+
+    /// Apply current scale controls around view center.
+    pub fn apply_scale_controls(&mut self) {
+        let center_t = (self.view.time_min_s + self.view.time_max_s) * 0.5;
+        let center_v = (self.view.voltage_min + self.view.voltage_max) * 0.5;
+        let full_time = self.full_time_span_seconds().max(1e-18);
+        let (full_v_min, full_v_max) = self.full_voltage_bounds();
+        let full_v_span = (full_v_max - full_v_min).max(1e-9);
+
+        let desired_t_span =
+            (self.h_scale.max(1e-18) * EYE_VIEW_TIME_DIVISIONS).clamp(1e-18, full_time);
+        let desired_v_span =
+            (self.v_scale.max(1e-9) * EYE_VIEW_VOLTAGE_DIVISIONS).clamp(1e-9, full_v_span);
+
+        self.view.time_min_s = center_t - desired_t_span * 0.5;
+        self.view.time_max_s = center_t + desired_t_span * 0.5;
+        self.view.voltage_min = center_v - desired_v_span * 0.5;
+        self.view.voltage_max = center_v + desired_v_span * 0.5;
+        self.clamp_view_to_data();
     }
 }
 
@@ -538,6 +897,8 @@ mod tests {
         assert_eq!(state.mode, EyeDisplayMode::Overlay);
         assert!(state.show_grid);
         assert!(state.show_measurements);
+        assert!(state.markers.is_empty());
+        assert_eq!(state.cursors.mode, EyeCursorMode::None);
     }
 
     #[test]
@@ -616,6 +977,57 @@ mod tests {
     }
 
     #[test]
+    fn test_state_load_data_resets_interaction_state() {
+        let mut state = EyeDiagramState::new();
+        state.cursors.place(1e-9);
+        state.add_marker(1e-9);
+        assert!(!state.markers.is_empty());
+        assert!(state.cursors.cursor1_time_s.is_some());
+        let mut data = EyeData::new(100e-12, 2);
+        data.add_trace(super::super::data::EyeTrace::new(
+            vec![0.0, 0.5, 1.0],
+            vec![-0.1, 0.1, -0.1],
+        ));
+        state.load_data(data);
+        assert!(state.markers.is_empty());
+        assert_eq!(state.cursors.mode, EyeCursorMode::None);
+        assert!(state.view.time_max_s > state.view.time_min_s);
+    }
+
+    #[test]
+    fn test_state_marker_management_behaves_like_waveform() {
+        let mut state = EyeDiagramState::new();
+        state.add_marker(2.0e-9);
+        state.add_marker(1.0e-9);
+        state.add_marker(2.0e-9); // duplicate ignored
+        state.add_marker(f64::NAN); // invalid ignored
+        assert_eq!(state.markers, vec![1.0e-9, 2.0e-9]);
+        assert!(state.remove_nearest_marker(2.01e-9, 20e-12));
+        assert_eq!(state.markers, vec![1.0e-9]);
+        assert!(!state.remove_nearest_marker(2.01e-9, 1e-12));
+        state.clear_markers();
+        assert!(state.markers.is_empty());
+    }
+
+    #[test]
+    fn test_state_zoom_and_pan_clamped_to_data_bounds() {
+        let mut state = EyeDiagramState::new();
+        let mut data = EyeData::new(100e-12, 2);
+        data.add_trace(super::super::data::EyeTrace::new(
+            vec![0.0, 0.5, 1.0, 1.5, 2.0],
+            vec![-0.2, 0.2, -0.2, 0.2, -0.2],
+        ));
+        state.load_data(data);
+        let full_time = state.full_time_span_seconds();
+        state.pan_view(-full_time, 0.0);
+        assert!(state.view.time_min_s >= 0.0);
+        state.zoom_view(0.01, 0.0, 0.0);
+        assert!(state.view.time_span() > 0.0);
+        assert!(state.h_scale > 0.0);
+        assert!(state.v_scale > 0.0);
+    }
+
+    #[test]
     fn test_state_mask_result_disabled() {
         let state = EyeDiagramState::new();
         assert!(state.mask_result_string().contains("disabled"));
@@ -637,6 +1049,19 @@ mod tests {
         state.mask.total_samples = 1000;
         state.mask.violation_count = 10;
         assert!(state.mask_result_string().contains("FAIL"));
+    }
+
+    #[test]
+    fn test_cursor_state_place_and_delta() {
+        let mut cursors = EyeCursorState::default();
+        cursors.place(1.0e-9);
+        assert_eq!(cursors.mode, EyeCursorMode::Single);
+        cursors.place(1.4e-9);
+        assert_eq!(cursors.mode, EyeCursorMode::Delta);
+        let delta = cursors.delta_time().expect("delta");
+        assert!((delta - 0.4e-9).abs() < 1e-18);
+        cursors.clear();
+        assert_eq!(cursors.mode, EyeCursorMode::None);
     }
 
     // =========================================================================

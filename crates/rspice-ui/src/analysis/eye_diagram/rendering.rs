@@ -10,7 +10,9 @@ use egui::{
 #[cfg(test)]
 use super::data::EyeDataBuilder;
 use super::data::EyeTrace;
-use super::state::{ColorMap, EyeDiagramState, EyeDisplayMode};
+use super::state::{
+    ColorMap, EyeDiagramState, EyeDisplayMode, EyePersistenceCache, EyePersistenceCacheKey,
+};
 use crate::common::app::AppState;
 use crate::common::viewer_style::{viewer_chart_bg_color, viewer_header_bg_color};
 
@@ -60,6 +62,28 @@ fn panel_border_color() -> Color32 {
 
 fn highlight_color() -> Color32 {
     Color32::from_rgb(100, 200, 255)
+}
+
+fn cursor1_color() -> Color32 {
+    Color32::from_rgb(255, 235, 59)
+}
+
+fn cursor2_color() -> Color32 {
+    Color32::from_rgb(76, 175, 80)
+}
+
+fn marker_color(index: usize) -> Color32 {
+    const PALETTE: [Color32; 8] = [
+        Color32::from_rgb(59, 130, 246),
+        Color32::from_rgb(16, 185, 129),
+        Color32::from_rgb(249, 115, 22),
+        Color32::from_rgb(139, 92, 246),
+        Color32::from_rgb(236, 72, 153),
+        Color32::from_rgb(234, 179, 8),
+        Color32::from_rgb(20, 184, 166),
+        Color32::from_rgb(239, 68, 68),
+    ];
+    PALETTE[index % PALETTE.len()]
 }
 
 // =============================================================================
@@ -122,7 +146,8 @@ pub fn render_eye_diagram(ui: &mut Ui, state: &EyeDiagramState) {
         measurements_width,
     );
 
-    render_chart_core(ui, &layout, state);
+    let mut state_copy = state.clone();
+    render_chart_core(ui, &layout, &mut state_copy);
 }
 
 fn measure_text_width(painter: &Painter, text: &str, font: FontId, color: Color32) -> f32 {
@@ -420,6 +445,50 @@ fn render_header(ui: &mut Ui, layout: &EyeLayout, state: &mut EyeDiagramState) -
 
             ui.separator();
 
+            if ui.small_button("Fit").clicked() {
+                state.reset_view_to_data();
+                state.invalidate_persistence_cache();
+            }
+
+            let mut h_scale = state.h_scale;
+            let h_resp = ui.add(
+                egui::DragValue::new(&mut h_scale)
+                    .speed((state.h_scale.abs() * 0.05).max(1e-18))
+                    .range(1e-18..=1e9)
+                    .suffix(" s/div"),
+            );
+            if h_resp.changed() {
+                state.h_scale = h_scale.max(1e-18);
+                state.apply_scale_controls();
+                state.invalidate_persistence_cache();
+            }
+
+            let mut v_scale = state.v_scale;
+            let v_resp = ui.add(
+                egui::DragValue::new(&mut v_scale)
+                    .speed((state.v_scale.abs() * 0.05).max(1e-9))
+                    .range(1e-9..=1e9)
+                    .suffix(" V/div"),
+            );
+            if v_resp.changed() {
+                state.v_scale = v_scale.max(1e-9);
+                state.apply_scale_controls();
+                state.invalidate_persistence_cache();
+            }
+
+            let mut decay = state.persistence_decay;
+            let decay_resp = ui.add(
+                egui::Slider::new(&mut decay, 0.50..=0.999)
+                    .text("Decay")
+                    .clamping(egui::SliderClamping::Always),
+            );
+            if decay_resp.changed() {
+                state.persistence_decay = decay;
+                state.invalidate_persistence_cache();
+            }
+
+            ui.separator();
+
             if ui
                 .small_button(if state.show_measurements {
                     "Meas [on]"
@@ -460,10 +529,10 @@ fn render_header(ui: &mut Ui, layout: &EyeLayout, state: &mut EyeDiagramState) -
 // Chart Rendering
 // =============================================================================
 
-fn render_chart_area(ui: &mut Ui, layout: &EyeLayout, state: &EyeDiagramState) {
+fn render_chart_area(ui: &mut Ui, layout: &EyeLayout, state: &mut EyeDiagramState) {
+    let response = ui.allocate_rect(layout.chart, Sense::click_and_drag());
     render_chart_core(ui, layout, state);
-
-    let _response = ui.allocate_rect(layout.chart, Sense::click());
+    handle_eye_chart_interactions(ui, response, eye_plot_rect(layout.chart), state);
 }
 
 fn handle_measurements_splitter(ui: &mut Ui, layout: &EyeLayout, state: &mut EyeDiagramState) {
@@ -521,7 +590,90 @@ fn next_measurements_pane_width(
     clamp_measurements_pane_width(total, base - drag_delta_x)
 }
 
-fn render_chart_core(ui: &mut Ui, layout: &EyeLayout, state: &EyeDiagramState) {
+fn handle_eye_chart_interactions(
+    ui: &Ui,
+    response: egui::Response,
+    plot_rect: Rect,
+    state: &mut EyeDiagramState,
+) {
+    if response.double_clicked() {
+        state.reset_view_to_data();
+        state.cursors.clear();
+        state.clear_markers();
+        state.invalidate_persistence_cache();
+        return;
+    }
+
+    if response.clicked() {
+        if let Some(pos) = response.interact_pointer_pos() {
+            if plot_rect.contains(pos) {
+                let modifiers = ui.input(|i| i.modifiers);
+                let time_s = x_to_eye_time(pos.x, plot_rect, state);
+                if modifiers.alt {
+                    state.add_marker(time_s);
+                } else {
+                    state.cursors.place(time_s);
+                }
+            }
+        }
+    }
+
+    if response.secondary_clicked() {
+        if let Some(pos) = response.interact_pointer_pos() {
+            if plot_rect.contains(pos) {
+                let modifiers = ui.input(|i| i.modifiers);
+                if modifiers.alt {
+                    let time_s = x_to_eye_time(pos.x, plot_rect, state);
+                    let tolerance = eye_marker_removal_tolerance_s(state, plot_rect, pos.x);
+                    state.remove_nearest_marker(time_s, tolerance);
+                }
+            }
+        }
+    }
+
+    if response.hovered() {
+        let scroll_y = ui.input(|i| i.raw_scroll_delta.y);
+        if scroll_y.abs() > f32::EPSILON {
+            let zoom = (1.0f64 - (scroll_y as f64) * 0.0015).clamp(0.5, 1.5);
+            let pointer = response.hover_pos().unwrap_or(plot_rect.center());
+            let center_time_s = x_to_eye_time(pointer.x, plot_rect, state);
+            let center_voltage = y_to_eye_voltage(pointer.y, plot_rect, state);
+            state.zoom_view(zoom, center_time_s, center_voltage);
+            state.invalidate_persistence_cache();
+        }
+    }
+
+    if response.dragged_by(egui::PointerButton::Primary) {
+        if !response
+            .hover_pos()
+            .map(|pos| plot_rect.contains(pos))
+            .unwrap_or(false)
+        {
+            return;
+        }
+        if ui.input(|i| i.modifiers.alt) {
+            return;
+        }
+        let delta = ui.input(|i| i.pointer.delta());
+        if delta.length_sq() > 0.0 {
+            let dt = -(delta.x as f64 / plot_rect.width() as f64) * state.view.time_span();
+            let dv = (delta.y as f64 / plot_rect.height() as f64) * state.view.voltage_span();
+            state.pan_view(dt, dv);
+            state.invalidate_persistence_cache();
+        }
+    }
+}
+
+fn eye_marker_removal_tolerance_s(state: &EyeDiagramState, plot_rect: Rect, pointer_x: f32) -> f64 {
+    let x_radius = (plot_rect.width() * 0.01).max(4.0);
+    let x0 = (pointer_x - x_radius).clamp(plot_rect.min.x, plot_rect.max.x);
+    let x1 = (pointer_x + x_radius).clamp(plot_rect.min.x, plot_rect.max.x);
+    (x_to_eye_time(x1, plot_rect, state) - x_to_eye_time(x0, plot_rect, state))
+        .abs()
+        .max(1e-18)
+}
+
+fn render_chart_core(ui: &mut Ui, layout: &EyeLayout, state: &mut EyeDiagramState) {
     let painter = ui.painter().clone();
     let chart_rect = layout.chart;
     let plot_rect = eye_plot_rect(chart_rect);
@@ -548,6 +700,8 @@ fn render_chart_core(ui: &mut Ui, layout: &EyeLayout, state: &EyeDiagramState) {
         EyeDisplayMode::Persistence => render_traces_persistence(&painter, plot_rect, state),
         EyeDisplayMode::SingleTrace => render_single_trace(&painter, plot_rect, state),
     }
+
+    render_eye_cursors_and_markers(&painter, plot_rect, state);
 
     render_axes(
         &painter,
@@ -701,15 +855,15 @@ fn render_center_lines(painter: &Painter, rect: Rect, _state: &EyeDiagramState) 
 }
 
 fn eye_time_ticks(state: &EyeDiagramState, target_major_ticks: usize) -> AxisTicks {
-    let max_time = eye_time_range_seconds(state);
-    if !max_time.is_finite() || max_time <= 0.0 {
+    let (time_min, time_max) = eye_view_time_bounds(state);
+    if !time_min.is_finite() || !time_max.is_finite() || time_max <= time_min {
         return AxisTicks {
             ticks: Vec::new(),
             unit: "s".to_string(),
         };
     }
 
-    let tick_spec = crate::waveform::axis::calculate_ticks(0.0, max_time, target_major_ticks);
+    let tick_spec = crate::waveform::axis::calculate_ticks(time_min, time_max, target_major_ticks);
     let unit = crate::waveform::axis::format_axis_unit("s", tick_spec.prefix);
     let mut ticks = Vec::with_capacity(
         tick_spec
@@ -743,7 +897,7 @@ fn eye_time_ticks(state: &EyeDiagramState, target_major_ticks: usize) -> AxisTic
 }
 
 fn eye_voltage_ticks(state: &EyeDiagramState, target_major_ticks: usize) -> AxisTicks {
-    let (v_min, v_max) = eye_voltage_bounds(state);
+    let (v_min, v_max) = eye_view_voltage_bounds(state);
     if !v_min.is_finite() || !v_max.is_finite() || v_max <= v_min {
         return AxisTicks {
             ticks: Vec::new(),
@@ -783,40 +937,58 @@ fn eye_voltage_ticks(state: &EyeDiagramState, target_major_ticks: usize) -> Axis
     AxisTicks { ticks, unit }
 }
 
-fn eye_time_range_seconds(state: &EyeDiagramState) -> f64 {
-    state.ui_count.max(1) as f64 * state.data.bit_period.max(1e-18)
+fn eye_full_time_range_seconds(state: &EyeDiagramState) -> f64 {
+    state.full_time_span_seconds()
 }
 
-fn eye_voltage_bounds(state: &EyeDiagramState) -> (f64, f64) {
-    let swing = if state.data.swing.is_finite() && state.data.swing > 0.0 {
-        state.data.swing
-    } else {
-        (state.data.v_high - state.data.v_low).abs().max(1.0)
-    };
-    let half_swing = swing * 0.5;
-    (
-        state.data.v_cross - half_swing,
-        state.data.v_cross + half_swing,
-    )
+fn eye_view_time_bounds(state: &EyeDiagramState) -> (f64, f64) {
+    (state.view.time_min_s, state.view.time_max_s)
+}
+
+fn eye_view_voltage_bounds(state: &EyeDiagramState) -> (f64, f64) {
+    (state.view.voltage_min, state.view.voltage_max)
+}
+
+fn trace_time_to_seconds(state: &EyeDiagramState, time_ui: f64) -> f64 {
+    time_ui * state.data.bit_period.max(1e-18)
 }
 
 fn eye_time_to_x(time_seconds: f64, plot_rect: Rect, state: &EyeDiagramState) -> f32 {
-    let range = eye_time_range_seconds(state);
+    let (min, max) = eye_view_time_bounds(state);
+    let range = max - min;
     if !range.is_finite() || range <= 0.0 {
         return plot_rect.center().x;
     }
-    let t = (time_seconds / range).clamp(0.0, 1.0);
+    let t = ((time_seconds - min) / range).clamp(0.0, 1.0);
     plot_rect.min.x + (t as f32) * plot_rect.width()
 }
 
 fn eye_voltage_to_y(voltage: f64, plot_rect: Rect, state: &EyeDiagramState) -> f32 {
-    let (v_min, v_max) = eye_voltage_bounds(state);
+    let (v_min, v_max) = eye_view_voltage_bounds(state);
     let range = v_max - v_min;
     if !range.is_finite() || range <= 0.0 {
         return plot_rect.center().y;
     }
     let t = ((voltage - v_min) / range).clamp(0.0, 1.0);
     plot_rect.max.y - (t as f32) * plot_rect.height()
+}
+
+fn x_to_eye_time(x: f32, plot_rect: Rect, state: &EyeDiagramState) -> f64 {
+    if plot_rect.width() <= 0.0 {
+        return eye_view_time_bounds(state).0;
+    }
+    let t = ((x - plot_rect.min.x) / plot_rect.width()).clamp(0.0, 1.0) as f64;
+    let (min, max) = eye_view_time_bounds(state);
+    min + t * (max - min)
+}
+
+fn y_to_eye_voltage(y: f32, plot_rect: Rect, state: &EyeDiagramState) -> f64 {
+    if plot_rect.height() <= 0.0 {
+        return eye_view_voltage_bounds(state).0;
+    }
+    let t = ((y - plot_rect.min.y) / plot_rect.height()).clamp(0.0, 1.0) as f64;
+    let (min, max) = eye_view_voltage_bounds(state);
+    max - t * (max - min)
 }
 
 fn render_mask(painter: &Painter, rect: Rect, state: &EyeDiagramState) {
@@ -832,7 +1004,7 @@ fn render_mask(painter: &Painter, rect: Rect, state: &EyeDiagramState) {
         .points
         .iter()
         .map(|&(t, v)| {
-            let time_seconds = t * eye_time_range_seconds(state);
+            let time_seconds = t * eye_full_time_range_seconds(state);
             let voltage = state.data.v_cross + v * state.data.swing;
             let x = eye_time_to_x(time_seconds, rect, state);
             let y = eye_voltage_to_y(voltage, rect, state);
@@ -883,8 +1055,10 @@ fn render_traces_overlay(painter: &Painter, rect: Rect, state: &EyeDiagramState)
     }
 }
 
-fn render_traces_persistence(painter: &Painter, rect: Rect, state: &EyeDiagramState) {
-    let Some(grid) = build_persistence_grid(rect, state) else {
+fn render_traces_persistence(painter: &Painter, rect: Rect, state: &mut EyeDiagramState) {
+    let color_map = state.color_map;
+    let intensity_exponent = persistence_intensity_exponent(state.persistence_decay);
+    let Some(grid) = ensure_persistence_grid(rect, state) else {
         return;
     };
     let cell_width = rect.width() / grid.width as f32;
@@ -898,8 +1072,9 @@ fn render_traces_persistence(painter: &Painter, rect: Rect, state: &EyeDiagramSt
     }
 
     for (x, y, count) in &grid.nonzero_bins {
-        let intensity = (*count as f32 / grid.max_count as f32).sqrt();
-        let (r, g, b) = state.color_map.map(intensity);
+        let base = *count as f32 / grid.max_count.max(1) as f32;
+        let intensity = base.powf(intensity_exponent).clamp(0.0, 1.0);
+        let (r, g, b) = color_map.map(intensity);
         let alpha = (32.0 + intensity * 223.0).clamp(0.0, 255.0) as u8;
         let color = Color32::from_rgba_unmultiplied(r, g, b, alpha);
         let min = Pos2::new(
@@ -922,25 +1097,85 @@ struct PersistenceGrid {
     max_count: u32,
 }
 
-fn build_persistence_grid(plot_rect: Rect, state: &EyeDiagramState) -> Option<PersistenceGrid> {
-    let data = &state.data;
-    if data.traces.is_empty() {
-        return None;
-    }
+fn persistence_intensity_exponent(decay: f32) -> f32 {
+    // Higher decay => longer persistence tail => brighter low-density bins.
+    let clamped = decay.clamp(0.50, 0.999);
+    0.35 + (1.0 - clamped) * 3.3
+}
 
+fn ensure_persistence_grid<'a>(
+    plot_rect: Rect,
+    state: &'a mut EyeDiagramState,
+) -> Option<&'a EyePersistenceCache> {
+    let key = persistence_cache_key(plot_rect, state)?;
+    let cache_hit = state
+        .persistence_cache
+        .as_ref()
+        .map(|cache| cache.key == key)
+        .unwrap_or(false);
+    if !cache_hit {
+        let rebuilt = build_persistence_cache(state, key)?;
+        state.persistence_cache = Some(rebuilt);
+    }
+    state.persistence_cache.as_ref()
+}
+
+fn persistence_cache_key(
+    plot_rect: Rect,
+    state: &EyeDiagramState,
+) -> Option<EyePersistenceCacheKey> {
     let width = (plot_rect.width().round() as usize).clamp(96, 480);
     let height = (plot_rect.height().round() as usize).clamp(72, 320);
     if width == 0 || height == 0 {
         return None;
     }
 
+    Some(EyePersistenceCacheKey {
+        width,
+        height,
+        trace_count: state.data.traces.len(),
+        total_points: state.data.total_points(),
+        ui_count: state.ui_count.max(1),
+        time_min_s: state.view.time_min_s,
+        time_max_s: state.view.time_max_s,
+        voltage_min: state.view.voltage_min,
+        voltage_max: state.view.voltage_max,
+        decay_quantized: (state.persistence_decay.clamp(0.0, 1.0) * 1000.0).round() as u16,
+    })
+}
+
+fn build_persistence_cache(
+    state: &EyeDiagramState,
+    key: EyePersistenceCacheKey,
+) -> Option<EyePersistenceCache> {
+    let grid = build_persistence_grid(state, key.width, key.height)?;
+    Some(EyePersistenceCache {
+        key,
+        width: grid.width,
+        height: grid.height,
+        nonzero_bins: grid.nonzero_bins,
+        max_count: grid.max_count,
+    })
+}
+
+fn build_persistence_grid(
+    state: &EyeDiagramState,
+    width: usize,
+    height: usize,
+) -> Option<PersistenceGrid> {
+    let data = &state.data;
+    if data.traces.is_empty() {
+        return None;
+    }
+
     let mut counts = vec![0u32; width * height];
     let mut max_count = 0u32;
-    let time_range = eye_time_range_seconds(state);
+    let (time_min, time_max) = eye_view_time_bounds(state);
+    let time_range = (time_max - time_min).max(1e-18);
     if !time_range.is_finite() || time_range <= 0.0 {
         return None;
     }
-    let (v_min, v_max) = eye_voltage_bounds(state);
+    let (v_min, v_max) = eye_view_voltage_bounds(state);
     let v_range = (v_max - v_min).max(1e-18);
 
     for trace in &data.traces {
@@ -952,8 +1187,8 @@ fn build_persistence_grid(plot_rect: Rect, state: &EyeDiagramState) -> Option<Pe
                 continue;
             }
 
-            let time_seconds = (t / state.ui_count.max(1) as f64) * time_range;
-            let x_norm = (time_seconds / time_range).clamp(0.0, 1.0);
+            let time_seconds = trace_time_to_seconds(state, t);
+            let x_norm = ((time_seconds - time_min) / time_range).clamp(0.0, 1.0);
             let y_norm = ((v_max - v) / v_range).clamp(0.0, 1.0);
 
             let xi = ((x_norm * (width as f64 - 1.0)).round() as usize).min(width - 1);
@@ -1022,7 +1257,7 @@ fn render_single_eye_trace(
             continue;
         }
 
-        let time_seconds = (t / state.ui_count.max(1) as f64) * eye_time_range_seconds(state);
+        let time_seconds = trace_time_to_seconds(state, t);
         let point = Pos2::new(
             eye_time_to_x(time_seconds, rect, state),
             eye_voltage_to_y(v, rect, state),
@@ -1088,11 +1323,99 @@ fn clip_line_segment_to_rect(start: Pos2, end: Pos2, rect: Rect) -> Option<[Pos2
     ])
 }
 
+fn render_eye_cursors_and_markers(painter: &Painter, plot_rect: Rect, state: &EyeDiagramState) {
+    let label_font = FontId::proportional(9.0);
+
+    if let Some(t) = state.cursors.cursor1_time_s {
+        let x = eye_time_to_x(t, plot_rect, state);
+        if x.is_finite() {
+            painter.line_segment(
+                [Pos2::new(x, plot_rect.min.y), Pos2::new(x, plot_rect.max.y)],
+                Stroke::new(1.4, cursor1_color()),
+            );
+            draw_eye_axis_label(
+                painter,
+                Pos2::new(x, plot_rect.min.y + 3.0),
+                format!("C1 {}", crate::waveform::axis::format_time(t)),
+                cursor1_color(),
+                &label_font,
+            );
+        }
+    }
+
+    if let Some(t) = state.cursors.cursor2_time_s {
+        let x = eye_time_to_x(t, plot_rect, state);
+        if x.is_finite() {
+            painter.line_segment(
+                [Pos2::new(x, plot_rect.min.y), Pos2::new(x, plot_rect.max.y)],
+                Stroke::new(1.4, cursor2_color()),
+            );
+            draw_eye_axis_label(
+                painter,
+                Pos2::new(x, plot_rect.min.y + 15.0),
+                format!("C2 {}", crate::waveform::axis::format_time(t)),
+                cursor2_color(),
+                &label_font,
+            );
+        }
+    }
+
+    for (idx, marker_t) in state.markers.iter().copied().enumerate() {
+        let x = eye_time_to_x(marker_t, plot_rect, state);
+        if !x.is_finite() {
+            continue;
+        }
+        let color = marker_color(idx);
+        painter.line_segment(
+            [Pos2::new(x, plot_rect.min.y), Pos2::new(x, plot_rect.max.y)],
+            Stroke::new(1.0, color),
+        );
+        draw_eye_axis_label(
+            painter,
+            Pos2::new(x, plot_rect.min.y + 27.0),
+            format!(
+                "M{} {}",
+                idx + 1,
+                crate::waveform::axis::format_time(marker_t)
+            ),
+            color,
+            &label_font,
+        );
+    }
+}
+
+fn draw_eye_axis_label(
+    painter: &Painter,
+    anchor: Pos2,
+    text: String,
+    color: Color32,
+    font: &FontId,
+) {
+    let galley = painter.layout_no_wrap(text, font.clone(), color);
+    let size = galley.size();
+    let rect = Rect::from_center_size(anchor, Vec2::new(size.x + 8.0, size.y + 4.0));
+    painter.rect_filled(
+        rect,
+        Rounding::same(3.0),
+        Color32::from_rgba_unmultiplied(20, 22, 28, 220),
+    );
+    painter.rect_stroke(
+        rect,
+        Rounding::same(3.0),
+        Stroke::new(1.0, color.gamma_multiply(0.8)),
+    );
+    painter.galley(
+        Pos2::new(rect.min.x + 4.0, rect.min.y + 2.0),
+        galley,
+        Color32::TRANSPARENT,
+    );
+}
+
 // =============================================================================
 // Measurements Panel
 // =============================================================================
 
-fn render_measurements_panel(ui: &mut Ui, layout: &EyeLayout, state: &EyeDiagramState) {
+fn render_measurements_panel(ui: &mut Ui, layout: &EyeLayout, state: &mut EyeDiagramState) {
     let Some(measurements_rect) = layout.measurements else {
         return;
     };
@@ -1177,6 +1500,11 @@ fn render_measurements_panel(ui: &mut Ui, layout: &EyeLayout, state: &EyeDiagram
                                 .color(color),
                         );
                     }
+
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+                    render_cursor_marker_manager(ui, state);
                 });
             });
     });
@@ -1208,6 +1536,77 @@ fn measurement_row(ui: &mut Ui, label: &str, value: &str) {
             );
         });
     });
+}
+
+fn render_cursor_marker_manager(ui: &mut Ui, state: &mut EyeDiagramState) {
+    ui.label(
+        egui::RichText::new("Cursors / Markers")
+            .size(11.0)
+            .color(text_color()),
+    );
+    ui.add_space(4.0);
+
+    let c1 = state
+        .cursors
+        .cursor1_time_s
+        .map(crate::waveform::axis::format_time)
+        .unwrap_or_else(|| "—".to_string());
+    let c2 = state
+        .cursors
+        .cursor2_time_s
+        .map(crate::waveform::axis::format_time)
+        .unwrap_or_else(|| "—".to_string());
+    measurement_row(ui, "C1", &c1);
+    measurement_row(ui, "C2", &c2);
+    if let Some(dt) = state.cursors.delta_time() {
+        measurement_row(ui, "ΔT", &crate::waveform::axis::format_time(dt));
+    } else {
+        measurement_row(ui, "ΔT", "—");
+    }
+
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        if ui.small_button("Clear Cursors").clicked() {
+            state.cursors.clear();
+        }
+        if ui.small_button("Clear Markers").clicked() {
+            state.clear_markers();
+        }
+    });
+
+    if state.markers.is_empty() {
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new("No markers")
+                .size(10.0)
+                .color(Color32::from_rgb(100, 105, 115)),
+        );
+        return;
+    }
+
+    ui.add_space(4.0);
+    let mut remove_idx: Option<usize> = None;
+    for (idx, marker) in state.markers.iter().copied().enumerate() {
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new(format!("M{}:", idx + 1))
+                    .size(10.0)
+                    .color(Color32::from_rgb(120, 125, 135)),
+            );
+            ui.label(
+                egui::RichText::new(crate::waveform::axis::format_time(marker))
+                    .size(11.0)
+                    .color(Color32::from_rgb(200, 205, 215)),
+            );
+            if ui.small_button("x").clicked() {
+                remove_idx = Some(idx);
+            }
+        });
+    }
+
+    if let Some(idx) = remove_idx {
+        state.remove_marker_at(idx);
+    }
 }
 
 // =============================================================================
@@ -1406,12 +1805,38 @@ mod tests {
         let mut state = EyeDiagramState::new();
         state.set_mode(EyeDisplayMode::Persistence);
         load_demo_data(&mut state);
-        let plot_rect = Rect::from_min_size(Pos2::new(0.0, 0.0), Vec2::new(400.0, 260.0));
-        let grid = build_persistence_grid(plot_rect, &state).expect("persistence grid");
+        let grid = build_persistence_grid(&state, 400, 260).expect("persistence grid");
         assert!(grid.width >= 96);
         assert!(grid.height >= 72);
         assert!(grid.max_count > 0);
         assert!(!grid.nonzero_bins.is_empty());
+    }
+
+    #[test]
+    fn test_persistence_cache_reuses_existing_grid_until_key_changes() {
+        let mut state = EyeDiagramState::new();
+        state.set_mode(EyeDisplayMode::Persistence);
+        load_demo_data(&mut state);
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(420.0, 280.0));
+
+        let first_ptr = {
+            let cache = ensure_persistence_grid(rect, &mut state).expect("cache");
+            cache.nonzero_bins.as_ptr()
+        };
+        let first_key = state.persistence_cache.as_ref().expect("cache").key;
+
+        let second_ptr = {
+            let cache = ensure_persistence_grid(rect, &mut state).expect("cache");
+            cache.nonzero_bins.as_ptr()
+        };
+        assert_eq!(first_ptr, second_ptr);
+
+        let center_t = (state.view.time_min_s + state.view.time_max_s) * 0.5;
+        let center_v = (state.view.voltage_min + state.view.voltage_max) * 0.5;
+        state.zoom_view(0.8, center_t, center_v);
+        let _ = ensure_persistence_grid(rect, &mut state).expect("cache rebuilt");
+        let second_key = state.persistence_cache.as_ref().expect("cache").key;
+        assert_ne!(first_key.time_max_s, second_key.time_max_s);
     }
 
     #[test]
