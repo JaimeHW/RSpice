@@ -13,6 +13,7 @@ use crate::analysis::transient::{
     TrapGearController,
 };
 use crate::analysis::waveform::{CompressionConfig, TransientResultCompressed, WaveformRecorder};
+use crate::netlist::AnalysisCommand;
 use crate::{Netlist, Value};
 
 /// Maximum voltage limit for solution values (matching DC solver)
@@ -41,6 +42,20 @@ struct JfetTransientHistory {
 }
 
 impl Engine {
+    #[inline]
+    fn transient_source_step_hint(netlist: &Netlist, max_step: Value) -> Value {
+        if let Some(step) = netlist.analyses.iter().find_map(|analysis| match analysis {
+            AnalysisCommand::Tran { step, .. } if step.is_finite() && *step > 0.0 => Some(*step),
+            _ => None,
+        }) {
+            step
+        } else if max_step.is_finite() && max_step > 0.0 {
+            (max_step / 10.0).max(1e-12)
+        } else {
+            1e-12
+        }
+    }
+
     /// Run transient time-domain analysis
     ///
     /// Uses adaptive integration with automatic method switching (TrapGear).
@@ -459,6 +474,14 @@ impl Engine {
         let mut matrix = self.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
+        let source_step_hint = Self::transient_source_step_hint(netlist, max_step);
+        circuit
+            .voltage_sources
+            .set_transient_context(source_step_hint, tstop);
+        circuit
+            .current_sources
+            .set_transient_context(source_step_hint, tstop);
+
         // Get DC operating point as initial condition.
         let mut solution = self.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?;
         let applied_ic = self.apply_initial_condition_overrides(netlist, &circuit, &mut solution);
@@ -642,6 +665,7 @@ impl Engine {
                     t + dt, // Evaluate at target time point
                     |br_ordinal| num_nodes + br_ordinal,
                 );
+                circuit.current_sources.update_transient_rhs(&mut rhs, t + dt);
 
                 // Get current integration method from TrapGear controller
                 let current_method = trapgear.current_method();

@@ -219,10 +219,10 @@ V1 1 0 PULSE(0 1)
             assert!((*v1 - 0.0).abs() < 1e-12);
             assert!((*v2 - 1.0).abs() < 1e-12);
             assert!((*delay - 0.0).abs() < 1e-12);
-            assert!((*rise - 1e-12).abs() < 1e-24);
-            assert!((*fall - 1e-12).abs() < 1e-24);
-            assert!(*width >= 1e98);
-            assert!(*period >= 1e99);
+            assert!(rise.is_nan());
+            assert!(fall.is_nan());
+            assert!(width.is_nan());
+            assert!(period.is_nan());
         }
         other => panic!("Expected pulse source, got {:?}", other),
     }

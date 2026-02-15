@@ -280,13 +280,22 @@ impl Engine {
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
                     let dc_value = extract_dc_value(spec);
                     let (ac_mag, ac_phase) = super::extract_ac_value(spec);
-                    circuit.current_sources.add_with_ac(
+                    let transient_spec = match spec {
+                        crate::netlist::SourceSpec::Pulse { .. }
+                        | crate::netlist::SourceSpec::Sin { .. }
+                        | crate::netlist::SourceSpec::Pwl { .. }
+                        | crate::netlist::SourceSpec::PwlFile { .. }
+                        | crate::netlist::SourceSpec::Exp { .. } => Some(spec.clone()),
+                        _ => None,
+                    };
+                    circuit.current_sources.add_with_ac_and_spec(
                         element.name.clone(),
                         np,
                         nn,
                         dc_value,
                         ac_mag,
                         ac_phase,
+                        transient_spec,
                     );
                 }
                 ElementKind::Diode { model } => {
@@ -900,6 +909,19 @@ impl Engine {
                     }
 
                     let attenuation = model_params.and_then(|p| tline_model_attenuation(p, z0_eff));
+                    let dc_series_resistance = model_params
+                        .and_then(|p| {
+                            let r = p.r?;
+                            if !r.is_finite() || r <= 0.0 {
+                                return None;
+                            }
+                            let len = p.len.unwrap_or(1.0);
+                            if !len.is_finite() || len <= 0.0 {
+                                return None;
+                            }
+                            Some(r * len)
+                        })
+                        .unwrap_or(0.0);
                     let push_tline = |circuit: &mut CircuitData,
                                       name: String,
                                       p1p: usize,
@@ -911,6 +933,7 @@ impl Engine {
                         );
                         tline.freq = freq_eff;
                         tline.nl = nl_eff;
+                        tline.set_dc_series_resistance(dc_series_resistance);
                         if let Some(att) = attenuation {
                             tline.set_attenuation(att);
                         }

@@ -415,6 +415,14 @@ pub struct VoltageSources {
     pub source_specs: Vec<Option<crate::netlist::SourceSpec>>,
     /// Pre-baked CSC indices: [br->np, np->br, br->nn, nn->br] per source
     csc_indices: Vec<[Option<CscIndex>; 4]>,
+    /// Optional transient context used to resolve source defaults.
+    transient_context: Option<TransientSourceContext>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TransientSourceContext {
+    tstep: Value,
+    tstop: Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -502,6 +510,29 @@ impl VoltageSources {
         self.ac_phases.push(ac_phase);
         self.source_specs.push(source_spec);
         self.csc_indices.push([None; 4]);
+    }
+
+    /// Set transient context used to resolve waveform defaults.
+    pub fn set_transient_context(&mut self, tstep: Value, tstop: Value) {
+        let step = if tstep.is_finite() && tstep > 0.0 {
+            tstep
+        } else {
+            1e-12
+        };
+        let stop = if tstop.is_finite() && tstop > 0.0 {
+            tstop
+        } else {
+            1e99
+        };
+        self.transient_context = Some(TransientSourceContext {
+            tstep: step,
+            tstop: stop,
+        });
+    }
+
+    /// Clear transient context and use static waveform defaults.
+    pub fn clear_transient_context(&mut self) {
+        self.transient_context = None;
     }
 
     pub fn len(&self) -> usize {
@@ -627,11 +658,12 @@ impl VoltageSources {
         time: Value,
         get_branch_idx: impl Fn(usize) -> usize,
     ) {
+        let context = self.transient_context;
         for i in 0..self.names.len() {
             let br = get_branch_idx(self.branch_indices[i]);
 
             let v = match &self.source_specs[i] {
-                Some(spec) => Self::evaluate_source_at_time(spec, time),
+                Some(spec) => Self::evaluate_source_at_time_with_context(spec, time, context),
                 None => self.dc_values[i], // DC only
             };
 
@@ -642,12 +674,14 @@ impl VoltageSources {
     /// Maximum absolute change expected from time-varying sources over [t0, t1].
     #[inline]
     pub fn max_expected_delta(&self, t0: Value, t1: Value) -> Value {
+        let context = self.transient_context;
         self.source_specs
             .iter()
             .filter_map(|spec| spec.as_ref())
             .map(|spec| {
-                (Self::evaluate_source_at_time(spec, t1) - Self::evaluate_source_at_time(spec, t0))
-                    .abs()
+                (Self::evaluate_source_at_time_with_context(spec, t1, context)
+                    - Self::evaluate_source_at_time_with_context(spec, t0, context))
+                .abs()
             })
             .fold(0.0, Value::max)
     }
@@ -690,8 +724,64 @@ impl VoltageSources {
         log::warn!("{}", msg);
     }
 
-    /// Evaluate source specification at given time
-    fn evaluate_source_at_time(spec: &crate::netlist::SourceSpec, time: Value) -> Value {
+    #[inline]
+    fn pulse_step_default(context: Option<TransientSourceContext>) -> Value {
+        context.map(|ctx| ctx.tstep).unwrap_or(1e-12).max(1e-18)
+    }
+
+    #[inline]
+    fn pulse_stop_default(context: Option<TransientSourceContext>) -> Value {
+        context.map(|ctx| ctx.tstop).unwrap_or(1e99).max(1e-18)
+    }
+
+    #[inline]
+    fn resolve_pulse_timing(
+        delay: Value,
+        rise: Value,
+        fall: Value,
+        width: Value,
+        period: Value,
+        context: Option<TransientSourceContext>,
+    ) -> (Value, Value, Value, Value, Value) {
+        let step_default = Self::pulse_step_default(context);
+        let stop_default = Self::pulse_stop_default(context);
+
+        let td = if delay.is_finite() { delay.max(0.0) } else { 0.0 };
+        let tr = if rise.is_nan() { step_default } else { rise };
+        let tf = if fall.is_nan() { step_default } else { fall };
+        let pw = if width.is_nan() { stop_default } else { width };
+        let per = if period.is_nan() { stop_default } else { period };
+
+        let tr = if tr.is_finite() && tr > 0.0 {
+            tr
+        } else {
+            step_default
+        };
+        let tf = if tf.is_finite() && tf > 0.0 {
+            tf
+        } else {
+            step_default
+        };
+        let pw = if pw.is_finite() && pw >= 0.0 {
+            pw
+        } else {
+            stop_default
+        };
+        let per = if per.is_finite() && per > 0.0 {
+            per
+        } else {
+            stop_default
+        };
+
+        (td, tr, tf, pw, per)
+    }
+
+    #[inline]
+    fn evaluate_source_at_time_with_context(
+        spec: &crate::netlist::SourceSpec,
+        time: Value,
+        context: Option<TransientSourceContext>,
+    ) -> Value {
         use crate::netlist::SourceSpec;
         use std::f64::consts::PI;
 
@@ -708,11 +798,18 @@ impl VoltageSources {
                 width,
                 period,
             } => {
-                if time < *delay {
+                let (delay, rise, fall, width, period) =
+                    Self::resolve_pulse_timing(*delay, *rise, *fall, *width, *period, context);
+                if time < delay {
                     return *v1;
                 }
-                let t = (time - delay) % period;
-                if t < *rise {
+                let t_rel = time - delay;
+                let t = if period.is_finite() && period > 0.0 {
+                    t_rel.rem_euclid(period)
+                } else {
+                    t_rel
+                };
+                if t < rise {
                     v1 + (v2 - v1) * t / rise
                 } else if t < rise + width {
                     *v2
@@ -816,7 +913,9 @@ impl VoltageSources {
 
             // Get the source value at this time
             let v_source = match &self.source_specs[i] {
-                Some(spec) => Self::evaluate_source_at_time(spec, time),
+                Some(spec) => {
+                    Self::evaluate_source_at_time_with_context(spec, time, self.transient_context)
+                }
                 None => self.dc_values[i],
             };
 
@@ -850,6 +949,10 @@ pub struct CurrentSources {
     pub ac_magnitudes: Vec<Value>,
     /// AC phase in radians for HB/AC analysis
     pub ac_phases: Vec<Value>,
+    /// Full source specification for transient waveform evaluation
+    pub source_specs: Vec<Option<crate::netlist::SourceSpec>>,
+    /// Optional transient context used to resolve source defaults.
+    transient_context: Option<TransientSourceContext>,
 }
 
 impl CurrentSources {
@@ -864,6 +967,7 @@ impl CurrentSources {
         self.dc_values.push(dc_value);
         self.ac_magnitudes.push(0.0);
         self.ac_phases.push(0.0);
+        self.source_specs.push(None);
     }
 
     /// Add current source with AC parameters
@@ -882,6 +986,50 @@ impl CurrentSources {
         self.dc_values.push(dc_value);
         self.ac_magnitudes.push(ac_magnitude);
         self.ac_phases.push(ac_phase);
+        self.source_specs.push(None);
+    }
+
+    /// Add current source with AC and transient specification.
+    pub fn add_with_ac_and_spec(
+        &mut self,
+        name: String,
+        node_pos: NodeId,
+        node_neg: NodeId,
+        dc_value: Value,
+        ac_magnitude: Value,
+        ac_phase: Value,
+        source_spec: Option<crate::netlist::SourceSpec>,
+    ) {
+        self.names.push(name);
+        self.node_pos.push(node_pos);
+        self.node_neg.push(node_neg);
+        self.dc_values.push(dc_value);
+        self.ac_magnitudes.push(ac_magnitude);
+        self.ac_phases.push(ac_phase);
+        self.source_specs.push(source_spec);
+    }
+
+    /// Set transient context used to resolve waveform defaults.
+    pub fn set_transient_context(&mut self, tstep: Value, tstop: Value) {
+        let step = if tstep.is_finite() && tstep > 0.0 {
+            tstep
+        } else {
+            1e-12
+        };
+        let stop = if tstop.is_finite() && tstop > 0.0 {
+            tstop
+        } else {
+            1e99
+        };
+        self.transient_context = Some(TransientSourceContext {
+            tstep: step,
+            tstop: stop,
+        });
+    }
+
+    /// Clear transient context and use static waveform defaults.
+    pub fn clear_transient_context(&mut self) {
+        self.transient_context = None;
     }
 
     /// Set AC parameters for existing source
@@ -930,6 +1078,38 @@ impl CurrentSources {
             }
             if nn > 0 {
                 rhs[nn - 1] += current;
+            }
+        }
+    }
+
+    /// Update RHS contribution of time-varying current sources at transient time.
+    ///
+    /// `stamp_dc_direct` already stamped DC values, so this applies only the
+    /// delta between waveform and DC.
+    #[inline]
+    pub fn update_transient_rhs(&self, rhs: &mut [Value], time: Value) {
+        for i in 0..self.names.len() {
+            let Some(spec) = self.source_specs[i].as_ref() else {
+                continue;
+            };
+
+            let value = VoltageSources::evaluate_source_at_time_with_context(
+                spec,
+                time,
+                self.transient_context,
+            );
+            let delta = value - self.dc_values[i];
+            if delta == 0.0 {
+                continue;
+            }
+
+            let np = self.node_pos[i];
+            let nn = self.node_neg[i];
+            if np > 0 {
+                rhs[np - 1] -= delta;
+            }
+            if nn > 0 {
+                rhs[nn - 1] += delta;
             }
         }
     }
@@ -2059,18 +2239,21 @@ impl CircuitData {
     #[inline]
     fn stamp_tlines_dc_direct(&self, matrix: &mut StaticMatrix) {
         for tl in &self.tlines {
-            let g = tl.conductance();
-            Self::stamp_tline_port_direct(matrix, tl.node1_pos, tl.node1_neg, g);
-            Self::stamp_tline_port_direct(matrix, tl.node2_pos, tl.node2_neg, g);
+            let g_series = tl.dc_series_conductance();
+            // DC fallback: couple near/far conductors through equivalent series path.
+            // This preserves operating-point continuity across the line and avoids
+            // nonphysical port-to-ground shunts.
+            Self::stamp_tline_port_direct(matrix, tl.node1_pos, tl.node2_pos, g_series);
+            Self::stamp_tline_port_direct(matrix, tl.node1_neg, tl.node2_neg, g_series);
         }
     }
 
     #[inline]
     fn stamp_tlines_dc(&self, matrix: &mut TripletMatrix) {
         for tl in &self.tlines {
-            let g = tl.conductance();
-            Self::stamp_tline_port_triplet(matrix, tl.node1_pos, tl.node1_neg, g);
-            Self::stamp_tline_port_triplet(matrix, tl.node2_pos, tl.node2_neg, g);
+            let g_series = tl.dc_series_conductance();
+            Self::stamp_tline_port_triplet(matrix, tl.node1_pos, tl.node2_pos, g_series);
+            Self::stamp_tline_port_triplet(matrix, tl.node1_neg, tl.node2_neg, g_series);
         }
     }
 
@@ -2092,7 +2275,7 @@ impl CircuitData {
         self.ccvs
             .stamp_all_direct(matrix, |br_ordinal| num_nodes + br_ordinal);
 
-        // Transmission-line companion DC fallback: each port starts as Z0 shunt.
+        // Transmission-line DC fallback: couple near/far conductors via series path.
         self.stamp_tlines_dc_direct(matrix);
     }
 
@@ -2620,6 +2803,76 @@ mod tests {
 
         let delta = vs.max_expected_delta(0.0, 1e-3);
         assert_eq!(delta, 0.0);
+    }
+
+    #[test]
+    fn test_voltage_sources_pulse_defaults_follow_transient_context() {
+        let mut vs = VoltageSources::new();
+        vs.add_with_ac_and_spec(
+            "VP".to_string(),
+            1,
+            0,
+            1,
+            0.0,
+            0.0,
+            0.0,
+            Some(SourceSpec::Pulse {
+                v1: 0.0,
+                v2: 1.0,
+                delay: 0.0,
+                rise: Value::NAN,
+                fall: Value::NAN,
+                width: Value::NAN,
+                period: Value::NAN,
+            }),
+        );
+        vs.set_transient_context(1e-6, 10e-6);
+
+        let mut rhs = vec![0.0; 2];
+        vs.update_transient_rhs(&mut rhs, 0.5e-6, |br_ordinal| 1 + br_ordinal);
+        assert!(
+            (rhs[1] - 0.5).abs() < 1e-6,
+            "pulse rise default should follow transient step, got {}",
+            rhs[1]
+        );
+
+        vs.update_transient_rhs(&mut rhs, 2.0e-6, |br_ordinal| 1 + br_ordinal);
+        assert!(
+            (rhs[1] - 1.0).abs() < 1e-9,
+            "pulse width default should keep source high within tstop window, got {}",
+            rhs[1]
+        );
+    }
+
+    #[test]
+    fn test_current_sources_update_transient_rhs_applies_waveform_delta() {
+        let mut cs = CurrentSources::new();
+        cs.add_with_ac_and_spec(
+            "IP".to_string(),
+            1,
+            0,
+            0.0,
+            0.0,
+            0.0,
+            Some(SourceSpec::Pulse {
+                v1: 0.0,
+                v2: 1.0,
+                delay: 0.0,
+                rise: 1e-9,
+                fall: 1e-9,
+                width: 5e-9,
+                period: 10e-9,
+            }),
+        );
+
+        let mut rhs = vec![0.0; 2];
+        cs.stamp_all(&mut rhs);
+        cs.update_transient_rhs(&mut rhs, 2.0e-9);
+        assert!(
+            (rhs[0] + 1.0).abs() < 1e-9,
+            "current pulse should inject 1A from node to ground, rhs={}",
+            rhs[0]
+        );
     }
 
     #[test]

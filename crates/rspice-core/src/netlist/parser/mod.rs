@@ -1816,13 +1816,12 @@ fn parse_pulse_spec(
     let v1 = expect_value_default(stream, params, 0.0);
     let v2 = expect_value_default(stream, params, 1.0);
     let delay = expect_value_default(stream, params, 0.0);
-    // ngspice-compatible practical defaults for omitted timing fields:
-    // treat unspecified pulse width/period as "long enough for one-shot" so
-    // PULSE(V1 V2) behaves like a step in transient analyses.
-    let rise = expect_value_default(stream, params, 1e-12);
-    let fall = expect_value_default(stream, params, 1e-12);
-    let width = expect_value_default(stream, params, 1e99);
-    let period = expect_value_default(stream, params, 2e99);
+    // Keep omitted timing fields as NaN sentinels so transient runtime can
+    // resolve ngspice-compatible defaults from .TRAN context (tstep/tstop).
+    let rise = try_value(stream, params).unwrap_or(Value::NAN);
+    let fall = try_value(stream, params).unwrap_or(Value::NAN);
+    let width = try_value(stream, params).unwrap_or(Value::NAN);
+    let period = try_value(stream, params).unwrap_or(Value::NAN);
 
     if has_paren {
         stream.consume(&TokenKind::RParen);

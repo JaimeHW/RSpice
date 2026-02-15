@@ -11,6 +11,7 @@
 use super::helpers::{expect_value, expect_value_default, skip_commas, try_value};
 use super::lexer::{TokenKind, TokenStream};
 use super::{ParamContext, ParseError, SourceSpec};
+use crate::Value;
 
 /// Parse source specification (DC, AC, PULSE, SIN, PWL, EXP)
 ///
@@ -99,10 +100,12 @@ fn parse_pulse_spec(
     let v1 = expect_value_default(stream, params, 0.0);
     let v2 = expect_value_default(stream, params, 1.0);
     let delay = expect_value_default(stream, params, 0.0);
-    let rise = expect_value_default(stream, params, 1e-12);
-    let fall = expect_value_default(stream, params, 1e-12);
-    let width = expect_value_default(stream, params, 1e99);
-    let period = expect_value_default(stream, params, 2e99);
+    // Preserve omitted timing arguments as NaN sentinels so runtime can apply
+    // context-aware defaults from transient analysis settings.
+    let rise = try_value(stream, params).unwrap_or(Value::NAN);
+    let fall = try_value(stream, params).unwrap_or(Value::NAN);
+    let width = try_value(stream, params).unwrap_or(Value::NAN);
+    let period = try_value(stream, params).unwrap_or(Value::NAN);
 
     if has_paren {
         stream.consume(&TokenKind::RParen);
