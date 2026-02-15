@@ -91,6 +91,31 @@ impl Engine {
     }
 
     #[inline]
+    fn stamp_nonlinear_devices_for_dc(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+    ) {
+        circuit.update_nonlinear(solution);
+        circuit.stamp_nonlinear(matrix, rhs, solution);
+        circuit.stamp_behavioral(matrix, rhs, solution, 0.0);
+        if circuit.has_xspice_devices() {
+            circuit.evaluate_xspice_with_analysis(0.0, solution, crate::xspice::AnalysisType::DcOp);
+            circuit.stamp_xspice(matrix, rhs);
+        }
+    }
+
+    #[inline]
+    fn update_device_states_for_dc(&self, circuit: &mut CircuitData, solution: &[Value]) {
+        circuit.update_nonlinear(solution);
+        if circuit.has_xspice_devices() {
+            circuit.evaluate_xspice_with_analysis(0.0, solution, crate::xspice::AnalysisType::DcOp);
+        }
+    }
+
+    #[inline]
     pub(crate) fn voltage_convergence_met(&self, old: &[Value], new: &[Value]) -> bool {
         Self::check_voltage_convergence_with_tolerances(
             old,
@@ -136,9 +161,7 @@ impl Engine {
         let mut rhs = vec![0.0; size];
         matrix.clear_values();
         linear_stamp(circuit, matrix, &mut rhs);
-        circuit.update_nonlinear(solution);
-        circuit.stamp_nonlinear(matrix, &mut rhs, solution);
-        circuit.stamp_behavioral(matrix, &mut rhs, solution, 0.0);
+        self.stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, solution);
         self.residual_convergence_met(matrix, solution, &rhs)
     }
 
@@ -440,9 +463,7 @@ impl Engine {
         let mut rhs = vec![0.0; size];
         matrix.clear_values();
         linear_stamp(circuit, matrix, &mut rhs);
-        circuit.update_nonlinear(solution);
-        circuit.stamp_nonlinear(matrix, &mut rhs, solution);
-        circuit.stamp_behavioral(matrix, &mut rhs, solution, 0.0);
+        self.stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, solution);
 
         let next_solution = matrix.solve(&rhs).ok()?;
         Some(Self::step_l2_norm(solution, &next_solution))
@@ -542,9 +563,7 @@ impl Engine {
             }
 
             circuit.stamp_dc_direct_scaled(matrix, &mut rhs, source_scale);
-            circuit.update_nonlinear(&solution);
-            circuit.stamp_nonlinear(matrix, &mut rhs, &solution);
-            circuit.stamp_behavioral(matrix, &mut rhs, &solution, 0.0);
+            self.stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution);
 
             let raw_solution = match matrix.solve(&rhs) {
                 Ok(sol) => sol,
@@ -560,7 +579,7 @@ impl Engine {
             let voltage_converged = self.voltage_convergence_met(&solution, &new_solution);
             let linearized_residual_converged =
                 self.residual_convergence_met(matrix, &new_solution, &rhs);
-            circuit.update_nonlinear(&new_solution);
+            self.update_device_states_for_dc(circuit, &new_solution);
             solution = new_solution;
 
             if voltage_converged
@@ -635,18 +654,17 @@ impl Engine {
             matrix.add(i, i, 1e-12);
         }
         circuit.stamp_dc_direct(matrix, &mut rhs);
-        circuit.update_nonlinear(solution);
-        circuit.stamp_nonlinear(matrix, &mut rhs, solution);
-        circuit.stamp_behavioral(matrix, &mut rhs, solution, 0.0);
+        self.stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, solution);
         let residual_converged = self.residual_convergence_met(matrix, solution, &rhs);
 
         let Ok(next_solution) = matrix.solve(&rhs) else {
             return false;
         };
 
-        residual_converged
-            && self.voltage_convergence_met(solution, &next_solution)
-            && circuit.nonlinear_converged(self.device_convergence_tolerance())
+        residual_converged && self.voltage_convergence_met(solution, &next_solution) && {
+            self.update_device_states_for_dc(circuit, solution);
+            circuit.nonlinear_converged(self.device_convergence_tolerance())
+        }
     }
 
     /// Try solving with a specific GMIN value
@@ -993,10 +1011,8 @@ impl Engine {
             }
             // Stamp linear devices
             circuit.stamp_dc_direct(matrix, &mut rhs);
-            // Update nonlinear devices with current solution and stamp
-            circuit.update_nonlinear(&solution);
-            circuit.stamp_nonlinear(matrix, &mut rhs, &solution);
-            circuit.stamp_behavioral(matrix, &mut rhs, &solution, 0.0);
+            // Update nonlinear/behavioral/XSPICE devices with current solution and stamp
+            self.stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution);
             // Solve linearized system
             let raw_solution = matrix.solve(&rhs).map_err(SimulationError::Solver)?;
             let mut new_solution = self.apply_damping_strategy(
@@ -1040,7 +1056,7 @@ impl Engine {
             let linearized_residual_converged =
                 self.residual_convergence_met(matrix, &new_solution, &rhs);
             // Device convergence must be checked at the candidate iterate, not the prior iterate.
-            circuit.update_nonlinear(&new_solution);
+            self.update_device_states_for_dc(circuit, &new_solution);
             let device_converged = circuit.nonlinear_converged(self.device_convergence_tolerance());
             solution = new_solution;
             if voltage_converged
@@ -1284,10 +1300,8 @@ impl Engine {
                 // Stamp linear devices with scaled sources
                 circuit.stamp_dc_direct_scaled(matrix, &mut rhs, scale);
 
-                // Stamp nonlinear devices
-                circuit.update_nonlinear(&solution);
-                circuit.stamp_nonlinear(matrix, &mut rhs, &solution);
-                circuit.stamp_behavioral(matrix, &mut rhs, &solution, 0.0);
+                // Stamp nonlinear/behavioral/XSPICE devices
+                self.stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution);
 
                 match matrix.solve(&rhs) {
                     Ok(raw_solution) => {
@@ -1302,7 +1316,7 @@ impl Engine {
                         let converged = self.voltage_convergence_met(&solution, &new_solution);
                         let linearized_residual_converged =
                             self.residual_convergence_met(matrix, &new_solution, &rhs);
-                        circuit.update_nonlinear(&new_solution);
+                        self.update_device_states_for_dc(circuit, &new_solution);
                         solution = new_solution;
                         if converged
                             && linearized_residual_converged
@@ -1365,9 +1379,7 @@ impl Engine {
                 }
 
                 circuit.stamp_dc_direct(matrix, &mut rhs);
-                circuit.update_nonlinear(&solution);
-                circuit.stamp_nonlinear(matrix, &mut rhs, &solution);
-                circuit.stamp_behavioral(matrix, &mut rhs, &solution, 0.0);
+                self.stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution);
 
                 let raw_solution = match matrix.solve(&rhs) {
                     Ok(sol) => sol,
@@ -1393,7 +1405,7 @@ impl Engine {
                 let converged = self.voltage_convergence_met(&solution, &new_solution);
                 let linearized_residual_converged =
                     self.residual_convergence_met(matrix, &new_solution, &rhs);
-                circuit.update_nonlinear(&new_solution);
+                self.update_device_states_for_dc(circuit, &new_solution);
                 solution = new_solution;
 
                 if converged
@@ -1547,9 +1559,7 @@ impl Engine {
 
                 // Stamp linear and nonlinear devices
                 circuit.stamp_dc_direct(matrix, &mut rhs);
-                circuit.update_nonlinear(&solution);
-                circuit.stamp_nonlinear(matrix, &mut rhs, &solution);
-                circuit.stamp_behavioral(matrix, &mut rhs, &solution, 0.0);
+                self.stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution);
 
                 // Log RHS on first iteration of first GMIN step for debugging
                 if step == 0 && _iteration == 0 {
@@ -1572,7 +1582,7 @@ impl Engine {
                         let converged = self.voltage_convergence_met(&solution, &new_solution);
                         let linearized_residual_converged =
                             self.residual_convergence_met(matrix, &new_solution, &rhs);
-                        circuit.update_nonlinear(&new_solution);
+                        self.update_device_states_for_dc(circuit, &new_solution);
                         solution = new_solution;
                         if converged
                             && linearized_residual_converged

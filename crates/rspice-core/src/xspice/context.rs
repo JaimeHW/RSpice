@@ -363,6 +363,17 @@ impl CmContext {
             .unwrap_or(0.0)
     }
 
+    /// Get previous analog output value
+    pub fn output_prev(&self, name: &str) -> Value {
+        self.outputs
+            .get(name)
+            .map(|v| match v {
+                OutputValue::Analog(a) => a.prev_value,
+                _ => 0.0,
+            })
+            .unwrap_or(0.0)
+    }
+
     /// Get analog output partial derivative
     pub fn partial(&self, name: &str) -> Value {
         self.outputs
@@ -377,7 +388,10 @@ impl CmContext {
     /// Set analog output value
     pub fn set_output(&mut self, name: &str, value: Value) {
         match self.outputs.get_mut(name) {
-            Some(OutputValue::Analog(a)) => a.value = value,
+            Some(OutputValue::Analog(a)) => {
+                a.prev_value = a.value;
+                a.value = value;
+            }
             Some(_) => {}
             None => {
                 self.outputs.insert(
@@ -395,6 +409,7 @@ impl CmContext {
             .entry(name.to_string())
             .or_insert_with(OutputValue::analog);
         if let OutputValue::Analog(a) = out {
+            a.prev_value = a.value;
             a.value = value;
             a.partial = partial;
         }
@@ -585,6 +600,19 @@ mod tests {
 
         ctx.set_output("out", 10.0);
         assert!((ctx.output("out") - 10.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_output_prev_updates_on_analog_writes() {
+        let mut ctx = CmContext::new();
+
+        ctx.set_output("out", 1.0);
+        assert!((ctx.output("out") - 1.0).abs() < 1e-12);
+
+        ctx.set_output_with_partial("out", 2.0, 3.0);
+        assert!((ctx.output_prev("out") - 1.0).abs() < 1e-12);
+        assert!((ctx.output("out") - 2.0).abs() < 1e-12);
+        assert!((ctx.partial("out") - 3.0).abs() < 1e-12);
     }
 
     #[test]

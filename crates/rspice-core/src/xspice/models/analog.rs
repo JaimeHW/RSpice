@@ -89,9 +89,7 @@ impl CodeModel for Gain {
         let v_in = ctx.input("in");
         let v_out = gain * (v_in + in_offset) + out_offset;
 
-        ctx.set_output("out", v_out);
-
-        // For AC analysis, provide linearized gain
+        // Provide both operating-point output and linearized gain.
         ctx.set_output_with_partial("out", v_out, gain);
 
         Ok(())

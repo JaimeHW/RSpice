@@ -2142,6 +2142,7 @@ impl CircuitData {
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
             || !self.behavioral_sources.is_empty()
+            || self.has_xspice_devices()
             || {
                 #[cfg(feature = "veriloga")]
                 {
@@ -2232,6 +2233,7 @@ impl CircuitData {
             && self.jfets.iter().all(|jfet| jfet.is_converged(tolerance))
             && self.vswitches.iter().all(|sw| sw.is_converged(tolerance))
             && self.iswitches.iter().all(|sw| sw.is_converged(tolerance))
+            && self.xspice_converged(tolerance)
     }
 
     //=========================================================================
@@ -2253,8 +2255,16 @@ impl CircuitData {
     /// * `time` - Current simulation time
     /// * `voltages` - Current node voltage solution
     pub fn evaluate_xspice(&mut self, time: Value, voltages: &[Value]) {
-        use crate::xspice::AnalysisType;
+        self.evaluate_xspice_with_analysis(time, voltages, crate::xspice::AnalysisType::Transient);
+    }
 
+    /// Evaluate all XSPICE code model instances for the requested analysis type.
+    pub fn evaluate_xspice_with_analysis(
+        &mut self,
+        time: Value,
+        voltages: &[Value],
+        analysis: crate::xspice::AnalysisType,
+    ) {
         for instance in &mut self.xspice_instances {
             // First, collect input values (immutable borrow of connections)
             let input_values: Vec<(usize, Value)> = instance
@@ -2294,7 +2304,6 @@ impl CircuitData {
             }
 
             // Evaluate the code model
-            let analysis = AnalysisType::Transient;
             if let Err(e) = instance.evaluate(time, 0.0, analysis) {
                 log::warn!("XSPICE evaluation error for {}: {}", instance.name, e);
             }

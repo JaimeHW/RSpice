@@ -361,6 +361,42 @@ impl Engine {
             }
         }
 
+        // XSPICE analog output ports stamp nodal current/partial contributions.
+        for instance in &circuit.xspice_instances {
+            let ports = instance.ports();
+            for (port_idx, connection) in instance.connections().iter().enumerate() {
+                let Some(port) = ports.get(port_idx) else {
+                    continue;
+                };
+                if port.direction != crate::xspice::PortDirection::Out
+                    && port.direction != crate::xspice::PortDirection::InOut
+                {
+                    continue;
+                }
+
+                match connection {
+                    crate::xspice::PortConnection::Analog(node) => {
+                        if *node > 0 {
+                            triplets.push((*node - 1, *node - 1, 0.0));
+                        }
+                    }
+                    crate::xspice::PortConnection::Differential(pos, neg) => {
+                        if *pos > 0 {
+                            triplets.push((*pos - 1, *pos - 1, 0.0));
+                        }
+                        if *neg > 0 {
+                            triplets.push((*neg - 1, *neg - 1, 0.0));
+                        }
+                        if *pos > 0 && *neg > 0 {
+                            triplets.push((*pos - 1, *neg - 1, 0.0));
+                            triplets.push((*neg - 1, *pos - 1, 0.0));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         #[cfg(feature = "veriloga")]
         for device in circuit.veriloga_devices.iter() {
             // Build a conservative matrix topology for this Verilog-A device:

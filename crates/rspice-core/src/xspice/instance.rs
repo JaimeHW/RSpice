@@ -423,9 +423,8 @@ impl XspiceInstance {
                 let output = self.context.output(&port.name);
                 let partial = self.context.partial(&port.name);
 
-                // Conductance = partial derivative, current = output - partial * v
-                // For a simple gain: out = gain * in, partial = gain
-                Some((partial.abs().max(1e-12), output))
+                // Return linearized contribution terms consumed by circuit stamping.
+                Some((partial, output))
             } else {
                 None
             }
@@ -445,10 +444,24 @@ impl XspiceInstance {
     ///
     /// Compares current output to previous iteration.
     pub fn is_converged(&self, tolerance: Value) -> bool {
-        // For now, always return true - convergence handled by Newton iteration
-        // Future: track output changes between iterations
-        let _ = tolerance;
-        true
+        let tol = if tolerance.is_finite() && tolerance > 0.0 {
+            tolerance
+        } else {
+            1e-12
+        };
+
+        self.model
+            .ports()
+            .iter()
+            .filter(|port| {
+                port.direction == super::PortDirection::Out
+                    || port.direction == super::PortDirection::InOut
+            })
+            .all(|port| {
+                let curr = self.context.output(&port.name);
+                let prev = self.context.output_prev(&port.name);
+                (curr - prev).abs() <= tol + tol * curr.abs().max(prev.abs())
+            })
     }
 }
 
