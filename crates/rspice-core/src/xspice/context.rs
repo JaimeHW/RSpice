@@ -259,6 +259,11 @@ impl Default for CmContext {
 }
 
 impl CmContext {
+    #[inline]
+    fn canonical_param_key(name: &str) -> String {
+        name.to_ascii_lowercase()
+    }
+
     /// Create a new empty context
     pub fn new() -> Self {
         Self {
@@ -445,28 +450,36 @@ impl CmContext {
 
     /// Get parameter value
     pub fn param(&self, name: &str) -> Value {
-        self.params.get(name).copied().unwrap_or(0.0)
+        self.params
+            .get(&Self::canonical_param_key(name))
+            .copied()
+            .unwrap_or(0.0)
     }
 
     /// Get parameter with default
     pub fn param_or(&self, name: &str, default: Value) -> Value {
-        self.params.get(name).copied().unwrap_or(default)
+        self.params
+            .get(&Self::canonical_param_key(name))
+            .copied()
+            .unwrap_or(default)
     }
 
     /// Get string parameter
     pub fn string_param(&self, name: &str) -> Option<&str> {
-        self.string_params.get(name).map(|s| s.as_str())
+        self.string_params
+            .get(&Self::canonical_param_key(name))
+            .map(|s| s.as_str())
     }
 
     /// Set parameter value
     pub fn set_param(&mut self, name: &str, value: Value) {
-        self.params.insert(name.to_string(), value);
+        self.params.insert(Self::canonical_param_key(name), value);
     }
 
     /// Set string parameter
     pub fn set_string_param(&mut self, name: &str, value: &str) {
         self.string_params
-            .insert(name.to_string(), value.to_string());
+            .insert(Self::canonical_param_key(name), value.to_string());
     }
 
     //-------------------------------------------------------------------------
@@ -622,6 +635,14 @@ mod tests {
         ctx.set_param("gain", 2.5);
         assert!((ctx.param("gain") - 2.5).abs() < 1e-10);
         assert!((ctx.param_or("missing", 1.0) - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_parameters_are_case_insensitive() {
+        let mut ctx = CmContext::new();
+        ctx.set_param("GAIN", 4.0);
+        assert!((ctx.param("gain") - 4.0).abs() < 1e-12);
+        assert!((ctx.param("GaIn") - 4.0).abs() < 1e-12);
     }
 
     #[test]

@@ -2315,35 +2315,103 @@ impl CircuitData {
     /// After evaluation, analog code models produce conductance and current
     /// contributions that must be stamped into the MNA system.
     pub fn stamp_xspice(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
+        #[inline]
+        fn stamp_nodal_current_output(
+            matrix: &mut StaticMatrix,
+            rhs: &mut [Value],
+            connection: &crate::xspice::PortConnection,
+            conductance: Value,
+            current: Value,
+        ) {
+            match connection {
+                crate::xspice::PortConnection::Analog(node) => {
+                    if *node > 0 {
+                        matrix.add(*node - 1, *node - 1, conductance);
+                        rhs[*node - 1] += current;
+                    }
+                }
+                crate::xspice::PortConnection::Differential(pos, neg) => {
+                    if *pos > 0 {
+                        matrix.add(*pos - 1, *pos - 1, conductance);
+                        if *neg > 0 {
+                            matrix.add(*pos - 1, *neg - 1, -conductance);
+                        }
+                        rhs[*pos - 1] += current;
+                    }
+                    if *neg > 0 {
+                        if *pos > 0 {
+                            matrix.add(*neg - 1, *pos - 1, -conductance);
+                        }
+                        matrix.add(*neg - 1, *neg - 1, conductance);
+                        rhs[*neg - 1] -= current;
+                    }
+                }
+                _ => {}
+            }
+        }
+
         for instance in &self.xspice_instances {
+            let ports = instance.ports();
             // Get contributions from each output port
             for (port_idx, connection) in instance.connections().iter().enumerate() {
                 if let Some((conductance, current)) = instance.get_analog_contribution(port_idx) {
-                    match connection {
-                        crate::xspice::PortConnection::Analog(node) => {
-                            if *node > 0 {
-                                // Stamp diagonal conductance
-                                matrix.add(*node - 1, *node - 1, conductance);
-                                // Stamp RHS current
-                                rhs[*node - 1] += current;
+                    let Some(port) = ports.get(port_idx) else {
+                        continue;
+                    };
+                    match port.default_type {
+                        crate::xspice::PortType::Voltage
+                        | crate::xspice::PortType::DifferentialVoltage => {
+                            if let Some(branch_ordinal) = instance.branch_ordinal_at(port_idx) {
+                                let br_mna = self.get_branch_matrix_index(branch_ordinal);
+                                let br = br_mna - 1;
+                                match connection {
+                                    crate::xspice::PortConnection::Analog(node) => {
+                                        if *node > 0 {
+                                            matrix.add(br, *node - 1, 1.0);
+                                            matrix.add(*node - 1, br, 1.0);
+                                        }
+                                        rhs[br] += current;
+                                    }
+                                    crate::xspice::PortConnection::Differential(pos, neg) => {
+                                        if *pos > 0 {
+                                            matrix.add(br, *pos - 1, 1.0);
+                                            matrix.add(*pos - 1, br, 1.0);
+                                        }
+                                        if *neg > 0 {
+                                            matrix.add(br, *neg - 1, -1.0);
+                                            matrix.add(*neg - 1, br, -1.0);
+                                        }
+                                        rhs[br] += current;
+                                    }
+                                    _ => {
+                                        stamp_nodal_current_output(
+                                            matrix,
+                                            rhs,
+                                            connection,
+                                            conductance,
+                                            current,
+                                        );
+                                    }
+                                }
+                            } else {
+                                // Fallback for misconfigured instances: preserve behavior.
+                                stamp_nodal_current_output(
+                                    matrix,
+                                    rhs,
+                                    connection,
+                                    conductance,
+                                    current,
+                                );
                             }
                         }
-                        crate::xspice::PortConnection::Differential(pos, neg) => {
-                            // Stamp differential conductance
-                            if *pos > 0 {
-                                matrix.add(*pos - 1, *pos - 1, conductance);
-                                if *neg > 0 {
-                                    matrix.add(*pos - 1, *neg - 1, -conductance);
-                                }
-                                rhs[*pos - 1] += current;
-                            }
-                            if *neg > 0 {
-                                if *pos > 0 {
-                                    matrix.add(*neg - 1, *pos - 1, -conductance);
-                                }
-                                matrix.add(*neg - 1, *neg - 1, conductance);
-                                rhs[*neg - 1] -= current;
-                            }
+                        crate::xspice::PortType::Current => {
+                            stamp_nodal_current_output(
+                                matrix,
+                                rhs,
+                                connection,
+                                conductance,
+                                current,
+                            );
                         }
                         _ => {}
                     }

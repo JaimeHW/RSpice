@@ -361,7 +361,9 @@ impl Engine {
             }
         }
 
-        // XSPICE analog output ports stamp nodal current/partial contributions.
+        // XSPICE analog output ports:
+        // - Voltage outputs reserve branch-equation topology (MNA branch variable)
+        // - Current outputs reserve nodal conductance/current topology
         for instance in &circuit.xspice_instances {
             let ports = instance.ports();
             for (port_idx, connection) in instance.connections().iter().enumerate() {
@@ -374,24 +376,54 @@ impl Engine {
                     continue;
                 }
 
-                match connection {
-                    crate::xspice::PortConnection::Analog(node) => {
-                        if *node > 0 {
-                            triplets.push((*node - 1, *node - 1, 0.0));
+                match port.default_type {
+                    crate::xspice::PortType::Voltage
+                    | crate::xspice::PortType::DifferentialVoltage => {
+                        let Some(branch_ordinal) = instance.branch_ordinal_at(port_idx) else {
+                            continue;
+                        };
+                        let br = circuit.get_branch_matrix_index(branch_ordinal);
+                        let br_idx = br - 1;
+                        match connection {
+                            crate::xspice::PortConnection::Analog(node) => {
+                                if *node > 0 {
+                                    triplets.push((br_idx, *node - 1, 0.0));
+                                    triplets.push((*node - 1, br_idx, 0.0));
+                                }
+                            }
+                            crate::xspice::PortConnection::Differential(pos, neg) => {
+                                if *pos > 0 {
+                                    triplets.push((br_idx, *pos - 1, 0.0));
+                                    triplets.push((*pos - 1, br_idx, 0.0));
+                                }
+                                if *neg > 0 {
+                                    triplets.push((br_idx, *neg - 1, 0.0));
+                                    triplets.push((*neg - 1, br_idx, 0.0));
+                                }
+                            }
+                            _ => {}
                         }
                     }
-                    crate::xspice::PortConnection::Differential(pos, neg) => {
-                        if *pos > 0 {
-                            triplets.push((*pos - 1, *pos - 1, 0.0));
+                    crate::xspice::PortType::Current => match connection {
+                        crate::xspice::PortConnection::Analog(node) => {
+                            if *node > 0 {
+                                triplets.push((*node - 1, *node - 1, 0.0));
+                            }
                         }
-                        if *neg > 0 {
-                            triplets.push((*neg - 1, *neg - 1, 0.0));
+                        crate::xspice::PortConnection::Differential(pos, neg) => {
+                            if *pos > 0 {
+                                triplets.push((*pos - 1, *pos - 1, 0.0));
+                            }
+                            if *neg > 0 {
+                                triplets.push((*neg - 1, *neg - 1, 0.0));
+                            }
+                            if *pos > 0 && *neg > 0 {
+                                triplets.push((*pos - 1, *neg - 1, 0.0));
+                                triplets.push((*neg - 1, *pos - 1, 0.0));
+                            }
                         }
-                        if *pos > 0 && *neg > 0 {
-                            triplets.push((*pos - 1, *neg - 1, 0.0));
-                            triplets.push((*neg - 1, *pos - 1, 0.0));
-                        }
-                    }
+                        _ => {}
+                    },
                     _ => {}
                 }
             }

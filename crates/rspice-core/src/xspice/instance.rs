@@ -67,6 +67,8 @@ pub struct XspiceInstance {
     port_indices: HashMap<String, usize>,
     /// Execution context
     context: CmContext,
+    /// Optional MNA branch variable per port (for voltage-type outputs)
+    output_branches: Vec<Option<usize>>,
     /// Has been initialized
     initialized: bool,
 }
@@ -77,6 +79,7 @@ impl std::fmt::Debug for XspiceInstance {
             .field("name", &self.name)
             .field("model", &self.model.name())
             .field("connections", &self.connections)
+            .field("output_branches", &self.output_branches)
             .field("initialized", &self.initialized)
             .finish()
     }
@@ -98,6 +101,7 @@ impl XspiceInstance {
     ) -> CmResult<Self> {
         let name = name.into();
         let ports = model.ports();
+        let port_count = ports.len();
 
         // Validate connection count
         if connections.len() != ports.len() {
@@ -141,6 +145,7 @@ impl XspiceInstance {
             connections,
             port_indices,
             context,
+            output_branches: vec![None; port_count],
             initialized: false,
         })
     }
@@ -409,6 +414,45 @@ impl XspiceInstance {
         }
     }
 
+    /// Assign an MNA branch ordinal to a voltage-type output port.
+    pub fn set_output_branch(&mut self, port_idx: usize, branch_ordinal: usize) -> CmResult<()> {
+        let ports = self.model.ports();
+        let Some(port) = ports.get(port_idx) else {
+            return Err(CmError::Internal(format!(
+                "Invalid port index {} for instance {}",
+                port_idx, self.name
+            )));
+        };
+        let is_output = port.direction == super::PortDirection::Out
+            || port.direction == super::PortDirection::InOut;
+        let is_voltage_port = matches!(
+            port.default_type,
+            PortType::Voltage | PortType::DifferentialVoltage
+        );
+        if !is_output || !is_voltage_port {
+            return Err(CmError::Internal(format!(
+                "Port '{}' on instance {} is not a voltage output",
+                port.name, self.name
+            )));
+        }
+        if port_idx >= self.output_branches.len() {
+            return Err(CmError::Internal(format!(
+                "Branch storage out of bounds for port {} on instance {}",
+                port_idx, self.name
+            )));
+        }
+        self.output_branches[port_idx] = Some(branch_ordinal);
+        Ok(())
+    }
+
+    /// Get assigned branch ordinal for a port, if any.
+    #[inline]
+    pub fn branch_ordinal_at(&self, port_idx: usize) -> Option<usize> {
+        self.output_branches
+            .get(port_idx)
+            .and_then(|entry| entry.as_ref().copied())
+    }
+
     /// Get analog contribution (conductance, current) for stamping
     ///
     /// Returns Some((conductance, current)) for output ports that produce
@@ -416,9 +460,9 @@ impl XspiceInstance {
     pub fn get_analog_contribution(&self, port_idx: usize) -> Option<(Value, Value)> {
         let ports = self.model.ports();
         if let Some(port) = ports.get(port_idx) {
-            if port.direction == super::PortDirection::Out
-                || port.direction == super::PortDirection::InOut
-            {
+            let is_output = port.direction == super::PortDirection::Out
+                || port.direction == super::PortDirection::InOut;
+            if is_output && port.default_type.is_analog() {
                 // Get output value and partial derivative
                 let output = self.context.output(&port.name);
                 let partial = self.context.partial(&port.name);
@@ -471,7 +515,52 @@ impl XspiceInstance {
 
 #[cfg(test)]
 mod tests {
+    use super::super::{CodeModel, ParamSpec, PortDirection, PortSpec, PortType};
     use super::*;
+    use std::sync::Arc;
+
+    #[derive(Debug)]
+    struct TestGainModel;
+
+    impl CodeModel for TestGainModel {
+        fn name(&self) -> &str {
+            "test_gain"
+        }
+
+        fn ports(&self) -> &[PortSpec] {
+            use std::sync::OnceLock;
+            static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
+            PORTS.get_or_init(|| {
+                vec![
+                    PortSpec::input("in", PortType::Voltage),
+                    PortSpec::output("out", PortType::Voltage),
+                    PortSpec {
+                        name: "dout".to_string(),
+                        direction: PortDirection::Out,
+                        default_type: PortType::Digital,
+                        allowed_types: vec![PortType::Digital],
+                        is_vector: false,
+                        null_allowed: false,
+                        description: String::new(),
+                    },
+                ]
+            })
+        }
+
+        fn parameters(&self) -> &[ParamSpec] {
+            &[]
+        }
+
+        fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
+            Ok(())
+        }
+
+        fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+            let v = ctx.input("in");
+            ctx.set_output_with_partial("out", v, 1.0);
+            Ok(())
+        }
+    }
 
     #[test]
     fn test_port_connection() {
@@ -484,6 +573,58 @@ mod tests {
         assert_eq!(null.primary_node(), None);
     }
 
-    // Note: Full instance tests require model implementations
-    // They will be added after models are implemented
+    #[test]
+    fn test_set_output_branch_for_voltage_output_port() {
+        let model: Arc<dyn CodeModel> = Arc::new(TestGainModel);
+        let mut instance = XspiceInstance::new(
+            "A1",
+            model,
+            vec![
+                PortConnection::Analog(1),
+                PortConnection::Analog(2),
+                PortConnection::Digital(3),
+            ],
+            &[],
+        )
+        .expect("instance should build");
+
+        instance
+            .set_output_branch(1, 7)
+            .expect("voltage output branch assignment should succeed");
+        assert_eq!(instance.branch_ordinal_at(1), Some(7));
+    }
+
+    #[test]
+    fn test_set_output_branch_rejects_non_voltage_or_non_output_ports() {
+        let model: Arc<dyn CodeModel> = Arc::new(TestGainModel);
+        let mut instance = XspiceInstance::new(
+            "A1",
+            model,
+            vec![
+                PortConnection::Analog(1),
+                PortConnection::Analog(2),
+                PortConnection::Digital(3),
+            ],
+            &[],
+        )
+        .expect("instance should build");
+
+        let err_input = instance
+            .set_output_branch(0, 3)
+            .expect_err("input port should reject branch assignment");
+        assert!(
+            err_input.to_string().contains("not a voltage output"),
+            "unexpected input-port error: {}",
+            err_input
+        );
+
+        let err_digital = instance
+            .set_output_branch(2, 4)
+            .expect_err("digital output should reject branch assignment");
+        assert!(
+            err_digital.to_string().contains("not a voltage output"),
+            "unexpected digital-port error: {}",
+            err_digital
+        );
+    }
 }
