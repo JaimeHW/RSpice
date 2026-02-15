@@ -317,9 +317,35 @@ impl Engine {
 
     #[inline]
     fn has_suspicious_uniformity(solution: &[Value]) -> bool {
-        let unique_values: std::collections::HashSet<i32> =
-            solution.iter().map(|v| (v * 100.0) as i32).collect();
-        unique_values.len() <= 4 && solution.len() > 4
+        if solution.len() <= 4 {
+            return false;
+        }
+
+        let mut counts: std::collections::HashMap<i32, usize> = std::collections::HashMap::new();
+        let mut min_v = Value::INFINITY;
+        let mut max_v = Value::NEG_INFINITY;
+
+        for &v in solution {
+            if !v.is_finite() {
+                return false;
+            }
+            min_v = min_v.min(v);
+            max_v = max_v.max(v);
+            let bucket = (v * 1000.0).round() as i32; // 1 mV quantization
+            *counts.entry(bucket).or_insert(0) += 1;
+        }
+
+        let span = max_v - min_v;
+        if span <= 1e-9 {
+            return true;
+        }
+
+        let dominant = counts.values().copied().max().unwrap_or(0);
+        let dominant_ratio = dominant as Value / solution.len() as Value;
+
+        // Only flag near-constant stuck vectors; avoid false positives on
+        // legitimate rail-distributed logic operating points.
+        dominant_ratio >= 0.8 && counts.len() <= 3 && span <= 5e-2
     }
 
     #[inline]
@@ -1159,12 +1185,9 @@ impl Engine {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            match self.source_stepping_nonlinear_with_guess_and_abort(
-                circuit,
-                matrix,
-                &solution,
-                abort,
-            ) {
+            match self
+                .source_stepping_nonlinear_with_guess_and_abort(circuit, matrix, &solution, abort)
+            {
                 Ok(source_stepped) => {
                     log::info!(
                         "DC operating point after source stepping ({} nodes): {:?}",
@@ -1235,12 +1258,7 @@ impl Engine {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            match self.gmin_stepping_nonlinear_with_abort(
-                circuit,
-                matrix,
-                &fallback_seed,
-                abort,
-            ) {
+            match self.gmin_stepping_nonlinear_with_abort(circuit, matrix, &fallback_seed, abort) {
                 Ok(gmin_solution) => {
                     if let Some(candidate) = self.evaluate_fallback_candidate(
                         circuit,
@@ -1701,9 +1719,7 @@ impl Engine {
         // Check for suspicious values - not just clamped at ±999V but also
         // suspiciously uniform values that indicate failed source stepping.
         // Reset to zero if the guess looks like garbage.
-        let unique_values: std::collections::HashSet<i32> =
-            initial_guess.iter().map(|v| (v * 100.0) as i32).collect();
-        let is_garbage = unique_values.len() <= 4 && initial_guess.len() > 4;
+        let is_garbage = Self::has_suspicious_uniformity(initial_guess);
 
         let mut solution: Vec<Value> = if is_garbage {
             log::debug!("GMIN stepping: resetting garbage initial guess to zero");
@@ -1815,9 +1831,7 @@ impl Engine {
         let has_clamped = solution.iter().any(|&v| v.abs() >= 999.0);
 
         // Check for suspicious uniformity (same issue as source stepping)
-        let unique_values: std::collections::HashSet<i32> =
-            solution.iter().map(|v| (v * 100.0) as i32).collect();
-        let has_suspicious_uniformity = unique_values.len() <= 4 && solution.len() > 4;
+        let has_suspicious_uniformity = Self::has_suspicious_uniformity(&solution);
 
         if has_clamped {
             log::warn!(
@@ -1825,6 +1839,8 @@ impl Engine {
                 Circuit may need additional biasing or convergence aids."
             );
         } else if has_suspicious_uniformity {
+            let unique_values: std::collections::HashSet<i32> =
+                solution.iter().map(|v| (v * 100.0) as i32).collect();
             log::warn!(
                 "GMIN stepping completed but solution has suspiciously uniform values ({} unique). \
                 DC operating point may be incorrect.",
