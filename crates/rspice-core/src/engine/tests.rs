@@ -146,6 +146,75 @@ R1 2 0 1k
     }
 
     #[test]
+    fn test_behavioral_voltage_source_stamps_branch_and_evaluates_expression() {
+        let netlist = Netlist::parse(
+            r#"
+* Behavioral voltage source should evaluate V() and stamp as MNA branch
+V1 in 0 2
+B1 out 0 V=V(in)*2
+RLOAD out 0 1k
+.end
+"#,
+        )
+        .unwrap();
+
+        let result = Engine::default().run_dc_op(&netlist).unwrap();
+        let vout = result.voltage(2);
+        assert!(
+            (vout - 4.0).abs() < 1e-6,
+            "expected behavioral source output of 4V, got {}",
+            vout
+        );
+    }
+
+    #[test]
+    fn test_behavioral_source_branch_current_reference_resolves_by_name() {
+        let netlist = Netlist::parse(
+            r#"
+* Behavioral source references current through named branch source
+V1 in 0 3
+R1 in 0 1k
+B1 out 0 V=ABS(I(V1))*1000
+RLOAD out 0 1k
+.end
+"#,
+        )
+        .unwrap();
+
+        let result = Engine::default().run_dc_op(&netlist).unwrap();
+        let vout = result.voltage(2);
+        assert!(
+            (vout - 3.0).abs() < 2e-3,
+            "expected behavioral branch-current derived output near 3V, got {}",
+            vout
+        );
+    }
+
+    #[test]
+    fn test_behavioral_source_unknown_node_reference_fails_build() {
+        let netlist = Netlist::parse(
+            r#"
+* Unknown behavioral node reference must fail build
+V1 in 0 1
+B1 out 0 V=V(does_not_exist)
+R1 out 0 1k
+.end
+"#,
+        )
+        .unwrap();
+
+        let err = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("unknown behavioral reference should fail build");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Behavioral source") && msg.contains("unknown node"),
+            "expected unknown behavioral node error, got {}",
+            msg
+        );
+    }
+
+    #[test]
     fn test_transient_rc() {
         let netlist_str = r#"
 * RC Transient Test
@@ -1005,6 +1074,141 @@ Z1 3 2 0 MMOD
 
         assert_eq!(circuit.jfets.len(), 1);
         assert_eq!(circuit.jfets[0].jfet_type, crate::device::JfetType::PJF);
+    }
+
+    #[test]
+    fn test_diode_unknown_model_errors() {
+        let netlist_str = r#"
+* Diode unknown model must fail
+D1 1 0 DMISS
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let err = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("unknown diode model should fail build");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Diode") && msg.contains("unknown model"),
+            "expected unknown diode model error, got {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_bjt_unknown_model_errors() {
+        let netlist_str = r#"
+* BJT unknown model must fail
+Q1 3 2 0 QMISSING
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let err = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("unknown BJT model should fail build");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("BJT") && msg.contains("unknown model"),
+            "expected unknown BJT model error, got {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_mos_unknown_model_errors() {
+        let netlist_str = r#"
+* MOS unknown model must fail
+M1 2 1 0 0 MMISSING
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let err = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("unknown MOS model should fail build");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("MOSFET") && msg.contains("unknown model"),
+            "expected unknown MOS model error, got {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_jfet_unknown_model_errors() {
+        let netlist_str = r#"
+* JFET unknown model must fail
+J1 3 2 0 JMISSING
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let err = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("unknown JFET model should fail build");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("JFET") && msg.contains("unknown model"),
+            "expected unknown JFET model error, got {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_mesfet_unknown_model_errors() {
+        let netlist_str = r#"
+* MESFET unknown model must fail
+Z1 3 2 0 MMISSING
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let err = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("unknown MESFET model should fail build");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("MESFET") && msg.contains("unknown model"),
+            "expected unknown MESFET model error, got {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_xspice_unknown_model_fails_build() {
+        let netlist_str = r#"
+* XSPICE unknown model must fail
+V1 in 0 1
+R1 out 0 1k
+A1 in out no_such_model
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let err = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("unknown XSPICE model should fail build");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Unknown XSPICE model"),
+            "expected unknown XSPICE model error, got {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_xspice_invalid_port_count_fails_build() {
+        let netlist_str = r#"
+* XSPICE instance with wrong port count must fail
+A1 out gain
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let err = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("invalid XSPICE port count should fail build");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Failed to create XSPICE instance") && msg.contains("Port count"),
+            "expected XSPICE creation error with port count details, got {}",
+            msg
+        );
     }
 
     #[test]
