@@ -26,12 +26,7 @@ impl Engine {
 
         let mut matrix = matrix;
 
-        // Choose solver based on circuit type
-        let solution = if circuit.has_nonlinear_devices() {
-            self.solve_nonlinear(&mut circuit, &mut matrix)?
-        } else {
-            self.solve_linear(&circuit, &mut matrix)?
-        };
+        let solution = self.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?;
 
         // Build result
         let mut result = SimulationResult::new(circuit.num_nodes(), circuit.num_branches());
@@ -104,7 +99,10 @@ impl Engine {
 
         let mut results = Vec::with_capacity(sweep_points.len());
 
-        // Use previous solution as initial guess for next point
+        let node_hints = self.collect_node_voltage_hints(netlist, &circuit);
+
+        // Use previous solution as initial guess for next point.
+        // For the first point, apply .NODESET/.IC hints if present.
         let mut prev_solution: Option<Vec<Value>> = None;
 
         for &sweep_value in &sweep_points {
@@ -114,11 +112,13 @@ impl Engine {
             // Solve DC at this point
             // Key optimization: use previous solution as initial guess for faster convergence
             let solution = if circuit.has_nonlinear_devices() {
-                self.solve_nonlinear_with_guess(
-                    &mut circuit,
-                    &mut matrix,
-                    prev_solution.as_deref(),
-                )?
+                if let Some(seed) = prev_solution.as_deref() {
+                    self.solve_nonlinear_with_guess(&mut circuit, &mut matrix, Some(seed))?
+                } else if node_hints.is_empty() {
+                    self.solve_nonlinear(&mut circuit, &mut matrix)?
+                } else {
+                    self.solve_nonlinear_with_node_hints(&mut circuit, &mut matrix, &node_hints)?
+                }
             } else {
                 self.solve_linear(&circuit, &mut matrix)?
             };

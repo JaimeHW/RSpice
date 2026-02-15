@@ -255,6 +255,75 @@ C1 2 0 1u
     }
 
     #[test]
+    fn test_collect_node_voltage_hints_prefers_ic_over_nodeset() {
+        let netlist = Netlist::parse(
+            r#"
+* .IC should override .NODESET for the same node
+V1 in 0 1
+R1 in out 1k
+R2 out 0 1k
+.NODESET out=0.25
+.IC out=0.75
+.end
+"#,
+        )
+        .expect("netlist should parse");
+
+        let engine = Engine::default();
+        let circuit = engine
+            .build_circuit(&netlist)
+            .expect("circuit should build");
+        let hints = engine.collect_node_voltage_hints(&netlist, &circuit);
+        let out_node = circuit
+            .get_node_by_name("out")
+            .expect("out node should exist");
+
+        let out_hint = hints
+            .iter()
+            .find(|(node_id, _)| *node_id == out_node)
+            .map(|(_, v)| *v);
+        assert_eq!(out_hint, Some(0.75));
+    }
+
+    #[test]
+    fn test_transient_ic_overrides_initial_point() {
+        let netlist = Netlist::parse(
+            r#"
+* .IC should override t=0 transient node state
+V1 in 0 5
+R1 in out 1k
+C1 out 0 1u
+.IC V(out)=0
+.end
+"#,
+        )
+        .expect("netlist should parse");
+
+        let engine = Engine::default();
+        let result = engine
+            .run_tran(&netlist, 200e-6, 2e-6)
+            .expect("transient should run");
+        assert!(
+            result.num_points() >= 2,
+            "expected multiple transient points"
+        );
+
+        let v_out_t0 = result.voltage_at(2, 0);
+        let v_out_t1 = result.voltage_at(2, 1);
+        assert!(
+            v_out_t0.abs() < 1e-9,
+            "expected V(out) at t=0 from .IC to be ~0V, got {}",
+            v_out_t0
+        );
+        assert!(
+            v_out_t1 > v_out_t0,
+            "expected V(out) to begin charging after t=0, got t0={} t1={}",
+            v_out_t0,
+            v_out_t1
+        );
+    }
+
+    #[test]
     fn test_ac_rc_lowpass() {
         let netlist_str = r#"
 * AC Lowpass Test

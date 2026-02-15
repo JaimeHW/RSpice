@@ -459,13 +459,10 @@ impl Engine {
         let mut matrix = self.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
-        // Get DC operating point as initial condition
-        let dc_solution = if circuit.has_nonlinear_devices() {
-            self.solve_nonlinear(&mut circuit, &mut matrix)?
-        } else {
-            self.solve_linear(&circuit, &mut matrix)?
-        };
-        circuit.refresh_jiles_atherton_inductances(&dc_solution);
+        // Get DC operating point as initial condition.
+        let mut solution = self.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?;
+        let applied_ic = self.apply_initial_condition_overrides(netlist, &circuit, &mut solution);
+        circuit.refresh_jiles_atherton_inductances(&solution);
 
         let num_nodes = circuit.num_nodes();
         let size = circuit.matrix_size();
@@ -497,20 +494,24 @@ impl Engine {
         // Debug: log node names and their indices to verify alignment
         log::info!("Node mapping (index -> name, DC voltage):");
         for (i, name) in node_names.iter().enumerate() {
-            let dc_v = dc_solution.get(i).copied().unwrap_or(0.0);
+            let dc_v = solution.get(i).copied().unwrap_or(0.0);
             log::info!("  Node[{}] = '{}', V_dc = {:.4}", i, name, dc_v);
+        }
+        if applied_ic > 0 {
+            log::info!(
+                "Applied {} .IC node override(s) to transient initial state",
+                applied_ic
+            );
         }
 
         let mut result = TransientResult {
             time: vec![0.0],
             voltages: (0..num_nodes)
-                .map(|i| vec![dc_solution.get(i).copied().unwrap_or(0.0)])
+                .map(|i| vec![solution.get(i).copied().unwrap_or(0.0)])
                 .collect(),
             num_nodes,
             node_names,
         };
-
-        let mut solution = dc_solution;
         let mut t = 0.0;
 
         // Initialize capacitor voltage history from DC solution

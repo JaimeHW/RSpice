@@ -273,11 +273,7 @@ impl Engine {
 
         // Get DC operating point
         let has_nonlinear = circuit.has_nonlinear_devices();
-        let dc_solution = if has_nonlinear {
-            self.solve_nonlinear(&mut circuit, &mut matrix)?
-        } else {
-            self.solve_linear(&circuit, &mut matrix)?
-        };
+        let dc_solution = self.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?;
         circuit.refresh_jiles_atherton_inductances(&dc_solution);
         if has_nonlinear {
             // Align stateful nonlinear models (limited junction voltages, operating region)

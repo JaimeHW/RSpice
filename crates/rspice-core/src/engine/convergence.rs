@@ -805,22 +805,33 @@ impl Engine {
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
     ) -> Result<Vec<Value>, SimulationError> {
-        // First, try to get an initial guess from linear solve
-        // This stamps only linear devices (resistors, voltage sources)
-        // to get DC source voltages propagated through the resistor network
-        let initial_guess = self.linear_presolve_for_guess(circuit, matrix);
+        self.solve_nonlinear_with_node_hints(circuit, matrix, &[])
+    }
 
-        // Apply BJT-specific junction voltage correction
-        // The linear presolve treats BJT terminals as disconnected, so
-        // VBE could be huge (e.g., 9V). We need to set VBE ≈ 0.7V for
-        // realistic forward active operation.
-        let corrected_guess = initial_guess.map(|mut guess| {
-            Self::apply_bjt_initial_guess_correction(&mut guess, circuit);
-            guess
-        });
+    /// Solve nonlinear DC with optional node-voltage hint overrides.
+    ///
+    /// `node_hints` entries are `(node_id, voltage)` with node IDs using the
+    /// standard 1-based non-ground circuit numbering.
+    pub(crate) fn solve_nonlinear_with_node_hints(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        node_hints: &[(usize, Value)],
+    ) -> Result<Vec<Value>, SimulationError> {
+        let size = circuit.matrix_size();
+        let mut initial_guess = self
+            .linear_presolve_for_guess(circuit, matrix)
+            .unwrap_or_else(|| vec![0.0; size]);
 
-        // Now run full nonlinear solve with the warm-start guess
-        self.solve_nonlinear_with_guess(circuit, matrix, corrected_guess.as_deref())
+        for &(node_id, voltage) in node_hints {
+            if !voltage.is_finite() || node_id == 0 || node_id > circuit.num_nodes() {
+                continue;
+            }
+            initial_guess[node_id - 1] = voltage;
+        }
+
+        Self::apply_bjt_initial_guess_correction(&mut initial_guess, circuit);
+        self.solve_nonlinear_with_guess(circuit, matrix, Some(&initial_guess))
     }
 
     /// Apply BJT-specific initial guess corrections

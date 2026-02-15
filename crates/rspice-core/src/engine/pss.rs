@@ -127,12 +127,8 @@ impl Engine {
             return Err(PssError::NoReactiveElements.into());
         }
 
-        // Get DC operating point as initial condition
-        let dc_solution = if circuit.has_nonlinear_devices() {
-            self.solve_nonlinear(&mut circuit, &mut matrix)?
-        } else {
-            self.solve_linear(&circuit, &mut matrix)?
-        };
+        // Get DC operating point as initial condition.
+        let dc_solution = self.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?;
 
         // Initialize capacitor/inductor state from DC
         self.pss_initialize_reactive_state(&mut circuit, &dc_solution);

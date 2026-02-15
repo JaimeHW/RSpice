@@ -97,12 +97,8 @@ impl Engine {
         let mut matrix = self.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
-        // Get DC operating point for bias-dependent noise
-        let dc_solution = if circuit.has_nonlinear_devices() {
-            self.solve_nonlinear(&mut circuit, &mut matrix)?
-        } else {
-            self.solve_linear(&circuit, &mut matrix)?
-        };
+        // Get DC operating point for bias-dependent noise.
+        let dc_solution = self.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?;
 
         // Collect noise sources
         let mut noise_sources: Vec<NoiseSource> = Vec::new();
@@ -449,12 +445,7 @@ impl Engine {
             .params
             .all_params()
             .into_iter()
-            .filter(|(name, value)| {
-                !name.starts_with("IC_")
-                    && !name.starts_with("NODESET_")
-                    && value.is_finite()
-                    && value.abs() > 0.0
-            })
+            .filter(|(_, value)| value.is_finite() && value.abs() > 0.0)
             .collect();
         all_eligible_params.sort_by(|a, b| a.0.cmp(&b.0));
 
