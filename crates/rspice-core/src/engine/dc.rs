@@ -11,22 +11,24 @@ use crate::{Netlist, Value};
 impl Engine {
     /// Run DC operating point analysis
     pub fn run_dc_op(&self, netlist: &Netlist) -> Result<SimulationResult, SimulationError> {
+        let engine = self.resolved_for_netlist(netlist);
+
         // Build circuit from netlist
-        let mut circuit = self.build_circuit(netlist)?;
+        let mut circuit = engine.build_circuit(netlist)?;
 
         if circuit.num_nodes() == 0 {
             return Err(SimulationError::Circuit("No nodes in circuit".to_string()));
         }
 
         // Build matrix structure (done once)
-        let matrix = self.build_matrix(&circuit)?;
+        let matrix = engine.build_matrix(&circuit)?;
 
         // Link phase: bake CSC indices into device storage for O(1) stamping
         circuit.link_indices(&matrix);
 
         let mut matrix = matrix;
 
-        let solution = self.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?;
+        let solution = engine.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?;
 
         // Build result
         let mut result = SimulationResult::new(circuit.num_nodes(), circuit.num_branches());
@@ -62,6 +64,7 @@ impl Engine {
     ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
         use crate::analysis::DcSweep;
 
+        let engine = self.resolved_for_netlist(netlist);
         let sweep = DcSweep::new(source_name.to_string(), start, stop, step);
         let sweep_points = sweep.points();
 
@@ -72,7 +75,7 @@ impl Engine {
         }
 
         // Build circuit once
-        let mut circuit = self.build_circuit(netlist)?;
+        let mut circuit = engine.build_circuit(netlist)?;
 
         if circuit.num_nodes() == 0 {
             return Err(SimulationError::Circuit("No nodes in circuit".to_string()));
@@ -93,7 +96,7 @@ impl Engine {
         let original_value = circuit.voltage_sources.dc_values[vsrc_idx];
 
         // Build matrix structure (done once)
-        let matrix = self.build_matrix(&circuit)?;
+        let matrix = engine.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
         let mut matrix = matrix;
 
@@ -114,14 +117,14 @@ impl Engine {
             // Key optimization: use previous solution as initial guess for faster convergence
             let solution = if circuit.has_nonlinear_devices() {
                 if let Some(seed) = prev_solution.as_deref() {
-                    self.solve_nonlinear_with_guess(&mut circuit, &mut matrix, Some(seed))?
+                    engine.solve_nonlinear_with_guess(&mut circuit, &mut matrix, Some(seed))?
                 } else if node_hints.is_empty() {
-                    self.solve_nonlinear(&mut circuit, &mut matrix)?
+                    engine.solve_nonlinear(&mut circuit, &mut matrix)?
                 } else {
-                    self.solve_nonlinear_with_node_hints(&mut circuit, &mut matrix, &node_hints)?
+                    engine.solve_nonlinear_with_node_hints(&mut circuit, &mut matrix, &node_hints)?
                 }
             } else {
-                self.solve_linear(&circuit, &mut matrix)?
+                engine.solve_linear(&circuit, &mut matrix)?
             };
 
             // Build result

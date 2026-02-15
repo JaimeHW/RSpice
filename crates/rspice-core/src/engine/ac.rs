@@ -267,13 +267,14 @@ impl Engine {
         netlist: &Netlist,
         frequencies: &[Value],
     ) -> Result<Vec<AcResult>, SimulationError> {
-        let mut circuit = self.build_circuit(netlist)?;
-        let mut matrix = self.build_matrix(&circuit)?;
+        let engine = self.resolved_for_netlist(netlist);
+        let mut circuit = engine.build_circuit(netlist)?;
+        let mut matrix = engine.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
         // Get DC operating point
         let has_nonlinear = circuit.has_nonlinear_devices();
-        let dc_solution = self.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?;
+        let dc_solution = engine.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?;
         circuit.refresh_jiles_atherton_inductances(&dc_solution);
         if has_nonlinear {
             // Align stateful nonlinear models (limited junction voltages, operating region)

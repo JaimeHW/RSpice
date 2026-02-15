@@ -470,6 +470,17 @@ impl Engine {
         max_step: Value,
         abort: &dyn AbortSignal,
     ) -> Result<TransientResult, SimulationError> {
+        let engine = self.resolved_for_netlist(netlist);
+        engine.run_tran_with_abort_resolved(netlist, tstop, max_step, abort)
+    }
+
+    fn run_tran_with_abort_resolved(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<TransientResult, SimulationError> {
         let mut circuit = self.build_circuit(netlist)?;
         let mut matrix = self.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);

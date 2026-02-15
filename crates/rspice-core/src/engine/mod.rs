@@ -350,6 +350,18 @@ impl Engine {
     pub fn config(&self) -> &SimulationConfig {
         &self.config
     }
+
+    /// Resolve effective simulation configuration for a specific netlist.
+    ///
+    /// Applies `.OPTIONS` on top of the engine's base configuration.
+    pub(crate) fn resolved_for_netlist(&self, netlist: &Netlist) -> Self {
+        let resolved = resolve_simulation_config(
+            &self.config,
+            Some(&netlist.options),
+            &SimulationConfigOverrides::default(),
+        );
+        Self::new(resolved)
+    }
 }
 
 impl Default for Engine {
