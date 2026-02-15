@@ -965,6 +965,9 @@ fn parse_resistor(
                 if let Some(v) = params.get(s) {
                     stream.advance();
                     value = Some(v);
+                } else if let Ok(v) = crate::netlist::lexer::parse_spice_value(s) {
+                    stream.advance();
+                    value = Some(v);
                 } else if !matches!(stream.peek_n(1).kind, TokenKind::Equals) {
                     model = Some(s.clone());
                     stream.advance();
@@ -1015,7 +1018,7 @@ fn parse_resistor(
                         value = Some(param_value);
                     }
                     instance_params.push((name_upper, param_value));
-                } else if model.is_none() {
+                } else if model.is_none() && value.is_none() {
                     // Bare identifier after value-less prefix: treat as model name.
                     model = Some(raw_name);
                 }
@@ -1218,10 +1221,14 @@ fn parse_bjt(
                     // If the token AFTER the second ident is '=', then second is a param name
                     // and first_ident is the model name (not substrate)
                     let next_ident = next_s.clone();
+                    let next_upper = next_ident.to_ascii_uppercase();
 
                     // Peek ahead: is there an '=' after the next ident?
                     // stream.peek_n(1) would be the token after the current peek
-                    if matches!(stream.peek_n(1).kind, TokenKind::Equals) {
+                    if matches!(stream.peek_n(1).kind, TokenKind::Equals)
+                        // OFF is an optional BJT instance keyword, not a model name.
+                        || next_upper == "OFF"
+                    {
                         // Pattern: model_name param=value
                         // first_ident is the model, don't treat next_ident as model
                         (None, first_ident)
@@ -1277,7 +1284,26 @@ fn parse_mosfet(
     let gate = expect_node(stream, line_num)?;
     let source = expect_node(stream, line_num)?;
     let bulk = expect_node(stream, line_num)?;
-    let model = expect_ident(stream, line_num)?;
+
+    // SPICE MOS syntax variants:
+    // - 4-node: Mname D G S B model ...
+    // - 5-node (e.g. BSIMSOI): Mname D G S B E model ...
+    // We disambiguate by looking for an additional bare identifier before
+    // parameter assignments.
+    let first_after_bulk = expect_node(stream, line_num)?;
+    let (extra_node, model) = if matches!(&stream.peek().kind, TokenKind::Ident(_))
+        && !matches!(stream.peek_n(1).kind, TokenKind::Equals)
+    {
+        let model = expect_ident(stream, line_num)?;
+        (Some(first_after_bulk), model)
+    } else {
+        (None, first_after_bulk)
+    };
+
+    let mut nodes = vec![drain, gate, source, bulk];
+    if let Some(extra) = extra_node {
+        nodes.push(extra);
+    }
 
     elements.push(Element {
         name,
@@ -1285,7 +1311,7 @@ fn parse_mosfet(
             model,
             mos_type: super::MosType::Nmos, // Will be set from model
         },
-        nodes: vec![drain, gate, source, bulk],
+        nodes,
     });
 
     Ok(())
@@ -1790,10 +1816,13 @@ fn parse_pulse_spec(
     let v1 = expect_value_default(stream, params, 0.0);
     let v2 = expect_value_default(stream, params, 1.0);
     let delay = expect_value_default(stream, params, 0.0);
-    let rise = expect_value_default(stream, params, 1e-9);
-    let fall = expect_value_default(stream, params, 1e-9);
-    let width = expect_value_default(stream, params, 1e-6);
-    let period = expect_value_default(stream, params, 2e-6);
+    // ngspice-compatible practical defaults for omitted timing fields:
+    // treat unspecified pulse width/period as "long enough for one-shot" so
+    // PULSE(V1 V2) behaves like a step in transient analyses.
+    let rise = expect_value_default(stream, params, 1e-12);
+    let fall = expect_value_default(stream, params, 1e-12);
+    let width = expect_value_default(stream, params, 1e99);
+    let period = expect_value_default(stream, params, 2e99);
 
     if has_paren {
         stream.consume(&TokenKind::RParen);
@@ -2173,6 +2202,9 @@ fn expect_value(
             if let Some(v) = params.get(s) {
                 stream.advance();
                 Ok(v * sign)
+            } else if let Ok(v) = crate::netlist::lexer::parse_spice_value(s) {
+                stream.advance();
+                Ok(v * sign)
             } else {
                 Err(ParseError::Syntax {
                     line: line_num,
@@ -2203,6 +2235,9 @@ fn try_value(stream: &mut TokenStream, params: &ParamContext) -> Option<Value> {
         }
         TokenKind::Ident(s) => {
             if let Some(v) = params.get(s) {
+                stream.advance();
+                Some(v)
+            } else if let Ok(v) = crate::netlist::lexer::parse_spice_value(s) {
                 stream.advance();
                 Some(v)
             } else {

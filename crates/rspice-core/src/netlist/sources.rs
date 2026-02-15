@@ -99,10 +99,10 @@ fn parse_pulse_spec(
     let v1 = expect_value_default(stream, params, 0.0);
     let v2 = expect_value_default(stream, params, 1.0);
     let delay = expect_value_default(stream, params, 0.0);
-    let rise = expect_value_default(stream, params, 1e-9);
-    let fall = expect_value_default(stream, params, 1e-9);
-    let width = expect_value_default(stream, params, 1e-6);
-    let period = expect_value_default(stream, params, 2e-6);
+    let rise = expect_value_default(stream, params, 1e-12);
+    let fall = expect_value_default(stream, params, 1e-12);
+    let width = expect_value_default(stream, params, 1e99);
+    let period = expect_value_default(stream, params, 2e99);
 
     if has_paren {
         stream.consume(&TokenKind::RParen);

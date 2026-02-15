@@ -145,6 +145,32 @@ R1 in out RMOD R=2k L=10u W=2u
 }
 
 #[test]
+fn test_parse_resistor_ohms_suffix_not_treated_as_model() {
+    let netlist = r#"Resistor Unit Suffix
+R1 1 0 1Ohms
+R2 1 0 1.019524e+9Ohms
+.END
+"#;
+    let result = parse_netlist(netlist).expect("netlist should parse");
+    assert_eq!(result.elements.len(), 2);
+
+    match &result.elements[0].kind {
+        ElementKind::Resistor { value, model, .. } => {
+            assert!((*value - 1.0).abs() < 1e-12);
+            assert!(model.is_none());
+        }
+        other => panic!("Expected resistor, got {:?}", other),
+    }
+    match &result.elements[1].kind {
+        ElementKind::Resistor { value, model, .. } => {
+            assert!((*value - 1.019_524e9).abs() < 1e-3);
+            assert!(model.is_none());
+        }
+        other => panic!("Expected resistor, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_parse_pulse() {
     let netlist = r#"Pulse Test
 V1 1 0 PULSE(0 5 0 1n 1n 1u 2u)
@@ -170,6 +196,35 @@ V1 1 0 PULSE(0 5 0 1n 1n 1u 2u)
             assert!((*period - 2e-6).abs() < 1e-15);
         }
         _ => panic!("Expected Pulse source"),
+    }
+}
+
+#[test]
+fn test_parse_pulse_with_minimal_args_uses_step_like_defaults() {
+    let netlist = r#"Pulse Defaults
+V1 1 0 PULSE(0 1)
+.END
+"#;
+    let result = parse_netlist(netlist).expect("netlist should parse");
+    match &result.elements[0].kind {
+        ElementKind::VoltageSource(SourceSpec::Pulse {
+            v1,
+            v2,
+            delay,
+            rise,
+            fall,
+            width,
+            period,
+        }) => {
+            assert!((*v1 - 0.0).abs() < 1e-12);
+            assert!((*v2 - 1.0).abs() < 1e-12);
+            assert!((*delay - 0.0).abs() < 1e-12);
+            assert!((*rise - 1e-12).abs() < 1e-24);
+            assert!((*fall - 1e-12).abs() < 1e-24);
+            assert!(*width >= 1e98);
+            assert!(*period >= 1e99);
+        }
+        other => panic!("Expected pulse source, got {:?}", other),
     }
 }
 
@@ -347,6 +402,21 @@ Q1 2 1 0 2N2222
 }
 
 #[test]
+fn test_parse_bjt_with_off_keyword_keeps_model_name() {
+    let netlist = r#"BJT OFF
+Q1 3 2 4 QSTD OFF
+.END
+"#;
+    let result = parse_netlist(netlist).expect("netlist should parse");
+    match &result.elements[0].kind {
+        ElementKind::Bjt { model, .. } => {
+            assert_eq!(model, "QSTD");
+        }
+        other => panic!("Expected BJT element, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_parse_mosfet() {
     let netlist = r#"MOSFET Test
 M1 3 2 1 0 NMOS
@@ -358,6 +428,23 @@ M1 3 2 1 0 NMOS
             assert_eq!(model, "NMOS");
         }
         _ => panic!("Expected Mosfet element"),
+    }
+}
+
+#[test]
+fn test_parse_five_node_mosfet_model_disambiguation() {
+    let netlist = r#"Five Node MOS
+M1 d g s e b n1 w=10u l=0.25u
+.END
+"#;
+    let result = parse_netlist(netlist).expect("netlist should parse");
+    assert_eq!(result.elements.len(), 1);
+    assert_eq!(result.elements[0].nodes.len(), 5);
+    assert!(result.elements[0].nodes[3].eq_ignore_ascii_case("e"));
+    assert!(result.elements[0].nodes[4].eq_ignore_ascii_case("b"));
+    match &result.elements[0].kind {
+        ElementKind::Mosfet { model, .. } => assert!(model.eq_ignore_ascii_case("n1")),
+        other => panic!("Expected MOSFET element, got {:?}", other),
     }
 }
 

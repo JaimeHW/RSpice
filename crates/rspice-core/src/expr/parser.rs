@@ -455,21 +455,39 @@ impl<'a> Parser<'a> {
         // Check for V(node) or I(element)
         if (upper == "V" || upper == "I") && self.current == Token::LParen {
             self.advance(); // consume (
-            if let Token::Ident(arg) = self.current.clone() {
+            let parse_ref_arg = |token: &Token| match token {
+                Token::Ident(arg) => Some(arg.clone()),
+                Token::Number(n) => Some(n.to_string()),
+                _ => None,
+            };
+
+            if let Some(first_arg) = parse_ref_arg(&self.current) {
                 self.advance();
+
+                // Differential voltage probe form: V(node_pos, node_neg)
+                if upper == "V" && self.current == Token::Comma {
+                    self.advance();
+                    if let Some(second_arg) = parse_ref_arg(&self.current) {
+                        self.advance();
+                        self.expect(Token::RParen);
+                        return Expr::sub(
+                            Expr::NodeVoltage(first_arg),
+                            Expr::NodeVoltage(second_arg),
+                        );
+                    }
+                    self.errors.push(
+                        "Expected node name after comma in differential voltage probe"
+                            .to_string(),
+                    );
+                    self.expect(Token::RParen);
+                    return Expr::Const(0.0);
+                }
+
                 self.expect(Token::RParen);
                 return if upper == "V" {
-                    Expr::NodeVoltage(arg)
+                    Expr::NodeVoltage(first_arg)
                 } else {
-                    Expr::BranchCurrent(arg)
-                };
-            } else if let Token::Number(n) = self.current {
-                self.advance();
-                self.expect(Token::RParen);
-                return if upper == "V" {
-                    Expr::NodeVoltage(n.to_string())
-                } else {
-                    Expr::BranchCurrent(n.to_string())
+                    Expr::BranchCurrent(first_arg)
                 };
             }
         }
@@ -590,6 +608,19 @@ mod tests {
     fn test_parse_current() {
         let expr = parse_expression("I(L1)");
         assert_eq!(expr, Expr::BranchCurrent("L1".to_string()));
+    }
+
+    #[test]
+    fn test_parse_differential_voltage() {
+        let expr = parse_expression("V(10,40)");
+        assert_eq!(
+            expr,
+            Expr::Binary {
+                op: BinaryOp::Sub,
+                left: Box::new(Expr::NodeVoltage("10".to_string())),
+                right: Box::new(Expr::NodeVoltage("40".to_string())),
+            }
+        );
     }
 
     #[test]

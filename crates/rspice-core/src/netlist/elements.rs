@@ -180,7 +180,26 @@ pub fn parse_bjt(
     let collector = expect_node(stream, line_num)?;
     let base = expect_node(stream, line_num)?;
     let emitter = expect_node(stream, line_num)?;
-    let model = expect_ident(stream, line_num)?;
+
+    // Optional substrate node can appear before model: Q C B E [S] model.
+    // "OFF" is an instance keyword and must not be interpreted as model.
+    let first = expect_node(stream, line_num)?;
+    let first_is_numeric = first.parse::<i64>().is_ok();
+    let (maybe_substrate, model) = if first_is_numeric
+        || (matches!(&stream.peek().kind, TokenKind::Ident(next))
+            && !matches!(stream.peek_n(1).kind, TokenKind::Equals)
+            && !next.eq_ignore_ascii_case("OFF"))
+    {
+        let model = expect_ident(stream, line_num)?;
+        (Some(first), model)
+    } else {
+        (None, first)
+    };
+
+    let mut nodes = vec![collector, base, emitter];
+    if let Some(sub) = maybe_substrate {
+        nodes.push(sub);
+    }
 
     elements.push(Element {
         name,
@@ -188,7 +207,7 @@ pub fn parse_bjt(
             model,
             bjt_type: BjtType::Npn, // Will be set from model
         },
-        nodes: vec![collector, base, emitter],
+        nodes,
     });
 
     Ok(())
@@ -205,7 +224,21 @@ pub fn parse_mosfet(
     let gate = expect_node(stream, line_num)?;
     let source = expect_node(stream, line_num)?;
     let bulk = expect_node(stream, line_num)?;
-    let model = expect_ident(stream, line_num)?;
+
+    let first_after_bulk = expect_node(stream, line_num)?;
+    let (extra_node, model) = if matches!(&stream.peek().kind, TokenKind::Ident(_))
+        && !matches!(stream.peek_n(1).kind, TokenKind::Equals)
+    {
+        let model = expect_ident(stream, line_num)?;
+        (Some(first_after_bulk), model)
+    } else {
+        (None, first_after_bulk)
+    };
+
+    let mut nodes = vec![drain, gate, source, bulk];
+    if let Some(extra) = extra_node {
+        nodes.push(extra);
+    }
 
     elements.push(Element {
         name,
@@ -213,7 +246,7 @@ pub fn parse_mosfet(
             model,
             mos_type: MosType::Nmos, // Will be set from model
         },
-        nodes: vec![drain, gate, source, bulk],
+        nodes,
     });
 
     Ok(())
