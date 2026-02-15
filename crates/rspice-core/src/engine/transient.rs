@@ -681,7 +681,7 @@ impl Engine {
 
                 // Evaluate and stamp XSPICE code models
                 if circuit.has_xspice_devices() {
-                    circuit.evaluate_xspice(t + dt, &new_solution);
+                    circuit.evaluate_xspice_with_timestep(t + dt, dt, &new_solution);
                     circuit.stamp_xspice(&mut matrix, &mut rhs);
                 }
 

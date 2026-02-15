@@ -1361,6 +1361,43 @@ RLOAD out 0 1k
     }
 
     #[test]
+    fn test_xspice_integrator_advances_output_in_transient() {
+        let netlist = Netlist::parse(
+            r#"
+* XSPICE integrator must integrate with transient dt
+V1 in 0 1
+A1 in out integrator gain=1000 out_ic=0
+RLOAD out 0 1k
+.end
+"#,
+        )
+        .unwrap();
+
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+        let out_node = circuit
+            .get_node_by_name("out")
+            .expect("out node should exist");
+
+        let result = engine
+            .run_tran(&netlist, 1e-3, 100e-6)
+            .expect("transient with XSPICE integrator should converge");
+        assert!(
+            result.num_points() >= 2,
+            "expected multiple transient output points"
+        );
+
+        let v0 = result.voltage_at(out_node, 0);
+        let vend = result.voltage_at(out_node, result.num_points() - 1);
+        assert!(
+            vend > v0 + 1e-6,
+            "integrator output should ramp over transient; got v0={} vend={}",
+            v0,
+            vend
+        );
+    }
+
+    #[test]
     fn test_diode_incompatible_model_type_errors() {
         let netlist_str = r#"
 * Diode references incompatible model type

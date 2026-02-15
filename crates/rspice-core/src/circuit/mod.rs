@@ -2255,13 +2255,34 @@ impl CircuitData {
     /// * `time` - Current simulation time
     /// * `voltages` - Current node voltage solution
     pub fn evaluate_xspice(&mut self, time: Value, voltages: &[Value]) {
-        self.evaluate_xspice_with_analysis(time, voltages, crate::xspice::AnalysisType::Transient);
+        self.evaluate_xspice_with_analysis(
+            time,
+            0.0,
+            voltages,
+            crate::xspice::AnalysisType::Transient,
+        );
+    }
+
+    /// Evaluate all XSPICE code model instances for transient with explicit timestep.
+    pub fn evaluate_xspice_with_timestep(
+        &mut self,
+        time: Value,
+        timestep: Value,
+        voltages: &[Value],
+    ) {
+        self.evaluate_xspice_with_analysis(
+            time,
+            timestep,
+            voltages,
+            crate::xspice::AnalysisType::Transient,
+        );
     }
 
     /// Evaluate all XSPICE code model instances for the requested analysis type.
     pub fn evaluate_xspice_with_analysis(
         &mut self,
         time: Value,
+        timestep: Value,
         voltages: &[Value],
         analysis: crate::xspice::AnalysisType,
     ) {
@@ -2304,7 +2325,7 @@ impl CircuitData {
             }
 
             // Evaluate the code model
-            if let Err(e) = instance.evaluate(time, 0.0, analysis) {
+            if let Err(e) = instance.evaluate(time, timestep, analysis) {
                 log::warn!("XSPICE evaluation error for {}: {}", instance.name, e);
             }
         }

@@ -102,7 +102,12 @@ impl Engine {
         circuit.stamp_nonlinear(matrix, rhs, solution);
         circuit.stamp_behavioral(matrix, rhs, solution, 0.0);
         if circuit.has_xspice_devices() {
-            circuit.evaluate_xspice_with_analysis(0.0, solution, crate::xspice::AnalysisType::DcOp);
+            circuit.evaluate_xspice_with_analysis(
+                0.0,
+                0.0,
+                solution,
+                crate::xspice::AnalysisType::DcOp,
+            );
             circuit.stamp_xspice(matrix, rhs);
         }
     }
@@ -111,7 +116,12 @@ impl Engine {
     fn update_device_states_for_dc(&self, circuit: &mut CircuitData, solution: &[Value]) {
         circuit.update_nonlinear(solution);
         if circuit.has_xspice_devices() {
-            circuit.evaluate_xspice_with_analysis(0.0, solution, crate::xspice::AnalysisType::DcOp);
+            circuit.evaluate_xspice_with_analysis(
+                0.0,
+                0.0,
+                solution,
+                crate::xspice::AnalysisType::DcOp,
+            );
         }
     }
 
