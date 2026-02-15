@@ -138,6 +138,7 @@ impl Engine {
         linear_stamp(circuit, matrix, &mut rhs);
         circuit.update_nonlinear(solution);
         circuit.stamp_nonlinear(matrix, &mut rhs, solution);
+        circuit.stamp_behavioral(matrix, &mut rhs, solution, 0.0);
         self.residual_convergence_met(matrix, solution, &rhs)
     }
 
@@ -441,6 +442,7 @@ impl Engine {
         linear_stamp(circuit, matrix, &mut rhs);
         circuit.update_nonlinear(solution);
         circuit.stamp_nonlinear(matrix, &mut rhs, solution);
+        circuit.stamp_behavioral(matrix, &mut rhs, solution, 0.0);
 
         let next_solution = matrix.solve(&rhs).ok()?;
         Some(Self::step_l2_norm(solution, &next_solution))
@@ -542,6 +544,7 @@ impl Engine {
             circuit.stamp_dc_direct_scaled(matrix, &mut rhs, source_scale);
             circuit.update_nonlinear(&solution);
             circuit.stamp_nonlinear(matrix, &mut rhs, &solution);
+            circuit.stamp_behavioral(matrix, &mut rhs, &solution, 0.0);
 
             let raw_solution = match matrix.solve(&rhs) {
                 Ok(sol) => sol,
@@ -634,6 +637,7 @@ impl Engine {
         circuit.stamp_dc_direct(matrix, &mut rhs);
         circuit.update_nonlinear(solution);
         circuit.stamp_nonlinear(matrix, &mut rhs, solution);
+        circuit.stamp_behavioral(matrix, &mut rhs, solution, 0.0);
         let residual_converged = self.residual_convergence_met(matrix, solution, &rhs);
 
         let Ok(next_solution) = matrix.solve(&rhs) else {
@@ -992,6 +996,7 @@ impl Engine {
             // Update nonlinear devices with current solution and stamp
             circuit.update_nonlinear(&solution);
             circuit.stamp_nonlinear(matrix, &mut rhs, &solution);
+            circuit.stamp_behavioral(matrix, &mut rhs, &solution, 0.0);
             // Solve linearized system
             let raw_solution = matrix.solve(&rhs).map_err(SimulationError::Solver)?;
             let mut new_solution = self.apply_damping_strategy(
@@ -1282,6 +1287,7 @@ impl Engine {
                 // Stamp nonlinear devices
                 circuit.update_nonlinear(&solution);
                 circuit.stamp_nonlinear(matrix, &mut rhs, &solution);
+                circuit.stamp_behavioral(matrix, &mut rhs, &solution, 0.0);
 
                 match matrix.solve(&rhs) {
                     Ok(raw_solution) => {
@@ -1361,6 +1367,7 @@ impl Engine {
                 circuit.stamp_dc_direct(matrix, &mut rhs);
                 circuit.update_nonlinear(&solution);
                 circuit.stamp_nonlinear(matrix, &mut rhs, &solution);
+                circuit.stamp_behavioral(matrix, &mut rhs, &solution, 0.0);
 
                 let raw_solution = match matrix.solve(&rhs) {
                     Ok(sol) => sol,
@@ -1542,6 +1549,7 @@ impl Engine {
                 circuit.stamp_dc_direct(matrix, &mut rhs);
                 circuit.update_nonlinear(&solution);
                 circuit.stamp_nonlinear(matrix, &mut rhs, &solution);
+                circuit.stamp_behavioral(matrix, &mut rhs, &solution, 0.0);
 
                 // Log RHS on first iteration of first GMIN step for debugging
                 if step == 0 && _iteration == 0 {

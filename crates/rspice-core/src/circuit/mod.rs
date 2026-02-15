@@ -1556,6 +1556,50 @@ impl CircuitData {
         self.num_nodes
     }
 
+    /// Look up an existing node ID by name.
+    pub fn get_node_by_name(&self, name: &str) -> Option<NodeId> {
+        self.node_map
+            .get(name)
+            .copied()
+            .or_else(|| self.node_map.get(&name.to_lowercase()).copied())
+            .or_else(|| self.node_map.get(&name.to_uppercase()).copied())
+            .or_else(|| {
+                self.node_map
+                    .iter()
+                    .find_map(|(candidate, &id)| candidate.eq_ignore_ascii_case(name).then_some(id))
+            })
+    }
+
+    /// Resolve behavioral expression references against current node/branch maps.
+    pub fn bind_behavioral_references(&mut self) -> Result<(), CircuitError> {
+        let node_lookup = self.node_map.clone();
+        let branch_lookup = self.branch_names.clone();
+        let num_nodes = self.num_nodes;
+        self.behavioral_sources
+            .bind_references(
+                |name: &str| {
+                    node_lookup
+                        .get(name)
+                        .copied()
+                        .or_else(|| node_lookup.get(&name.to_lowercase()).copied())
+                        .or_else(|| node_lookup.get(&name.to_uppercase()).copied())
+                        .or_else(|| {
+                            node_lookup.iter().find_map(|(candidate, &id)| {
+                                candidate.eq_ignore_ascii_case(name).then_some(id)
+                            })
+                        })
+                },
+                |name: &str| {
+                    branch_lookup
+                        .get(name)
+                        .or_else(|| branch_lookup.get(&name.to_uppercase()))
+                        .copied()
+                        .map(|ordinal| num_nodes + ordinal - 1)
+                },
+            )
+            .map_err(CircuitError::InvalidComponent)
+    }
+
     /// Check if any device in the circuit actually uses ground (node 0)
     /// This is different from just having "0" in the node map - we need to check
     /// if any device terminal is connected to node 0
@@ -1688,6 +1732,16 @@ impl CircuitData {
         for binding in &mut self.jiles_atherton_inductors {
             binding.device.node_pos = remap(binding.device.node_pos);
             binding.device.node_neg = remap(binding.device.node_neg);
+        }
+
+        // Behavioral sources
+        for source in &mut self.behavioral_sources.voltage_sources {
+            source.node_pos = remap(source.node_pos);
+            source.node_neg = remap(source.node_neg);
+        }
+        for source in &mut self.behavioral_sources.current_sources {
+            source.node_pos = remap(source.node_pos);
+            source.node_neg = remap(source.node_neg);
         }
 
         // Decrement num_nodes since one node is now ground
@@ -2087,6 +2141,7 @@ impl CircuitData {
             || !self.jfets.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
+            || !self.behavioral_sources.is_empty()
             || {
                 #[cfg(feature = "veriloga")]
                 {
@@ -2154,6 +2209,18 @@ impl CircuitData {
                 },
             );
         }
+    }
+
+    /// Stamp behavioral sources with the given analysis time.
+    pub fn stamp_behavioral(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+        time: Value,
+    ) {
+        self.behavioral_sources
+            .stamp_all(matrix, rhs, solution, self.num_nodes, time);
     }
 
     /// Check if all nonlinear devices have converged

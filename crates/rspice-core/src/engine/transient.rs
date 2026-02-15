@@ -675,6 +675,7 @@ impl Engine {
                 if circuit.has_nonlinear_devices() {
                     circuit.update_nonlinear(&new_solution);
                     circuit.stamp_nonlinear(&mut matrix, &mut rhs, &new_solution);
+                    circuit.stamp_behavioral(&mut matrix, &mut rhs, &new_solution, t + dt);
                 }
 
                 // Evaluate and stamp XSPICE code models

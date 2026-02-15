@@ -68,6 +68,22 @@ impl Engine {
             }
         }
 
+        // Behavioral voltage sources use the same MNA branch topology as independent V-sources.
+        for source in &circuit.behavioral_sources.voltage_sources {
+            let np = source.node_pos;
+            let nn = source.node_neg;
+            let br = circuit.get_branch_matrix_index(source.branch_ordinal);
+
+            if np > 0 {
+                triplets.push((br - 1, np - 1, 0.0));
+                triplets.push((np - 1, br - 1, 0.0));
+            }
+            if nn > 0 {
+                triplets.push((br - 1, nn - 1, 0.0));
+                triplets.push((nn - 1, br - 1, 0.0));
+            }
+        }
+
         // Diode stamps (2-terminal: 2x2 matrix)
         for diode in &circuit.diodes.devices {
             let a = diode.node_anode;
