@@ -707,7 +707,15 @@ impl TestRunner {
         };
 
         let engine = self.create_engine();
-        match engine.run_dc_sweep(&netlist, sweep_source, start_val, stop_val, step_val) {
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms);
+        match engine.run_dc_sweep_with_abort(
+            &netlist,
+            sweep_source,
+            start_val,
+            stop_val,
+            step_val,
+            &abort,
+        ) {
             Ok(results) => {
                 let mismatches = match self.compare_dc_sweep_reference(cir_path, &netlist, &results)
                 {
@@ -855,6 +863,7 @@ impl TestRunner {
         };
 
         let engine = self.create_engine();
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms);
         let mut merged_results: Vec<(Value, crate::SimulationResult)> = Vec::new();
 
         for outer_value in outer_points {
@@ -870,7 +879,14 @@ impl TestRunner {
                 };
             }
 
-            match engine.run_dc_sweep(&netlist, inner_source, inner_start, inner_stop, inner_step) {
+            match engine.run_dc_sweep_with_abort(
+                &netlist,
+                inner_source,
+                inner_start,
+                inner_stop,
+                inner_step,
+                &abort,
+            ) {
                 Ok(mut results) => merged_results.append(&mut results),
                 Err(e) => {
                     return TestResult {
