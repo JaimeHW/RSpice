@@ -1398,6 +1398,102 @@ RLOAD out 0 1k
     }
 
     #[test]
+    fn test_xspice_aswitch_controls_dc_conductive_path() {
+        let netlist_on = Netlist::parse(
+            r#"
+* XSPICE analog switch ON state should pass source voltage
+VCTRL ctrl 0 1
+VIN in 0 1
+A1 ctrl in out aswitch cntl_on=0.5 cntl_off=0 r_on=1 r_off=1e9 log=0
+RLOAD out 0 1k
+.end
+"#,
+        )
+        .unwrap();
+        let netlist_off = Netlist::parse(
+            r#"
+* XSPICE analog switch OFF state should isolate output
+VCTRL ctrl 0 0
+VIN in 0 1
+A1 ctrl in out aswitch cntl_on=0.5 cntl_off=0 r_on=1 r_off=1e9 log=0
+RLOAD out 0 1k
+.end
+"#,
+        )
+        .unwrap();
+
+        let engine = Engine::default();
+        let on = engine
+            .run_dc_op(&netlist_on)
+            .expect("ON state should converge");
+        let off = engine
+            .run_dc_op(&netlist_off)
+            .expect("OFF state should converge");
+
+        // Node order: 1=ctrl, 2=in, 3=out
+        let v_on = on.voltage(3);
+        let v_off = off.voltage(3);
+        assert!(
+            v_on > 0.95,
+            "ON-state switch should transfer input to output, got {}",
+            v_on
+        );
+        assert!(
+            v_off < 1e-5,
+            "OFF-state switch should isolate output, got {}",
+            v_off
+        );
+    }
+
+    #[test]
+    fn test_xspice_aswitch_inout_ports_use_nodal_topology_without_branches() {
+        let netlist = Netlist::parse(
+            r#"
+* XSPICE analog switch should reserve nodal coupling topology, not output branches
+VCTRL ctrl 0 1
+VIN in 0 1
+A1 ctrl in out aswitch cntl_on=0.5 cntl_off=0 r_on=1 r_off=1e9
+RLOAD out 0 1k
+.end
+"#,
+        )
+        .unwrap();
+
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+        assert_eq!(circuit.xspice_instances.len(), 1);
+
+        let inst = &circuit.xspice_instances[0];
+        assert_eq!(
+            inst.branch_ordinal_at(1),
+            None,
+            "ps inout terminal must not allocate branch variable"
+        );
+        assert_eq!(
+            inst.branch_ordinal_at(2),
+            None,
+            "ns inout terminal must not allocate branch variable"
+        );
+
+        let in_node = circuit
+            .get_node_by_name("in")
+            .expect("in node should exist in node map");
+        let out_node = circuit
+            .get_node_by_name("out")
+            .expect("out node should exist in node map");
+        let matrix = engine.build_matrix(&circuit).unwrap();
+
+        assert!(
+            matrix.get_index(in_node - 1, out_node - 1).is_some(),
+            "expected inout off-diagonal coupling in matrix topology"
+        );
+        assert!(
+            matrix.get_index(out_node - 1, in_node - 1).is_some(),
+            "expected reciprocal inout coupling in matrix topology"
+        );
+    }
+
+    #[test]
     fn test_diode_incompatible_model_type_errors() {
         let netlist_str = r#"
 * Diode references incompatible model type

@@ -711,9 +711,24 @@ impl CodeModel for AnalogSwitch {
 
         let conductance = 1.0 / resistance;
 
-        // Get node connections for stamping
-        // This would need circuit integration - for now just compute conductance
-        // and store it for the circuit builder to use
+        // Stamp two-terminal conductance between switch nodes.
+        let ps_node = ctx.port_node("ps").unwrap_or(0);
+        let ns_node = ctx.port_node("ns").unwrap_or(0);
+        let ps = ps_node.checked_sub(1);
+        let ns = ns_node.checked_sub(1);
+
+        if let Some(p) = ps {
+            ctx.stamp_conductance(p, p, conductance);
+        }
+        if let Some(n) = ns {
+            ctx.stamp_conductance(n, n, conductance);
+        }
+        if let (Some(p), Some(n)) = (ps, ns) {
+            ctx.stamp_conductance(p, n, -conductance);
+            ctx.stamp_conductance(n, p, -conductance);
+        }
+
+        // Keep a scalar diagnostic output for unit tests and probing.
         ctx.set_output("conductance", conductance);
 
         Ok(())
@@ -1103,6 +1118,63 @@ mod tests {
         model.evaluate(&mut ctx).unwrap();
         let g_off = ctx.output("conductance");
         assert!(g_off < 1e-9, "Conductance should be low when switch is off");
+    }
+
+    #[test]
+    fn test_analog_switch_stamps_two_terminal_conductance() {
+        let model = AnalogSwitch;
+        let mut ctx = CmContext::new();
+
+        ctx.set_param("cntl_on", 1.0);
+        ctx.set_param("cntl_off", 0.0);
+        ctx.set_param("r_on", 2.0);
+        ctx.set_param("r_off", 1e12);
+        ctx.set_param("log", 0.0);
+        ctx.set_port_node("ps", 5);
+        ctx.set_port_node("ns", 7);
+
+        ctx.set_input_analog("cntl", 1.0);
+        model.evaluate(&mut ctx).unwrap();
+
+        let expected = 0.5;
+        let stamps = ctx.take_stamps();
+        let has = |r: usize, c: usize, v: Value| {
+            stamps
+                .iter()
+                .any(|(rr, cc, vv)| *rr == r && *cc == c && (*vv - v).abs() < 1e-12)
+        };
+
+        assert!(has(4, 4, expected), "missing ps diagonal conductance stamp");
+        assert!(has(6, 6, expected), "missing ns diagonal conductance stamp");
+        assert!(has(4, 6, -expected), "missing ps-ns coupling stamp");
+        assert!(has(6, 4, -expected), "missing ns-ps coupling stamp");
+    }
+
+    #[test]
+    fn test_analog_switch_stamps_single_terminal_to_ground() {
+        let model = AnalogSwitch;
+        let mut ctx = CmContext::new();
+
+        ctx.set_param("cntl_on", 1.0);
+        ctx.set_param("cntl_off", 0.0);
+        ctx.set_param("r_on", 4.0);
+        ctx.set_param("r_off", 1e12);
+        ctx.set_param("log", 0.0);
+        ctx.set_port_node("ps", 3);
+        ctx.set_port_node("ns", 0);
+
+        ctx.set_input_analog("cntl", 1.0);
+        model.evaluate(&mut ctx).unwrap();
+
+        let stamps = ctx.take_stamps();
+        assert_eq!(
+            stamps.len(),
+            1,
+            "single-ended switch should only stamp one diagonal conductance"
+        );
+        assert_eq!(stamps[0].0, 2);
+        assert_eq!(stamps[0].1, 2);
+        assert!((stamps[0].2 - 0.25).abs() < 1e-12);
     }
 
     #[test]
