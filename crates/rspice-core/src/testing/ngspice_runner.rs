@@ -16,10 +16,13 @@
 //!     └── run_suite()          - Run all tests in directory
 //! ```
 
+use crate::abort_signal::AbortSignal;
+use crate::engine::{ConvergenceConfig, SimulationConfig};
 use crate::{Engine, Netlist, Value};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Analysis Types
@@ -36,6 +39,18 @@ pub enum AnalysisSpec {
         start: Value,
         stop: Value,
         step: Value,
+    },
+    /// Two-dimensional DC sweep (.dc src1 s1 e1 st1 src2 s2 e2 st2)
+    /// `inner_*` is the fast sweep axis (x-axis in ngspice tabular output).
+    DcSweep2 {
+        inner_source: String,
+        inner_start: Value,
+        inner_stop: Value,
+        inner_step: Value,
+        outer_source: String,
+        outer_start: Value,
+        outer_stop: Value,
+        outer_step: Value,
     },
     /// Transient analysis (.tran tstep tstop [tstart] [tmax])
     Transient {
@@ -109,6 +124,29 @@ struct ReferenceTable {
     variables: HashMap<String, ReferenceSeries>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct DeadlineAbort {
+    start: Instant,
+    deadline: Duration,
+}
+
+impl DeadlineAbort {
+    fn new(start: Instant, timeout_ms: u128) -> Self {
+        let millis = timeout_ms.min(u128::from(u64::MAX)) as u64;
+        Self {
+            start,
+            deadline: Duration::from_millis(millis),
+        }
+    }
+}
+
+impl AbortSignal for DeadlineAbort {
+    #[inline]
+    fn is_aborted(&self) -> bool {
+        self.start.elapsed() >= self.deadline
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Configuration
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -165,6 +203,14 @@ impl TestRunner {
     /// Get the test runner configuration
     pub fn config(&self) -> &TestRunnerConfig {
         &self.config
+    }
+
+    fn create_engine(&self) -> Engine {
+        // Regression harness prioritizes convergence robustness over speed so
+        // difficult ngspice decks exercise model behavior instead of solver limits.
+        let mut config = SimulationConfig::default();
+        config.convergence_config = ConvergenceConfig::robust();
+        Engine::new(config)
     }
 
     /// Discover all .cir test files in a subdirectory
@@ -264,6 +310,29 @@ impl TestRunner {
                     *st,
                     *sp,
                     *stp,
+                    analysis_start,
+                ),
+                AnalysisSpec::DcSweep2 {
+                    inner_source,
+                    inner_start,
+                    inner_stop,
+                    inner_step,
+                    outer_source,
+                    outer_start,
+                    outer_stop,
+                    outer_step,
+                } => self.run_dc_sweep_2d_test(
+                    &name,
+                    cir_path,
+                    &source,
+                    inner_source,
+                    *inner_start,
+                    *inner_stop,
+                    *inner_step,
+                    outer_source,
+                    *outer_start,
+                    *outer_stop,
+                    *outer_step,
                     analysis_start,
                 ),
                 AnalysisSpec::Transient {
@@ -385,7 +454,26 @@ impl TestRunner {
     /// Parse .dc directive: .dc source start stop step
     fn parse_dc_directive(&self, line: &str) -> Option<AnalysisSpec> {
         let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 5 {
+        if parts.len() >= 9 {
+            let inner_source = parts[1].to_string();
+            let inner_start = self.parse_spice_value(parts[2])?;
+            let inner_stop = self.parse_spice_value(parts[3])?;
+            let inner_step = self.parse_spice_value(parts[4])?;
+            let outer_source = parts[5].to_string();
+            let outer_start = self.parse_spice_value(parts[6])?;
+            let outer_stop = self.parse_spice_value(parts[7])?;
+            let outer_step = self.parse_spice_value(parts[8])?;
+            Some(AnalysisSpec::DcSweep2 {
+                inner_source,
+                inner_start,
+                inner_stop,
+                inner_step,
+                outer_source,
+                outer_start,
+                outer_stop,
+                outer_step,
+            })
+        } else if parts.len() >= 5 {
             let source = parts[1].to_string();
             let start = self.parse_spice_value(parts[2])?;
             let stop = self.parse_spice_value(parts[3])?;
@@ -506,7 +594,7 @@ impl TestRunner {
             }
         };
 
-        let engine = Engine::default();
+        let engine = self.create_engine();
         match engine.run_dc_op(&netlist) {
             Ok(result) => {
                 // Extract test/gold node pairs and compare
@@ -618,7 +706,7 @@ impl TestRunner {
             }
         };
 
-        let engine = Engine::default();
+        let engine = self.create_engine();
         match engine.run_dc_sweep(&netlist, sweep_source, start_val, stop_val, step_val) {
             Ok(results) => {
                 let mismatches = match self.compare_dc_sweep_reference(cir_path, &netlist, &results)
@@ -660,6 +748,172 @@ impl TestRunner {
         }
     }
 
+    #[inline]
+    fn generate_sweep_points(start: Value, stop: Value, step: Value) -> Result<Vec<Value>, String> {
+        if !start.is_finite() || !stop.is_finite() || !step.is_finite() || step == 0.0 {
+            return Err("Invalid DC sweep range".to_string());
+        }
+        if (stop > start && step < 0.0) || (stop < start && step > 0.0) {
+            return Err("DC sweep step sign does not reach stop".to_string());
+        }
+
+        let mut points = Vec::new();
+        let mut x = start;
+        let mut guard = 0usize;
+        let max_points = 2_000_000usize;
+        let eps = (step.abs() * 1e-9).max(1e-18);
+        let done = |value: Value| -> bool {
+            if step > 0.0 {
+                value > stop + eps
+            } else {
+                value < stop - eps
+            }
+        };
+
+        while !done(x) {
+            points.push(x);
+            guard += 1;
+            if guard >= max_points {
+                return Err("DC sweep exceeded point limit".to_string());
+            }
+            x += step;
+        }
+        if points.is_empty() {
+            points.push(start);
+        }
+        Ok(points)
+    }
+
+    fn set_source_dc_value(
+        &self,
+        netlist: &mut Netlist,
+        source_name: &str,
+        dc_value: Value,
+    ) -> Result<(), String> {
+        for element in &mut netlist.elements {
+            if !element.name.eq_ignore_ascii_case(source_name) {
+                continue;
+            }
+            match &mut element.kind {
+                crate::netlist::ElementKind::VoltageSource(spec)
+                | crate::netlist::ElementKind::CurrentSource(spec) => {
+                    *spec = crate::netlist::SourceSpec::Dc(dc_value);
+                    return Ok(());
+                }
+                _ => {
+                    return Err(format!(
+                        "Sweep source '{}' is not an independent source",
+                        source_name
+                    ));
+                }
+            }
+        }
+        Err(format!("Sweep source '{}' not found", source_name))
+    }
+
+    fn run_dc_sweep_2d_test(
+        &self,
+        name: &str,
+        cir_path: &Path,
+        source: &str,
+        inner_source: &str,
+        inner_start: Value,
+        inner_stop: Value,
+        inner_step: Value,
+        outer_source: &str,
+        outer_start: Value,
+        outer_stop: Value,
+        outer_step: Value,
+        start: std::time::Instant,
+    ) -> TestResult {
+        let base_netlist = match Netlist::parse(source) {
+            Ok(n) => n,
+            Err(e) => {
+                return TestResult {
+                    name: name.to_string(),
+                    passed: false,
+                    error: Some(format!("Parse error: {}", e)),
+                    mismatches: Vec::new(),
+                    duration_ms: start.elapsed().as_millis(),
+                    analysis_type: Some("DC Sweep".to_string()),
+                };
+            }
+        };
+
+        let outer_points = match Self::generate_sweep_points(outer_start, outer_stop, outer_step) {
+            Ok(points) => points,
+            Err(e) => {
+                return TestResult {
+                    name: name.to_string(),
+                    passed: false,
+                    error: Some(format!("Sweep setup error: {}", e)),
+                    mismatches: Vec::new(),
+                    duration_ms: start.elapsed().as_millis(),
+                    analysis_type: Some("DC Sweep".to_string()),
+                };
+            }
+        };
+
+        let engine = self.create_engine();
+        let mut merged_results: Vec<(Value, crate::SimulationResult)> = Vec::new();
+
+        for outer_value in outer_points {
+            let mut netlist = base_netlist.clone();
+            if let Err(e) = self.set_source_dc_value(&mut netlist, outer_source, outer_value) {
+                return TestResult {
+                    name: name.to_string(),
+                    passed: false,
+                    error: Some(format!("Sweep setup error: {}", e)),
+                    mismatches: Vec::new(),
+                    duration_ms: start.elapsed().as_millis(),
+                    analysis_type: Some("DC Sweep".to_string()),
+                };
+            }
+
+            match engine.run_dc_sweep(&netlist, inner_source, inner_start, inner_stop, inner_step) {
+                Ok(mut results) => merged_results.append(&mut results),
+                Err(e) => {
+                    return TestResult {
+                        name: name.to_string(),
+                        passed: false,
+                        error: Some(format!("Simulation error: {}", e)),
+                        mismatches: Vec::new(),
+                        duration_ms: start.elapsed().as_millis(),
+                        analysis_type: Some("DC Sweep".to_string()),
+                    };
+                }
+            }
+        }
+
+        let mismatches = match self.compare_dc_sweep_reference(cir_path, &base_netlist, &merged_results)
+        {
+            Ok(m) => m,
+            Err(e) => {
+                return TestResult {
+                    name: name.to_string(),
+                    passed: false,
+                    error: Some(format!("Reference comparison error: {}", e)),
+                    mismatches: Vec::new(),
+                    duration_ms: start.elapsed().as_millis(),
+                    analysis_type: Some("DC Sweep".to_string()),
+                };
+            }
+        };
+        let passed = mismatches.is_empty();
+        TestResult {
+            name: name.to_string(),
+            passed,
+            error: if passed {
+                None
+            } else {
+                Some(format!("{} reference mismatch(es)", mismatches.len()))
+            },
+            mismatches,
+            duration_ms: start.elapsed().as_millis(),
+            analysis_type: Some("DC Sweep".to_string()),
+        }
+    }
+
     fn run_transient_test(
         &self,
         name: &str,
@@ -684,7 +938,7 @@ impl TestRunner {
             }
         };
 
-        let engine = Engine::default();
+        let engine = self.create_engine();
         let max_step = tmax.unwrap_or_else(|| {
             if tstep > 0.0 {
                 // Engine transient startup uses initial_step = max_step / 10.
@@ -696,7 +950,8 @@ impl TestRunner {
             }
         });
 
-        match engine.run_tran(&netlist, tstop, max_step) {
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms);
+        match engine.run_tran_with_abort(&netlist, tstop, max_step, &abort) {
             Ok(result) => {
                 let mismatches = match self.compare_transient_reference(cir_path, &result) {
                     Ok(m) => m,
@@ -768,7 +1023,7 @@ impl TestRunner {
             AcSweepType::Lin => self.generate_linear_points(fstart, fstop, points),
         };
 
-        let engine = Engine::default();
+        let engine = self.create_engine();
         match engine.run_ac(&netlist, &frequencies) {
             Ok(results) => {
                 let mismatches = match self.compare_ac_reference(cir_path, &netlist, &results) {
@@ -1173,7 +1428,7 @@ impl TestRunner {
             return Ok(Vec::new());
         }
 
-        let engine = Engine::default();
+        let engine = self.create_engine();
         let circuit = engine
             .build_circuit(netlist)
             .map_err(|e| format!("Failed to build circuit for AC reference mapping: {e}"))?;
@@ -1246,6 +1501,7 @@ impl TestRunner {
         F: Fn(&str) -> Option<Vec<f64>>,
     {
         let mut mismatches = Vec::new();
+        let sim_monotonic = Self::is_monotonic_axis(x_sim);
 
         for (var, expected_series) in &reference.variables {
             if Self::normalize_variable_name(var)
@@ -1261,26 +1517,75 @@ impl TestRunner {
                 continue;
             }
 
-            for (&x_ref, &expected) in expected_series.x.iter().zip(expected_series.y.iter()) {
-                let Some(actual) = Self::interpolate_series(x_sim, &actual_series, x_ref) else {
-                    continue;
-                };
-                if let Some(relative_error) = self.compare_values(expected, actual) {
-                    mismatches.push(ValueMismatch {
-                        x_value: x_ref,
-                        node: var.clone(),
-                        expected,
-                        actual,
-                        relative_error,
-                    });
-                    if mismatches.len() >= self.config.max_mismatches {
-                        return mismatches;
+            let ref_monotonic = Self::is_monotonic_axis(&expected_series.x);
+            if sim_monotonic && ref_monotonic {
+                for (&x_ref, &expected) in expected_series.x.iter().zip(expected_series.y.iter()) {
+                    let Some(actual) = Self::interpolate_series(x_sim, &actual_series, x_ref) else {
+                        continue;
+                    };
+                    if let Some(relative_error) = self.compare_values(expected, actual) {
+                        mismatches.push(ValueMismatch {
+                            x_value: x_ref,
+                            node: var.clone(),
+                            expected,
+                            actual,
+                            relative_error,
+                        });
+                        if mismatches.len() >= self.config.max_mismatches {
+                            return mismatches;
+                        }
+                    }
+                }
+            } else {
+                // Multi-dimensional sweeps (e.g. .dc src1 ... src2 ...) produce
+                // non-monotonic x-axes. For these traces compare by row index.
+                let n = expected_series.y.len().min(actual_series.len());
+                for i in 0..n {
+                    let expected = expected_series.y[i];
+                    let actual = actual_series[i];
+                    let x_value = expected_series
+                        .x
+                        .get(i)
+                        .copied()
+                        .unwrap_or(i as f64);
+                    if let Some(relative_error) = self.compare_values(expected, actual) {
+                        mismatches.push(ValueMismatch {
+                            x_value,
+                            node: var.clone(),
+                            expected,
+                            actual,
+                            relative_error,
+                        });
+                        if mismatches.len() >= self.config.max_mismatches {
+                            return mismatches;
+                        }
                     }
                 }
             }
         }
 
         mismatches
+    }
+
+    #[inline]
+    fn is_monotonic_axis(x: &[f64]) -> bool {
+        if x.len() < 2 {
+            return true;
+        }
+        let mut non_decreasing = true;
+        let mut non_increasing = true;
+        for pair in x.windows(2) {
+            if pair[1] < pair[0] {
+                non_decreasing = false;
+            }
+            if pair[1] > pair[0] {
+                non_increasing = false;
+            }
+            if !non_decreasing && !non_increasing {
+                return false;
+            }
+        }
+        true
     }
 
     fn load_reference_table(&self, cir_path: &Path) -> Result<Option<ReferenceTable>, String> {
@@ -1572,6 +1877,35 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_dc_directive_2d() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+
+        let spec = runner.parse_dc_directive(".dc vd 0 3 0.01 vg 0.5 3 0.5").unwrap();
+        if let AnalysisSpec::DcSweep2 {
+            inner_source,
+            inner_start,
+            inner_stop,
+            inner_step,
+            outer_source,
+            outer_start,
+            outer_stop,
+            outer_step,
+        } = spec
+        {
+            assert_eq!(inner_source, "vd");
+            assert!((inner_start - 0.0).abs() < 1e-12);
+            assert!((inner_stop - 3.0).abs() < 1e-12);
+            assert!((inner_step - 0.01).abs() < 1e-12);
+            assert_eq!(outer_source, "vg");
+            assert!((outer_start - 0.5).abs() < 1e-12);
+            assert!((outer_stop - 3.0).abs() < 1e-12);
+            assert!((outer_step - 0.5).abs() < 1e-12);
+        } else {
+            panic!("Expected 2D DC Sweep analysis");
+        }
+    }
+
+    #[test]
     fn test_parse_ac_directive() {
         let runner = TestRunner::new(".", TestRunnerConfig::default());
 
@@ -1633,6 +1967,40 @@ mod tests {
 
         assert_eq!(analyses.len(), 1);
         assert!(matches!(analyses[0], AnalysisSpec::Transient { .. }));
+    }
+
+    #[test]
+    fn test_is_monotonic_axis_detection() {
+        assert!(TestRunner::is_monotonic_axis(&[]));
+        assert!(TestRunner::is_monotonic_axis(&[0.0]));
+        assert!(TestRunner::is_monotonic_axis(&[0.0, 1.0, 2.0]));
+        assert!(TestRunner::is_monotonic_axis(&[2.0, 1.0, 0.0]));
+        assert!(!TestRunner::is_monotonic_axis(&[0.0, 1.0, 0.5]));
+    }
+
+    #[test]
+    fn test_compare_reference_dataset_non_monotonic_uses_row_alignment() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let mut reference = ReferenceTable::default();
+        reference.x_name = "v-sweep".to_string();
+        reference.variables.insert(
+            "v(out)".to_string(),
+            ReferenceSeries {
+                x: vec![0.0, 1.0, 0.0, 1.0],
+                y: vec![1.0, 2.0, 3.0, 4.0],
+            },
+        );
+
+        let x_sim = vec![0.0, 1.0, 0.0, 1.0];
+        let mismatches = runner.compare_reference_dataset(&reference, &x_sim, |var| {
+            if var.eq_ignore_ascii_case("v(out)") {
+                Some(vec![1.0, 2.0, 3.0, 4.0])
+            } else {
+                None
+            }
+        });
+
+        assert!(mismatches.is_empty());
     }
 
     #[test]
