@@ -37,6 +37,8 @@ use veriloga_cache::{normalize_model_key, resolve_cached_or_compile_veriloga};
 
 /// Embedded transistor model library used for fallback model resolution.
 const BUILTIN_TRANSISTOR_LIB: &str = include_str!("../../../../models/spice/transistor.lib");
+/// Embedded diode model library used for fallback model resolution.
+const BUILTIN_DIODE_LIB: &str = include_str!("../../../../models/spice/diode.lib");
 
 /// Lazily parsed builtin BJT model parameter map (MODEL_NAME -> params).
 fn builtin_bjt_model_map() -> &'static HashMap<String, HashMap<String, f64>> {
@@ -51,6 +53,30 @@ fn builtin_bjt_model_map() -> &'static HashMap<String, HashMap<String, f64>> {
         for model in netlist.models {
             if model.model_type.eq_ignore_ascii_case("NPN")
                 || model.model_type.eq_ignore_ascii_case("PNP")
+            {
+                map.insert(
+                    model.name.to_uppercase(),
+                    model.params.into_iter().collect(),
+                );
+            }
+        }
+        map
+    })
+}
+
+/// Lazily parsed builtin diode model parameter map (MODEL_NAME -> params).
+fn builtin_diode_model_map() -> &'static HashMap<String, HashMap<String, f64>> {
+    static DIODE_MODELS: OnceLock<HashMap<String, HashMap<String, f64>>> = OnceLock::new();
+    DIODE_MODELS.get_or_init(|| {
+        let mut map = HashMap::new();
+        let Ok(netlist) = crate::netlist::parse_netlist(BUILTIN_DIODE_LIB) else {
+            log::warn!("Failed to parse embedded diode library for fallback models");
+            return map;
+        };
+
+        for model in netlist.models {
+            if model.model_type.eq_ignore_ascii_case("D")
+                || model.model_type.eq_ignore_ascii_case("DIODE")
             {
                 map.insert(
                     model.name.to_uppercase(),
@@ -269,8 +295,7 @@ impl Engine {
                     let mut diode = crate::device::Diode::new(element.name.clone(), anode, cathode);
 
                     // Look up model and apply parameters
-                    let model_def = find_model_def(netlist, model);
-                    if let Some(device_model) = model_def {
+                    if let Some(device_model) = find_model_def(netlist, model) {
                         ensure_model_type(
                             "Diode",
                             &element.name,
@@ -281,6 +306,20 @@ impl Engine {
                         let params_map: std::collections::HashMap<String, f64> =
                             device_model.params.iter().cloned().collect();
                         diode = diode.with_model_params(&params_map);
+                    } else if let Some(params_map) =
+                        builtin_diode_model_map().get(&model.to_uppercase())
+                    {
+                        diode = diode.with_model_params(params_map);
+                        log::debug!(
+                            "Applied embedded diode fallback model '{}' to {}",
+                            model,
+                            element.name
+                        );
+                    } else {
+                        return Err(SimulationError::Circuit(format!(
+                            "Diode '{}' references unknown model '{}'",
+                            element.name, model
+                        )));
                     }
 
                     circuit.diodes.add(diode);
@@ -335,11 +374,19 @@ impl Engine {
                             model,
                             element.name
                         );
+                    } else {
+                        return Err(SimulationError::Circuit(format!(
+                            "BJT '{}' references unknown model '{}'",
+                            element.name, model
+                        )));
                     }
 
                     circuit.bjts.add(bjt);
                 }
-                ElementKind::Mosfet { model, mos_type } => {
+                ElementKind::Mosfet {
+                    model,
+                    mos_type: _mos_type,
+                } => {
                     let drain = circuit.get_or_create_node(&element.nodes[0]);
                     let gate = circuit.get_or_create_node(&element.nodes[1]);
                     let source = circuit.get_or_create_node(&element.nodes[2]);
@@ -354,8 +401,15 @@ impl Engine {
                                 element.name, model, device_model.model_type
                             ))
                         })?
+                    } else if model.eq_ignore_ascii_case("NMOS") {
+                        crate::netlist::MosType::Nmos
+                    } else if model.eq_ignore_ascii_case("PMOS") {
+                        crate::netlist::MosType::Pmos
                     } else {
-                        *mos_type
+                        return Err(SimulationError::Circuit(format!(
+                            "MOSFET '{}' references unknown model '{}'",
+                            element.name, model
+                        )));
                     };
 
                     let mut mosfet = match resolved_mos_type {
@@ -391,7 +445,10 @@ impl Engine {
 
                     circuit.mosfets.add(mosfet);
                 }
-                ElementKind::Jfet { model, jfet_type } => {
+                ElementKind::Jfet {
+                    model,
+                    jfet_type: _jfet_type,
+                } => {
                     let drain = circuit.get_or_create_node(&element.nodes[0]);
                     let gate = circuit.get_or_create_node(&element.nodes[1]);
                     let source = circuit.get_or_create_node(&element.nodes[2]);
@@ -405,8 +462,15 @@ impl Engine {
                                 element.name, model, device_model.model_type
                             ))
                         })?
+                    } else if model.eq_ignore_ascii_case("NJF") {
+                        crate::netlist::JfetType::Njf
+                    } else if model.eq_ignore_ascii_case("PJF") {
+                        crate::netlist::JfetType::Pjf
                     } else {
-                        *jfet_type
+                        return Err(SimulationError::Circuit(format!(
+                            "JFET '{}' references unknown model '{}'",
+                            element.name, model
+                        )));
                     };
 
                     let mut jfet = match resolved_jfet_type {
@@ -459,7 +523,10 @@ impl Engine {
                     circuit.jfets.push(jfet);
                 }
                 // MESFET (GaAs FET) - treat as JFET for now since physics are similar
-                ElementKind::Mesfet { model, mesfet_type } => {
+                ElementKind::Mesfet {
+                    model,
+                    mesfet_type: _mesfet_type,
+                } => {
                     let drain = circuit.get_or_create_node(&element.nodes[0]);
                     let gate = circuit.get_or_create_node(&element.nodes[1]);
                     let source = circuit.get_or_create_node(&element.nodes[2]);
@@ -474,8 +541,15 @@ impl Engine {
                                 element.name, model, device_model.model_type
                             ))
                         })?
+                    } else if model.eq_ignore_ascii_case("NMF") {
+                        crate::netlist::MesfetType::Nmf
+                    } else if model.eq_ignore_ascii_case("PMF") {
+                        crate::netlist::MesfetType::Pmf
                     } else {
-                        *mesfet_type
+                        return Err(SimulationError::Circuit(format!(
+                            "MESFET '{}' references unknown model '{}'",
+                            element.name, model
+                        )));
                     };
 
                     let mut jfet = match resolved_mesfet_type {
@@ -959,37 +1033,33 @@ impl Engine {
                     }
 
                     // Look up the model in the registry and create instance
-                    if let Some(code_model) = circuit.xspice_registry.get(model) {
-                        match crate::xspice::XspiceInstance::new(
-                            element.name.clone(),
-                            code_model.clone(),
-                            connections,
-                            params,
-                        ) {
-                            Ok(instance) => {
-                                circuit.xspice_instances.push(instance);
-                                log::debug!(
-                                    "Created XSPICE instance {}: model={}, ports={}",
-                                    element.name,
-                                    model,
-                                    ports.len()
-                                );
-                            }
-                            Err(e) => {
-                                log::warn!(
-                                    "Failed to create XSPICE instance {}: {}",
-                                    element.name,
-                                    e
-                                );
-                            }
-                        }
-                    } else {
-                        log::warn!(
+                    let code_model = circuit.xspice_registry.get(model).ok_or_else(|| {
+                        SimulationError::Circuit(format!(
                             "Unknown XSPICE model '{}' for element {}",
-                            model,
-                            element.name
-                        );
-                    }
+                            model, element.name
+                        ))
+                    })?;
+
+                    let instance = crate::xspice::XspiceInstance::new(
+                        element.name.clone(),
+                        code_model.clone(),
+                        connections,
+                        params,
+                    )
+                    .map_err(|e| {
+                        SimulationError::Circuit(format!(
+                            "Failed to create XSPICE instance '{}': {}",
+                            element.name, e
+                        ))
+                    })?;
+
+                    circuit.xspice_instances.push(instance);
+                    log::debug!(
+                        "Created XSPICE instance {}: model={}, ports={}",
+                        element.name,
+                        model,
+                        ports.len()
+                    );
                 }
             }
         }
@@ -997,6 +1067,12 @@ impl Engine {
         // Ensure ground reference exists
         // If no node "0" was specified, auto-select a reference node
         circuit.ensure_ground_reference();
+
+        // Resolve behavioral source expression references after final node IDs
+        // are stabilized (including any automatic ground remap).
+        circuit
+            .bind_behavioral_references()
+            .map_err(|e| SimulationError::Circuit(e.to_string()))?;
 
         // Resolve all pending control element references after final node count
         // is established (required for current-controlled switch branch indexing).
