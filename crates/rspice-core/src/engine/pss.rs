@@ -614,7 +614,7 @@ impl Engine {
                     matrix.add(i, i, 1e-12);
                 }
 
-                circuit.stamp_dc_direct(matrix, &mut rhs);
+                circuit.stamp_transient_linear_direct(matrix, &mut rhs);
 
                 let current_method = trapgear.current_method();
                 let coeff = CompanionCoefficients::for_method(current_method);

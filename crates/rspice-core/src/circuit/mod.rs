@@ -2279,6 +2279,27 @@ impl CircuitData {
         self.stamp_tlines_dc_direct(matrix);
     }
 
+    /// Stamp linear devices for transient Newton iterations.
+    ///
+    /// This intentionally excludes transmission-line DC fallback conductances:
+    /// transient delay behavior is handled by dedicated tline companion stamps.
+    pub fn stamp_transient_linear_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
+        self.resistors.stamp_all_direct(matrix);
+        let num_nodes = self.num_nodes;
+        self.inductors.stamp_dc_short_direct(matrix, rhs, num_nodes);
+        self.voltage_sources
+            .stamp_all_direct(matrix, rhs, |br_ordinal| num_nodes + br_ordinal);
+        self.current_sources.stamp_all(rhs);
+
+        self.vcvs
+            .stamp_all_direct(matrix, |br_ordinal| num_nodes + br_ordinal);
+        self.vccs.stamp_all_direct(matrix);
+        self.cccs
+            .stamp_all_direct(matrix, |br_ordinal| num_nodes + br_ordinal);
+        self.ccvs
+            .stamp_all_direct(matrix, |br_ordinal| num_nodes + br_ordinal);
+    }
+
     /// Stamp all devices with scaled source values (for source stepping)
     pub fn stamp_dc_direct_scaled(
         &self,

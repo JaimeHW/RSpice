@@ -655,8 +655,9 @@ impl Engine {
                     matrix.add(i, i, 1e-12);
                 }
 
-                // Stamp linear devices (R, V, I) - this stamps DC values initially
-                circuit.stamp_dc_direct(&mut matrix, &mut rhs);
+                // Stamp linear devices (R, V, I) for transient.
+                // Tline transient behavior is stamped separately via companions.
+                circuit.stamp_transient_linear_direct(&mut matrix, &mut rhs);
 
                 // Update voltage source RHS values for time-varying sources (PULSE, SIN, etc.)
                 let num_nodes = circuit.num_nodes();
