@@ -261,7 +261,7 @@ impl Mosfet {
     /// Set model parameters from a DeviceModel
     pub fn with_params(mut self, params: &std::collections::HashMap<String, Value>) -> Self {
         // Level 1 parameters
-        if let Some(&v) = params.get("VTO") {
+        if let Some(&v) = params.get("VTO").or_else(|| params.get("VTH0")) {
             self.vto = v;
         }
         if let Some(&v) = params.get("KP") {
@@ -1106,6 +1106,15 @@ mod tests {
         assert_eq!(m.node_gate, 2);
         assert_eq!(m.node_source, 1);
         assert_eq!(m.node_bulk, 0);
+    }
+
+    #[test]
+    fn test_with_params_accepts_vth0_alias_for_vto() {
+        let mut params = std::collections::HashMap::new();
+        params.insert("VTH0".to_string(), 0.52);
+
+        let m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0).with_params(&params);
+        assert!((m.vto - 0.52).abs() < 1e-12);
     }
 
     #[test]
