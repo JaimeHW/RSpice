@@ -4,6 +4,7 @@
 
 #[cfg(test)]
 mod engine_tests {
+    use crate::abort_signal::ImmediateAbort;
     use crate::Netlist;
     use crate::Value;
     use crate::engine::Engine;
@@ -1783,6 +1784,29 @@ RRET out 0 1k
                 .node_names
                 .iter()
                 .any(|name| name.eq_ignore_ascii_case("out"))
+        );
+    }
+
+    #[test]
+    fn test_dc_sweep_with_abort_returns_aborted_error() {
+        let netlist = Netlist::parse(
+            r#"
+* DC sweep abort coverage
+V1 in 0 0
+R1 in out 1k
+R2 out 0 1k
+.end
+"#,
+        )
+        .unwrap();
+
+        let engine = Engine::default();
+        let abort = ImmediateAbort;
+        let result = engine.run_dc_sweep_with_abort(&netlist, "V1", 0.0, 5.0, 0.1, &abort);
+        assert!(
+            matches!(result, Err(crate::engine::SimulationError::Aborted)),
+            "expected sweep to abort immediately, got {:?}",
+            result
         );
     }
 
