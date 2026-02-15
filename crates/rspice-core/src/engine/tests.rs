@@ -215,6 +215,30 @@ R1 out 0 1k
     }
 
     #[test]
+    fn test_behavioral_source_invalid_expression_fails_build() {
+        let netlist = Netlist::parse(
+            r#"
+* Invalid behavioral expression must fail build
+V1 in 0 1
+B1 out 0 V=V(in) @ 2
+R1 out 0 1k
+.end
+"#,
+        )
+        .unwrap();
+
+        let err = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("invalid behavioral expression should fail build");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Invalid behavioral expression") && msg.contains("@"),
+            "expected strict behavioral parse error, got {}",
+            msg
+        );
+    }
+
+    #[test]
     fn test_transient_rc() {
         let netlist_str = r#"
 * RC Transient Test
@@ -1208,6 +1232,25 @@ A1 out gain
             msg.contains("Failed to create XSPICE instance") && msg.contains("Port count"),
             "expected XSPICE creation error with port count details, got {}",
             msg
+        );
+    }
+
+    #[test]
+    fn test_xspice_gain_participates_in_dc_operating_point() {
+        let netlist_str = r#"
+* XSPICE gain block should contribute during DC solve
+V1 in 0 1
+A1 in out gain gain=2
+RLOAD out 0 1k
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let result = Engine::default().run_dc_op(&netlist).unwrap();
+        let vout = result.voltage(2);
+        assert!(
+            vout > 0.8 && vout < 1.2,
+            "expected XSPICE gain to drive non-zero DC output near 1V, got {}",
+            vout
         );
     }
 
