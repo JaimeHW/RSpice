@@ -205,7 +205,7 @@ impl TestRunner {
         &self.config
     }
 
-    fn create_engine(&self) -> Engine {
+    fn create_dc_engine(&self) -> Engine {
         // Regression harness prioritizes convergence robustness over speed so
         // difficult ngspice decks exercise model behavior instead of solver limits.
         let mut config = SimulationConfig::default();
@@ -213,11 +213,23 @@ impl TestRunner {
         Engine::new(config)
     }
 
+    fn create_dynamic_engine(&self) -> Engine {
+        // Use production-like defaults for transient/AC-style analyses.
+        // For several ngspice decks, forcing robust DC continuation settings
+        // globally can create false convergence failures in dynamic solves.
+        Engine::new(SimulationConfig::default())
+    }
+
     /// Discover all .cir test files in a subdirectory
     pub fn discover_tests(&self, subdir: &str) -> Vec<PathBuf> {
         let dir = self.test_dir.join(subdir);
         if !dir.exists() {
             return Vec::new();
+        }
+
+        if let Some(mut suite_tests) = self.discover_tests_from_makefile(&dir) {
+            suite_tests.sort();
+            return suite_tests;
         }
 
         let mut tests = Vec::new();
@@ -231,6 +243,76 @@ impl TestRunner {
         }
         tests.sort();
         tests
+    }
+
+    fn discover_tests_from_makefile(&self, dir: &Path) -> Option<Vec<PathBuf>> {
+        let makefile = dir.join("Makefile.am");
+        let content = fs::read_to_string(&makefile).ok()?;
+
+        let mut in_tests_block = false;
+        let mut tokens: Vec<String> = Vec::new();
+
+        for raw_line in content.lines() {
+            let no_comment = raw_line
+                .split_once('#')
+                .map(|(head, _)| head)
+                .unwrap_or(raw_line);
+            let trimmed = no_comment.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            if !in_tests_block {
+                let Some((lhs, rhs)) = trimmed.split_once('=') else {
+                    continue;
+                };
+                if lhs.trim() != "TESTS" {
+                    continue;
+                }
+                in_tests_block = true;
+                let continuation = rhs.trim_end().ends_with('\\');
+                tokens.extend(
+                    rhs.trim_end_matches('\\')
+                        .split_whitespace()
+                        .map(str::to_string),
+                );
+                if !continuation {
+                    break;
+                }
+                continue;
+            }
+
+            let continuation = trimmed.ends_with('\\');
+            tokens.extend(
+                trimmed
+                    .trim_end_matches('\\')
+                    .split_whitespace()
+                    .map(str::to_string),
+            );
+            if !continuation {
+                break;
+            }
+        }
+
+        if tokens.is_empty() {
+            return None;
+        }
+
+        let mut tests = Vec::new();
+        for token in tokens {
+            if token.contains('$') {
+                continue;
+            }
+            if !token.to_ascii_lowercase().ends_with(".cir") {
+                continue;
+            }
+            let path = dir.join(&token);
+            if path.exists() {
+                tests.push(path);
+            }
+        }
+
+        if tests.is_empty() { None } else { Some(tests) }
     }
 
     /// Run a single test circuit
@@ -340,17 +422,15 @@ impl TestRunner {
                     tstop,
                     tstart: _,
                     tmax,
-                } => {
-                    self.run_transient_test(
-                        &name,
-                        cir_path,
-                        &source,
-                        *tstep,
-                        *tstop,
-                        *tmax,
-                        analysis_start,
-                    )
-                }
+                } => self.run_transient_test(
+                    &name,
+                    cir_path,
+                    &source,
+                    *tstep,
+                    *tstop,
+                    *tmax,
+                    analysis_start,
+                ),
                 AnalysisSpec::Ac {
                     sweep_type,
                     points,
@@ -594,7 +674,7 @@ impl TestRunner {
             }
         };
 
-        let engine = self.create_engine();
+        let engine = self.create_dynamic_engine();
         match engine.run_dc_op(&netlist) {
             Ok(result) => {
                 // Extract test/gold node pairs and compare
@@ -706,16 +786,34 @@ impl TestRunner {
             }
         };
 
-        let engine = self.create_engine();
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms);
-        match engine.run_dc_sweep_with_abort(
+        let primary_engine = self.create_dynamic_engine();
+        let primary_result = primary_engine.run_dc_sweep_with_abort(
             &netlist,
             sweep_source,
             start_val,
             stop_val,
             step_val,
             &abort,
-        ) {
+        );
+
+        let sweep_result = match primary_result {
+            Ok(results) => Ok(results),
+            Err(err) if Self::is_recoverable_dc_convergence_error(&err) => {
+                let robust_engine = self.create_dc_engine();
+                robust_engine.run_dc_sweep_with_abort(
+                    &netlist,
+                    sweep_source,
+                    start_val,
+                    stop_val,
+                    step_val,
+                    &abort,
+                )
+            }
+            Err(err) => Err(err),
+        };
+
+        match sweep_result {
             Ok(results) => {
                 let mismatches = match self.compare_dc_sweep_reference(cir_path, &netlist, &results)
                 {
@@ -754,6 +852,15 @@ impl TestRunner {
                 analysis_type: Some("DC Sweep".to_string()),
             },
         }
+    }
+
+    #[inline]
+    fn is_recoverable_dc_convergence_error(err: &crate::engine::SimulationError) -> bool {
+        let message = err.to_string().to_ascii_lowercase();
+        !message.contains("aborted")
+            && (message.contains("convergence")
+                || message.contains("singular")
+                || message.contains("failed to converge"))
     }
 
     #[inline]
@@ -862,7 +969,7 @@ impl TestRunner {
             }
         };
 
-        let engine = self.create_engine();
+        let engine = self.create_dc_engine();
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms);
         let mut merged_results: Vec<(Value, crate::SimulationResult)> = Vec::new();
 
@@ -901,20 +1008,20 @@ impl TestRunner {
             }
         }
 
-        let mismatches = match self.compare_dc_sweep_reference(cir_path, &base_netlist, &merged_results)
-        {
-            Ok(m) => m,
-            Err(e) => {
-                return TestResult {
-                    name: name.to_string(),
-                    passed: false,
-                    error: Some(format!("Reference comparison error: {}", e)),
-                    mismatches: Vec::new(),
-                    duration_ms: start.elapsed().as_millis(),
-                    analysis_type: Some("DC Sweep".to_string()),
-                };
-            }
-        };
+        let mismatches =
+            match self.compare_dc_sweep_reference(cir_path, &base_netlist, &merged_results) {
+                Ok(m) => m,
+                Err(e) => {
+                    return TestResult {
+                        name: name.to_string(),
+                        passed: false,
+                        error: Some(format!("Reference comparison error: {}", e)),
+                        mismatches: Vec::new(),
+                        duration_ms: start.elapsed().as_millis(),
+                        analysis_type: Some("DC Sweep".to_string()),
+                    };
+                }
+            };
         let passed = mismatches.is_empty();
         TestResult {
             name: name.to_string(),
@@ -954,7 +1061,7 @@ impl TestRunner {
             }
         };
 
-        let engine = self.create_engine();
+        let engine = self.create_dynamic_engine();
         let max_step = tmax.unwrap_or_else(|| {
             if tstep > 0.0 {
                 // Engine transient startup uses initial_step = max_step / 10.
@@ -1039,7 +1146,7 @@ impl TestRunner {
             AcSweepType::Lin => self.generate_linear_points(fstart, fstop, points),
         };
 
-        let engine = self.create_engine();
+        let engine = self.create_dynamic_engine();
         match engine.run_ac(&netlist, &frequencies) {
             Ok(results) => {
                 let mismatches = match self.compare_ac_reference(cir_path, &netlist, &results) {
@@ -1444,7 +1551,7 @@ impl TestRunner {
             return Ok(Vec::new());
         }
 
-        let engine = self.create_engine();
+        let engine = self.create_dynamic_engine();
         let circuit = engine
             .build_circuit(netlist)
             .map_err(|e| format!("Failed to build circuit for AC reference mapping: {e}"))?;
@@ -1536,7 +1643,8 @@ impl TestRunner {
             let ref_monotonic = Self::is_monotonic_axis(&expected_series.x);
             if sim_monotonic && ref_monotonic {
                 for (&x_ref, &expected) in expected_series.x.iter().zip(expected_series.y.iter()) {
-                    let Some(actual) = Self::interpolate_series(x_sim, &actual_series, x_ref) else {
+                    let Some(actual) = Self::interpolate_series(x_sim, &actual_series, x_ref)
+                    else {
                         continue;
                     };
                     if let Some(relative_error) = self.compare_values(expected, actual) {
@@ -1559,11 +1667,7 @@ impl TestRunner {
                 for i in 0..n {
                     let expected = expected_series.y[i];
                     let actual = actual_series[i];
-                    let x_value = expected_series
-                        .x
-                        .get(i)
-                        .copied()
-                        .unwrap_or(i as f64);
+                    let x_value = expected_series.x.get(i).copied().unwrap_or(i as f64);
                     if let Some(relative_error) = self.compare_values(expected, actual) {
                         mismatches.push(ValueMismatch {
                             x_value,
@@ -1809,6 +1913,21 @@ impl TestRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_temp_dir(prefix: &str) -> PathBuf {
+        let unique = format!(
+            "{}_{}_{}",
+            prefix,
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+        std::env::temp_dir().join(unique)
+    }
 
     #[test]
     fn test_config_defaults() {
@@ -1835,6 +1954,60 @@ mod tests {
         assert!((runner.parse_spice_value("2nF").unwrap() - 2e-9).abs() < 1e-18);
         assert!((runner.parse_spice_value("3mH").unwrap() - 3e-3).abs() < 1e-12);
         assert!(runner.parse_spice_value("not_a_number").is_none());
+    }
+
+    #[test]
+    fn test_dc_engine_uses_robust_convergence_profile() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let engine = runner.create_dc_engine();
+        let config = engine.config();
+
+        assert!(
+            config.convergence_config.source_stepping,
+            "DC regression engine should enable source stepping"
+        );
+        assert!(
+            config.convergence_config.gmin_stepping,
+            "DC regression engine should enable GMIN stepping"
+        );
+        assert!(
+            config.convergence_config.pseudo_transient,
+            "DC regression engine should enable pseudo-transient continuation"
+        );
+    }
+
+    #[test]
+    fn test_dynamic_engine_uses_default_convergence_profile() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let engine = runner.create_dynamic_engine();
+        let config = engine.config();
+        let default_cfg = SimulationConfig::default();
+
+        assert_eq!(
+            config.convergence_config.source_stepping,
+            default_cfg.convergence_config.source_stepping
+        );
+        assert_eq!(
+            config.convergence_config.gmin_stepping,
+            default_cfg.convergence_config.gmin_stepping
+        );
+        assert_eq!(
+            config.convergence_config.pseudo_transient,
+            default_cfg.convergence_config.pseudo_transient
+        );
+    }
+
+    #[test]
+    fn test_recoverable_dc_convergence_error_detection() {
+        assert!(TestRunner::is_recoverable_dc_convergence_error(
+            &crate::engine::SimulationError::ConvergenceFailed(5000)
+        ));
+        assert!(TestRunner::is_recoverable_dc_convergence_error(
+            &crate::engine::SimulationError::Circuit("singular matrix".to_string())
+        ));
+        assert!(!TestRunner::is_recoverable_dc_convergence_error(
+            &crate::engine::SimulationError::Aborted
+        ));
     }
 
     #[test]
@@ -1896,7 +2069,9 @@ mod tests {
     fn test_parse_dc_directive_2d() {
         let runner = TestRunner::new(".", TestRunnerConfig::default());
 
-        let spec = runner.parse_dc_directive(".dc vd 0 3 0.01 vg 0.5 3 0.5").unwrap();
+        let spec = runner
+            .parse_dc_directive(".dc vd 0 3 0.01 vg 0.5 3 0.5")
+            .unwrap();
         if let AnalysisSpec::DcSweep2 {
             inner_source,
             inner_start,
@@ -2073,9 +2248,7 @@ mod tests {
             Some("XSPICE code model (A-device)")
         );
         assert_eq!(
-            runner
-                .check_unsupported(".model cpl1 cpl (R=1)")
-                .as_deref(),
+            runner.check_unsupported(".model cpl1 cpl (R=1)").as_deref(),
             Some("CPL transmission line model")
         );
     }
@@ -2163,5 +2336,54 @@ mod tests {
         // Should find some tests in general directory
         // Just verify it doesn't panic
         let _ = tests;
+    }
+
+    #[test]
+    fn test_discover_tests_prefers_makefile_tests_manifest() {
+        let root = unique_temp_dir("rspice_ngspice_manifest");
+        let suite = root.join("suite");
+        fs::create_dir_all(&suite).expect("failed to create temp suite dir");
+
+        fs::write(
+            suite.join("Makefile.am"),
+            "TESTS = \\\n  t1.cir \\\n  t2.cir\nEXTRA_DIST += helper.cir\n",
+        )
+        .expect("failed to write Makefile.am");
+        fs::write(suite.join("t1.cir"), "* t1\n").expect("failed to create t1.cir");
+        fs::write(suite.join("t2.cir"), "* t2\n").expect("failed to create t2.cir");
+        fs::write(suite.join("helper.cir"), "* helper\n").expect("failed to create helper.cir");
+
+        let runner = TestRunner::new(&root, TestRunnerConfig::default());
+        let discovered = runner.discover_tests("suite");
+        let names: Vec<String> = discovered
+            .iter()
+            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+            .collect();
+
+        assert_eq!(names, vec!["t1.cir".to_string(), "t2.cir".to_string()]);
+
+        fs::remove_dir_all(&root).expect("failed to remove temp suite dir");
+    }
+
+    #[test]
+    fn test_discover_tests_falls_back_without_makefile_manifest() {
+        let root = unique_temp_dir("rspice_ngspice_fallback");
+        let suite = root.join("suite");
+        fs::create_dir_all(&suite).expect("failed to create temp suite dir");
+
+        fs::write(suite.join("a.cir"), "* a\n").expect("failed to create a.cir");
+        fs::write(suite.join("b.cir"), "* b\n").expect("failed to create b.cir");
+        fs::write(suite.join("notes.txt"), "not a circuit\n").expect("failed to write notes");
+
+        let runner = TestRunner::new(&root, TestRunnerConfig::default());
+        let discovered = runner.discover_tests("suite");
+        let names: Vec<String> = discovered
+            .iter()
+            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+            .collect();
+
+        assert_eq!(names, vec!["a.cir".to_string(), "b.cir".to_string()]);
+
+        fs::remove_dir_all(&root).expect("failed to remove temp suite dir");
     }
 }
