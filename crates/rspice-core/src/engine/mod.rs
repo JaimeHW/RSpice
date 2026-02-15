@@ -463,14 +463,33 @@ impl Engine {
         circuit: &mut crate::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
     ) -> Result<Vec<Value>, SimulationError> {
+        self.solve_dc_operating_point_with_abort(
+            netlist,
+            circuit,
+            matrix,
+            &crate::abort_signal::NoAbort,
+        )
+    }
+
+    /// Solve the DC operating point with optional node-voltage hints and abort support.
+    pub(crate) fn solve_dc_operating_point_with_abort(
+        &self,
+        netlist: &Netlist,
+        circuit: &mut crate::CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        abort: &dyn crate::abort_signal::AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
         if circuit.has_nonlinear_devices() {
             let hints = self.collect_node_voltage_hints(netlist, circuit);
             if hints.is_empty() {
-                self.solve_nonlinear(circuit, matrix)
+                self.solve_nonlinear_with_node_hints_and_abort(circuit, matrix, &[], abort)
             } else {
-                self.solve_nonlinear_with_node_hints(circuit, matrix, &hints)
+                self.solve_nonlinear_with_node_hints_and_abort(circuit, matrix, &hints, abort)
             }
         } else {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             self.solve_linear(circuit, matrix)
         }
     }

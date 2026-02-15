@@ -6,6 +6,7 @@
 //! - Linear and nonlinear solver interfaces
 
 use super::{DampingStrategy, Engine, SimulationError};
+use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::solver::{
     ArcLengthConfig, ArcLengthContinuation, PseudoTransient, SolverError, StaticMatrix,
 };
@@ -35,6 +36,12 @@ impl Engine {
     const LINE_SEARCH_BACKTRACK: Value = 0.5;
     const LINE_SEARCH_MAX_ITERS: usize = 8;
     const ARC_LENGTH_MAX_STEPS: usize = 128;
+    const ABORT_POLL_MASK: usize = 0x7;
+
+    #[inline]
+    fn should_abort_iteration(abort: &dyn AbortSignal, iteration: usize) -> bool {
+        (iteration & Self::ABORT_POLL_MASK) == 0 && abort.is_aborted()
+    }
 
     #[inline]
     fn nonlinear_iteration_budget(&self, multiplier: usize) -> usize {
@@ -559,11 +566,15 @@ impl Engine {
         initial_solution: &[Value],
         damping_state: &mut NewtonDampingState,
         max_iterations: usize,
+        abort: &dyn AbortSignal,
     ) -> (Vec<Value>, bool, usize) {
         let mut solution = initial_solution.to_vec();
         let mut used_iterations = 0usize;
 
         for iter in 0..max_iterations {
+            if Self::should_abort_iteration(abort, iter) {
+                return (solution, false, used_iterations);
+            }
             used_iterations = iter + 1;
             let mut rhs = vec![0.0; solution.len()];
             matrix.clear_values();
@@ -810,23 +821,35 @@ impl Engine {
     /// This performs a linear pre-solve to get a warm-start initial guess,
     /// which helps convergence especially for BJT circuits where starting
     /// from 0V puts the transistor in an unphysical state.
+    #[allow(dead_code)]
     pub(crate) fn solve_nonlinear(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
     ) -> Result<Vec<Value>, SimulationError> {
-        self.solve_nonlinear_with_node_hints(circuit, matrix, &[])
+        self.solve_nonlinear_with_node_hints_and_abort(circuit, matrix, &[], &NoAbort)
     }
 
     /// Solve nonlinear DC with optional node-voltage hint overrides.
     ///
     /// `node_hints` entries are `(node_id, voltage)` with node IDs using the
     /// standard 1-based non-ground circuit numbering.
+    #[allow(dead_code)]
     pub(crate) fn solve_nonlinear_with_node_hints(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         node_hints: &[(usize, Value)],
+    ) -> Result<Vec<Value>, SimulationError> {
+        self.solve_nonlinear_with_node_hints_and_abort(circuit, matrix, node_hints, &NoAbort)
+    }
+
+    pub(crate) fn solve_nonlinear_with_node_hints_and_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        node_hints: &[(usize, Value)],
+        abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
         let mut initial_guess = self
@@ -841,7 +864,7 @@ impl Engine {
         }
 
         Self::apply_bjt_initial_guess_correction(&mut initial_guess, circuit);
-        self.solve_nonlinear_with_guess(circuit, matrix, Some(&initial_guess))
+        self.solve_nonlinear_with_guess_and_abort(circuit, matrix, Some(&initial_guess), abort)
     }
 
     /// Apply BJT-specific initial guess corrections
@@ -990,11 +1013,22 @@ impl Engine {
     ///
     /// # Returns
     /// The converged solution vector, or error if Newton-Raphson fails to converge.
+    #[allow(dead_code)]
     pub(crate) fn solve_nonlinear_with_guess(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         initial_guess: Option<&[Value]>,
+    ) -> Result<Vec<Value>, SimulationError> {
+        self.solve_nonlinear_with_guess_and_abort(circuit, matrix, initial_guess, &NoAbort)
+    }
+
+    pub(crate) fn solve_nonlinear_with_guess_and_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: Option<&[Value]>,
+        abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
         // Use provided initial guess or start from zero.
@@ -1011,6 +1045,9 @@ impl Engine {
         // Need 500+ iterations to traverse the full +/-1000V range if starting from a poor guess
         let dc_max_iterations = self.nonlinear_iteration_budget(10);
         for iteration in 0..dc_max_iterations {
+            if Self::should_abort_iteration(abort, iteration) {
+                return Err(SimulationError::Aborted);
+            }
             // Debug trace first few iterations
             if iteration < 5 {
                 log::debug!(
@@ -1119,7 +1156,15 @@ impl Engine {
         let mut fallback_seed = solution.clone();
 
         if allow_source {
-            match self.source_stepping_nonlinear_with_guess(circuit, matrix, &solution) {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            match self.source_stepping_nonlinear_with_guess_and_abort(
+                circuit,
+                matrix,
+                &solution,
+                abort,
+            ) {
                 Ok(source_stepped) => {
                     log::info!(
                         "DC operating point after source stepping ({} nodes): {:?}",
@@ -1149,7 +1194,15 @@ impl Engine {
         }
 
         if allow_pseudo {
-            match self.pseudo_transient_nonlinear_with_guess(circuit, matrix, &fallback_seed) {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            match self.pseudo_transient_nonlinear_with_guess_and_abort(
+                circuit,
+                matrix,
+                &fallback_seed,
+                abort,
+            ) {
                 Ok(pseudo_solution) => {
                     log::info!(
                         "DC operating point after pseudo-transient continuation ({} nodes): {:?}",
@@ -1179,7 +1232,15 @@ impl Engine {
         }
 
         if allow_gmin {
-            match self.gmin_stepping_nonlinear(circuit, matrix, &fallback_seed) {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            match self.gmin_stepping_nonlinear_with_abort(
+                circuit,
+                matrix,
+                &fallback_seed,
+                abort,
+            ) {
                 Ok(gmin_solution) => {
                     if let Some(candidate) = self.evaluate_fallback_candidate(
                         circuit,
@@ -1204,8 +1265,15 @@ impl Engine {
         }
 
         if allow_arc {
-            let arc_solution =
-                self.arc_length_continuation_nonlinear_with_guess(circuit, matrix, &fallback_seed)?;
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let arc_solution = self.arc_length_continuation_nonlinear_with_guess_and_abort(
+                circuit,
+                matrix,
+                &fallback_seed,
+                abort,
+            )?;
             if let Some(candidate) = self.evaluate_fallback_candidate(
                 circuit,
                 matrix,
@@ -1269,7 +1337,7 @@ impl Engine {
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
         let zero_guess = vec![0.0; size];
-        self.source_stepping_nonlinear_with_guess(circuit, matrix, &zero_guess)
+        self.source_stepping_nonlinear_with_guess_and_abort(circuit, matrix, &zero_guess, &NoAbort)
     }
 
     /// Source stepping for nonlinear circuits with initial guess
@@ -1282,11 +1350,27 @@ impl Engine {
     /// Source stepping ramps sources from 0% to 100% in steps, which helps
     /// find operating points in difficult circuits with strong nonlinearities.
     /// Uses finer granularity (11 steps) for commercial-grade convergence handling.
+    #[allow(dead_code)]
     pub(crate) fn source_stepping_nonlinear_with_guess(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         initial_guess: &[Value],
+    ) -> Result<Vec<Value>, SimulationError> {
+        self.source_stepping_nonlinear_with_guess_and_abort(
+            circuit,
+            matrix,
+            initial_guess,
+            &NoAbort,
+        )
+    }
+
+    pub(crate) fn source_stepping_nonlinear_with_guess_and_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: &[Value],
+        abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         // Finer source stepping for difficult circuits (mirrors Spectre/HSPICE approach)
         // Smaller initial steps help with BJT/MOSFET turn-on regions
@@ -1304,11 +1388,17 @@ impl Engine {
         let mut damping_state = NewtonDampingState::default();
         let source_iterations = self.continuation_iteration_budget(20, 16);
 
-        for &scale in SOURCE_SCALES {
+        for (scale_idx, &scale) in SOURCE_SCALES.iter().enumerate() {
+            if Self::should_abort_iteration(abort, scale_idx) {
+                return Err(SimulationError::Aborted);
+            }
             // Run Newton iterations at this source level
             // Use robust iteration budget so continuation still has work even
             // when the base direct-Newton budget is intentionally small.
-            for _iteration in 0..source_iterations {
+            for iteration in 0..source_iterations {
+                if Self::should_abort_iteration(abort, iteration) {
+                    return Err(SimulationError::Aborted);
+                }
                 let mut rhs = vec![0.0; size];
 
                 matrix.clear_values();
@@ -1367,11 +1457,27 @@ impl Engine {
     /// Uses pseudo-capacitor anchoring (`Gpseudo * (x - x_prev)`) and grows the
     /// pseudo timestep as the solution stabilizes. This is a robust fallback for
     /// hard DC operating points where direct Newton/source/GMIN struggle.
+    #[allow(dead_code)]
     pub(crate) fn pseudo_transient_nonlinear_with_guess(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         initial_guess: &[Value],
+    ) -> Result<Vec<Value>, SimulationError> {
+        self.pseudo_transient_nonlinear_with_guess_and_abort(
+            circuit,
+            matrix,
+            initial_guess,
+            &NoAbort,
+        )
+    }
+
+    pub(crate) fn pseudo_transient_nonlinear_with_guess_and_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: &[Value],
+        abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
         let mut solution = Self::normalize_initial_guess(initial_guess, size);
@@ -1386,11 +1492,18 @@ impl Engine {
         let mut damping_state = NewtonDampingState::default();
         let pseudo_iterations = self.continuation_iteration_budget(12, 16);
 
+        let mut stage = 0usize;
         while !pseudo.is_complete() {
+            if Self::should_abort_iteration(abort, stage) {
+                return Err(SimulationError::Aborted);
+            }
             let pseudo_conductance = pseudo.conductance(0);
             let mut stage_converged = false;
 
-            for _ in 0..pseudo_iterations {
+            for iteration in 0..pseudo_iterations {
+                if Self::should_abort_iteration(abort, iteration) {
+                    return Err(SimulationError::Aborted);
+                }
                 let mut rhs = vec![0.0; size];
                 matrix.clear_values();
 
@@ -1451,6 +1564,7 @@ impl Engine {
             } else if !pseudo.reduce_on_failure() {
                 return Err(SimulationError::ConvergenceFailed(pseudo_iterations));
             }
+            stage += 1;
         }
 
         Ok(solution)
@@ -1460,11 +1574,27 @@ impl Engine {
     ///
     /// Uses predictor-corrector continuation on source scale (lambda: 0 -> 1) with
     /// adaptive arc-length control. This improves robustness near turning points.
+    #[allow(dead_code)]
     pub(crate) fn arc_length_continuation_nonlinear_with_guess(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         initial_guess: &[Value],
+    ) -> Result<Vec<Value>, SimulationError> {
+        self.arc_length_continuation_nonlinear_with_guess_and_abort(
+            circuit,
+            matrix,
+            initial_guess,
+            &NoAbort,
+        )
+    }
+
+    pub(crate) fn arc_length_continuation_nonlinear_with_guess_and_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: &[Value],
+        abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
         let mut current_solution = Self::normalize_initial_guess(initial_guess, size);
@@ -1494,11 +1624,16 @@ impl Engine {
             &current_solution,
             &mut damping_state,
             arc_newton_iters,
+            abort,
         );
         current_solution = bootstrap_solution;
         arc.initialize(&current_solution);
 
+        let mut arc_step = 0usize;
         while !arc.is_complete() && !arc.is_failed() {
+            if Self::should_abort_iteration(abort, arc_step) {
+                return Err(SimulationError::Aborted);
+            }
             let (predicted_solution, target_lambda) = arc.predict(&current_solution);
             let (corrected_solution, converged, newton_iters) = self
                 .solve_scaled_nonlinear_corrector(
@@ -1508,6 +1643,7 @@ impl Engine {
                     &predicted_solution,
                     &mut damping_state,
                     arc_cfg.max_newton_iters,
+                    abort,
                 );
 
             if converged {
@@ -1516,6 +1652,7 @@ impl Engine {
             } else if !arc.reject_step() {
                 break;
             }
+            arc_step += 1;
         }
 
         if arc.is_complete() {
@@ -1524,7 +1661,12 @@ impl Engine {
             log::warn!(
                 "Arc-length continuation did not reach lambda=1. Falling back to monotonic source continuation."
             );
-            self.source_stepping_nonlinear_with_guess(circuit, matrix, &current_solution)
+            self.source_stepping_nonlinear_with_guess_and_abort(
+                circuit,
+                matrix,
+                &current_solution,
+                abort,
+            )
         }
     }
 
@@ -1535,11 +1677,22 @@ impl Engine {
     /// This helps BJT and other semiconductor devices find their operating
     /// point by initially providing a strong DC path that's gradually removed.
     /// This is a technique used in commercial SPICE simulators like Spectre/HSPICE.
+    #[allow(dead_code)]
     pub(crate) fn gmin_stepping_nonlinear(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         initial_guess: &[Value],
+    ) -> Result<Vec<Value>, SimulationError> {
+        self.gmin_stepping_nonlinear_with_abort(circuit, matrix, initial_guess, &NoAbort)
+    }
+
+    pub(crate) fn gmin_stepping_nonlinear_with_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: &[Value],
+        abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let gmin_scales = self.gmin_nonlinear_schedule();
 
@@ -1565,10 +1718,16 @@ impl Engine {
         let gmin_iterations = self.continuation_iteration_budget(10, 12);
 
         for (step, &gmin) in gmin_scales.iter().enumerate() {
+            if Self::should_abort_iteration(abort, step) {
+                return Err(SimulationError::Aborted);
+            }
             log::debug!("GMIN stepping: step {} with GMIN = {:.2e}", step + 1, gmin);
 
             // Use more iterations for GMIN stepping to allow convergence
-            for _iteration in 0..gmin_iterations {
+            for iteration in 0..gmin_iterations {
+                if Self::should_abort_iteration(abort, iteration) {
+                    return Err(SimulationError::Aborted);
+                }
                 let mut rhs = vec![0.0; size];
 
                 matrix.clear_values();
@@ -1583,7 +1742,7 @@ impl Engine {
                 self.stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution);
 
                 // Log RHS on first iteration of first GMIN step for debugging
-                if step == 0 && _iteration == 0 {
+                if step == 0 && iteration == 0 {
                     log::debug!(
                         "GMIN step 1 iter 1 - RHS: {:?}",
                         rhs.iter().map(|v| format!("{:.2e}", v)).collect::<Vec<_>>()
@@ -2080,5 +2239,35 @@ mod tests {
         assert_eq!(solution[0], 0.0);
         assert_eq!(solution[1], -Engine::MAX_NODE_VOLTAGE);
         assert_eq!(solution[2], 12.5);
+    }
+
+    #[test]
+    fn test_solve_nonlinear_with_guess_and_abort_stops_immediately() {
+        let netlist = crate::Netlist::parse(
+            r#"
+V1 1 0 DC 1
+D1 1 0 DMOD
+.MODEL DMOD D (IS=1e-14)
+.end
+"#,
+        )
+        .expect("netlist parse should succeed");
+        let engine = Engine::default();
+        let mut circuit = engine
+            .build_circuit(&netlist)
+            .expect("circuit build should succeed");
+        let mut matrix = engine
+            .build_matrix(&circuit)
+            .expect("matrix build should succeed");
+        circuit.link_indices(&matrix);
+
+        let abort = crate::abort_signal::ImmediateAbort;
+        let result =
+            engine.solve_nonlinear_with_guess_and_abort(&mut circuit, &mut matrix, None, &abort);
+        assert!(
+            matches!(result, Err(crate::engine::SimulationError::Aborted)),
+            "expected immediate abort, got: {:?}",
+            result
+        );
     }
 }

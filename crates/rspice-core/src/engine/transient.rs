@@ -494,7 +494,8 @@ impl Engine {
             .set_transient_context(source_step_hint, tstop);
 
         // Get DC operating point as initial condition.
-        let mut solution = self.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?;
+        let mut solution =
+            self.solve_dc_operating_point_with_abort(netlist, &mut circuit, &mut matrix, abort)?;
         let applied_ic = self.apply_initial_condition_overrides(netlist, &circuit, &mut solution);
         circuit.refresh_jiles_atherton_inductances(&solution);
 

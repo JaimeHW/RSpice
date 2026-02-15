@@ -5,6 +5,7 @@
 //! - DC sweep for I-V curve generation
 
 use super::{Engine, SimulationError};
+use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::solver::SimulationResult;
 use crate::{Netlist, Value};
 
@@ -62,6 +63,18 @@ impl Engine {
         stop: Value,
         step: Value,
     ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
+        self.run_dc_sweep_with_abort(netlist, source_name, start, stop, step, &NoAbort)
+    }
+
+    pub fn run_dc_sweep_with_abort(
+        &self,
+        netlist: &Netlist,
+        source_name: &str,
+        start: Value,
+        stop: Value,
+        step: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
         use crate::analysis::DcSweep;
 
         let engine = self.resolved_for_netlist(netlist);
@@ -110,6 +123,9 @@ impl Engine {
         let mut prev_solution: Option<Vec<Value>> = None;
 
         for &sweep_value in &sweep_points {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             // Update source value
             circuit.voltage_sources.dc_values[vsrc_idx] = sweep_value;
 
@@ -117,13 +133,31 @@ impl Engine {
             // Key optimization: use previous solution as initial guess for faster convergence
             let solution = if circuit.has_nonlinear_devices() {
                 if let Some(seed) = prev_solution.as_deref() {
-                    engine.solve_nonlinear_with_guess(&mut circuit, &mut matrix, Some(seed))?
+                    engine.solve_nonlinear_with_guess_and_abort(
+                        &mut circuit,
+                        &mut matrix,
+                        Some(seed),
+                        abort,
+                    )?
                 } else if node_hints.is_empty() {
-                    engine.solve_nonlinear(&mut circuit, &mut matrix)?
+                    engine.solve_nonlinear_with_node_hints_and_abort(
+                        &mut circuit,
+                        &mut matrix,
+                        &[],
+                        abort,
+                    )?
                 } else {
-                    engine.solve_nonlinear_with_node_hints(&mut circuit, &mut matrix, &node_hints)?
+                    engine.solve_nonlinear_with_node_hints_and_abort(
+                        &mut circuit,
+                        &mut matrix,
+                        &node_hints,
+                        abort,
+                    )?
                 }
             } else {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
                 engine.solve_linear(&circuit, &mut matrix)?
             };
 
