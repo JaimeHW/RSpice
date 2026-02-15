@@ -470,30 +470,47 @@ impl CodeModel for Integrator {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        // Allocate state for integrated value
-        ctx.allocate_states(1);
+        // State layout:
+        // state[0] = integrated output
+        // state[1] = previous input sample for trapezoidal integration
+        ctx.allocate_states(2);
 
         // Set initial condition
         let ic = ctx.param("out_ic");
         ctx.set_state(0, ic);
+        ctx.set_state(1, 0.0);
+        ctx.advance_state();
 
         Ok(())
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let gain = ctx.param("gain");
-        let lower = ctx.param("out_lower_limit");
-        let upper = ctx.param("out_upper_limit");
+        let lower_limit = ctx.param("out_lower_limit");
+        let upper_limit = ctx.param("out_upper_limit");
+        let (lower, upper) = if lower_limit <= upper_limit {
+            (lower_limit, upper_limit)
+        } else {
+            (upper_limit, lower_limit)
+        };
 
-        let v_in = ctx.input("in");
+        let v_in_raw = ctx.input("in");
+        let v_in = if v_in_raw.is_finite() { v_in_raw } else { 0.0 };
         let dt = ctx.timestep;
-
-        // Trapezoidal integration: y[n] = y[n-1] + dt * (x[n] + x[n-1]) / 2
-        // Simplified for now: y[n] = y[n-1] + dt * gain * x[n]
         let prev_out = ctx.state_prev(0);
-        let new_out = (prev_out + dt * gain * v_in).clamp(lower, upper);
+        let prev_in = ctx.state_prev(1);
+
+        // Trapezoidal integration:
+        // y[n] = y[n-1] + gain * dt * (x[n] + x[n-1]) / 2
+        let delta = if dt.is_finite() && dt > 0.0 {
+            0.5 * gain * dt * (v_in + prev_in)
+        } else {
+            0.0
+        };
+        let new_out = (prev_out + delta).clamp(lower, upper);
 
         ctx.set_state(0, new_out);
+        ctx.set_state(1, v_in);
         ctx.set_output("out", new_out);
 
         Ok(())
@@ -854,12 +871,76 @@ mod tests {
 
         model.init(&mut ctx).unwrap();
 
-        // Integrate constant 1V for 1ms
+        // First step uses trap startup against previous input = 0.
+        ctx.set_input_analog("in", 1.0);
+        model.evaluate(&mut ctx).unwrap();
+        let y1 = ctx.output("out");
+        assert!(
+            (y1 - 0.5e-3).abs() < 1e-12,
+            "unexpected first-step output: {y1}"
+        );
+
+        // Accept state and integrate one additional step.
+        ctx.advance_state();
+        model.evaluate(&mut ctx).unwrap();
+        let y2 = ctx.output("out");
+        assert!(
+            (y2 - 1.5e-3).abs() < 1e-12,
+            "unexpected second-step output: {y2}"
+        );
+    }
+
+    #[test]
+    fn test_integrator_holds_state_for_zero_timestep() {
+        let model = Integrator;
+        let mut ctx = CmContext::new();
+
+        ctx.set_param("gain", 2.0);
+        ctx.set_param("out_ic", 0.25);
+        ctx.set_param("out_lower_limit", -1e12);
+        ctx.set_param("out_upper_limit", 1e12);
+        ctx.timestep = 0.0;
+
+        model.init(&mut ctx).unwrap();
         ctx.set_input_analog("in", 1.0);
         model.evaluate(&mut ctx).unwrap();
 
-        // Output should be approximately 1mV (1V * 1ms)
-        assert!(ctx.output("out") > 0.0);
+        assert!(
+            (ctx.output("out") - 0.25).abs() < 1e-12,
+            "zero timestep should hold output at initial condition"
+        );
+    }
+
+    #[test]
+    fn test_integrator_respects_saturation_limits() {
+        let model = Integrator;
+        let mut ctx = CmContext::new();
+
+        ctx.set_param("gain", 1e6);
+        ctx.set_param("out_ic", 0.0);
+        ctx.set_param("out_lower_limit", -0.2);
+        ctx.set_param("out_upper_limit", 0.2);
+        ctx.timestep = 1e-3;
+
+        model.init(&mut ctx).unwrap();
+
+        ctx.set_input_analog("in", 1.0);
+        model.evaluate(&mut ctx).unwrap();
+        assert!(
+            (ctx.output("out") - 0.2).abs() < 1e-12,
+            "upper clamp should limit output"
+        );
+
+        // With trapezoidal integration, a polarity flip has one half-step of lag.
+        ctx.advance_state();
+        ctx.set_input_analog("in", -1.0);
+        model.evaluate(&mut ctx).unwrap();
+        ctx.advance_state();
+        model.evaluate(&mut ctx).unwrap();
+        assert!(
+            (ctx.output("out") - (-0.2)).abs() < 1e-12,
+            "lower clamp should limit output"
+        );
     }
 
     #[test]
