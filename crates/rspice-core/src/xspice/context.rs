@@ -218,6 +218,8 @@ pub struct CmContext {
     inputs: HashMap<String, InputValue>,
     /// Output port values by name
     outputs: HashMap<String, OutputValue>,
+    /// Connected analog node index per scalar analog port (0 = ground).
+    port_nodes: HashMap<String, usize>,
 
     //-------------------------------------------------------------------------
     // Parameters
@@ -276,6 +278,7 @@ impl CmContext {
             iteration: 0,
             inputs: HashMap::new(),
             outputs: HashMap::new(),
+            port_nodes: HashMap::new(),
             params: HashMap::new(),
             string_params: HashMap::new(),
             state: Vec::new(),
@@ -439,6 +442,21 @@ impl CmContext {
         }
     }
 
+    /// Register connected node for an analog scalar port (0 = ground).
+    pub fn set_port_node(&mut self, name: &str, node: usize) {
+        self.port_nodes.insert(name.to_string(), node);
+    }
+
+    /// Get connected node for an analog scalar port (0 = ground).
+    pub fn port_node(&self, name: &str) -> Option<usize> {
+        self.port_nodes.get(name).copied()
+    }
+
+    /// Clear port-node mapping for current evaluation pass.
+    pub fn clear_port_nodes(&mut self) {
+        self.port_nodes.clear();
+    }
+
     /// Get all pending events and clear the queue
     pub fn take_pending_events(&mut self) -> Vec<(String, DigitalValue, Value)> {
         std::mem::take(&mut self.pending_events)
@@ -554,6 +572,12 @@ impl CmContext {
     /// Get all RHS contributions and clear
     pub fn take_rhs(&mut self) -> Vec<(usize, Value)> {
         std::mem::take(&mut self.rhs)
+    }
+
+    /// Clear queued matrix and RHS contributions.
+    pub fn clear_stamps(&mut self) {
+        self.stamps.clear();
+        self.rhs.clear();
     }
 
     //-------------------------------------------------------------------------
@@ -685,5 +709,31 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].0, "out");
         assert!((events[0].2 - 1e-9).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_port_node_mapping() {
+        let mut ctx = CmContext::new();
+        assert_eq!(ctx.port_node("p"), None);
+
+        ctx.set_port_node("p", 3);
+        ctx.set_port_node("n", 0);
+        assert_eq!(ctx.port_node("p"), Some(3));
+        assert_eq!(ctx.port_node("n"), Some(0));
+
+        ctx.clear_port_nodes();
+        assert_eq!(ctx.port_node("p"), None);
+        assert_eq!(ctx.port_node("n"), None);
+    }
+
+    #[test]
+    fn test_clear_stamps() {
+        let mut ctx = CmContext::new();
+        ctx.stamp_conductance(1, 1, 1.0);
+        ctx.stamp_rhs(2, 3.0);
+        ctx.clear_stamps();
+
+        assert!(ctx.take_stamps().is_empty());
+        assert!(ctx.take_rhs().is_empty());
     }
 }

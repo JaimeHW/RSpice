@@ -2335,7 +2335,9 @@ impl CircuitData {
     ///
     /// After evaluation, analog code models produce conductance and current
     /// contributions that must be stamped into the MNA system.
-    pub fn stamp_xspice(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
+    pub fn stamp_xspice(&mut self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
+        let num_nodes = self.num_nodes;
+
         #[inline]
         fn stamp_nodal_current_output(
             matrix: &mut StaticMatrix,
@@ -2371,7 +2373,7 @@ impl CircuitData {
             }
         }
 
-        for instance in &self.xspice_instances {
+        for instance in &mut self.xspice_instances {
             let ports = instance.ports();
             // Get contributions from each output port
             for (port_idx, connection) in instance.connections().iter().enumerate() {
@@ -2383,7 +2385,7 @@ impl CircuitData {
                         crate::xspice::PortType::Voltage
                         | crate::xspice::PortType::DifferentialVoltage => {
                             if let Some(branch_ordinal) = instance.branch_ordinal_at(port_idx) {
-                                let br_mna = self.get_branch_matrix_index(branch_ordinal);
+                                let br_mna = num_nodes + branch_ordinal;
                                 let br = br_mna - 1;
                                 match connection {
                                     crate::xspice::PortConnection::Analog(node) => {
@@ -2436,6 +2438,26 @@ impl CircuitData {
                         }
                         _ => {}
                     }
+                }
+            }
+
+            // Drain any explicit matrix/RHS stamps queued by the code model.
+            for (row, col, value) in instance.take_deferred_stamps() {
+                if row < rhs.len() && col < rhs.len() {
+                    if matrix.get_index(row, col).is_some() {
+                        matrix.add(row, col, value);
+                    } else {
+                        log::debug!(
+                            "XSPICE deferred stamp ({}, {}) missing from matrix topology",
+                            row,
+                            col
+                        );
+                    }
+                }
+            }
+            for (node, value) in instance.take_deferred_rhs() {
+                if node < rhs.len() {
+                    rhs[node] += value;
                 }
             }
         }

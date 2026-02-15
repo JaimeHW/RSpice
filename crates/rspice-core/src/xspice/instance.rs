@@ -287,6 +287,14 @@ impl XspiceInstance {
         timestep: Value,
         analysis: AnalysisType,
     ) -> CmResult<()> {
+        self.context.clear_stamps();
+        self.context.clear_port_nodes();
+        for (port, connection) in self.model.ports().iter().zip(self.connections.iter()) {
+            if let PortConnection::Analog(node) = connection {
+                self.context.set_port_node(&port.name, *node);
+            }
+        }
+
         self.context.time = time;
         self.context.timestep = timestep;
         self.context.analysis = analysis;
@@ -423,8 +431,7 @@ impl XspiceInstance {
                 port_idx, self.name
             )));
         };
-        let is_output = port.direction == super::PortDirection::Out
-            || port.direction == super::PortDirection::InOut;
+        let is_output = port.direction == super::PortDirection::Out;
         let is_voltage_port = matches!(
             port.default_type,
             PortType::Voltage | PortType::DifferentialVoltage
@@ -460,8 +467,7 @@ impl XspiceInstance {
     pub fn get_analog_contribution(&self, port_idx: usize) -> Option<(Value, Value)> {
         let ports = self.model.ports();
         if let Some(port) = ports.get(port_idx) {
-            let is_output = port.direction == super::PortDirection::Out
-                || port.direction == super::PortDirection::InOut;
+            let is_output = port.direction == super::PortDirection::Out;
             if is_output && port.default_type.is_analog() {
                 // Get output value and partial derivative
                 let output = self.context.output(&port.name);
@@ -475,6 +481,16 @@ impl XspiceInstance {
         } else {
             None
         }
+    }
+
+    /// Drain deferred matrix stamps queued by the code model.
+    pub fn take_deferred_stamps(&mut self) -> Vec<(usize, usize, Value)> {
+        self.context.take_stamps()
+    }
+
+    /// Drain deferred RHS contributions queued by the code model.
+    pub fn take_deferred_rhs(&mut self) -> Vec<(usize, Value)> {
+        self.context.take_rhs()
     }
 
     /// Accept the current timestep
@@ -626,5 +642,66 @@ mod tests {
             "unexpected digital-port error: {}",
             err_digital
         );
+    }
+
+    #[derive(Debug)]
+    struct TestInoutModel;
+
+    impl CodeModel for TestInoutModel {
+        fn name(&self) -> &str {
+            "test_inout"
+        }
+
+        fn ports(&self) -> &[PortSpec] {
+            use std::sync::OnceLock;
+            static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
+            PORTS.get_or_init(|| {
+                vec![PortSpec {
+                    name: "p".to_string(),
+                    direction: PortDirection::InOut,
+                    default_type: PortType::Voltage,
+                    allowed_types: vec![PortType::Voltage],
+                    is_vector: false,
+                    null_allowed: false,
+                    description: String::new(),
+                }]
+            })
+        }
+
+        fn parameters(&self) -> &[ParamSpec] {
+            &[]
+        }
+
+        fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
+            Ok(())
+        }
+
+        fn evaluate(&self, _ctx: &mut CmContext) -> CmResult<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_set_output_branch_rejects_inout_voltage_port() {
+        let model: Arc<dyn CodeModel> = Arc::new(TestInoutModel);
+        let mut instance = XspiceInstance::new("A1", model, vec![PortConnection::Analog(1)], &[])
+            .expect("instance should build");
+
+        let err = instance
+            .set_output_branch(0, 2)
+            .expect_err("inout port should reject voltage-output branch assignment");
+        assert!(
+            err.to_string().contains("not a voltage output"),
+            "unexpected inout-port error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_get_analog_contribution_ignores_inout_ports() {
+        let model: Arc<dyn CodeModel> = Arc::new(TestInoutModel);
+        let instance = XspiceInstance::new("A1", model, vec![PortConnection::Analog(1)], &[])
+            .expect("instance should build");
+        assert_eq!(instance.get_analog_contribution(0), None);
     }
 }

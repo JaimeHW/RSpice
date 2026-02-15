@@ -1060,10 +1060,8 @@ impl Engine {
                     // instead of approximating these ports as nodal current injections.
                     let ports_spec = instance.ports().to_vec();
                     for (port_idx, port_spec) in ports_spec.iter().enumerate() {
-                        let is_output = matches!(
-                            port_spec.direction,
-                            crate::xspice::PortDirection::Out | crate::xspice::PortDirection::InOut
-                        );
+                        let is_output =
+                            matches!(port_spec.direction, crate::xspice::PortDirection::Out);
                         let is_voltage_port = matches!(
                             port_spec.default_type,
                             crate::xspice::PortType::Voltage

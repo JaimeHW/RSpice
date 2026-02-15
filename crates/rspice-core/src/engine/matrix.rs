@@ -363,16 +363,37 @@ impl Engine {
 
         // XSPICE analog output ports:
         // - Voltage outputs reserve branch-equation topology (MNA branch variable)
-        // - Current outputs reserve nodal conductance/current topology
+        // - Current outputs reserve nodal conductance/current topology.
+        // Passive inout analog terminals reserve full nodal coupling so
+        // code-model deferred stamps can inject conductance terms safely.
         for instance in &circuit.xspice_instances {
             let ports = instance.ports();
+            let mut inout_analog_nodes: Vec<usize> = Vec::new();
             for (port_idx, connection) in instance.connections().iter().enumerate() {
                 let Some(port) = ports.get(port_idx) else {
                     continue;
                 };
-                if port.direction != crate::xspice::PortDirection::Out
-                    && port.direction != crate::xspice::PortDirection::InOut
-                {
+
+                if port.direction == crate::xspice::PortDirection::InOut {
+                    match connection {
+                        crate::xspice::PortConnection::Analog(node) => {
+                            if *node > 0 {
+                                inout_analog_nodes.push(*node);
+                            }
+                        }
+                        crate::xspice::PortConnection::Differential(pos, neg) => {
+                            if *pos > 0 {
+                                inout_analog_nodes.push(*pos);
+                            }
+                            if *neg > 0 {
+                                inout_analog_nodes.push(*neg);
+                            }
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+                if port.direction != crate::xspice::PortDirection::Out {
                     continue;
                 }
 
@@ -425,6 +446,14 @@ impl Engine {
                         _ => {}
                     },
                     _ => {}
+                }
+            }
+
+            inout_analog_nodes.sort_unstable();
+            inout_analog_nodes.dedup();
+            for &row in &inout_analog_nodes {
+                for &col in &inout_analog_nodes {
+                    triplets.push((row - 1, col - 1, 0.0));
                 }
             }
         }
