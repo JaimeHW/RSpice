@@ -4,7 +4,7 @@
 //! Tests are organized by analysis type and device model category.
 
 use rspice_core::testing::{TestRunner, TestRunnerConfig, TestStatistics};
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Test Helpers
@@ -23,12 +23,74 @@ fn get_tests_dir() -> PathBuf {
         .join("tests")
 }
 
+fn suite_is_cmc_qaspec(subdir: &str) -> bool {
+    let suite_dir = get_tests_dir().join(subdir);
+    if !suite_dir.exists() {
+        return false;
+    }
+
+    // CMC model QA suites typically expose `qaSpec`/`run` in nested
+    // model-family subdirectories (e.g. bsim3/nmos/qaSpec).
+    let mut stack = vec![suite_dir];
+    let mut visited_dirs = 0usize;
+    while let Some(dir) = stack.pop() {
+        visited_dirs += 1;
+        if visited_dirs > 256 {
+            break;
+        }
+
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if name.eq_ignore_ascii_case("qaSpec") || name.eq_ignore_ascii_case("run") {
+                return true;
+            }
+            if path.is_dir() {
+                stack.push(path);
+            }
+        }
+    }
+
+    false
+}
+
 fn run_and_report(runner: &TestRunner, subdir: &str) -> TestStatistics {
     let results = runner.run_suite(subdir);
     if !results.is_empty() {
         TestRunner::print_summary(&results);
     }
-    TestRunner::statistics(&results)
+    let stats = TestRunner::statistics(&results);
+
+    if stats.total == 0 && suite_is_cmc_qaspec(subdir) {
+        println!(
+            "Suite '{}' uses CMC qaSpec workflow (no direct .cir decks); skipping under .cir harness.",
+            subdir
+        );
+        return stats;
+    }
+
+    assert!(
+        stats.total > 0,
+        "Suite '{}' discovered no .cir tests. Verify suite path and test discovery.",
+        subdir
+    );
+    assert_eq!(
+        stats.failed,
+        0,
+        "Suite '{}' has {} failing circuit(s): {} passed, {} skipped ({:.1}% pass rate).",
+        subdir,
+        stats.failed,
+        stats.passed,
+        stats.skipped,
+        stats.pass_rate()
+    );
+
+    stats
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -345,6 +407,20 @@ fn test_full_ngspice_suite_summary() {
         total_stats.pass_rate()
     );
     println!("Total time: {}ms", total_stats.total_time_ms);
+
+    assert!(
+        total_stats.total > 0,
+        "Full ngspice suite discovered no tests; verify tests directory wiring."
+    );
+    assert_eq!(
+        total_stats.failed,
+        0,
+        "Full ngspice suite has {} failing circuit(s): {} passed, {} skipped ({:.1}% pass rate).",
+        total_stats.failed,
+        total_stats.passed,
+        total_stats.skipped,
+        total_stats.pass_rate()
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -366,6 +442,14 @@ fn test_discover_tests() {
         println!("  - {}", path.display());
         assert!(path.extension().map_or(false, |e| e == "cir"));
     }
+}
+
+#[test]
+fn test_cmc_suite_detection() {
+    assert!(suite_is_cmc_qaspec("bsim3"));
+    assert!(suite_is_cmc_qaspec("bsim4"));
+    assert!(suite_is_cmc_qaspec("hicum2"));
+    assert!(!suite_is_cmc_qaspec("general"));
 }
 
 #[test]
