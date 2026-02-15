@@ -14,5 +14,5 @@ mod vm;
 
 pub use ast::{BinaryOp, Expr, Function, UnaryOp};
 pub use compiler::compile;
-pub use parser::parse_expression;
+pub use parser::{ParseError, parse_expression, parse_expression_strict};
 pub use vm::{CompiledExpr, Context, Instruction, Vm};

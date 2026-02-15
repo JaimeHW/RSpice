@@ -664,7 +664,8 @@ impl Engine {
                         nn,
                         branch,
                         expression,
-                    );
+                    )
+                    .map_err(SimulationError::Circuit)?;
                     circuit.behavioral_sources.add_voltage(bvs);
                 }
                 ElementKind::BehavioralCurrent { expression } => {
@@ -676,7 +677,8 @@ impl Engine {
                         np,
                         nn,
                         expression,
-                    );
+                    )
+                    .map_err(SimulationError::Circuit)?;
                     circuit.behavioral_sources.add_current(bcs);
                 }
                 // Flattened tree leaves external subcircuit-backed devices here

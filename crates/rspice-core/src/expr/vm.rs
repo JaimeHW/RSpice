@@ -66,6 +66,7 @@ pub enum Instruction {
     Min,
     Max,
     Pwr,
+    Pwrs,
     Limit,
     Sign,
     Uramp,
@@ -255,6 +256,7 @@ impl Vm {
                 Instruction::Min => self.binary_op(|a, b| a.min(b)),
                 Instruction::Max => self.binary_op(|a, b| a.max(b)),
                 Instruction::Pwr => self.binary_op(|a, b| a.abs().powf(b)),
+                Instruction::Pwrs => self.binary_op(|a, b| a.signum() * a.abs().powf(b)),
                 Instruction::Mod => self.binary_op(|a, b| if b != 0.0 { a % b } else { 0.0 }),
 
                 Instruction::Limit => {

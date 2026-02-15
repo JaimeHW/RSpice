@@ -5,7 +5,7 @@
 //! evaluation in the Newton-Raphson loop.
 
 use crate::Value;
-use crate::expr::{CompiledExpr, Context, Vm, compile, parse_expression};
+use crate::expr::{CompiledExpr, Context, Vm, compile, parse_expression_strict};
 use crate::solver::StaticMatrix;
 
 /// Compiled behavioral voltage source
@@ -41,11 +41,12 @@ impl BehavioralVoltageSource {
         node_neg: usize,
         branch_ordinal: usize,
         expression: &str,
-    ) -> Self {
-        let ast = parse_expression(expression);
+    ) -> Result<Self, String> {
+        let ast = parse_expression_strict(expression)
+            .map_err(|e| format!("Invalid behavioral expression '{}': {}", expression, e))?;
         let program = compile(&ast);
 
-        Self {
+        Ok(Self {
             name,
             node_pos,
             node_neg,
@@ -56,7 +57,7 @@ impl BehavioralVoltageSource {
             branch_bindings: Vec::new(),
             node_values: Vec::new(),
             branch_values: Vec::new(),
-        }
+        })
     }
 
     /// Resolve V(...) and I(...) references against circuit node/branch indices.
@@ -177,11 +178,17 @@ pub struct BehavioralCurrentSource {
 
 impl BehavioralCurrentSource {
     /// Create a new behavioral current source
-    pub fn new(name: String, node_pos: usize, node_neg: usize, expression: &str) -> Self {
-        let ast = parse_expression(expression);
+    pub fn new(
+        name: String,
+        node_pos: usize,
+        node_neg: usize,
+        expression: &str,
+    ) -> Result<Self, String> {
+        let ast = parse_expression_strict(expression)
+            .map_err(|e| format!("Invalid behavioral expression '{}': {}", expression, e))?;
         let program = compile(&ast);
 
-        Self {
+        Ok(Self {
             name,
             node_pos,
             node_neg,
@@ -191,7 +198,7 @@ impl BehavioralCurrentSource {
             branch_bindings: Vec::new(),
             node_values: Vec::new(),
             branch_values: Vec::new(),
-        }
+        })
     }
 
     /// Resolve V(...) and I(...) references against circuit node/branch indices.
@@ -340,28 +347,32 @@ mod tests {
 
     #[test]
     fn test_behavioral_voltage_simple() {
-        let mut bvs = BehavioralVoltageSource::new("B1".to_string(), 1, 0, 1, "5.0");
+        let mut bvs = BehavioralVoltageSource::new("B1".to_string(), 1, 0, 1, "5.0")
+            .expect("valid expression should parse");
         let v = bvs.evaluate(&[], 0.0);
         assert!((v - 5.0).abs() < 1e-10);
     }
 
     #[test]
     fn test_behavioral_voltage_expression() {
-        let mut bvs = BehavioralVoltageSource::new("B1".to_string(), 1, 0, 1, "2 * 3 + 1");
+        let mut bvs = BehavioralVoltageSource::new("B1".to_string(), 1, 0, 1, "2 * 3 + 1")
+            .expect("valid expression should parse");
         let v = bvs.evaluate(&[], 0.0);
         assert!((v - 7.0).abs() < 1e-10);
     }
 
     #[test]
     fn test_behavioral_current_simple() {
-        let mut bcs = BehavioralCurrentSource::new("B1".to_string(), 1, 0, "0.001");
+        let mut bcs = BehavioralCurrentSource::new("B1".to_string(), 1, 0, "0.001")
+            .expect("valid expression should parse");
         let i = bcs.evaluate(&[], 0.0);
         assert!((i - 0.001).abs() < 1e-12);
     }
 
     #[test]
     fn test_behavioral_binding_resolves_node_and_branch_references() {
-        let mut bvs = BehavioralVoltageSource::new("B1".to_string(), 2, 0, 1, "V(out) + I(VS)");
+        let mut bvs = BehavioralVoltageSource::new("B1".to_string(), 2, 0, 1, "V(out) + I(VS)")
+            .expect("valid expression should parse");
         bvs.bind_references(
             |name| if name == "out" { Some(2) } else { None },
             |name| {
@@ -381,13 +392,25 @@ mod tests {
 
     #[test]
     fn test_behavioral_binding_rejects_unknown_references() {
-        let mut bcs = BehavioralCurrentSource::new("B2".to_string(), 1, 0, "V(missing) + I(NOPE)");
+        let mut bcs = BehavioralCurrentSource::new("B2".to_string(), 1, 0, "V(missing) + I(NOPE)")
+            .expect("valid expression should parse");
         let err = bcs
             .bind_references(|_| None, |_| None)
             .expect_err("binding should reject unknown references");
         assert!(
             err.contains("unknown node") || err.contains("unknown branch"),
             "unexpected bind error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_behavioral_new_rejects_invalid_expression() {
+        let err = BehavioralVoltageSource::new("Bbad".to_string(), 1, 0, 1, "V(1) @ 2")
+            .expect_err("invalid expression should fail constructor");
+        assert!(
+            err.contains("Invalid behavioral expression"),
+            "unexpected error: {}",
             err
         );
     }

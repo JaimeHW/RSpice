@@ -7,6 +7,28 @@ use super::ast::{BinaryOp, Expr, Function, UnaryOp};
 use std::iter::Peekable;
 use std::str::Chars;
 
+/// Expression parse error
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseError {
+    message: String,
+}
+
+impl ParseError {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ParseError {}
+
 /// Token types for expression parsing
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
@@ -33,6 +55,7 @@ pub enum Token {
     LParen,
     RParen,
     Comma,
+    Invalid(char),
     // End of input
     Eof,
 }
@@ -183,8 +206,8 @@ impl<'a> Lexer<'a> {
                 }
                 _ => {
                     self.chars.next();
-                    self.next_token()
-                } // Skip unknown
+                    Token::Invalid(c)
+                }
             },
         }
     }
@@ -194,13 +217,18 @@ impl<'a> Lexer<'a> {
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
     current: Token,
+    errors: Vec<String>,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(input: &'a str) -> Self {
         let mut lexer = Lexer::new(input);
         let current = lexer.next_token();
-        Self { lexer, current }
+        Self {
+            lexer,
+            current,
+            errors: Vec::new(),
+        }
     }
 
     fn advance(&mut self) {
@@ -212,13 +240,30 @@ impl<'a> Parser<'a> {
             self.advance();
             true
         } else {
+            self.errors.push(format!(
+                "Expected token {:?}, found {:?}",
+                expected, self.current
+            ));
             false
         }
     }
 
     /// Parse a complete expression
     pub fn parse(&mut self) -> Expr {
-        self.parse_or()
+        let expr = self.parse_or();
+        while self.current != Token::Eof {
+            match self.current {
+                Token::Invalid(c) => self
+                    .errors
+                    .push(format!("Invalid character '{}' in expression", c)),
+                _ => self.errors.push(format!(
+                    "Unexpected trailing token in expression: {:?}",
+                    self.current
+                )),
+            }
+            self.advance();
+        }
+        expr
     }
 
     // Precedence levels (lowest to highest):
@@ -385,11 +430,22 @@ impl<'a> Parser<'a> {
             }
             Token::LParen => {
                 self.advance();
-                let expr = self.parse();
+                let expr = self.parse_or();
                 self.expect(Token::RParen);
                 expr
             }
-            _ => Expr::Const(0.0), // Error recovery
+            Token::Invalid(c) => {
+                self.errors
+                    .push(format!("Invalid character '{}' in expression", c));
+                self.advance();
+                Expr::Const(0.0)
+            }
+            other => {
+                self.errors
+                    .push(format!("Unexpected token {:?} in expression", other));
+                self.advance();
+                Expr::Const(0.0)
+            }
         }
     }
 
@@ -432,10 +488,10 @@ impl<'a> Parser<'a> {
             let mut args = Vec::new();
 
             if self.current != Token::RParen {
-                args.push(self.parse());
+                args.push(self.parse_or());
                 while self.current == Token::Comma {
                     self.advance();
-                    args.push(self.parse());
+                    args.push(self.parse_or());
                 }
             }
             self.expect(Token::RParen);
@@ -475,16 +531,43 @@ impl<'a> Parser<'a> {
             if let Some(f) = func {
                 return Expr::Function { func: f, args };
             }
+
+            self.errors
+                .push(format!("Unknown function '{}' in expression", name));
+            return Expr::Const(0.0);
         }
 
-        // Unknown identifier - treat as parameter (constant 0 for now)
+        // Unknown identifier is an error in strict behavioral expressions.
+        self.errors
+            .push(format!("Unknown identifier '{}' in expression", name));
         Expr::Const(0.0)
+    }
+}
+
+/// Parse an expression string into AST with strict error reporting.
+pub fn parse_expression_strict(input: &str) -> Result<Expr, ParseError> {
+    let mut parser = Parser::new(input);
+    let expr = parser.parse();
+    if parser.errors.is_empty() {
+        Ok(expr)
+    } else {
+        Err(ParseError::new(parser.errors.join("; ")))
     }
 }
 
 /// Parse an expression string into AST
 pub fn parse_expression(input: &str) -> Expr {
-    Parser::new(input).parse()
+    match parse_expression_strict(input) {
+        Ok(expr) => expr,
+        Err(err) => {
+            log::warn!(
+                "Behavioral expression parse fallback for '{}': {}",
+                input,
+                err
+            );
+            Expr::Const(0.0)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -583,5 +666,32 @@ mod tests {
             } => (),
             _ => panic!("Expected addition at top"),
         }
+    }
+
+    #[test]
+    fn test_parse_expression_strict_rejects_unknown_identifier() {
+        let err = parse_expression_strict("FOO + 1").expect_err("strict parser should reject FOO");
+        assert!(err.to_string().contains("Unknown identifier"));
+    }
+
+    #[test]
+    fn test_parse_expression_strict_rejects_unknown_function() {
+        let err = parse_expression_strict("MYSTERY(1)")
+            .expect_err("strict parser should reject function");
+        assert!(err.to_string().contains("Unknown function"));
+    }
+
+    #[test]
+    fn test_parse_expression_strict_rejects_invalid_character() {
+        let err = parse_expression_strict("V(1) @ 2")
+            .expect_err("strict parser should reject invalid character");
+        assert!(err.to_string().contains("Invalid character"));
+    }
+
+    #[test]
+    fn test_parse_expression_strict_rejects_missing_rparen() {
+        let err = parse_expression_strict("SIN(V(1)")
+            .expect_err("strict parser should reject missing parenthesis");
+        assert!(err.to_string().contains("Expected token RParen"));
     }
 }

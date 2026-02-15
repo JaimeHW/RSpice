@@ -99,7 +99,7 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr) {
                 Function::Min => Instruction::Min,
                 Function::Max => Instruction::Max,
                 Function::Pwr => Instruction::Pwr,
-                Function::Pwrs => Instruction::Pwr, // Simplified - same as pwr for now
+                Function::Pwrs => Instruction::Pwrs,
                 Function::Limit => Instruction::Limit,
                 Function::Sign => Instruction::Sign,
                 Function::Uramp => Instruction::Uramp,
@@ -167,5 +167,18 @@ mod tests {
         let result = vm.execute(&program, &ctx);
 
         assert!((result - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_compile_and_execute_pwrs_preserves_sign() {
+        let expr = Expr::Function {
+            func: Function::Pwrs,
+            args: vec![Expr::constant(-2.0), Expr::constant(3.0)],
+        };
+        let program = compile(&expr);
+        let mut vm = Vm::new();
+        let ctx = Context::dc(&[], &[]);
+        let result = vm.execute(&program, &ctx);
+        assert!((result + 8.0).abs() < 1e-10);
     }
 }
