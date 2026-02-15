@@ -571,27 +571,23 @@ pub(super) fn parse_voltage_output_reference(
 /// Parse .NODESET command: .NODESET V(node1)=val V(node2)=val...
 pub(super) fn parse_nodeset_command(
     stream: &mut TokenStream,
-    _line_num: usize,
-    params: &mut ParamContext,
+    line_num: usize,
+    params: &ParamContext,
+    node_sets: &mut Vec<NodeSet>,
 ) -> Result<(), ParseError> {
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
-
-        if let TokenKind::Ident(s) = &stream.peek().kind {
-            let spec = s.clone();
-            stream.advance();
-
-            // Consume = if present
-            stream.consume(&TokenKind::Equals);
-
-            if let Some(v) = try_value(stream, params) {
-                // Store as NODESET_nodename parameter
-                let param_name = format!("NODESET_{}", spec.replace("V(", "").replace(")", ""));
-                params.set(&param_name, v);
-            }
-        } else {
-            stream.advance();
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
         }
+
+        let Some(node) = parse_voltage_hint_target(stream, line_num)? else {
+            break;
+        };
+
+        stream.consume(&TokenKind::Equals);
+        let voltage = expect_value(stream, line_num, params)?;
+        node_sets.push(NodeSet { node, voltage });
     }
 
     Ok(())
@@ -603,38 +599,57 @@ pub(super) fn parse_nodeset_command(
 /// Format: .IC V(node)=voltage [V(node2)=voltage2] ...
 pub(super) fn parse_ic_command(
     stream: &mut TokenStream,
-    _line_num: usize,
-    params: &mut ParamContext,
+    line_num: usize,
+    params: &ParamContext,
+    initial_conditions: &mut Vec<InitialCondition>,
 ) -> Result<(), ParseError> {
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
-
-        if let TokenKind::Ident(s) = &stream.peek().kind {
-            let spec = s.clone();
-            stream.advance();
-
-            // Consume = if present
-            stream.consume(&TokenKind::Equals);
-
-            if let Some(v) = try_value(stream, params) {
-                // Extract node name from V(node) syntax
-                let node_name = spec
-                    .to_uppercase()
-                    .replace("V(", "")
-                    .replace(")", "")
-                    .trim()
-                    .to_string();
-
-                if !node_name.is_empty() {
-                    // Store as IC_nodename parameter for later use by engine
-                    let param_name = format!("IC_{}", node_name);
-                    params.set(&param_name, v);
-                }
-            }
-        } else {
-            stream.advance();
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
         }
+
+        let Some(node) = parse_voltage_hint_target(stream, line_num)? else {
+            break;
+        };
+
+        stream.consume(&TokenKind::Equals);
+        let voltage = expect_value(stream, line_num, params)?;
+        initial_conditions.push(InitialCondition { node, voltage });
     }
 
     Ok(())
+}
+
+fn parse_voltage_hint_target(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<Option<String>, ParseError> {
+    skip_commas(stream);
+    if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        return Ok(None);
+    }
+
+    if let TokenKind::Ident(ident) = &stream.peek().kind {
+        if ident.eq_ignore_ascii_case("V") && matches!(stream.peek_n(1).kind, TokenKind::LParen) {
+            stream.advance(); // V
+            stream.advance(); // (
+
+            let node = expect_node(stream, line_num)?;
+            if stream.consume(&TokenKind::Comma) {
+                // Optional reference node (e.g. V(out,0)); currently ignored.
+                let _ = expect_node(stream, line_num)?;
+            }
+
+            if !stream.consume(&TokenKind::RParen) {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "Expected ')' in voltage target specification".to_string(),
+                });
+            }
+            return Ok(Some(node));
+        }
+    }
+
+    Ok(Some(expect_node(stream, line_num)?))
 }

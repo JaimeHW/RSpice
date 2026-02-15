@@ -11,7 +11,7 @@ use super::lexer::{LexError, TokenKind, TokenStream, tokenize};
 use super::xspice_parser;
 use super::{
     AnalysisCommand, Element, ElementKind, FreqVariation, InitialCondition, ModelDef,
-    MonteCarloCommand, MonteCarloDistribution, Netlist, ParamContext, ParseError,
+    MonteCarloCommand, MonteCarloDistribution, Netlist, NodeSet, ParamContext, ParseError,
     PoleZeroAnalysisType, PoleZeroTransferType, SensitivityAcSweep, SourceSpec, StepCommand,
     StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
 };
@@ -39,6 +39,8 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
     let mut models = Vec::new();
     let mut subcircuits = Vec::new();
     let mut params = ParamContext::new();
+    let mut initial_conditions = Vec::new();
+    let mut node_sets = Vec::new();
     let mut global_nodes = std::collections::HashSet::new();
     let mut veriloga_includes = Vec::new();
     let mut measurements = Vec::new();
@@ -82,6 +84,8 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
                 &mut in_subcircuit,
                 &mut current_subckt,
                 &mut params,
+                &mut initial_conditions,
+                &mut node_sets,
                 &mut global_nodes,
                 &mut measurements,
                 &mut options,
@@ -117,27 +121,13 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
             &mut in_subcircuit,
             &mut current_subckt,
             &mut params,
+            &mut initial_conditions,
+            &mut node_sets,
             &mut global_nodes,
             &mut measurements,
             &mut options,
         )?;
     }
-
-    // Extract initial conditions from params (they were stored as IC_nodename)
-    let initial_conditions: Vec<InitialCondition> = params
-        .all_params()
-        .iter()
-        .filter_map(|(k, v)| {
-            let node = k.strip_prefix("IC_")?;
-            if node.is_empty() {
-                return None;
-            }
-            Some(InitialCondition {
-                node: node.to_string(),
-                voltage: *v,
-            })
-        })
-        .collect();
 
     Ok(Netlist {
         title,
@@ -147,6 +137,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
         subcircuits,
         params,
         initial_conditions,
+        node_sets,
         global_nodes,
         measurements,
         options,
@@ -259,6 +250,8 @@ fn process_line(
     in_subcircuit: &mut bool,
     current_subckt: &mut Option<SubcircuitDef>,
     params: &mut ParamContext,
+    initial_conditions: &mut Vec<InitialCondition>,
+    node_sets: &mut Vec<NodeSet>,
     global_nodes: &mut std::collections::HashSet<String>,
     measurements: &mut Vec<crate::analysis::MeasureStatement>,
     options: &mut super::SimulationOptions,
@@ -303,6 +296,8 @@ fn process_line(
                 analyses,
                 models,
                 &mut subckt_params,
+                initial_conditions,
+                node_sets,
                 global_nodes,
                 &mut dummy_measurements,
                 options,
@@ -320,6 +315,8 @@ fn process_line(
         analyses,
         models,
         params,
+        initial_conditions,
+        node_sets,
         global_nodes,
         measurements,
         options,
@@ -333,6 +330,8 @@ fn parse_line(
     analyses: &mut Vec<AnalysisCommand>,
     models: &mut Vec<ModelDef>,
     params: &mut ParamContext,
+    initial_conditions: &mut Vec<InitialCondition>,
+    node_sets: &mut Vec<NodeSet>,
     global_nodes: &mut std::collections::HashSet<String>,
     measurements: &mut Vec<crate::analysis::MeasureStatement>,
     options: &mut super::SimulationOptions,
@@ -367,6 +366,8 @@ fn parse_line(
             analyses,
             models,
             params,
+            initial_conditions,
+            node_sets,
             global_nodes,
             measurements,
             options,
@@ -419,6 +420,8 @@ fn parse_command(
     analyses: &mut Vec<AnalysisCommand>,
     models: &mut Vec<ModelDef>,
     params: &mut ParamContext,
+    initial_conditions: &mut Vec<InitialCondition>,
+    node_sets: &mut Vec<NodeSet>,
     global_nodes: &mut std::collections::HashSet<String>,
     measurements: &mut Vec<crate::analysis::MeasureStatement>,
     options: &mut super::SimulationOptions,
@@ -530,12 +533,10 @@ fn parse_command(
             analyses.push(pz);
         }
         ".IC" => {
-            // Parse initial conditions - stored as params for now
-            parse_ic_command(stream, line_num, params)?;
+            parse_ic_command(stream, line_num, params, initial_conditions)?;
         }
         ".NODESET" => {
-            // Parse nodeset hints - stored as params for now
-            parse_nodeset_command(stream, line_num, params)?;
+            parse_nodeset_command(stream, line_num, params, node_sets)?;
         }
         ".INCLUDE" | ".INC" => {
             // Include directives are handled in a preprocessing pass

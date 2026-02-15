@@ -1253,30 +1253,58 @@ fn test_parse_pz_invalid_analysis_type() {
 
 #[test]
 fn test_parse_ic() {
-    // Use simpler node format without parentheses
     let netlist = r#"IC Test
 .IC N1=5 N2=2.5
 .END
 "#;
     let result = parse_netlist(netlist).unwrap();
 
-    // IC values stored as parameters with IC_ prefix
-    assert!(result.params.get("IC_N1").is_some());
-    assert!((result.params.get("IC_N1").unwrap() - 5.0).abs() < 1e-10);
-    assert!((result.params.get("IC_N2").unwrap() - 2.5).abs() < 1e-10);
+    assert_eq!(result.initial_conditions.len(), 2);
+    assert_eq!(result.initial_conditions[0].node, "N1");
+    assert!((result.initial_conditions[0].voltage - 5.0).abs() < 1e-10);
+    assert_eq!(result.initial_conditions[1].node, "N2");
+    assert!((result.initial_conditions[1].voltage - 2.5).abs() < 1e-10);
 }
 
 #[test]
-fn test_parse_ic_ignores_empty_ic_param_suffix() {
+fn test_parse_ic_with_voltage_function_syntax() {
+    let netlist = r#"IC V() Syntax
+.IC V(out)=1.2 V(mid,0)=0.45
+.END
+"#;
+    let result = parse_netlist(netlist).expect("netlist should parse");
+    assert_eq!(result.initial_conditions.len(), 2);
+    assert_eq!(result.initial_conditions[0].node, "OUT");
+    assert!((result.initial_conditions[0].voltage - 1.2).abs() < 1e-12);
+    assert_eq!(result.initial_conditions[1].node, "MID");
+    assert!((result.initial_conditions[1].voltage - 0.45).abs() < 1e-12);
+}
+
+#[test]
+fn test_parse_nodeset() {
+    let netlist = r#"NODESET Test
+.NODESET N1=1.0 V(N2,0)=2.5
+.END
+"#;
+    let result = parse_netlist(netlist).expect("netlist should parse");
+    assert_eq!(result.node_sets.len(), 2);
+    assert_eq!(result.node_sets[0].node, "N1");
+    assert!((result.node_sets[0].voltage - 1.0).abs() < 1e-12);
+    assert_eq!(result.node_sets[1].node, "N2");
+    assert!((result.node_sets[1].voltage - 2.5).abs() < 1e-12);
+}
+
+#[test]
+fn test_parse_params_named_like_ic_do_not_create_initial_conditions() {
     let netlist = r#"IC Empty Suffix Test
 .PARAM IC_=5
 .PARAM IC_NODE=2.5
 .END
 "#;
     let result = parse_netlist(netlist).expect("netlist should parse");
-    assert_eq!(result.initial_conditions.len(), 1);
-    assert_eq!(result.initial_conditions[0].node, "NODE");
-    assert!((result.initial_conditions[0].voltage - 2.5).abs() < 1e-10);
+    assert!(result.initial_conditions.is_empty());
+    assert!(result.node_sets.is_empty());
+    assert!((result.params.get("IC_NODE").unwrap() - 2.5).abs() < 1e-10);
 }
 
 #[test]

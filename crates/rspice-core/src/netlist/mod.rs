@@ -77,6 +77,8 @@ pub struct Netlist {
     pub params: ParamContext,
     /// Initial conditions from .IC statements
     pub initial_conditions: Vec<InitialCondition>,
+    /// Operating-point node voltage hints from .NODESET statements
+    pub node_sets: Vec<NodeSet>,
     /// Global nodes from .GLOBAL (not renamed in subcircuits)
     pub global_nodes: HashSet<String>,
     /// Measurement statements from .MEAS commands
@@ -235,6 +237,7 @@ impl Default for Netlist {
             subcircuits: Vec::new(),
             params: ParamContext::new(),
             initial_conditions: Vec::new(),
+            node_sets: Vec::new(),
             global_nodes: HashSet::new(),
             measurements: Vec::new(),
             options: SimulationOptions::default(),
