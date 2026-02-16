@@ -42,6 +42,72 @@ struct JfetTransientHistory {
 }
 
 impl Engine {
+    fn solve_transient_initial_solution(
+        &self,
+        netlist: &Netlist,
+        circuit: &mut crate::circuit::Circuit,
+        matrix: &mut crate::solver::StaticMatrix,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        match self.solve_dc_operating_point_with_abort(netlist, circuit, matrix, abort) {
+            Ok(solution) => return Ok(solution),
+            Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
+            Err(primary_err) => {
+                log::warn!(
+                    "Transient initial DC operating point failed: {}. Retrying with robust DC aids.",
+                    primary_err
+                );
+
+                let mut robust_cfg = self.config.clone();
+                robust_cfg.max_iterations = robust_cfg.max_iterations.max(120);
+                robust_cfg.convergence_config = super::ConvergenceConfig::robust()
+                    .with_voltage_tolerances(self.voltage_reltol(), self.voltage_abstol())
+                    .with_current_tolerance(self.current_abstol())
+                    .with_residual_reltol(self.residual_reltol());
+                let robust_engine = super::Engine::new(robust_cfg);
+
+                match robust_engine
+                    .solve_dc_operating_point_with_abort(netlist, circuit, matrix, abort)
+                {
+                    Ok(solution) => {
+                        log::warn!(
+                            "Transient startup recovered using robust DC convergence fallback."
+                        );
+                        return Ok(solution);
+                    }
+                    Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
+                    Err(robust_err) => {
+                        log::warn!(
+                            "Robust transient-start DC retry also failed: {}. Trying linearized startup seed.",
+                            robust_err
+                        );
+                    }
+                }
+
+                // Last-resort seed: linearized solve with nonlinear devices effectively open.
+                // This keeps transient progression possible for strongly nonlinear decks that
+                // fail strict t=0 operating-point convergence.
+                match self.solve_linear(circuit, matrix) {
+                    Ok(mut solution) => {
+                        for v in &mut solution {
+                            if !v.is_finite() {
+                                *v = 0.0;
+                            }
+                        }
+                        log::warn!(
+                            "Transient startup using linearized initial seed after DC OP failure."
+                        );
+                        Ok(solution)
+                    }
+                    Err(linear_err) => Err(SimulationError::Circuit(format!(
+                        "Transient startup failed: primary DC error: {}; linearized fallback error: {}",
+                        primary_err, linear_err
+                    ))),
+                }
+            }
+        }
+    }
+
     #[inline]
     fn transient_source_step_hint(netlist: &Netlist, max_step: Value) -> Value {
         if let Some(step) = netlist.analyses.iter().find_map(|analysis| match analysis {
@@ -543,7 +609,7 @@ impl Engine {
 
         // Get DC operating point as initial condition.
         let mut solution =
-            self.solve_dc_operating_point_with_abort(netlist, &mut circuit, &mut matrix, abort)?;
+            self.solve_transient_initial_solution(netlist, &mut circuit, &mut matrix, abort)?;
         let applied_ic = self.apply_initial_condition_overrides(netlist, &circuit, &mut solution);
         circuit.refresh_jiles_atherton_inductances(&solution);
 
@@ -643,7 +709,9 @@ impl Engine {
         let mut force_accept_cooldown = 0_usize; // Steps to skip dt reduction after force-accept
         const MAX_RETRIES: usize = 20; // Maximum retries per timepoint before force-accept
         const MAX_WALL_TIME_SECS: u64 = 300; // Wall-clock timeout (5 minutes - use abort for earlier cancellation)
-        const ABORT_CHECK_INTERVAL: usize = 1000; // Check abort every N iterations for performance
+        // Keep cancellation responsiveness tight for large transient decks where a
+        // single accepted step can still be expensive.
+        const ABORT_CHECK_INTERVAL: usize = 16;
         let estimated_steps = ((tstop / max_step).ceil().max(1.0) as usize).saturating_add(1);
         let max_total_iterations = estimated_steps.saturating_mul(40).max(10_000_000);
         let wall_start = std::time::Instant::now();
