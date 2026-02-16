@@ -260,17 +260,46 @@ impl Mosfet {
 
     /// Set model parameters from a DeviceModel
     pub fn with_params(mut self, params: &std::collections::HashMap<String, Value>) -> Self {
+        const EPS0: Value = 8.854_187_817e-12;
+        const EPS_SI_REL: Value = 11.7;
+        const EPS_OX_REL: Value = 3.9;
+        const Q_E: Value = 1.602_176_634e-19;
+        const V_T_REF: Value = 0.025_85;
+        const N_I_CM3: Value = 1.45e10;
+
+        let kp_explicit = params
+            .get("KP")
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.0);
+        let gamma_explicit = params
+            .get("GAMMA")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0);
+        let phi_explicit = params
+            .get("PHI")
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.0);
+
+        let tox = params
+            .get("TOX")
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.0);
+        let nsub = params
+            .get("NSUB")
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.0);
+
         // Level 1 parameters
         if let Some(&v) = params.get("VTO").or_else(|| params.get("VTH0")) {
             self.vto = v;
         }
-        if let Some(&v) = params.get("KP") {
+        if let Some(v) = kp_explicit {
             self.kp = v;
         }
-        if let Some(&v) = params.get("GAMMA") {
+        if let Some(v) = gamma_explicit {
             self.gamma = v;
         }
-        if let Some(&v) = params.get("PHI") {
+        if let Some(v) = phi_explicit {
             self.phi = v;
         }
         if let Some(&v) = params.get("LAMBDA") {
@@ -282,8 +311,45 @@ impl Mosfet {
         if let Some(&v) = params.get("W") {
             self.w = v;
         }
+        if let Some(tox) = tox {
+            self.cox = EPS_OX_REL * EPS0 / tox;
+        }
+        if kp_explicit.is_none() {
+            // SPICE convention: U0/UO is in cm^2/(V*s), convert to m^2/(V*s).
+            let u0_cm = params
+                .get("U0")
+                .or_else(|| params.get("UO"))
+                .copied()
+                .filter(|v| v.is_finite() && *v > 0.0);
+            if let Some(u0_cm) = u0_cm {
+                let u0_m = u0_cm * 1e-4;
+                let kp_derived = u0_m * self.cox;
+                if kp_derived.is_finite() && kp_derived > 0.0 {
+                    self.kp = kp_derived;
+                }
+            }
+        }
+        if gamma_explicit.is_none() || phi_explicit.is_none() {
+            if let Some(nsub_cm3) = nsub {
+                // NSUB is cm^-3 in SPICE model cards.
+                let nsub_m3 = nsub_cm3 * 1e6;
+                if phi_explicit.is_none() && nsub_cm3 > N_I_CM3 {
+                    let phi_derived = 2.0 * V_T_REF * (nsub_cm3 / N_I_CM3).ln();
+                    if phi_derived.is_finite() && phi_derived > 0.0 {
+                        self.phi = phi_derived;
+                    }
+                }
+                if gamma_explicit.is_none() && self.cox > 0.0 && self.cox.is_finite() {
+                    let gamma_derived =
+                        (2.0 * Q_E * EPS_SI_REL * EPS0 * nsub_m3).sqrt() / self.cox;
+                    if gamma_derived.is_finite() && gamma_derived >= 0.0 {
+                        self.gamma = gamma_derived;
+                    }
+                }
+            }
+        }
         // BSIM3 parameters
-        if let Some(&v) = params.get("U0") {
+        if let Some(&v) = params.get("U0").or_else(|| params.get("UO")) {
             self.u0 = v;
         }
         if let Some(&v) = params.get("UA") {
@@ -352,6 +418,9 @@ impl Mosfet {
             self.nv = v;
         }
         if let Some(&v) = params.get("LAMBDA0") {
+            self.lambda0 = v;
+        } else if let Some(&v) = params.get("LAMBDA") {
+            // Some model cards only provide legacy LAMBDA even for higher levels.
             self.lambda0 = v;
         }
         if let Some(&v) = params.get("LAMBDA1") {
@@ -758,6 +827,13 @@ impl Mosfet {
 
     /// Determine operating region and calculate drain current
     fn calculate_id(&self, vgs: Value, vds: Value, vbs: Value) -> (Value, MosRegion) {
+        // Legacy SPICE Level-6 equations are historically asymmetric and tuned
+        // around the declared terminal ordering. Preserve that behavior to
+        // match ngspice regression vectors.
+        if self.level == 6 {
+            return self.calculate_id_forward(vgs, vds, vbs);
+        }
+
         // Superimpose forward and reverse-oriented channel currents to preserve
         // source/drain symmetry while maintaining smooth behavior around Vds = 0.
         let (id_forward, region_forward) = self.calculate_id_forward(vgs, vds, vbs);
@@ -901,7 +977,8 @@ impl Mosfet {
     ///
     /// Id = KC * W/L * (Vgs - Vth)^NC * (1 - exp(-Vds * KV))^NV * (1 + LAMBDA * Vds)
     fn calculate_id_level6(&self, vgs: Value, vds: Value, vbs: Value) -> (Value, MosRegion) {
-        let p = self.polarity();
+        // Keep Level-6 in a legacy signed-voltage space (no PMOS polarity fold).
+        let p = 1.0;
         let vgs_eff = p * vgs;
         let vds_eff = smooth_positive(p * vds, VDS_SMOOTHING);
         let vth = self.vth(vbs);
@@ -948,6 +1025,14 @@ impl Mosfet {
     /// - gds_rev = gm_fwd_rev + gds_fwd_rev + gmb_fwd_rev
     /// - gmb_rev = -gmb_fwd_rev
     fn small_signal(&self, vgs: Value, vds: Value, vbs: Value) -> (Value, Value, Value) {
+        if self.level == 6 {
+            return (
+                self.gm_forward(vgs, vds, vbs),
+                self.gds_forward(vgs, vds, vbs),
+                self.gmb_forward(vgs, vds, vbs),
+            );
+        }
+
         let gm_forward = self.gm_forward(vgs, vds, vbs);
         let gds_forward = self.gds_forward(vgs, vds, vbs);
         let gmb_forward = self.gmb_forward(vgs, vds, vbs);
@@ -964,7 +1049,7 @@ impl Mosfet {
     }
 
     fn gm_forward(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
-        let p = self.polarity();
+        let p = if self.level == 6 { 1.0 } else { self.polarity() };
         let vgs_eff = p * vgs;
         let _vds_eff = smooth_positive(p * vds, VDS_SMOOTHING);
         let vth = self.vth(vbs);
@@ -999,7 +1084,7 @@ impl Mosfet {
     }
 
     fn gds_forward(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
-        let p = self.polarity();
+        let p = if self.level == 6 { 1.0 } else { self.polarity() };
         let vgs_eff = p * vgs;
         let vds_eff = smooth_positive(p * vds, VDS_SMOOTHING);
         let vth = self.vth(vbs);
@@ -1173,6 +1258,49 @@ mod tests {
 
         let m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0).with_params(&params);
         assert!((m.vto - 0.52).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_with_params_accepts_uo_alias_and_derives_kp_from_tox() {
+        let mut params = std::collections::HashMap::new();
+        params.insert("UO".to_string(), 575.0);
+        params.insert("TOX".to_string(), 0.11e-6);
+
+        let m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0).with_params(&params);
+        assert!((m.u0 - 575.0).abs() < 1e-12);
+        // Expected order from U0*COX with TOX=0.11um is around 1.8e-5 A/V^2.
+        assert!(m.kp > 1.5e-5 && m.kp < 2.2e-5, "unexpected derived KP={}", m.kp);
+    }
+
+    #[test]
+    fn test_with_params_derives_gamma_and_phi_from_nsub_and_tox() {
+        let mut params = std::collections::HashMap::new();
+        params.insert("NSUB".to_string(), 2.2e15);
+        params.insert("TOX".to_string(), 0.11e-6);
+
+        let m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0).with_params(&params);
+        assert!(m.phi > 0.5 && m.phi < 0.8, "unexpected derived PHI={}", m.phi);
+        assert!(
+            m.gamma > 0.6 && m.gamma < 1.2,
+            "unexpected derived GAMMA={}",
+            m.gamma
+        );
+    }
+
+    #[test]
+    fn test_with_params_preserves_explicit_kp_gamma_phi_over_derivations() {
+        let mut params = std::collections::HashMap::new();
+        params.insert("U0".to_string(), 700.0);
+        params.insert("TOX".to_string(), 0.09e-6);
+        params.insert("NSUB".to_string(), 5.0e15);
+        params.insert("KP".to_string(), 3.21e-5);
+        params.insert("GAMMA".to_string(), 0.55);
+        params.insert("PHI".to_string(), 0.71);
+
+        let m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0).with_params(&params);
+        assert!((m.kp - 3.21e-5).abs() < 1e-15);
+        assert!((m.gamma - 0.55).abs() < 1e-15);
+        assert!((m.phi - 0.71).abs() < 1e-15);
     }
 
     #[test]
@@ -1495,4 +1623,5 @@ mod tests {
             "gmb mismatch in swapped mode: analytical={gmb}, numeric={gmb_num}"
         );
     }
+
 }
