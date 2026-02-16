@@ -607,6 +607,34 @@ Q1 2 1 0 2N2222
 }
 
 #[test]
+fn test_parse_mos6_reference_model_types() {
+    let netlist = include_str!("../../../../../tests/mos6/mos6inv.cir");
+    let result = parse_netlist(netlist).expect("mos6inv deck should parse");
+
+    let n10l5 = result
+        .models
+        .iter()
+        .find(|m| m.name.eq_ignore_ascii_case("N10L5"))
+        .expect("missing N10L5 model");
+    assert!(
+        n10l5.model_type.eq_ignore_ascii_case("NMOS"),
+        "expected N10L5 model type NMOS, got '{}'",
+        n10l5.model_type
+    );
+
+    let p12l5 = result
+        .models
+        .iter()
+        .find(|m| m.name.eq_ignore_ascii_case("P12L5"))
+        .expect("missing P12L5 model");
+    assert!(
+        p12l5.model_type.eq_ignore_ascii_case("PMOS"),
+        "expected P12L5 model type PMOS, got '{}'",
+        p12l5.model_type
+    );
+}
+
+#[test]
 fn test_parse_element_with_inline_semicolon_comment() {
     let netlist = r#"Inline Element Comment Test
 V1 1 0 5 ; DC supply
