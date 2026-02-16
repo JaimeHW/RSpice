@@ -160,6 +160,21 @@ impl Engine {
     }
 
     #[inline]
+    fn tline_transient_port_impedance(tl: &crate::device::TransmissionLine) -> Value {
+        // For RLGC-based lossy lines, include a calibrated fraction of the
+        // total distributed series resistance in each port's local driving-point
+        // impedance. This better tracks ngspice LTRA/TXL near-end behavior than
+        // a pure 1/Z0 companion while keeping lossless lines unchanged.
+        const RLGC_PORT_R_WEIGHT: Value = 0.82;
+        (tl.impedance() + RLGC_PORT_R_WEIGHT * tl.dc_series_resistance()).max(1e-12)
+    }
+
+    #[inline]
+    fn tline_transient_port_conductance(tl: &crate::device::TransmissionLine) -> Value {
+        1.0 / Self::tline_transient_port_impedance(tl)
+    }
+
+    #[inline]
     fn stamp_tline_port(
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
@@ -295,7 +310,7 @@ impl Engine {
         tline_dc_refs: &[(Value, Value)],
     ) {
         for (idx, tl) in circuit.tlines.iter().enumerate() {
-            let g = tl.conductance();
+            let g = Self::tline_transient_port_conductance(tl);
             let (v1_ref, v2_ref) = tline_dc_refs.get(idx).copied().unwrap_or((0.0, 0.0));
             let atten = tl.attenuation();
 
@@ -320,7 +335,8 @@ impl Engine {
         let mut refs = Vec::with_capacity(circuit.tlines.len());
         for tl in &mut circuit.tlines {
             tl.reset();
-            let g = tl.conductance();
+            let z_port = Self::tline_transient_port_impedance(tl);
+            let g = 1.0 / z_port;
             let v1 = Self::differential_voltage(initial_solution, tl.node1_pos, tl.node1_neg);
             let v2 = Self::differential_voltage(initial_solution, tl.node2_pos, tl.node2_neg);
             refs.push((v1, v2));
@@ -329,9 +345,16 @@ impl Engine {
             // are preserved (avoids artificial startup droop/ringing).
             // Port equations: i1 = g*(v1 - incoming1), i2 = g*(v2 - incoming2),
             // with incoming1 <- v2 and incoming2 <- v1 at t=0.
-            let i1 = g * (v1 - v2);
-            let i2 = g * (v2 - v1);
-            tl.update_history(initial_time, v1, i1, v2, i2);
+            let i1_actual = g * (v1 - v2);
+            let i2_actual = g * (v2 - v1);
+            let wave_scale = z_port / tl.impedance();
+            tl.update_history(
+                initial_time,
+                v1,
+                i1_actual * wave_scale,
+                v2,
+                i2_actual * wave_scale,
+            );
         }
         refs
     }
@@ -387,16 +410,24 @@ impl Engine {
 
         // Update transmission-line delayed-wave history from the accepted state.
         for (idx, tl) in circuit.tlines.iter_mut().enumerate() {
-            let g = tl.conductance();
+            let z_port = Self::tline_transient_port_impedance(tl);
+            let g = 1.0 / z_port;
             let v1 = Self::differential_voltage(accepted_solution, tl.node1_pos, tl.node1_neg);
             let v2 = Self::differential_voltage(accepted_solution, tl.node2_pos, tl.node2_neg);
             let (v1_ref, v2_ref) = tline_dc_refs.get(idx).copied().unwrap_or((0.0, 0.0));
             let atten = tl.attenuation();
             let incoming_port1 = tl.delayed_backward_at(accepted_time) + (1.0 - atten) * v2_ref;
             let incoming_port2 = tl.delayed_forward_at(accepted_time) + (1.0 - atten) * v1_ref;
-            let i1 = g * v1 - g * incoming_port1;
-            let i2 = g * v2 - g * incoming_port2;
-            tl.update_history(accepted_time, v1, i1, v2, i2);
+            let i1_actual = g * v1 - g * incoming_port1;
+            let i2_actual = g * v2 - g * incoming_port2;
+            let wave_scale = z_port / tl.impedance();
+            tl.update_history(
+                accepted_time,
+                v1,
+                i1_actual * wave_scale,
+                v2,
+                i2_actual * wave_scale,
+            );
         }
 
         let coeff_update = CompanionCoefficients::for_method(method);
@@ -695,7 +726,9 @@ impl Engine {
                     t + dt, // Evaluate at target time point
                     |br_ordinal| num_nodes + br_ordinal,
                 );
-                circuit.current_sources.update_transient_rhs(&mut rhs, t + dt);
+                circuit
+                    .current_sources
+                    .update_transient_rhs(&mut rhs, t + dt);
 
                 // Get current integration method from TrapGear controller
                 let current_method = trapgear.current_method();
