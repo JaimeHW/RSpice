@@ -746,11 +746,19 @@ impl VoltageSources {
         let step_default = Self::pulse_step_default(context);
         let stop_default = Self::pulse_stop_default(context);
 
-        let td = if delay.is_finite() { delay.max(0.0) } else { 0.0 };
+        let td = if delay.is_finite() {
+            delay.max(0.0)
+        } else {
+            0.0
+        };
         let tr = if rise.is_nan() { step_default } else { rise };
         let tf = if fall.is_nan() { step_default } else { fall };
         let pw = if width.is_nan() { stop_default } else { width };
-        let per = if period.is_nan() { stop_default } else { period };
+        let per = if period.is_nan() {
+            stop_default
+        } else {
+            period
+        };
 
         let tr = if tr.is_finite() && tr > 0.0 {
             tr
@@ -2346,6 +2354,29 @@ impl CircuitData {
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
             || !self.behavioral_sources.is_empty()
+            || self.has_xspice_devices()
+            || {
+                #[cfg(feature = "veriloga")]
+                {
+                    !self.veriloga_devices.is_empty()
+                }
+                #[cfg(not(feature = "veriloga"))]
+                {
+                    false
+                }
+            }
+    }
+
+    /// Check whether circuit contains strongly-coupled physical nonlinearities
+    /// that benefit from conservative Newton damping (e.g., voltage limiting).
+    #[inline]
+    pub fn has_physical_nonlinear_devices(&self) -> bool {
+        !self.diodes.is_empty()
+            || !self.bjts.is_empty()
+            || !self.mosfets.is_empty()
+            || !self.jfets.is_empty()
+            || !self.vswitches.is_empty()
+            || !self.iswitches.is_empty()
             || self.has_xspice_devices()
             || {
                 #[cfg(feature = "veriloga")]

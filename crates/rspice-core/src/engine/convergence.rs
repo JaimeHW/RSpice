@@ -1066,6 +1066,7 @@ impl Engine {
         let mut hit_voltage_limit = false;
         let mut limited_nodes: Vec<usize> = Vec::new();
         let mut damping_state = NewtonDampingState::default();
+        let requires_conservative_nonlinear_limiting = circuit.has_physical_nonlinear_devices();
         // Use 10x more iterations for DC nonlinear since damping limits voltage change per step
         // With MAX_DELTA_V=2V and standard max_iterations=50, we can only move 100V
         // Need 500+ iterations to traverse the full +/-1000V range if starting from a poor guess
@@ -1099,12 +1100,17 @@ impl Engine {
             self.stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution);
             // Solve linearized system
             let raw_solution = matrix.solve(&rhs).map_err(SimulationError::Solver)?;
-            let mut new_solution = self.apply_damping_strategy(
-                &solution,
-                &raw_solution,
-                &mut damping_state,
-                |trial| self.nonlinear_merit(circuit, matrix, trial),
-            );
+            // Voltage-limiting style damping is critical for strongly-coupled
+            // semiconductor nonlinearities, but it can unnecessarily throttle
+            // behavioral-only fixed-point updates (e.g., B-source macros that
+            // legitimately require kilovolt-level solution jumps).
+            let mut new_solution = if requires_conservative_nonlinear_limiting {
+                self.apply_damping_strategy(&solution, &raw_solution, &mut damping_state, |trial| {
+                    self.nonlinear_merit(circuit, matrix, trial)
+                })
+            } else {
+                raw_solution
+            };
             // Solution limiting: prevent numerical blow-up by clamping extreme values
             // This is a critical convergence aid for circuits with strong nonlinearities
             for (i, v) in new_solution.iter_mut().enumerate() {
@@ -1115,7 +1121,9 @@ impl Engine {
                         i + 1
                     );
                     *v = 0.0; // Replace NaN/Inf with zero
-                } else if v.abs() > Self::MAX_NODE_VOLTAGE {
+                } else if requires_conservative_nonlinear_limiting
+                    && v.abs() > Self::MAX_NODE_VOLTAGE
+                {
                     if !hit_voltage_limit {
                         hit_voltage_limit = true;
                         log::debug!(
@@ -1142,11 +1150,13 @@ impl Engine {
             // Device convergence must be checked at the candidate iterate, not the prior iterate.
             self.update_device_states_for_dc(circuit, &new_solution);
             let device_converged = circuit.nonlinear_converged(self.device_convergence_tolerance());
+            let nonlinear_residual_converged =
+                self.nonlinear_residual_converged(circuit, matrix, &new_solution);
             solution = new_solution;
             if voltage_converged
                 && linearized_residual_converged
                 && device_converged
-                && self.nonlinear_residual_converged(circuit, matrix, &solution)
+                && nonlinear_residual_converged
             {
                 if hit_voltage_limit {
                     log::info!(
