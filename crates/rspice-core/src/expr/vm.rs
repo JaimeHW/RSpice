@@ -58,9 +58,13 @@ pub enum Instruction {
     Sinh,
     Cosh,
     Tanh,
+    Asinh,
+    Acosh,
+    Atanh,
     Floor,
     Ceil,
     Round,
+    Sqr,
 
     // Multi-arg functions
     Min,
@@ -71,9 +75,18 @@ pub enum Instruction {
     Sign,
     Uramp,
     Stp,
+    U2,
+    Eq0,
+    Ne0,
+    Gt0,
+    Lt0,
+    Ge0,
+    Le0,
+    Table(usize),
+    Pwl(usize),
     Mod,
 
-    /// Conditional: if top > 0, keep second, else keep third
+    /// Conditional: if cond != 0, keep second, else keep third
     IfElse,
 }
 
@@ -237,9 +250,13 @@ impl Vm {
                 Instruction::Sinh => self.unary_op(|a| a.sinh()),
                 Instruction::Cosh => self.unary_op(|a| a.cosh()),
                 Instruction::Tanh => self.unary_op(|a| a.tanh()),
+                Instruction::Asinh => self.unary_op(|a| a.asinh()),
+                Instruction::Acosh => self.unary_op(|a| a.acosh()),
+                Instruction::Atanh => self.unary_op(|a| a.atanh()),
                 Instruction::Floor => self.unary_op(|a| a.floor()),
                 Instruction::Ceil => self.unary_op(|a| a.ceil()),
-                Instruction::Round => self.unary_op(|a| a.round()),
+                Instruction::Round => self.unary_op(|a| a.round_ties_even()),
+                Instruction::Sqr => self.unary_op(|a| a * a),
                 Instruction::Sign => self.unary_op(|a| {
                     if a > 0.0 {
                         1.0
@@ -250,7 +267,22 @@ impl Vm {
                     }
                 }),
                 Instruction::Uramp => self.unary_op(|a| a.max(0.0)),
-                Instruction::Stp => self.unary_op(|a| if a >= 0.0 { 1.0 } else { 0.0 }),
+                Instruction::Stp => self.unary_op(|a| {
+                    if a > 0.0 {
+                        1.0
+                    } else if a == 0.0 {
+                        0.5
+                    } else {
+                        0.0
+                    }
+                }),
+                Instruction::U2 => self.unary_op(|a| a.clamp(0.0, 1.0)),
+                Instruction::Eq0 => self.unary_op(|a| if a.abs() < 1e-12 { 1.0 } else { 0.0 }),
+                Instruction::Ne0 => self.unary_op(|a| if a.abs() >= 1e-12 { 1.0 } else { 0.0 }),
+                Instruction::Gt0 => self.unary_op(|a| if a > 0.0 { 1.0 } else { 0.0 }),
+                Instruction::Lt0 => self.unary_op(|a| if a < 0.0 { 1.0 } else { 0.0 }),
+                Instruction::Ge0 => self.unary_op(|a| if a >= 0.0 { 1.0 } else { 0.0 }),
+                Instruction::Le0 => self.unary_op(|a| if a <= 0.0 { 1.0 } else { 0.0 }),
 
                 // Multi-arg functions
                 Instruction::Min => self.binary_op(|a, b| a.min(b)),
@@ -258,6 +290,16 @@ impl Vm {
                 Instruction::Pwr => self.binary_op(|a, b| a.abs().powf(b)),
                 Instruction::Pwrs => self.binary_op(|a, b| a.signum() * a.abs().powf(b)),
                 Instruction::Mod => self.binary_op(|a, b| if b != 0.0 { a % b } else { 0.0 }),
+                Instruction::Table(arg_count) | Instruction::Pwl(arg_count) => {
+                    if *arg_count >= 3 && self.stack.len() >= *arg_count {
+                        let start = self.stack.len() - *arg_count;
+                        let args = &self.stack[start..];
+                        let x = args[0];
+                        let result = table_interpolate_from_args(x, &args[1..]);
+                        self.stack.truncate(start);
+                        self.stack.push(result);
+                    }
+                }
 
                 Instruction::Limit => {
                     // limit(x, lo, hi) - pop 3, push 1
@@ -300,6 +342,60 @@ impl Vm {
             self.stack.push(f(a));
         }
     }
+}
+
+fn table_interpolate_from_args(x: Value, args: &[Value]) -> Value {
+    let pair_count = args.len() / 2;
+    if pair_count == 0 {
+        return 0.0;
+    }
+
+    let first_x = args[0];
+    let first_y = args[1];
+    if pair_count == 1 {
+        return first_y;
+    }
+
+    if x <= first_x {
+        return interpolate_segment(x, first_x, first_y, args[2], args[3], first_y);
+    }
+
+    let last_idx = 2 * (pair_count - 1);
+    let last_x = args[last_idx];
+    let last_y = args[last_idx + 1];
+    if x >= last_x {
+        let prev_idx = 2 * (pair_count - 2);
+        return interpolate_segment(
+            x,
+            args[prev_idx],
+            args[prev_idx + 1],
+            last_x,
+            last_y,
+            last_y,
+        );
+    }
+
+    for i in 0..(pair_count - 1) {
+        let idx = 2 * i;
+        let x1 = args[idx];
+        let y1 = args[idx + 1];
+        let x2 = args[idx + 2];
+        let y2 = args[idx + 3];
+        if x >= x1 && x <= x2 {
+            return interpolate_segment(x, x1, y1, x2, y2, y1);
+        }
+    }
+
+    last_y
+}
+
+#[inline]
+fn interpolate_segment(x: Value, x1: Value, y1: Value, x2: Value, y2: Value, flat: Value) -> Value {
+    if (x2 - x1).abs() < 1e-12 {
+        return flat;
+    }
+    let t = (x - x1) / (x2 - x1);
+    y1 + t * (y2 - y1)
 }
 
 #[cfg(test)]
@@ -345,5 +441,97 @@ mod tests {
         let ctx = Context::dc(&voltages, &[]);
         let result = vm.execute(&program, &ctx);
         assert!((result - 10.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_vm_round_uses_ties_even() {
+        let mut program = CompiledExpr::new();
+        program.instructions = vec![Instruction::PushConst(2.5), Instruction::Round];
+        let mut vm = Vm::new();
+        let result = vm.execute(&program, &Context::dc(&[], &[]));
+        assert!((result - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_vm_stp_and_u2_semantics() {
+        let mut stp_program = CompiledExpr::new();
+        stp_program.instructions = vec![Instruction::PushConst(0.0), Instruction::Stp];
+        let mut vm = Vm::new();
+        let stp_result = vm.execute(&stp_program, &Context::dc(&[], &[]));
+        assert!((stp_result - 0.5).abs() < 1e-12);
+
+        let mut u2_program = CompiledExpr::new();
+        u2_program.instructions = vec![Instruction::PushConst(1.25), Instruction::U2];
+        let u2_result = vm.execute(&u2_program, &Context::dc(&[], &[]));
+        assert!((u2_result - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_vm_table_interpolation() {
+        let mut program = CompiledExpr::new();
+        // TABLE(0.5, 0,0, 1,10, 2,20) -> 5
+        program.instructions = vec![
+            Instruction::PushConst(0.5),
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(10.0),
+            Instruction::PushConst(2.0),
+            Instruction::PushConst(20.0),
+            Instruction::Table(7),
+        ];
+
+        let mut vm = Vm::new();
+        let result = vm.execute(&program, &Context::dc(&[], &[]));
+        assert!((result - 5.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_vm_table_extrapolation_uses_end_segments() {
+        let mut low_program = CompiledExpr::new();
+        // TABLE(-1, 0,0, 1,10) -> -10
+        low_program.instructions = vec![
+            Instruction::PushConst(-1.0),
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(10.0),
+            Instruction::Table(5),
+        ];
+        let mut vm = Vm::new();
+        let low_result = vm.execute(&low_program, &Context::dc(&[], &[]));
+        assert!((low_result - (-10.0)).abs() < 1e-12);
+
+        let mut high_program = CompiledExpr::new();
+        // TABLE(3, 0,0, 1,10, 2,20) -> 30
+        high_program.instructions = vec![
+            Instruction::PushConst(3.0),
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(10.0),
+            Instruction::PushConst(2.0),
+            Instruction::PushConst(20.0),
+            Instruction::Table(7),
+        ];
+        let high_result = vm.execute(&high_program, &Context::dc(&[], &[]));
+        assert!((high_result - 30.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_vm_table_duplicate_x_segment_is_flat() {
+        let mut program = CompiledExpr::new();
+        // duplicate x points should avoid divide-by-zero and return first y
+        program.instructions = vec![
+            Instruction::PushConst(0.5),
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(2.0),
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(8.0),
+            Instruction::Table(5),
+        ];
+        let mut vm = Vm::new();
+        let result = vm.execute(&program, &Context::dc(&[], &[]));
+        assert!((result - 2.0).abs() < 1e-12);
     }
 }

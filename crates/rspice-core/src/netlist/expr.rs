@@ -810,7 +810,7 @@ fn eval_function(name: &str, args: &[Expr], ctx: &ParamContext) -> Result<Value,
         "IF" => {
             // IF(cond, then, else)
             let cond = get_arg(0)?;
-            if cond > 0.5 { get_arg(1) } else { get_arg(2) }
+            if cond != 0.0 { get_arg(1) } else { get_arg(2) }
         }
         "URAMP" => {
             // URAMP(x) = x if x > 0, else 0
@@ -1115,6 +1115,13 @@ mod tests {
         assert!(approx_eq(eval_simple("max(3, 5)").unwrap(), 5.0));
         assert!(approx_eq(eval_simple("min(3, 5)").unwrap(), 3.0));
         assert!(approx_eq(eval_simple("pow(2, 3)").unwrap(), 8.0));
+    }
+
+    #[test]
+    fn test_if_uses_nonzero_truthiness() {
+        assert!(approx_eq(eval_simple("IF(0.1, 42, 43)").unwrap(), 42.0));
+        assert!(approx_eq(eval_simple("IF(-0.1, 42, 43)").unwrap(), 42.0));
+        assert!(approx_eq(eval_simple("IF(0.0, 42, 43)").unwrap(), 43.0));
     }
 
     #[test]

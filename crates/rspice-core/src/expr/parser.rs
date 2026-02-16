@@ -105,7 +105,7 @@ impl<'a> Lexer<'a> {
     fn read_ident(&mut self) -> String {
         let mut s = String::new();
         while let Some(&c) = self.chars.peek() {
-            if c.is_alphanumeric() || c == '_' {
+            if c.is_alphanumeric() || c == '_' || c == '.' || c == '#' || c == ':' {
                 s.push(self.chars.next().unwrap());
             } else {
                 break;
@@ -476,8 +476,7 @@ impl<'a> Parser<'a> {
                         );
                     }
                     self.errors.push(
-                        "Expected node name after comma in differential voltage probe"
-                            .to_string(),
+                        "Expected node name after comma in differential voltage probe".to_string(),
                     );
                     self.expect(Token::RParen);
                     return Expr::Const(0.0);
@@ -530,17 +529,30 @@ impl<'a> Parser<'a> {
                 "SINH" => Some(Function::Sinh),
                 "COSH" => Some(Function::Cosh),
                 "TANH" => Some(Function::Tanh),
+                "ASINH" => Some(Function::Asinh),
+                "ACOSH" => Some(Function::Acosh),
+                "ATANH" => Some(Function::Atanh),
                 "FLOOR" | "INT" => Some(Function::Floor),
                 "CEIL" | "CEILING" => Some(Function::Ceil),
                 "ROUND" | "NINT" => Some(Function::Round),
+                "SQR" => Some(Function::Sqr),
                 "MIN" => Some(Function::Min),
                 "MAX" => Some(Function::Max),
-                "PWR" => Some(Function::Pwr),
+                "POW" | "PWR" => Some(Function::Pwr),
                 "PWRS" => Some(Function::Pwrs),
                 "LIMIT" => Some(Function::Limit),
                 "SIGN" | "SGN" => Some(Function::Sign),
                 "URAMP" => Some(Function::Uramp),
                 "STP" | "STEP" | "U" => Some(Function::Stp),
+                "U2" => Some(Function::U2),
+                "EQ0" => Some(Function::Eq0),
+                "NE0" => Some(Function::Ne0),
+                "GT0" => Some(Function::Gt0),
+                "LT0" => Some(Function::Lt0),
+                "GE0" => Some(Function::Ge0),
+                "LE0" => Some(Function::Le0),
+                "TABLE" => Some(Function::Table),
+                "PWL" => Some(Function::Pwl),
                 "MOD" | "FMOD" => Some(Function::Mod),
                 "IF" => Some(Function::If),
                 _ => None,

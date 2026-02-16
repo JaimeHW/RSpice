@@ -1423,6 +1423,50 @@ fn test_parse_nodeset() {
 }
 
 #[test]
+fn test_parse_behavioral_expression_quoted_preserves_inner_expression_text() {
+    let netlist = r#"Behavioral Quote
+B1 out 0 V='1+2'
+R1 out 0 1k
+.END
+"#;
+    let parsed = parse_netlist(netlist).expect("netlist should parse");
+    let b1 = parsed
+        .elements
+        .iter()
+        .find(|e| e.name.eq_ignore_ascii_case("B1"))
+        .expect("missing B1");
+
+    match &b1.kind {
+        ElementKind::BehavioralVoltage { expression } => {
+            assert_eq!(expression, "1+2");
+        }
+        other => panic!("expected behavioral voltage source, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_behavioral_expression_braced_preserves_inner_expression_text() {
+    let netlist = r#"Behavioral Braces
+B1 out 0 V={1+2}
+R1 out 0 1k
+.END
+"#;
+    let parsed = parse_netlist(netlist).expect("netlist should parse");
+    let b1 = parsed
+        .elements
+        .iter()
+        .find(|e| e.name.eq_ignore_ascii_case("B1"))
+        .expect("missing B1");
+
+    match &b1.kind {
+        ElementKind::BehavioralVoltage { expression } => {
+            assert_eq!(expression, "1+2");
+        }
+        other => panic!("expected behavioral voltage source, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_parse_params_named_like_ic_do_not_create_initial_conditions() {
     let netlist = r#"IC Empty Suffix Test
 .PARAM IC_=5

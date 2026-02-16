@@ -1704,43 +1704,47 @@ fn parse_behavioral(
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
 
-    // Look for V= or I=
-    let spec = expect_ident(stream, line_num)?;
+    // Look for V= or I= form.
+    let spec_token = expect_ident(stream, line_num)?;
+    let (spec_designator, inline_expr) = if let Some((lhs, rhs)) = spec_token.split_once('=') {
+        (lhs.trim().to_ascii_uppercase(), rhs.trim())
+    } else {
+        (spec_token.trim().to_ascii_uppercase(), "")
+    };
 
-    // Consume = if present
+    // Consume = if present as a separate token.
     stream.consume(&TokenKind::Equals);
 
-    // The rest is the expression
+    // Collect the expression text with token-aware reconstruction.
+    // Important: TokenKind::Expression already stores the inner content and must
+    // not be wrapped back into braces.
     let mut expr_parts = Vec::new();
+    if !inline_expr.is_empty() {
+        expr_parts.push(inline_expr.to_string());
+    }
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        expr_parts.push(format!("{}", stream.peek().kind));
+        if let Some(fragment) = behavioral_expr_token_fragment(&stream.peek().kind) {
+            expr_parts.push(fragment);
+        }
         stream.advance();
     }
-    let expression = expr_parts.join(" ");
-
-    let kind = if spec.starts_with('V') {
-        let expr_content = if spec.len() > 1 && spec.starts_with("V=") {
-            format!("{}{}", &spec[2..], expression)
-        } else {
-            expression
-        };
-        ElementKind::BehavioralVoltage {
-            expression: expr_content,
-        }
-    } else if spec.starts_with('I') {
-        let expr_content = if spec.len() > 1 && spec.starts_with("I=") {
-            format!("{}{}", &spec[2..], expression)
-        } else {
-            expression
-        };
-        ElementKind::BehavioralCurrent {
-            expression: expr_content,
-        }
-    } else {
+    let expression = expr_parts.join(" ").trim().to_string();
+    if expression.is_empty() {
         return Err(ParseError::Syntax {
             line: line_num,
-            message: "Behavioral source must have V=expr or I=expr".to_string(),
+            message: "Behavioral source requires a non-empty expression".to_string(),
         });
+    }
+
+    let kind = match spec_designator.as_str() {
+        "V" => ElementKind::BehavioralVoltage { expression },
+        "I" => ElementKind::BehavioralCurrent { expression },
+        _ => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: "Behavioral source must have V=expr or I=expr".to_string(),
+            });
+        }
     };
 
     elements.push(Element {
@@ -1750,6 +1754,27 @@ fn parse_behavioral(
     });
 
     Ok(())
+}
+
+fn behavioral_expr_token_fragment(token: &TokenKind) -> Option<String> {
+    match token {
+        TokenKind::Ident(s) => Some(s.clone()),
+        TokenKind::Number(n) => Some(format!("{}", n)),
+        TokenKind::StringLit(s) => Some(s.clone()),
+        TokenKind::Expression(expr) => Some(expr.clone()),
+        TokenKind::Equals => Some("=".to_string()),
+        TokenKind::Comma => Some(",".to_string()),
+        TokenKind::LParen => Some("(".to_string()),
+        TokenKind::RParen => Some(")".to_string()),
+        TokenKind::Plus => Some("+".to_string()),
+        TokenKind::Minus => Some("-".to_string()),
+        TokenKind::Star => Some("*".to_string()),
+        TokenKind::Slash => Some("/".to_string()),
+        TokenKind::AtSign => Some("@".to_string()),
+        TokenKind::LBracket => Some("[".to_string()),
+        TokenKind::RBracket => Some("]".to_string()),
+        TokenKind::Newline | TokenKind::Eof => None,
+    }
 }
 
 //=============================================================================
