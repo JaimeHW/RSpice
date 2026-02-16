@@ -1139,6 +1139,40 @@ M1 2 1 0 0 PMOD
     }
 
     #[test]
+    fn test_mos_instance_geometry_overrides_model_geometry() {
+        let netlist_str = r#"
+* Instance W/L should override model-card defaults
+M1 2 1 0 0 NMOD W=20u L=0.25u
+.MODEL NMOD NMOS (LEVEL=1 W=4u L=1u)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+        let m = &circuit.mosfets.devices[0];
+
+        assert!((m.w - 20e-6).abs() < 1e-18);
+        assert!((m.l - 0.25e-6).abs() < 1e-18);
+    }
+
+    #[test]
+    fn test_mos_instance_multiplier_scales_effective_width() {
+        let netlist_str = r#"
+* M and NF should scale effective width
+M1 2 1 0 0 NMOD W=10u M=3 NF=2
+.MODEL NMOD NMOS (LEVEL=1)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+        let m = &circuit.mosfets.devices[0];
+
+        assert!((m.w - 60e-6).abs() < 1e-18);
+        assert!((m.l - 1e-6).abs() < 1e-18);
+    }
+
+    #[test]
     fn test_jfet_model_card_type_sets_pjf_polarity() {
         let netlist_str = r#"
 * JFET model card type should define NJF/PJF polarity

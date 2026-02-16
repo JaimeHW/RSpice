@@ -424,10 +424,41 @@ M1 3 2 1 0 NMOS
 "#;
     let result = parse_netlist(netlist).unwrap();
     match &result.elements[0].kind {
-        ElementKind::Mosfet { model, .. } => {
+        ElementKind::Mosfet {
+            model,
+            instance_params,
+            ..
+        } => {
             assert_eq!(model, "NMOS");
+            assert!(instance_params.is_empty());
         }
         _ => panic!("Expected Mosfet element"),
+    }
+}
+
+#[test]
+fn test_parse_mosfet_with_instance_params() {
+    let netlist = r#"MOSFET Instance Params
+M1 d g s b nmod w=10u l=0.25u m=2 nf=4
+.END
+"#;
+    let result = parse_netlist(netlist).expect("netlist should parse");
+    match &result.elements[0].kind {
+        ElementKind::Mosfet {
+            model,
+            instance_params,
+            ..
+        } => {
+            assert!(model.eq_ignore_ascii_case("nmod"));
+            assert_eq!(instance_params.len(), 4);
+            let map: std::collections::HashMap<String, Value> =
+                instance_params.iter().cloned().collect();
+            assert!((map["W"] - 10e-6).abs() < 1e-18);
+            assert!((map["L"] - 0.25e-6).abs() < 1e-18);
+            assert!((map["M"] - 2.0).abs() < 1e-18);
+            assert!((map["NF"] - 4.0).abs() < 1e-18);
+        }
+        other => panic!("Expected MOSFET element, got {:?}", other),
     }
 }
 
@@ -443,7 +474,17 @@ M1 d g s e b n1 w=10u l=0.25u
     assert!(result.elements[0].nodes[3].eq_ignore_ascii_case("e"));
     assert!(result.elements[0].nodes[4].eq_ignore_ascii_case("b"));
     match &result.elements[0].kind {
-        ElementKind::Mosfet { model, .. } => assert!(model.eq_ignore_ascii_case("n1")),
+        ElementKind::Mosfet {
+            model,
+            instance_params,
+            ..
+        } => {
+            assert!(model.eq_ignore_ascii_case("n1"));
+            let map: std::collections::HashMap<String, Value> =
+                instance_params.iter().cloned().collect();
+            assert!((map["W"] - 10e-6).abs() < 1e-18);
+            assert!((map["L"] - 0.25e-6).abs() < 1e-18);
+        }
         other => panic!("Expected MOSFET element, got {:?}", other),
     }
 }

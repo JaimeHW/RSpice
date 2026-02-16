@@ -379,7 +379,7 @@ fn parse_line(
         'I' => parse_current_source(&mut stream, line_num, elements, params),
         'D' => parse_diode(&mut stream, line_num, elements),
         'Q' => parse_bjt(&mut stream, line_num, elements),
-        'M' => parse_mosfet(&mut stream, line_num, elements),
+        'M' => parse_mosfet(&mut stream, line_num, elements, params),
         'J' => parse_jfet(&mut stream, line_num, elements),
         'X' => parse_subcircuit_instance(&mut stream, line_num, elements),
         'E' => parse_vcvs(&mut stream, line_num, elements, params),
@@ -1278,6 +1278,7 @@ fn parse_mosfet(
     stream: &mut TokenStream,
     line_num: usize,
     elements: &mut Vec<Element>,
+    params: &ParamContext,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
     let drain = expect_node(stream, line_num)?;
@@ -1305,11 +1306,40 @@ fn parse_mosfet(
         nodes.push(extra);
     }
 
+    let mut instance_params = Vec::new();
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        skip_commas(stream);
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
+        }
+
+        match &stream.peek().kind {
+            TokenKind::Ident(raw_name) => {
+                let raw_name = raw_name.clone();
+                let name_upper = raw_name.to_ascii_uppercase();
+                stream.advance();
+
+                if stream.consume(&TokenKind::Equals) {
+                    let value = try_value(stream, params).ok_or_else(|| ParseError::Syntax {
+                        line: line_num,
+                        message: format!("Expected value for MOSFET parameter '{}'", raw_name),
+                    })?;
+                    instance_params.push((name_upper, value));
+                }
+            }
+            _ => {
+                // Ignore unsupported MOS instance tokens for now.
+                stream.advance();
+            }
+        }
+    }
+
     elements.push(Element {
         name,
         kind: ElementKind::Mosfet {
             model,
             mos_type: super::MosType::Nmos, // Will be set from model
+            instance_params,
         },
         nodes,
     });

@@ -366,6 +366,64 @@ impl Mosfet {
         self
     }
 
+    /// Apply MOSFET instance parameters (W/L/M/NF).
+    ///
+    /// Model-card parameters are expected to be applied first via `with_params`.
+    /// Instance parameters then override geometry and optional multiplicity.
+    pub fn with_instance_params(mut self, params: &[(String, Value)]) -> Self {
+        let mut width_override: Option<Value> = None;
+        let mut length_override: Option<Value> = None;
+        let mut multiplier = 1.0;
+        let mut nf = 1.0;
+
+        for (name, value) in params {
+            if !value.is_finite() {
+                continue;
+            }
+
+            if name.eq_ignore_ascii_case("W") {
+                if *value > 0.0 {
+                    width_override = Some(*value);
+                }
+                continue;
+            }
+
+            if name.eq_ignore_ascii_case("L") {
+                if *value > 0.0 {
+                    length_override = Some(*value);
+                }
+                continue;
+            }
+
+            if name.eq_ignore_ascii_case("M") || name.eq_ignore_ascii_case("MULT") {
+                if *value > 0.0 {
+                    multiplier = *value;
+                }
+                continue;
+            }
+
+            if name.eq_ignore_ascii_case("NF") {
+                if *value > 0.0 {
+                    nf = *value;
+                }
+            }
+        }
+
+        if let Some(w) = width_override {
+            self.w = w;
+        }
+        if let Some(l) = length_override {
+            self.l = l;
+        }
+
+        let scale = multiplier * nf;
+        if scale.is_finite() && scale > 0.0 {
+            self.w *= scale;
+        }
+
+        self
+    }
+
     /// Link this device to a StaticMatrix for O(1) stamping
     pub fn link(&mut self, matrix: &StaticMatrix) {
         let d = self.node_drain;
@@ -1115,6 +1173,25 @@ mod tests {
 
         let m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0).with_params(&params);
         assert!((m.vto - 0.52).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_with_instance_params_overrides_geometry() {
+        let params = vec![("W".to_string(), 20e-6), ("L".to_string(), 0.25e-6)];
+        let m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0).with_instance_params(&params);
+        assert!((m.w - 20e-6).abs() < 1e-18);
+        assert!((m.l - 0.25e-6).abs() < 1e-18);
+    }
+
+    #[test]
+    fn test_with_instance_params_applies_multiplicity() {
+        let params = vec![
+            ("W".to_string(), 10e-6),
+            ("M".to_string(), 3.0),
+            ("NF".to_string(), 2.0),
+        ];
+        let m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0).with_instance_params(&params);
+        assert!((m.w - 60e-6).abs() < 1e-18);
     }
 
     #[test]

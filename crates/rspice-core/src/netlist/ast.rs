@@ -169,7 +169,12 @@ pub enum ElementKind {
     Bjt { model: String, bjt_type: BjtType },
 
     /// MOSFET
-    Mosfet { model: String, mos_type: MosType },
+    Mosfet {
+        model: String,
+        mos_type: MosType,
+        /// Instance parameters (e.g. `W`, `L`, `M`, `NF`).
+        instance_params: Vec<(String, Value)>,
+    },
 
     /// JFET (NJF or PJF)
     Jfet { model: String, jfet_type: JfetType },

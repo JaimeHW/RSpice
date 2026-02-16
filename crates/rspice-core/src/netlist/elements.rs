@@ -245,6 +245,7 @@ pub fn parse_mosfet(
         kind: ElementKind::Mosfet {
             model,
             mos_type: MosType::Nmos, // Will be set from model
+            instance_params: Vec::new(),
         },
         nodes,
     });

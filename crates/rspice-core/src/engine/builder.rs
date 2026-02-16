@@ -395,6 +395,7 @@ impl Engine {
                 ElementKind::Mosfet {
                     model,
                     mos_type: _mos_type,
+                    instance_params,
                 } => {
                     let drain = circuit.get_or_create_node(&element.nodes[0]);
                     let gate = circuit.get_or_create_node(&element.nodes[1]);
@@ -451,6 +452,8 @@ impl Engine {
                         // Apply all model parameters (VTO, KP, GAMMA, KC, NC, etc.)
                         mosfet = mosfet.with_params(&params_map);
                     }
+
+                    mosfet = mosfet.with_instance_params(instance_params);
 
                     circuit.mosfets.add(mosfet);
                 }
