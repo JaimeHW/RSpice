@@ -3,6 +3,7 @@
 //! This module handles the conversion from parsed netlist elements
 //! to the runtime circuit representation.
 
+use super::behavioral_expr::prepare_behavioral_expression;
 use super::{Engine, SimulationError, extract_dc_value};
 use crate::netlist::{ElementKind, flatten_netlist};
 use crate::{CircuitData, Netlist};
@@ -669,13 +670,22 @@ impl Engine {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
                     let branch = circuit.allocate_branch_named(&element.name);
+                    let prepared_expression =
+                        prepare_behavioral_expression(expression, &netlist.params).map_err(
+                            |e| {
+                                SimulationError::Circuit(format!(
+                                    "Behavioral source '{}': {}",
+                                    element.name, e
+                                ))
+                            },
+                        )?;
 
                     let bvs = crate::device::BehavioralVoltageSource::new(
                         element.name.clone(),
                         np,
                         nn,
                         branch,
-                        expression,
+                        &prepared_expression,
                     )
                     .map_err(SimulationError::Circuit)?;
                     circuit.behavioral_sources.add_voltage(bvs);
@@ -683,12 +693,21 @@ impl Engine {
                 ElementKind::BehavioralCurrent { expression } => {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
+                    let prepared_expression =
+                        prepare_behavioral_expression(expression, &netlist.params).map_err(
+                            |e| {
+                                SimulationError::Circuit(format!(
+                                    "Behavioral source '{}': {}",
+                                    element.name, e
+                                ))
+                            },
+                        )?;
 
                     let bcs = crate::device::BehavioralCurrentSource::new(
                         element.name.clone(),
                         np,
                         nn,
-                        expression,
+                        &prepared_expression,
                     )
                     .map_err(SimulationError::Circuit)?;
                     circuit.behavioral_sources.add_current(bcs);

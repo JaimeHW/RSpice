@@ -4,9 +4,9 @@
 
 #[cfg(test)]
 mod engine_tests {
-    use crate::abort_signal::ImmediateAbort;
     use crate::Netlist;
     use crate::Value;
+    use crate::abort_signal::ImmediateAbort;
     use crate::engine::Engine;
 
     #[test]
@@ -236,6 +236,228 @@ R1 out 0 1k
             msg.contains("Invalid behavioral expression") && msg.contains("@"),
             "expected strict behavioral parse error, got {}",
             msg
+        );
+    }
+
+    #[test]
+    fn test_behavioral_source_expands_user_defined_function_calls() {
+        let netlist = Netlist::parse(
+            r#"
+* Behavioral source should support .FUNC expansion
+.FUNC BAR2(P) 'V(P)+P'
+VNODEP p 0 102
+B1 out 0 V='bar2(17.0)'
+RLOAD out 0 1k
+.end
+"#,
+        )
+        .unwrap();
+
+        let result = Engine::default().run_dc_op(&netlist).unwrap();
+        let out_idx = result
+            .node_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case("out"))
+            .expect("missing out node");
+        let vout = result.voltage(out_idx);
+        assert!(
+            (vout - 119.0).abs() < 1e-6,
+            "expected behavioral .FUNC expansion output of 119V, got {}",
+            vout
+        );
+    }
+
+    #[test]
+    fn test_behavioral_source_subckt_internal_probe_is_hierarchically_remapped() {
+        let netlist = Netlist::parse(
+            r#"
+* Internal subckt node probe V(1) should map to hierarchical node
+.SUBCKT NINT_SRC OUT
+V1 1 0 2.6
+B1 OUT 0 V=nint(v(1))
+.ENDS
+X1 out NINT_SRC
+RLOAD out 0 1k
+.end
+"#,
+        )
+        .unwrap();
+
+        let result = Engine::default().run_dc_op(&netlist).unwrap();
+        let out_idx = result
+            .node_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case("out"))
+            .expect("missing out node");
+        let vout = result.voltage(out_idx);
+        assert!(
+            (vout - 3.0).abs() < 1e-6,
+            "expected remapped internal probe nint(v(1)) to evaluate to 3V, got {}",
+            vout
+        );
+    }
+
+    #[test]
+    fn test_behavioral_nint_uses_round_ties_even() {
+        let netlist = Netlist::parse(
+            r#"
+* nint should round halves to even (2.5 -> 2)
+B1 out 0 V=nint(2.5)
+RLOAD out 0 1k
+.end
+"#,
+        )
+        .unwrap();
+
+        let result = Engine::default().run_dc_op(&netlist).unwrap();
+        let out_idx = result
+            .node_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case("out"))
+            .expect("missing out node");
+        let vout = result.voltage(out_idx);
+        assert!(
+            (vout - 2.0).abs() < 1e-6,
+            "expected nint(2.5) = 2.0 (ties-even), got {}",
+            vout
+        );
+    }
+
+    #[test]
+    fn test_behavioral_u_u2_and_eq0_helpers_match_ngspice_semantics() {
+        let netlist = Netlist::parse(
+            r#"
+* u(0) = 0.5, u2(1.25) = 1, eq0(0) = 1
+B1 n_u 0 V=u(0)
+B2 n_u2 0 V=u2(1.25)
+B3 n_eq0 0 V=eq0(0)
+R1 n_u 0 1k
+R2 n_u2 0 1k
+R3 n_eq0 0 1k
+.end
+"#,
+        )
+        .unwrap();
+
+        let result = Engine::default().run_dc_op(&netlist).unwrap();
+        let node_voltage = |name: &str| -> f64 {
+            let idx = result
+                .node_names
+                .iter()
+                .position(|n| n.eq_ignore_ascii_case(name))
+                .unwrap_or_else(|| panic!("missing node {}", name));
+            result.voltage(idx)
+        };
+        let vu = node_voltage("n_u");
+        let vu2 = node_voltage("n_u2");
+        let veq0 = node_voltage("n_eq0");
+
+        assert!((vu - 0.5).abs() < 1e-6, "expected u(0)=0.5, got {}", vu);
+        assert!(
+            (vu2 - 1.0).abs() < 1e-6,
+            "expected u2(1.25)=1.0, got {}",
+            vu2
+        );
+        assert!(
+            (veq0 - 1.0).abs() < 1e-6,
+            "expected eq0(0)=1.0, got {}",
+            veq0
+        );
+    }
+
+    #[test]
+    fn test_behavioral_func_i_probe_expression_converges() {
+        let netlist = Netlist::parse(
+            r#"
+* Isolate .FUNC with I(vsrc) probe usage
+vncol2 p 0 102.0
+vp 1 0 105.0
+rp 1 0 1.0
+.func baz1(n,vp) 'n+i(vp)+vp'
+b1 out 0 v='baz1(17.0,10000)'
+rload out 0 1k
+.end
+"#,
+        )
+        .unwrap();
+
+        let result = Engine::default()
+            .run_dc_op(&netlist)
+            .expect("I(vsrc)-based behavioral function should converge");
+        let out_idx = result
+            .node_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case("out"))
+            .expect("missing out node");
+        let vout = result.voltage(out_idx);
+        assert!(
+            (vout - 9912.0).abs() < 1e-3,
+            "expected baz1 result of 9912, got {}",
+            vout
+        );
+    }
+
+    #[test]
+    fn test_behavioral_func_i_probe_expression_converges_without_load() {
+        let netlist = Netlist::parse(
+            r#"
+* Isolate .FUNC with I(vsrc) probe usage (no explicit B-source load)
+vncol2 p 0 102.0
+vp 1 0 105.0
+rp 1 0 1.0
+.func baz1(n,vp) 'n+i(vp)+vp'
+b1 out 0 v='baz1(17.0,10000)'
+.end
+"#,
+        )
+        .unwrap();
+
+        let result = Engine::default()
+            .run_dc_op(&netlist)
+            .expect("unloaded I(vsrc)-based behavioral function should converge");
+        let out_idx = result
+            .node_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case("out"))
+            .expect("missing out node");
+        let vout = result.voltage(out_idx);
+        assert!(
+            (vout - 9912.0).abs() < 1e-3,
+            "expected baz1 result of 9912, got {}",
+            vout
+        );
+    }
+
+    #[test]
+    fn test_behavioral_i_probe_binds_to_named_voltage_source_branch() {
+        let netlist = Netlist::parse(
+            r#"
+vncol2 p 0 102.0
+vp 1 0 105.0
+rp 1 0 1.0
+b1 out 0 v=i(vp)+17
+rload out 0 1k
+.end
+"#,
+        )
+        .unwrap();
+
+        let engine = Engine::default();
+        let mut circuit = engine.build_circuit(&netlist).unwrap();
+        assert_eq!(circuit.behavioral_sources.voltage_sources.len(), 1);
+        let vp_branch = circuit
+            .get_branch_by_name("vp")
+            .expect("missing vp branch ordinal");
+        let num_nodes = circuit.num_nodes();
+        let vp_idx = num_nodes + vp_branch - 1;
+        let mut solution = vec![0.0; circuit.matrix_size()];
+        solution[vp_idx] = -105.0;
+
+        let out = circuit.behavioral_sources.voltage_sources[0].evaluate(&solution, 0.0);
+        assert!(
+            (out - (-88.0)).abs() < 1e-9,
+            "expected i(vp)+17 with i(vp)=-105 to evaluate to -88, got {}",
+            out
         );
     }
 
@@ -1801,7 +2023,9 @@ RRET out 0 1k
 "#;
         let netlist = Netlist::parse(netlist_str).unwrap();
         let engine = Engine::default();
-        let results = engine.run_dc_sweep(&netlist, "VDRV", 0.0, 1.0, 1.0).unwrap();
+        let results = engine
+            .run_dc_sweep(&netlist, "VDRV", 0.0, 1.0, 1.0)
+            .unwrap();
         assert!(!results.is_empty());
 
         // Regression guard: dc-sweep result node names must be real circuit names,

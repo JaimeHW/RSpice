@@ -294,6 +294,30 @@ fn test_ngspice_xspice_digital_suite() {
     );
 }
 
+#[test]
+fn test_ngspice_regression_parser_suite() {
+    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
+    let stats = run_and_report(&runner, "regression/parser");
+
+    println!(
+        "Regression Parser: {} tests, {:.1}% pass rate",
+        stats.total,
+        stats.pass_rate()
+    );
+}
+
+#[test]
+fn test_ngspice_regression_func_suite() {
+    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
+    let stats = run_and_report(&runner, "regression/func");
+
+    println!(
+        "Regression Func: {} tests, {:.1}% pass rate",
+        stats.total,
+        stats.pass_rate()
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SOI MOSFET Tests
 // ═══════════════════════════════════════════════════════════════════════════════
