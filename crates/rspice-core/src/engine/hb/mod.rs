@@ -432,6 +432,10 @@ impl Engine {
                 ac_magnitude,
                 ..
             }) if ac_magnitude.abs() <= HB_ZERO_SENSE_TOL => Some(*dc_value),
+            Some(SourceSpec::DcTransient {
+                dc_value,
+                transient,
+            }) => Self::hb_extract_static_source_voltage(Some(transient), *dc_value),
             Some(SourceSpec::Ac { magnitude, .. }) if magnitude.abs() <= HB_ZERO_SENSE_TOL => {
                 Some(0.0)
             }

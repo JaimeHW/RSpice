@@ -1823,6 +1823,14 @@ fn parse_source_spec(
                             });
                         }
                     }
+                    if let Some(transient) =
+                        parse_transient_source_spec_keyword(stream, line_num, params)?
+                    {
+                        return Ok(SourceSpec::DcTransient {
+                            dc_value,
+                            transient: Box::new(transient),
+                        });
+                    }
                     return Ok(SourceSpec::Dc(dc_value));
                 }
                 "AC" => {
@@ -1858,6 +1866,37 @@ fn parse_source_spec(
     // Default: try to parse as DC value
     let value = expect_value(stream, line_num, params)?;
     Ok(SourceSpec::Dc(value))
+}
+
+fn parse_transient_source_spec_keyword(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<Option<SourceSpec>, ParseError> {
+    skip_commas(stream);
+    let TokenKind::Ident(keyword) = &stream.peek().kind else {
+        return Ok(None);
+    };
+
+    match keyword.to_uppercase().as_str() {
+        "PULSE" => {
+            stream.advance();
+            parse_pulse_spec(stream, line_num, params).map(Some)
+        }
+        "SIN" => {
+            stream.advance();
+            parse_sin_spec(stream, line_num, params).map(Some)
+        }
+        "PWL" => {
+            stream.advance();
+            parse_pwl_spec(stream, line_num, params).map(Some)
+        }
+        "EXP" => {
+            stream.advance();
+            parse_exp_spec(stream, line_num, params).map(Some)
+        }
+        _ => Ok(None),
+    }
 }
 
 fn parse_pulse_spec(

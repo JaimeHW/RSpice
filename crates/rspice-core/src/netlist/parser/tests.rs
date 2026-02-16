@@ -288,6 +288,72 @@ I1 1 0 DC 1m AC 2 180
 }
 
 #[test]
+fn test_parse_dc_plus_pwl_source() {
+    let netlist = r#"DC + PWL Test
+V1 1 0 DC 0.7 PWL(0 0 2n 5)
+.END
+"#;
+    let result = parse_netlist(netlist).unwrap();
+    match &result.elements[0].kind {
+        ElementKind::VoltageSource(SourceSpec::DcTransient {
+            dc_value,
+            transient,
+        }) => {
+            assert!((*dc_value - 0.7).abs() < 1e-12);
+            match transient.as_ref() {
+                SourceSpec::Pwl { points } => {
+                    assert_eq!(points.len(), 2);
+                    assert!((points[0].0 - 0.0).abs() < 1e-18);
+                    assert!((points[0].1 - 0.0).abs() < 1e-18);
+                    assert!((points[1].0 - 2e-9).abs() < 1e-21);
+                    assert!((points[1].1 - 5.0).abs() < 1e-18);
+                }
+                other => panic!("Expected PWL transient source, got {:?}", other),
+            }
+        }
+        other => panic!("Expected DC+transient source, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_dc_plus_pulse_source() {
+    let netlist = r#"DC + PULSE Test
+I1 1 0 DC 1m PULSE(0 2m 1n 2n 2n 10n 20n)
+.END
+"#;
+    let result = parse_netlist(netlist).unwrap();
+    match &result.elements[0].kind {
+        ElementKind::CurrentSource(SourceSpec::DcTransient {
+            dc_value,
+            transient,
+        }) => {
+            assert!((*dc_value - 1e-3).abs() < 1e-15);
+            match transient.as_ref() {
+                SourceSpec::Pulse {
+                    v1,
+                    v2,
+                    delay,
+                    rise,
+                    fall,
+                    width,
+                    period,
+                } => {
+                    assert!((*v1 - 0.0).abs() < 1e-15);
+                    assert!((*v2 - 2e-3).abs() < 1e-15);
+                    assert!((*delay - 1e-9).abs() < 1e-21);
+                    assert!((*rise - 2e-9).abs() < 1e-21);
+                    assert!((*fall - 2e-9).abs() < 1e-21);
+                    assert!((*width - 10e-9).abs() < 1e-21);
+                    assert!((*period - 20e-9).abs() < 1e-21);
+                }
+                other => panic!("Expected PULSE transient source, got {:?}", other),
+            }
+        }
+        other => panic!("Expected DC+transient source, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_parse_sin_phase_is_degrees_converted_to_radians() {
     let netlist = r#"Sin Phase Test
 V1 1 0 SIN(0 1 1k 0 0 90)

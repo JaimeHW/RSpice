@@ -262,6 +262,7 @@ impl Engine {
                         | crate::netlist::SourceSpec::Sin { .. }
                         | crate::netlist::SourceSpec::Pwl { .. }
                         | crate::netlist::SourceSpec::PwlFile { .. }
+                        | crate::netlist::SourceSpec::DcTransient { .. }
                         | crate::netlist::SourceSpec::Exp { .. } => Some(spec.clone()),
                         _ => None,
                     };
@@ -286,6 +287,7 @@ impl Engine {
                         | crate::netlist::SourceSpec::Sin { .. }
                         | crate::netlist::SourceSpec::Pwl { .. }
                         | crate::netlist::SourceSpec::PwlFile { .. }
+                        | crate::netlist::SourceSpec::DcTransient { .. }
                         | crate::netlist::SourceSpec::Exp { .. } => Some(spec.clone()),
                         _ => None,
                     };

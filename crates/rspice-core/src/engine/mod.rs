@@ -501,6 +501,7 @@ pub(crate) fn extract_dc_value(spec: &SourceSpec) -> Value {
     match spec {
         SourceSpec::Dc(v) => *v,
         SourceSpec::DcAc { dc_value, .. } => *dc_value,
+        SourceSpec::DcTransient { dc_value, .. } => *dc_value,
         SourceSpec::Pulse { v1, .. } => *v1, // Use initial value
         SourceSpec::Sin { offset, .. } => *offset, // Use DC offset
         SourceSpec::Pwl { points } => points.first().map(|(_, v)| *v).unwrap_or(0.0),
@@ -520,6 +521,7 @@ pub(crate) fn extract_ac_value(spec: &SourceSpec) -> (Value, Value) {
             ac_phase,
             ..
         } => (*ac_magnitude, *ac_phase),
+        SourceSpec::DcTransient { transient, .. } => extract_ac_value(transient),
         // Sin sources have AC component at their frequency
         SourceSpec::Sin {
             amplitude, phase, ..

@@ -797,6 +797,9 @@ impl VoltageSources {
             SourceSpec::Dc(v) => *v,
             SourceSpec::Ac { .. } => 0.0, // AC sources are DC=0 in transient
             SourceSpec::DcAc { dc_value, .. } => *dc_value,
+            SourceSpec::DcTransient { transient, .. } => {
+                Self::evaluate_source_at_time_with_context(transient, time, context)
+            }
             SourceSpec::Pulse {
                 v1,
                 v2,

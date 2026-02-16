@@ -479,6 +479,16 @@ pub enum SourceSpec {
         ac_phase: Value,
     },
 
+    /// Combined DC operating value and transient waveform specification
+    /// (common SPICE syntax: `DC x PULSE(...)`, `DC x PWL(...)`, etc).
+    ///
+    /// The explicit `dc_value` is used for operating point / DC analyses,
+    /// while `transient` drives time-domain evaluation.
+    DcTransient {
+        dc_value: Value,
+        transient: Box<SourceSpec>,
+    },
+
     /// Pulse source: PULSE(v1 v2 td tr tf pw per)
     Pulse {
         v1: Value,
