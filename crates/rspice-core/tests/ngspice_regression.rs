@@ -250,6 +250,18 @@ fn test_ngspice_hicum2_suite() {
     );
 }
 
+#[test]
+fn test_ngspice_hfet_suite() {
+    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
+    let stats = run_and_report(&runner, "hfet");
+
+    println!(
+        "HFET: {} tests, {:.1}% pass rate",
+        stats.total,
+        stats.pass_rate()
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Analysis Tests
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -402,6 +414,8 @@ fn test_full_ngspice_suite_summary() {
         // Regression tests (.control blocks ignored - runs simulation part)
         "regression/parser",
         "regression/func",
+        // XSPICE digital decks (currently skipped when A-device support is unavailable)
+        "xspice/digital",
     ];
 
     let mut total_stats = TestStatistics {
