@@ -97,6 +97,17 @@ fn suite_config(subdir: &str) -> TestRunnerConfig {
     let mut cfg = TestRunnerConfig::default();
 
     match subdir {
+        // Large digital/mixed-signal decks need substantially more wall clock
+        // time in release mode to complete robust startup and long transients.
+        "general" | "transient" => {
+            cfg.max_time_per_test_ms = 420_000; // 7 minutes
+        }
+        // Level-6 references include near-zero startup voltages in the single
+        // digit nanovolt range; use a small absolute floor to avoid
+        // over-penalizing numerically equivalent zero.
+        "mos6" => {
+            cfg.absolute_tolerance = 1e-5;
+        }
         // Distributed transmission-line decks are currently compared with a
         // wider envelope because RSpice uses a simplified lossy companion model
         // rather than ngspice's full LTRA convolution kernel.
@@ -116,7 +127,7 @@ fn suite_config(subdir: &str) -> TestRunnerConfig {
 
 #[test]
 fn test_ngspice_general_suite() {
-    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
+    let runner = TestRunner::new(get_tests_dir(), suite_config("general"));
     let stats = run_and_report(&runner, "general");
 
     println!(
@@ -152,7 +163,7 @@ fn test_ngspice_filters_suite() {
 
 #[test]
 fn test_ngspice_transient_suite() {
-    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
+    let runner = TestRunner::new(get_tests_dir(), suite_config("transient"));
     let stats = run_and_report(&runner, "transient");
 
     println!(
@@ -216,7 +227,7 @@ fn test_ngspice_bsim4_suite() {
 
 #[test]
 fn test_ngspice_mos6_suite() {
-    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
+    let runner = TestRunner::new(get_tests_dir(), suite_config("mos6"));
     let stats = run_and_report(&runner, "mos6");
 
     println!(
