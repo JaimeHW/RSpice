@@ -273,27 +273,32 @@ impl<'a> Lexer<'a> {
                             if chars.len() > i + 2 {
                                 let m2 = chars[i + 1].to_ascii_uppercase();
                                 let m3 = chars[i + 2].to_ascii_uppercase();
-                                (m2 == 'E' && m3 == 'G') || m2 == 'S' || (m2 == 'H' && m3 == 'Z')
+                                (m2 == 'E' && m3 == 'G')
+                                    || m2 == 'S'
+                                    || m2 == 'A'
+                                    || m2 == 'V'
+                                    || (m2 == 'H' && m3 == 'Z')
                             } else {
-                                after == 'S' || after == 'H' // MS, MH
+                                matches!(after, 'S' | 'H' | 'A' | 'V') // MS, MH, mA, mV
                             }
                         }
-                        // Unit suffixes followed by 's' (seconds), 'F' (farad), or 'H' (henry/hertz)
+                        // Unit suffixes followed by seconds/farad/henry and common
+                        // source units (A/V).
                         'N' => {
-                            // ns, nF, nH - but NOT when followed by digit (like 1N4148)
-                            matches!(after, 'S' | 'F' | 'H')
+                            // ns, nF, nH, nA, nV - but NOT when followed by digit (like 1N4148)
+                            matches!(after, 'S' | 'F' | 'H' | 'A' | 'V')
                         }
                         'P' => {
-                            // ps, pF, pH - but NOT when followed by digit
-                            matches!(after, 'S' | 'F' | 'H')
+                            // ps, pF, pH, pA, pV - but NOT when followed by digit
+                            matches!(after, 'S' | 'F' | 'H' | 'A' | 'V')
                         }
                         'U' => {
-                            // us, uF, uH - but NOT when followed by digit
-                            matches!(after, 'S' | 'F' | 'H')
+                            // us, uF, uH, uA, uV - but NOT when followed by digit
+                            matches!(after, 'S' | 'F' | 'H' | 'A' | 'V')
                         }
                         'F' => {
-                            // fs (femtosecond) - but NOT when followed by digit
-                            after == 'S'
+                            // fs, fA, fV - but NOT when followed by digit
+                            matches!(after, 'S' | 'A' | 'V')
                         }
                         'K' => {
                             // kHz
@@ -302,7 +307,7 @@ impl<'a> Lexer<'a> {
                                 let k3 = chars[i + 2].to_ascii_uppercase();
                                 k2 == 'H' && k3 == 'Z'
                             } else {
-                                !after.is_ascii_alphabetic()
+                                !after.is_ascii_alphabetic() || matches!(after, 'A' | 'V')
                             }
                         }
                         'G' => {
@@ -312,7 +317,7 @@ impl<'a> Lexer<'a> {
                                 let g3 = chars[i + 2].to_ascii_uppercase();
                                 g2 == 'H' && g3 == 'Z'
                             } else {
-                                !after.is_ascii_alphabetic()
+                                !after.is_ascii_alphabetic() || matches!(after, 'A' | 'V')
                             }
                         }
                         'T' => {
@@ -322,7 +327,7 @@ impl<'a> Lexer<'a> {
                                 let t3 = chars[i + 2].to_ascii_uppercase();
                                 t2 == 'H' && t3 == 'Z'
                             } else {
-                                !after.is_ascii_alphabetic()
+                                !after.is_ascii_alphabetic() || matches!(after, 'A' | 'V')
                             }
                         }
                         _ => false,
@@ -562,6 +567,21 @@ fn parse_spice_suffix(chars: &[char]) -> (Value, usize) {
                 _ => {}
             }
         }
+
+        // Voltage/current units with engineering prefix (e.g., mV, uA, kV).
+        if c2 == 'V' || c2 == 'A' {
+            match c1 {
+                'T' => return (1e12, 2),
+                'G' => return (1e9, 2),
+                'K' => return (1e3, 2),
+                'M' => return (1e-3, 2),
+                'U' => return (1e-6, 2),
+                'N' => return (1e-9, 2),
+                'P' => return (1e-12, 2),
+                'F' => return (1e-15, 2),
+                _ => {}
+            }
+        }
     }
 
     // Single char suffixes
@@ -575,7 +595,8 @@ fn parse_spice_suffix(chars: &[char]) -> (Value, usize) {
         'N' => (1e-9, 1),
         'P' => (1e-12, 1),
         'F' => (1e-15, 1),
-        'A' => (1e-18, 1), // atto
+        // Unit designators (e.g., "1V", "1A") are treated as neutral scale.
+        'V' | 'A' => (1.0, 1),
         _ => (1.0, 0),
     }
 }
@@ -772,6 +793,10 @@ mod tests {
         assert!((parse_spice_value("1K").unwrap() - 1e3).abs() < 1e-10);
         assert!((parse_spice_value("1MEG").unwrap() - 1e6).abs() < 1e-10);
         assert!((parse_spice_value("1meg").unwrap() - 1e6).abs() < 1e-10);
+        assert!((parse_spice_value("1V").unwrap() - 1.0).abs() < 1e-12);
+        assert!((parse_spice_value("1A").unwrap() - 1.0).abs() < 1e-12);
+        assert!((parse_spice_value("1mA").unwrap() - 1e-3).abs() < 1e-15);
+        assert!((parse_spice_value("1kV").unwrap() - 1e3).abs() < 1e-9);
         assert!((parse_spice_value("1u").unwrap() - 1e-6).abs() < 1e-20);
         assert!((parse_spice_value("1n").unwrap() - 1e-9).abs() < 1e-20);
         assert!((parse_spice_value("1p").unwrap() - 1e-12).abs() < 1e-20);
