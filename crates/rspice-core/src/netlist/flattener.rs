@@ -335,6 +335,12 @@ impl<'a> Flattener<'a> {
 
         // Remap the element kind, handling CCCS/CCVS control element names
         let new_kind = match &element.kind {
+            ElementKind::BehavioralVoltage { expression } => ElementKind::BehavioralVoltage {
+                expression: self.remap_behavioral_expression(expression, prefix, node_map),
+            },
+            ElementKind::BehavioralCurrent { expression } => ElementKind::BehavioralCurrent {
+                expression: self.remap_behavioral_expression(expression, prefix, node_map),
+            },
             ElementKind::Cccs {
                 gain,
                 control_element,
@@ -393,6 +399,65 @@ impl<'a> Flattener<'a> {
         } else {
             format!("{}{}{}", prefix, self.config.hierarchy_separator, node)
         }
+    }
+
+    /// Remap V(...) and I(...) probe references inside behavioral expressions.
+    ///
+    /// This keeps behavioral source references consistent with flattened names:
+    /// - `V(internal)` -> `V(X1.internal)`
+    /// - `V(port)` -> `V(parent_mapped_node)`
+    /// - `I(vsrc)` -> `I(X1.vsrc)` for local branch probes
+    fn remap_behavioral_expression(
+        &self,
+        expression: &str,
+        prefix: &str,
+        node_map: &HashMap<String, String>,
+    ) -> String {
+        let chars: Vec<char> = expression.chars().collect();
+        let mut out = String::with_capacity(expression.len() + prefix.len());
+        let mut i = 0usize;
+
+        while i < chars.len() {
+            let c = chars[i];
+            if is_ident_start(c) {
+                let ident_start = i;
+                i += 1;
+                while i < chars.len() && is_ident_continue(chars[i]) {
+                    i += 1;
+                }
+                let ident: String = chars[ident_start..i].iter().collect();
+
+                let mut ws_idx = i;
+                while ws_idx < chars.len() && chars[ws_idx].is_whitespace() {
+                    ws_idx += 1;
+                }
+
+                let is_probe = ident.eq_ignore_ascii_case("V") || ident.eq_ignore_ascii_case("I");
+                if is_probe && ws_idx < chars.len() && chars[ws_idx] == '(' {
+                    if let Some((inner, end_idx)) = extract_parenthesized(&chars, ws_idx) {
+                        let remapped = if ident.eq_ignore_ascii_case("V") {
+                            remap_voltage_probe_args(self, &inner, prefix, node_map)
+                        } else {
+                            remap_current_probe_arg(prefix, &inner)
+                        };
+                        out.push_str(&ident);
+                        out.push('(');
+                        out.push_str(&remapped);
+                        out.push(')');
+                        i = end_idx + 1;
+                        continue;
+                    }
+                }
+
+                out.push_str(&ident);
+                continue;
+            }
+
+            out.push(c);
+            i += 1;
+        }
+
+        out
     }
 
     /// Substitute parameters in element values
@@ -504,6 +569,111 @@ impl<'a> Flattener<'a> {
 pub fn flatten_netlist(netlist: &Netlist) -> Result<Vec<Element>, ParseError> {
     let mut flattener = Flattener::new(&netlist.subcircuits);
     flattener.flatten(netlist)
+}
+
+fn is_ident_start(c: char) -> bool {
+    c.is_ascii_alphabetic() || c == '_'
+}
+
+fn is_ident_continue(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '#' || c == ':'
+}
+
+fn extract_parenthesized(chars: &[char], lparen_idx: usize) -> Option<(String, usize)> {
+    if chars.get(lparen_idx).copied() != Some('(') {
+        return None;
+    }
+
+    let mut depth = 0usize;
+    let mut i = lparen_idx;
+    while i < chars.len() {
+        match chars[i] {
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    let inner: String = chars[lparen_idx + 1..i].iter().collect();
+                    return Some((inner, i));
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+fn split_top_level_commas(input: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0usize;
+    for c in input.chars() {
+        match c {
+            '(' => {
+                depth += 1;
+                current.push(c);
+            }
+            ')' => {
+                depth = depth.saturating_sub(1);
+                current.push(c);
+            }
+            ',' if depth == 0 => {
+                parts.push(current.trim().to_string());
+                current.clear();
+            }
+            _ => current.push(c),
+        }
+    }
+    parts.push(current.trim().to_string());
+    parts
+}
+
+fn remap_voltage_probe_args(
+    flattener: &Flattener<'_>,
+    args: &str,
+    prefix: &str,
+    node_map: &HashMap<String, String>,
+) -> String {
+    let parts = split_top_level_commas(args);
+    if parts.len() == 1 {
+        return remap_probe_node(flattener, &parts[0], prefix, node_map);
+    }
+    if parts.len() == 2 {
+        let a = remap_probe_node(flattener, &parts[0], prefix, node_map);
+        let b = remap_probe_node(flattener, &parts[1], prefix, node_map);
+        return format!("{}, {}", a, b);
+    }
+    args.trim().to_string()
+}
+
+fn remap_current_probe_arg(prefix: &str, arg: &str) -> String {
+    let trimmed = arg.trim();
+    if trimmed.is_empty() || !is_simple_probe_name(trimmed) {
+        return trimmed.to_string();
+    }
+    if prefix.is_empty() {
+        trimmed.to_string()
+    } else {
+        format!("{}.{}", prefix, trimmed)
+    }
+}
+
+fn remap_probe_node(
+    flattener: &Flattener<'_>,
+    arg: &str,
+    prefix: &str,
+    node_map: &HashMap<String, String>,
+) -> String {
+    let trimmed = arg.trim();
+    if trimmed.is_empty() || !is_simple_probe_name(trimmed) {
+        return trimmed.to_string();
+    }
+    flattener.remap_node(trimmed, prefix, node_map)
+}
+
+fn is_simple_probe_name(s: &str) -> bool {
+    s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '#' || c == ':')
 }
 
 #[cfg(test)]
@@ -745,6 +915,96 @@ X1 in 0 missing_model
                 && msg.to_ascii_uppercase().contains("MISSING_MODEL"),
             "Unexpected error: {}",
             err
+        );
+    }
+
+    #[test]
+    fn test_flatten_remaps_behavioral_internal_voltage_probe_nodes() {
+        let netlist_str = r#"Behavioral Probe Remap
+.SUBCKT BTEST OUT
+V1 1 0 1
+B1 OUT 0 V=nint(v(1))
+.ENDS
+X1 out BTEST
+RLOAD out 0 1k
+.end
+"#;
+        let netlist = parse_netlist(netlist_str).unwrap();
+        let flat = flatten_netlist(&netlist).unwrap();
+        let b1 = flat
+            .iter()
+            .find(|e| e.name == "X1.B1")
+            .expect("expected flattened behavioral source");
+        let expression = match &b1.kind {
+            ElementKind::BehavioralVoltage { expression } => expression,
+            other => panic!("expected behavioral voltage source, got {:?}", other),
+        };
+
+        let upper = expression.to_ascii_uppercase();
+        assert!(
+            upper.contains("V(X1.1)"),
+            "expected hierarchical node remap in expression, got '{}'",
+            expression
+        );
+        assert!(
+            !upper.contains("V(1)"),
+            "unremapped local node probe should not remain, got '{}'",
+            expression
+        );
+    }
+
+    #[test]
+    fn test_flatten_remaps_behavioral_branch_current_probes() {
+        let netlist_str = r#"Behavioral Branch Probe Remap
+.SUBCKT BTEST OUT
+VS local 0 1
+B1 OUT 0 V=I(VS)
+.ENDS
+X1 out BTEST
+RLOAD out 0 1k
+.end
+"#;
+        let netlist = parse_netlist(netlist_str).unwrap();
+        let flat = flatten_netlist(&netlist).unwrap();
+        let b1 = flat
+            .iter()
+            .find(|e| e.name == "X1.B1")
+            .expect("expected flattened behavioral source");
+        let expression = match &b1.kind {
+            ElementKind::BehavioralVoltage { expression } => expression,
+            other => panic!("expected behavioral voltage source, got {:?}", other),
+        };
+        assert!(
+            expression.to_ascii_uppercase().contains("I(X1.VS)"),
+            "expected hierarchical branch remap in expression, got '{}'",
+            expression
+        );
+    }
+
+    #[test]
+    fn test_flatten_remaps_behavioral_subckt_ports_to_instance_nodes() {
+        let netlist_str = r#"Behavioral Port Probe Remap
+.SUBCKT DIFFBUF P N OUT
+B1 OUT 0 V=V(P,N)
+.ENDS
+X1 a b out DIFFBUF
+RLOAD out 0 1k
+.end
+"#;
+        let netlist = parse_netlist(netlist_str).unwrap();
+        let flat = flatten_netlist(&netlist).unwrap();
+        let b1 = flat
+            .iter()
+            .find(|e| e.name == "X1.B1")
+            .expect("expected flattened behavioral source");
+        let expression = match &b1.kind {
+            ElementKind::BehavioralVoltage { expression } => expression,
+            other => panic!("expected behavioral voltage source, got {:?}", other),
+        };
+        assert!(
+            expression.to_ascii_uppercase().contains("V(A, B)"),
+            "expected external-port node remap in expression, got '{}'",
+            expression
         );
     }
 }
