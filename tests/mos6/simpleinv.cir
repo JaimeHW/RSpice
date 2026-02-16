@@ -1,7 +1,7 @@
 *** NDINV * 4
 
 VDD 100    0  5
-VIN  1    0  DC 0 PWL(0 0 150N 5)
+VIN  1    0  DC 0 PWL(0 0 2N 5)
 
 MP10  11  1  100   100   p12l5   L=1.0U W=5U
 MN11  11  1    0     0   N10L5   L=1.0U W=5U
