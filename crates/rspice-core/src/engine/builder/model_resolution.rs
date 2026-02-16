@@ -392,9 +392,9 @@ pub(super) fn resolve_jfet_type_from_model(model_type: &str) -> Option<crate::ne
 pub(super) fn resolve_mesfet_type_from_model(
     model_type: &str,
 ) -> Option<crate::netlist::MesfetType> {
-    if model_type.eq_ignore_ascii_case("NMF") {
+    if model_type.eq_ignore_ascii_case("NMF") || model_type.eq_ignore_ascii_case("NHFET") {
         Some(crate::netlist::MesfetType::Nmf)
-    } else if model_type.eq_ignore_ascii_case("PMF") {
+    } else if model_type.eq_ignore_ascii_case("PMF") || model_type.eq_ignore_ascii_case("PHFET") {
         Some(crate::netlist::MesfetType::Pmf)
     } else {
         None
@@ -445,5 +445,31 @@ pub(super) fn map_switch_state(state: crate::netlist::SwitchState) -> crate::dev
     match state {
         crate::netlist::SwitchState::On => crate::device::SwitchState::On,
         crate::netlist::SwitchState::Off => crate::device::SwitchState::Off,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_mesfet_type_from_model;
+
+    #[test]
+    fn resolve_mesfet_type_accepts_hfet_aliases() {
+        assert_eq!(
+            resolve_mesfet_type_from_model("NHFET"),
+            Some(crate::netlist::MesfetType::Nmf)
+        );
+        assert_eq!(
+            resolve_mesfet_type_from_model("PHFET"),
+            Some(crate::netlist::MesfetType::Pmf)
+        );
+        assert_eq!(
+            resolve_mesfet_type_from_model("NMF"),
+            Some(crate::netlist::MesfetType::Nmf)
+        );
+        assert_eq!(
+            resolve_mesfet_type_from_model("PMF"),
+            Some(crate::netlist::MesfetType::Pmf)
+        );
+        assert_eq!(resolve_mesfet_type_from_model("UNKNOWN"), None);
     }
 }

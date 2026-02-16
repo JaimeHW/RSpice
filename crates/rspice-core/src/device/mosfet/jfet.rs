@@ -275,7 +275,12 @@ impl Jfet {
     pub fn with_model_params(mut self, params: &std::collections::HashMap<String, Value>) -> Self {
         let mut p = self.params.clone();
 
-        if let Some(v) = params.get("VTO").copied().filter(|v| v.is_finite()) {
+        if let Some(v) = params
+            .get("VTO")
+            .or_else(|| params.get("VT0"))
+            .copied()
+            .filter(|v| v.is_finite())
+        {
             p.vto = v;
         }
 
@@ -335,12 +340,18 @@ impl Jfet {
         if let Some(v) = params
             .get("M")
             .copied()
-            .filter(|v| v.is_finite() && *v >= 0.0 && *v < 1.0)
+            .filter(|v| v.is_finite() && *v > 0.0)
         {
-            p.m = v;
+            if v < 1.0 {
+                p.m = v;
+            } else {
+                // HFET/MESFET cards often use M as multiplicity.
+                self.m *= v;
+            }
         }
         if let Some(v) = params
             .get("RD")
+            .or_else(|| params.get("RDI"))
             .copied()
             .filter(|v| v.is_finite() && *v >= 0.0)
         {
@@ -348,6 +359,7 @@ impl Jfet {
         }
         if let Some(v) = params
             .get("RS")
+            .or_else(|| params.get("RSI"))
             .copied()
             .filter(|v| v.is_finite() && *v >= 0.0)
         {
@@ -1102,7 +1114,6 @@ mod tests {
         model.insert("LAMBDA".to_string(), -0.1);
         model.insert("IS".to_string(), -1e-9);
         model.insert("PB".to_string(), 0.0);
-        model.insert("M".to_string(), 1.5);
         model.insert("FC".to_string(), 1.2);
         model.insert("N".to_string(), 0.0);
         model.insert("TNOM".to_string(), -10.0);
@@ -1127,10 +1138,6 @@ mod tests {
             "invalid PB should be ignored"
         );
         assert!(
-            (jfet.params.m - baseline.params.m).abs() < 1e-30,
-            "invalid M should be ignored"
-        );
-        assert!(
             (jfet.params.fc - baseline.params.fc).abs() < 1e-30,
             "invalid FC should be ignored"
         );
@@ -1153,5 +1160,35 @@ mod tests {
 
         let (cgs, cgd) = jfet.capacitances(0.0, 0.0);
         assert!(cgs.is_finite() && cgd.is_finite());
+    }
+
+    #[test]
+    fn test_with_model_params_accepts_hfet_aliases() {
+        use std::collections::HashMap;
+
+        let mut model = HashMap::new();
+        model.insert("VT0".to_string(), 0.3);
+        model.insert("RDI".to_string(), 12.0);
+        model.insert("RSI".to_string(), 8.0);
+
+        let jfet = Jfet::njf("J1", 1, 2, 0).with_model_params(&model);
+        assert!((jfet.params.vto - 0.3).abs() < 1e-15);
+        assert!((jfet.params.rd - 12.0).abs() < 1e-15);
+        assert!((jfet.params.rs - 8.0).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_with_model_params_uses_m_greater_than_one_as_multiplier() {
+        use std::collections::HashMap;
+
+        let mut model = HashMap::new();
+        model.insert("M".to_string(), 2.5);
+
+        let jfet = Jfet::njf("J1", 1, 2, 0).with_model_params(&model);
+        assert!((jfet.m - 2.5).abs() < 1e-15);
+        assert!(
+            (jfet.params.m - JfetParams::default().m).abs() < 1e-15,
+            "grading coefficient should remain default when M is treated as multiplicity"
+        );
     }
 }
