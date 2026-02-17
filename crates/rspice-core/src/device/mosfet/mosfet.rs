@@ -1011,7 +1011,12 @@ impl Mosfet {
         // Level 6 double-exponent model equations
         // Current gain term: KC * W/L * Vgt^NC
         let wl = self.wl_ratio();
-        let current_term = self.kc * wl * vgt.powf(self.nc);
+        let vgt_pow = vgt.max(0.0);
+        let current_term = if vgt_pow > 0.0 {
+            self.kc * wl * vgt_pow.powf(self.nc)
+        } else {
+            0.0
+        };
 
         // Saturation term: (1 - exp(-KV * Vds))^NV
         // This smoothly transitions from linear to saturation
@@ -1660,6 +1665,51 @@ mod tests {
         assert!(
             rel(gmb, gmb_num) < 2e-1,
             "gmb mismatch in swapped mode: analytical={gmb}, numeric={gmb_num}"
+        );
+    }
+
+    #[test]
+    fn test_level6_pmos_legacy_signed_mode_gate_low_is_off() {
+        // Legacy ngspice Level-6 PMOS convention in these decks:
+        // Vg=0V, Vd=0V, Vs=5V, Vb=5V -> vgs=-5V keeps PMOS off.
+        let mut m = Mosfet::new_pmos("M1".to_string(), 3, 2, 1, 0).with_level(6);
+        m.vto = -0.60865;
+        m.kc = 6.42696e-06;
+        m.nc = 1.6536;
+        m.kv = 0.92145;
+        m.nv = 0.88345;
+        m.lambda0 = 0.018966;
+        m.lambda1 = 0.0084012;
+        m.gamma = 0.89213;
+        m.phi = 1.0;
+
+        let (id, region) = m.calculate_id(-5.0, -5.0, 0.0);
+        assert!(
+            id.abs() < 1e-10,
+            "Level-6 PMOS should be near cutoff for negative Vgs, got Id={id}"
+        );
+        assert_eq!(region, MosRegion::Cutoff);
+    }
+
+    #[test]
+    fn test_level6_pmos_legacy_signed_mode_vgs_zero_is_finite() {
+        // Legacy ngspice Level-6 PMOS with declared source at high rail:
+        // Vg=Vs=5V, Vd=0V, Vb=5V -> vgs=0V, vds=-5V.
+        let mut m = Mosfet::new_pmos("M1".to_string(), 3, 2, 1, 0).with_level(6);
+        m.vto = -0.60865;
+        m.kc = 6.42696e-06;
+        m.nc = 1.6536;
+        m.kv = 0.92145;
+        m.nv = 0.88345;
+        m.lambda0 = 0.018966;
+        m.lambda1 = 0.0084012;
+        m.gamma = 0.89213;
+        m.phi = 1.0;
+
+        let (id, _) = m.calculate_id(0.0, -5.0, 0.0);
+        assert!(
+            id.is_finite(),
+            "Level-6 PMOS should remain finite at Vgs=0, got Id={id}"
         );
     }
 
