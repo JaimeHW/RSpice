@@ -290,7 +290,11 @@ impl Mosfet {
             .filter(|v| v.is_finite() && *v > 0.0);
 
         // Level 1 parameters
-        if let Some(&v) = params.get("VTO").or_else(|| params.get("VTH0")) {
+        if let Some(&v) = params
+            .get("VTO")
+            .or_else(|| params.get("VT0"))
+            .or_else(|| params.get("VTH0"))
+        {
             self.vto = v;
         }
         if let Some(v) = kp_explicit {
@@ -1284,6 +1288,15 @@ mod tests {
 
         let m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0).with_params(&params);
         assert!((m.vto - 0.52).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_with_params_accepts_vt0_alias_for_vto() {
+        let mut params = std::collections::HashMap::new();
+        params.insert("VT0".to_string(), -0.61);
+
+        let m = Mosfet::new_pmos("M1".to_string(), 3, 2, 1, 0).with_params(&params);
+        assert!((m.vto + 0.61).abs() < 1e-12);
     }
 
     #[test]
