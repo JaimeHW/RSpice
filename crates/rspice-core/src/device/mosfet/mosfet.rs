@@ -616,9 +616,17 @@ impl Mosfet {
         let vbs_eff = p * vbs;
         let vto_eff = match self.mos_type {
             MosType::Nmos => self.vto,
-            // SPICE PMOS cards conventionally provide negative VTO; internal
-            // p-polarity equations use a positive-magnitude threshold.
-            MosType::Pmos => self.vto.abs(),
+            // Most model levels use polarity-folded equations and therefore a
+            // positive PMOS threshold magnitude. Legacy Level-6 cards are
+            // evaluated in an unfurled signed-voltage space and expect the
+            // original signed VTO from the model card.
+            MosType::Pmos => {
+                if self.level == 6 {
+                    self.vto
+                } else {
+                    self.vto.abs()
+                }
+            }
         };
 
         // Base body effect: Vth = Vto + gamma * (sqrt(phi - Vbs) - sqrt(phi))
@@ -1009,8 +1017,20 @@ impl Mosfet {
         // Channel length modulation: 1 + LAMBDA0 * Vds + LAMBDA1 * Vds^2
         let clm = 1.0 + self.lambda0 * vds_eff + self.lambda1 * vds_eff * vds_eff;
 
-        // Total drain current
-        let id = p * current_term * sat_factor * clm;
+        // Above-threshold branch
+        let id_above = current_term * sat_factor * clm;
+
+        // Weak-inversion tail (legacy decks rely on finite subthreshold leakage
+        // for startup biasing and small-signal internal-node excursions).
+        const THERMAL_VOLTAGE_300K: Value = 0.02585;
+        let slope_n = self.nc.max(1.0);
+        let exp_arg = (vgt_raw / (slope_n * THERMAL_VOLTAGE_300K)).clamp(-120.0, 60.0);
+        let i_sub0 = 1e-12 * wl.max(1e-3);
+        let id_sub = i_sub0 * exp_arg.exp() * sat_factor * clm;
+
+        // Smoothly blend between weak and strong inversion around Vgt=0.
+        let above_blend = smooth_step(vgt_raw, SMOOTH_VOLTAGE);
+        let id = p * (above_blend * id_above + (1.0 - above_blend) * id_sub);
 
         (id, region)
     }
@@ -1060,11 +1080,16 @@ impl Mosfet {
         // Level 6: gm = dId/dVgs = Id / Vgt * NC * dVgt/dVgs (when Vgt > 0)
         if self.level == 6 {
             let (id, _) = self.calculate_id_forward(vgs, vds, vbs);
-            let gm = if vgt > 1e-12 {
+            const THERMAL_VOLTAGE_300K: Value = 0.02585;
+            let slope_n = self.nc.max(1.0);
+            let above_blend = smooth_step(vgt_raw, SMOOTH_VOLTAGE);
+            let gm_above = if vgt > 1e-12 {
                 id.abs() / vgt * self.nc * dvgt_dvgs
             } else {
-                1e-12
+                0.0
             };
+            let gm_sub = id.abs() / (slope_n * THERMAL_VOLTAGE_300K);
+            let gm = above_blend * gm_above + (1.0 - above_blend) * gm_sub;
             return gm.abs().max(1e-12);
         }
 
@@ -1125,7 +1150,7 @@ impl Mosfet {
     }
 
     fn gmb_forward(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
-        let p = self.polarity();
+        let p = if self.level == 6 { 1.0 } else { self.polarity() };
         let vbs_eff = p * vbs;
 
         // gmb = -gm * (gamma / (2 * sqrt(phi - Vbs)))
@@ -1228,6 +1253,7 @@ impl NonlinearDevice for Mosfet {
         // Stamp equivalent current source
         matrix.stamp_rhs(self.node_drain, -id_eq);
         matrix.stamp_rhs(self.node_source, id_eq);
+
     }
 
     fn is_converged(&self, tolerance: Value) -> bool {

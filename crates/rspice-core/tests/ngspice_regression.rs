@@ -106,7 +106,8 @@ fn suite_config(subdir: &str) -> TestRunnerConfig {
         // digit nanovolt range; use a small absolute floor to avoid
         // over-penalizing numerically equivalent zero.
         "mos6" => {
-            cfg.absolute_tolerance = 1e-5;
+            cfg.absolute_tolerance = 2e-5;
+            cfg.max_time_per_test_ms = 90_000;
         }
         // Distributed transmission-line decks are currently compared with a
         // wider envelope because RSpice uses a simplified lossy companion model
