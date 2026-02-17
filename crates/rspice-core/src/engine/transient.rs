@@ -160,6 +160,44 @@ impl Engine {
                             "Robust transient-start DC retry also failed: {}. Trying linearized startup seed.",
                             robust_err
                         );
+
+                        // Level-6 legacy decks often expose weakly-conditioned DC
+                        // operating points where strict re-validation fails even
+                        // though continuation produces a materially better startup
+                        // state than a pure linearized seed.
+                        let has_level6_mos = circuit.mosfets.devices.iter().any(|m| m.level == 6);
+                        if has_level6_mos {
+                            let seed_guess = vec![0.0; circuit.matrix_size()];
+                            match robust_engine.source_stepping_nonlinear_with_guess_and_abort(
+                                circuit,
+                                matrix,
+                                &seed_guess,
+                                abort,
+                            ) {
+                                Ok(mut continuation_seed) => {
+                                    for v in &mut continuation_seed {
+                                        if !v.is_finite() {
+                                            *v = 0.0;
+                                        }
+                                    }
+                                    continuation_seed = self.nonlinear_startup_warmup_seed(
+                                        circuit,
+                                        matrix,
+                                        &continuation_seed,
+                                    );
+                                    log::warn!(
+                                        "Transient startup using Level-6 continuation seed after DC OP failure."
+                                    );
+                                    return Ok((continuation_seed, InitialSolutionMode::LinearizedSeed));
+                                }
+                                Err(seed_err) => {
+                                    log::warn!(
+                                        "Level-6 continuation seed failed: {}. Falling back to linearized seed.",
+                                        seed_err
+                                    );
+                                }
+                            }
+                        }
                     }
                 }
 
