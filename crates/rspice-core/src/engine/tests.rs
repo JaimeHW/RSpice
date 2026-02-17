@@ -2232,6 +2232,142 @@ J1 d g 0 JCAP
     }
 
     #[test]
+    fn test_transient_mosfet_cgd_companion_couples_gate_edge_to_drain() {
+        let with_cgd = Netlist::parse(
+            r#"
+* MOSFET Cgd feedthrough pulse
+VG g 0 PULSE(0 1 0 1u 1u 40u 80u)
+RLOAD d 0 1k
+M1 d g 0 0 MCAP
+.MODEL MCAP NMOS (LEVEL=1 KP=0 VTO=100 CGSO=0 CGDO=1e-4 CGBO=0)
+.end
+"#,
+        )
+        .unwrap();
+        let without_cgd = Netlist::parse(
+            r#"
+* Baseline without MOS Cgd
+VG g 0 PULSE(0 1 0 1u 1u 40u 80u)
+RLOAD d 0 1k
+M1 d g 0 0 MCAP
+.MODEL MCAP NMOS (LEVEL=1 KP=0 VTO=100 CGSO=0 CGDO=0 CGBO=0)
+.end
+"#,
+        )
+        .unwrap();
+
+        let engine = Engine::default();
+        let with_cgd_result = engine.run_tran(&with_cgd, 20e-6, 50e-9).unwrap();
+        let without_cgd_result = engine.run_tran(&without_cgd, 20e-6, 50e-9).unwrap();
+
+        let d_with = with_cgd_result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("d"))
+            .expect("drain node d missing in with-cgd result");
+        let d_without = without_cgd_result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("d"))
+            .expect("drain node d missing in baseline result");
+
+        let peak_with = with_cgd_result
+            .time
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| **t <= 3e-6)
+            .map(|(i, _)| with_cgd_result.voltages[d_with][i].abs())
+            .fold(0.0, Value::max);
+        let peak_without = without_cgd_result
+            .time
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| **t <= 3e-6)
+            .map(|(i, _)| without_cgd_result.voltages[d_without][i].abs())
+            .fold(0.0, Value::max);
+
+        assert!(
+            peak_with > 0.2,
+            "expected strong MOS Cgd feedthrough pulse at drain, peak={}",
+            peak_with
+        );
+        assert!(
+            peak_without < 1e-3 && peak_without < peak_with * 0.05,
+            "baseline without MOS Cgd should have negligible drain pulse, peak_without={} peak_with={}",
+            peak_without,
+            peak_with
+        );
+    }
+
+    #[test]
+    fn test_transient_mosfet_cgs_companion_creates_gate_rc_delay() {
+        let with_cgs = Netlist::parse(
+            r#"
+* MOSFET gate RC loading through Cgs
+VSTEP in 0 PULSE(0 1 0 1u 1u 20u 40u)
+RG in g 1k
+M1 d g 0 0 MCAP
+RD d 0 1k
+.MODEL MCAP NMOS (LEVEL=1 KP=0 VTO=100 CGSO=1e-4 CGDO=0 CGBO=0)
+.end
+"#,
+        )
+        .unwrap();
+        let no_cgs = Netlist::parse(
+            r#"
+* Baseline: same topology without MOS Cgs
+VSTEP in 0 PULSE(0 1 0 1u 1u 20u 40u)
+RG in g 1k
+M1 d g 0 0 MCAP
+RD d 0 1k
+.MODEL MCAP NMOS (LEVEL=1 KP=0 VTO=100 CGSO=0 CGDO=0 CGBO=0)
+.end
+"#,
+        )
+        .unwrap();
+
+        let engine = Engine::default();
+        let with_cgs_result = engine.run_tran(&with_cgs, 20e-6, 100e-9).unwrap();
+        let no_cgs_result = engine.run_tran(&no_cgs, 20e-6, 100e-9).unwrap();
+
+        let g_with = with_cgs_result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("g"))
+            .expect("gate node g missing in with-cgs result");
+        let g_no = no_cgs_result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("g"))
+            .expect("gate node g missing in baseline result");
+
+        let idx_with = with_cgs_result
+            .time
+            .iter()
+            .position(|&time| time >= 2e-6)
+            .unwrap_or(with_cgs_result.time.len() - 1);
+        let idx_no = no_cgs_result
+            .time
+            .iter()
+            .position(|&time| time >= 2e-6)
+            .unwrap_or(no_cgs_result.time.len() - 1);
+
+        let vg_with = with_cgs_result.voltages[g_with][idx_with];
+        let vg_no = no_cgs_result.voltages[g_no][idx_no];
+
+        assert!(
+            vg_with < 0.8,
+            "expected MOS Cgs loading to delay gate at 2us, got Vg={}",
+            vg_with
+        );
+        assert!(
+            vg_no > 0.95,
+            "baseline without MOS Cgs should settle near source quickly, got Vg={}",
+            vg_no
+        );
+    }
+
+    #[test]
     fn test_dc_inductor_behaves_as_short() {
         let netlist_str = r#"
 * DC inductor short behavior

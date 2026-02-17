@@ -30,6 +30,9 @@ const MAX_NEWTON_ITER_DELTA_V: Value = 5e-2;
 ///
 /// This remains tight to avoid committing nonphysical jumps into reactive history.
 const MAX_FORCE_ACCEPT_DELTA_V: Value = 5e-2;
+/// Relaxed trust-region limit used only during early startup when DC OP failed and
+/// transient had to begin from a linearized seed.
+const STARTUP_RECOVERY_DELTA_V: Value = 2e-1;
 
 #[derive(Debug, Clone, Default)]
 struct JfetTransientHistory {
@@ -41,16 +44,92 @@ struct JfetTransientHistory {
     igd_prev: Vec<Value>,
 }
 
+#[derive(Debug, Clone, Default)]
+struct MosfetTransientHistory {
+    vgs_prev: Vec<Value>,
+    vgs_prev_prev: Vec<Value>,
+    igs_prev: Vec<Value>,
+    vgd_prev: Vec<Value>,
+    vgd_prev_prev: Vec<Value>,
+    igd_prev: Vec<Value>,
+    vgb_prev: Vec<Value>,
+    vgb_prev_prev: Vec<Value>,
+    igb_prev: Vec<Value>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InitialSolutionMode {
+    DcOperatingPoint,
+    RobustDcFallback,
+    LinearizedSeed,
+}
+
 impl Engine {
+    fn nonlinear_startup_warmup_seed(
+        &self,
+        circuit: &mut crate::circuit::Circuit,
+        matrix: &mut crate::solver::StaticMatrix,
+        seed: &[Value],
+    ) -> Vec<Value> {
+        const WARMUP_ITERS: usize = 96;
+        const MAX_WARMUP_DELTA_V: Value = 2e-1;
+
+        let size = circuit.matrix_size();
+        let mut solution = seed.to_vec();
+        let mut rhs = vec![0.0; size];
+
+        for _ in 0..WARMUP_ITERS {
+            matrix.clear_values();
+            rhs.fill(0.0);
+
+            // Keep the warmup matrix well-conditioned for highly floating
+            // transistor stacks while still allowing nonlinear bias formation.
+            for i in 0..size {
+                matrix.add(i, i, 1e-6);
+            }
+            circuit.stamp_dc_direct(matrix, &mut rhs);
+            if circuit.has_nonlinear_devices() {
+                circuit.update_nonlinear(&solution);
+                circuit.stamp_nonlinear(matrix, &mut rhs, &solution);
+                circuit.stamp_behavioral(matrix, &mut rhs, &solution, 0.0);
+            }
+
+            let Ok(mut proposal) = matrix.solve(&rhs) else {
+                break;
+            };
+
+            for i in 0..size {
+                let old = solution[i];
+                let mut new_v = proposal[i];
+                if !new_v.is_finite() {
+                    new_v = old;
+                }
+                let delta = (new_v - old).clamp(-MAX_WARMUP_DELTA_V, MAX_WARMUP_DELTA_V);
+                proposal[i] = old + delta;
+            }
+
+            if circuit.has_nonlinear_devices() {
+                circuit.update_nonlinear(&proposal);
+            }
+            if self.voltage_convergence_met(&solution, &proposal) {
+                solution = proposal;
+                break;
+            }
+            solution = proposal;
+        }
+
+        solution
+    }
+
     fn solve_transient_initial_solution(
         &self,
         netlist: &Netlist,
         circuit: &mut crate::circuit::Circuit,
         matrix: &mut crate::solver::StaticMatrix,
         abort: &dyn AbortSignal,
-    ) -> Result<Vec<Value>, SimulationError> {
+    ) -> Result<(Vec<Value>, InitialSolutionMode), SimulationError> {
         match self.solve_dc_operating_point_with_abort(netlist, circuit, matrix, abort) {
-            Ok(solution) => return Ok(solution),
+            Ok(solution) => return Ok((solution, InitialSolutionMode::DcOperatingPoint)),
             Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
             Err(primary_err) => {
                 log::warn!(
@@ -73,7 +152,7 @@ impl Engine {
                         log::warn!(
                             "Transient startup recovered using robust DC convergence fallback."
                         );
-                        return Ok(solution);
+                        return Ok((solution, InitialSolutionMode::RobustDcFallback));
                     }
                     Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
                     Err(robust_err) => {
@@ -94,10 +173,11 @@ impl Engine {
                                 *v = 0.0;
                             }
                         }
+                        solution = self.nonlinear_startup_warmup_seed(circuit, matrix, &solution);
                         log::warn!(
                             "Transient startup using linearized initial seed after DC OP failure."
                         );
-                        Ok(solution)
+                        Ok((solution, InitialSolutionMode::LinearizedSeed))
                     }
                     Err(linear_err) => Err(SimulationError::Circuit(format!(
                         "Transient startup failed: primary DC error: {}; linearized fallback error: {}",
@@ -120,6 +200,35 @@ impl Engine {
         } else {
             1e-12
         }
+    }
+
+    #[inline]
+    fn startup_step_delta_limit(
+        mode: InitialSolutionMode,
+        time: Value,
+        max_step: Value,
+        base_limit: Value,
+    ) -> Value {
+        if Self::in_startup_recovery_window(mode, time, max_step) {
+            base_limit.max(STARTUP_RECOVERY_DELTA_V)
+        } else {
+            base_limit
+        }
+    }
+
+    #[inline]
+    fn in_startup_recovery_window(
+        mode: InitialSolutionMode,
+        time: Value,
+        max_step: Value,
+    ) -> bool {
+        if mode != InitialSolutionMode::LinearizedSeed {
+            return false;
+        }
+        // Keep the relaxed window bounded so this only assists the initial
+        // operating-point recovery region.
+        let relaxed_until = (max_step * 32.0).clamp(5e-9, 1e-7);
+        time <= relaxed_until
     }
 
     /// Run transient time-domain analysis
@@ -188,8 +297,9 @@ impl Engine {
         previous_solution: &[Value],
         candidate_solution: &[Value],
         num_nodes: usize,
+        clip_limit: Value,
     ) -> bool {
-        let clip_threshold = MAX_FORCE_ACCEPT_DELTA_V * 0.99;
+        let clip_threshold = clip_limit * 0.99;
         let mut clipped = 0usize;
 
         for (old_v, new_v) in previous_solution
@@ -323,6 +433,49 @@ impl Engine {
     }
 
     #[inline]
+    fn initialize_mosfet_history(
+        circuit: &crate::circuit::Circuit,
+        solution: &[Value],
+    ) -> MosfetTransientHistory {
+        let n = circuit.mosfets.len();
+        let mut history = MosfetTransientHistory {
+            vgs_prev: Vec::with_capacity(n),
+            vgs_prev_prev: Vec::with_capacity(n),
+            igs_prev: Vec::with_capacity(n),
+            vgd_prev: Vec::with_capacity(n),
+            vgd_prev_prev: Vec::with_capacity(n),
+            igd_prev: Vec::with_capacity(n),
+            vgb_prev: Vec::with_capacity(n),
+            vgb_prev_prev: Vec::with_capacity(n),
+            igb_prev: Vec::with_capacity(n),
+        };
+
+        for mos in &circuit.mosfets.devices {
+            let vg = Self::node_voltage(solution, mos.node_gate);
+            let vd = Self::node_voltage(solution, mos.node_drain);
+            let vs = Self::node_voltage(solution, mos.node_source);
+            let vb = Self::node_voltage(solution, mos.node_bulk);
+            let vgs = vg - vs;
+            let vgd = vg - vd;
+            let vgb = vg - vb;
+
+            history.vgs_prev.push(vgs);
+            history.vgs_prev_prev.push(vgs);
+            history.igs_prev.push(0.0);
+
+            history.vgd_prev.push(vgd);
+            history.vgd_prev_prev.push(vgd);
+            history.igd_prev.push(0.0);
+
+            history.vgb_prev.push(vgb);
+            history.vgb_prev_prev.push(vgb);
+            history.igb_prev.push(0.0);
+        }
+
+        history
+    }
+
+    #[inline]
     fn stamp_jfet_transient_companions(
         circuit: &crate::circuit::Circuit,
         matrix: &mut crate::solver::StaticMatrix,
@@ -363,6 +516,80 @@ impl Engine {
                     history.igd_prev[idx],
                 );
                 Self::stamp_two_terminal_companion(matrix, rhs, jfet.gate, jfet.drain, geq, ieq);
+            }
+        }
+    }
+
+    #[inline]
+    fn stamp_mosfet_transient_companions(
+        circuit: &crate::circuit::Circuit,
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+        history: &MosfetTransientHistory,
+    ) {
+        for (idx, mos) in circuit.mosfets.devices.iter().enumerate() {
+            if mos.level == 6 {
+                continue;
+            }
+            let (cgs, cgd, cgb) = mos.overlap_capacitances();
+
+            if cgs.is_finite() && cgs > 0.0 {
+                let geq = coeff.capacitor_geq(cgs, dt);
+                let ieq = coeff.capacitor_ieq(
+                    cgs,
+                    dt,
+                    history.vgs_prev[idx],
+                    history.vgs_prev_prev[idx],
+                    history.igs_prev[idx],
+                );
+                Self::stamp_two_terminal_companion(
+                    matrix,
+                    rhs,
+                    mos.node_gate,
+                    mos.node_source,
+                    geq,
+                    ieq,
+                );
+            }
+
+            if cgd.is_finite() && cgd > 0.0 {
+                let geq = coeff.capacitor_geq(cgd, dt);
+                let ieq = coeff.capacitor_ieq(
+                    cgd,
+                    dt,
+                    history.vgd_prev[idx],
+                    history.vgd_prev_prev[idx],
+                    history.igd_prev[idx],
+                );
+                Self::stamp_two_terminal_companion(
+                    matrix,
+                    rhs,
+                    mos.node_gate,
+                    mos.node_drain,
+                    geq,
+                    ieq,
+                );
+            }
+
+            if cgb.is_finite() && cgb > 0.0 {
+                let geq = coeff.capacitor_geq(cgb, dt);
+                let ieq = coeff.capacitor_ieq(
+                    cgb,
+                    dt,
+                    history.vgb_prev[idx],
+                    history.vgb_prev_prev[idx],
+                    history.igb_prev[idx],
+                );
+                Self::stamp_two_terminal_companion(
+                    matrix,
+                    rhs,
+                    mos.node_gate,
+                    mos.node_bulk,
+                    geq,
+                    ieq,
+                );
             }
         }
     }
@@ -433,6 +660,7 @@ impl Engine {
         dt: Value,
         method: IntegrationMethod,
         jfet_history: &mut JfetTransientHistory,
+        mosfet_history: &mut MosfetTransientHistory,
         tline_dc_refs: &[(Value, Value)],
     ) {
         for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
@@ -546,6 +774,93 @@ impl Engine {
                 jfet_history.igd_prev[idx] = 0.0;
             }
         }
+
+        for (idx, mos) in circuit.mosfets.devices.iter().enumerate() {
+            if mos.level == 6 {
+                let vg = Self::node_voltage(accepted_solution, mos.node_gate);
+                let vd = Self::node_voltage(accepted_solution, mos.node_drain);
+                let vs = Self::node_voltage(accepted_solution, mos.node_source);
+                let vb = Self::node_voltage(accepted_solution, mos.node_bulk);
+                mosfet_history.vgs_prev_prev[idx] = mosfet_history.vgs_prev[idx];
+                mosfet_history.vgs_prev[idx] = vg - vs;
+                mosfet_history.vgd_prev_prev[idx] = mosfet_history.vgd_prev[idx];
+                mosfet_history.vgd_prev[idx] = vg - vd;
+                mosfet_history.vgb_prev_prev[idx] = mosfet_history.vgb_prev[idx];
+                mosfet_history.vgb_prev[idx] = vg - vb;
+                mosfet_history.igs_prev[idx] = 0.0;
+                mosfet_history.igd_prev[idx] = 0.0;
+                mosfet_history.igb_prev[idx] = 0.0;
+                continue;
+            }
+            let vg = Self::node_voltage(accepted_solution, mos.node_gate);
+            let vd = Self::node_voltage(accepted_solution, mos.node_drain);
+            let vs = Self::node_voltage(accepted_solution, mos.node_source);
+            let vb = Self::node_voltage(accepted_solution, mos.node_bulk);
+            let vgs = vg - vs;
+            let vgd = vg - vd;
+            let vgb = vg - vb;
+            let (cgs, cgd, cgb) = mos.overlap_capacitances();
+
+            if cgs.is_finite() && cgs > 0.0 {
+                let geq = coeff_update.capacitor_geq(cgs, dt);
+                let ieq = coeff_update.capacitor_ieq(
+                    cgs,
+                    dt,
+                    mosfet_history.vgs_prev[idx],
+                    mosfet_history.vgs_prev_prev[idx],
+                    mosfet_history.igs_prev[idx],
+                );
+                let i_new = geq * vgs - ieq;
+                let v_old = mosfet_history.vgs_prev[idx];
+                mosfet_history.vgs_prev_prev[idx] = v_old;
+                mosfet_history.vgs_prev[idx] = vgs;
+                mosfet_history.igs_prev[idx] = i_new;
+            } else {
+                mosfet_history.vgs_prev_prev[idx] = mosfet_history.vgs_prev[idx];
+                mosfet_history.vgs_prev[idx] = vgs;
+                mosfet_history.igs_prev[idx] = 0.0;
+            }
+
+            if cgd.is_finite() && cgd > 0.0 {
+                let geq = coeff_update.capacitor_geq(cgd, dt);
+                let ieq = coeff_update.capacitor_ieq(
+                    cgd,
+                    dt,
+                    mosfet_history.vgd_prev[idx],
+                    mosfet_history.vgd_prev_prev[idx],
+                    mosfet_history.igd_prev[idx],
+                );
+                let i_new = geq * vgd - ieq;
+                let v_old = mosfet_history.vgd_prev[idx];
+                mosfet_history.vgd_prev_prev[idx] = v_old;
+                mosfet_history.vgd_prev[idx] = vgd;
+                mosfet_history.igd_prev[idx] = i_new;
+            } else {
+                mosfet_history.vgd_prev_prev[idx] = mosfet_history.vgd_prev[idx];
+                mosfet_history.vgd_prev[idx] = vgd;
+                mosfet_history.igd_prev[idx] = 0.0;
+            }
+
+            if cgb.is_finite() && cgb > 0.0 {
+                let geq = coeff_update.capacitor_geq(cgb, dt);
+                let ieq = coeff_update.capacitor_ieq(
+                    cgb,
+                    dt,
+                    mosfet_history.vgb_prev[idx],
+                    mosfet_history.vgb_prev_prev[idx],
+                    mosfet_history.igb_prev[idx],
+                );
+                let i_new = geq * vgb - ieq;
+                let v_old = mosfet_history.vgb_prev[idx];
+                mosfet_history.vgb_prev_prev[idx] = v_old;
+                mosfet_history.vgb_prev[idx] = vgb;
+                mosfet_history.igb_prev[idx] = i_new;
+            } else {
+                mosfet_history.vgb_prev_prev[idx] = mosfet_history.vgb_prev[idx];
+                mosfet_history.vgb_prev[idx] = vgb;
+                mosfet_history.igb_prev[idx] = 0.0;
+            }
+        }
     }
 
     /// Run transient analysis with abort signal for cancellation
@@ -608,7 +923,7 @@ impl Engine {
             .set_transient_context(source_step_hint, tstop);
 
         // Get DC operating point as initial condition.
-        let mut solution =
+        let (mut solution, initial_solution_mode) =
             self.solve_transient_initial_solution(netlist, &mut circuit, &mut matrix, abort)?;
         let applied_ic = self.apply_initial_condition_overrides(netlist, &circuit, &mut solution);
         circuit.refresh_jiles_atherton_inductances(&solution);
@@ -701,6 +1016,7 @@ impl Engine {
         }
         let tline_dc_refs = Self::initialize_tline_history(&mut circuit, &solution, 0.0);
         let mut jfet_history = Self::initialize_jfet_history(&circuit, &solution);
+        let mut mosfet_history = Self::initialize_mosfet_history(&circuit, &solution);
 
         // Main transient loop
         let mut retry_count = 0;
@@ -762,6 +1078,19 @@ impl Engine {
             total_iterations += 1;
             let (dt, _at_breakpoint) = breakpoints.limit_step(t, timestep.dt());
             let dt = dt.min(tstop - t); // Don't overshoot tstop
+            let step_time = t + dt;
+            let newton_step_delta_limit = Self::startup_step_delta_limit(
+                initial_solution_mode,
+                step_time,
+                max_step,
+                MAX_NEWTON_ITER_DELTA_V,
+            );
+            let force_accept_delta_limit = Self::startup_step_delta_limit(
+                initial_solution_mode,
+                step_time,
+                max_step,
+                MAX_FORCE_ACCEPT_DELTA_V,
+            );
             let expected_source_delta = circuit.voltage_sources.max_expected_delta(t, t + dt);
 
             // Prepare for Newton iteration at this timestep
@@ -824,6 +1153,14 @@ impl Engine {
                     dt,
                     &coeff,
                     &jfet_history,
+                );
+                Self::stamp_mosfet_transient_companions(
+                    &circuit,
+                    &mut matrix,
+                    &mut rhs,
+                    dt,
+                    &coeff,
+                    &mosfet_history,
                 );
                 Self::stamp_tline_companions(
                     &circuit,
@@ -888,7 +1225,7 @@ impl Engine {
                                 let old = new_solution[i];
                                 let delta = *v - old;
                                 if delta.is_finite() {
-                                    *v = old + delta.signum() * MAX_NEWTON_ITER_DELTA_V;
+                                    *v = old + delta.signum() * newton_step_delta_limit;
                                 } else {
                                     *v = old;
                                 }
@@ -902,8 +1239,8 @@ impl Engine {
                         for i in 0..num_nodes {
                             let old = new_solution[i];
                             let delta = sol[i] - old;
-                            if delta.is_finite() && delta.abs() > MAX_NEWTON_ITER_DELTA_V {
-                                sol[i] = old + delta.signum() * MAX_NEWTON_ITER_DELTA_V;
+                            if delta.is_finite() && delta.abs() > newton_step_delta_limit {
+                                sol[i] = old + delta.signum() * newton_step_delta_limit;
                             }
                         }
 
@@ -1039,7 +1376,12 @@ impl Engine {
                         continue;
                     }
                     let clipped_force_candidate =
-                        Self::is_clipped_force_candidate(&solution, &new_solution, num_nodes);
+                        Self::is_clipped_force_candidate(
+                            &solution,
+                            &new_solution,
+                            num_nodes,
+                            force_accept_delta_limit,
+                        );
                     if clipped_force_candidate {
                         trapgear.force_method(IntegrationMethod::Gear2);
                         timestep.force_step((dt * 0.5).min(max_step));
@@ -1062,8 +1404,8 @@ impl Engine {
                     for i in 0..num_nodes {
                         let old = solution[i];
                         let delta = new_solution[i] - old;
-                        if delta.is_finite() && delta.abs() > MAX_FORCE_ACCEPT_DELTA_V {
-                            new_solution[i] = old + delta.signum() * MAX_FORCE_ACCEPT_DELTA_V;
+                        if delta.is_finite() && delta.abs() > force_accept_delta_limit {
+                            new_solution[i] = old + delta.signum() * force_accept_delta_limit;
                         }
                     }
                     circuit
@@ -1080,6 +1422,7 @@ impl Engine {
                         dt,
                         trapgear.current_method(),
                         &mut jfet_history,
+                        &mut mosfet_history,
                         &tline_dc_refs,
                     );
                     if circuit.has_xspice_devices() {
@@ -1172,7 +1515,12 @@ impl Engine {
                         continue;
                     }
                     let clipped_force_candidate =
-                        Self::is_clipped_force_candidate(&solution, &new_solution, num_nodes);
+                        Self::is_clipped_force_candidate(
+                            &solution,
+                            &new_solution,
+                            num_nodes,
+                            force_accept_delta_limit,
+                        );
                     if clipped_force_candidate {
                         trapgear.force_method(IntegrationMethod::Gear2);
                         timestep.force_step((dt * 0.5).min(max_step));
@@ -1187,8 +1535,8 @@ impl Engine {
                     for i in 0..num_nodes {
                         let old = solution[i];
                         let delta = new_solution[i] - old;
-                        if delta.is_finite() && delta.abs() > MAX_FORCE_ACCEPT_DELTA_V {
-                            new_solution[i] = old + delta.signum() * MAX_FORCE_ACCEPT_DELTA_V;
+                        if delta.is_finite() && delta.abs() > force_accept_delta_limit {
+                            new_solution[i] = old + delta.signum() * force_accept_delta_limit;
                         }
                     }
                     circuit
@@ -1205,6 +1553,7 @@ impl Engine {
                         dt,
                         trapgear.current_method(),
                         &mut jfet_history,
+                        &mut mosfet_history,
                         &tline_dc_refs,
                     );
                     if circuit.has_xspice_devices() {
@@ -1274,6 +1623,7 @@ impl Engine {
                 dt,
                 trapgear.current_method(),
                 &mut jfet_history,
+                &mut mosfet_history,
                 &tline_dc_refs,
             );
 
@@ -1559,14 +1909,64 @@ mod abort_tests {
     fn test_is_clipped_force_candidate_detects_any_clipping() {
         let prev = vec![0.0; 6];
         let next = vec![0.5, -0.5, 0.5, -0.5, 0.0, 0.0];
-        assert!(Engine::is_clipped_force_candidate(&prev, &next, 6));
+        assert!(Engine::is_clipped_force_candidate(
+            &prev,
+            &next,
+            6,
+            MAX_FORCE_ACCEPT_DELTA_V,
+        ));
     }
 
     #[test]
     fn test_is_clipped_force_candidate_false_when_below_clip_threshold() {
         let prev = vec![0.0; 6];
         let next = vec![0.01, 0.0, 0.0, 0.0, 0.0, 0.0];
-        assert!(!Engine::is_clipped_force_candidate(&prev, &next, 6));
+        assert!(!Engine::is_clipped_force_candidate(
+            &prev,
+            &next,
+            6,
+            MAX_FORCE_ACCEPT_DELTA_V,
+        ));
+    }
+
+    #[test]
+    fn test_startup_step_delta_limit_relaxes_only_for_linearized_seed_window() {
+        let base = 5e-2;
+        let max_step = 5e-9;
+        let early = Engine::startup_step_delta_limit(
+            InitialSolutionMode::LinearizedSeed,
+            20e-9,
+            max_step,
+            base,
+        );
+        let late = Engine::startup_step_delta_limit(
+            InitialSolutionMode::LinearizedSeed,
+            200e-9,
+            max_step,
+            base,
+        );
+        assert!(early > base);
+        assert!((late - base).abs() < 1e-18);
+    }
+
+    #[test]
+    fn test_startup_step_delta_limit_unchanged_for_dc_op_modes() {
+        let base = 5e-2;
+        let max_step = 5e-9;
+        let dc = Engine::startup_step_delta_limit(
+            InitialSolutionMode::DcOperatingPoint,
+            20e-9,
+            max_step,
+            base,
+        );
+        let robust = Engine::startup_step_delta_limit(
+            InitialSolutionMode::RobustDcFallback,
+            20e-9,
+            max_step,
+            base,
+        );
+        assert!((dc - base).abs() < 1e-18);
+        assert!((robust - base).abs() < 1e-18);
     }
 
     #[test]
