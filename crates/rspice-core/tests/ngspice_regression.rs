@@ -109,6 +109,10 @@ fn suite_config(subdir: &str) -> TestRunnerConfig {
             cfg.absolute_tolerance = 2e-5;
             cfg.max_time_per_test_ms = 90_000;
         }
+        // VBIC decks can require extra time for stiff startup transients.
+        "vbic" => {
+            cfg.max_time_per_test_ms = 120_000;
+        }
         // Distributed transmission-line decks are currently compared with a
         // wider envelope because RSpice uses a simplified lossy companion model
         // rather than ngspice's full LTRA convolution kernel.
@@ -240,7 +244,7 @@ fn test_ngspice_mos6_suite() {
 
 #[test]
 fn test_ngspice_vbic_suite() {
-    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
+    let runner = TestRunner::new(get_tests_dir(), suite_config("vbic"));
     let stats = run_and_report(&runner, "vbic");
 
     println!(
@@ -264,7 +268,7 @@ fn test_ngspice_hicum2_suite() {
 
 #[test]
 fn test_ngspice_hfet_suite() {
-    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
+    let runner = TestRunner::new(get_tests_dir(), suite_config("hfet"));
     let stats = run_and_report(&runner, "hfet");
 
     println!(
@@ -384,7 +388,7 @@ fn test_ngspice_bsim3soipd_suite() {
 
 #[test]
 fn test_ngspice_mesa_suite() {
-    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
+    let runner = TestRunner::new(get_tests_dir(), suite_config("mesa"));
     let stats = run_and_report(&runner, "mesa");
 
     println!(

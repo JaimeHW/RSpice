@@ -209,15 +209,25 @@ impl TestRunner {
         // Regression harness prioritizes convergence robustness over speed so
         // difficult ngspice decks exercise model behavior instead of solver limits.
         let mut config = SimulationConfig::default();
+        config.max_iterations = config.max_iterations.max(1200);
         config.convergence_config = ConvergenceConfig::robust();
+        // ngspice regression references run at 27C -> 300.15 K by default.
+        config.temperature = 300.15;
         Engine::new(config)
     }
 
     fn create_dynamic_engine(&self) -> Engine {
-        // Use production-like defaults for transient/AC-style analyses.
-        // For several ngspice decks, forcing robust DC continuation settings
-        // globally can create false convergence failures in dynamic solves.
-        Engine::new(SimulationConfig::default())
+        // Dynamic regression runs should track production transient behavior,
+        // while keeping default ambient aligned with ngspice references.
+        let mut config = SimulationConfig::default();
+        // ngspice transient reference decks default to trapezoidal integration.
+        // Fixing method here avoids TrapGear switching artifacts in waveform
+        // comparisons while preserving production defaults elsewhere.
+        config.integration_method = crate::analysis::IntegrationMethod::Trapezoidal;
+        // Sub-ps floor improves waveform alignment around steep HFET/MESA edges.
+        config.min_timestep = 1e-12;
+        config.temperature = 300.15;
+        Engine::new(config)
     }
 
     /// Discover all .cir test files in a subdirectory
@@ -674,8 +684,18 @@ impl TestRunner {
             }
         };
 
-        let engine = self.create_dynamic_engine();
-        match engine.run_dc_op(&netlist) {
+        let primary_engine = self.create_dynamic_engine();
+        let robust_engine = self.create_dc_engine();
+        let primary_result = primary_engine.run_dc_op(&netlist);
+        let op_result = match primary_result {
+            Ok(result) => Ok(result),
+            Err(err) if Self::is_recoverable_dc_convergence_error(&err) => {
+                robust_engine.run_dc_op(&netlist)
+            }
+            Err(err) => Err(err),
+        };
+
+        match op_result {
             Ok(result) => {
                 // Extract test/gold node pairs and compare
                 let mismatches = self.compare_test_gold_nodes(&result);
@@ -912,7 +932,24 @@ impl TestRunner {
             match &mut element.kind {
                 crate::netlist::ElementKind::VoltageSource(spec)
                 | crate::netlist::ElementKind::CurrentSource(spec) => {
-                    *spec = crate::netlist::SourceSpec::Dc(dc_value);
+                    match spec {
+                        crate::netlist::SourceSpec::Dc(v) => *v = dc_value,
+                        crate::netlist::SourceSpec::DcAc { dc_value: v, .. } => *v = dc_value,
+                        crate::netlist::SourceSpec::DcTransient { dc_value: v, .. } => {
+                            *v = dc_value
+                        }
+                        crate::netlist::SourceSpec::DcAcTransient { dc_value: v, .. } => {
+                            *v = dc_value
+                        }
+                        crate::netlist::SourceSpec::Ac { .. }
+                        | crate::netlist::SourceSpec::Pulse { .. }
+                        | crate::netlist::SourceSpec::Sin { .. }
+                        | crate::netlist::SourceSpec::Pwl { .. }
+                        | crate::netlist::SourceSpec::PwlFile { .. }
+                        | crate::netlist::SourceSpec::Exp { .. } => {
+                            *spec = crate::netlist::SourceSpec::Dc(dc_value);
+                        }
+                    }
                     return Ok(());
                 }
                 _ => {
@@ -969,7 +1006,8 @@ impl TestRunner {
             }
         };
 
-        let engine = self.create_dc_engine();
+        let primary_engine = self.create_dynamic_engine();
+        let robust_engine = self.create_dc_engine();
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms);
         let mut merged_results: Vec<(Value, crate::SimulationResult)> = Vec::new();
 
@@ -986,14 +1024,29 @@ impl TestRunner {
                 };
             }
 
-            match engine.run_dc_sweep_with_abort(
+            let primary_result = primary_engine.run_dc_sweep_with_abort(
                 &netlist,
                 inner_source,
                 inner_start,
                 inner_stop,
                 inner_step,
                 &abort,
-            ) {
+            );
+            let sweep_result = match primary_result {
+                Ok(results) => Ok(results),
+                Err(err) if Self::is_recoverable_dc_convergence_error(&err) => robust_engine
+                    .run_dc_sweep_with_abort(
+                        &netlist,
+                        inner_source,
+                        inner_start,
+                        inner_stop,
+                        inner_step,
+                        &abort,
+                    ),
+                Err(err) => Err(err),
+            };
+
+            match sweep_result {
                 Ok(mut results) => merged_results.append(&mut results),
                 Err(e) => {
                     return TestResult {
@@ -1064,10 +1117,9 @@ impl TestRunner {
         let engine = self.create_dynamic_engine();
         let max_step = tmax.unwrap_or_else(|| {
             if tstep > 0.0 {
-                // Engine transient startup uses initial_step = max_step / 10.
-                // Inflate max_step so startup begins near .tran tstep and aligns
-                // with coarse ngspice reference traces.
-                tstep * 10.0
+                // Respect .tran print-step as the default transient step cap
+                // when no explicit Tmax is provided.
+                tstep
             } else {
                 tstop / 100.0
             }
@@ -1146,8 +1198,18 @@ impl TestRunner {
             AcSweepType::Lin => self.generate_linear_points(fstart, fstop, points),
         };
 
-        let engine = self.create_dynamic_engine();
-        match engine.run_ac(&netlist, &frequencies) {
+        let primary_engine = self.create_dynamic_engine();
+        let robust_engine = self.create_dc_engine();
+        let primary_result = primary_engine.run_ac(&netlist, &frequencies);
+        let ac_result = match primary_result {
+            Ok(results) => Ok(results),
+            Err(err) if Self::is_recoverable_dc_convergence_error(&err) => {
+                robust_engine.run_ac(&netlist, &frequencies)
+            }
+            Err(err) => Err(err),
+        };
+
+        match ac_result {
             Ok(results) => {
                 let mismatches = match self.compare_ac_reference(cir_path, &netlist, &results) {
                     Ok(m) => m,
@@ -1500,15 +1562,20 @@ impl TestRunner {
     fn compare_dc_sweep_reference(
         &self,
         cir_path: &Path,
-        _netlist: &Netlist,
+        netlist: &Netlist,
         results: &[(Value, crate::SimulationResult)],
     ) -> Result<Vec<ValueMismatch>, String> {
-        let Some(reference) = self.load_reference_table(cir_path)? else {
+        let Some(reference) = self.load_reference_table_for_axis(cir_path, &["v-sweep"])? else {
             return Ok(Vec::new());
         };
         if results.is_empty() {
             return Ok(Vec::new());
         }
+
+        let engine = self.create_dynamic_engine();
+        let circuit = engine
+            .build_circuit(netlist)
+            .map_err(|e| format!("Failed to build circuit for DC reference mapping: {e}"))?;
 
         let x_sim: Vec<f64> = results.iter().map(|(x, _)| *x).collect();
         let first = &results[0].1;
@@ -1540,6 +1607,15 @@ impl TestRunner {
                 return Some(series);
             }
 
+            if let Some(branch_name) = Self::parse_current_probe(var) {
+                let branch_idx = circuit.get_branch_by_name(&branch_name)?.checked_sub(1)?;
+                let series = results
+                    .iter()
+                    .map(|(_, r)| r.branch_currents.get(branch_idx).copied().unwrap_or(0.0))
+                    .collect();
+                return Some(series);
+            }
+
             None
         }))
     }
@@ -1549,7 +1625,7 @@ impl TestRunner {
         cir_path: &Path,
         result: &crate::engine::TransientResult,
     ) -> Result<Vec<ValueMismatch>, String> {
-        let Some(reference) = self.load_reference_table(cir_path)? else {
+        let Some(reference) = self.load_reference_table_for_axis(cir_path, &["time"])? else {
             return Ok(Vec::new());
         };
         if result.time.is_empty() {
@@ -1603,7 +1679,7 @@ impl TestRunner {
         netlist: &Netlist,
         results: &[crate::analysis::AcResult],
     ) -> Result<Vec<ValueMismatch>, String> {
-        let Some(reference) = self.load_reference_table(cir_path)? else {
+        let Some(reference) = self.load_reference_table_for_axis(cir_path, &["frequency"])? else {
             return Ok(Vec::new());
         };
         if results.is_empty() {
@@ -1767,7 +1843,11 @@ impl TestRunner {
         true
     }
 
-    fn load_reference_table(&self, cir_path: &Path) -> Result<Option<ReferenceTable>, String> {
+    fn load_reference_table_for_axis(
+        &self,
+        cir_path: &Path,
+        axis_candidates: &[&str],
+    ) -> Result<Option<ReferenceTable>, String> {
         let out_path = cir_path.with_extension("out");
         if !out_path.exists() {
             return Ok(None);
@@ -1779,18 +1859,42 @@ impl TestRunner {
                 out_path.display()
             )
         })?;
-        match self.parse_ngspice_output(&content) {
-            Ok(table) => Ok(Some(table)),
-            Err(_) => Ok(None),
+        let Ok(mut tables) = self.parse_ngspice_output_tables(&content) else {
+            return Ok(None);
+        };
+        if tables.is_empty() {
+            return Ok(None);
         }
+
+        for candidate in axis_candidates {
+            let target = Self::normalize_variable_name(candidate);
+            if let Some(idx) = tables
+                .iter()
+                .position(|t| Self::normalize_variable_name(&t.x_name) == target)
+            {
+                return Ok(Some(tables.swap_remove(idx)));
+            }
+        }
+
+        Ok(tables.into_iter().next())
     }
 
-    fn parse_ngspice_output(&self, content: &str) -> Result<ReferenceTable, String> {
-        let mut table = ReferenceTable::default();
+    fn parse_ngspice_output_tables(&self, content: &str) -> Result<Vec<ReferenceTable>, String> {
+        let mut tables: Vec<ReferenceTable> = Vec::new();
+        let mut current_table = ReferenceTable::default();
         let mut in_data_section = false;
         let mut x_col_idx = 0usize;
         let mut value_col_start = 1usize;
         let mut current_vars: Vec<String> = Vec::new();
+
+        let finalize_current = |tables: &mut Vec<ReferenceTable>,
+                                table: &mut ReferenceTable,
+                                vars: &mut Vec<String>| {
+            if !table.variables.is_empty() {
+                tables.push(std::mem::take(table));
+            }
+            vars.clear();
+        };
 
         for raw_line in content.lines() {
             let trimmed = raw_line
@@ -1804,7 +1908,8 @@ impl TestRunner {
             if lower.starts_with("index ") {
                 let parts: Vec<&str> = trimmed.split_whitespace().collect();
                 if parts.len() >= 3 {
-                    table.x_name = parts[1].to_string();
+                    finalize_current(&mut tables, &mut current_table, &mut current_vars);
+                    current_table.x_name = parts[1].to_string();
                     current_vars = parts[2..].iter().map(|s| s.to_string()).collect();
                     x_col_idx = 1;
                     value_col_start = 2;
@@ -1818,7 +1923,8 @@ impl TestRunner {
             {
                 let parts: Vec<&str> = trimmed.split_whitespace().collect();
                 if parts.len() >= 2 {
-                    table.x_name = parts[0].to_string();
+                    finalize_current(&mut tables, &mut current_table, &mut current_vars);
+                    current_table.x_name = parts[0].to_string();
                     current_vars = parts[1..].iter().map(|s| s.to_string()).collect();
                     x_col_idx = 0;
                     value_col_start = 1;
@@ -1846,17 +1952,67 @@ impl TestRunner {
                 let Ok(y_value) = (*val_str).parse::<f64>() else {
                     continue;
                 };
-                let entry = table.variables.entry(var_name.clone()).or_default();
+                let entry = current_table.variables.entry(var_name.clone()).or_default();
                 entry.x.push(x_value);
                 entry.y.push(y_value);
             }
         }
 
-        if table.variables.is_empty() {
+        if !current_table.variables.is_empty() {
+            tables.push(current_table);
+        }
+
+        if tables.is_empty() {
             Err("No tabular data found in ngspice output".to_string())
         } else {
-            Ok(table)
+            Ok(Self::merge_contiguous_reference_tables(tables))
         }
+    }
+
+    fn merge_contiguous_reference_tables(tables: Vec<ReferenceTable>) -> Vec<ReferenceTable> {
+        let mut merged: Vec<ReferenceTable> = Vec::new();
+
+        for mut table in tables {
+            if let Some(last) = merged.last_mut() {
+                if Self::can_merge_reference_tables(last, &table) {
+                    for (name, mut series) in table.variables.drain() {
+                        if let Some(dst) = last.variables.get_mut(&name) {
+                            dst.x.append(&mut series.x);
+                            dst.y.append(&mut series.y);
+                        }
+                    }
+                    continue;
+                }
+            }
+            merged.push(table);
+        }
+
+        merged
+    }
+
+    fn can_merge_reference_tables(a: &ReferenceTable, b: &ReferenceTable) -> bool {
+        if Self::normalize_variable_name(&a.x_name) != Self::normalize_variable_name(&b.x_name) {
+            return false;
+        }
+        if a.variables.len() != b.variables.len() || a.variables.is_empty() {
+            return false;
+        }
+
+        for (name, a_series) in &a.variables {
+            let Some(b_series) = b.variables.get(name) else {
+                return false;
+            };
+            if a_series.x.is_empty() || b_series.x.is_empty() {
+                return false;
+            }
+            let a_last = a_series.x[a_series.x.len() - 1];
+            let b_first = b_series.x[0];
+            // Merge only continuation segments (page breaks), not independent analyses.
+            if b_first < a_last {
+                return false;
+            }
+        }
+        true
     }
 
     fn normalize_variable_name(name: &str) -> String {
@@ -1877,6 +2033,21 @@ impl TestRunner {
         } else {
             Some((inner.to_string(), None))
         }
+    }
+
+    fn parse_current_probe(var: &str) -> Option<String> {
+        let normalized = Self::normalize_variable_name(var);
+        if normalized.starts_with("i(") && normalized.ends_with(')') {
+            let inner = &normalized[2..normalized.len() - 1];
+            return if inner.is_empty() {
+                None
+            } else {
+                Some(inner.to_string())
+            };
+        }
+        normalized
+            .strip_suffix("#branch")
+            .and_then(|name| (!name.is_empty()).then(|| name.to_string()))
     }
 
     fn parse_ac_voltage_probe(var: &str) -> Option<(&'static str, String, Option<String>)> {
@@ -1909,10 +2080,12 @@ impl TestRunner {
         }
 
         let ascending = x[0] <= x[x.len() - 1];
+        let axis_scale = x[0].abs().max(x[x.len() - 1].abs()).max(x_query.abs());
+        let range_eps = (8e-15 * axis_scale).max(1e-18);
         let in_range = if ascending {
-            x_query >= x[0] && x_query <= x[x.len() - 1]
+            x_query >= x[0] - range_eps && x_query <= x[x.len() - 1] + range_eps
         } else {
-            x_query <= x[0] && x_query >= x[x.len() - 1]
+            x_query <= x[0] + range_eps && x_query >= x[x.len() - 1] - range_eps
         };
         if !in_range {
             return None;
@@ -1938,6 +2111,14 @@ impl TestRunner {
         let x1 = x[hi];
         let y0 = y[lo];
         let y1 = y[hi];
+        let local_scale = x0.abs().max(x1.abs()).max(x_query.abs());
+        let snap_eps = (8e-15 * local_scale).max(1e-18);
+        if (x_query - x0).abs() <= snap_eps {
+            return Some(y0);
+        }
+        if (x_query - x1).abs() <= snap_eps {
+            return Some(y1);
+        }
         if (x1 - x0).abs() <= f64::EPSILON {
             return Some(y0);
         }
@@ -2036,6 +2217,18 @@ mod tests {
     }
 
     #[test]
+    fn test_dc_engine_uses_extended_iteration_budget() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let engine = runner.create_dc_engine();
+        let config = engine.config();
+
+        assert!(
+            config.max_iterations >= 1200,
+            "robust DC regression engine should use an elevated iteration budget"
+        );
+    }
+
+    #[test]
     fn test_dynamic_engine_uses_default_convergence_profile() {
         let runner = TestRunner::new(".", TestRunnerConfig::default());
         let engine = runner.create_dynamic_engine();
@@ -2054,6 +2247,11 @@ mod tests {
             config.convergence_config.pseudo_transient,
             default_cfg.convergence_config.pseudo_transient
         );
+        assert_eq!(
+            config.integration_method,
+            crate::analysis::IntegrationMethod::Trapezoidal
+        );
+        assert!((config.min_timestep - 1e-12).abs() < 1e-30);
     }
 
     #[test]
@@ -2229,6 +2427,41 @@ mod tests {
     }
 
     #[test]
+    fn test_interpolate_series_snaps_near_exact_grid_point() {
+        let x = vec![0.0, 1.1500000000000001, 2.0];
+        let y = vec![0.0, -4.361641e-11, 1.0];
+        let got =
+            TestRunner::interpolate_series(&x, &y, 1.15).expect("expected interpolation result");
+        assert!(
+            (got - y[1]).abs() < 1e-24,
+            "expected exact snap to grid point"
+        );
+    }
+
+    #[test]
+    fn test_interpolate_series_accepts_endpoint_roundoff() {
+        let x = vec![0.0, 1.0];
+        let y = vec![5.0, 7.0];
+        let got =
+            TestRunner::interpolate_series(&x, &y, 1.0 + 1e-15).expect("expected endpoint snap");
+        assert!((got - 7.0).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_interpolate_series_does_not_oversnap_transient_queries() {
+        // Regression for hfet/mesa transient comparisons: do not snap to a
+        // nearby earlier sample when query is between two very close timepoints.
+        let x = vec![1.000_616_914_834_557e-9, 1.000_626_914_834_557e-9];
+        let y = vec![0.123_382_966_911_379_7, 0.125_382_966_911_379_7];
+        let got =
+            TestRunner::interpolate_series(&x, &y, 1.000_625e-9).expect("expected interpolation");
+        assert!(
+            (got - 0.125).abs() < 1e-9,
+            "expected true interpolation near 0.125, got {got}"
+        );
+    }
+
+    #[test]
     fn test_compare_reference_dataset_non_monotonic_uses_row_alignment() {
         let runner = TestRunner::new(".", TestRunnerConfig::default());
         let mut reference = ReferenceTable::default();
@@ -2251,6 +2484,160 @@ mod tests {
         });
 
         assert!(mismatches.is_empty());
+    }
+
+    #[test]
+    fn test_parse_ngspice_output_tables_splits_multiple_sections() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let content = "\
+Index   time            v(out)\n\
+0       0.0             0.0\n\
+1       1e-9            1.0\n\
+Index   frequency       vm(out)\n\
+0       1e3             2.0\n\
+1       1e4             3.0\n";
+
+        let tables = runner
+            .parse_ngspice_output_tables(content)
+            .expect("expected two parseable sections");
+        assert_eq!(tables.len(), 2);
+        assert_eq!(
+            TestRunner::normalize_variable_name(&tables[0].x_name),
+            "time"
+        );
+        assert_eq!(
+            TestRunner::normalize_variable_name(&tables[1].x_name),
+            "frequency"
+        );
+    }
+
+    #[test]
+    fn test_parse_ngspice_output_tables_merges_paginated_sections() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let content = "\
+Index   time            v(out)\n\
+0       0.0             0.0\n\
+1       1e-9            1.0\n\
+Index   time            v(out)\n\
+2       2e-9            2.0\n\
+3       3e-9            3.0\n";
+
+        let tables = runner
+            .parse_ngspice_output_tables(content)
+            .expect("expected parseable paginated section");
+        assert_eq!(tables.len(), 1, "expected merged continuation table");
+        let series = tables[0]
+            .variables
+            .get("v(out)")
+            .expect("v(out) series missing");
+        assert_eq!(series.x.len(), 4);
+        assert_eq!(series.y.len(), 4);
+        assert!((series.x[0] - 0.0).abs() < 1e-15);
+        assert!((series.x[3] - 3e-9).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_load_reference_table_for_axis_selects_requested_section() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let temp_dir = unique_temp_dir("ngspice_axis_select");
+        std::fs::create_dir_all(&temp_dir).expect("temp dir");
+
+        let cir_path = temp_dir.join("multi.cir");
+        let out_path = temp_dir.join("multi.out");
+        std::fs::write(&cir_path, "* axis select test").expect("write cir");
+        std::fs::write(
+            &out_path,
+            "\
+Index   time            v(out)\n\
+0       0.0             0.0\n\
+1       1e-9            1.0\n\
+Index   frequency       vm(out)\n\
+0       1e3             2.0\n\
+1       1e4             3.0\n",
+        )
+        .expect("write out");
+
+        let selected = runner
+            .load_reference_table_for_axis(&cir_path, &["frequency"])
+            .expect("load reference")
+            .expect("reference table");
+        assert_eq!(
+            TestRunner::normalize_variable_name(&selected.x_name),
+            "frequency"
+        );
+    }
+
+    #[test]
+    fn test_parse_current_probe_accepts_i_function_and_branch_suffix() {
+        assert_eq!(
+            TestRunner::parse_current_probe("i(VDS)"),
+            Some("vds".to_string())
+        );
+        assert_eq!(
+            TestRunner::parse_current_probe("vdd#branch"),
+            Some("vdd".to_string())
+        );
+        assert_eq!(TestRunner::parse_current_probe("v(out)"), None);
+    }
+
+    #[test]
+    fn test_compare_dc_sweep_reference_maps_voltage_source_branch_current() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let temp_dir = unique_temp_dir("ngspice_dc_branch_compare");
+        std::fs::create_dir_all(&temp_dir).expect("temp dir");
+
+        let cir_path = temp_dir.join("branch.cir");
+        let out_path = temp_dir.join("branch.out");
+        std::fs::write(
+            &cir_path,
+            "\
+V1 1 0 0
+R1 1 0 1k
+.dc v1 0 1 1
+.print dc i(v1)
+.end
+",
+        )
+        .expect("write cir");
+        std::fs::write(
+            &out_path,
+            "\
+Index   v-sweep         v1#branch
+0       0.0             0.1
+1       1.0             0.2
+",
+        )
+        .expect("write out");
+
+        let netlist = Netlist::parse(
+            "\
+V1 1 0 0
+R1 1 0 1k
+.dc v1 0 1 1
+.print dc i(v1)
+.end
+",
+        )
+        .expect("parse netlist");
+
+        let mut r0 = crate::SimulationResult::new(1, 1);
+        r0.node_names = vec!["0".to_string(), "1".to_string()];
+        r0.node_voltages = vec![0.0, 0.0];
+        r0.branch_currents[0] = 0.1;
+
+        let mut r1 = crate::SimulationResult::new(1, 1);
+        r1.node_names = vec!["0".to_string(), "1".to_string()];
+        r1.node_voltages = vec![0.0, 1.0];
+        r1.branch_currents[0] = 0.2;
+
+        let mismatches = runner
+            .compare_dc_sweep_reference(&cir_path, &netlist, &[(0.0, r0), (1.0, r1)])
+            .expect("comparison should succeed");
+        assert!(
+            mismatches.is_empty(),
+            "branch-current mapped comparison should match reference, got {:?}",
+            mismatches
+        );
     }
 
     #[test]
