@@ -800,6 +800,9 @@ impl VoltageSources {
             SourceSpec::DcTransient { transient, .. } => {
                 Self::evaluate_source_at_time_with_context(transient, time, context)
             }
+            SourceSpec::DcAcTransient { transient, .. } => {
+                Self::evaluate_source_at_time_with_context(transient, time, context)
+            }
             SourceSpec::Pulse {
                 v1,
                 v2,
@@ -2399,8 +2402,17 @@ impl CircuitData {
         self.diodes.update_all(voltages);
         self.bjts.update_all(voltages);
         self.mosfets.update_all(voltages);
-        for jfet in &mut self.jfets {
+        let mut order: Vec<usize> = (0..self.jfets.len()).collect();
+        order.sort_by_key(|&idx| (self.jfets[idx].model_order(), idx));
+        let mut hfet_inverse_latched = false;
+        for idx in order {
+            let jfet = &mut self.jfets[idx];
+            let uses_hfet_legacy_inverse = jfet.uses_hfet_legacy_inverse_mode();
+            jfet.set_hfet_legacy_inverse_active(uses_hfet_legacy_inverse && hfet_inverse_latched);
             jfet.update(voltages);
+            if uses_hfet_legacy_inverse && jfet.internal_vds_limited_state() < 0.0 {
+                hfet_inverse_latched = true;
+            }
         }
         for vswitch in &mut self.vswitches {
             vswitch.update(voltages);

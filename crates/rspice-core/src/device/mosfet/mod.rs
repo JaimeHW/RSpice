@@ -15,7 +15,7 @@ mod vdmos;
 pub use bsim3::{Bsim3, Bsim3Params, Bsim3Region, Bsim3Type};
 pub use bsim4::{Bsim4, Bsim4Params, Bsim4Type};
 pub use ekv::EkvMosfet;
-pub use jfet::{Jfet, JfetParams, JfetType};
+pub use jfet::{Jfet, JfetChannelModel, JfetParams, JfetType};
 pub use mos_models::MosParams;
 pub use mosfet::{MosRegion, MosType, Mosfet, MosfetIndices};
 pub use smooth::{

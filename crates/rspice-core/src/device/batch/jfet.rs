@@ -41,6 +41,10 @@ pub struct BatchJfets {
     pub beta: Vec<Value>,
     /// Channel length modulation (LAMBDA)
     pub lambda: Vec<Value>,
+    /// HFET-style DIBL/overdrive modulation coefficient
+    pub eta: Vec<Value>,
+    /// HFET/MESFET low-field channel conductivity term
+    pub sigma0: Vec<Value>,
     /// Gate saturation current (IS)
     pub is: Vec<Value>,
     /// Pre-computed n*Vt for gate junctions
@@ -113,6 +117,8 @@ impl BatchJfets {
             vto: Vec::with_capacity(capacity),
             beta: Vec::with_capacity(capacity),
             lambda: Vec::with_capacity(capacity),
+            eta: Vec::with_capacity(capacity),
+            sigma0: Vec::with_capacity(capacity),
             is: Vec::with_capacity(capacity),
             n_vt: Vec::with_capacity(capacity),
             mult: Vec::with_capacity(capacity),
@@ -155,6 +161,8 @@ impl BatchJfets {
         vto: Value,
         beta: Value,
         lambda: Value,
+        eta: Value,
+        sigma0: Value,
         is: Value,
         n_vt: Value,
         mult: Value,
@@ -167,6 +175,8 @@ impl BatchJfets {
         self.vto.push(vto);
         self.beta.push(beta);
         self.lambda.push(lambda);
+        self.eta.push(eta);
+        self.sigma0.push(sigma0);
         self.is.push(is);
         self.n_vt.push(n_vt.max(1e-12));
         self.mult.push(mult);
@@ -487,8 +497,34 @@ mod tests {
     #[test]
     fn test_batch_jfets_creation() {
         let mut batch = BatchJfets::new();
-        batch.add(1, 2, 0, JfetType::NJF, -2.0, 1e-4, 0.01, 1e-14, 0.026, 1.0);
-        batch.add(3, 4, 0, JfetType::PJF, 2.0, 1e-4, 0.01, 1e-14, 0.026, 1.0);
+        batch.add(
+            1,
+            2,
+            0,
+            JfetType::NJF,
+            -2.0,
+            1e-4,
+            0.01,
+            0.0,
+            0.0,
+            1e-14,
+            0.026,
+            1.0,
+        );
+        batch.add(
+            3,
+            4,
+            0,
+            JfetType::PJF,
+            2.0,
+            1e-4,
+            0.01,
+            0.0,
+            0.0,
+            1e-14,
+            0.026,
+            1.0,
+        );
 
         assert_eq!(batch.len(), 2);
         assert!(!batch.is_empty());
@@ -500,7 +536,20 @@ mod tests {
 
         // Add 8 NJFETs
         for _ in 0..8 {
-            batch.add(1, 2, 0, JfetType::NJF, -2.0, 1e-4, 0.01, 1e-14, 0.026, 1.0);
+            batch.add(
+                1,
+                2,
+                0,
+                JfetType::NJF,
+                -2.0,
+                1e-4,
+                0.01,
+                0.0,
+                0.0,
+                1e-14,
+                0.026,
+                1.0,
+            );
         }
 
         // Set to saturation region
@@ -520,7 +569,20 @@ mod tests {
     #[test]
     fn test_batch_jfet_reverse_vds_changes_current_sign() {
         let mut batch = BatchJfets::new();
-        batch.add(1, 2, 0, JfetType::NJF, -2.0, 1e-3, 0.0, 1e-14, 0.026, 1.0);
+        batch.add(
+            1,
+            2,
+            0,
+            JfetType::NJF,
+            -2.0,
+            1e-3,
+            0.0,
+            0.0,
+            0.0,
+            1e-14,
+            0.026,
+            1.0,
+        );
 
         batch.vgs[0] = 0.0;
         batch.vds[0] = 1.0;
@@ -558,7 +620,20 @@ mod tests {
     #[test]
     fn test_batch_jfet_forward_gate_bias_generates_gate_junction_terms() {
         let mut batch = BatchJfets::new();
-        batch.add(1, 2, 0, JfetType::NJF, -2.0, 1e-4, 0.0, 1e-12, 0.026, 1.0);
+        batch.add(
+            1,
+            2,
+            0,
+            JfetType::NJF,
+            -2.0,
+            1e-4,
+            0.0,
+            0.0,
+            0.0,
+            1e-12,
+            0.026,
+            1.0,
+        );
 
         batch.vgs[0] = 0.6;
         batch.vds[0] = 0.0;

@@ -1215,6 +1215,8 @@ impl Jfets {
                 d.params.vto,
                 d.params.beta,
                 d.params.lambda,
+                d.params.eta,
+                d.params.sigma0,
                 d.params.is,
                 d.params.n * vt,
                 d.m * d.area,

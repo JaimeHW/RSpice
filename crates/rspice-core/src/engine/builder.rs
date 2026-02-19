@@ -57,7 +57,7 @@ fn builtin_bjt_model_map() -> &'static HashMap<String, HashMap<String, f64>> {
             {
                 map.insert(
                     model.name.to_uppercase(),
-                    model.params.into_iter().collect(),
+                    model_params_upper_map(&model.params),
                 );
             }
         }
@@ -81,12 +81,19 @@ fn builtin_diode_model_map() -> &'static HashMap<String, HashMap<String, f64>> {
             {
                 map.insert(
                     model.name.to_uppercase(),
-                    model.params.into_iter().collect(),
+                    model_params_upper_map(&model.params),
                 );
             }
         }
         map
     })
+}
+
+fn model_params_upper_map(params: &[(String, f64)]) -> HashMap<String, f64> {
+    params
+        .iter()
+        .map(|(name, value)| (name.to_ascii_uppercase(), *value))
+        .collect()
 }
 
 impl Engine {
@@ -263,6 +270,7 @@ impl Engine {
                         | crate::netlist::SourceSpec::Pwl { .. }
                         | crate::netlist::SourceSpec::PwlFile { .. }
                         | crate::netlist::SourceSpec::DcTransient { .. }
+                        | crate::netlist::SourceSpec::DcAcTransient { .. }
                         | crate::netlist::SourceSpec::Exp { .. } => Some(spec.clone()),
                         _ => None,
                     };
@@ -288,6 +296,7 @@ impl Engine {
                         | crate::netlist::SourceSpec::Pwl { .. }
                         | crate::netlist::SourceSpec::PwlFile { .. }
                         | crate::netlist::SourceSpec::DcTransient { .. }
+                        | crate::netlist::SourceSpec::DcAcTransient { .. }
                         | crate::netlist::SourceSpec::Exp { .. } => Some(spec.clone()),
                         _ => None,
                     };
@@ -315,8 +324,7 @@ impl Engine {
                             device_model,
                             &["D", "DIODE"],
                         )?;
-                        let params_map: std::collections::HashMap<String, f64> =
-                            device_model.params.iter().cloned().collect();
+                        let params_map = model_params_upper_map(&device_model.params);
                         diode = diode.with_model_params(&params_map);
                     } else if let Some(params_map) =
                         builtin_diode_model_map().get(&model.to_uppercase())
@@ -371,9 +379,8 @@ impl Engine {
 
                     // Look up model and apply parameters
                     if let Some(device_model) = model_def {
-                        // Convert Vec<(String, f64)> to HashMap for with_params
-                        let params_map: std::collections::HashMap<String, f64> =
-                            device_model.params.iter().cloned().collect();
+                        // Normalize keys so model cards remain case-insensitive.
+                        let params_map = model_params_upper_map(&device_model.params);
                         bjt = bjt.with_params(&params_map);
                     } else if let Some(params_map) =
                         builtin_bjt_model_map().get(&model.to_uppercase())
@@ -444,9 +451,7 @@ impl Engine {
 
                     // Look up model and apply parameters including LEVEL
                     if let Some(device_model) = model_def {
-                        // Convert Vec<(String, f64)> to HashMap for with_params
-                        let params_map: std::collections::HashMap<String, f64> =
-                            device_model.params.iter().cloned().collect();
+                        let params_map = model_params_upper_map(&device_model.params);
 
                         // Extract LEVEL from params (default to 1)
                         let level = params_map.get("LEVEL").copied().unwrap_or(1.0) as i32;
@@ -463,6 +468,7 @@ impl Engine {
                 ElementKind::Jfet {
                     model,
                     jfet_type: _jfet_type,
+                    instance_params,
                 } => {
                     let drain = circuit.get_or_create_node(&element.nodes[0]);
                     let gate = circuit.get_or_create_node(&element.nodes[1]);
@@ -470,6 +476,11 @@ impl Engine {
 
                     // Resolve NJF/PJF from model card when available.
                     let model_def = find_model_def(netlist, model);
+                    let model_order = netlist
+                        .models
+                        .iter()
+                        .position(|m| m.name.eq_ignore_ascii_case(model))
+                        .unwrap_or(usize::MAX);
                     let resolved_jfet_type = if let Some(device_model) = model_def {
                         resolve_jfet_type_from_model(&device_model.model_type).ok_or_else(|| {
                             SimulationError::Circuit(format!(
@@ -499,10 +510,11 @@ impl Engine {
 
                     // Look up model and apply parameters
                     if let Some(device_model) = model_def {
-                        let params_map: std::collections::HashMap<String, f64> =
-                            device_model.params.iter().cloned().collect();
+                        let params_map = model_params_upper_map(&device_model.params);
                         jfet = jfet.with_model_params(&params_map);
                     }
+                    jfet = jfet.with_instance_params(instance_params);
+                    jfet.set_model_order(model_order);
 
                     // Realistic extrinsic JFET series resistances (RD/RS) are modeled by
                     // inserting explicit linear resistors and connecting the intrinsic JFET
@@ -541,6 +553,7 @@ impl Engine {
                 ElementKind::Mesfet {
                     model,
                     mesfet_type: _mesfet_type,
+                    instance_params,
                 } => {
                     let drain = circuit.get_or_create_node(&element.nodes[0]);
                     let gate = circuit.get_or_create_node(&element.nodes[1]);
@@ -549,6 +562,20 @@ impl Engine {
 
                     // Resolve NMF/PMF from model card when available.
                     let model_def = find_model_def(netlist, model);
+                    let model_order = netlist
+                        .models
+                        .iter()
+                        .position(|m| m.name.eq_ignore_ascii_case(model))
+                        .unwrap_or(usize::MAX);
+                    let use_hfet_defaults = model_def
+                        .map(|device_model| {
+                            device_model.model_type.eq_ignore_ascii_case("NHFET")
+                                || device_model.model_type.eq_ignore_ascii_case("PHFET")
+                        })
+                        .unwrap_or_else(|| {
+                            model.eq_ignore_ascii_case("NHFET")
+                                || model.eq_ignore_ascii_case("PHFET")
+                        });
                     let resolved_mesfet_type = if let Some(device_model) = model_def {
                         resolve_mesfet_type_from_model(&device_model.model_type).ok_or_else(|| {
                             SimulationError::Circuit(format!(
@@ -560,6 +587,10 @@ impl Engine {
                         crate::netlist::MesfetType::Nmf
                     } else if model.eq_ignore_ascii_case("PMF") {
                         crate::netlist::MesfetType::Pmf
+                    } else if model.eq_ignore_ascii_case("NHFET") {
+                        crate::netlist::MesfetType::Nmf
+                    } else if model.eq_ignore_ascii_case("PHFET") {
+                        crate::netlist::MesfetType::Pmf
                     } else {
                         return Err(SimulationError::Circuit(format!(
                             "MESFET '{}' references unknown model '{}'",
@@ -567,7 +598,7 @@ impl Engine {
                         )));
                     };
 
-                    let mut jfet = match resolved_mesfet_type {
+                    let jfet_base = match resolved_mesfet_type {
                         crate::netlist::MesfetType::Nmf => {
                             crate::device::Jfet::njf(&element.name, drain, gate, source)
                         }
@@ -575,13 +606,19 @@ impl Engine {
                             crate::device::Jfet::pjf(&element.name, drain, gate, source)
                         }
                     };
+                    let mut jfet = if use_hfet_defaults {
+                        jfet_base.enable_hfet_model()
+                    } else {
+                        jfet_base.enable_mesa_model()
+                    };
 
                     // Look up model and apply parameters
                     if let Some(device_model) = model_def {
-                        let params_map: std::collections::HashMap<String, f64> =
-                            device_model.params.iter().cloned().collect();
+                        let params_map = model_params_upper_map(&device_model.params);
                         jfet = jfet.with_model_params(&params_map);
                     }
+                    jfet = jfet.with_instance_params(instance_params);
+                    jfet.set_model_order(model_order);
 
                     // Apply the same RD/RS extrinsic-node expansion for MESFET aliases.
                     let rd = if jfet.params.rd.is_finite() && jfet.params.rd > 0.0 {
@@ -804,8 +841,7 @@ impl Engine {
                         model_def,
                         &["SW", "VSWITCH", "VSW"],
                     )?;
-                    let params_map: std::collections::HashMap<String, f64> =
-                        model_def.params.iter().cloned().collect();
+                    let params_map = model_params_upper_map(&model_def.params);
 
                     let mut sw = crate::device::VoltageSwitch::new(
                         element.name.clone(),
@@ -841,8 +877,7 @@ impl Engine {
                         model_def,
                         &["CSW", "ISWITCH", "ISW"],
                     )?;
-                    let params_map: std::collections::HashMap<String, f64> =
-                        model_def.params.iter().cloned().collect();
+                    let params_map = model_params_upper_map(&model_def.params);
 
                     let mut sw = crate::device::CurrentSwitch::new(
                         element.name.clone(),
