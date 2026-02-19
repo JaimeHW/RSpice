@@ -15,10 +15,10 @@ impl Engine {
         rhs: &mut [Value],
         gmin: Value,
     ) {
-        let size = circuit.matrix_size();
+        let node_count = circuit.num_nodes();
 
-        // Add GMIN to diagonal for numerical stability
-        for i in 0..size {
+        // Add GMIN only to node-voltage equations (not branch-current equations).
+        for i in 0..node_count {
             matrix.add(i, i, gmin);
         }
 
@@ -35,10 +35,10 @@ impl Engine {
         gmin: Value,
         scale: Value,
     ) {
-        let size = circuit.matrix_size();
+        let node_count = circuit.num_nodes();
 
-        // Add GMIN to diagonal
-        for i in 0..size {
+        // Add GMIN only to node-voltage equations (not branch-current equations).
+        for i in 0..node_count {
             matrix.add(i, i, gmin);
         }
 

@@ -188,13 +188,15 @@ impl Engine {
         matrix: &mut StaticMatrix,
         solution: &[Value],
     ) -> bool {
+        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
         self.nonlinear_residual_converged_with_linear_stamp(
             circuit,
             matrix,
             solution,
             |circuit, matrix, rhs| {
-                for i in 0..rhs.len() {
-                    matrix.add(i, i, 1e-12);
+                let node_count = circuit.num_nodes().min(rhs.len());
+                for i in 0..node_count {
+                    matrix.add(i, i, gmin_floor);
                 }
                 circuit.stamp_dc_direct(matrix, rhs);
             },
@@ -208,13 +210,15 @@ impl Engine {
         solution: &[Value],
         source_scale: Value,
     ) -> bool {
+        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
         self.nonlinear_residual_converged_with_linear_stamp(
             circuit,
             matrix,
             solution,
             |circuit, matrix, rhs| {
-                for i in 0..rhs.len() {
-                    matrix.add(i, i, 1e-12);
+                let node_count = circuit.num_nodes().min(rhs.len());
+                for i in 0..node_count {
+                    matrix.add(i, i, gmin_floor);
                 }
                 circuit.stamp_dc_direct_scaled(matrix, rhs, source_scale);
             },
@@ -233,7 +237,8 @@ impl Engine {
             matrix,
             solution,
             |circuit, matrix, rhs| {
-                for i in 0..rhs.len() {
+                let node_count = circuit.num_nodes().min(rhs.len());
+                for i in 0..node_count {
                     matrix.add(i, i, gmin);
                 }
                 circuit.stamp_dc_direct(matrix, rhs);
@@ -518,9 +523,11 @@ impl Engine {
         matrix: &mut StaticMatrix,
         solution: &[Value],
     ) -> Option<Value> {
+        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
         self.nonlinear_merit_with_linear_stamp(circuit, matrix, solution, |circuit, matrix, rhs| {
-            for i in 0..rhs.len() {
-                matrix.add(i, i, 1e-12);
+            let node_count = circuit.num_nodes().min(rhs.len());
+            for i in 0..node_count {
+                matrix.add(i, i, gmin_floor);
             }
             circuit.stamp_dc_direct(matrix, rhs);
         })
@@ -533,9 +540,11 @@ impl Engine {
         solution: &[Value],
         source_scale: Value,
     ) -> Option<Value> {
+        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
         self.nonlinear_merit_with_linear_stamp(circuit, matrix, solution, |circuit, matrix, rhs| {
-            for i in 0..rhs.len() {
-                matrix.add(i, i, 1e-12);
+            let node_count = circuit.num_nodes().min(rhs.len());
+            for i in 0..node_count {
+                matrix.add(i, i, gmin_floor);
             }
             circuit.stamp_dc_direct_scaled(matrix, rhs, source_scale);
         })
@@ -549,7 +558,8 @@ impl Engine {
         gmin: Value,
     ) -> Option<Value> {
         self.nonlinear_merit_with_linear_stamp(circuit, matrix, solution, |circuit, matrix, rhs| {
-            for i in 0..rhs.len() {
+            let node_count = circuit.num_nodes().min(rhs.len());
+            for i in 0..node_count {
                 matrix.add(i, i, gmin);
             }
             circuit.stamp_dc_direct(matrix, rhs);
@@ -564,9 +574,10 @@ impl Engine {
         anchor_solution: &[Value],
         pseudo_conductance: Value,
     ) -> Option<Value> {
+        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
         self.nonlinear_merit_with_linear_stamp(circuit, matrix, solution, |circuit, matrix, rhs| {
             for i in 0..rhs.len() {
-                matrix.add(i, i, 1e-12 + pseudo_conductance);
+                matrix.add(i, i, gmin_floor + pseudo_conductance);
                 rhs[i] += pseudo_conductance * anchor_solution[i];
             }
             circuit.stamp_dc_direct(matrix, rhs);
@@ -596,6 +607,7 @@ impl Engine {
     ) -> (Vec<Value>, bool, usize) {
         let mut solution = initial_solution.to_vec();
         let mut used_iterations = 0usize;
+        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
 
         for iter in 0..max_iterations {
             if Self::should_abort_iteration(abort, iter) {
@@ -605,8 +617,9 @@ impl Engine {
             let mut rhs = vec![0.0; solution.len()];
             matrix.clear_values();
 
-            for i in 0..solution.len() {
-                matrix.add(i, i, 1e-12);
+            let node_count = circuit.num_nodes().min(solution.len());
+            for i in 0..node_count {
+                matrix.add(i, i, gmin_floor);
             }
 
             circuit.stamp_dc_direct_scaled(matrix, &mut rhs, source_scale);
@@ -697,8 +710,10 @@ impl Engine {
         // a small fixed-point update plus device-level convergence.
         let mut rhs = vec![0.0; size];
         matrix.clear_values();
-        for i in 0..size {
-            matrix.add(i, i, 1e-12);
+        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
+        let node_count = circuit.num_nodes().min(size);
+        for i in 0..node_count {
+            matrix.add(i, i, gmin_floor);
         }
         circuit.stamp_dc_direct(matrix, &mut rhs);
         self.stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, solution);
@@ -773,7 +788,7 @@ impl Engine {
     ) -> Result<Vec<Value>, SolverError> {
         // Source stepping sequence
         const SOURCE_SCALES: &[Value] = &[0.0, 0.1, 0.25, 0.5, 0.75, 1.0];
-        const GMIN: Value = 1e-12;
+        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
 
         let size = circuit.matrix_size();
         let mut solution = vec![0.0; size]; // Start from zero
@@ -784,7 +799,7 @@ impl Engine {
             matrix.clear_values();
             rhs.fill(0.0);
 
-            self.stamp_dc_scaled(circuit, matrix, &mut rhs, GMIN, scale);
+            self.stamp_dc_scaled(circuit, matrix, &mut rhs, gmin_floor, scale);
 
             match matrix.solve(&rhs) {
                 Ok(sol) => {
@@ -814,7 +829,8 @@ impl Engine {
 
         matrix.clear_values();
         rhs.fill(0.0);
-        self.stamp_dc_direct(circuit, matrix, &mut rhs, 1e-12);
+        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
+        self.stamp_dc_direct(circuit, matrix, &mut rhs, gmin_floor);
 
         let direct_result = matrix.solve(&rhs);
         if let Ok(sol) = direct_result {
@@ -1066,6 +1082,7 @@ impl Engine {
         let mut hit_voltage_limit = false;
         let mut limited_nodes: Vec<usize> = Vec::new();
         let mut damping_state = NewtonDampingState::default();
+        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
         let requires_conservative_nonlinear_limiting = circuit.has_physical_nonlinear_devices();
         // Use 10x more iterations for DC nonlinear since damping limits voltage change per step
         // With MAX_DELTA_V=2V and standard max_iterations=50, we can only move 100V
@@ -1090,9 +1107,9 @@ impl Engine {
             // Clear matrix and RHS for this iteration
             matrix.clear_values();
             rhs.fill(0.0);
-            // Add GMIN to diagonal for numerical stability
-            for i in 0..size {
-                matrix.add(i, i, 1e-12);
+            let node_count = circuit.num_nodes().min(size);
+            for i in 0..node_count {
+                matrix.add(i, i, gmin_floor);
             }
             // Stamp linear devices
             circuit.stamp_dc_direct(matrix, &mut rhs);
@@ -1415,6 +1432,7 @@ impl Engine {
         };
         let mut damping_state = NewtonDampingState::default();
         let source_iterations = self.continuation_iteration_budget(20, 16);
+        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
 
         for (scale_idx, &scale) in SOURCE_SCALES.iter().enumerate() {
             if Self::should_abort_iteration(abort, scale_idx) {
@@ -1432,8 +1450,9 @@ impl Engine {
                 matrix.clear_values();
 
                 // Add GMIN
-                for i in 0..size {
-                    matrix.add(i, i, 1e-12);
+                let node_count = circuit.num_nodes().min(size);
+                for i in 0..node_count {
+                    matrix.add(i, i, gmin_floor);
                 }
 
                 // Stamp linear devices with scaled sources
@@ -1758,8 +1777,9 @@ impl Engine {
 
                 matrix.clear_values();
 
-                // Add current GMIN to diagonal
-                for i in 0..size {
+                // Add current GMIN only to node-voltage equations.
+                let node_count = circuit.num_nodes().min(size);
+                for i in 0..node_count {
                     matrix.add(i, i, gmin);
                 }
 
