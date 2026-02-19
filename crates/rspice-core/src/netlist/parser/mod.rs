@@ -380,7 +380,7 @@ fn parse_line(
         'D' => parse_diode(&mut stream, line_num, elements),
         'Q' => parse_bjt(&mut stream, line_num, elements),
         'M' => parse_mosfet(&mut stream, line_num, elements, params),
-        'J' => parse_jfet(&mut stream, line_num, elements),
+        'J' => parse_jfet(&mut stream, line_num, elements, params),
         'X' => parse_subcircuit_instance(&mut stream, line_num, elements),
         'E' => parse_vcvs(&mut stream, line_num, elements, params),
         'F' => parse_cccs(&mut stream, line_num, elements, params),
@@ -397,7 +397,7 @@ fn parse_line(
         'Y' => parse_lossy_tline(&mut stream, line_num, elements, params),
         'P' => parse_coupled_tlines(&mut stream, line_num, elements),
         // MESFET (Z element) - treat like JFET with model
-        'Z' => parse_mesfet(&mut stream, line_num, elements),
+        'Z' => parse_mesfet(&mut stream, line_num, elements, params),
         // XSPICE code model instance
         'A' => {
             let name = expect_ident(&mut stream, line_num)?;
@@ -1351,18 +1351,21 @@ fn parse_jfet(
     stream: &mut TokenStream,
     line_num: usize,
     elements: &mut Vec<Element>,
+    params: &ParamContext,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
     let drain = expect_node(stream, line_num)?;
     let gate = expect_node(stream, line_num)?;
     let source = expect_node(stream, line_num)?;
     let model = expect_ident(stream, line_num)?;
+    let instance_params = parse_fet_instance_params(stream, line_num, params);
 
     elements.push(Element {
         name,
         kind: ElementKind::Jfet {
             model,
             jfet_type: super::JfetType::Njf, // Will be set from model
+            instance_params,
         },
         nodes: vec![drain, gate, source],
     });
@@ -1375,23 +1378,80 @@ fn parse_mesfet(
     stream: &mut TokenStream,
     line_num: usize,
     elements: &mut Vec<Element>,
+    params: &ParamContext,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
     let drain = expect_node(stream, line_num)?;
     let gate = expect_node(stream, line_num)?;
     let source = expect_node(stream, line_num)?;
     let model = expect_ident(stream, line_num)?;
+    let instance_params = parse_fet_instance_params(stream, line_num, params);
 
     elements.push(Element {
         name,
         kind: ElementKind::Mesfet {
             model,
             mesfet_type: super::MesfetType::Nmf, // Will be set from model
+            instance_params,
         },
         nodes: vec![drain, gate, source],
     });
 
     Ok(())
+}
+
+fn parse_fet_instance_params(
+    stream: &mut TokenStream,
+    _line_num: usize,
+    params: &ParamContext,
+) -> Vec<(String, Value)> {
+    let mut instance_params = Vec::new();
+    let mut area_positional_seen = false;
+
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        skip_commas(stream);
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
+        }
+
+        match &stream.peek().kind {
+            TokenKind::Ident(raw_name) => {
+                let raw_name = raw_name.clone();
+                let name_upper = raw_name.to_ascii_uppercase();
+                stream.advance();
+
+                if stream.consume(&TokenKind::Equals) {
+                    if let Some(value) = try_value(stream, params) {
+                        instance_params.push((name_upper, value));
+                    }
+                    continue;
+                }
+
+                if name_upper == "OFF" {
+                    continue;
+                }
+
+                if !area_positional_seen {
+                    if let Ok(parsed) = raw_name.parse::<f64>() {
+                        instance_params.push(("AREA".to_string(), parsed));
+                        area_positional_seen = true;
+                    }
+                }
+            }
+            _ => {
+                if !area_positional_seen {
+                    if let Some(value) = try_value(stream, params) {
+                        instance_params.push(("AREA".to_string(), value));
+                        area_positional_seen = true;
+                        continue;
+                    }
+                }
+                stream.advance();
+            }
+        }
+    }
+
+    instance_params
 }
 
 /// Parse lossless transmission line (O element)
@@ -1808,7 +1868,9 @@ fn parse_source_spec(
                     stream.consume(&TokenKind::Equals);
                     let dc_value = expect_value(stream, line_num, params)?;
 
-                    // Check for optional AC specification after DC
+                    let mut ac_terms: Option<(Value, Value)> = None;
+
+                    // Optional AC specification after DC
                     skip_commas(stream);
                     if let TokenKind::Ident(next) = &stream.peek().kind {
                         if next.to_uppercase() == "AC" {
@@ -1816,36 +1878,79 @@ fn parse_source_spec(
                             let ac_magnitude = try_value(stream, params).unwrap_or(1.0);
                             // SPICE AC phase is specified in degrees; store radians internally.
                             let ac_phase = try_value(stream, params).unwrap_or(0.0).to_radians();
-                            return Ok(SourceSpec::DcAc {
+                            ac_terms = Some((ac_magnitude, ac_phase));
+                        }
+                    }
+
+                    let transient = parse_transient_source_spec_keyword(stream, line_num, params)?;
+                    return Ok(match (ac_terms, transient) {
+                        (Some((ac_magnitude, ac_phase)), Some(transient)) => {
+                            SourceSpec::DcAcTransient {
                                 dc_value,
                                 ac_magnitude,
                                 ac_phase,
-                            });
+                                transient: Box::new(transient),
+                            }
                         }
-                    }
-                    if let Some(transient) =
-                        parse_transient_source_spec_keyword(stream, line_num, params)?
-                    {
-                        return Ok(SourceSpec::DcTransient {
+                        (Some((ac_magnitude, ac_phase)), None) => SourceSpec::DcAc {
+                            dc_value,
+                            ac_magnitude,
+                            ac_phase,
+                        },
+                        (None, Some(transient)) => SourceSpec::DcTransient {
                             dc_value,
                             transient: Box::new(transient),
-                        });
-                    }
-                    return Ok(SourceSpec::Dc(dc_value));
+                        },
+                        (None, None) => SourceSpec::Dc(dc_value),
+                    });
                 }
                 "AC" => {
                     stream.advance();
                     // AC magnitude is optional - defaults to 1.0 if not specified
-                    let magnitude = try_value(stream, params).unwrap_or(1.0);
+                    let ac_magnitude = try_value(stream, params).unwrap_or(1.0);
                     // SPICE AC phase is specified in degrees; store radians internally.
-                    let phase = try_value(stream, params).unwrap_or(0.0).to_radians();
-                    return Ok(SourceSpec::Ac { magnitude, phase });
+                    let ac_phase = try_value(stream, params).unwrap_or(0.0).to_radians();
+
+                    // Support ngspice ordering like:
+                    //   AC 1 DC 0 SIN(...)
+                    // by accepting optional DC and transient terms after AC.
+                    skip_commas(stream);
+                    let mut dc_value = 0.0;
+                    let mut has_dc_term = false;
+                    if let TokenKind::Ident(next) = &stream.peek().kind {
+                        if next.to_uppercase() == "DC" {
+                            stream.advance();
+                            skip_commas(stream);
+                            stream.consume(&TokenKind::Equals);
+                            dc_value = expect_value(stream, line_num, params)?;
+                            has_dc_term = true;
+                        }
+                    }
+
+                    let transient = parse_transient_source_spec_keyword(stream, line_num, params)?;
+                    return Ok(match transient {
+                        Some(transient) => SourceSpec::DcAcTransient {
+                            dc_value,
+                            ac_magnitude,
+                            ac_phase,
+                            transient: Box::new(transient),
+                        },
+                        None if has_dc_term => SourceSpec::DcAc {
+                            dc_value,
+                            ac_magnitude,
+                            ac_phase,
+                        },
+                        None => SourceSpec::Ac {
+                            magnitude: ac_magnitude,
+                            phase: ac_phase,
+                        },
+                    });
                 }
                 "PULSE" => {
                     stream.advance();
                     return parse_pulse_spec(stream, line_num, params);
                 }
-                "SIN" => {
+                "SIN" | "SINE" => {
                     stream.advance();
                     return parse_sin_spec(stream, line_num, params);
                 }
@@ -1865,7 +1970,14 @@ fn parse_source_spec(
 
     // Default: try to parse as DC value
     let value = expect_value(stream, line_num, params)?;
-    Ok(SourceSpec::Dc(value))
+    if let Some(transient) = parse_transient_source_spec_keyword(stream, line_num, params)? {
+        Ok(SourceSpec::DcTransient {
+            dc_value: value,
+            transient: Box::new(transient),
+        })
+    } else {
+        Ok(SourceSpec::Dc(value))
+    }
 }
 
 fn parse_transient_source_spec_keyword(
@@ -1884,6 +1996,10 @@ fn parse_transient_source_spec_keyword(
             parse_pulse_spec(stream, line_num, params).map(Some)
         }
         "SIN" => {
+            stream.advance();
+            parse_sin_spec(stream, line_num, params).map(Some)
+        }
+        "SINE" => {
             stream.advance();
             parse_sin_spec(stream, line_num, params).map(Some)
         }

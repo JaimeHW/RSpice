@@ -288,6 +288,63 @@ I1 1 0 DC 1m AC 2 180
 }
 
 #[test]
+fn test_parse_ac_dc_sine_combination_into_dc_ac_transient() {
+    let netlist = r#"AC DC SIN Combo
+V1 1 0 AC 1 DC 0 Sine(0 10m 10Meg 0 0)
+.END
+"#;
+    let result = parse_netlist(netlist).unwrap();
+    match &result.elements[0].kind {
+        ElementKind::VoltageSource(SourceSpec::DcAcTransient {
+            dc_value,
+            ac_magnitude,
+            ac_phase,
+            transient,
+        }) => {
+            assert!((*dc_value - 0.0).abs() < 1e-15);
+            assert!((*ac_magnitude - 1.0).abs() < 1e-12);
+            assert!((*ac_phase - 0.0).abs() < 1e-12);
+            match transient.as_ref() {
+                SourceSpec::Sin {
+                    offset,
+                    amplitude,
+                    frequency,
+                    ..
+                } => {
+                    assert!((*offset - 0.0).abs() < 1e-15);
+                    assert!((*amplitude - 10e-3).abs() < 1e-15);
+                    assert!((*frequency - 10e6).abs() < 1e-3);
+                }
+                other => panic!("Expected SIN transient payload, got {:?}", other),
+            }
+        }
+        other => panic!("Expected DC+AC+transient source, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_sine_keyword_alias() {
+    let netlist = r#"SINE Alias
+V1 1 0 SINE(0 2 1k)
+.END
+"#;
+    let result = parse_netlist(netlist).unwrap();
+    match &result.elements[0].kind {
+        ElementKind::VoltageSource(SourceSpec::Sin {
+            offset,
+            amplitude,
+            frequency,
+            ..
+        }) => {
+            assert!((*offset - 0.0).abs() < 1e-15);
+            assert!((*amplitude - 2.0).abs() < 1e-12);
+            assert!((*frequency - 1e3).abs() < 1e-9);
+        }
+        other => panic!("Expected SIN source via SINE alias, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_parse_dc_plus_pwl_source() {
     let netlist = r#"DC + PWL Test
 V1 1 0 DC 0.7 PWL(0 0 2n 5)
@@ -552,6 +609,52 @@ M1 d g s e b n1 w=10u l=0.25u
             assert!((map["L"] - 0.25e-6).abs() < 1e-18);
         }
         other => panic!("Expected MOSFET element, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_jfet_with_instance_params() {
+    let netlist = r#"JFET Instance Params
+J1 d g s jmod area=2 m=3
+.END
+"#;
+    let result = parse_netlist(netlist).expect("netlist should parse");
+    match &result.elements[0].kind {
+        ElementKind::Jfet {
+            model,
+            instance_params,
+            ..
+        } => {
+            assert!(model.eq_ignore_ascii_case("jmod"));
+            let map: std::collections::HashMap<String, Value> =
+                instance_params.iter().cloned().collect();
+            assert!((map["AREA"] - 2.0).abs() < 1e-18);
+            assert!((map["M"] - 3.0).abs() < 1e-18);
+        }
+        other => panic!("Expected JFET element, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_mesfet_with_instance_geometry_params() {
+    let netlist = r#"MESFET Instance Params
+Z1 d g s zmod l=0.7u w=20u
+.END
+"#;
+    let result = parse_netlist(netlist).expect("netlist should parse");
+    match &result.elements[0].kind {
+        ElementKind::Mesfet {
+            model,
+            instance_params,
+            ..
+        } => {
+            assert!(model.eq_ignore_ascii_case("zmod"));
+            let map: std::collections::HashMap<String, Value> =
+                instance_params.iter().cloned().collect();
+            assert!((map["L"] - 0.7e-6).abs() < 1e-18);
+            assert!((map["W"] - 20e-6).abs() < 1e-18);
+        }
+        other => panic!("Expected MESFET element, got {:?}", other),
     }
 }
 

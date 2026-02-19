@@ -177,12 +177,19 @@ pub enum ElementKind {
     },
 
     /// JFET (NJF or PJF)
-    Jfet { model: String, jfet_type: JfetType },
+    Jfet {
+        model: String,
+        jfet_type: JfetType,
+        /// Instance parameters (e.g. `AREA`, `M`, `W`, `L`).
+        instance_params: Vec<(String, Value)>,
+    },
 
     /// MESFET (GaAs FET: NMF or PMF)
     Mesfet {
         model: String,
         mesfet_type: MesfetType,
+        /// Instance parameters (e.g. `AREA`, `M`, `W`, `L`).
+        instance_params: Vec<(String, Value)>,
     },
 
     //-------------------------------------------------------------------------
@@ -486,6 +493,19 @@ pub enum SourceSpec {
     /// while `transient` drives time-domain evaluation.
     DcTransient {
         dc_value: Value,
+        transient: Box<SourceSpec>,
+    },
+
+    /// Combined DC, AC, and transient specification.
+    ///
+    /// Common in ngspice decks where one source drives:
+    /// - DC operating point (`dc_value`)
+    /// - AC small-signal excitation (`ac_magnitude`, `ac_phase`)
+    /// - Time-domain excitation (`transient`)
+    DcAcTransient {
+        dc_value: Value,
+        ac_magnitude: Value,
+        ac_phase: Value,
         transient: Box<SourceSpec>,
     },
 

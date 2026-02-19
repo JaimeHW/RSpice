@@ -1474,8 +1474,12 @@ impl Engine {
                 *dc_value = value;
                 Ok(())
             }
+            SourceSpec::DcAcTransient { dc_value, .. } => {
+                *dc_value = value;
+                Ok(())
+            }
             _ => Err(SimulationError::Circuit(
-                "Stepping source VALUE/DC is supported for DC, DC+AC, and DC+transient source definitions only"
+                "Stepping source VALUE/DC is supported for DC, DC+AC, DC+transient, and DC+AC+transient source definitions only"
                     .to_string(),
             )),
         }
