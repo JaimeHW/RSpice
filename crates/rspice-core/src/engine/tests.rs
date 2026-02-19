@@ -478,6 +478,77 @@ C1 2 0 1u
     }
 
     #[test]
+    fn test_transient_honors_fixed_integration_method() {
+        let netlist_str = r#"
+* RC step response (method-sensitive with coarse timesteps)
+V1 in 0 PULSE(0 1 0 1n 1n 2u 4u)
+R1 in out 1k
+C1 out 0 1n
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+
+        let mut trap_cfg = crate::engine::SimulationConfig::default();
+        trap_cfg.integration_method = crate::analysis::IntegrationMethod::Trapezoidal;
+        trap_cfg.min_timestep = 1e-15;
+        let trap = Engine::new(trap_cfg)
+            .run_tran(&netlist, 8e-6, 5e-7)
+            .unwrap();
+
+        let mut gear_cfg = crate::engine::SimulationConfig::default();
+        gear_cfg.integration_method = crate::analysis::IntegrationMethod::Gear2;
+        gear_cfg.min_timestep = 1e-15;
+        let gear = Engine::new(gear_cfg)
+            .run_tran(&netlist, 8e-6, 5e-7)
+            .unwrap();
+
+        let trap_out_idx = trap
+            .node_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case("out"))
+            .expect("trap run missing out node");
+        let gear_out_idx = gear
+            .node_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case("out"))
+            .expect("gear run missing out node");
+
+        let sample_at = |time: &[f64], values: &[f64], t_query: f64| -> f64 {
+            if time.is_empty() || values.is_empty() {
+                return 0.0;
+            }
+            if t_query <= time[0] {
+                return values[0];
+            }
+            for i in 0..time.len().saturating_sub(1) {
+                let t0 = time[i];
+                let t1 = time[i + 1];
+                if t_query >= t0 && t_query <= t1 {
+                    let y0 = values[i];
+                    let y1 = values[i + 1];
+                    let alpha = if (t1 - t0).abs() > 0.0 {
+                        (t_query - t0) / (t1 - t0)
+                    } else {
+                        0.0
+                    };
+                    return y0 + alpha * (y1 - y0);
+                }
+            }
+            *values.last().unwrap_or(&0.0)
+        };
+
+        let trap_v = sample_at(&trap.time, &trap.voltages[trap_out_idx], 0.5e-6);
+        let gear_v = sample_at(&gear.time, &gear.voltages[gear_out_idx], 0.5e-6);
+
+        assert!(
+            (trap_v - gear_v).abs() > 1e-4,
+            "fixed integration methods should diverge on coarse RC step: trap_v={}, gear_v={}",
+            trap_v,
+            gear_v
+        );
+    }
+
+    #[test]
     fn test_collect_node_voltage_hints_prefers_ic_over_nodeset() {
         let netlist = Netlist::parse(
             r#"
@@ -1424,6 +1495,53 @@ Z1 3 2 0 MMOD
 
         assert_eq!(circuit.jfets.len(), 1);
         assert_eq!(circuit.jfets[0].jfet_type, crate::device::JfetType::PJF);
+    }
+
+    #[test]
+    fn test_bjt_lowercase_model_params_are_applied() {
+        let netlist_str = r#"
+* Lowercase model params must remain case-insensitive
+Q1 3 2 0 qmod
+.MODEL qmod npn (bf=75 rb=40 rc=25)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let circuit = Engine::default().build_circuit(&netlist).unwrap();
+        let q = &circuit.bjts.devices[0];
+        assert!((q.bf - 75.0).abs() < 1e-12);
+        assert!((q.rb - 40.0).abs() < 1e-12);
+        assert!((q.rc - 25.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_mos_lowercase_level_param_is_applied() {
+        let netlist_str = r#"
+* Lowercase LEVEL should configure level-6 path
+M1 2 1 0 0 mmod
+.MODEL mmod nmos (level=6 kc=2e-5 nc=1.2 kv=0.9 nv=0.8)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let circuit = Engine::default().build_circuit(&netlist).unwrap();
+        let m = &circuit.mosfets.devices[0];
+        assert_eq!(m.level, 6);
+        assert!((m.kc - 2e-5).abs() < 1e-18);
+    }
+
+    #[test]
+    fn test_mesfet_lowercase_model_params_are_applied() {
+        let netlist_str = r#"
+* Lowercase VT0/ETA/SIGMA0 should map into MESFET compatibility path
+Z1 3 2 0 mmod w=10u l=1u
+.MODEL mmod nhfet (level=5 vt0=0.3 eta=1.2 sigma0=0.04 rd=60 rs=60)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let circuit = Engine::default().build_circuit(&netlist).unwrap();
+        let z = &circuit.jfets[0];
+        assert!((z.params.vto - 0.3).abs() < 1e-12);
+        assert!((z.params.eta - 1.2).abs() < 1e-12);
+        assert!((z.params.sigma0 - 0.04).abs() < 1e-12);
     }
 
     #[test]

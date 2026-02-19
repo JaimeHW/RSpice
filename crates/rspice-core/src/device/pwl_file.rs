@@ -207,6 +207,16 @@ impl PwlWaveform {
         let end = self.times.last().unwrap() * self.time_scale + self.time_offset;
         (start, end)
     }
+
+    /// Iterate over scaled knot times used by the waveform interpolation.
+    ///
+    /// Each returned time already includes `time_scale` and `time_offset`.
+    pub fn scaled_knot_times(&self) -> impl Iterator<Item = Value> + '_ {
+        self.times
+            .iter()
+            .copied()
+            .map(|t| t * self.time_scale + self.time_offset)
+    }
 }
 
 //=============================================================================
