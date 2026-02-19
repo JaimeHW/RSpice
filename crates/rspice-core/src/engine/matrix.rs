@@ -82,6 +82,28 @@ impl Engine {
                 triplets.push((br - 1, nn - 1, 0.0));
                 triplets.push((nn - 1, br - 1, 0.0));
             }
+
+            // Linearized behavioral dependency terms on branch equation row.
+            for col in source.bound_solution_indices() {
+                triplets.push((br - 1, col, 0.0));
+            }
+        }
+
+        // Behavioral current sources: row coupling from KCL rows to referenced variables.
+        for source in &circuit.behavioral_sources.current_sources {
+            let np = source.node_pos;
+            let nn = source.node_neg;
+            let referenced_cols: Vec<usize> = source.bound_solution_indices().collect();
+            if np > 0 {
+                for &col in &referenced_cols {
+                    triplets.push((np - 1, col, 0.0));
+                }
+            }
+            if nn > 0 {
+                for &col in &referenced_cols {
+                    triplets.push((nn - 1, col, 0.0));
+                }
+            }
         }
 
         // Diode stamps (2-terminal: 2x2 matrix)

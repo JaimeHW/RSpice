@@ -8,6 +8,9 @@ use crate::Value;
 use crate::expr::{CompiledExpr, Context, Vm, compile, parse_expression_strict};
 use crate::solver::StaticMatrix;
 
+const DERIVATIVE_REL_STEP: Value = 1e-6;
+const DERIVATIVE_ABS_STEP: Value = 1e-9;
+
 /// Compiled behavioral voltage source
 #[derive(Debug)]
 pub struct BehavioralVoltageSource {
@@ -31,6 +34,10 @@ pub struct BehavioralVoltageSource {
     node_values: Vec<Value>,
     /// Reused scratch storage for expression branch-current values
     branch_values: Vec<Value>,
+    /// Linearization partials d(expr)/d(node_values[idx])
+    node_partials: Vec<Value>,
+    /// Linearization partials d(expr)/d(branch_values[idx])
+    branch_partials: Vec<Value>,
 }
 
 impl BehavioralVoltageSource {
@@ -57,6 +64,8 @@ impl BehavioralVoltageSource {
             branch_bindings: Vec::new(),
             node_values: Vec::new(),
             branch_values: Vec::new(),
+            node_partials: Vec::new(),
+            branch_partials: Vec::new(),
         })
     }
 
@@ -99,6 +108,8 @@ impl BehavioralVoltageSource {
 
         self.node_values.resize(self.node_bindings.len(), 0.0);
         self.branch_values.resize(self.branch_bindings.len(), 0.0);
+        self.node_partials.resize(self.node_bindings.len(), 0.0);
+        self.branch_partials.resize(self.branch_bindings.len(), 0.0);
         Ok(())
     }
 
@@ -119,8 +130,115 @@ impl BehavioralVoltageSource {
     /// Evaluate the expression with current circuit solution.
     pub fn evaluate(&mut self, solution: &[Value], time: Value) -> Value {
         self.refresh_expression_inputs(solution);
+        self.evaluate_with_cached_inputs(time)
+    }
+
+    #[inline]
+    pub(crate) fn bound_solution_indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.node_bindings
+            .iter()
+            .chain(self.branch_bindings.iter())
+            .filter_map(|binding| *binding)
+    }
+
+    #[inline]
+    fn evaluate_with_cached_inputs(&mut self, time: Value) -> Value {
         let ctx = Context::transient(&self.node_values, &self.branch_values, time);
         self.vm.execute(&self.program, &ctx)
+    }
+
+    #[inline]
+    fn derivative_step(base: Value) -> Value {
+        DERIVATIVE_ABS_STEP + DERIVATIVE_REL_STEP * base.abs().max(1.0)
+    }
+
+    #[inline]
+    fn estimate_node_partial(&mut self, idx: usize, f0: Value, time: Value) -> Value {
+        let base = self.node_values[idx];
+        let h = Self::derivative_step(base);
+        self.node_values[idx] = base + h;
+        let fp = self.evaluate_with_cached_inputs(time);
+        self.node_values[idx] = base - h;
+        let fm = self.evaluate_with_cached_inputs(time);
+        self.node_values[idx] = base;
+
+        let mut df = if fp.is_finite() && fm.is_finite() {
+            (fp - fm) / (2.0 * h)
+        } else if fp.is_finite() && f0.is_finite() {
+            (fp - f0) / h
+        } else if fm.is_finite() && f0.is_finite() {
+            (f0 - fm) / h
+        } else {
+            0.0
+        };
+        if !df.is_finite() {
+            df = 0.0;
+        }
+        df
+    }
+
+    #[inline]
+    fn estimate_branch_partial(&mut self, idx: usize, f0: Value, time: Value) -> Value {
+        let base = self.branch_values[idx];
+        let h = Self::derivative_step(base);
+        self.branch_values[idx] = base + h;
+        let fp = self.evaluate_with_cached_inputs(time);
+        self.branch_values[idx] = base - h;
+        let fm = self.evaluate_with_cached_inputs(time);
+        self.branch_values[idx] = base;
+
+        let mut df = if fp.is_finite() && fm.is_finite() {
+            (fp - fm) / (2.0 * h)
+        } else if fp.is_finite() && f0.is_finite() {
+            (fp - f0) / h
+        } else if fm.is_finite() && f0.is_finite() {
+            (f0 - fm) / h
+        } else {
+            0.0
+        };
+        if !df.is_finite() {
+            df = 0.0;
+        }
+        df
+    }
+
+    fn linearize_expression(&mut self, solution: &[Value], time: Value) -> Value {
+        self.refresh_expression_inputs(solution);
+        let f0 = self.evaluate_with_cached_inputs(time);
+
+        if !f0.is_finite() {
+            self.node_partials.fill(0.0);
+            self.branch_partials.fill(0.0);
+            return 0.0;
+        }
+
+        for idx in 0..self.node_bindings.len() {
+            self.node_partials[idx] = if self.node_bindings[idx].is_some() {
+                self.estimate_node_partial(idx, f0, time)
+            } else {
+                0.0
+            };
+        }
+        for idx in 0..self.branch_bindings.len() {
+            self.branch_partials[idx] = if self.branch_bindings[idx].is_some() {
+                self.estimate_branch_partial(idx, f0, time)
+            } else {
+                0.0
+            };
+        }
+
+        let mut affine = f0;
+        for (idx, binding) in self.node_bindings.iter().enumerate() {
+            if let Some(global_idx) = binding {
+                affine -= self.node_partials[idx] * solution[*global_idx];
+            }
+        }
+        for (idx, binding) in self.branch_bindings.iter().enumerate() {
+            if let Some(global_idx) = binding {
+                affine -= self.branch_partials[idx] * solution[*global_idx];
+            }
+        }
+        if !affine.is_finite() { 0.0 } else { affine }
     }
 
     /// Stamp into the matrix (MNA voltage source with computed value)
@@ -132,7 +250,7 @@ impl BehavioralVoltageSource {
         num_nodes: usize,
         time: Value,
     ) {
-        let v_value = self.evaluate(solution, time);
+        let v_affine = self.linearize_expression(solution, time);
         let br = num_nodes + self.branch_ordinal;
         let np = self.node_pos;
         let nn = self.node_neg;
@@ -148,8 +266,27 @@ impl BehavioralVoltageSource {
             matrix.add(nn - 1, br - 1, -1.0);
         }
 
+        // Linearized behavioral dependency terms on branch equation row:
+        // V(np)-V(nn)-f(x) = 0 => row(br): ... + (-df/dx)*x = affine
+        for (idx, binding) in self.node_bindings.iter().enumerate() {
+            if let Some(global_idx) = binding {
+                let df = self.node_partials[idx];
+                if df != 0.0 {
+                    matrix.add(br - 1, *global_idx, -df);
+                }
+            }
+        }
+        for (idx, binding) in self.branch_bindings.iter().enumerate() {
+            if let Some(global_idx) = binding {
+                let df = self.branch_partials[idx];
+                if df != 0.0 {
+                    matrix.add(br - 1, *global_idx, -df);
+                }
+            }
+        }
+
         // RHS: branch equation
-        rhs[br - 1] = v_value;
+        rhs[br - 1] = v_affine;
     }
 }
 
@@ -174,6 +311,10 @@ pub struct BehavioralCurrentSource {
     node_values: Vec<Value>,
     /// Reused scratch storage for expression branch-current values
     branch_values: Vec<Value>,
+    /// Linearization partials d(expr)/d(node_values[idx])
+    node_partials: Vec<Value>,
+    /// Linearization partials d(expr)/d(branch_values[idx])
+    branch_partials: Vec<Value>,
 }
 
 impl BehavioralCurrentSource {
@@ -198,6 +339,8 @@ impl BehavioralCurrentSource {
             branch_bindings: Vec::new(),
             node_values: Vec::new(),
             branch_values: Vec::new(),
+            node_partials: Vec::new(),
+            branch_partials: Vec::new(),
         })
     }
 
@@ -240,6 +383,8 @@ impl BehavioralCurrentSource {
 
         self.node_values.resize(self.node_bindings.len(), 0.0);
         self.branch_values.resize(self.branch_bindings.len(), 0.0);
+        self.node_partials.resize(self.node_bindings.len(), 0.0);
+        self.branch_partials.resize(self.branch_bindings.len(), 0.0);
         Ok(())
     }
 
@@ -260,22 +405,166 @@ impl BehavioralCurrentSource {
     /// Evaluate the expression with current circuit solution.
     pub fn evaluate(&mut self, solution: &[Value], time: Value) -> Value {
         self.refresh_expression_inputs(solution);
+        self.evaluate_with_cached_inputs(time)
+    }
+
+    #[inline]
+    pub(crate) fn bound_solution_indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.node_bindings
+            .iter()
+            .chain(self.branch_bindings.iter())
+            .filter_map(|binding| *binding)
+    }
+
+    #[inline]
+    fn evaluate_with_cached_inputs(&mut self, time: Value) -> Value {
         let ctx = Context::transient(&self.node_values, &self.branch_values, time);
         self.vm.execute(&self.program, &ctx)
     }
 
-    /// Stamp into the RHS (current source stamps directly)
-    pub fn stamp(&mut self, rhs: &mut [Value], solution: &[Value], time: Value) {
-        let i_value = self.evaluate(solution, time);
+    #[inline]
+    fn derivative_step(base: Value) -> Value {
+        DERIVATIVE_ABS_STEP + DERIVATIVE_REL_STEP * base.abs().max(1.0)
+    }
+
+    #[inline]
+    fn estimate_node_partial(&mut self, idx: usize, f0: Value, time: Value) -> Value {
+        let base = self.node_values[idx];
+        let h = Self::derivative_step(base);
+        self.node_values[idx] = base + h;
+        let fp = self.evaluate_with_cached_inputs(time);
+        self.node_values[idx] = base - h;
+        let fm = self.evaluate_with_cached_inputs(time);
+        self.node_values[idx] = base;
+
+        let mut df = if fp.is_finite() && fm.is_finite() {
+            (fp - fm) / (2.0 * h)
+        } else if fp.is_finite() && f0.is_finite() {
+            (fp - f0) / h
+        } else if fm.is_finite() && f0.is_finite() {
+            (f0 - fm) / h
+        } else {
+            0.0
+        };
+        if !df.is_finite() {
+            df = 0.0;
+        }
+        df
+    }
+
+    #[inline]
+    fn estimate_branch_partial(&mut self, idx: usize, f0: Value, time: Value) -> Value {
+        let base = self.branch_values[idx];
+        let h = Self::derivative_step(base);
+        self.branch_values[idx] = base + h;
+        let fp = self.evaluate_with_cached_inputs(time);
+        self.branch_values[idx] = base - h;
+        let fm = self.evaluate_with_cached_inputs(time);
+        self.branch_values[idx] = base;
+
+        let mut df = if fp.is_finite() && fm.is_finite() {
+            (fp - fm) / (2.0 * h)
+        } else if fp.is_finite() && f0.is_finite() {
+            (fp - f0) / h
+        } else if fm.is_finite() && f0.is_finite() {
+            (f0 - fm) / h
+        } else {
+            0.0
+        };
+        if !df.is_finite() {
+            df = 0.0;
+        }
+        df
+    }
+
+    fn linearize_expression(&mut self, solution: &[Value], time: Value) -> Value {
+        self.refresh_expression_inputs(solution);
+        let f0 = self.evaluate_with_cached_inputs(time);
+
+        if !f0.is_finite() {
+            self.node_partials.fill(0.0);
+            self.branch_partials.fill(0.0);
+            return 0.0;
+        }
+
+        for idx in 0..self.node_bindings.len() {
+            self.node_partials[idx] = if self.node_bindings[idx].is_some() {
+                self.estimate_node_partial(idx, f0, time)
+            } else {
+                0.0
+            };
+        }
+        for idx in 0..self.branch_bindings.len() {
+            self.branch_partials[idx] = if self.branch_bindings[idx].is_some() {
+                self.estimate_branch_partial(idx, f0, time)
+            } else {
+                0.0
+            };
+        }
+
+        let mut affine = f0;
+        for (idx, binding) in self.node_bindings.iter().enumerate() {
+            if let Some(global_idx) = binding {
+                affine -= self.node_partials[idx] * solution[*global_idx];
+            }
+        }
+        for (idx, binding) in self.branch_bindings.iter().enumerate() {
+            if let Some(global_idx) = binding {
+                affine -= self.branch_partials[idx] * solution[*global_idx];
+            }
+        }
+        if !affine.is_finite() { 0.0 } else { affine }
+    }
+
+    /// Stamp linearized behavioral current source into matrix and RHS.
+    pub fn stamp(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+        time: Value,
+    ) {
+        let i_affine = self.linearize_expression(solution, time);
         let np = self.node_pos;
         let nn = self.node_neg;
 
-        // Current source: current flows from n+ to n-
+        // Current source orientation: I flows from n+ to n-.
+        // Linearized form:
+        // I(x) ~= affine + sum(df/dx * x)
+        // KCL rows:
+        // row(n+) += -I(x), row(n-) += +I(x)
+        for (idx, binding) in self.node_bindings.iter().enumerate() {
+            if let Some(global_idx) = binding {
+                let df = self.node_partials[idx];
+                if df != 0.0 {
+                    if np > 0 {
+                        matrix.add(np - 1, *global_idx, df);
+                    }
+                    if nn > 0 {
+                        matrix.add(nn - 1, *global_idx, -df);
+                    }
+                }
+            }
+        }
+        for (idx, binding) in self.branch_bindings.iter().enumerate() {
+            if let Some(global_idx) = binding {
+                let df = self.branch_partials[idx];
+                if df != 0.0 {
+                    if np > 0 {
+                        matrix.add(np - 1, *global_idx, df);
+                    }
+                    if nn > 0 {
+                        matrix.add(nn - 1, *global_idx, -df);
+                    }
+                }
+            }
+        }
+
         if np > 0 {
-            rhs[np - 1] -= i_value;
+            rhs[np - 1] -= i_affine;
         }
         if nn > 0 {
-            rhs[nn - 1] += i_value;
+            rhs[nn - 1] += i_affine;
         }
     }
 }
@@ -336,7 +625,7 @@ impl BehavioralSources {
             vs.stamp(matrix, rhs, solution, num_nodes, time);
         }
         for cs in &mut self.current_sources {
-            cs.stamp(rhs, solution, time);
+            cs.stamp(matrix, rhs, solution, time);
         }
     }
 }
@@ -401,6 +690,106 @@ mod tests {
             err.contains("unknown node") || err.contains("unknown branch"),
             "unexpected bind error: {}",
             err
+        );
+    }
+
+    #[test]
+    fn test_behavioral_current_stamp_linearization_signs_match_newton_form() {
+        let mut bcs = BehavioralCurrentSource::new("B1".to_string(), 1, 0, "V(n1)")
+            .expect("valid expression should parse");
+        bcs.bind_references(|name| (name == "n1").then_some(1), |_| None)
+            .expect("binding should resolve node reference");
+
+        let mut matrix =
+            StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).expect("valid 1x1 topology");
+        let idx = matrix.get_index(0, 0).expect("matrix entry missing");
+        let mut rhs = vec![0.0];
+        let solution = [0.25];
+
+        bcs.stamp(&mut matrix, &mut rhs, &solution, 0.0);
+
+        let jac = matrix.values_mut()[idx.0];
+        assert!(
+            (jac - 1.0).abs() < 1e-6,
+            "expected +dI/dV at np row, got {}",
+            jac
+        );
+        assert!(
+            rhs[0].abs() < 1e-9,
+            "expected zero affine RHS for I=V linear source, got {}",
+            rhs[0]
+        );
+    }
+
+    #[test]
+    fn test_behavioral_current_stamp_linearization_affine_term() {
+        let mut bcs = BehavioralCurrentSource::new("B1".to_string(), 1, 0, "sqr(V(n1))")
+            .expect("valid expression should parse");
+        bcs.bind_references(|name| (name == "n1").then_some(1), |_| None)
+            .expect("binding should resolve node reference");
+
+        let mut matrix =
+            StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).expect("valid 1x1 topology");
+        let idx = matrix.get_index(0, 0).expect("matrix entry missing");
+        let mut rhs = vec![0.0];
+        let solution = [0.4];
+
+        bcs.stamp(&mut matrix, &mut rhs, &solution, 0.0);
+
+        let jac = matrix.values_mut()[idx.0];
+        let expected_didv = 0.8;
+        let expected_ieq = 0.16 - expected_didv * 0.4; // ieq = I - dI/dV * V = -0.16
+        let expected_rhs = -expected_ieq; // np row contribution
+        assert!(
+            (jac - expected_didv).abs() < 1e-4,
+            "expected dI/dV ~ {}, got {}",
+            expected_didv,
+            jac
+        );
+        assert!(
+            (rhs[0] - expected_rhs).abs() < 1e-4,
+            "expected affine RHS ~ {}, got {}",
+            expected_rhs,
+            rhs[0]
+        );
+    }
+
+    #[test]
+    fn test_behavioral_voltage_stamp_linearization_terms() {
+        let mut bvs = BehavioralVoltageSource::new("B1".to_string(), 2, 0, 1, "2*V(ctrl)")
+            .expect("valid expression should parse");
+        bvs.bind_references(|name| (name == "ctrl").then_some(1), |_| None)
+            .expect("binding should resolve node reference");
+
+        // 2 nodes + 1 branch = matrix size 3.
+        let mut matrix = StaticMatrix::from_triplets(
+            3,
+            3,
+            &[
+                (2, 1, 0.0), // branch equation row to output node
+                (1, 2, 0.0), // output node row to branch current
+                (2, 0, 0.0), // derivative term dVexpr/dV(ctrl)
+            ],
+        )
+        .expect("valid topology for behavioral voltage source");
+        let idx_deriv = matrix
+            .get_index(2, 0)
+            .expect("missing derivative stamp entry");
+        let mut rhs = vec![0.0; 3];
+        let solution = [0.5, 0.0, 0.0];
+
+        bvs.stamp(&mut matrix, &mut rhs, &solution, 2, 0.0);
+
+        let deriv = matrix.values_mut()[idx_deriv.0];
+        assert!(
+            (deriv + 2.0).abs() < 1e-4,
+            "expected branch row coupling -dVexpr/dV(ctrl)=-2, got {}",
+            deriv
+        );
+        assert!(
+            rhs[2].abs() < 1e-9,
+            "expected zero affine RHS for Vexpr=2*V(ctrl) at expansion point, got {}",
+            rhs[2]
         );
     }
 

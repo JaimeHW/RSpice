@@ -235,6 +235,37 @@ impl StaticMatrix {
         Ok(residual_inf)
     }
 
+    /// Compute raw residual vector `A*x - b`.
+    pub fn residual_vector(
+        &self,
+        solution: &[Value],
+        rhs: &[Value],
+    ) -> Result<Vec<Value>, SolverError> {
+        if solution.len() != self.ncols || rhs.len() != self.nrows {
+            return Err(SolverError::InvalidCircuit(
+                "Residual vector size mismatch".to_string(),
+            ));
+        }
+
+        let mut ax = vec![0.0; self.nrows];
+        for col in 0..self.ncols {
+            let x = solution[col];
+            if x == 0.0 {
+                continue;
+            }
+            for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
+                let row = self.row_indices[idx];
+                ax[row] += self.values[idx] * x;
+            }
+        }
+
+        for row in 0..self.nrows {
+            ax[row] -= rhs[row];
+        }
+
+        Ok(ax)
+    }
+
     /// Convert to faer SparseColMat (borrows values, no allocation)
     fn to_sparse_col_mat(&self) -> SparseColMat<usize, Value> {
         let symbolic = SymbolicSparseColMat::new_checked(
