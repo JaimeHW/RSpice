@@ -344,8 +344,7 @@ impl Mosfet {
                     }
                 }
                 if gamma_explicit.is_none() && self.cox > 0.0 && self.cox.is_finite() {
-                    let gamma_derived =
-                        (2.0 * Q_E * EPS_SI_REL * EPS0 * nsub_m3).sqrt() / self.cox;
+                    let gamma_derived = (2.0 * Q_E * EPS_SI_REL * EPS0 * nsub_m3).sqrt() / self.cox;
                     if gamma_derived.is_finite() && gamma_derived >= 0.0 {
                         self.gamma = gamma_derived;
                     }
@@ -1078,7 +1077,11 @@ impl Mosfet {
     }
 
     fn gm_forward(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
-        let p = if self.level == 6 { 1.0 } else { self.polarity() };
+        let p = if self.level == 6 {
+            1.0
+        } else {
+            self.polarity()
+        };
         let vgs_eff = p * vgs;
         let _vds_eff = smooth_positive(p * vds, VDS_SMOOTHING);
         let vth = self.vth(vbs);
@@ -1118,7 +1121,11 @@ impl Mosfet {
     }
 
     fn gds_forward(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
-        let p = if self.level == 6 { 1.0 } else { self.polarity() };
+        let p = if self.level == 6 {
+            1.0
+        } else {
+            self.polarity()
+        };
         let vgs_eff = p * vgs;
         let vds_eff = smooth_positive(p * vds, VDS_SMOOTHING);
         let vth = self.vth(vbs);
@@ -1159,7 +1166,11 @@ impl Mosfet {
     }
 
     fn gmb_forward(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
-        let p = if self.level == 6 { 1.0 } else { self.polarity() };
+        let p = if self.level == 6 {
+            1.0
+        } else {
+            self.polarity()
+        };
         let vbs_eff = p * vbs;
 
         // gmb = -gm * (gamma / (2 * sqrt(phi - Vbs)))
@@ -1262,7 +1273,6 @@ impl NonlinearDevice for Mosfet {
         // Stamp equivalent current source
         matrix.stamp_rhs(self.node_drain, -id_eq);
         matrix.stamp_rhs(self.node_source, id_eq);
-
     }
 
     fn is_converged(&self, tolerance: Value) -> bool {
@@ -1313,7 +1323,11 @@ mod tests {
         let m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0).with_params(&params);
         assert!((m.u0 - 575.0).abs() < 1e-12);
         // Expected order from U0*COX with TOX=0.11um is around 1.8e-5 A/V^2.
-        assert!(m.kp > 1.5e-5 && m.kp < 2.2e-5, "unexpected derived KP={}", m.kp);
+        assert!(
+            m.kp > 1.5e-5 && m.kp < 2.2e-5,
+            "unexpected derived KP={}",
+            m.kp
+        );
     }
 
     #[test]
@@ -1323,7 +1337,11 @@ mod tests {
         params.insert("TOX".to_string(), 0.11e-6);
 
         let m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0).with_params(&params);
-        assert!(m.phi > 0.5 && m.phi < 0.8, "unexpected derived PHI={}", m.phi);
+        assert!(
+            m.phi > 0.5 && m.phi < 0.8,
+            "unexpected derived PHI={}",
+            m.phi
+        );
         assert!(
             m.gamma > 0.6 && m.gamma < 1.2,
             "unexpected derived GAMMA={}",
@@ -1712,5 +1730,4 @@ mod tests {
             "Level-6 PMOS should remain finite at Vgs=0, got Id={id}"
         );
     }
-
 }

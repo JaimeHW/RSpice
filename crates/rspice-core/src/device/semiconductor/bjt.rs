@@ -207,11 +207,21 @@ impl Bjt {
         if let Some(&v) = params.get("CJE") {
             self.cje = v;
         }
+        if let Some(&v) = params.get("CJEP") {
+            self.cje += v.max(0.0);
+        }
         if let Some(&v) = params.get("MJE") {
             self.mje = v;
         }
         if let Some(&v) = params.get("CJC") {
             self.cjc = v;
+        }
+        if let Some(&v) = params.get("CJCP") {
+            // VBIC's CJCP is collector-substrate capacitance. In the current
+            // 3-terminal BJT abstraction (no explicit substrate node), couple a
+            // small fraction into Cbc to approximate startup charge loading
+            // without over-damping collector dynamics.
+            self.cjc += 0.215 * v.max(0.0);
         }
         if let Some(&v) = params.get("MJC") {
             self.mjc = v;
@@ -767,6 +777,21 @@ mod tests {
         assert_eq!(q.tf, 1e-9);
         assert_eq!(q.tr, 10e-9);
         assert_eq!(q.ikf, 0.05);
+    }
+
+    #[test]
+    fn test_bjt_vbic_extrinsic_caps_are_accumulated() {
+        use std::collections::HashMap;
+
+        let mut params = HashMap::new();
+        params.insert("CJE".to_string(), 1e-13);
+        params.insert("CJEP".to_string(), 2e-13);
+        params.insert("CJC".to_string(), 3e-13);
+        params.insert("CJCP".to_string(), 4e-13);
+
+        let q = Bjt::new_npn("Q1".to_string(), 2, 1, 0).with_params(&params);
+        assert!((q.cje - 3e-13).abs() < 1e-20);
+        assert!((q.cjc - 3.86e-13).abs() < 1e-20);
     }
 
     // =========================================================================
