@@ -2193,12 +2193,13 @@ impl Jfet {
         let pol = self.jfet_type.polarity();
         let p = &self.params;
 
-        let vgs_int = pol * vgs;
+        let mut vgs_int = pol * vgs;
         let mut vds_int = pol * vds;
         let mut inverse = false;
         if vds_int < 0.0 {
-            // ngspice HFET level-5 evaluates reverse Vds by flipping channel
-            // current sign while keeping the controlling gate branch on Vgs.
+            // Reverse branch: evaluate the forward model with swapped channel control
+            // (Vgs <- Vgd) and map Jacobian terms back to the original orientation.
+            vgs_int -= vds_int;
             vds_int = -vds_int;
             inverse = true;
         }
@@ -2310,7 +2311,7 @@ impl Jfet {
         let gm_fwd = g_total * delvgtvgs;
         let gds_fwd = delidvds + g_total * sigma;
         let (mut ids, mut gm, mut gds) = if inverse {
-            (-ids_fwd, gm_fwd, gds_fwd)
+            (-ids_fwd, -gm_fwd, gm_fwd + gds_fwd)
         } else {
             (ids_fwd, gm_fwd, gds_fwd)
         };
@@ -4017,6 +4018,49 @@ mod tests {
             (gds_rev - (gm_swapped + gds_swapped)).abs()
                 <= tol * (gm_swapped + gds_swapped).abs().max(1.0),
             "reverse gds should match swapped-orientation mapping"
+        );
+    }
+
+    #[test]
+    fn test_hfet_calculate_reverse_vds_transform_matches_swapped_orientation_for_pjf() {
+        use std::collections::HashMap;
+
+        let mut model = HashMap::new();
+        model.insert("VT0".to_string(), 0.3);
+        model.insert("ETA".to_string(), 1.32);
+        model.insert("SIGMA0".to_string(), 0.04);
+        model.insert("VSIGMA".to_string(), 0.1);
+        model.insert("VSIGMAT".to_string(), 0.3);
+        model.insert("MU".to_string(), 0.385);
+        model.insert("VS".to_string(), 1.5e5);
+        model.insert("NMAX".to_string(), 6e15);
+        model.insert("M".to_string(), 2.57);
+        model.insert("LAMBDA".to_string(), 0.17);
+
+        let z = Jfet::pjf("Z1", 1, 2, 0)
+            .enable_hfet_model()
+            .with_model_params(&model)
+            .with_instance_params(&[("W".to_string(), 10e-6), ("L".to_string(), 1e-6)]);
+
+        let vgs = 0.0;
+        let vds = 0.3;
+        let (ids_rev, gm_rev, gds_rev) = z.calculate(vgs, vds, 300.0);
+        let (ids_swapped, gm_swapped, gds_swapped) = z.calculate(vgs - vds, -vds, 300.0);
+        assert!(ids_rev.is_finite() && gm_rev.is_finite() && gds_rev.is_finite());
+
+        let tol = 1e-9;
+        assert!(
+            (ids_rev + ids_swapped).abs() <= tol * ids_swapped.abs().max(1.0),
+            "reverse Ids should match swapped-orientation mapping for PJF"
+        );
+        assert!(
+            (gm_rev + gm_swapped).abs() <= tol * gm_swapped.abs().max(1.0),
+            "reverse gm should match swapped-orientation mapping for PJF"
+        );
+        assert!(
+            (gds_rev - (gm_swapped + gds_swapped)).abs()
+                <= tol * (gm_swapped + gds_swapped).abs().max(1.0),
+            "reverse gds should match swapped-orientation mapping for PJF"
         );
     }
 
