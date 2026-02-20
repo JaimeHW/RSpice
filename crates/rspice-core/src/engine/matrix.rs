@@ -140,14 +140,15 @@ impl Engine {
             }
         }
 
-        // MOSFET stamps (4-terminal but only D, S rows with D, G, S, B columns)
+        // MOSFET stamps.
+        // Include full 4x4 terminal coupling so transient overlap-capacitance
+        // companions (Cgs/Cgd/Cgb) can stamp gate-row entries safely.
         for mosfet in &circuit.mosfets.devices {
             let d = mosfet.node_drain;
             let g = mosfet.node_gate;
             let s = mosfet.node_source;
             let b = mosfet.node_bulk;
-            // Drain and Source rows, all columns
-            for &row in &[d, s] {
+            for &row in &[d, g, s, b] {
                 for &col in &[d, g, s, b] {
                     if row > 0 && col > 0 {
                         triplets.push((row - 1, col - 1, 0.0));

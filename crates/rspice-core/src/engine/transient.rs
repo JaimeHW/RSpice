@@ -607,8 +607,13 @@ impl Engine {
 
     #[inline]
     fn jfet_branch_voltages(jfet: &crate::device::Jfet, voltages: &[Value]) -> (Value, Value) {
-        if let Some((vgs, vgd, _vds)) = jfet.internal_branch_state_voltages() {
-            return (vgs, vgd);
+        if matches!(
+            jfet.params.channel_model,
+            crate::device::JfetChannelModel::Hfet1
+        ) {
+            if let Some((vgs, vgd, _vds)) = jfet.internal_branch_state_voltages() {
+                return (vgs, vgd);
+            }
         }
         let vg = Self::node_voltage(voltages, jfet.gate);
         let vd = Self::node_voltage(voltages, jfet.drain);
@@ -621,11 +626,16 @@ impl Engine {
         jfet: &crate::device::Jfet,
         voltages: &[Value],
     ) -> (Value, Value) {
-        // Drive charge-history updates from the device's internal branch state
-        // whenever available. This mirrors ngspice HFET/MESA use of vgspp/vgdpp
-        // rather than raw terminal deltas.
-        if let Some((vgs, vgd, _vds)) = jfet.internal_branch_state_voltages() {
-            return (vgs, vgd);
+        // For HFET/MESA models, drive charge-history updates from limited internal
+        // branch state (ngspice-compatible vgspp/vgdpp behavior). For legacy
+        // Shichman-Hodges JFETs, use raw terminal deltas.
+        if matches!(
+            jfet.params.channel_model,
+            crate::device::JfetChannelModel::Hfet1
+        ) {
+            if let Some((vgs, vgd, _vds)) = jfet.internal_branch_state_voltages() {
+                return (vgs, vgd);
+            }
         }
 
         let vg = Self::node_voltage(voltages, jfet.gate);
@@ -1407,6 +1417,11 @@ impl Engine {
 
         let num_nodes = circuit.num_nodes();
         let size = circuit.matrix_size();
+        let requires_conservative_nonlinear_limiting = circuit.has_physical_nonlinear_devices();
+        let enforce_force_candidate_safety =
+            requires_conservative_nonlinear_limiting || circuit.has_xspice_devices();
+        let is_strictly_linear_transient =
+            !circuit.has_nonlinear_devices() && !circuit.has_xspice_devices();
 
         // Initialize timestep controller.
         // BJT-heavy decks (notably VBIC regression circuits) need a smaller startup
@@ -1777,14 +1792,15 @@ impl Engine {
                             }
                         }
 
-                        // Apply Newton damping to node voltages every iteration.
-                        // This keeps transient NR inside a trust region in stiff nonlinear zones
-                        // (e.g., BJT turn-on) and mirrors commercial solver stabilization.
-                        for i in 0..num_nodes {
-                            let old = new_solution[i];
-                            let delta = sol[i] - old;
-                            if delta.is_finite() && delta.abs() > newton_step_delta_limit {
-                                sol[i] = old + delta.signum() * newton_step_delta_limit;
+                        if requires_conservative_nonlinear_limiting {
+                            // Trust-region damping is critical for stiff semiconductor
+                            // nonlinearities, but it should not throttle linear decks.
+                            for i in 0..num_nodes {
+                                let old = new_solution[i];
+                                let delta = sol[i] - old;
+                                if delta.is_finite() && delta.abs() > newton_step_delta_limit {
+                                    sol[i] = old + delta.signum() * newton_step_delta_limit;
+                                }
                             }
                         }
 
@@ -1793,6 +1809,14 @@ impl Engine {
                         if has_bad_values {
                             new_solution = sol;
                             continue;
+                        }
+
+                        if is_strictly_linear_transient {
+                            // A purely linear deck does not need Newton fixed-point
+                            // iterations: one direct solve per timestep is exact.
+                            new_solution = sol;
+                            converged = true;
+                            break;
                         }
 
                         let voltage_converged = self.voltage_convergence_met(&new_solution, &sol);
@@ -1898,7 +1922,11 @@ impl Engine {
                         num_nodes,
                     );
 
-                    if unbounded_force_candidate || !had_solver_candidate || stale_force_candidate {
+                    if enforce_force_candidate_safety
+                        && (unbounded_force_candidate
+                            || !had_solver_candidate
+                            || stale_force_candidate)
+                    {
                         stale_accept_count += 1;
                         let boosted = (dt * 4.0).min(max_step);
                         if boosted > dt {
@@ -2028,7 +2056,11 @@ impl Engine {
             }
 
             // Check LTE for physics accuracy
-            let (lte, accept) = lte_estimator.estimate(&new_solution, dt);
+            let (lte, accept) = if is_strictly_linear_transient {
+                (0.0, true)
+            } else {
+                lte_estimator.estimate(&new_solution, dt)
+            };
             if !accept {
                 retry_count += 1;
                 trap_order = 1;
@@ -2058,7 +2090,11 @@ impl Engine {
                         num_nodes,
                     );
 
-                    if unbounded_force_candidate || !had_solver_candidate || stale_force_candidate {
+                    if enforce_force_candidate_safety
+                        && (unbounded_force_candidate
+                            || !had_solver_candidate
+                            || stale_force_candidate)
+                    {
                         stale_accept_count += 1;
                         let boosted = (dt * 4.0).min(max_step);
                         if boosted > dt {
@@ -2205,8 +2241,16 @@ impl Engine {
             // CRITICAL: Grow timestep back after successful convergence
             // This prevents staying stuck at minimum timestep after force-accepts
             // LTE estimator recommends scale based on error - apply it to timestep
-            let (lte, _) = lte_estimator.estimate(&new_solution, dt);
-            let scale = lte_estimator.recommend_scale(lte);
+            let (lte, _) = if is_strictly_linear_transient {
+                (0.0, true)
+            } else {
+                lte_estimator.estimate(&new_solution, dt)
+            };
+            let scale = if is_strictly_linear_transient {
+                1.0
+            } else {
+                lte_estimator.recommend_scale(lte)
+            };
             if scale > 1.0 {
                 // Grow timestep gradually (limit to 1.5x per successful step)
                 let new_dt = (dt * scale.min(1.5)).min(max_step);
@@ -2496,6 +2540,34 @@ mod abort_tests {
         let vgs_raw = voltages[1] - voltages[2];
         let vgd_raw = voltages[1] - voltages[0];
 
+        assert!((vgs_charge - vgs_raw).abs() < 1e-15);
+        assert!((vgd_charge - vgd_raw).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_jfet_branch_voltage_helpers_shichman_use_raw_terminals_even_with_internal_state() {
+        use crate::device::NonlinearDevice;
+
+        let mut z = crate::device::Jfet::njf("Z1", 1, 2, 3);
+        let stale_voltages = [0.0, 1.0, 0.0];
+        z.update(&stale_voltages);
+
+        let query_voltages = [0.4, -0.2, -0.6];
+        let vgs_raw = query_voltages[1] - query_voltages[2];
+        let vgd_raw = query_voltages[1] - query_voltages[0];
+        let (vgs_internal, vgd_internal, _) = z
+            .internal_branch_state_voltages()
+            .expect("expected finite internal branch state");
+        assert!(
+            (vgs_internal - vgs_raw).abs() > 1e-6 || (vgd_internal - vgd_raw).abs() > 1e-6,
+            "test setup requires stale internal branch state"
+        );
+
+        let (vgs_eval, vgd_eval) = Engine::jfet_branch_voltages(&z, &query_voltages);
+        let (vgs_charge, vgd_charge) = Engine::jfet_charge_branch_voltages(&z, &query_voltages);
+
+        assert!((vgs_eval - vgs_raw).abs() < 1e-15);
+        assert!((vgd_eval - vgd_raw).abs() < 1e-15);
         assert!((vgs_charge - vgs_raw).abs() < 1e-15);
         assert!((vgd_charge - vgd_raw).abs() < 1e-15);
     }
