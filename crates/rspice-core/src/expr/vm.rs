@@ -371,7 +371,7 @@ fn table_interpolate_from_args(x: Value, args: &[Value]) -> Value {
             args[prev_idx + 1],
             last_x,
             last_y,
-            last_y,
+            args[prev_idx + 1],
         );
     }
 
@@ -533,5 +533,25 @@ mod tests {
         let mut vm = Vm::new();
         let result = vm.execute(&program, &Context::dc(&[], &[]));
         assert!((result - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_vm_table_duplicate_terminal_x_extrapolates_from_previous_y() {
+        let mut program = CompiledExpr::new();
+        // When the last two x values are identical, high-end extrapolation should
+        // stay on the previous y plateau rather than jumping to the duplicate y.
+        program.instructions = vec![
+            Instruction::PushConst(2.0),
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(10.0),
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(20.0),
+            Instruction::Table(7),
+        ];
+        let mut vm = Vm::new();
+        let result = vm.execute(&program, &Context::dc(&[], &[]));
+        assert!((result - 10.0).abs() < 1e-12);
     }
 }
