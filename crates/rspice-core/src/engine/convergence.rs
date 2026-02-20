@@ -665,12 +665,25 @@ impl Engine {
         matrix: &mut StaticMatrix,
         candidate: Vec<Value>,
         method_name: &str,
+        abort: &dyn AbortSignal,
     ) -> Option<Vec<Value>> {
         let suspicious = Self::is_suspicious_solution(&candidate);
         let validated =
             !suspicious && self.validate_nonlinear_solution(circuit, matrix, &candidate);
         if validated {
             return Some(candidate);
+        }
+
+        if !suspicious {
+            if let Some(refined) =
+                self.refine_fallback_candidate(circuit, matrix, &candidate, abort)
+            {
+                log::info!(
+                    "{} candidate required Newton polishing and is now accepted.",
+                    method_name
+                );
+                return Some(refined);
+            }
         }
 
         if suspicious {
@@ -693,6 +706,31 @@ impl Engine {
         }
 
         None
+    }
+
+    fn refine_fallback_candidate(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        candidate: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Option<Vec<Value>> {
+        let mut damping_state = NewtonDampingState::default();
+        let refinement_iterations = self.continuation_iteration_budget(4, 12);
+        let (refined, converged, _) = self.solve_scaled_nonlinear_corrector(
+            circuit,
+            matrix,
+            1.0,
+            candidate,
+            &mut damping_state,
+            refinement_iterations,
+            abort,
+        );
+        if converged || self.validate_nonlinear_solution(circuit, matrix, &refined) {
+            Some(refined)
+        } else {
+            None
+        }
     }
 
     fn validate_nonlinear_solution(
@@ -1226,6 +1264,7 @@ impl Engine {
                         matrix,
                         source_stepped.clone(),
                         "Source stepping",
+                        abort,
                     ) {
                         return Ok(candidate);
                     }
@@ -1264,6 +1303,7 @@ impl Engine {
                         matrix,
                         pseudo_solution.clone(),
                         "Pseudo-transient continuation",
+                        abort,
                     ) {
                         return Ok(candidate);
                     }
@@ -1292,6 +1332,7 @@ impl Engine {
                         matrix,
                         gmin_solution.clone(),
                         "GMIN stepping",
+                        abort,
                     ) {
                         return Ok(candidate);
                     }
@@ -1324,6 +1365,7 @@ impl Engine {
                 matrix,
                 arc_solution.clone(),
                 "Arc-length continuation",
+                abort,
             ) {
                 return Ok(candidate);
             }
