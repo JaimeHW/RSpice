@@ -166,7 +166,12 @@ pub enum ElementKind {
     Diode { model: String },
 
     /// BJT (NPN or PNP)
-    Bjt { model: String, bjt_type: BjtType },
+    Bjt {
+        model: String,
+        bjt_type: BjtType,
+        /// Instance parameters (e.g. `AREA`, `M`, `TEMP`).
+        instance_params: Vec<(String, Value)>,
+    },
 
     /// MOSFET
     Mosfet {

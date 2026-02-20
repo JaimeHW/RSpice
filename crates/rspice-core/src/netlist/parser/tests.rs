@@ -540,6 +540,30 @@ Q1 3 2 4 QSTD OFF
 }
 
 #[test]
+fn test_parse_bjt_with_instance_params() {
+    let netlist = r#"BJT Instance Params
+Q1 c b e qmod m=2 area=3 temp=85
+.END
+"#;
+    let result = parse_netlist(netlist).expect("netlist should parse");
+    match &result.elements[0].kind {
+        ElementKind::Bjt {
+            model,
+            instance_params,
+            ..
+        } => {
+            assert!(model.eq_ignore_ascii_case("qmod"));
+            let map: std::collections::HashMap<String, Value> =
+                instance_params.iter().cloned().collect();
+            assert!((map["M"] - 2.0).abs() < 1e-18);
+            assert!((map["AREA"] - 3.0).abs() < 1e-18);
+            assert!((map["TEMP"] - 85.0).abs() < 1e-18);
+        }
+        other => panic!("Expected BJT element, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_parse_mosfet() {
     let netlist = r#"MOSFET Test
 M1 3 2 1 0 NMOS

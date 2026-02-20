@@ -206,6 +206,7 @@ pub fn parse_bjt(
         kind: ElementKind::Bjt {
             model,
             bjt_type: BjtType::Npn, // Will be set from model
+            instance_params: Vec::new(),
         },
         nodes,
     });

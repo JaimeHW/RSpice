@@ -344,10 +344,19 @@ impl Engine {
 
                     circuit.diodes.add(diode);
                 }
-                ElementKind::Bjt { model, bjt_type } => {
+                ElementKind::Bjt {
+                    model,
+                    bjt_type,
+                    instance_params,
+                } => {
                     let collector = circuit.get_or_create_node(&element.nodes[0]);
                     let base = circuit.get_or_create_node(&element.nodes[1]);
                     let emitter = circuit.get_or_create_node(&element.nodes[2]);
+                    let substrate = element
+                        .nodes
+                        .get(3)
+                        .map(|n| circuit.get_or_create_node(n))
+                        .unwrap_or(0);
 
                     // Resolve polarity from model card when available.
                     let model_def = find_model_def(netlist, model);
@@ -399,6 +408,10 @@ impl Engine {
                             element.name, model
                         )));
                     }
+
+                    bjt = bjt.with_instance_params(instance_params);
+                    bjt.set_temperature(self.config.temperature);
+                    bjt.set_substrate_node(substrate);
 
                     circuit.bjts.add(bjt);
                 }

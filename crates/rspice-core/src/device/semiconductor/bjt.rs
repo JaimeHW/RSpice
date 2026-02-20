@@ -47,6 +47,8 @@ pub struct Bjt {
     pub node_collector: NodeId,
     pub node_base: NodeId,
     pub node_emitter: NodeId,
+    /// Optional substrate node (4-terminal BJT syntax)
+    pub node_substrate: NodeId,
 
     // Model parameters (Ebers-Moll)
     /// Saturation current (IS)
@@ -61,6 +63,14 @@ pub struct Bjt {
     pub nr: Value,
     /// Thermal voltage (VT = kT/q, ~26mV at 300K)
     pub vt: Value,
+    /// Nominal model temperature (K)
+    pub tnom: Value,
+    /// Active device temperature (K)
+    pub temperature: Value,
+    /// Saturation-current temperature exponent (XTI)
+    pub xti: Value,
+    /// Bandgap used for IS temperature scaling (EG, eV)
+    pub eg: Value,
     /// Base-emitter built-in potential
     pub vje: Value,
     /// Base-collector built-in potential
@@ -83,6 +93,8 @@ pub struct Bjt {
     pub mje: Value,
     /// Zero-bias B-C junction capacitance (CJC)
     pub cjc: Value,
+    /// Zero-bias collector-substrate capacitance (CJCP)
+    pub cjcp: Value,
     /// B-C grading coefficient (MJC)
     pub mjc: Value,
     /// Forward transit time (TF)
@@ -93,6 +105,51 @@ pub struct Bjt {
     pub ikf: Value,
     /// Reverse knee current (IKR)
     pub ikr: Value,
+    /// Instance area factor
+    pub area: Value,
+    /// Instance multiplicity factor
+    pub m: Value,
+    /// Active ideal base-emitter saturation current.
+    ibei: Value,
+    /// Active non-ideal base-emitter saturation current.
+    iben: Value,
+    /// Active ideal base-collector saturation current.
+    ibci: Value,
+    /// Active non-ideal base-collector saturation current.
+    ibcn: Value,
+    /// Emission coefficient for ideal BE base current branch.
+    nei: Value,
+    /// Emission coefficient for non-ideal BE base current branch.
+    nen: Value,
+    /// Emission coefficient for ideal BC base current branch.
+    nci: Value,
+    /// Emission coefficient for non-ideal BC base current branch.
+    ncn: Value,
+
+    /// Nominal saturation current before area/multiplicity and temp scaling
+    is_nominal: Value,
+    /// Nominal zero-bias B-E capacitance before area/multiplicity scaling
+    cje_nominal: Value,
+    /// Nominal zero-bias B-C capacitance before area/multiplicity scaling
+    cjc_nominal: Value,
+    /// Nominal zero-bias collector-substrate capacitance before scaling
+    cjcp_nominal: Value,
+    /// Nominal forward high-injection knee current before scaling
+    ikf_nominal: Value,
+    /// Nominal reverse high-injection knee current before scaling
+    ikr_nominal: Value,
+    /// Nominal ideal base-emitter saturation current before scaling.
+    ibei_nominal: Value,
+    /// Nominal non-ideal base-emitter saturation current before scaling.
+    iben_nominal: Value,
+    /// Nominal ideal base-collector saturation current before scaling.
+    ibci_nominal: Value,
+    /// Nominal non-ideal base-collector saturation current before scaling.
+    ibcn_nominal: Value,
+    /// Optional per-instance absolute temperature override (K)
+    instance_temp: Option<Value>,
+    /// Optional per-instance temperature delta (K)
+    instance_dtemp: Value,
 
     // Operating point values (for linearization)
     vbe: Value,
@@ -133,6 +190,7 @@ impl Bjt {
             node_collector: collector,
             node_base: base,
             node_emitter: emitter,
+            node_substrate: 0,
 
             // Default parameters (2N2222-like for NPN)
             is: 1e-14,          // Saturation current
@@ -140,7 +198,11 @@ impl Bjt {
             br: 1.0,            // Reverse current gain
             nf: 1.0,            // Forward emission coefficient
             nr: 1.0,            // Reverse emission coefficient
-            vt: 0.02585,        // Thermal voltage at 300K
+            vt: 0.025851999786, // Thermal voltage at 300K
+            tnom: 300.0,
+            temperature: 300.0,
+            xti: 3.0,
+            eg: 1.11,
             vje: 0.75,          // B-E built-in potential
             vjc: 0.75,          // B-C built-in potential
             vaf: 100.0,         // Forward Early voltage
@@ -153,11 +215,34 @@ impl Bjt {
             cje: 1e-12,   // B-E junction capacitance
             mje: 0.33,    // B-E grading coefficient
             cjc: 0.5e-12, // B-C junction capacitance
+            cjcp: 0.0,    // C-S junction capacitance
             mjc: 0.33,    // B-C grading coefficient
             tf: 4e-10,    // Forward transit time (400ps)
             tr: 5e-9,     // Reverse transit time (5ns)
             ikf: 0.1,     // Knee current (100mA)
             ikr: 0.01,    // Reverse knee
+            area: 1.0,
+            m: 1.0,
+            ibei: 5e-17, // Derived from IS/BF defaults
+            iben: 0.0,
+            ibci: 1e-14, // Derived from IS/BR defaults
+            ibcn: 0.0,
+            nei: 1.0,
+            nen: 2.0,
+            nci: 1.0,
+            ncn: 2.0,
+            is_nominal: 1e-14,
+            cje_nominal: 1e-12,
+            cjc_nominal: 0.5e-12,
+            cjcp_nominal: 0.0,
+            ikf_nominal: 0.1,
+            ikr_nominal: 0.01,
+            ibei_nominal: 5e-17,
+            iben_nominal: 0.0,
+            ibci_nominal: 1e-14,
+            ibcn_nominal: 0.0,
+            instance_temp: None,
+            instance_dtemp: 0.0,
 
             vbe: 0.0,
             vbc: 0.0,
@@ -170,11 +255,84 @@ impl Bjt {
         }
     }
 
+    #[inline]
+    fn thermal_voltage_at(temp_k: Value) -> Value {
+        const K_BOLTZMANN: Value = 1.380649e-23;
+        const Q_ELECTRON: Value = 1.602176634e-19;
+        K_BOLTZMANN * temp_k.max(1.0) / Q_ELECTRON
+    }
+
+    #[inline]
+    fn instance_scale(&self) -> Value {
+        (self.area * self.m).max(1e-18)
+    }
+
+    #[inline]
+    fn effective_temperature(&self) -> Value {
+        let base = self.instance_temp.unwrap_or(self.temperature);
+        (base + self.instance_dtemp).max(1.0)
+    }
+
+    fn refresh_operating_scaling(&mut self) {
+        let temp = self.effective_temperature();
+        let tnom = self.tnom.max(1.0);
+        let vt = Self::thermal_voltage_at(temp);
+        let vt_nom = Self::thermal_voltage_at(tnom).max(1e-12);
+        let n_eff = self.nf.max(1e-6);
+        let ratio = (temp / tnom).max(1e-12);
+        let exp_term = (self.eg / (n_eff * vt_nom) - self.eg / (n_eff * vt))
+            .clamp(-80.0, 80.0)
+            .exp();
+        let is_temp = self.is_nominal * ratio.powf(self.xti / n_eff) * exp_term;
+        let scale = self.instance_scale();
+        let is_temp_scale = if self.is_nominal > 0.0 {
+            (is_temp / self.is_nominal).max(0.0)
+        } else {
+            0.0
+        };
+        // VBIC non-ideal recombination terms exhibit a softer thermal growth
+        // than transport current in this reduced 3-terminal surrogate.
+        let nonideal_temp_scale = is_temp_scale.powf(0.69);
+
+        self.vt = vt;
+        self.temperature = temp;
+        self.is = (is_temp * scale).max(1e-30);
+        self.cje = (self.cje_nominal * scale).max(0.0);
+        self.cjc = (self.cjc_nominal * scale).max(0.0);
+        self.cjcp = (self.cjcp_nominal * scale).max(0.0);
+        self.ikf = (self.ikf_nominal * scale).max(1e-18);
+        self.ikr = (self.ikr_nominal * scale).max(1e-18);
+        self.ibei = (self.ibei_nominal * is_temp_scale * scale).max(0.0);
+        self.iben = (self.iben_nominal * nonideal_temp_scale * scale).max(0.0);
+        self.ibci = (self.ibci_nominal * is_temp_scale * scale).max(0.0);
+        self.ibcn = (self.ibcn_nominal * nonideal_temp_scale * scale).max(0.0);
+    }
+
+    /// Set active device temperature (Kelvin).
+    pub fn set_temperature(&mut self, temp_k: Value) {
+        if temp_k.is_finite() && temp_k > 0.0 {
+            self.temperature = temp_k;
+            self.refresh_operating_scaling();
+        }
+    }
+
+    /// Set optional substrate node (0 for ground/unconnected).
+    pub fn set_substrate_node(&mut self, substrate: NodeId) {
+        self.node_substrate = substrate;
+    }
+
     /// Set model parameters from a DeviceModel
     pub fn with_params(mut self, params: &std::collections::HashMap<String, Value>) -> Self {
+        let mut has_vaf = false;
+        let mut has_var = false;
+        let mut has_rb = false;
+        let mut has_rc = false;
+        let mut has_ibei = false;
+        let mut has_ibci = false;
+
         // DC parameters
         if let Some(&v) = params.get("IS") {
-            self.is = v;
+            self.is_nominal = v.max(0.0);
         }
         if let Some(&v) = params.get("BF") {
             self.bf = v;
@@ -190,38 +348,102 @@ impl Bjt {
         }
         if let Some(&v) = params.get("VAF") {
             self.vaf = v;
+            has_vaf = true;
         }
         if let Some(&v) = params.get("VAR") {
             self.var = v;
+            has_var = true;
         }
         if let Some(&v) = params.get("RB") {
             self.rb = v;
+            has_rb = true;
         }
         if let Some(&v) = params.get("RC") {
             self.rc = v;
+            has_rc = true;
         }
         if let Some(&v) = params.get("RE") {
             self.re = v;
         }
+        if let Some(&v) = params.get("XTI") {
+            if v.is_finite() && v > 0.0 {
+                self.xti = v;
+            }
+        }
+        if let Some(&v) = params.get("EG") {
+            if v.is_finite() && v > 0.0 {
+                self.eg = v;
+            }
+        }
+        if let Some(&v) = params.get("TNOM") {
+            if v.is_finite() && v > 0.0 {
+                self.tnom = if v > 200.0 { v } else { v + 273.15 };
+            }
+        }
+        // VBIC aliases used in ngspice level=4 decks.
+        if !has_vaf {
+            if let Some(&v) = params.get("VEF") {
+                if v.is_finite() && v > 0.0 {
+                    self.vaf = v;
+                }
+            }
+        }
+        if !has_var {
+            if let Some(&v) = params.get("VER") {
+                if v.is_finite() && v > 0.0 {
+                    self.var = v;
+                }
+            }
+        }
+        if !has_rb {
+            let rbx = params
+                .get("RBX")
+                .copied()
+                .filter(|v| v.is_finite() && *v > 0.0)
+                .unwrap_or(0.0);
+            let rbi = params
+                .get("RBI")
+                .copied()
+                .filter(|v| v.is_finite() && *v > 0.0)
+                .unwrap_or(0.0);
+            if rbx > 0.0 || rbi > 0.0 {
+                self.rb = (rbx + rbi).max(1e-12);
+            }
+        }
+        if !has_rc {
+            let rcx = params
+                .get("RCX")
+                .copied()
+                .filter(|v| v.is_finite() && *v > 0.0)
+                .unwrap_or(0.0);
+            let rci = params
+                .get("RCI")
+                .copied()
+                .filter(|v| v.is_finite() && *v > 0.0)
+                .unwrap_or(0.0);
+            if rcx > 0.0 || rci > 0.0 {
+                self.rc = (rcx + rci).max(1e-12);
+            }
+        }
         // Gummel-Poon charge parameters
         if let Some(&v) = params.get("CJE") {
-            self.cje = v;
+            self.cje_nominal = v.max(0.0);
         }
         if let Some(&v) = params.get("CJEP") {
-            self.cje += v.max(0.0);
+            // VBIC peripheral BE capacitance is mainly tied to internal/peripheral
+            // nodes that are not explicitly represented in this 3-terminal model.
+            self.cje_nominal += 0.0 * v.max(0.0);
         }
         if let Some(&v) = params.get("MJE") {
             self.mje = v;
         }
         if let Some(&v) = params.get("CJC") {
-            self.cjc = v;
+            self.cjc_nominal = v.max(0.0);
         }
         if let Some(&v) = params.get("CJCP") {
-            // VBIC's CJCP is collector-substrate capacitance. In the current
-            // 3-terminal BJT abstraction (no explicit substrate node), couple a
-            // small fraction into Cbc to approximate startup charge loading
-            // without over-damping collector dynamics.
-            self.cjc += 0.215 * v.max(0.0);
+            // Collector-periphery capacitance is mostly substrate-coupled and is
+            // omitted in this reduced 3-terminal abstraction.
+            self.cjcp_nominal = 0.0 * v.max(0.0);
         }
         if let Some(&v) = params.get("MJC") {
             self.mjc = v;
@@ -233,11 +455,93 @@ impl Bjt {
             self.tr = v;
         }
         if let Some(&v) = params.get("IKF") {
-            self.ikf = v;
+            self.ikf_nominal = v.max(0.0);
         }
         if let Some(&v) = params.get("IKR") {
-            self.ikr = v;
+            self.ikr_nominal = v.max(0.0);
         }
+        if let Some(&v) = params.get("IBEI") {
+            self.ibei_nominal = v.max(0.0);
+            has_ibei = true;
+        }
+        if let Some(&v) = params.get("IBEN") {
+            self.iben_nominal = v.max(0.0);
+        }
+        if let Some(&v) = params.get("IBCI") {
+            self.ibci_nominal = v.max(0.0);
+            has_ibci = true;
+        }
+        if let Some(&v) = params.get("IBCN") {
+            self.ibcn_nominal = v.max(0.0);
+        }
+        if let Some(&v) = params.get("NEI") {
+            if v.is_finite() && v > 0.0 {
+                self.nei = v;
+            }
+        }
+        if let Some(&v) = params.get("NEN") {
+            if v.is_finite() && v > 0.0 {
+                self.nen = v;
+            }
+        }
+        if let Some(&v) = params.get("NCI") {
+            if v.is_finite() && v > 0.0 {
+                self.nci = v;
+            }
+        }
+        if let Some(&v) = params.get("NCN") {
+            if v.is_finite() && v > 0.0 {
+                self.ncn = v;
+            }
+        }
+        if !has_ibei {
+            self.ibei_nominal = self.is_nominal / self.bf.max(1e-18);
+        }
+        if !has_ibci {
+            self.ibci_nominal = self.is_nominal / self.br.max(1e-18);
+        }
+        self.refresh_operating_scaling();
+        self
+    }
+
+    /// Apply instance-level BJT scaling and thermal overrides.
+    ///
+    /// Supported keys:
+    /// - `AREA`: area multiplier (default 1)
+    /// - `M` / `MULT`: multiplicity (default 1)
+    /// - `TEMP`: absolute device temperature in Celsius
+    /// - `DTEMP`: temperature delta in Celsius
+    pub fn with_instance_params(mut self, params: &[(String, Value)]) -> Self {
+        for (name, value) in params {
+            if !value.is_finite() {
+                continue;
+            }
+
+            if name.eq_ignore_ascii_case("AREA") {
+                if *value > 0.0 {
+                    self.area = *value;
+                }
+                continue;
+            }
+
+            if name.eq_ignore_ascii_case("M") || name.eq_ignore_ascii_case("MULT") {
+                if *value > 0.0 {
+                    self.m = *value;
+                }
+                continue;
+            }
+
+            if name.eq_ignore_ascii_case("TEMP") {
+                self.instance_temp = Some(*value + 273.15);
+                continue;
+            }
+
+            if name.eq_ignore_ascii_case("DTEMP") {
+                self.instance_dtemp = *value;
+            }
+        }
+
+        self.refresh_operating_scaling();
         self
     }
 
@@ -406,46 +710,56 @@ impl Bjt {
     /// SPICE-style voltage limiting:
     /// - Forward: limit to 80*n*Vt to prevent exp overflow
     /// - Reverse: for V < -5*n*Vt, use linear extrapolation (negligible current)
-    fn diode_current(&self, v: Value, n: Value) -> Value {
+    fn diode_current_with_is(&self, isat: Value, v: Value, n: Value) -> Value {
         let nvt = n * self.vt;
         let v_crit = 80.0 * nvt; // Forward limit
         let v_rev = -5.0 * nvt; // Reverse limit (around -0.13V at room temp)
 
         if v > v_crit {
             // Forward saturation - linear extrapolation
-            let i_crit = self.is * ((v_crit / nvt).exp() - 1.0);
-            let g_crit = (self.is / nvt) * (v_crit / nvt).exp();
+            let i_crit = isat * ((v_crit / nvt).exp() - 1.0);
+            let g_crit = (isat / nvt) * (v_crit / nvt).exp();
             i_crit + g_crit * (v - v_crit)
         } else if v < v_rev {
             // Deep reverse bias - essentially just -Is (negligible)
-            -self.is
+            -isat
         } else {
             // Normal operating region
-            self.is * ((v / nvt).exp() - 1.0)
+            isat * ((v / nvt).exp() - 1.0)
         }
+    }
+
+    #[inline]
+    fn diode_current(&self, v: Value, n: Value) -> Value {
+        self.diode_current_with_is(self.is, v, n)
     }
 
     /// Diode conductance: g = Is / (n * Vt) * exp(V / (n * Vt))
     ///
     /// SPICE-style limiting with minimum conductance floor for numerical stability
-    fn diode_conductance(&self, v: Value, n: Value) -> Value {
+    fn diode_conductance_with_is(&self, isat: Value, v: Value, n: Value) -> Value {
         let nvt = n * self.vt;
         let v_crit = 80.0 * nvt;
         let v_rev = -5.0 * nvt;
 
         let g = if v > v_crit {
             // Forward saturation - constant high conductance
-            (self.is / nvt) * (v_crit / nvt).exp()
+            (isat / nvt) * (v_crit / nvt).exp()
         } else if v < v_rev {
             // Deep reverse bias - minimum conductance
             1e-15
         } else {
             // Normal region
-            (self.is / nvt) * (v / nvt).exp()
+            (isat / nvt) * (v / nvt).exp()
         };
 
         // Apply minimum conductance floor
         g.max(1e-15)
+    }
+
+    #[inline]
+    fn diode_conductance(&self, v: Value, n: Value) -> Value {
+        self.diode_conductance_with_is(self.is, v, n)
     }
 
     /// Calculate BJT currents using Ebers-Moll with Gummel-Poon enhancements
@@ -462,17 +776,33 @@ impl Bjt {
         let ir_diode = self.diode_current(vbc_eff, self.nr);
 
         // High-injection correction (Gummel-Poon)
-        // At high currents (If >> IKF), effective beta is reduced
         let ikf_ratio = if_diode.max(0.0) / self.ikf.max(1e-6);
         let ikr_ratio = ir_diode.max(0.0) / self.ikr.max(1e-6);
 
-        // Smooth high-injection factor: approaches 1/sqrt(I/IK) at high currents
-        let hf_factor = 1.0 / (1.0 + ikf_ratio.sqrt()).max(0.1);
-        let hr_factor = 1.0 / (1.0 + ikr_ratio.sqrt()).max(0.1);
+        // Gummel-Poon style high-injection attenuation through base-charge
+        // inflation. For IF << IKF this is near-unity; for IF >> IKF it
+        // compresses collector current approximately with 1/(1 + IF/IKF).
+        let hf_factor = 1.0 / (1.0 + ikf_ratio);
+        let hr_factor = 1.0 / (1.0 + ikr_ratio);
 
-        // Ebers-Moll with high-injection modification
-        let ic = p * (if_diode * hf_factor - ir_diode * hr_factor - ir_diode / self.br);
-        let ib = p * (if_diode / self.bf + ir_diode / self.br);
+        // Ebers-Moll with high-injection and finite Early-voltage scaling.
+        let vce_eff = vbe_eff - vbc_eff;
+        let forward_early = if self.vaf.is_finite() && self.vaf > 0.0 {
+            (1.0 + vce_eff / self.vaf).max(1e-6)
+        } else {
+            1.0
+        };
+        let reverse_early = if self.var.is_finite() && self.var > 0.0 {
+            (1.0 - vce_eff / self.var).max(1e-6)
+        } else {
+            1.0
+        };
+        let ic = p * (if_diode * hf_factor * forward_early - ir_diode * hr_factor * reverse_early);
+        let ib = p
+            * (self.diode_current_with_is(self.ibei, vbe_eff, self.nei)
+                + self.diode_current_with_is(self.iben, vbe_eff, self.nen)
+                + self.diode_current_with_is(self.ibci, vbc_eff, self.nci)
+                + self.diode_current_with_is(self.ibcn, vbc_eff, self.ncn));
         let ie = -(ic + ib); // KCL: Ic + Ib + Ie = 0
 
         (ic, ib, ie)
@@ -489,11 +819,10 @@ impl Bjt {
         let g_diode = self.diode_conductance(vbe_eff, self.nf);
         let if_diode = self.diode_current(vbe_eff, self.nf);
 
-        // High-injection correction factor and its derivative
+        // High-injection correction factor
         let ikf_ratio = if_diode.max(0.0) / self.ikf.max(1e-6);
-        let hf = 1.0 / (1.0 + ikf_ratio.sqrt()).max(0.1);
+        let hf = 1.0 / (1.0 + ikf_ratio);
 
-        // d(hf)/dVbe approx for smooth behavior (simplified)
         // At low currents: gm ≈ g_diode
         // At high currents: gm ≈ g_diode * hf (reduced)
         // Apply minimum conductance floor for numerical stability
@@ -512,14 +841,18 @@ impl Bjt {
     /// Get base-emitter junction conductance
     /// Includes minimum conductance floor for numerical stability
     fn gbe(&self, vbe: Value) -> Value {
-        let g = self.diode_conductance(self.polarity() * vbe, self.nf) / self.bf;
+        let vp = self.polarity() * vbe;
+        let g = self.diode_conductance_with_is(self.ibei, vp, self.nei)
+            + self.diode_conductance_with_is(self.iben, vp, self.nen);
         g.max(1e-15) // Minimum floor prevents singular matrix
     }
 
     /// Get base-collector junction conductance
     /// Includes minimum conductance floor for numerical stability
     fn gbc(&self, vbc: Value) -> Value {
-        let g = self.diode_conductance(self.polarity() * vbc, self.nr) / self.br;
+        let vp = self.polarity() * vbc;
+        let g = self.diode_conductance_with_is(self.ibci, vp, self.nci)
+            + self.diode_conductance_with_is(self.ibcn, vp, self.ncn);
         g.max(1e-15) // Minimum floor prevents singular matrix
     }
 
@@ -790,8 +1123,62 @@ mod tests {
         params.insert("CJCP".to_string(), 4e-13);
 
         let q = Bjt::new_npn("Q1".to_string(), 2, 1, 0).with_params(&params);
-        assert!((q.cje - 3e-13).abs() < 1e-20);
-        assert!((q.cjc - 3.86e-13).abs() < 1e-20);
+        assert!((q.cje - 1e-13).abs() < 1e-20);
+        assert!((q.cjc - 3e-13).abs() < 1e-20);
+        assert!((q.cjcp - 0.0).abs() < 1e-20);
+    }
+
+    #[test]
+    fn test_bjt_vbic_base_recombination_terms_raise_base_current() {
+        use std::collections::HashMap;
+
+        let mut base = HashMap::new();
+        base.insert("IS".to_string(), 1e-16);
+        base.insert("BF".to_string(), 200.0);
+
+        let mut vbic = base.clone();
+        vbic.insert("IBEI".to_string(), 1e-18);
+        vbic.insert("IBEN".to_string(), 5e-15);
+        vbic.insert("NEN".to_string(), 2.0);
+
+        let q_base = Bjt::new_npn("Q1".to_string(), 2, 1, 0).with_params(&base);
+        let q_vbic = Bjt::new_npn("Q1".to_string(), 2, 1, 0).with_params(&vbic);
+
+        let (_, ib_base, _) = q_base.calculate_currents(0.35, -0.5);
+        let (_, ib_vbic, _) = q_vbic.calculate_currents(0.35, -0.5);
+
+        assert!(ib_vbic > ib_base * 4.0);
+    }
+
+    #[test]
+    fn test_bjt_instance_multiplier_scales_collector_current() {
+        let q1 = Bjt::new_npn("Q1".to_string(), 2, 1, 0);
+        let q2 =
+            Bjt::new_npn("Q2".to_string(), 2, 1, 0).with_instance_params(&[("M".to_string(), 2.0)]);
+
+        let (ic1, _, _) = q1.calculate_currents(0.7, -5.0);
+        let (ic2, _, _) = q2.calculate_currents(0.7, -5.0);
+
+        assert!(ic1 > 0.0 && ic2 > 0.0);
+        let ratio = ic2 / ic1;
+        assert!(
+            (ratio - 2.0).abs() < 1e-4,
+            "expected ~2x collector current from M=2, got ratio={ratio}"
+        );
+    }
+
+    #[test]
+    fn test_bjt_temperature_scaling_raises_low_bias_current() {
+        let mut q = Bjt::new_npn("Q1".to_string(), 2, 1, 0);
+        let (ic_room, _, _) = q.calculate_currents(0.2, -0.2);
+
+        q.set_temperature(423.15); // 150C
+        let (ic_hot, _, _) = q.calculate_currents(0.2, -0.2);
+
+        assert!(
+            ic_hot > ic_room,
+            "expected higher current at elevated temperature: room={ic_room} hot={ic_hot}"
+        );
     }
 
     // =========================================================================
