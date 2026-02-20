@@ -56,6 +56,9 @@ struct BjtTransientHistory {
     vbc_prev: Vec<Value>,
     vbc_prev_prev: Vec<Value>,
     ibc_prev: Vec<Value>,
+    vcs_prev: Vec<Value>,
+    vcs_prev_prev: Vec<Value>,
+    ics_prev: Vec<Value>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -756,20 +759,28 @@ impl Engine {
             vbc_prev: Vec::with_capacity(n),
             vbc_prev_prev: Vec::with_capacity(n),
             ibc_prev: Vec::with_capacity(n),
+            vcs_prev: Vec::with_capacity(n),
+            vcs_prev_prev: Vec::with_capacity(n),
+            ics_prev: Vec::with_capacity(n),
         };
 
         for bjt in &circuit.bjts.devices {
             let vc = Self::node_voltage(solution, bjt.node_collector);
             let vb = Self::node_voltage(solution, bjt.node_base);
             let ve = Self::node_voltage(solution, bjt.node_emitter);
+            let vs = Self::node_voltage(solution, bjt.node_substrate);
             let vbe = vb - ve;
             let vbc = vb - vc;
+            let vcs = vc - vs;
             history.vbe_prev.push(vbe);
             history.vbe_prev_prev.push(vbe);
             history.ibe_prev.push(0.0);
             history.vbc_prev.push(vbc);
             history.vbc_prev_prev.push(vbc);
             history.ibc_prev.push(0.0);
+            history.vcs_prev.push(vcs);
+            history.vcs_prev_prev.push(vcs);
+            history.ics_prev.push(0.0);
         }
 
         history
@@ -863,10 +874,18 @@ impl Engine {
         circuit: &crate::circuit::Circuit,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
+        method: IntegrationMethod,
+        trap_order: u8,
         dt: Value,
-        coeff: &CompanionCoefficients,
         history: &BjtTransientHistory,
     ) {
+        let effective_method = match method {
+            IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear if trap_order <= 1 => {
+                IntegrationMethod::BackwardEuler
+            }
+            _ => method,
+        };
+        let coeff = CompanionCoefficients::for_method(effective_method);
         for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
             let vbe = history.vbe_prev[idx];
             let vbc = history.vbc_prev[idx];
@@ -905,6 +924,29 @@ impl Engine {
                     rhs,
                     bjt.node_base,
                     bjt.node_collector,
+                    geq,
+                    ieq,
+                );
+            }
+
+            let ccs = bjt.cjcp;
+            if ccs.is_finite()
+                && ccs > 0.0
+                && bjt.node_collector != bjt.node_substrate
+            {
+                let geq = coeff.capacitor_geq(ccs, dt);
+                let ieq = coeff.capacitor_ieq(
+                    ccs,
+                    dt,
+                    history.vcs_prev[idx],
+                    history.vcs_prev_prev[idx],
+                    history.ics_prev[idx],
+                );
+                Self::stamp_two_terminal_companion(
+                    matrix,
+                    rhs,
+                    bjt.node_collector,
+                    bjt.node_substrate,
                     geq,
                     ieq,
                 );
@@ -1172,13 +1214,21 @@ impl Engine {
             );
         }
 
-        let coeff_update = CompanionCoefficients::for_method(method);
+        let effective_method = match method {
+            IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear if trap_order <= 1 => {
+                IntegrationMethod::BackwardEuler
+            }
+            _ => method,
+        };
+        let coeff_update = CompanionCoefficients::for_method(effective_method);
         for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
             let vc = Self::node_voltage(accepted_solution, bjt.node_collector);
             let vb = Self::node_voltage(accepted_solution, bjt.node_base);
             let ve = Self::node_voltage(accepted_solution, bjt.node_emitter);
+            let vs = Self::node_voltage(accepted_solution, bjt.node_substrate);
             let vbe = vb - ve;
             let vbc = vb - vc;
+            let vcs = vc - vs;
             let (cbe, cbc) = bjt.junction_capacitances(vbe, vbc);
 
             if cbe.is_finite() && cbe > 0.0 {
@@ -1219,6 +1269,30 @@ impl Engine {
                 bjt_history.vbc_prev_prev[idx] = bjt_history.vbc_prev[idx];
                 bjt_history.vbc_prev[idx] = vbc;
                 bjt_history.ibc_prev[idx] = 0.0;
+            }
+
+            let ccs = bjt.cjcp;
+            if ccs.is_finite()
+                && ccs > 0.0
+                && bjt.node_collector != bjt.node_substrate
+            {
+                let geq = coeff_update.capacitor_geq(ccs, dt);
+                let ieq = coeff_update.capacitor_ieq(
+                    ccs,
+                    dt,
+                    bjt_history.vcs_prev[idx],
+                    bjt_history.vcs_prev_prev[idx],
+                    bjt_history.ics_prev[idx],
+                );
+                let i_new = geq * vcs - ieq;
+                let v_old = bjt_history.vcs_prev[idx];
+                bjt_history.vcs_prev_prev[idx] = v_old;
+                bjt_history.vcs_prev[idx] = vcs;
+                bjt_history.ics_prev[idx] = i_new;
+            } else {
+                bjt_history.vcs_prev_prev[idx] = bjt_history.vcs_prev[idx];
+                bjt_history.vcs_prev[idx] = vcs;
+                bjt_history.ics_prev[idx] = 0.0;
             }
         }
 
@@ -1700,8 +1774,9 @@ impl Engine {
                     &circuit,
                     &mut matrix,
                     &mut rhs,
+                    current_method,
+                    step_trap_order,
                     dt,
-                    &coeff,
                     &bjt_history,
                 );
                 Self::stamp_jfet_transient_companions(
