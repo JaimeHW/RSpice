@@ -220,6 +220,10 @@ impl TestRunner {
         // Dynamic regression runs should track production transient behavior,
         // while keeping default ambient aligned with ngspice references.
         let mut config = SimulationConfig::default();
+        // Keep nonlinear solve robustness aligned with DC harness so transient
+        // comparisons reflect model behavior instead of iteration limits.
+        config.max_iterations = config.max_iterations.max(1200);
+        config.convergence_config = ConvergenceConfig::robust();
         // ngspice transient reference decks default to trapezoidal integration.
         // Fixing method here avoids TrapGear switching artifacts in waveform
         // comparisons while preserving production defaults elsewhere.
@@ -1117,9 +1121,10 @@ impl TestRunner {
         let engine = self.create_dynamic_engine();
         let max_step = tmax.unwrap_or_else(|| {
             if tstep > 0.0 {
-                // Respect .tran print-step as the default transient step cap
-                // when no explicit Tmax is provided.
-                tstep
+                // .tran print-step is an output interval, not an internal
+                // solver cap. Leave headroom for adaptive stepping unless
+                // an explicit Tmax is provided.
+                tstep * 32.0
             } else {
                 tstop / 100.0
             }

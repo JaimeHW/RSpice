@@ -253,7 +253,11 @@ impl BreakpointManager {
                 if proposed_dt >= time_to_bp {
                     // Force landing exactly on breakpoint
                     self.just_passed_breakpoint = false; // Will be set after solving at BP
-                    (time_to_bp.max(MIN_STEP_AFTER_BREAKPOINT), true)
+                    if time_to_bp < MIN_STEP_AFTER_BREAKPOINT {
+                        (time_to_bp, true)
+                    } else {
+                        (time_to_bp.max(MIN_STEP_AFTER_BREAKPOINT), true)
+                    }
                 } else if proposed_dt > time_to_bp * 0.9 {
                     // Close to breakpoint - go directly there
                     (time_to_bp, true)
@@ -922,6 +926,21 @@ mod tests {
 
         assert_eq!(mgr.next_after(0.0), Some(5e-4));
         assert_eq!(mgr.next_after(6e-4), Some(1e-3));
+    }
+
+    #[test]
+    fn test_breakpoint_limit_step_lands_exactly_for_sub_minimum_remaining_time() {
+        let mut mgr = BreakpointManager::new();
+        mgr.add(1.0e-9);
+
+        let current_time = 9.995e-10;
+        let proposed_dt = 2.0e-12;
+        let (dt, at_breakpoint) = mgr.limit_step(current_time, proposed_dt);
+
+        let time_to_bp = 1.0e-9 - current_time;
+        assert!(at_breakpoint);
+        assert!(time_to_bp < MIN_STEP_AFTER_BREAKPOINT);
+        assert!((dt - time_to_bp).abs() < 1e-18);
     }
 
     #[test]

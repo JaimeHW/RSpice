@@ -578,10 +578,9 @@ impl Jfet {
     pub fn enable_mesa_model(mut self) -> Self {
         let is_n = matches!(self.jfet_type, JfetType::NJF);
         self.params.channel_model = JfetChannelModel::Hfet1;
-        // ngspice MESA/HFET load paths share a legacy `inverse` latch that is
-        // scoped to the full model-instance loop (not reset per instance).
-        // Preserve this compatibility quirk for transient parity.
-        self.hfet_legacy_inverse_mode = true;
+        // ngspice MESA/HFET2 level-2..4 handles inverse mode per instance;
+        // it does not use the HFET1 global inverse latch quirk.
+        self.hfet_legacy_inverse_mode = false;
         self.params.hfet_level = 2;
         self.params.vto = if is_n { -1.26 } else { 1.26 };
         self.params.beta = 0.0085;
@@ -1482,7 +1481,7 @@ impl Jfet {
     pub(crate) fn uses_hfet_legacy_inverse_mode(&self) -> bool {
         self.hfet_legacy_inverse_mode
             && matches!(self.params.channel_model, JfetChannelModel::Hfet1)
-            && self.params.hfet_level >= 2
+            && self.params.hfet_level >= 5
     }
 
     #[inline]
@@ -2193,13 +2192,12 @@ impl Jfet {
         let pol = self.jfet_type.polarity();
         let p = &self.params;
 
-        let mut vgs_int = pol * vgs;
+        let vgs_int = pol * vgs;
         let mut vds_int = pol * vds;
         let mut inverse = false;
         if vds_int < 0.0 {
-            // Reverse branch: evaluate the forward model with swapped channel control
-            // (Vgs <- Vgd) and map Jacobian terms back to the original orientation.
-            vgs_int -= vds_int;
+            // ngspice HFET level-5 evaluates reverse Vds by flipping channel
+            // current sign while keeping the controlling gate branch on Vgs.
             vds_int = -vds_int;
             inverse = true;
         }
@@ -2310,11 +2308,8 @@ impl Jfet {
         let g_total = delidgch * p_chain + delidvsate * delvsatevgt;
         let gm_fwd = g_total * delvgtvgs;
         let gds_fwd = delidvds + g_total * sigma;
-        let (mut ids, mut gm, mut gds) = if inverse {
-            (-ids_fwd, -gm_fwd, gm_fwd + gds_fwd)
-        } else {
-            (ids_fwd, gm_fwd, gds_fwd)
-        };
+        let (mut ids, mut gm, mut gds) =
+            if inverse { (-ids_fwd, gm_fwd, gds_fwd) } else { (ids_fwd, gm_fwd, gds_fwd) };
 
         if !ids.is_finite() {
             ids = 0.0;
@@ -2671,15 +2666,13 @@ impl Jfet {
 
         let vgs_int = pol * vgs;
         let vgd_int = pol * vgd;
-        let mut vgs_eff = vgs_int;
+        let vgs_eff = vgs_int;
         let mut vds_int = vgs_int - vgd_int;
         let mut inverse = false;
         if vds_int < 0.0 {
-            // Match ngspice HFET1 load path:
-            // when local Vds is negative, evaluate charge/cap equations on the
-            // gate-drain branch (vgs <- vgd), then swap terminal caps back.
+            // Match ngspice HFET1 load path: evaluate with |Vds| while keeping
+            // channel control on Vgs, then swap terminal caps in inverse mode.
             vds_int = -vds_int;
-            vgs_eff = vgd_int;
             inverse = true;
         }
 
@@ -3847,11 +3840,11 @@ mod tests {
     }
 
     #[test]
-    fn test_enable_mesa_model_enables_legacy_inverse_mode_for_ngspice_compat() {
+    fn test_enable_mesa_model_disables_hfet1_legacy_inverse_mode() {
         let jfet = Jfet::njf("Z1", 1, 2, 0).enable_mesa_model();
         assert_eq!(jfet.params.channel_model, JfetChannelModel::Hfet1);
         assert_eq!(jfet.params.hfet_level, 2);
-        assert!(jfet.uses_hfet_legacy_inverse_mode());
+        assert!(!jfet.uses_hfet_legacy_inverse_mode());
     }
 
     #[test]
@@ -3994,35 +3987,33 @@ mod tests {
 
         let (ids_fwd, gm_fwd, gds_fwd) = z.calculate(0.0, 0.3, 300.0);
         let (ids_rev, gm_rev, gds_rev) = z.calculate(0.0, -0.3, 300.0);
-        let (ids_swapped, gm_swapped, gds_swapped) = z.calculate(0.3, 0.3, 300.0);
         assert!(ids_fwd.is_finite() && gm_fwd.is_finite() && gds_fwd.is_finite());
         assert!(ids_rev.is_finite() && gm_rev.is_finite() && gds_rev.is_finite());
         assert!(ids_fwd > 0.0, "forward HFET current should be positive");
         assert!(ids_rev < 0.0, "reverse HFET current should flip sign");
         assert!(
-            gm_rev < 0.0,
-            "reverse HFET gm should transform with sign flip, got {}",
+            gm_rev > 0.0,
+            "reverse HFET gm should keep forward sign, got {}",
             gm_rev
         );
 
         let tol = 1e-9;
         assert!(
-            (ids_rev + ids_swapped).abs() <= tol * ids_swapped.abs().max(1.0),
-            "reverse Ids should match swapped-orientation mapping"
+            (ids_rev + ids_fwd).abs() <= tol * ids_fwd.abs().max(1.0),
+            "reverse Ids should be forward Ids with sign flip"
         );
         assert!(
-            (gm_rev + gm_swapped).abs() <= tol * gm_swapped.abs().max(1.0),
-            "reverse gm should match swapped-orientation mapping"
+            (gm_rev - gm_fwd).abs() <= tol * gm_fwd.abs().max(1.0),
+            "reverse gm should match forward gm"
         );
         assert!(
-            (gds_rev - (gm_swapped + gds_swapped)).abs()
-                <= tol * (gm_swapped + gds_swapped).abs().max(1.0),
-            "reverse gds should match swapped-orientation mapping"
+            (gds_rev - gds_fwd).abs() <= tol * gds_fwd.abs().max(1.0),
+            "reverse gds should match forward gds"
         );
     }
 
     #[test]
-    fn test_hfet_calculate_reverse_vds_transform_matches_swapped_orientation_for_pjf() {
+    fn test_hfet_calculate_reverse_vds_flips_ids_for_pjf_and_keeps_derivatives() {
         use std::collections::HashMap;
 
         let mut model = HashMap::new();
@@ -4042,25 +4033,26 @@ mod tests {
             .with_model_params(&model)
             .with_instance_params(&[("W".to_string(), 10e-6), ("L".to_string(), 1e-6)]);
 
-        let vgs = 0.0;
-        let vds = 0.3;
-        let (ids_rev, gm_rev, gds_rev) = z.calculate(vgs, vds, 300.0);
-        let (ids_swapped, gm_swapped, gds_swapped) = z.calculate(vgs - vds, -vds, 300.0);
+        // For PJF, positive external Vds maps to negative internal Vds.
+        // Compare against the same internal-control forward branch by flipping
+        // external Vds sign while keeping Vgs fixed.
+        let (ids_rev, gm_rev, gds_rev) = z.calculate(0.0, 0.3, 300.0);
+        let (ids_fwd, gm_fwd, gds_fwd) = z.calculate(0.0, -0.3, 300.0);
         assert!(ids_rev.is_finite() && gm_rev.is_finite() && gds_rev.is_finite());
+        assert!(ids_fwd.is_finite() && gm_fwd.is_finite() && gds_fwd.is_finite());
 
         let tol = 1e-9;
         assert!(
-            (ids_rev + ids_swapped).abs() <= tol * ids_swapped.abs().max(1.0),
-            "reverse Ids should match swapped-orientation mapping for PJF"
+            (ids_rev + ids_fwd).abs() <= tol * ids_fwd.abs().max(1.0),
+            "reverse Ids should be forward Ids with sign flip for PJF"
         );
         assert!(
-            (gm_rev + gm_swapped).abs() <= tol * gm_swapped.abs().max(1.0),
-            "reverse gm should match swapped-orientation mapping for PJF"
+            (gm_rev - gm_fwd).abs() <= tol * gm_fwd.abs().max(1.0),
+            "reverse gm should match forward gm for PJF"
         );
         assert!(
-            (gds_rev - (gm_swapped + gds_swapped)).abs()
-                <= tol * (gm_swapped + gds_swapped).abs().max(1.0),
-            "reverse gds should match swapped-orientation mapping for PJF"
+            (gds_rev - gds_fwd).abs() <= tol * gds_fwd.abs().max(1.0),
+            "reverse gds should match forward gds for PJF"
         );
     }
 
@@ -4091,18 +4083,19 @@ mod tests {
         let vgd = 0.35;
         let (cgs_inv, cgd_inv) = z.transient_capacitances(vgs, vgd, 300.15);
 
-        // ngspice semantics for local inverse:
-        // evaluate on swapped branch pair (vgs <- vgd, vgd <- vgs), then swap caps back.
-        let (cgs_swapped_eval, cgd_swapped_eval) = z.transient_capacitances(vgd, vgs, 300.15);
+        // ngspice HFET1 semantics for local inverse:
+        // evaluate caps with |Vds| while keeping Vgs control, then swap outputs.
+        let vgd_forward = vgs - (vgs - vgd).abs();
+        let (cgs_fwd, cgd_fwd) = z.transient_capacitances(vgs, vgd_forward, 300.15);
         let rel = |a: f64, b: f64| (a - b).abs() / a.abs().max(b.abs()).max(1e-30);
 
         assert!(
-            rel(cgs_inv, cgd_swapped_eval) < 1e-12,
-            "inverse cgs should match swapped-eval cgd"
+            rel(cgs_inv, cgd_fwd) < 1e-12,
+            "inverse cgs should match forward-eval cgd"
         );
         assert!(
-            rel(cgd_inv, cgs_swapped_eval) < 1e-12,
-            "inverse cgd should match swapped-eval cgs"
+            rel(cgd_inv, cgs_fwd) < 1e-12,
+            "inverse cgd should match forward-eval cgs"
         );
     }
 
@@ -4160,7 +4153,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mesa_legacy_inverse_cap_swap_matches_ngspice_single_swap_semantics() {
+    fn test_mesa_model_ignores_hfet1_legacy_inverse_latch() {
         use std::collections::HashMap;
 
         let mut model = HashMap::new();
@@ -4199,16 +4192,16 @@ mod tests {
 
         let rel = |a: f64, b: f64| (a - b).abs() / a.abs().max(b.abs()).max(1.0);
 
-        // Legacy latch should swap forward-oriented caps once.
+        // MESA mode should ignore HFET1 legacy latch forcing.
         assert!(
-            rel(cgs_fwd_legacy, cgd_fwd) < 1e-12 && rel(cgd_fwd_legacy, cgs_fwd) < 1e-12,
-            "legacy inverse should swap forward MESA caps exactly once"
+            rel(cgs_fwd_legacy, cgs_fwd) < 1e-12 && rel(cgd_fwd_legacy, cgd_fwd) < 1e-12,
+            "MESA forward caps should be unchanged by legacy latch state"
         );
 
-        // If local inverse already swapped, legacy latch must NOT swap again.
+        // Locally inverse path should also be unaffected.
         assert!(
             rel(cgs_inv_legacy, cgs_inv) < 1e-12 && rel(cgd_inv_legacy, cgd_inv) < 1e-12,
-            "legacy inverse must not double-swap local-inverse MESA caps"
+            "MESA inverse caps should be unchanged by legacy latch state"
         );
     }
 
