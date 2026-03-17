@@ -366,14 +366,14 @@ fn render_header(ui: &mut Ui, layout: &ViewerLayout, viewer_state: &mut Waveform
 
             ui.add_space(4.0);
 
-            ui.label(
-                egui::RichText::new("Waveform Viewer")
-                    .size(13.0)
-                    .strong()
-                    .color(Color32::from_rgb(200, 200, 210)),
-            );
+            // ui.label(
+            //     egui::RichText::new("Waveform Viewer")
+            //         .size(13.0)
+            //         .strong()
+            //         .color(Color32::from_rgb(200, 200, 210)),
+            // );
 
-            ui.add_space(12.0);
+            // ui.add_space(12.0);
 
             if ui
                 .add(egui::Button::new("Fit All").min_size(egui::vec2(58.0, HEADER_HEIGHT - 8.0)))
