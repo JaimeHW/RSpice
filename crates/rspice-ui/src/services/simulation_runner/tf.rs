@@ -310,6 +310,8 @@ fn source_dc_bias(spec: &SourceSpec) -> Value {
         SourceSpec::Dc(v) => *v,
         SourceSpec::Ac { .. } => 0.0,
         SourceSpec::DcAc { dc_value, .. } => *dc_value,
+        SourceSpec::DcTransient { dc_value, .. } => *dc_value,
+        SourceSpec::DcAcTransient { dc_value, .. } => *dc_value,
         SourceSpec::Pulse { v1, .. } => *v1,
         SourceSpec::Sin { offset, .. } => *offset,
         SourceSpec::Pwl { points } => points.first().map(|(_, value)| *value).unwrap_or(0.0),
