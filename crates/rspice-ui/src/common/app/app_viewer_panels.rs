@@ -2,6 +2,7 @@ use egui::{Color32, RichText, Stroke, Ui};
 
 use super::RSpiceApp;
 use crate::common::viewer_style::viewer_header_bg_color;
+use crate::simulation::controller::DerivedViewerLoadState;
 
 const VIEWER_TAB_CHIP_OUTER_HEIGHT: f32 = VIEWER_TAB_ROW_HEIGHT + 2.0 * VIEWER_TAB_INNER_Y;
 const VIEWER_TAB_CHIP_TOP_SPACE: f32 = 5.0;
@@ -409,12 +410,29 @@ impl RSpiceApp {
 
     /// Render the FFT panel.
     pub(super) fn render_fft_panel(&mut self, ui: &mut Ui) {
+        if let Some(state) = self.ensure_transient_viewer_ready(ui, crate::viewers::ActiveViewer::Fft)
+        {
+            if !matches!(state, DerivedViewerLoadState::Ready) {
+                return;
+            }
+        }
         crate::analysis::fft::render_fft_panel(ui, &mut self.state);
+        self.simulation_controller
+            .mark_transient_view_ready(&self.state, crate::viewers::ActiveViewer::Fft);
     }
 
     /// Render the Eye diagram panel.
     pub(super) fn render_eye_panel(&mut self, ui: &mut Ui) {
+        if let Some(state) =
+            self.ensure_transient_viewer_ready(ui, crate::viewers::ActiveViewer::EyeDiagram)
+        {
+            if !matches!(state, DerivedViewerLoadState::Ready) {
+                return;
+            }
+        }
         crate::analysis::eye_diagram::render_eye_diagram_panel(ui, &mut self.state);
+        self.simulation_controller
+            .mark_transient_view_ready(&self.state, crate::viewers::ActiveViewer::EyeDiagram);
     }
 
     /// Render the Smith chart panel.
@@ -426,6 +444,74 @@ impl RSpiceApp {
     pub(super) fn render_histogram_panel(&mut self, ui: &mut Ui) {
         crate::analysis::histogram::render_histogram_panel(ui, &mut self.state);
     }
+
+    fn ensure_transient_viewer_ready(
+        &mut self,
+        ui: &mut Ui,
+        viewer: crate::viewers::ActiveViewer,
+    ) -> Option<DerivedViewerLoadState> {
+        let Some(analysis_type) = self
+            .state
+            .simulation
+            .active_analysis()
+            .map(|analysis| analysis.analysis_type)
+        else {
+            return None;
+        };
+        if !crate::simulation::SimulationController::analysis_supports_transient_derivation(
+            analysis_type,
+        ) {
+            return None;
+        }
+
+        let load_state = self
+            .simulation_controller
+            .ensure_transient_viewer_data(&mut self.state, viewer);
+        match load_state {
+            DerivedViewerLoadState::Ready => Some(load_state),
+            DerivedViewerLoadState::Loading => {
+                render_viewer_status_placeholder(
+                    ui,
+                    viewer.name(),
+                    "Preparing derived data from the active transient waveform...",
+                );
+                Some(load_state)
+            }
+            DerivedViewerLoadState::Unavailable => {
+                render_viewer_status_placeholder(
+                    ui,
+                    viewer.name(),
+                    "The active analysis does not contain a usable derived-view source.",
+                );
+                Some(load_state)
+            }
+        }
+    }
+}
+
+fn render_viewer_status_placeholder(ui: &mut Ui, title: &str, message: &str) {
+    egui::Frame::none()
+        .fill(Color32::from_rgb(24, 28, 34))
+        .stroke(Stroke::new(1.0, Color32::from_rgb(54, 60, 72)))
+        .inner_margin(egui::Margin::symmetric(18.0, 18.0))
+        .show(ui, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space(24.0);
+                ui.label(
+                    RichText::new(title)
+                        .strong()
+                        .size(14.0)
+                        .color(Color32::from_rgb(220, 225, 235)),
+                );
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(message)
+                        .size(11.0)
+                        .color(Color32::from_rgb(180, 185, 195)),
+                );
+                ui.add_space(24.0);
+            });
+        });
 }
 
 #[cfg(test)]

@@ -29,14 +29,19 @@ impl ViewerCapability {
 }
 
 impl AppState {
+    /// Clear transient-derived viewer caches without disturbing AC/RF state.
+    pub fn clear_transient_specialized_viewer_data(&mut self) {
+        self.fft_state.clear();
+        self.eye_diagram_state
+            .load_data(crate::analysis::eye_diagram::data::EyeData::default());
+    }
+
     /// Clear all specialized (non-waveform) viewer data caches.
     ///
     /// Use when result selection changes in a way that can invalidate
     /// cached analysis-specific visualizations.
     pub fn clear_specialized_viewer_data(&mut self) {
-        self.fft_state.clear();
-        self.eye_diagram_state
-            .load_data(crate::analysis::eye_diagram::data::EyeData::default());
+        self.clear_transient_specialized_viewer_data();
         self.histogram_state.clear();
         self.bode_plot_state
             .load_data(crate::analysis::bode::BodeData::new());
@@ -57,10 +62,12 @@ impl AppState {
                 }
             }
             ActiveViewer::EyeDiagram => {
-                if self.eye_diagram_state.trace_count() == 0 {
-                    ViewerCapability::unavailable("Requires transient eye traces")
-                } else {
+                if self.eye_diagram_state.trace_count() > 0 {
                     ViewerCapability::available("Eye traces loaded")
+                } else if self.active_analysis_supports_eye_diagram() {
+                    ViewerCapability::available("Can derive eye data from active transient waveforms")
+                } else {
+                    ViewerCapability::unavailable("Requires transient eye traces")
                 }
             }
             ActiveViewer::Histogram => {
@@ -93,6 +100,8 @@ impl AppState {
                     .unwrap_or(false);
                 if has_spectrum {
                     ViewerCapability::available("FFT spectrum data loaded")
+                } else if self.active_analysis_supports_fft() {
+                    ViewerCapability::available("Can derive FFT from active transient waveforms")
                 } else {
                     ViewerCapability::unavailable("Requires sampled time-domain data for FFT")
                 }
@@ -154,6 +163,32 @@ impl AppState {
         } else {
             ActiveViewer::Waveform
         }
+    }
+
+    fn active_analysis_supports_eye_diagram(&self) -> bool {
+        self.active_time_domain_waveform_len()
+            .map(|len| len >= 8)
+            .unwrap_or(false)
+    }
+
+    fn active_analysis_supports_fft(&self) -> bool {
+        self.active_time_domain_waveform_len()
+            .map(|len| len >= crate::analysis::fft::MIN_FFT_SAMPLES)
+            .unwrap_or(false)
+    }
+
+    fn active_time_domain_waveform_len(&self) -> Option<usize> {
+        let analysis = self.simulation.active_analysis()?;
+        crate::simulation::SimulationController::analysis_supports_transient_derivation(
+            analysis.analysis_type,
+        )
+        .then_some(())?;
+
+        analysis
+            .waveforms
+            .iter()
+            .map(|wf| wf.x.len().min(wf.y.len()))
+            .max()
     }
 
     /// Close the active viewer tab.
@@ -226,6 +261,25 @@ mod tests {
         state.pole_zero_state.load_data(data);
     }
 
+    fn seed_active_transient_analysis(state: &mut AppState) {
+        let time = vec![0.0, 1e-9, 2e-9, 3e-9, 4e-9, 5e-9, 6e-9, 7e-9, 8e-9, 9e-9, 10e-9, 11e-9,
+            12e-9, 13e-9, 14e-9, 15e-9];
+        let values = vec![
+            1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0,
+            -1.0,
+        ];
+        let analysis = crate::state::AnalysisResult::new(1, AnalysisType::Transient, "TR")
+            .with_waveforms(vec![crate::state::WaveformData::new(
+                "V(out)",
+                time,
+                values,
+                "#4aa3ff",
+            )]);
+        let run = state.simulation.start_run();
+        run.add_analysis(analysis);
+        state.simulation.complete_run();
+    }
+
     #[test]
     fn viewer_capabilities_default_to_waveform_only() {
         let state = AppState::default();
@@ -261,6 +315,15 @@ mod tests {
         assert!(state.viewer_is_available(ActiveViewer::Histogram));
         assert!(state.viewer_is_available(ActiveViewer::SmithChart));
         assert!(state.viewer_is_available(ActiveViewer::PoleZero));
+    }
+
+    #[test]
+    fn viewer_capabilities_allow_lazy_transient_fft_and_eye_derivation() {
+        let mut state = AppState::default();
+        seed_active_transient_analysis(&mut state);
+
+        assert!(state.viewer_is_available(ActiveViewer::Fft));
+        assert!(state.viewer_is_available(ActiveViewer::EyeDiagram));
     }
 
     #[test]

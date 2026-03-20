@@ -148,6 +148,43 @@ impl SimulationController {
         })
     }
 
+    pub(super) fn fft_source_waveform_from_state<'a>(
+        waveforms: &'a [crate::state::WaveformData],
+        preferred_name: Option<&str>,
+    ) -> Option<(String, &'a crate::state::WaveformData)> {
+        let mut candidates: Vec<&crate::state::WaveformData> = waveforms
+            .iter()
+            .filter(|wf| {
+                let len = wf.x.len().min(wf.y.len());
+                len >= crate::analysis::fft::MIN_FFT_SAMPLES
+            })
+            .collect();
+        candidates.sort_by(|a, b| a.name.cmp(&b.name));
+
+        if let Some(name) = preferred_name {
+            if let Some(waveform) = candidates
+                .iter()
+                .copied()
+                .find(|wf| wf.name == name || wf.name.eq_ignore_ascii_case(name))
+            {
+                return Some((waveform.name.clone(), waveform));
+            }
+
+            if let Some(waveform) = candidates
+                .iter()
+                .copied()
+                .find(|wf| Self::parse_fft_source_name(&wf.name).core == Self::parse_fft_source_name(name).core)
+            {
+                return Some((waveform.name.clone(), waveform));
+            }
+        }
+
+        candidates
+            .into_iter()
+            .next()
+            .map(|waveform| (waveform.name.clone(), waveform))
+    }
+
     fn match_preferred_fft_source_normalized<'a>(
         waveforms: &'a std::collections::HashMap<String, crate::simulation::WaveformData>,
         expected_len: usize,
@@ -234,7 +271,7 @@ impl SimulationController {
         }
     }
 
-    fn estimate_ui_period(time: &[f64], signal: &[f64]) -> Option<f64> {
+    pub(super) fn estimate_ui_period(time: &[f64], signal: &[f64]) -> Option<f64> {
         let n = time.len().min(signal.len());
         if n < 8 {
             return None;

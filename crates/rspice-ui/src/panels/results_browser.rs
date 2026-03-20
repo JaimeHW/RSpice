@@ -113,13 +113,37 @@ pub fn render_results_browser(ui: &mut Ui, state: &mut AppState) {
 
                 // Handle run selection
                 if run_response.run_selected {
+                    let previous = (
+                        state.simulation.active_run_idx,
+                        state.simulation.active_analysis_idx,
+                    );
                     state.simulation.select_run(run_data.index);
+                    if previous
+                        != (
+                            state.simulation.active_run_idx,
+                            state.simulation.active_analysis_idx,
+                        )
+                    {
+                        state.clear_transient_specialized_viewer_data();
+                    }
                 }
 
                 // Handle analysis selection
                 if let Some(analysis_idx) = run_response.analysis_selected {
+                    let previous = (
+                        state.simulation.active_run_idx,
+                        state.simulation.active_analysis_idx,
+                    );
                     state.simulation.select_run(run_data.index);
                     state.simulation.select_analysis(analysis_idx);
+                    if previous
+                        != (
+                            state.simulation.active_run_idx,
+                            state.simulation.active_analysis_idx,
+                        )
+                    {
+                        state.clear_transient_specialized_viewer_data();
+                    }
                 }
 
                 // Handle analysis view request
@@ -151,8 +175,20 @@ fn activate_analysis_view(
     analysis_idx: usize,
     analysis_type: AnalysisType,
 ) {
+    let previous = (
+        state.simulation.active_run_idx,
+        state.simulation.active_analysis_idx,
+    );
     state.simulation.select_run(run_idx);
     state.simulation.select_analysis(analysis_idx);
+    if previous
+        != (
+            state.simulation.active_run_idx,
+            state.simulation.active_analysis_idx,
+        )
+    {
+        state.clear_transient_specialized_viewer_data();
+    }
     state.open_preferred_viewer_for_analysis(analysis_type);
 }
 

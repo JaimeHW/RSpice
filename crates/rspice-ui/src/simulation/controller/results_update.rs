@@ -1,16 +1,27 @@
 use super::*;
 
 impl SimulationController {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn update_waveforms(
-        &self,
+        &mut self,
+        state: &mut AppState,
+        result: &crate::simulation::SimulationResult,
+    ) {
+        state
+            .simulation
+            .replace_waveforms(self.waveforms_for_result(result));
+        self.apply_result_side_effects(state, result);
+        if let crate::simulation::SimulationResult::Transient { time, waveforms } = result {
+            self.populate_transient_post_views(state, time, waveforms);
+        }
+    }
+
+    pub(super) fn apply_result_side_effects(
+        &mut self,
         state: &mut AppState,
         result: &crate::simulation::SimulationResult,
     ) {
         use crate::simulation::SimulationResult;
-        use crate::state::WaveformData;
-
-        // Clear previous waveforms
-        state.simulation.waveforms.clear();
 
         match result {
             SimulationResult::DcOp(dc_result) => {
@@ -38,25 +49,8 @@ impl SimulationController {
             }
 
             SimulationResult::Transient { time, waveforms } => {
-                // Transient: Create waveform traces with time as X-axis
-                let time_vec: Vec<f64> = time.clone();
-                let mut names: Vec<_> = waveforms.keys().cloned().collect();
-                names.sort();
-
-                for (idx, name) in names.into_iter().enumerate() {
-                    let Some(wf_data) = waveforms.get(&name) else {
-                        continue;
-                    };
-                    let color = Self::color_for_index(idx);
-                    let waveform = WaveformData::new(
-                        name.clone(),
-                        time_vec.clone(),
-                        wf_data.y_values.clone(),
-                        color,
-                    );
-                    state.simulation.waveforms.push(waveform);
-                }
-                self.populate_transient_post_views(state, time, waveforms);
+                self.invalidate_transient_post_views(state);
+                self.prime_transient_fft_source_selection(state);
 
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                     "Transient: {} points, {} waveforms",
@@ -71,21 +65,6 @@ impl SimulationController {
                 frequencies,
                 waveforms,
             } => {
-                // AC: Create magnitude traces (log-log or semi-log typically)
-                // Commercial simulators show |V(node)| in dB and phase separately
-                let freq_vec: Vec<f64> = frequencies.clone();
-
-                for (idx, (name, wf_data)) in waveforms.iter().enumerate() {
-                    // Magnitude trace - use magnitude() for complex data, not raw real values
-                    let mag_name = format!("|{}|", name);
-                    let color = Self::color_for_index(idx);
-
-                    // For AC analysis, use the magnitude of complex waveform data
-                    let magnitude = wf_data.magnitude();
-
-                    let waveform = WaveformData::new(mag_name, freq_vec.clone(), magnitude, color);
-                    state.simulation.waveforms.push(waveform);
-                }
                 self.populate_ac_post_views(state, frequencies, waveforms);
 
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
@@ -102,20 +81,6 @@ impl SimulationController {
                 sweep_values,
                 waveforms,
             } => {
-                // DC Sweep: sweep variable as X-axis
-                let x_vec: Vec<f64> = sweep_values.clone();
-
-                for (idx, (name, wf_data)) in waveforms.iter().enumerate() {
-                    let color = Self::color_for_index(idx);
-                    let waveform = WaveformData::new(
-                        name.clone(),
-                        x_vec.clone(),
-                        wf_data.y_values.clone(),
-                        color,
-                    );
-                    state.simulation.waveforms.push(waveform);
-                }
-
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                     "DC Sweep ({}): {} points, {} waveforms",
                     sweep_var,
@@ -129,48 +94,9 @@ impl SimulationController {
             SimulationResult::Noise {
                 frequencies,
                 output_noise,
-                input_noise,
-                contributors,
+                input_noise: _,
+                contributors: _,
             } => {
-                // Noise: frequency as X-axis, noise spectral density as Y
-                let freq_vec: Vec<f64> = frequencies.clone();
-
-                // Output noise trace
-                if !output_noise.is_empty() {
-                    let waveform = WaveformData::new(
-                        "onoise".to_string(),
-                        freq_vec.clone(),
-                        output_noise.clone(),
-                        Self::color_for_index(0),
-                    );
-                    state.simulation.waveforms.push(waveform);
-                }
-
-                // Input-referred noise trace (if present)
-                if let Some(inoise) = input_noise {
-                    if !inoise.is_empty() {
-                        let waveform = WaveformData::new(
-                            "inoise".to_string(),
-                            freq_vec.clone(),
-                            inoise.clone(),
-                            Self::color_for_index(1),
-                        );
-                        state.simulation.waveforms.push(waveform);
-                    }
-                }
-
-                // Per-source contributions
-                for (idx, (source, values)) in contributors.iter().enumerate() {
-                    let color = Self::color_for_index(idx + 2);
-                    let waveform = WaveformData::new(
-                        format!("noise({})", source),
-                        freq_vec.clone(),
-                        values.clone(),
-                        color,
-                    );
-                    state.simulation.waveforms.push(waveform);
-                }
-
                 // Calculate integrated noise
                 let integrated: f64 = output_noise.iter().sum::<f64>().sqrt();
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
@@ -270,24 +196,6 @@ impl SimulationController {
                 variables,
             } => {
                 self.populate_monte_carlo_histograms(state, variables);
-                for (idx, var) in variables.iter().enumerate() {
-                    if var.histogram.is_empty() || var.bin_edges.len() < 2 {
-                        continue;
-                    }
-                    let x: Vec<f64> = var
-                        .bin_edges
-                        .windows(2)
-                        .map(|window| (window[0] + window[1]) * 0.5)
-                        .collect();
-                    let y: Vec<f64> = var.histogram.iter().map(|count| *count as f64).collect();
-                    let waveform = WaveformData::new(
-                        format!("hist({})", var.name),
-                        x,
-                        y,
-                        Self::color_for_index(idx),
-                    );
-                    state.simulation.waveforms.push(waveform);
-                }
 
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                     "Monte Carlo: {}/{} runs converged ({} failed), all_converged={}",
@@ -316,16 +224,6 @@ impl SimulationController {
                 waveforms,
                 num_failures,
             } => {
-                for (idx, (name, wf_data)) in waveforms.iter().enumerate() {
-                    let waveform = WaveformData::new(
-                        name.clone(),
-                        sweep_values.clone(),
-                        wf_data.y_values.clone(),
-                        Self::color_for_index(idx),
-                    );
-                    state.simulation.waveforms.push(waveform);
-                }
-
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                     "Parametric ({}): {} points, {} waveforms, {} failed points",
                     target,
@@ -343,16 +241,6 @@ impl SimulationController {
                 num_failures,
                 ..
             } => {
-                for (idx, (name, wf_data)) in waveforms.iter().enumerate() {
-                    let waveform = WaveformData::new(
-                        name.clone(),
-                        x_values.clone(),
-                        wf_data.y_values.clone(),
-                        Self::color_for_index(idx),
-                    );
-                    state.simulation.waveforms.push(waveform);
-                }
-
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                     "Corner sweep: {} points, {} waveforms, {} failed corners",
                     x_values.len(),
@@ -365,19 +253,9 @@ impl SimulationController {
 
             SimulationResult::Reliability {
                 years,
-                waveforms,
+                waveforms: _,
                 device_results,
             } => {
-                for (idx, (name, wf_data)) in waveforms.iter().enumerate() {
-                    let waveform = WaveformData::new(
-                        name.clone(),
-                        years.clone(),
-                        wf_data.y_values.clone(),
-                        Self::color_for_index(idx),
-                    );
-                    state.simulation.waveforms.push(waveform);
-                }
-
                 state.simulation.reliability_results = device_results.clone();
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                     "Reliability: {} lifetime points, {} devices analyzed",
@@ -390,21 +268,11 @@ impl SimulationController {
 
             SimulationResult::Optimization {
                 iterations,
-                waveforms,
+                waveforms: _,
                 best_cost,
                 best_variables,
                 converged,
             } => {
-                for (idx, (name, wf_data)) in waveforms.iter().enumerate() {
-                    let waveform = WaveformData::new(
-                        name.clone(),
-                        iterations.clone(),
-                        wf_data.y_values.clone(),
-                        Self::color_for_index(idx),
-                    );
-                    state.simulation.waveforms.push(waveform);
-                }
-
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                     "Optimization: {} iterations, best cost {:.6e}, converged={}",
                     iterations.len(),
@@ -423,18 +291,9 @@ impl SimulationController {
 
             SimulationResult::Soa {
                 time,
-                waveforms,
+                waveforms: _,
                 violations,
             } => {
-                for (idx, (name, wf_data)) in waveforms.iter().enumerate() {
-                    let waveform = WaveformData::new(
-                        name.clone(),
-                        time.clone(),
-                        wf_data.y_values.clone(),
-                        Self::color_for_index(idx),
-                    );
-                    state.simulation.waveforms.push(waveform);
-                }
                 state.simulation.soa_violations = violations.clone();
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                     "SOA: {} sampled points, {} violations",
@@ -450,15 +309,6 @@ impl SimulationController {
                     "Analysis complete (no waveform data)".to_string(),
                 ));
             }
-        }
-
-        // Build node-to-waveform mapping for cross-probing
-        state.simulation.node_to_waveform.clear();
-        for (idx, wf) in state.simulation.waveforms.iter().enumerate() {
-            state
-                .simulation
-                .node_to_waveform
-                .insert(wf.name.clone(), idx);
         }
     }
 

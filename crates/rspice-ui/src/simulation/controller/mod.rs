@@ -40,7 +40,9 @@ mod results_convert;
 mod results_post;
 mod results_update;
 mod spice_value;
+mod transient_post;
 mod touchstone;
+pub(crate) use transient_post::DerivedViewerLoadState;
 
 #[cfg(test)]
 use self::spice_value::parse_spice_value;
@@ -87,6 +89,8 @@ pub struct SimulationController {
     total_analyses: usize,
     /// Cached netlist for multi-analysis runs (avoids regeneration)
     cached_netlist: Option<String>,
+    /// Runtime coordinator for transient-derived viewer data (eye/FFT).
+    transient_post: transient_post::TransientPostCoordinator,
 }
 
 impl Default for SimulationController {
@@ -107,6 +111,7 @@ impl SimulationController {
             current_analysis_idx: 0,
             total_analyses: 0,
             cached_netlist: None,
+            transient_post: transient_post::TransientPostCoordinator::default(),
         }
     }
 
@@ -139,6 +144,10 @@ impl SimulationController {
 
         // Poll for completion
         self.poll_completion(state);
+
+        // Apply/cancel background transient post-processing work after any
+        // selection changes that happened during the previous frame.
+        self.sync_transient_post_views(state);
 
         // Update running state
         state.simulation.is_running = self.runner.is_running();
@@ -527,8 +536,9 @@ impl SimulationController {
                         );
                     }
 
-                    // Update waveform data (legacy compatibility)
-                    self.update_waveforms(state, &sim_result);
+                    // Display the just-completed analysis without rebuilding waveform buffers.
+                    state.simulation.select_latest_analysis();
+                    self.apply_result_side_effects(state, &sim_result);
 
                     // Optional Touchstone export for S-parameter analyses.
                     self.maybe_export_touchstone(state, &sim_result);
