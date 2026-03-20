@@ -336,6 +336,46 @@ fn test_simulation_state_complete_run_syncs_waveforms() {
 }
 
 #[test]
+fn test_simulation_state_replace_waveforms_rebuilds_mapping_and_version_once() {
+    let mut state = SimulationState::default();
+    state.add_waveform(WaveformData::new("stale", vec![0.0], vec![0.0], "#000000"));
+    let version_after_add = state.data_version;
+
+    state.replace_waveforms(vec![
+        WaveformData::new("V(1)", vec![0.0, 1.0], vec![0.0, 1.0], "#ff0000"),
+        WaveformData::new("V(2)", vec![0.0, 1.0], vec![1.0, 2.0], "#00ff00"),
+    ]);
+
+    assert_eq!(state.waveforms.len(), 2);
+    assert_eq!(state.node_to_waveform.get("V(1)"), Some(&0));
+    assert_eq!(state.node_to_waveform.get("V(2)"), Some(&1));
+    assert!(!state.node_to_waveform.contains_key("stale"));
+    assert_eq!(state.data_version, version_after_add.wrapping_add(1));
+}
+
+#[test]
+fn test_simulation_state_select_latest_analysis_syncs_newest_waveforms() {
+    let mut state = SimulationState::default();
+    let run = state.start_run();
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TR1").with_waveforms(vec![
+            WaveformData::new("V(old)", vec![0.0, 1.0], vec![0.0, 1.0], "#ff0000"),
+        ]),
+    );
+    run.add_analysis(
+        AnalysisResult::new(2, AnalysisType::Transient, "TR2").with_waveforms(vec![
+            WaveformData::new("V(new)", vec![0.0, 1.0], vec![1.0, 2.0], "#00ff00"),
+        ]),
+    );
+
+    assert!(state.select_latest_analysis());
+    assert_eq!(state.active_analysis_idx, Some(1));
+    assert_eq!(state.waveforms.len(), 1);
+    assert_eq!(state.waveforms[0].name, "V(new)");
+    assert_eq!(state.node_to_waveform.get("V(new)"), Some(&0));
+}
+
+#[test]
 fn test_simulation_state_delete_run() {
     let mut state = SimulationState::default();
 

@@ -30,7 +30,7 @@ rspice-veriloga = { path = "../rspice-veriloga" }
 tokio = { version = "1", features = ["sync", "macros", "time", "rt-multi-thread"] }
 
 # Serialization
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 bincode = "1"
 
@@ -91,4 +91,8 @@ criterion = "0.5"
 
 [[bench]]
 name = "cadence_psf"
+harness = false
+
+[[bench]]
+name = "waveform_fft"
 harness = false

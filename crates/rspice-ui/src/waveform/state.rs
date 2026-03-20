@@ -12,6 +12,7 @@
 //! - `BoxSelection`: Region selection for box zoom
 
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use super::measurements::MeasurementCache;
 
@@ -427,9 +428,9 @@ pub struct TraceData {
     /// Trace identifier (typically signal name like "V(out)")
     pub name: String,
     /// X-axis data points (typically time in seconds)
-    pub x: Vec<f64>,
+    pub x: Arc<[f64]>,
     /// Y-axis data points (typically voltage or current)
-    pub y: Vec<f64>,
+    pub y: Arc<[f64]>,
     /// Visual style
     pub style: TraceStyle,
     /// Whether this trace is visible
@@ -448,8 +449,8 @@ impl Default for TraceData {
     fn default() -> Self {
         Self {
             name: String::new(),
-            x: Vec::new(),
-            y: Vec::new(),
+            x: Arc::<[f64]>::from([]),
+            y: Arc::<[f64]>::from([]),
             style: TraceStyle::default(),
             visible: true,
             highlighted: false,
@@ -463,11 +464,15 @@ impl Default for TraceData {
 
 impl TraceData {
     /// Create a new trace with the given name and data
-    pub fn new(name: impl Into<String>, x: Vec<f64>, y: Vec<f64>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        x: impl Into<Arc<[f64]>>,
+        y: impl Into<Arc<[f64]>>,
+    ) -> Self {
         let mut trace = Self {
             name: name.into(),
-            x,
-            y,
+            x: x.into(),
+            y: y.into(),
             ..Default::default()
         };
         trace.compute_statistics();
@@ -502,20 +507,19 @@ impl TraceData {
             self.cached_x_max = self.x.iter().copied().reduce(f64::max);
         }
 
-        if self.y.is_empty() {
-            self.cached_y_min = None;
-            self.cached_y_max = None;
-        } else {
-            // Filter out NaN/Inf for robustness
-            let valid_y: Vec<f64> = self.y.iter().copied().filter(|v| v.is_finite()).collect();
-            if valid_y.is_empty() {
-                self.cached_y_min = None;
-                self.cached_y_max = None;
-            } else {
-                self.cached_y_min = valid_y.iter().copied().reduce(f64::min);
-                self.cached_y_max = valid_y.iter().copied().reduce(f64::max);
+        let mut y_min = f64::INFINITY;
+        let mut y_max = f64::NEG_INFINITY;
+        let mut has_finite_y = false;
+        for &value in self.y.iter() {
+            if !value.is_finite() {
+                continue;
             }
+            has_finite_y = true;
+            y_min = y_min.min(value);
+            y_max = y_max.max(value);
         }
+        self.cached_y_min = has_finite_y.then_some(y_min);
+        self.cached_y_max = has_finite_y.then_some(y_max);
     }
 
     /// Get cached X minimum
@@ -1430,6 +1434,16 @@ mod tests {
     }
 
     #[test]
+    fn test_trace_data_new_reuses_shared_buffers() {
+        let x: Arc<[f64]> = Arc::from(vec![0.0, 1.0, 2.0]);
+        let y: Arc<[f64]> = Arc::from(vec![0.0, 1.0, 2.0]);
+
+        let trace = TraceData::new("shared", Arc::clone(&x), Arc::clone(&y));
+        assert!(Arc::ptr_eq(&trace.x, &x));
+        assert!(Arc::ptr_eq(&trace.y, &y));
+    }
+
+    #[test]
     fn test_trace_data_statistics() {
         let trace = TraceData::new("test", vec![0.0, 1.0, 2.0, 3.0], vec![-1.0, 2.0, 0.5, 1.0]);
 
@@ -1754,6 +1768,24 @@ mod tests {
             let color = WaveformViewerState::palette_color(i);
             assert!(color.0 > 0 || color.1 > 0 || color.2 > 0);
         }
+    }
+
+    #[test]
+    fn test_waveform_viewer_load_from_simulation_reuses_shared_samples() {
+        let mut state = WaveformViewerState::new();
+        let x: Arc<[f64]> = Arc::from(vec![0.0, 1.0, 2.0]);
+        let y: Arc<[f64]> = Arc::from(vec![0.0, 0.5, 1.0]);
+        let waveforms = vec![crate::state::WaveformData::new(
+            "V(out)",
+            Arc::clone(&x),
+            Arc::clone(&y),
+            "#00aaff",
+        )];
+
+        state.load_from_simulation(&waveforms);
+        assert_eq!(state.traces.len(), 1);
+        assert!(Arc::ptr_eq(&state.traces[0].x, &x));
+        assert!(Arc::ptr_eq(&state.traces[0].y, &y));
     }
 
     // =========================================================================

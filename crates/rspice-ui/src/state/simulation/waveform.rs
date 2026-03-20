@@ -1,4 +1,7 @@
 use super::*;
+use std::sync::Arc;
+
+pub type SharedWaveformValues = Arc<[Value]>;
 
 /// Waveform trace data
 #[derive(Debug, Clone, PartialEq)]
@@ -7,10 +10,10 @@ pub struct WaveformData {
     pub name: String,
 
     /// X-axis values (time or frequency)
-    pub x: Vec<Value>,
+    pub x: SharedWaveformValues,
 
     /// Y-axis values
-    pub y: Vec<Value>,
+    pub y: SharedWaveformValues,
 
     /// Trace color (hex string)
     pub color: String,
@@ -23,14 +26,14 @@ impl WaveformData {
     /// Create a new waveform trace
     pub fn new(
         name: impl Into<String>,
-        x: Vec<Value>,
-        y: Vec<Value>,
+        x: impl Into<SharedWaveformValues>,
+        y: impl Into<SharedWaveformValues>,
         color: impl Into<String>,
     ) -> Self {
         Self {
             name: name.into(),
-            x,
-            y,
+            x: x.into(),
+            y: y.into(),
             color: color.into(),
             visible: true,
         }

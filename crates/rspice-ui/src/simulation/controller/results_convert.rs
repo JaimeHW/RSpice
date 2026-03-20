@@ -1,6 +1,173 @@
 use super::*;
+use std::sync::Arc;
 
 impl SimulationController {
+    pub(super) fn waveforms_for_result(
+        &self,
+        sim_result: &crate::simulation::SimulationResult,
+    ) -> Vec<crate::state::WaveformData> {
+        use crate::simulation::SimulationResult;
+        use crate::state::WaveformData;
+
+        match sim_result {
+            SimulationResult::Transient { time, waveforms } => {
+                self.build_sorted_waveforms_with_shared_x(time, waveforms, |name, waveform| {
+                    (name, waveform.y_values.clone())
+                })
+            }
+
+            SimulationResult::Ac {
+                frequencies,
+                waveforms,
+            } => {
+                self.build_waveforms_with_shared_x(
+                    frequencies,
+                    waveforms
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, (name, waveform))| {
+                            (idx, format!("|{}|", name), waveform.magnitude())
+                        }),
+                )
+            }
+
+            SimulationResult::DcSweep {
+                sweep_values,
+                waveforms,
+                ..
+            } => self.build_waveforms_with_shared_x(
+                sweep_values,
+                waveforms
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, (name, waveform))| (idx, name.clone(), waveform.y_values.clone())),
+            ),
+
+            SimulationResult::Noise {
+                frequencies,
+                output_noise,
+                input_noise,
+                contributors,
+            } => {
+                let shared_freqs: Arc<[f64]> = Arc::from(frequencies.clone());
+                let mut results = Vec::new();
+
+                if !output_noise.is_empty() {
+                    results.push(WaveformData::new(
+                        "onoise".to_string(),
+                        Arc::clone(&shared_freqs),
+                        output_noise.clone(),
+                        Self::color_for_index(0),
+                    ));
+                }
+
+                if let Some(inoise) = input_noise {
+                    if !inoise.is_empty() {
+                        results.push(WaveformData::new(
+                            "inoise".to_string(),
+                            Arc::clone(&shared_freqs),
+                            inoise.clone(),
+                            Self::color_for_index(1),
+                        ));
+                    }
+                }
+
+                for (idx, (source, values)) in contributors.iter().enumerate() {
+                    results.push(WaveformData::new(
+                        format!("noise({})", source),
+                        Arc::clone(&shared_freqs),
+                        values.clone(),
+                        Self::color_for_index(idx + 2),
+                    ));
+                }
+
+                results
+            }
+
+            SimulationResult::MonteCarlo { variables, .. } => variables
+                .iter()
+                .filter_map(|var| {
+                    if var.histogram.is_empty() || var.bin_edges.len() < 2 {
+                        return None;
+                    }
+                    let x: Vec<f64> = var
+                        .bin_edges
+                        .windows(2)
+                        .map(|window| (window[0] + window[1]) * 0.5)
+                        .collect();
+                    let y: Vec<f64> = var.histogram.iter().map(|count| *count as f64).collect();
+                    Some(WaveformData::new(
+                        format!("hist({})", var.name),
+                        x,
+                        y,
+                        Self::color_for_index(0),
+                    ))
+                })
+                .collect(),
+
+            SimulationResult::Parametric {
+                sweep_values,
+                waveforms,
+                ..
+            } => self.build_waveforms_with_shared_x(
+                sweep_values,
+                waveforms
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, (name, waveform))| (idx, name.clone(), waveform.y_values.clone())),
+            ),
+
+            SimulationResult::Corner {
+                x_values,
+                waveforms,
+                ..
+            } => self.build_waveforms_with_shared_x(
+                x_values,
+                waveforms
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, (name, waveform))| (idx, name.clone(), waveform.y_values.clone())),
+            ),
+
+            SimulationResult::Reliability {
+                years, waveforms, ..
+            } => self.build_waveforms_with_shared_x(
+                years,
+                waveforms
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, (name, waveform))| (idx, name.clone(), waveform.y_values.clone())),
+            ),
+
+            SimulationResult::Optimization {
+                iterations,
+                waveforms,
+                ..
+            } => self.build_waveforms_with_shared_x(
+                iterations,
+                waveforms
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, (name, waveform))| (idx, name.clone(), waveform.y_values.clone())),
+            ),
+
+            SimulationResult::Soa {
+                time, waveforms, ..
+            } => self.build_waveforms_with_shared_x(
+                time,
+                waveforms
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, (name, waveform))| (idx, name.clone(), waveform.y_values.clone())),
+            ),
+
+            SimulationResult::DcOp(_)
+            | SimulationResult::PoleZero { .. }
+            | SimulationResult::Sensitivity { .. }
+            | SimulationResult::Empty { .. } => Vec::new(),
+        }
+    }
+
     pub(super) fn convert_to_analysis_result(
         &self,
         sim_result: &crate::simulation::SimulationResult,
@@ -18,7 +185,6 @@ impl SimulationController {
         label: &str,
     ) -> AnalysisResult {
         use crate::simulation::SimulationResult;
-        use crate::state::WaveformData;
 
         match sim_result {
             SimulationResult::DcOp(dc_result) => {
@@ -50,79 +216,15 @@ impl SimulationController {
                 AnalysisResult::new(1, analysis_type, label.to_string()).with_dc_op(state_dc_op)
             }
 
-            SimulationResult::Transient { time, waveforms } => {
-                let mut names: Vec<_> = waveforms.keys().cloned().collect();
-                names.sort();
-                let wf_data: Vec<WaveformData> = names
-                    .into_iter()
-                    .enumerate()
-                    .filter_map(|(idx, name)| {
-                        waveforms.get(&name).map(|wf| {
-                            WaveformData::new(
-                                name,
-                                time.clone(),
-                                wf.y_values.clone(),
-                                Self::color_for_index(idx),
-                            )
-                        })
-                    })
-                    .collect();
-                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
-            }
-
-            SimulationResult::Ac {
-                frequencies,
-                waveforms,
-            } => {
-                // For AC analysis, store magnitude (not raw complex values)
-                let wf_data: Vec<WaveformData> = waveforms
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, (name, wf))| {
-                        WaveformData::new(
-                            format!("|{}|", name),
-                            frequencies.clone(),
-                            wf.magnitude(),
-                            Self::color_for_index(idx),
-                        )
-                    })
-                    .collect();
-                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
-            }
-
-            SimulationResult::DcSweep {
-                sweep_var: _,
-                sweep_values,
-                waveforms,
-            } => {
-                let wf_data: Vec<WaveformData> = waveforms
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, (name, wf))| {
-                        WaveformData::new(
-                            name.clone(),
-                            sweep_values.clone(),
-                            wf.y_values.clone(),
-                            Self::color_for_index(idx),
-                        )
-                    })
-                    .collect();
-                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
-            }
-
-            SimulationResult::Noise {
-                frequencies,
-                output_noise,
-                ..
-            } => {
-                let wf_data = vec![WaveformData::new(
-                    "onoise".to_string(),
-                    frequencies.clone(),
-                    output_noise.clone(),
-                    Self::color_for_index(0),
-                )];
-                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
-            }
+            SimulationResult::Transient { .. }
+            | SimulationResult::Ac { .. }
+            | SimulationResult::DcSweep { .. }
+            | SimulationResult::Noise { .. } => AnalysisResult::new(
+                1,
+                analysis_type,
+                label.to_string(),
+            )
+            .with_waveforms(self.waveforms_for_result(sim_result)),
 
             SimulationResult::PoleZero { .. } => {
                 // Pole-Zero results are displayed in console, not as waveforms
@@ -134,130 +236,74 @@ impl SimulationController {
                 AnalysisResult::new(1, analysis_type, label.to_string())
             }
 
-            SimulationResult::MonteCarlo { variables, .. } => {
-                let wf_data: Vec<WaveformData> = variables
-                    .iter()
-                    .filter_map(|var| {
-                        if var.histogram.is_empty() || var.bin_edges.len() < 2 {
-                            return None;
-                        }
-                        let x: Vec<f64> = var
-                            .bin_edges
-                            .windows(2)
-                            .map(|window| (window[0] + window[1]) * 0.5)
-                            .collect();
-                        let y: Vec<f64> = var.histogram.iter().map(|count| *count as f64).collect();
-                        Some(WaveformData::new(
-                            format!("hist({})", var.name),
-                            x,
-                            y,
-                            Self::color_for_index(0),
-                        ))
-                    })
-                    .collect();
-                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
-            }
-
-            SimulationResult::Parametric {
-                sweep_values,
-                waveforms,
-                ..
-            } => {
-                let wf_data: Vec<WaveformData> = waveforms
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, (name, wf))| {
-                        WaveformData::new(
-                            name.clone(),
-                            sweep_values.clone(),
-                            wf.y_values.clone(),
-                            Self::color_for_index(idx),
-                        )
-                    })
-                    .collect();
-                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
-            }
-
-            SimulationResult::Corner {
-                x_values,
-                waveforms,
-                ..
-            } => {
-                let wf_data: Vec<WaveformData> = waveforms
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, (name, wf))| {
-                        WaveformData::new(
-                            name.clone(),
-                            x_values.clone(),
-                            wf.y_values.clone(),
-                            Self::color_for_index(idx),
-                        )
-                    })
-                    .collect();
-                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
-            }
-
-            SimulationResult::Reliability {
-                years, waveforms, ..
-            } => {
-                let wf_data: Vec<WaveformData> = waveforms
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, (name, wf))| {
-                        WaveformData::new(
-                            name.clone(),
-                            years.clone(),
-                            wf.y_values.clone(),
-                            Self::color_for_index(idx),
-                        )
-                    })
-                    .collect();
-                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
-            }
-
-            SimulationResult::Optimization {
-                iterations,
-                waveforms,
-                ..
-            } => {
-                let wf_data: Vec<WaveformData> = waveforms
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, (name, wf))| {
-                        WaveformData::new(
-                            name.clone(),
-                            iterations.clone(),
-                            wf.y_values.clone(),
-                            Self::color_for_index(idx),
-                        )
-                    })
-                    .collect();
-                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
-            }
-
-            SimulationResult::Soa {
-                time, waveforms, ..
-            } => {
-                let wf_data: Vec<WaveformData> = waveforms
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, (name, wf))| {
-                        WaveformData::new(
-                            name.clone(),
-                            time.clone(),
-                            wf.y_values.clone(),
-                            Self::color_for_index(idx),
-                        )
-                    })
-                    .collect();
-                AnalysisResult::new(1, analysis_type, label.to_string()).with_waveforms(wf_data)
-            }
+            SimulationResult::MonteCarlo { .. }
+            | SimulationResult::Parametric { .. }
+            | SimulationResult::Corner { .. }
+            | SimulationResult::Reliability { .. }
+            | SimulationResult::Optimization { .. }
+            | SimulationResult::Soa { .. } => AnalysisResult::new(
+                1,
+                analysis_type,
+                label.to_string(),
+            )
+            .with_waveforms(self.waveforms_for_result(sim_result)),
 
             SimulationResult::Empty { .. } => {
                 AnalysisResult::new(1, analysis_type, label.to_string())
             }
         }
+    }
+
+    fn build_waveforms_with_shared_x<I>(
+        &self,
+        x_values: &[f64],
+        traces: I,
+    ) -> Vec<crate::state::WaveformData>
+    where
+        I: IntoIterator<Item = (usize, String, Vec<f64>)>,
+    {
+        let shared_x: Arc<[f64]> = Arc::from(x_values.to_vec());
+        traces
+            .into_iter()
+            .map(|(idx, name, y_values)| {
+                crate::state::WaveformData::new(
+                    name,
+                    Arc::clone(&shared_x),
+                    y_values,
+                    Self::color_for_index(idx),
+                )
+            })
+            .collect()
+    }
+
+    fn build_sorted_waveforms_with_shared_x<F>(
+        &self,
+        x_values: &[f64],
+        waveforms: &std::collections::HashMap<String, crate::simulation::WaveformData>,
+        value_mapper: F,
+    ) -> Vec<crate::state::WaveformData>
+    where
+        F: Fn(String, &crate::simulation::WaveformData) -> (String, Vec<f64>),
+    {
+        let mut names: Vec<_> = waveforms.keys().cloned().collect();
+        names.sort();
+        let shared_x: Arc<[f64]> = Arc::from(x_values.to_vec());
+
+        names
+            .into_iter()
+            .enumerate()
+            .filter_map(|(idx, name)| {
+                waveforms.get(&name).map(|waveform| {
+                    let (display_name, y_values) = value_mapper(name, waveform);
+                    crate::state::WaveformData::new(
+                        display_name,
+                        Arc::clone(&shared_x),
+                        y_values,
+                        Self::color_for_index(idx),
+                    )
+                })
+            })
+            .collect()
     }
 
     /// Get color for waveform trace by index

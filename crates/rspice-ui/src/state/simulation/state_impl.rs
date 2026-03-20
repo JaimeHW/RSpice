@@ -13,14 +13,24 @@ impl SimulationState {
 
     /// Clear waveforms and increment version
     pub fn clear_waveforms(&mut self) {
-        self.waveforms.clear();
-        self.node_to_waveform.clear();
-        self.data_version = self.data_version.wrapping_add(1);
+        self.replace_waveforms(Vec::new());
     }
 
     /// Add a waveform trace and increment version
     pub fn add_waveform(&mut self, waveform: WaveformData) {
+        let index = self.waveforms.len();
+        self.node_to_waveform.insert(waveform.name.clone(), index);
         self.waveforms.push(waveform);
+        self.data_version = self.data_version.wrapping_add(1);
+    }
+
+    /// Replace the displayed waveform set and rebuild cross-probe mappings.
+    pub fn replace_waveforms(&mut self, waveforms: Vec<WaveformData>) {
+        self.node_to_waveform.clear();
+        self.waveforms = waveforms;
+        for (index, waveform) in self.waveforms.iter().enumerate() {
+            self.node_to_waveform.insert(waveform.name.clone(), index);
+        }
         self.data_version = self.data_version.wrapping_add(1);
     }
 
@@ -231,6 +241,23 @@ impl SimulationState {
         false
     }
 
+    /// Select the most recently added analysis in the active run.
+    pub fn select_latest_analysis(&mut self) -> bool {
+        let Some(run_idx) = self.active_run_idx else {
+            return false;
+        };
+        let Some(last_idx) = self
+            .runs
+            .get(run_idx)
+            .and_then(|run| run.analyses.len().checked_sub(1))
+        else {
+            return false;
+        };
+        self.active_analysis_idx = Some(last_idx);
+        self.sync_selected_analysis_waveforms();
+        true
+    }
+
     /// Get the currently active run (if any)
     pub fn active_run(&self) -> Option<&SimulationRun> {
         self.active_run_idx.and_then(|idx| self.runs.get(idx))
@@ -316,11 +343,6 @@ impl SimulationState {
             .map(|analysis| analysis.waveforms.clone())
             .unwrap_or_default();
 
-        self.waveforms = selected_waveforms;
-        self.node_to_waveform.clear();
-        for (index, waveform) in self.waveforms.iter().enumerate() {
-            self.node_to_waveform.insert(waveform.name.clone(), index);
-        }
-        self.data_version = self.data_version.wrapping_add(1);
+        self.replace_waveforms(selected_waveforms);
     }
 }
