@@ -250,6 +250,47 @@ fn test_collect_fft_cursor_label_obstacles_samples_top_band_trace_points() {
 }
 
 #[test]
+fn test_visible_spectrum_index_window_expands_one_bin_past_view_bounds() {
+    let freqs = vec![0.0, 10.0, 20.0, 30.0, 40.0];
+    let mags = vec![1.0, 0.8, 0.6, 0.4, 0.2];
+    let phases = vec![0.0; freqs.len()];
+    let data = FftData::from_spectrum("window", &freqs, &mags, &phases, 100.0);
+    let mut state = FftState::new();
+    state.freq_scale = FrequencyScale::Linear;
+    state.freq_min = 12.0;
+    state.freq_max = 28.0;
+
+    let window = visible_spectrum_index_window(&data, &state).expect("window");
+    assert_eq!(window, (1, 4));
+}
+
+#[test]
+fn test_build_spectrum_polyline_decimates_dense_visible_range() {
+    let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 500.0));
+    let n = 200_000usize;
+    let freqs: Vec<f64> = (0..n).map(|i| i as f64).collect();
+    let mags: Vec<f64> = freqs
+        .iter()
+        .map(|f| 1.0 + 0.5 * (2.0 * std::f64::consts::PI * f / 2500.0).sin())
+        .collect();
+    let phases = vec![0.0; n];
+    let data = FftData::from_spectrum("dense", &freqs, &mags, &phases, n as f64 * 2.0);
+
+    let mut state = FftState::new();
+    state.freq_scale = FrequencyScale::Linear;
+    state.freq_min = 0.0;
+    state.freq_max = (n - 1) as f64;
+    state.mag_scale = MagnitudeScale::Linear;
+    state.mag_min = 0.0;
+    state.mag_max = 2.0;
+
+    let points = build_spectrum_polyline(rect, &data, &state);
+    assert!(points.len() >= rect.width() as usize);
+    assert!(points.len() < n / 4);
+    assert!(points.iter().all(|point| point.x.is_finite() && point.y.is_finite()));
+}
+
+#[test]
 fn test_render_info_panel_handles_small_height_with_scroll() {
     let mut state = FftState::new();
     load_demo_data(&mut state);

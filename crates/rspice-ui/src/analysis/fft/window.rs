@@ -10,7 +10,7 @@ use std::f64::consts::PI;
 // =============================================================================
 
 /// Window function type
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum WindowFunction {
     /// Rectangular window (no windowing)
     Rectangular,

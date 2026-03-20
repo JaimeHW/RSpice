@@ -8,6 +8,7 @@ use super::pipeline::{
     MAX_REFERENCE_RESAMPLE_POINTS, MIN_FFT_SAMPLES,
 };
 use super::window::WindowFunction;
+use std::sync::Arc;
 
 // =============================================================================
 // Scale Mode
@@ -106,10 +107,17 @@ const DEFAULT_MANUAL_SAMPLE_COUNT: usize = 4096;
 const MAX_USER_MARKERS: usize = 16;
 const MARKER_MERGE_EPS_HZ: f64 = 1e-12;
 
+#[derive(Debug, Clone, Default)]
+struct PeakCache {
+    spectrum_revision: u64,
+    threshold_bits: u64,
+    peak_indices: Vec<usize>,
+}
+
 #[derive(Debug, Clone)]
 pub struct FftSourceCache {
     pub name: String,
-    pub samples: Vec<f64>,
+    pub samples: Arc<[f64]>,
     pub sample_rate: f64,
     pub original_count: usize,
     pub decimation_factor: usize,
@@ -180,6 +188,10 @@ pub struct FftState {
     pub info_pane_width: Option<f32>,
     /// Runtime auto-fit width hint captured from rendered content.
     pub info_pane_auto_width_hint: f32,
+    /// Runtime spectrum revision for display caches.
+    spectrum_revision: u64,
+    /// Cached local-maximum bins for the current threshold and spectrum revision.
+    peak_cache: PeakCache,
 }
 
 impl Default for FftState {
@@ -214,6 +226,8 @@ impl Default for FftState {
             marker_frequencies: Vec::new(),
             info_pane_width: None,
             info_pane_auto_width_hint: 0.0,
+            spectrum_revision: 0,
+            peak_cache: PeakCache::default(),
         }
     }
 }
@@ -231,6 +245,7 @@ impl FftState {
         self.data = Some(data);
         self.analysis = Some(analysis);
         self.source_cache = None;
+        self.mark_spectrum_changed();
         self.update_auto_scale();
     }
 
@@ -241,7 +256,7 @@ impl FftState {
         }
         self.source_cache = Some(FftSourceCache {
             name: input.name,
-            samples: input.samples,
+            samples: Arc::from(input.samples),
             sample_rate: input.sample_rate,
             original_count: input.original_count,
             decimation_factor: input.decimation_factor,
@@ -347,11 +362,13 @@ impl FftState {
         if data.is_empty() {
             self.data = None;
             self.analysis = None;
+            self.mark_spectrum_changed();
             return;
         }
         let analysis = SpectrumAnalysis::analyze(&data, self.num_harmonics);
         self.data = Some(data);
         self.analysis = Some(analysis);
+        self.mark_spectrum_changed();
         self.update_auto_scale();
     }
 
@@ -368,6 +385,7 @@ impl FftState {
         if let Some(data) = self.data.as_mut() {
             data.convert_normalization(normalization);
             self.recompute_analysis();
+            self.mark_spectrum_changed();
             self.update_auto_scale();
             return;
         }
@@ -392,6 +410,7 @@ impl FftState {
         self.analysis = None;
         self.source_cache = None;
         self.clear_markers();
+        self.mark_spectrum_changed();
     }
 
     /// Has data?
@@ -423,28 +442,30 @@ impl FftState {
             }
 
             if self.mag_auto {
-                let mut values = Vec::new();
+                let mut min_value = f64::INFINITY;
+                let mut max_value = f64::NEG_INFINITY;
+                let mut has_finite = false;
                 for point in &data.points {
                     let value = self.display_magnitude(point);
                     if value.is_finite() {
-                        values.push(value);
+                        has_finite = true;
+                        min_value = min_value.min(value);
+                        max_value = max_value.max(value);
                     }
                 }
 
-                if !values.is_empty() {
-                    let min = values.iter().copied().fold(f64::INFINITY, f64::min);
-                    let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-                    let span = (max - min).abs();
+                if has_finite {
+                    let span = (max_value - min_value).abs();
                     let padding = if span > 0.0 { span * 0.1 } else { 1.0 };
 
                     match self.mag_scale {
                         MagnitudeScale::Linear => {
-                            self.mag_min = (min - padding).max(0.0);
-                            self.mag_max = (max + padding).max(self.mag_min + 1e-9);
+                            self.mag_min = (min_value - padding).max(0.0);
+                            self.mag_max = (max_value + padding).max(self.mag_min + 1e-9);
                         }
                         MagnitudeScale::DB | MagnitudeScale::DBm | MagnitudeScale::DBc => {
-                            self.mag_min = (min - padding).floor().max(-300.0);
-                            self.mag_max = (max + padding).ceil().min(120.0);
+                            self.mag_min = (min_value - padding).floor().max(-300.0);
+                            self.mag_max = (max_value + padding).ceil().min(120.0);
                         }
                     }
                 }
@@ -509,6 +530,27 @@ impl FftState {
     pub fn set_num_harmonics(&mut self, num_harmonics: usize) {
         self.num_harmonics = num_harmonics.max(1);
         self.recompute_analysis();
+    }
+
+    pub fn ensure_peak_cache(&mut self) {
+        let Some(data) = self.data.as_ref() else {
+            self.peak_cache = PeakCache::default();
+            return;
+        };
+        let threshold_bits = self.peak_threshold_db.to_bits();
+        if self.peak_cache.spectrum_revision == self.spectrum_revision
+            && self.peak_cache.threshold_bits == threshold_bits
+        {
+            return;
+        }
+
+        self.peak_cache.spectrum_revision = self.spectrum_revision;
+        self.peak_cache.threshold_bits = threshold_bits;
+        self.peak_cache.peak_indices = data.find_peak_indices(self.peak_threshold_db);
+    }
+
+    pub fn cached_peak_indices(&self) -> &[usize] {
+        &self.peak_cache.peak_indices
     }
 
     /// Toggle grid
@@ -604,6 +646,11 @@ impl FftState {
     /// Get SNR
     pub fn snr_db(&self) -> Option<f64> {
         self.analysis.as_ref()?.snr_db
+    }
+
+    fn mark_spectrum_changed(&mut self) {
+        self.spectrum_revision = self.spectrum_revision.wrapping_add(1);
+        self.peak_cache = PeakCache::default();
     }
 }
 
@@ -1145,6 +1192,38 @@ mod tests {
             .map(|a| a.harmonics.len())
             .unwrap_or(0);
         assert!(h10_count >= h2_count);
+    }
+
+    #[test]
+    fn test_state_peak_cache_refreshes_for_threshold_and_data_changes() {
+        let mut state = FftState::new();
+        let input = PreparedFftInput {
+            name: "V(out)".to_string(),
+            samples: (0..2048)
+                .map(|i| {
+                    let t = i as f64 / 20_000.0;
+                    (2.0 * std::f64::consts::PI * 1_000.0 * t).sin()
+                        + 0.2 * (2.0 * std::f64::consts::PI * 2_000.0 * t).sin()
+                })
+                .collect(),
+            sample_rate: 20_000.0,
+            original_count: 2048,
+            decimation_factor: 1,
+        };
+        state.load_prepared_input(input);
+
+        state.ensure_peak_cache();
+        let baseline = state.cached_peak_indices().to_vec();
+        assert!(!baseline.is_empty());
+
+        state.peak_threshold_db = -6.0;
+        state.ensure_peak_cache();
+        let filtered = state.cached_peak_indices().to_vec();
+        assert!(filtered.len() <= baseline.len());
+
+        state.set_window(WindowFunction::FlatTop);
+        state.ensure_peak_cache();
+        assert!(!state.cached_peak_indices().is_empty());
     }
 
     #[test]

@@ -2,11 +2,16 @@
 //!
 //! Core data types for FFT and spectrum analysis.
 
-use std::f64::consts::PI;
+use std::{
+    collections::HashMap,
+    f64::consts::PI,
+    sync::{Arc, Mutex},
+};
 
-use rustfft::{num_complex::Complex, FftPlanner};
+use once_cell::sync::Lazy;
+use rustfft::{num_complex::Complex, Fft, FftPlanner};
 
-use super::window::{apply_window_copy, generate_window, WindowFunction};
+use super::window::{generate_window, WindowFunction};
 
 /// Amplitude normalization used for FFT magnitudes.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -44,6 +49,53 @@ impl SpectrumNormalization {
     pub fn relative_scale(from: SpectrumNormalization, to: SpectrumNormalization) -> f64 {
         to.scale_from_peak() / from.scale_from_peak()
     }
+}
+
+#[derive(Debug, Clone)]
+struct WindowCacheEntry {
+    coefficients: Arc<[f64]>,
+    coherent_gain: f64,
+}
+
+static WINDOW_CACHE: Lazy<Mutex<HashMap<(WindowFunction, usize), WindowCacheEntry>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+static FFT_PLAN_CACHE: Lazy<Mutex<HashMap<usize, Arc<dyn Fft<f64>>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+fn cached_window(window: WindowFunction, length: usize) -> WindowCacheEntry {
+    let mut cache = WINDOW_CACHE
+        .lock()
+        .expect("window cache lock poisoned");
+    if let Some(entry) = cache.get(&(window, length)) {
+        return entry.clone();
+    }
+
+    let coefficients = generate_window(window, length);
+    let coherent_gain = if length == 0 {
+        0.0
+    } else {
+        coefficients.iter().sum::<f64>() / length as f64
+    };
+    let entry = WindowCacheEntry {
+        coefficients: Arc::from(coefficients),
+        coherent_gain,
+    };
+    cache.insert((window, length), entry.clone());
+    entry
+}
+
+fn cached_fft_plan(length: usize) -> Arc<dyn Fft<f64>> {
+    let mut cache = FFT_PLAN_CACHE
+        .lock()
+        .expect("fft plan cache lock poisoned");
+    if let Some(plan) = cache.get(&length) {
+        return Arc::clone(plan);
+    }
+
+    let mut planner = FftPlanner::new();
+    let plan = planner.plan_fft_forward(length);
+    cache.insert(length, Arc::clone(&plan));
+    plan
 }
 
 // =============================================================================
@@ -183,20 +235,20 @@ impl FftData {
             return Self::new(name);
         }
 
-        // Apply window
-        let win = generate_window(window, n);
-        let windowed = apply_window_copy(data, &win);
+        let window_entry = cached_window(window, n);
 
         // Coherent gain from actual generated coefficients, not a table constant.
-        let cg = win.iter().sum::<f64>() / n as f64;
+        let cg = window_entry.coherent_gain;
         if !cg.is_finite() || cg.abs() < 1e-15 {
             return Self::new(name);
         }
 
-        let mut buffer: Vec<Complex<f64>> =
-            windowed.into_iter().map(|x| Complex::new(x, 0.0)).collect();
-        let mut planner = FftPlanner::new();
-        let fft = planner.plan_fft_forward(n);
+        let mut buffer: Vec<Complex<f64>> = data
+            .iter()
+            .zip(window_entry.coefficients.iter())
+            .map(|(&sample, &coeff)| Complex::new(sample * coeff, 0.0))
+            .collect();
+        let fft = cached_fft_plan(n);
         fft.process(&mut buffer);
 
         // One-sided spectrum: include DC..Nyquist (Nyquist exists only for even n).
@@ -317,20 +369,24 @@ impl FftData {
 
     /// Magnitude range in dB
     pub fn magnitude_range_db(&self) -> Option<(f64, f64)> {
-        let dbs: Vec<f64> = self
-            .points
-            .iter()
-            .map(|p| p.magnitude_db())
-            .filter(|db| db.is_finite())
-            .collect();
+        let mut min_db = f64::INFINITY;
+        let mut max_db = f64::NEG_INFINITY;
+        let mut has_finite = false;
 
-        if dbs.is_empty() {
-            return None;
+        for point in &self.points {
+            let db = point.magnitude_db();
+            if !db.is_finite() {
+                continue;
+            }
+            has_finite = true;
+            min_db = min_db.min(db);
+            max_db = max_db.max(db);
         }
 
-        let min = dbs.iter().copied().fold(f64::MAX, f64::min);
-        let max = dbs.iter().copied().fold(f64::MIN, f64::max);
-        Some((min, max))
+        if !has_finite {
+            return None;
+        }
+        Some((min_db, max_db))
     }
 
     /// DC component (bin 0)
@@ -352,8 +408,8 @@ impl FftData {
             .max_by(|(_, a), (_, b)| a.magnitude.total_cmp(&b.magnitude))
     }
 
-    /// Find all peaks above threshold
-    pub fn find_peaks(&self, threshold_db: f64) -> Vec<(usize, &FftPoint)> {
+    /// Find peak bin indices above threshold.
+    pub fn find_peak_indices(&self, threshold_db: f64) -> Vec<usize> {
         let mut peaks = Vec::new();
 
         for i in 1..self.points.len().saturating_sub(1) {
@@ -362,11 +418,19 @@ impl FftData {
             let next = self.points[i + 1].magnitude;
 
             if curr > prev && curr > next && self.points[i].magnitude_db() > threshold_db {
-                peaks.push((i, &self.points[i]));
+                peaks.push(i);
             }
         }
 
         peaks
+    }
+
+    /// Find all peaks above threshold
+    pub fn find_peaks(&self, threshold_db: f64) -> Vec<(usize, &FftPoint)> {
+        self.find_peak_indices(threshold_db)
+            .into_iter()
+            .map(|index| (index, &self.points[index]))
+            .collect()
     }
 
     /// Interpolate magnitude at specific frequency
@@ -932,6 +996,28 @@ mod tests {
 
         // Should find at least 2 peaks
         assert!(peaks.len() >= 2);
+    }
+
+    #[test]
+    fn test_fft_find_peak_indices_match_peak_search_results() {
+        let fs = 1000.0;
+        let data: Vec<f64> = (0..512)
+            .map(|i| {
+                let t = i as f64 / fs;
+                (2.0 * PI * 80.0 * t).sin()
+                    + 0.7 * (2.0 * PI * 160.0 * t).sin()
+                    + 0.3 * (2.0 * PI * 240.0 * t).sin()
+            })
+            .collect();
+
+        let fft = FftData::from_time_domain("Peaks", &data, fs, WindowFunction::Rectangular);
+        let peaks = fft.find_peaks(-50.0);
+        let indices = fft.find_peak_indices(-50.0);
+
+        assert_eq!(indices.len(), peaks.len());
+        for ((peak_idx, _), cached_idx) in peaks.iter().zip(indices.iter()) {
+            assert_eq!(*peak_idx, *cached_idx);
+        }
     }
 
     #[test]
