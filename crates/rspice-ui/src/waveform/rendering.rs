@@ -22,8 +22,9 @@
 
 use egui::{
     Color32, CursorIcon, FontId, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui,
-    UiBuilder, Vec2,
+    Shape, UiBuilder, Vec2,
 };
+use std::cell::RefCell;
 
 use super::axis::{self, GridLineType};
 use super::export::{calculate_export_stats, export_to_csv, export_to_spice_raw, ExportFormat};
@@ -709,36 +710,29 @@ fn render_trace(
     }
 
     let view = &viewer_state.view;
-    let polyline = build_trace_polyline(layout, view, trace);
-    let points = polyline.points;
-
-    if points.len() < 2 {
-        return;
-    }
-
-    // Draw the line with clipping
-    let color = trace.style.to_color32();
-    let width = if trace.highlighted {
-        trace.style.width * 2.0
-    } else {
-        trace.style.width
-    };
-    let stroke = Stroke::new(width, color);
-
-    // Use a clipped painter to ensure lines don't extend beyond plot area
-    let clipped_painter = painter.with_clip_rect(clip);
-
-    // Draw line segments with clipping
-    for window in points.windows(2) {
-        clipped_painter.line_segment([window[0], window[1]], stroke);
-    }
-
-    // Draw markers if enabled
-    if trace.style.show_markers && polyline.visible_samples <= 200 {
-        for point in &points {
-            painter.circle_filled(*point, trace.style.marker_size / 2.0, color);
+    TRACE_RENDER_SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        let visible_samples = build_trace_polyline_in_scratch(layout, view, trace, &mut scratch);
+        if scratch.points.len() < 2 {
+            return;
         }
-    }
+
+        let color = trace.style.to_color32();
+        let width = if trace.highlighted {
+            trace.style.width * 2.0
+        } else {
+            trace.style.width
+        };
+        let stroke = Stroke::new(width, color);
+        let clipped_painter = painter.with_clip_rect(clip);
+        clipped_painter.add(Shape::line(scratch.points.clone(), stroke));
+
+        if trace.style.show_markers && visible_samples <= 200 {
+            for point in scratch.points.iter().copied() {
+                clipped_painter.circle_filled(point, trace.style.marker_size / 2.0, color);
+            }
+        }
+    });
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -756,10 +750,22 @@ struct TraceBucket {
     max: Option<TraceScreenSample>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Default)]
 struct TracePolyline {
     points: Vec<Pos2>,
     visible_samples: usize,
+}
+
+#[derive(Debug, Default)]
+struct TraceRenderScratch {
+    points: Vec<Pos2>,
+    buckets: Vec<TraceBucket>,
+}
+
+thread_local! {
+    static TRACE_RENDER_SCRATCH: RefCell<TraceRenderScratch> =
+        RefCell::new(TraceRenderScratch::default());
 }
 
 fn trace_screen_pos(
@@ -854,55 +860,89 @@ fn update_trace_bucket(bucket: &mut TraceBucket, sample: TraceScreenSample) {
 }
 
 fn collect_bucket_points(points: &mut Vec<Pos2>, bucket: &TraceBucket) {
-    let mut bucket_samples = [bucket.first, bucket.min, bucket.max, bucket.last]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
-    if bucket_samples.is_empty() {
-        return;
-    }
-    bucket_samples.sort_by_key(|sample| sample.sample_index);
-    bucket_samples.dedup_by_key(|sample| sample.sample_index);
-    for sample in bucket_samples {
+    let mut pending = [bucket.first, bucket.min, bucket.max, bucket.last];
+    let mut last_index = None;
+
+    for _ in 0..pending.len() {
+        let mut selected_slot = None;
+        for (slot, sample) in pending.iter().enumerate() {
+            let Some(sample) = sample else {
+                continue;
+            };
+            let replace = selected_slot
+                .map(|existing: usize| {
+                    sample.sample_index < pending[existing].unwrap().sample_index
+                })
+                .unwrap_or(true);
+            if replace {
+                selected_slot = Some(slot);
+            }
+        }
+
+        let Some(slot) = selected_slot else {
+            break;
+        };
+        let Some(sample) = pending[slot].take() else {
+            continue;
+        };
+        if last_index == Some(sample.sample_index) {
+            continue;
+        }
+        last_index = Some(sample.sample_index);
         push_unique_point(points, sample.pos);
     }
 }
 
+#[cfg(test)]
 fn build_trace_polyline(
     layout: &ViewerLayout,
     view: &ViewTransform,
     trace: &TraceData,
 ) -> TracePolyline {
+    let mut scratch = TraceRenderScratch::default();
+    let visible_samples = build_trace_polyline_in_scratch(layout, view, trace, &mut scratch);
+    TracePolyline {
+        points: scratch.points,
+        visible_samples,
+    }
+}
+
+fn build_trace_polyline_in_scratch(
+    layout: &ViewerLayout,
+    view: &ViewTransform,
+    trace: &TraceData,
+    scratch: &mut TraceRenderScratch,
+) -> usize {
     let Some((start, end)) = visible_trace_index_window(trace, view) else {
-        return TracePolyline::default();
+        scratch.points.clear();
+        return 0;
     };
 
     let visible_samples = end.saturating_sub(start);
     if visible_samples == 0 {
-        return TracePolyline::default();
+        scratch.points.clear();
+        return 0;
     }
 
     let plot_width_px = layout.plot.width().max(1.0).ceil() as usize;
-    let mut points = Vec::new();
+    scratch.points.clear();
 
     if should_render_trace_directly(plot_width_px, visible_samples) {
-        points.reserve(visible_samples);
+        scratch.points.reserve(visible_samples);
         for idx in start..end {
             let Some((&x, &y)) = trace.x.get(idx).zip(trace.y.get(idx)) else {
                 continue;
             };
             if let Some(pos) = trace_screen_pos(layout, view, x, y) {
-                push_unique_point(&mut points, pos);
+                push_unique_point(&mut scratch.points, pos);
             }
         }
-        return TracePolyline {
-            points,
-            visible_samples,
-        };
+        return visible_samples;
     }
 
     let bucket_count = plot_width_px.max(1);
-    let mut buckets = vec![TraceBucket::default(); bucket_count];
+    scratch.buckets.clear();
+    scratch.buckets.resize(bucket_count, TraceBucket::default());
 
     for idx in start..end {
         let Some((&x, &y)) = trace.x.get(idx).zip(trace.y.get(idx)) else {
@@ -920,7 +960,7 @@ fn build_trace_polyline(
         let bucket_index = ((pos.x - layout.plot.min.x).floor() as isize)
             .clamp(0, bucket_count as isize - 1) as usize;
         update_trace_bucket(
-            &mut buckets[bucket_index],
+            &mut scratch.buckets[bucket_index],
             TraceScreenSample {
                 sample_index: idx,
                 data_y: y,
@@ -929,15 +969,12 @@ fn build_trace_polyline(
         );
     }
 
-    points.reserve(bucket_count * 2);
-    for bucket in &buckets {
-        collect_bucket_points(&mut points, bucket);
+    scratch.points.reserve(bucket_count * 2);
+    for bucket in &scratch.buckets {
+        collect_bucket_points(&mut scratch.points, bucket);
     }
 
-    TracePolyline {
-        points,
-        visible_samples,
-    }
+    visible_samples
 }
 
 #[derive(Debug, Clone, PartialEq)]

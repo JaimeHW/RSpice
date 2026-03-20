@@ -65,6 +65,59 @@ pub struct TraceMeasurements {
     pub integral: Option<f64>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct BasicStats {
+    count: usize,
+    min: f64,
+    max: f64,
+    mean: f64,
+    sum_squares: f64,
+    m2: f64,
+}
+
+impl BasicStats {
+    fn from_samples(samples: &[f64]) -> Option<Self> {
+        let mut stats = Self {
+            count: 0,
+            min: f64::INFINITY,
+            max: f64::NEG_INFINITY,
+            mean: 0.0,
+            sum_squares: 0.0,
+            m2: 0.0,
+        };
+
+        for &value in samples {
+            if !value.is_finite() {
+                continue;
+            }
+
+            stats.count += 1;
+            stats.min = stats.min.min(value);
+            stats.max = stats.max.max(value);
+            stats.sum_squares += value * value;
+
+            let delta = value - stats.mean;
+            stats.mean += delta / stats.count as f64;
+            let delta2 = value - stats.mean;
+            stats.m2 += delta * delta2;
+        }
+
+        (stats.count > 0).then_some(stats)
+    }
+
+    fn pk_pk(self) -> f64 {
+        self.max - self.min
+    }
+
+    fn rms(self) -> f64 {
+        (self.sum_squares / self.count as f64).sqrt()
+    }
+
+    fn std_dev(self) -> Option<f64> {
+        (self.count > 1).then(|| (self.m2 / (self.count - 1) as f64).sqrt())
+    }
+}
+
 // =============================================================================
 // Measurement Cache
 // =============================================================================
@@ -186,58 +239,32 @@ impl MeasurementCache {
 
 /// Calculate minimum value in a region
 pub fn calculate_min(y_data: &[f64]) -> Option<f64> {
-    y_data
-        .iter()
-        .copied()
-        .filter(|v| v.is_finite())
-        .reduce(f64::min)
+    BasicStats::from_samples(y_data).map(|stats| stats.min)
 }
 
 /// Calculate maximum value in a region
 pub fn calculate_max(y_data: &[f64]) -> Option<f64> {
-    y_data
-        .iter()
-        .copied()
-        .filter(|v| v.is_finite())
-        .reduce(f64::max)
+    BasicStats::from_samples(y_data).map(|stats| stats.max)
 }
 
 /// Calculate peak-to-peak amplitude
 pub fn calculate_pk_pk(y_data: &[f64]) -> Option<f64> {
-    let min = calculate_min(y_data)?;
-    let max = calculate_max(y_data)?;
-    Some(max - min)
+    BasicStats::from_samples(y_data).map(BasicStats::pk_pk)
 }
 
 /// Calculate mean (average) value
 pub fn calculate_mean(y_data: &[f64]) -> Option<f64> {
-    let valid: Vec<f64> = y_data.iter().copied().filter(|v| v.is_finite()).collect();
-    if valid.is_empty() {
-        return None;
-    }
-    Some(valid.iter().sum::<f64>() / valid.len() as f64)
+    BasicStats::from_samples(y_data).map(|stats| stats.mean)
 }
 
 /// Calculate RMS (root mean square) value
 pub fn calculate_rms(y_data: &[f64]) -> Option<f64> {
-    let valid: Vec<f64> = y_data.iter().copied().filter(|v| v.is_finite()).collect();
-    if valid.is_empty() {
-        return None;
-    }
-    let sum_sq: f64 = valid.iter().map(|v| v * v).sum();
-    Some((sum_sq / valid.len() as f64).sqrt())
+    BasicStats::from_samples(y_data).map(BasicStats::rms)
 }
 
 /// Calculate standard deviation
 pub fn calculate_std_dev(y_data: &[f64]) -> Option<f64> {
-    let mean = calculate_mean(y_data)?;
-    let valid: Vec<f64> = y_data.iter().copied().filter(|v| v.is_finite()).collect();
-    if valid.len() < 2 {
-        return None;
-    }
-    let variance: f64 =
-        valid.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (valid.len() - 1) as f64;
-    Some(variance.sqrt())
+    BasicStats::from_samples(y_data).and_then(BasicStats::std_dev)
 }
 
 // =============================================================================
@@ -454,15 +481,16 @@ pub fn calculate_integral(x_data: &[f64], y_data: &[f64]) -> Option<f64> {
 pub fn calculate_all_measurements(trace: &TraceData) -> TraceMeasurements {
     let x = &trace.x;
     let y = &trace.y;
+    let basic = BasicStats::from_samples(y);
 
     TraceMeasurements {
         trace_name: trace.name.clone(),
-        min: calculate_min(y),
-        max: calculate_max(y),
-        pk_pk: calculate_pk_pk(y),
-        mean: calculate_mean(y),
-        rms: calculate_rms(y),
-        std_dev: calculate_std_dev(y),
+        min: basic.map(|stats| stats.min),
+        max: basic.map(|stats| stats.max),
+        pk_pk: basic.map(BasicStats::pk_pk),
+        mean: basic.map(|stats| stats.mean),
+        rms: basic.map(BasicStats::rms),
+        std_dev: basic.and_then(BasicStats::std_dev),
         rise_time: calculate_rise_time(x, y),
         fall_time: calculate_fall_time(x, y),
         period: calculate_period(x, y),
@@ -478,33 +506,26 @@ pub fn calculate_measurements_in_range(
     x_start: f64,
     x_end: f64,
 ) -> TraceMeasurements {
-    // Find indices within range
     let n = trace.len();
-    let mut start_idx = 0;
-    let mut end_idx = n;
-
-    for (i, &x) in trace.x.iter().enumerate() {
-        if x >= x_start && start_idx == 0 {
-            start_idx = if i > 0 { i - 1 } else { 0 };
-        }
-        if x > x_end {
-            end_idx = i + 1;
-            break;
-        }
+    let start_idx = trace.x.partition_point(|x| *x < x_start).min(n);
+    let mut end_idx = (trace.x.partition_point(|x| *x <= x_end) + 1).min(n);
+    if end_idx <= start_idx {
+        end_idx = (start_idx + 1).min(n);
     }
 
     // Create sliced trace
     let x_slice = &trace.x[start_idx..end_idx.min(n)];
     let y_slice = &trace.y[start_idx..end_idx.min(n)];
+    let basic = BasicStats::from_samples(y_slice);
 
     TraceMeasurements {
         trace_name: trace.name.clone(),
-        min: calculate_min(y_slice),
-        max: calculate_max(y_slice),
-        pk_pk: calculate_pk_pk(y_slice),
-        mean: calculate_mean(y_slice),
-        rms: calculate_rms(y_slice),
-        std_dev: calculate_std_dev(y_slice),
+        min: basic.map(|stats| stats.min),
+        max: basic.map(|stats| stats.max),
+        pk_pk: basic.map(BasicStats::pk_pk),
+        mean: basic.map(|stats| stats.mean),
+        rms: basic.map(BasicStats::rms),
+        std_dev: basic.and_then(BasicStats::std_dev),
         rise_time: calculate_rise_time(x_slice, y_slice),
         fall_time: calculate_fall_time(x_slice, y_slice),
         period: calculate_period(x_slice, y_slice),
