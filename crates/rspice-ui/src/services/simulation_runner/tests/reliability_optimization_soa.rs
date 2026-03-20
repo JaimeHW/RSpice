@@ -8,6 +8,7 @@ fn test_extract_reliability_stress_data_maps_transistor_biases() {
             kind: ElementKind::Mosfet {
                 model: "NM".to_string(),
                 mos_type: rspice_core::netlist::MosType::Nmos,
+                instance_params: Vec::new(),
             },
             nodes: vec![
                 "d".to_string(),
@@ -21,6 +22,7 @@ fn test_extract_reliability_stress_data_maps_transistor_biases() {
             kind: ElementKind::Bjt {
                 model: "NPN".to_string(),
                 bjt_type: rspice_core::netlist::BjtType::Npn,
+                instance_params: Vec::new(),
             },
             nodes: vec!["c".to_string(), "b".to_string(), "e".to_string()],
         },

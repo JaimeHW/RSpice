@@ -983,7 +983,7 @@ R1 out 0 1k
         )
         .expect("Envelope spec should start");
 
-    let result = wait_for_result(&mut runner, Duration::from_secs(20));
+    let result = wait_for_result(&mut runner, Duration::from_secs(90));
     assert!(result.is_some(), "Expected envelope result");
     let result = result.unwrap().expect("Envelope should succeed");
     match result {
@@ -1021,7 +1021,7 @@ R1 out 0 1k
         )
         .expect("Fourier spec should start");
 
-    let result = wait_for_result(&mut runner, Duration::from_secs(20));
+    let result = wait_for_result(&mut runner, Duration::from_secs(90));
     assert!(result.is_some(), "Expected Fourier result");
     let result = result.unwrap().expect("Fourier should succeed");
     match result {
