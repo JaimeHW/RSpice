@@ -927,7 +927,7 @@ fn test_action_file_save_as_passes_current_filename_to_backend() {
     io.push_save_dialog_result(Err(crate::io::SchematicIoError::Cancelled));
     app.set_file_workflow_io_for_test(Box::new(io.clone()));
 
-    let saved = app.action_file_save_as();
+    let saved = crate::common::file_actions::action_file_save_as_with_io(&mut app.state, &io);
 
     assert!(!saved);
     assert_eq!(io.save_dialog_calls(), 1);

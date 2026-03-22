@@ -33,6 +33,7 @@ pub(crate) enum ShortcutCommand {
 }
 
 impl ShortcutCommand {
+    #[cfg(test)]
     pub(crate) const ALL: [ShortcutCommand; 30] = [
         ShortcutCommand::FileNew,
         ShortcutCommand::FileOpen,

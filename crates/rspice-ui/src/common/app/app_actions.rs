@@ -32,7 +32,7 @@ impl RSpiceApp {
             ShortcutCommand::EditDelete => self.action_edit_delete(),
             ShortcutCommand::EditSelectAll => self.action_edit_select_all(),
             ShortcutCommand::ToggleBrowserPanel => self.toggle_panel_browser(),
-            ShortcutCommand::ToggleLogPanel => self.toggle_panel_log_new(),
+            ShortcutCommand::ToggleLogPanel => self.toggle_panel_log(),
             ShortcutCommand::ShowShortcutsHelp => {
                 self.state.dialogs.shortcuts_help = true;
             }
@@ -203,21 +203,5 @@ impl RSpiceApp {
             self.state.panels.bottom_panel = true;
             self.state.panels.active_bottom_tab = BottomPanelTab::Log;
         }
-    }
-
-    pub(super) fn toggle_panel_waveform(&mut self) {
-        // Show bottom panel and switch to Waveform tab
-        if self.state.panels.bottom_panel
-            && self.state.panels.active_bottom_tab == BottomPanelTab::Waveform
-        {
-            self.state.panels.bottom_panel = false;
-        } else {
-            self.state.panels.bottom_panel = true;
-            self.state.panels.active_bottom_tab = BottomPanelTab::Waveform;
-        }
-    }
-
-    pub(super) fn toggle_panel_properties(&mut self) {
-        self.state.panels.properties = !self.state.panels.properties;
     }
 }

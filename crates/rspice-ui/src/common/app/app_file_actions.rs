@@ -86,9 +86,4 @@ impl RSpiceApp {
         let (state, io) = (&mut self.state, self.file_workflow_io.as_ref());
         crate::common::file_actions::action_file_save_with_io(state, io)
     }
-
-    pub(super) fn action_file_save_as(&mut self) -> bool {
-        let (state, io) = (&mut self.state, self.file_workflow_io.as_ref());
-        crate::common::file_actions::action_file_save_as_with_io(state, io)
-    }
 }

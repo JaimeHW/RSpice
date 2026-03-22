@@ -1,11 +1,6 @@
 use crate::common::app::AppState;
 use crate::common::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
-pub(super) fn action_export_svg(state: &mut AppState) {
-    let io = crate::common::export_workflow::NativeExportWorkflowIo;
-    action_export_svg_with_io(state, &io);
-}
-
 pub(super) fn action_export_svg_with_io(
     state: &mut AppState,
     io: &(impl ExportWorkflowIo + ?Sized),
@@ -51,11 +46,6 @@ pub(super) fn action_export_svg_with_io(
             // User cancelled - no message needed
         }
     }
-}
-
-pub(super) fn action_export_netlist(state: &mut AppState, format: crate::io::NetlistFormat) {
-    let io = crate::common::export_workflow::NativeExportWorkflowIo;
-    action_export_netlist_with_io(state, format, &io);
 }
 
 pub(super) fn action_export_netlist_with_io(

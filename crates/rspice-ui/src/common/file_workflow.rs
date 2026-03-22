@@ -51,14 +51,6 @@ pub(crate) fn create_new_schematic(state: &mut AppState) {
     state.push_user_message(ConsoleMessage::info("Created new schematic"));
 }
 
-/// Load a schematic from an explicit path.
-///
-/// Returns `true` on success and reports errors through the user console.
-pub(crate) fn load_schematic_from_path(state: &mut AppState, path: &Path) -> bool {
-    let io = NativeFileWorkflowIo;
-    load_schematic_from_path_with_io(state, path, &io)
-}
-
 pub(crate) fn load_schematic_from_path_with_io(
     state: &mut AppState,
     path: &Path,
@@ -77,12 +69,6 @@ pub(crate) fn load_schematic_from_path_with_io(
     }
 }
 
-/// Prompt the user for a schematic file path and load it.
-pub(crate) fn open_schematic_from_dialog(state: &mut AppState) {
-    let io = NativeFileWorkflowIo;
-    open_schematic_from_dialog_with_io(state, &io);
-}
-
 pub(crate) fn open_schematic_from_dialog_with_io(
     state: &mut AppState,
     io: &(impl FileWorkflowIo + ?Sized),
@@ -98,18 +84,6 @@ pub(crate) fn open_schematic_from_dialog_with_io(
             state.push_user_message(ConsoleMessage::error(format!("Open failed: {}", e)));
         }
     }
-}
-
-/// Save the current schematic to an explicit path.
-///
-/// Returns `true` on success and reports errors through the user console.
-pub(crate) fn save_schematic_to_path(
-    state: &mut AppState,
-    path: &Path,
-    update_current_file: bool,
-) -> bool {
-    let io = NativeFileWorkflowIo;
-    save_schematic_to_path_with_io(state, path, update_current_file, &io)
 }
 
 pub(crate) fn save_schematic_to_path_with_io(
@@ -134,14 +108,6 @@ pub(crate) fn save_schematic_to_path_with_io(
     }
 }
 
-/// Save the current schematic.
-///
-/// If no current file exists, this falls back to Save As.
-pub(crate) fn save_schematic(state: &mut AppState) -> bool {
-    let io = NativeFileWorkflowIo;
-    save_schematic_with_io(state, &io)
-}
-
 pub(crate) fn save_schematic_with_io(
     state: &mut AppState,
     io: &(impl FileWorkflowIo + ?Sized),
@@ -151,12 +117,6 @@ pub(crate) fn save_schematic_with_io(
     } else {
         save_schematic_as_with_io(state, io)
     }
-}
-
-/// Prompt for a target path and save the current schematic.
-pub(crate) fn save_schematic_as(state: &mut AppState) -> bool {
-    let io = NativeFileWorkflowIo;
-    save_schematic_as_with_io(state, &io)
 }
 
 pub(crate) fn save_schematic_as_with_io(

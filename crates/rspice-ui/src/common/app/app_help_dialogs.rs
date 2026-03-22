@@ -9,6 +9,7 @@ fn shortcut_help_row(command: ShortcutCommand) -> (&'static str, &'static str) {
     (command.shortcut_string(), command.display_name())
 }
 
+#[cfg(test)]
 fn total_shortcut_help_rows() -> usize {
     ShortcutCategory::ALL
         .iter()

@@ -391,14 +391,6 @@ impl RSpiceApp {
         self.file_workflow_io = io;
     }
 
-    #[cfg(test)]
-    fn set_export_workflow_io_for_test(
-        &mut self,
-        io: Box<dyn crate::common::export_workflow::ExportWorkflowIo>,
-    ) {
-        self.export_workflow_io = io;
-    }
-
     fn process_exit_request(&mut self, ctx: &Context) {
         if !self.state.exit_requested {
             return;
@@ -411,23 +403,6 @@ impl RSpiceApp {
     /// Toggle the bottom panel visibility
     pub fn toggle_bottom_panel(&mut self) {
         self.state.panels.bottom_panel = !self.state.panels.bottom_panel;
-    }
-
-    /// Toggle the log panel visibility.
-    pub fn toggle_panel_log_new(&mut self) {
-        self.toggle_panel_log();
-    }
-
-    /// Toggle the waveform panel visibility
-    pub fn toggle_panel_waveform_new(&mut self) {
-        // Switch to waveform tab if not active
-        if self.state.panels.active_bottom_tab != BottomPanelTab::Waveform {
-            self.state.panels.active_bottom_tab = BottomPanelTab::Waveform;
-            self.state.panels.bottom_panel = true;
-        } else {
-            // Toggle visibility if already active
-            self.state.panels.bottom_panel = !self.state.panels.bottom_panel;
-        }
     }
 }
 
