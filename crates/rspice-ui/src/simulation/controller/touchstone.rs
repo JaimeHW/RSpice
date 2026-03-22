@@ -245,11 +245,7 @@ impl SimulationController {
         analysis_idx: usize,
         num_ports: usize,
     ) -> PathBuf {
-        let source_path = state
-            .schematic
-            .current_file
-            .as_ref()
-            .or(state.simulation.current_file.as_ref());
+        let source_path = state.schematic.current_file.as_ref();
         let (base_dir, stem) = if let Some(path) = source_path {
             let dir = path
                 .parent()

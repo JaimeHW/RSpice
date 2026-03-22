@@ -11,7 +11,8 @@
 pub mod dc_annotation;
 pub mod dc_annotation_placement;
 pub mod display_settings;
-pub mod document;
+#[allow(dead_code)]
+pub(crate) mod document;
 pub mod hierarchy;
 pub mod history;
 pub mod junction_cache;
@@ -26,7 +27,8 @@ pub mod recent_files;
 pub mod render_context;
 mod schematic;
 pub mod schematic_file;
-pub mod session_state;
+#[allow(dead_code)]
+pub(crate) mod session_state;
 pub mod shortcuts;
 mod simulation;
 pub mod spatial_index;
@@ -34,7 +36,6 @@ pub mod viewport;
 
 pub use dc_annotation::{AnnotationKind, AnnotationMode, DcAnnotationState};
 pub use display_settings::{PinNameVisibility, SchematicDisplaySettings};
-pub use document::{Document, DocumentManager};
 pub use history::SchematicHistory;
 pub use library_browser::{Cell, Library, LibraryManager, View, ViewType};
 pub use model_library::ModelLibraryManager;
@@ -45,7 +46,7 @@ pub use property_types::{
 };
 pub use schematic::*;
 pub use simulation::{
-    AnalysisResult, AnalysisType, ConsoleMessage, CrossProbeMapping, DcOpResult, MessageSeverity,
-    OperatingPointValue, SimulationRun, SimulationState, WaveformData,
+    AnalysisResult, AnalysisType, CrossProbeMapping, DcOpResult, OperatingPointValue,
+    SimulationRun, SimulationState, WaveformData,
 };
 pub use viewport::{BoundingBox, Viewport, VisibilityFilter};

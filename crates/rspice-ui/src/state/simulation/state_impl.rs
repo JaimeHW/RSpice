@@ -1,16 +1,6 @@
 use super::*;
 
 impl SimulationState {
-    /// Add a console message
-    pub fn log(&mut self, message: ConsoleMessage) {
-        self.console_messages.push(message);
-    }
-
-    /// Clear console messages
-    pub fn clear_console(&mut self) {
-        self.console_messages.clear();
-    }
-
     /// Clear waveforms and increment version
     pub fn clear_waveforms(&mut self) {
         self.replace_waveforms(Vec::new());

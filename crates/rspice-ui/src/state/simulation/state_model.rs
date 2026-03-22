@@ -31,17 +31,8 @@ pub struct SimulationState {
     /// Used by the waveform viewer to detect when to reload traces.
     pub data_version: u64,
 
-    /// Console log messages
-    pub console_messages: Vec<ConsoleMessage>,
-
     /// Current netlist content (from editor)
     pub netlist_content: String,
-
-    /// Current file path (if opened/saved)
-    pub current_file: Option<PathBuf>,
-
-    /// Whether the editor content has unsaved changes
-    pub is_dirty: bool,
 
     /// Mapping from netlist node names (N001, N002) to waveform indices
     /// Populated after simulation to enable accurate probing
