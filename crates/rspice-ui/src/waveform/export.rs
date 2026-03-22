@@ -6,6 +6,10 @@
 use std::io::Write;
 use std::path::Path;
 
+use crate::common::export_workflow::{
+    ExportWorkflowIo, NativeExportWorkflowIo, SaveDialogConfig,
+};
+
 use super::state::TraceData;
 
 // =============================================================================
@@ -41,6 +45,15 @@ impl ExportFormat {
             ExportFormat::Tsv => '\t',
             ExportFormat::SpiceRaw => ' ',
         }
+    }
+}
+
+/// User-facing display name for an export format.
+pub fn export_format_display_name(format: ExportFormat) -> &'static str {
+    match format {
+        ExportFormat::Csv => "CSV",
+        ExportFormat::Tsv => "TSV",
+        ExportFormat::SpiceRaw => "SPICE RAW",
     }
 }
 
@@ -242,6 +255,43 @@ pub fn export_to_spice_raw(traces: &[TraceData], title: &str) -> String {
     output
 }
 
+/// Build the export payload for the requested format.
+pub fn build_export_payload(traces: &[TraceData], options: &ExportOptions) -> String {
+    match options.format {
+        ExportFormat::SpiceRaw => export_to_spice_raw(traces, "RSpice Waveforms"),
+        ExportFormat::Csv | ExportFormat::Tsv => export_to_csv(traces, options),
+    }
+}
+
+/// Save an export payload through the shared export workflow abstraction.
+pub(crate) fn save_export_payload_with_io(
+    payload: &str,
+    format: ExportFormat,
+    io: &(impl ExportWorkflowIo + ?Sized),
+) -> Result<std::path::PathBuf, String> {
+    let extension = format.extension();
+    let Some(mut path) = io.show_save_dialog(SaveDialogConfig {
+        title: "Export Waveforms",
+        default_name: &format!("waveforms.{}", extension),
+        filter_name: export_format_display_name(format),
+        filter_extensions: &[extension],
+    }) else {
+        return Err("Export canceled".to_string());
+    };
+    crate::common::file_actions::ensure_file_extension(&mut path, extension);
+    io.write_text_file(&path, payload)?;
+    Ok(path)
+}
+
+/// Save an export payload using the production export workflow backend.
+pub fn save_export_payload_with_native_dialog(
+    payload: &str,
+    format: ExportFormat,
+) -> Result<std::path::PathBuf, String> {
+    let io = NativeExportWorkflowIo;
+    save_export_payload_with_io(payload, format, &io)
+}
+
 // =============================================================================
 // Export Statistics
 // =============================================================================
@@ -286,6 +336,70 @@ pub fn calculate_export_stats(traces: &[TraceData], options: &ExportOptions) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::{Cell, RefCell};
+    use std::collections::VecDeque;
+    use std::path::PathBuf;
+
+    #[derive(Default)]
+    struct MockExportWorkflowIo {
+        save_dialog_results: RefCell<VecDeque<Option<PathBuf>>>,
+        write_text_results: RefCell<VecDeque<Result<(), String>>>,
+        save_dialog_calls: Cell<usize>,
+        write_text_calls: Cell<usize>,
+        last_save_dialog_config: RefCell<Option<(String, String, String, Vec<String>)>>,
+        last_write_path: RefCell<Option<PathBuf>>,
+        last_write_contents: RefCell<Option<String>>,
+    }
+
+    impl MockExportWorkflowIo {
+        fn push_save_dialog_result(&self, result: Option<PathBuf>) {
+            self.save_dialog_results.borrow_mut().push_back(result);
+        }
+
+        fn push_write_text_result(&self, result: Result<(), String>) {
+            self.write_text_results.borrow_mut().push_back(result);
+        }
+    }
+
+    impl ExportWorkflowIo for MockExportWorkflowIo {
+        fn show_save_dialog(&self, config: SaveDialogConfig<'_>) -> Option<PathBuf> {
+            self.save_dialog_calls
+                .set(self.save_dialog_calls.get().saturating_add(1));
+            *self.last_save_dialog_config.borrow_mut() = Some((
+                config.title.to_string(),
+                config.default_name.to_string(),
+                config.filter_name.to_string(),
+                config
+                    .filter_extensions
+                    .iter()
+                    .map(|ext| (*ext).to_string())
+                    .collect(),
+            ));
+            self.save_dialog_results
+                .borrow_mut()
+                .pop_front()
+                .expect("test must provide show_save_dialog result")
+        }
+
+        fn write_text_file(&self, path: &Path, contents: &str) -> Result<(), String> {
+            self.write_text_calls
+                .set(self.write_text_calls.get().saturating_add(1));
+            *self.last_write_path.borrow_mut() = Some(path.to_path_buf());
+            *self.last_write_contents.borrow_mut() = Some(contents.to_string());
+            self.write_text_results
+                .borrow_mut()
+                .pop_front()
+                .expect("test must provide write_text_file result")
+        }
+
+        fn write_waveform_csv(
+            &self,
+            _dataset: &crate::io::WaveformDataset,
+            _path: &Path,
+        ) -> Result<(), String> {
+            Err("unexpected write_waveform_csv call".to_string())
+        }
+    }
 
     fn make_test_traces() -> Vec<TraceData> {
         vec![
@@ -517,5 +631,83 @@ mod tests {
         let csv = export_to_csv(&traces, &options);
 
         assert!(csv.is_empty());
+    }
+
+    #[test]
+    fn test_build_export_payload_routes_by_format() {
+        let traces = vec![TraceData::new("V(out)", vec![0.0, 1e-6], vec![0.0, 1.0])];
+
+        let mut csv_opts = ExportOptions::default();
+        csv_opts.format = ExportFormat::Csv;
+        let csv = build_export_payload(&traces, &csv_opts);
+        assert!(csv.contains("Time,"));
+
+        let mut tsv_opts = ExportOptions::default();
+        tsv_opts.format = ExportFormat::Tsv;
+        let tsv = build_export_payload(&traces, &tsv_opts);
+        assert!(tsv.contains('\t'));
+
+        let mut raw_opts = ExportOptions::default();
+        raw_opts.format = ExportFormat::SpiceRaw;
+        let raw = build_export_payload(&traces, &raw_opts);
+        assert!(raw.contains("Title: RSpice Waveforms"));
+        assert!(raw.contains("Values:"));
+    }
+
+    #[test]
+    fn test_save_export_payload_with_io_uses_shared_dialog_contract() {
+        let io = MockExportWorkflowIo::default();
+        io.push_save_dialog_result(Some(PathBuf::from("exports/waveform_dump")));
+        io.push_write_text_result(Ok(()));
+
+        let path = save_export_payload_with_io("payload", ExportFormat::Csv, &io)
+            .expect("save should succeed");
+
+        assert_eq!(path, PathBuf::from("exports/waveform_dump.csv"));
+        assert_eq!(io.save_dialog_calls.get(), 1);
+        assert_eq!(io.write_text_calls.get(), 1);
+        assert_eq!(
+            io.last_save_dialog_config.borrow().clone(),
+            Some((
+                "Export Waveforms".to_string(),
+                "waveforms.csv".to_string(),
+                "CSV".to_string(),
+                vec!["csv".to_string()],
+            ))
+        );
+        assert_eq!(
+            io.last_write_path.borrow().clone(),
+            Some(PathBuf::from("exports/waveform_dump.csv"))
+        );
+        assert_eq!(
+            io.last_write_contents.borrow().clone(),
+            Some("payload".to_string())
+        );
+    }
+
+    #[test]
+    fn test_save_export_payload_with_io_propagates_cancel() {
+        let io = MockExportWorkflowIo::default();
+        io.push_save_dialog_result(None);
+
+        let err = save_export_payload_with_io("payload", ExportFormat::SpiceRaw, &io)
+            .expect_err("cancellation should be returned");
+
+        assert_eq!(err, "Export canceled");
+        assert_eq!(io.save_dialog_calls.get(), 1);
+        assert_eq!(io.write_text_calls.get(), 0);
+    }
+
+    #[test]
+    fn test_save_export_payload_with_io_propagates_write_errors() {
+        let io = MockExportWorkflowIo::default();
+        io.push_save_dialog_result(Some(PathBuf::from("exports/fail.raw")));
+        io.push_write_text_result(Err("disk full".to_string()));
+
+        let err = save_export_payload_with_io("payload", ExportFormat::SpiceRaw, &io)
+            .expect_err("write errors should surface");
+
+        assert_eq!(err, "disk full");
+        assert_eq!(io.write_text_calls.get(), 1);
     }
 }

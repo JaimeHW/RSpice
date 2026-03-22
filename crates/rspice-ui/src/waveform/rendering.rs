@@ -27,7 +27,10 @@ use egui::{
 use std::cell::RefCell;
 
 use super::axis::{self, GridLineType};
-use super::export::{calculate_export_stats, export_to_csv, export_to_spice_raw, ExportFormat};
+use super::export::{
+    build_export_payload, calculate_export_stats, export_format_display_name, ExportFormat,
+    save_export_payload_with_native_dialog,
+};
 use super::legend::{self, LegendSortOrder};
 use super::measurements::TraceMeasurements;
 use super::state::{MeasurementScope, TraceData, ViewTransform, WaveformViewerState};
@@ -2540,38 +2543,6 @@ fn render_measurements_panel(ui: &mut Ui, viewer_state: &mut WaveformViewerState
     }
 }
 
-fn export_format_display_name(format: ExportFormat) -> &'static str {
-    match format {
-        ExportFormat::Csv => "CSV",
-        ExportFormat::Tsv => "TSV",
-        ExportFormat::SpiceRaw => "SPICE RAW",
-    }
-}
-
-fn build_export_payload(traces: &[TraceData], options: &super::export::ExportOptions) -> String {
-    match options.format {
-        ExportFormat::SpiceRaw => export_to_spice_raw(traces, "RSpice Waveforms"),
-        ExportFormat::Csv | ExportFormat::Tsv => export_to_csv(traces, options),
-    }
-}
-
-fn save_export_payload_with_dialog(
-    payload: &str,
-    format: ExportFormat,
-) -> Result<std::path::PathBuf, String> {
-    let extension = format.extension();
-    let filter_name = export_format_display_name(format);
-    let dialog = rfd::FileDialog::new()
-        .add_filter(filter_name, &[extension])
-        .set_file_name(format!("waveforms.{}", extension))
-        .set_title("Export Waveforms");
-    let Some(path) = dialog.save_file() else {
-        return Err("Export canceled".to_string());
-    };
-    std::fs::write(&path, payload).map_err(|err| err.to_string())?;
-    Ok(path)
-}
-
 fn render_export_panel(ui: &mut Ui, viewer_state: &mut WaveformViewerState) {
     ui.separator();
     ui.label(
@@ -2698,8 +2669,10 @@ fn render_export_panel(ui: &mut Ui, viewer_state: &mut WaveformViewerState) {
         if ui.button("Save...").clicked() {
             let payload = build_export_payload(&viewer_state.traces, &viewer_state.export_options);
             viewer_state.export_status =
-                match save_export_payload_with_dialog(&payload, viewer_state.export_options.format)
-                {
+                match save_export_payload_with_native_dialog(
+                    &payload,
+                    viewer_state.export_options.format,
+                ) {
                     Ok(path) => Some(format!("Saved {}", path.display())),
                     Err(err) => Some(err),
                 };

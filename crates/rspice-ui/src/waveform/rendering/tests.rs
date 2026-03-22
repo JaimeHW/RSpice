@@ -132,27 +132,6 @@ fn test_center_waveform_view_x_on_marker_ignores_non_finite_inputs() {
     assert!((view.x_max - 15.0).abs() < 1e-9);
 }
 
-#[test]
-fn test_build_export_payload_routes_by_format() {
-    let traces = vec![TraceData::new("V(out)", vec![0.0, 1e-6], vec![0.0, 1.0])];
-
-    let mut csv_opts = super::super::export::ExportOptions::default();
-    csv_opts.format = ExportFormat::Csv;
-    let csv = build_export_payload(&traces, &csv_opts);
-    assert!(csv.contains("Time,"));
-
-    let mut tsv_opts = super::super::export::ExportOptions::default();
-    tsv_opts.format = ExportFormat::Tsv;
-    let tsv = build_export_payload(&traces, &tsv_opts);
-    assert!(tsv.contains('\t'));
-
-    let mut raw_opts = super::super::export::ExportOptions::default();
-    raw_opts.format = ExportFormat::SpiceRaw;
-    let raw = build_export_payload(&traces, &raw_opts);
-    assert!(raw.contains("Title: RSpice Waveforms"));
-    assert!(raw.contains("Values:"));
-}
-
 fn screen_to_data_y(layout: &ViewerLayout, view: &ViewTransform, screen_y: f32) -> f64 {
     let y_frac = (screen_y - layout.plot.min.y) as f64 / layout.plot.height() as f64;
     view.y_max - y_frac * view.y_range()
