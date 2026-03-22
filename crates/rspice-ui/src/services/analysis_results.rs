@@ -208,7 +208,6 @@ impl AnalysisResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use num_complex::Complex64;
 
     #[test]
     fn test_analysis_result_type_name() {

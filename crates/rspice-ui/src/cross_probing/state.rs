@@ -233,7 +233,6 @@ impl CrossProbeState {
 
 #[cfg(test)]
 mod tests {
-    use super::super::signal::SignalId;
     use super::*;
 
     // =========================================================================

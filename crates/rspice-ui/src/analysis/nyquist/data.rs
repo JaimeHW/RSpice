@@ -243,14 +243,6 @@ mod tests {
         (a - b).abs() < EPSILON
     }
 
-    fn approx_eq_rel(a: f64, b: f64, rel_tol: f64) -> bool {
-        if b.abs() < EPSILON {
-            a.abs() < EPSILON
-        } else {
-            ((a - b) / b).abs() < rel_tol
-        }
-    }
-
     // =========================================================================
     // NyquistPoint Tests
     // =========================================================================

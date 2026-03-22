@@ -9,7 +9,7 @@ fn test_convert_dc_op_result() {
     use crate::simulation::results::DcOpResult as EngineDcOpResult;
     use crate::simulation::SimulationResult;
 
-    let mut controller = SimulationController::new();
+    let controller = SimulationController::new();
     let config = AnalysisConfig::DcOp;
 
     // Create engine DC OP result with sample data
@@ -43,7 +43,7 @@ fn test_convert_transient_result() {
     use crate::simulation::SimulationResult;
     use std::collections::HashMap;
 
-    let mut controller = SimulationController::new();
+    let controller = SimulationController::new();
     let config = AnalysisConfig::Transient(TransientAnalysisConfig {
         stop_time: 1e-6,
         step_time: 1e-9,
@@ -82,7 +82,7 @@ fn test_convert_transient_result_reuses_shared_time_axis_across_waveforms() {
     use std::collections::HashMap;
     use std::sync::Arc;
 
-    let mut controller = SimulationController::new();
+    let controller = SimulationController::new();
     let time = vec![0.0, 1e-9, 2e-9, 3e-9];
     let mut waveforms = HashMap::new();
     waveforms.insert(
@@ -110,7 +110,7 @@ fn test_convert_ac_result() {
     use crate::simulation::SimulationResult;
     use std::collections::HashMap;
 
-    let mut controller = SimulationController::new();
+    let controller = SimulationController::new();
     let config = AnalysisConfig::Ac(AcAnalysisConfig {
         start_freq: 1.0,
         stop_freq: 1e6,
@@ -146,7 +146,7 @@ fn test_convert_dc_sweep_result() {
     use crate::simulation::SimulationResult;
     use std::collections::HashMap;
 
-    let mut controller = SimulationController::new();
+    let controller = SimulationController::new();
     let config = AnalysisConfig::DcSweep(DcSweepConfig {
         source: "V1".to_string(),
         start: 0.0,
@@ -186,7 +186,7 @@ fn test_convert_pole_zero_result() {
     use crate::simulation::config::{PoleZeroConfig, PzAnalysisType};
     use crate::simulation::SimulationResult;
 
-    let mut controller = SimulationController::new();
+    let controller = SimulationController::new();
     let config = AnalysisConfig::PoleZero(PoleZeroConfig {
         input_node: "in".to_string(),
         input_ref: "0".to_string(),
@@ -212,7 +212,7 @@ fn test_convert_monte_carlo_result() {
     use crate::simulation::results::MonteCarloVariableResult;
     use crate::simulation::SimulationResult;
 
-    let mut controller = SimulationController::new();
+    let controller = SimulationController::new();
     let sim_result = SimulationResult::MonteCarlo {
         runs_requested: 16,
         runs_completed: 15,
@@ -248,7 +248,7 @@ fn test_convert_parametric_result() {
     use crate::simulation::SimulationResult;
     use std::collections::HashMap;
 
-    let mut controller = SimulationController::new();
+    let controller = SimulationController::new();
     let sweep_values = vec![-40.0, 25.0, 85.0];
     let mut waveforms = HashMap::new();
     waveforms.insert(
@@ -281,7 +281,7 @@ fn test_convert_corner_result() {
     use crate::simulation::SimulationResult;
     use std::collections::HashMap;
 
-    let mut controller = SimulationController::new();
+    let controller = SimulationController::new();
     let temperatures = vec![-40.0, 25.0, 125.0];
     let mut waveforms = HashMap::new();
     waveforms.insert(
@@ -1306,7 +1306,7 @@ fn test_update_waveforms_monte_carlo_without_valid_histograms_selects_log_tab() 
 
 #[test]
 fn test_current_config_none_initially() {
-    let mut controller = SimulationController::new();
+    let controller = SimulationController::new();
     assert!(controller.current_config.is_none());
     assert!(controller.current_spec.is_none());
 }

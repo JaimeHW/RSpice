@@ -234,7 +234,6 @@ pub fn format_trace_delta(delta: f64, unit: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::waveform::state::TraceStyle;
 
     fn make_test_trace() -> TraceData {
         TraceData::new(

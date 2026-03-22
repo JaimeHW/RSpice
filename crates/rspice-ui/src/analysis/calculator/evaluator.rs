@@ -203,11 +203,6 @@ mod tests {
                 waveforms: HashMap::new(),
             }
         }
-
-        fn add(mut self, name: &str, val: CalcValue) -> Self {
-            self.waveforms.insert(name.to_string(), val);
-            self
-        }
     }
 
     impl EvaluationContext for MockContext {

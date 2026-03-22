@@ -4,7 +4,7 @@
 
 #[cfg(test)]
 use crate::output_spec::{
-    ac_output_value, parse_output_spec, resolve_node_or_ground_index, OutputSpec, OutputVoltageSpec,
+    resolve_node_or_ground_index, OutputSpec, OutputVoltageSpec,
 };
 #[cfg(test)]
 use crate::simulation::reliability_engine::{ParamShift, ReliabilityResult, StressMetrics};
@@ -17,8 +17,6 @@ use rspice_core::engine::Engine;
 use rspice_core::engine::SimulationConfig;
 #[cfg(test)]
 use rspice_core::netlist::{Element, ElementKind, StepSweep};
-#[cfg(test)]
-use rspice_core::solver::SimulationResult as CoreSimulationResult;
 #[cfg(test)]
 use rspice_core::Value;
 use rspice_core::{resolve_simulation_config, SimulationConfigOverrides};
