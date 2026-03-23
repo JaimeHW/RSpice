@@ -5,6 +5,7 @@
 //! - Handle include directives with path resolution
 //! - Access parsed netlist information
 
+use std::borrow::Cow;
 use pyo3::prelude::*;
 use rspice_core::Netlist;
 use std::path::Path;
@@ -20,6 +21,77 @@ use std::path::Path;
 #[pyclass(name = "Netlist")]
 pub struct PyNetlist {
     pub(crate) inner: Netlist,
+}
+
+impl PyNetlist {
+    fn parse_content(content: &str) -> Result<Netlist, rspice_core::error::ParseError> {
+        let normalized = normalize_titleless_netlist(content);
+        Netlist::parse(&normalized)
+    }
+
+    fn parse_content_with_includes(
+        content: &str,
+        base_path: &Path,
+    ) -> Result<Netlist, rspice_core::error::ParseError> {
+        let normalized = normalize_titleless_netlist(content);
+        Netlist::parse_with_path(&normalized, base_path)
+    }
+}
+
+fn normalize_titleless_netlist(content: &str) -> Cow<'_, str> {
+    if content
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .is_some_and(|line| line.starts_with('*'))
+    {
+        return Cow::Borrowed(content);
+    }
+
+    let meaningful_lines: Vec<&str> = content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('*'))
+        .take(2)
+        .collect();
+
+    if meaningful_lines.len() == 2
+        && meaningful_lines
+            .iter()
+            .copied()
+            .all(parses_as_spice_statement)
+    {
+        Cow::Owned(format!("* Untitled circuit\n{content}"))
+    } else {
+        Cow::Borrowed(content)
+    }
+}
+
+fn parses_as_spice_statement(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('*') || trimmed.starts_with('+') {
+        return false;
+    }
+
+    let candidate = format!("* Statement probe\n{trimmed}\n.end");
+    match Netlist::parse(&candidate) {
+        Ok(parsed) => {
+            if trimmed.starts_with('.') {
+                return true;
+            }
+
+            !parsed.elements.is_empty()
+                || !parsed.analyses.is_empty()
+                || !parsed.models.is_empty()
+                || !parsed.subcircuits.is_empty()
+                || !parsed.global_nodes.is_empty()
+                || !parsed.measurements.is_empty()
+                || !parsed.veriloga_includes.is_empty()
+                || !parsed.initial_conditions.is_empty()
+                || !parsed.node_sets.is_empty()
+        }
+        Err(_) => false,
+    }
 }
 
 #[pymethods]
@@ -45,7 +117,7 @@ impl PyNetlist {
     ///     ... ''')
     #[staticmethod]
     pub fn parse(content: &str) -> PyResult<Self> {
-        let inner = Netlist::parse(content).map_err(crate::errors::parse_error_to_pyerr)?;
+        let inner = Self::parse_content(content).map_err(crate::errors::parse_error_to_pyerr)?;
         Ok(Self { inner })
     }
 
@@ -92,8 +164,8 @@ impl PyNetlist {
     #[staticmethod]
     pub fn parse_with_includes(content: &str, base_path: &str) -> PyResult<Self> {
         let path = Path::new(base_path);
-        let inner =
-            Netlist::parse_with_path(content, path).map_err(crate::errors::parse_error_to_pyerr)?;
+        let inner = Self::parse_content_with_includes(content, path)
+            .map_err(crate::errors::parse_error_to_pyerr)?;
         Ok(Self { inner })
     }
 
@@ -171,6 +243,13 @@ R1 1 0 1k
         assert_eq!(netlist.num_elements(), 2);
         assert_eq!(netlist.num_models(), 0);
         assert_eq!(netlist.num_subcircuits(), 0);
+    }
+
+    #[test]
+    fn test_parse_titleless_netlist_preserves_first_element() {
+        let content = "V1 1 0 5\nR1 1 0 1k\n.end";
+        let netlist = PyNetlist::parse(content).unwrap();
+        assert_eq!(netlist.num_elements(), 2);
     }
 
     #[test]

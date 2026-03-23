@@ -57,16 +57,6 @@ pub fn simulation_error_to_pyerr(err: rspice_core::engine::SimulationError) -> P
     }
 }
 
-/// Convert a solver error to PyErr
-pub fn solver_error_to_pyerr(err: rspice_core::solver::SolverError) -> PyErr {
-    match &err {
-        rspice_core::solver::SolverError::ConvergenceFailed(_) => {
-            ConvergenceError::new_err(err.to_string())
-        }
-        _ => SimulationError::new_err(err.to_string()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use rspice_core::engine::SimulationError;

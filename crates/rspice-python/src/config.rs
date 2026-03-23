@@ -168,7 +168,7 @@ impl PyConvergenceConfig {
 
     /// Create minimal config (direct Newton only - fastest but may fail)
     #[staticmethod]
-    fn fast() -> Self {
+    pub fn fast() -> Self {
         Self {
             inner: ConvergenceConfig::fast(),
         }

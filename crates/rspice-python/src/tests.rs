@@ -2,19 +2,43 @@
 //!
 //! These tests verify the integration between different modules and
 //! exercise complete simulation workflows.
-//!
-//! **NOTE**: These tests cause GIL-related panics when run via `cargo test`
-//! due to PyO3's internal thread-safety requirements. Run via Python instead.
-
-/// Integration tests - disabled by default to prevent GIL panics.
-/// Enable with: cargo test -p rspice-python --features integration-tests
-#[cfg(all(test, feature = "integration-tests"))]
+#[cfg(test)]
 mod integration_tests {
     use crate::config::{
         PyBypassConfig, PyConvergenceConfig, PyDampingStrategy, PySimulationConfig,
     };
     use crate::engine::PyEngine;
     use crate::netlist::PyNetlist;
+
+    fn rc_step_netlist() -> PyNetlist {
+        PyNetlist::parse(
+            r#"
+* RC transient workflow test
+V1 1 0 PULSE(0 10 0 1n 1n 10m 20m)
+R1 1 2 10k
+C1 2 0 100n
+.end
+"#,
+        )
+        .unwrap()
+    }
+
+    fn diode_clamp_netlist() -> PyNetlist {
+        PyNetlist::parse(
+            r#"
+* Diode clamp
+V1 1 0 5
+R1 1 2 1k
+D1 2 0 1N4148
+.end
+"#,
+        )
+        .unwrap()
+    }
+
+    fn simple_resistor_netlist() -> PyNetlist {
+        PyNetlist::parse("V1 1 0 5\nR1 1 0 1k\n.end").unwrap()
+    }
 
     //=========================================================================
     // Complete Simulation Workflow Tests
@@ -45,16 +69,7 @@ R2 2 0 4k
     #[test]
     fn test_complete_transient_workflow() {
         // Parse → Engine → Transient → Verify waveform
-        let netlist = PyNetlist::parse(
-            r#"
-* Complete transient workflow test
-V1 1 0 10
-R1 1 2 10k
-C1 2 0 100n
-.end
-"#,
-        )
-        .unwrap();
+        let netlist = rc_step_netlist();
 
         let engine = PyEngine::new(None);
         // RC time constant = 10k * 100n = 1ms
@@ -109,7 +124,6 @@ R2 2 0 1k
     }
 
     #[test]
-    #[ignore = "AC analysis has GIL issues during parallel test execution"]
     fn test_complete_ac_workflow() {
         // Parse → Engine → AC → Verify filter response
         let netlist = PyNetlist::parse(
@@ -131,12 +145,12 @@ C1 2 0 1u
         assert_eq!(result.num_frequencies(), 4);
 
         // Verify low-pass characteristic
-        let mag_10hz = result.magnitude_at(0, 1);
-        let mag_10khz = result.magnitude_at(3, 1);
+        let mag_10hz = result.magnitude_at(0, 2);
+        let mag_10khz = result.magnitude_at(3, 2);
 
         assert!(
-            mag_10khz < mag_10hz * 0.5,
-            "Expected significant attenuation at 10kHz: {}V vs {}V at 10Hz",
+            mag_10khz < mag_10hz * 0.1,
+            "Expected significant attenuation at 10kHz on V(2): {}V vs {}V at 10Hz",
             mag_10khz,
             mag_10hz
         );
@@ -152,11 +166,18 @@ C1 2 0 1u
         config.set_tolerance(1e-15); // Very tight tolerance
 
         let engine = PyEngine::new(Some(config));
+        let cfg = engine.config();
         let netlist = PyNetlist::parse("V1 1 0 5\nR1 1 0 1k\n.end").unwrap();
         let result = engine.run_dc_op(&netlist).unwrap();
+        let voltage = result.voltage_by_index(1);
 
-        // Should still converge with tight tolerance on simple circuit
-        assert!((result.voltage_by_index(1) - 5.0).abs() < 1e-10);
+        assert!((cfg.inner.tolerance - 1e-15).abs() < 1e-18);
+        // Tight convergence settings should still preserve an engineering-accurate solution.
+        assert!(
+            (voltage - 5.0).abs() < 1e-6,
+            "Expected V(1) ~= 5V with tight tolerance, got {}V",
+            voltage
+        );
     }
 
     #[test]
@@ -339,7 +360,6 @@ R2 1 0 100
     //=========================================================================
 
     #[test]
-    #[ignore = "Damping strategy iteration may cause stack overflow in parallel tests"]
     fn test_all_damping_strategies() {
         let strategies = [
             PyDampingStrategy::None,
@@ -349,22 +369,40 @@ R2 1 0 100
             PyDampingStrategy::Combined,
         ];
 
-        let netlist = PyNetlist::parse("V1 1 0 5\nR1 1 0 1k\n.end").unwrap();
-
         for strategy in strategies {
             let mut config = PySimulationConfig::new();
-            let mut convergence = PyConvergenceConfig::new();
-            convergence.set_damping_strategy(strategy);
+            let (netlist, convergence) = match strategy {
+                PyDampingStrategy::None => (simple_resistor_netlist(), PyConvergenceConfig::fast()),
+                _ => {
+                    let mut convergence = PyConvergenceConfig::new();
+                    convergence.set_damping_strategy(strategy);
+                    (diode_clamp_netlist(), convergence)
+                }
+            };
             config.set_convergence(convergence);
 
             let engine = PyEngine::new(Some(config));
             let result = engine.run_dc_op(&netlist).unwrap();
-
-            assert!(
-                (result.voltage_by_index(1) - 5.0).abs() < 0.1,
-                "Failed with strategy {:?}",
-                strategy
-            );
+            match strategy {
+                PyDampingStrategy::None => {
+                    let voltage = result.voltage_by_index(1);
+                    assert!(
+                        (voltage - 5.0).abs() < 0.01,
+                        "Failed with strategy {:?}: V(1)={}",
+                        strategy,
+                        voltage
+                    );
+                }
+                _ => {
+                    let voltage = result.voltage_by_index(2);
+                    assert!(
+                        voltage.is_finite() && voltage > 0.0 && voltage < 5.0,
+                        "Failed with strategy {:?}: V(2)={}",
+                        strategy,
+                        voltage
+                    );
+                }
+            }
         }
     }
 

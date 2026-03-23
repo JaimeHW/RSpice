@@ -447,7 +447,7 @@ R1 1 0 1k
         PyNetlist::parse(
             r#"
 * RC transient
-V1 1 0 5
+V1 1 0 PULSE(0 5 0 1n 1n 10m 20m)
 R1 1 2 1k
 C1 2 0 1u
 .end
@@ -558,6 +558,38 @@ R1 1 0 1k
         assert!((cfg.temperature - 398.15).abs() < 1e-12);
         assert!((cfg.tolerance - 8e-4).abs() < 1e-15);
         assert_eq!(cfg.max_iterations, 88);
+    }
+
+    #[test]
+    fn test_engine_for_netlist_preserves_fast_convergence_on_linear_circuit() {
+        use crate::config::PyConvergenceConfig;
+
+        let mut config = PySimulationConfig::new();
+        config.set_convergence(PyConvergenceConfig::fast());
+        let engine = PyEngine::new(Some(config));
+        let netlist = simple_resistor_netlist();
+
+        let direct = engine.inner.run_dc_op(&netlist.inner).unwrap();
+        let resolved = engine.engine_for_netlist(&netlist.inner);
+        let resolved_result = resolved.run_dc_op(&netlist.inner).unwrap();
+
+        assert!((direct.voltage(1) - 10.0).abs() < 0.01);
+        assert!((resolved_result.voltage(1) - 10.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_engine_for_netlist_preserves_tight_tolerance_on_linear_circuit() {
+        let mut config = PySimulationConfig::new();
+        config.set_tolerance(1e-15);
+        let engine = PyEngine::new(Some(config));
+        let netlist = simple_resistor_netlist();
+
+        let direct = engine.inner.run_dc_op(&netlist.inner).unwrap();
+        let resolved = engine.engine_for_netlist(&netlist.inner);
+        let resolved_result = resolved.run_dc_op(&netlist.inner).unwrap();
+
+        assert!((direct.voltage(1) - 10.0).abs() < 0.01);
+        assert!((resolved_result.voltage(1) - 10.0).abs() < 0.01);
     }
 
     #[test]
@@ -718,7 +750,6 @@ R1 1 0 1k
     }
 
     #[test]
-    #[ignore = "AC analysis tests may have GIL issues during parallel test execution"]
     fn test_ac_rc_lowpass() {
         let engine = PyEngine::new(None);
         let netlist = ac_rc_netlist();
@@ -726,20 +757,20 @@ R1 1 0 1k
         let frequencies = vec![10.0, 10000.0];
         let result = engine.run_ac(&netlist, frequencies.clone()).unwrap();
 
-        // At low frequency (10 Hz), output should be close to input
-        let mag_low = result.magnitude_at(0, 1);
+        // At low frequency (10 Hz), the output node should closely follow the input.
+        let mag_low = result.magnitude_at(0, 2);
         assert!(
-            mag_low > 0.8,
-            "Expected ~1V at low freq, got {}V magnitude",
+            mag_low > 0.9,
+            "Expected ~1V at low freq on V(2), got {}V magnitude",
             mag_low
         );
 
         // At high frequency (10 kHz), output should be attenuated
         // Cutoff = 1/(2*pi*R*C) = 159 Hz, so 10kHz is well above
-        let mag_high = result.magnitude_at(1, 1);
+        let mag_high = result.magnitude_at(1, 2);
         assert!(
-            mag_high < mag_low,
-            "Expected attenuation at high freq: low={}, high={}",
+            mag_high < mag_low * 0.05,
+            "Expected strong attenuation on V(2): low={}, high={}",
             mag_low,
             mag_high
         );
