@@ -15,8 +15,6 @@ crate-type = ["cdylib"]
 default = []
 # Extension module feature for pyo3 - required for building Python extension
 extension-module = ["pyo3/extension-module"]
-# Enable integration tests (disabled by default due to GIL issues in cargo test)
-integration-tests = []
 
 [dependencies]
 # PyO3 for Python bindings with ABI3 for broad Python version support (3.8+)
@@ -34,3 +32,6 @@ num-complex.workspace = true
 [dev-dependencies]
 # Testing utilities
 approx.workspace = true
+
+[build-dependencies]
+pyo3-build-config = { version = "0.23", features = ["resolve-config"] }
