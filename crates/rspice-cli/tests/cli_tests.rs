@@ -11,7 +11,9 @@ fn fixtures_dir() -> PathBuf {
 }
 
 fn fixture(name: &str) -> PathBuf {
-    fixtures_dir().join(name)
+    let path = fixtures_dir().join(name);
+    assert!(path.exists(), "missing CLI test fixture: {}", path.display());
+    path
 }
 
 // ============================================================================
@@ -68,9 +70,6 @@ fn test_check_help() {
 #[test]
 fn test_run_resistor_divider() {
     let fixture_path = fixture("resistor_divider.sp");
-    if !fixture_path.exists() {
-        return; // Skip if fixture doesn't exist
-    }
 
     Command::cargo_bin("rspice")
         .unwrap()
@@ -96,9 +95,6 @@ fn test_run_missing_file() {
 #[test]
 fn test_info_resistor_divider() {
     let fixture_path = fixture("resistor_divider.sp");
-    if !fixture_path.exists() {
-        return;
-    }
 
     Command::cargo_bin("rspice")
         .unwrap()
@@ -112,9 +108,6 @@ fn test_info_resistor_divider() {
 #[test]
 fn test_info_json_output() {
     let fixture_path = fixture("resistor_divider.sp");
-    if !fixture_path.exists() {
-        return;
-    }
 
     Command::cargo_bin("rspice")
         .unwrap()
@@ -131,9 +124,6 @@ fn test_info_json_output() {
 #[test]
 fn test_check_valid_netlist() {
     let fixture_path = fixture("resistor_divider.sp");
-    if !fixture_path.exists() {
-        return;
-    }
 
     Command::cargo_bin("rspice")
         .unwrap()
@@ -146,9 +136,6 @@ fn test_check_valid_netlist() {
 #[test]
 fn test_check_connectivity() {
     let fixture_path = fixture("resistor_divider.sp");
-    if !fixture_path.exists() {
-        return;
-    }
 
     Command::cargo_bin("rspice")
         .unwrap()
@@ -160,9 +147,6 @@ fn test_check_connectivity() {
 #[test]
 fn test_check_json_output() {
     let fixture_path = fixture("resistor_divider.sp");
-    if !fixture_path.exists() {
-        return;
-    }
 
     Command::cargo_bin("rspice")
         .unwrap()
