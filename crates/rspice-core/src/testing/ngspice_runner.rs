@@ -1122,9 +1122,9 @@ impl TestRunner {
         let max_step = tmax.unwrap_or_else(|| {
             if tstep > 0.0 {
                 // .tran print-step is an output interval, not an internal
-                // solver cap. Leave headroom for adaptive stepping unless
-                // an explicit Tmax is provided.
-                tstep * 32.0
+                // solver cap. Match the release CLI heuristic so regression
+                // startup behavior tracks the shipping transient runner.
+                tstep * 10.0
             } else {
                 tstop / 100.0
             }
