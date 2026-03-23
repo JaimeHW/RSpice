@@ -56,9 +56,9 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
     for line in lines.iter().skip(1) {
         line_num += 1;
 
-        // Strip inline ';' comments (common SPICE syntax), then trim.
-        // We intentionally keep this simple and treat ';' as comment start.
-        // This matches common model-card usage where ';' appears outside quotes.
+        // Strip inline ';' and '$' comments (common SPICE syntax), then trim.
+        // We intentionally keep this simple and treat these markers as comment
+        // starts only when they appear outside quoted strings.
         let no_inline_comment = strip_inline_semicolon_comment(line);
         let trimmed = no_inline_comment.trim();
         if trimmed.is_empty() || trimmed.starts_with('*') {
@@ -167,7 +167,7 @@ fn strip_inline_semicolon_comment(line: &str) -> &str {
             '"' if !in_single_quote => {
                 in_double_quote = !in_double_quote;
             }
-            ';' if !in_single_quote && !in_double_quote => {
+            ';' | '$' if !in_single_quote && !in_double_quote => {
                 return &line[..idx];
             }
             _ => {}

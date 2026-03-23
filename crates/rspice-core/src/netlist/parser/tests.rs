@@ -777,6 +777,21 @@ R1 1 0 1k ; load resistor
 }
 
 #[test]
+fn test_parse_element_with_inline_dollar_comment() {
+    let netlist = r#"Inline Dollar Comment Test
+V1 1 0 5 $ DC supply
+R1 1 0 1k $ load resistor
+.END
+"#;
+    let result = parse_netlist(netlist).unwrap();
+    assert_eq!(result.elements.len(), 2);
+    match &result.elements[1].kind {
+        ElementKind::Resistor { value, .. } => assert!((*value - 1000.0).abs() < 1e-10),
+        _ => panic!("Expected resistor"),
+    }
+}
+
+#[test]
 fn test_strip_inline_semicolon_comment_preserves_quoted_semicolons() {
     let line = r#"V1 1 0 PWL FILE="stim;ulus.csv" ; trailing comment"#;
     let stripped = strip_inline_semicolon_comment(line);
@@ -795,6 +810,13 @@ fn test_strip_inline_semicolon_comment_handles_escaped_quotes() {
     let line = ".PARAM A=\"quoted \\\";\\\" token\" ; trailing";
     let stripped = strip_inline_semicolon_comment(line);
     assert_eq!(stripped, ".PARAM A=\"quoted \\\";\\\" token\" ");
+}
+
+#[test]
+fn test_strip_inline_semicolon_comment_preserves_quoted_dollar_signs() {
+    let line = r#"V1 1 0 PWL FILE="stim$ulus.csv" $ trailing comment"#;
+    let stripped = strip_inline_semicolon_comment(line);
+    assert_eq!(stripped, r#"V1 1 0 PWL FILE="stim$ulus.csv" "#);
 }
 
 #[test]
