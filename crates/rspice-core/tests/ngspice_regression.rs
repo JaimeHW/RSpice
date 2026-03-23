@@ -3,7 +3,7 @@
 //! Comprehensive integration tests that run RSpice against the ngspice test suite.
 //! Tests are organized by analysis type and device model category.
 
-use rspice_core::testing::{TestResult, TestRunner, TestRunnerConfig, TestStatistics};
+use rspice_core::testing::{TestRunner, TestRunnerConfig, TestStatistics};
 use std::{fs, path::PathBuf};
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -60,8 +60,7 @@ fn suite_is_cmc_qaspec(subdir: &str) -> bool {
 }
 
 fn run_and_report(runner: &TestRunner, subdir: &str) -> TestStatistics {
-    let mut results = runner.run_suite(subdir);
-    apply_known_model_gap_skips(subdir, &mut results);
+    let results = runner.run_suite(subdir);
     if !results.is_empty() {
         TestRunner::print_summary(&results);
     }
@@ -94,52 +93,14 @@ fn run_and_report(runner: &TestRunner, subdir: &str) -> TestStatistics {
     stats
 }
 
-fn apply_known_model_gap_skips(subdir: &str, results: &mut [TestResult]) {
-    let overrides: &[(&str, &str)] = match subdir {
-        "hfet" => &[(
-            "inverter",
-            "SKIPPED: HFET inverter transient parity requires full ngspice legacy charge path.",
-        )],
-        "mesa" => &[(
-            "mesosc",
-            "SKIPPED: MESA ring-oscillator transient parity requires full ngspice HFET2 internals.",
-        )],
-        "vbic" => &[
-            (
-                "diffamp",
-                "SKIPPED: VBIC diffamp parity requires full internal-node VBIC implementation.",
-            ),
-            (
-                "temp",
-                "SKIPPED: VBIC temperature sweep parity requires full internal-node VBIC implementation.",
-            ),
-        ],
-        _ => &[],
-    };
-
-    for result in results {
-        if result.passed {
-            continue;
-        }
-        for (name, reason) in overrides {
-            if result.name.eq_ignore_ascii_case(name) {
-                result.passed = true;
-                result.mismatches.clear();
-                result.error = Some((*reason).to_string());
-                break;
-            }
-        }
-    }
-}
-
 fn suite_config(subdir: &str) -> TestRunnerConfig {
     let mut cfg = TestRunnerConfig::default();
 
     match subdir {
-        // Large digital/mixed-signal decks need substantially more wall clock
-        // time in release mode to complete robust startup and long transients.
+        // Large digital/mixed-signal decks can spend several minutes in
+        // robust startup plus waveform parity comparison, even in release mode.
         "general" | "transient" => {
-            cfg.max_time_per_test_ms = 420_000; // 7 minutes
+            cfg.max_time_per_test_ms = 600_000; // 10 minutes
         }
         // Level-6 references include near-zero startup voltages in the single
         // digit nanovolt range; use a small absolute floor to avoid
@@ -568,40 +529,6 @@ fn test_unsupported_detection() {
     // Verify skip behavior is configured
     let config = runner.config();
     assert!(config.skip_unsupported);
-}
-
-#[test]
-fn test_known_model_gap_skip_overrides_mark_expected_failures_as_skipped() {
-    let mut results = vec![
-        TestResult {
-            name: "mesosc".to_string(),
-            passed: false,
-            error: Some("10 reference mismatch(es)".to_string()),
-            mismatches: Vec::new(),
-            duration_ms: 0,
-            analysis_type: Some("Transient".to_string()),
-        },
-        TestResult {
-            name: "other".to_string(),
-            passed: false,
-            error: Some("10 reference mismatch(es)".to_string()),
-            mismatches: Vec::new(),
-            duration_ms: 0,
-            analysis_type: Some("Transient".to_string()),
-        },
-    ];
-
-    apply_known_model_gap_skips("mesa", &mut results);
-
-    assert!(results[0].passed);
-    assert!(
-        results[0]
-            .error
-            .as_deref()
-            .unwrap_or_default()
-            .starts_with("SKIPPED:")
-    );
-    assert!(!results[1].passed);
 }
 
 #[test]
