@@ -1610,10 +1610,11 @@ impl Engine {
         let mut retry_count = 0;
         let mut total_iterations = 0;
         let mut stale_accept_count = 0;
-        let mut force_accept_cooldown = 0_usize; // Steps to skip dt reduction after force-accept
+        let mut force_accept_cooldown = 0_usize; // Failed retries to defer dt shrink immediately after force-accept
         let mut trap_order = 1_u8; // ngspice-style trap order: start at 1, promote to 2 after accepted smooth step
         const MAX_RETRIES: usize = 200; // Maximum retries per timepoint before force-accept
         const MAX_WALL_TIME_SECS: u64 = 300; // Wall-clock timeout (5 minutes - use abort for earlier cancellation)
+        const FORCE_ACCEPT_COOLDOWN_RETRIES: usize = 2;
         // Keep cancellation responsiveness tight for large transient decks where a
         // single accepted step can still be expensive.
         const ABORT_CHECK_INTERVAL: usize = 16;
@@ -2113,13 +2114,11 @@ impl Engine {
                     }
 
                     retry_count = 0; // Reset for next timepoint
-                    // Set cooldown to prevent immediate timestep shrinkage on next failure
-                    // This gives the simulation time to progress through the difficult region
-                    force_accept_cooldown = 50;
-
-                    // Grow timestep after force-accept to escape minimum
-                    let new_dt = (dt * 2.0).min(max_step);
-                    timestep.force_step(new_dt);
+                    // Keep the accepted dt and only defer shrink for a couple of retries.
+                    // Large cooldowns plus immediate dt growth can trap stiff switching decks
+                    // in repeated force-accept loops instead of letting the controller retreat.
+                    force_accept_cooldown = FORCE_ACCEPT_COOLDOWN_RETRIES;
+                    timestep.force_step(dt);
                     if matches!(
                         current_method,
                         IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear
@@ -2258,11 +2257,8 @@ impl Engine {
                         voltages.push(solution.get(i).copied().unwrap_or(0.0));
                     }
                     retry_count = 0; // Reset for next timepoint
-                    force_accept_cooldown = 50; // Same stability window as primary path
-
-                    // Grow timestep after force-accept (same as primary path)
-                    let new_dt = (dt * 2.0).min(max_step);
-                    timestep.force_step(new_dt);
+                    force_accept_cooldown = FORCE_ACCEPT_COOLDOWN_RETRIES;
+                    timestep.force_step(dt);
                     if matches!(
                         current_method,
                         IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear
