@@ -24,6 +24,25 @@ fn compile_or_panic(source: &str) -> CompiledModel {
     }
 }
 
+fn bsim4_model_path() -> std::path::PathBuf {
+    let model_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("models")
+        .join("veriloga");
+
+    for candidate in ["bsim4.pp.va", "bsim4.va"] {
+        let path = model_dir.join(candidate);
+        if path.exists() {
+            return path;
+        }
+    }
+
+    panic!("BSIM4 model not found under {}", model_dir.display());
+}
+
 // ============================================================================
 // Lexer → Parser Integration Tests
 // ============================================================================
@@ -1526,19 +1545,7 @@ fn test_math_function_combination() {
 fn test_bsim4_parsing() {
     // Test parsing of the industrial BSIM4 model
     // This is a diagnostic test to identify required parser features
-    let bsim4_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("models")
-        .join("veriloga")
-        .join("bsim4.pp.va");
-
-    if !bsim4_path.exists() {
-        println!("BSIM4 model not found at {:?}, skipping test", bsim4_path);
-        return;
-    }
+    let bsim4_path = bsim4_model_path();
 
     let source = std::fs::read_to_string(&bsim4_path).expect("Failed to read BSIM4 file");
     println!(
@@ -1548,8 +1555,9 @@ fn test_bsim4_parsing() {
     );
 
     let compiler = VerilogACompiler::default();
-    match compiler.compile(&source) {
-        Ok(model) => {
+    match compiler.compile_file_with_metadata(&bsim4_path) {
+        Ok(compiled) => {
+            let model = compiled.model;
             println!("SUCCESS: BSIM4 parsed successfully!");
             println!("  Model name: {}", model.name);
             println!("  Terminals: {:?}", model.terminal_names);
