@@ -151,6 +151,37 @@ RE emitter 0 100
     );
 }
 
+/// Test zener clamp using the built-in diode library model path.
+#[test]
+fn test_builtin_zener_clamp_dc() {
+    let netlist_str = r#"
+* Builtin zener clamp
+V1 vin 0 DC 12
+R1 vin vz 330
+D1 0 vz 1N4733A
+.OP
+.END
+"#;
+
+    let netlist = parse_netlist(netlist_str);
+    let engine = Engine::new(SimulationConfig::default());
+    let result = engine.run_dc_op(&netlist).expect("Zener clamp DC OP failed");
+
+    let vz_idx = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("vz"))
+        .expect("Expected zener node in DC results");
+    let vz = result.node_voltages[vz_idx];
+
+    assert!(
+        (4.5..=6.0).contains(&vz),
+        "Expected zener node to clamp near 5.1V, got {} V with nodes {:?}",
+        vz,
+        result.node_voltages
+    );
+}
+
 /// Test MOSFET inverter
 #[test]
 fn test_mosfet_inverter() {

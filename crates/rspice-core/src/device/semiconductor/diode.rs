@@ -28,6 +28,10 @@ pub struct Diode {
     pub vt: Value,
     /// Series resistance
     pub rs: Value,
+    /// Reverse breakdown voltage. `None` disables the breakdown branch.
+    pub bv: Option<Value>,
+    /// Reverse current at breakdown knee.
+    pub ibv: Value,
 
     // Junction capacitance parameters
     /// Zero-bias junction capacitance (CJ0)
@@ -60,6 +64,8 @@ impl Diode {
             n: 1.752,    // Emission coefficient
             vt: 0.02585, // Thermal voltage at 300K
             rs: 0.568,   // Series resistance
+            bv: None,
+            ibv: 1e-6,
 
             // Junction capacitance (1N4148-like)
             cj0: 4e-12, // Zero-bias junction capacitance (4pF)
@@ -93,6 +99,18 @@ impl Diode {
         if let Some(&v) = params.get("RS") {
             self.rs = v;
         }
+        if let Some(&v) = params.get("BV")
+            && v.is_finite()
+            && v > 0.0
+        {
+            self.bv = Some(v);
+        }
+        if let Some(&v) = params.get("IBV")
+            && v.is_finite()
+            && v > 0.0
+        {
+            self.ibv = v;
+        }
         if let Some(&v) = params.get("CJO") {
             self.cj0 = v;
         }
@@ -107,10 +125,6 @@ impl Diode {
         }
         if let Some(&v) = params.get("TT") {
             self.tt = v;
-        }
-        if let Some(&v) = params.get("BV") {
-            // Breakdown voltage (not yet used, but store for future)
-            let _ = v;
         }
         self
     }
@@ -220,15 +234,51 @@ impl Diode {
     /// Shockley diode equation: I = Is * (exp(Vd / (N * Vt)) - 1)
     /// Public for noise analysis (shot noise = 2qI)
     pub fn current(&self, vd: Value) -> Value {
+        let forward = self.forward_current(vd);
+        let breakdown = self.breakdown_current(vd);
+        forward + breakdown
+    }
+
+    /// Diode conductance (derivative of current): gd = Is / (N * Vt) * exp(Vd / (N * Vt))
+    fn diode_conductance(&self, vd: Value) -> Value {
+        let forward = self.forward_conductance(vd);
+        let breakdown = self.breakdown_conductance(vd);
+        forward + breakdown
+    }
+
+    fn forward_current(&self, vd: Value) -> Value {
         // Limit voltage to prevent overflow
         let vd_limited = vd.min(80.0 * self.n * self.vt);
         self.is * ((vd_limited / (self.n * self.vt)).exp() - 1.0)
     }
 
-    /// Diode conductance (derivative of current): gd = Is / (N * Vt) * exp(Vd / (N * Vt))
-    fn diode_conductance(&self, vd: Value) -> Value {
+    fn forward_conductance(&self, vd: Value) -> Value {
         let vd_limited = vd.min(80.0 * self.n * self.vt);
         (self.is / (self.n * self.vt)) * (vd_limited / (self.n * self.vt)).exp()
+    }
+
+    fn breakdown_softness(&self, bv: Value) -> Value {
+        let thermal_knee = (self.n * self.vt).abs().max(0.05);
+        let scaled_knee = (0.02 * bv.abs()).clamp(0.05, 1.0);
+        thermal_knee.max(scaled_knee)
+    }
+
+    fn breakdown_current(&self, vd: Value) -> Value {
+        let Some(bv) = self.bv else {
+            return 0.0;
+        };
+        let scale = self.breakdown_softness(bv);
+        let exponent = ((-vd - bv) / scale).clamp(-80.0, 40.0);
+        -self.ibv * exponent.exp()
+    }
+
+    fn breakdown_conductance(&self, vd: Value) -> Value {
+        let Some(bv) = self.bv else {
+            return 0.0;
+        };
+        let scale = self.breakdown_softness(bv);
+        let exponent = ((-vd - bv) / scale).clamp(-80.0, 40.0);
+        (self.ibv / scale) * exponent.exp()
     }
 }
 
@@ -315,6 +365,8 @@ mod tests {
         assert!((d.n - 1.752).abs() < 0.01);
         assert!((d.rs - 0.568).abs() < 0.01);
         assert!((d.vt - 0.02585).abs() < 0.001);
+        assert_eq!(d.bv, None);
+        assert!((d.ibv - 1e-6).abs() < 1e-12);
     }
 
     #[test]
@@ -334,6 +386,18 @@ mod tests {
         assert_eq!(d.vj, 0.7);
         assert_eq!(d.m, 0.5);
         assert_eq!(d.tt, 5e-9);
+    }
+
+    #[test]
+    fn test_diode_with_breakdown_model_params() {
+        let params = std::collections::HashMap::from([
+            ("BV".to_string(), 5.1),
+            ("IBV".to_string(), 0.02),
+        ]);
+        let d = Diode::new("DZ".to_string(), 1, 0).with_model_params(&params);
+
+        assert_eq!(d.bv, Some(5.1));
+        assert!((d.ibv - 0.02).abs() < 1e-12);
     }
 
     // =========================================================================
@@ -362,6 +426,38 @@ mod tests {
         // Zero bias: I = Is * (exp(0) - 1) = 0
         let id = d.current(0.0);
         assert!(id.abs() < 1e-15, "Zero bias current should be ~0");
+    }
+
+    #[test]
+    fn test_diode_reverse_breakdown_matches_ibv_at_bv() {
+        let params = std::collections::HashMap::from([
+            ("BV".to_string(), 5.1),
+            ("IBV".to_string(), 0.02),
+        ]);
+        let d = Diode::new("DZ".to_string(), 1, 0).with_model_params(&params);
+
+        let id = d.current(-5.1);
+        assert!(
+            (id + 0.02).abs() < 0.002,
+            "Current at BV should be close to -IBV, got {}",
+            id
+        );
+    }
+
+    #[test]
+    fn test_diode_reverse_breakdown_increases_beyond_knee() {
+        let params = std::collections::HashMap::from([
+            ("BV".to_string(), 5.1),
+            ("IBV".to_string(), 0.02),
+        ]);
+        let d = Diode::new("DZ".to_string(), 1, 0).with_model_params(&params);
+
+        let just_before = d.current(-4.5).abs();
+        let at_breakdown = d.current(-5.1).abs();
+        let beyond_breakdown = d.current(-6.0).abs();
+
+        assert!(at_breakdown > just_before * 50.0);
+        assert!(beyond_breakdown > at_breakdown);
     }
 
     #[test]
@@ -409,6 +505,19 @@ mod tests {
 
         assert!(g2 > g1, "Conductance should increase with forward bias");
         assert!(g3 > g2, "Conductance should increase with forward bias");
+    }
+
+    #[test]
+    fn test_diode_breakdown_conductance_is_positive_and_finite() {
+        let params = std::collections::HashMap::from([
+            ("BV".to_string(), 5.1),
+            ("IBV".to_string(), 0.02),
+        ]);
+        let d = Diode::new("DZ".to_string(), 1, 0).with_model_params(&params);
+
+        let gd = d.diode_conductance(-5.5);
+        assert!(gd.is_finite());
+        assert!(gd > 0.0);
     }
 
     #[test]
@@ -519,6 +628,21 @@ mod tests {
         let id = d.current(-100.0);
         assert!(id.is_finite());
         assert!(id.abs() < d.is * 2.0, "Reverse current should be ~-Is");
+    }
+
+    #[test]
+    fn test_diode_breakdown_large_reverse_stays_finite() {
+        let params = std::collections::HashMap::from([
+            ("BV".to_string(), 5.1),
+            ("IBV".to_string(), 0.02),
+        ]);
+        let d = Diode::new("DZ".to_string(), 1, 0).with_model_params(&params);
+
+        let id = d.current(-100.0);
+        let gd = d.diode_conductance(-100.0);
+        assert!(id.is_finite());
+        assert!(gd.is_finite());
+        assert!(gd > 0.0);
     }
 
     #[test]
