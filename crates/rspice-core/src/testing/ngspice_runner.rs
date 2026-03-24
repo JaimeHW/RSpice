@@ -1346,13 +1346,6 @@ impl TestRunner {
                 {
                     return Some("CPL transmission line model".to_string());
                 }
-                if token == ".model"
-                    && trimmed.split_whitespace().any(|part| {
-                        part.eq_ignore_ascii_case("ltra") || part.eq_ignore_ascii_case("txl")
-                    })
-                {
-                    return Some("LTRA/TXL transmission line model".to_string());
-                }
                 if token == ".model" && Self::is_unsupported_soi_level_model(&trimmed) {
                     return Some("BSIMSOI LEVEL=55/56/57 model".to_string());
                 }
@@ -2682,6 +2675,16 @@ R1 1 0 1k
         assert_eq!(
             runner.check_unsupported(".model cpl1 cpl (R=1)").as_deref(),
             Some("CPL transmission line model")
+        );
+        assert!(
+            runner
+                .check_unsupported(".model ymod ltra (r=1 l=2e-9 c=3e-12)")
+                .is_none()
+        );
+        assert!(
+            runner
+                .check_unsupported(".model ymod txl (r=1 l=2e-9 c=3e-12)")
+                .is_none()
         );
         assert_eq!(
             runner
