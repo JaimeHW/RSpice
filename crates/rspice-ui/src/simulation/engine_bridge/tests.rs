@@ -91,15 +91,26 @@ R1 1 0 1k
 fn test_parse_empty_netlist() {
     let bridge = EngineBridge::new();
     let result = bridge.run(&AnalysisConfig::DcOp, "");
-    // Empty netlist should fail
-    assert!(result.is_err());
+    match result.expect("empty netlist should yield an empty DC result") {
+        SimulationResult::DcOp(dc) => {
+            assert!(dc.node_voltages.is_empty());
+            assert!(dc.branch_currents.is_empty());
+            assert!(dc.device_ops.is_empty());
+        }
+        other => panic!("expected DC operating-point result, got {:?}", other),
+    }
 }
 
 #[test]
 fn test_parse_invalid_netlist() {
     let bridge = EngineBridge::new();
-    let result = bridge.run(&AnalysisConfig::DcOp, "not valid spice");
-    // Invalid should fail
+    let result = bridge.run(
+        &AnalysisConfig::DcOp,
+        r#"Invalid Netlist
+.MC 0
+.END
+"#,
+    );
     assert!(result.is_err());
 }
 

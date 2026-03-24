@@ -540,12 +540,26 @@ mod tests {
             nodes: vec!["out".to_string(), "0".to_string()],
             kind: ElementKind::Resistor {
                 value: 1e3,
+                value_expr: None,
                 model: None,
                 instance_params: Vec::new(),
             },
         });
         let generated = unique_aux_element_name(&netlist, "__RSPICE_SP_PORT1");
         assert_eq!(generated, "__RSPICE_SP_PORT1_1");
+
+        let existing = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("__rspice_sp_port1"))
+            .expect("expected pre-existing auxiliary resistor");
+        match &existing.kind {
+            ElementKind::Resistor { value, value_expr, .. } => {
+                assert_eq!(*value, 1e3);
+                assert_eq!(value_expr, &None);
+            }
+            other => panic!("expected auxiliary resistor, got {:?}", other),
+        }
     }
 
     #[test]
