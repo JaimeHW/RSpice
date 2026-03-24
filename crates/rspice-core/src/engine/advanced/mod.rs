@@ -1350,6 +1350,7 @@ impl Engine {
                 value: r,
                 model,
                 instance_params,
+                ..
             } => {
                 if !matches_param(&["R", "VALUE"]) {
                     return Err(SimulationError::Circuit(

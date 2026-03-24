@@ -10,6 +10,12 @@ use crate::solver::SimulationResult;
 use crate::{Netlist, Value};
 
 impl Engine {
+    fn build_empty_dc_result() -> SimulationResult {
+        let mut result = SimulationResult::new(0, 0);
+        result.node_names = vec!["0".to_string()];
+        result
+    }
+
     /// Run DC operating point analysis
     pub fn run_dc_op(&self, netlist: &Netlist) -> Result<SimulationResult, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
@@ -18,7 +24,7 @@ impl Engine {
         let mut circuit = engine.build_circuit(netlist)?;
 
         if circuit.num_nodes() == 0 {
-            return Err(SimulationError::Circuit("No nodes in circuit".to_string()));
+            return Ok(Self::build_empty_dc_result());
         }
 
         // Build matrix structure (done once)
@@ -87,11 +93,29 @@ impl Engine {
             ));
         }
 
+        if source_name.eq_ignore_ascii_case("TEMP") || source_name.eq_ignore_ascii_case("TEMPER") {
+            let mut results = Vec::with_capacity(sweep_points.len());
+            for &sweep_value in &sweep_points {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                let mut swept = netlist.clone();
+                swept.options.temp = Some(sweep_value);
+                swept.params.set("TEMP", sweep_value);
+                swept.params.set("TEMPER", sweep_value);
+                results.push((sweep_value, self.run_dc_op(&swept)?));
+            }
+            return Ok(results);
+        }
+
         // Build circuit once
         let mut circuit = engine.build_circuit(netlist)?;
 
         if circuit.num_nodes() == 0 {
-            return Err(SimulationError::Circuit("No nodes in circuit".to_string()));
+            return Ok(sweep_points
+                .into_iter()
+                .map(|value| (value, Self::build_empty_dc_result()))
+                .collect());
         }
 
         // Find source index (case-insensitive comparison - SPICE standard)

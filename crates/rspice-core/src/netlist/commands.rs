@@ -89,6 +89,7 @@ pub fn parse_command(
                 name,
                 model_type,
                 params: model_params,
+                expr_params: Vec::new(),
                 string_params: Vec::new(),
             });
         }

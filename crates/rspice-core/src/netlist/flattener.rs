@@ -16,7 +16,7 @@
 
 use super::hierarchy_path::HierarchyPath;
 use super::param_scope::ParamResolver;
-use super::{Element, ElementKind, Netlist, ParseError, SubcircuitDef};
+use super::{Element, ElementKind, Netlist, ParamContext, ParametricValue, ParseError, SubcircuitDef};
 use crate::Value;
 use std::collections::{HashMap, HashSet};
 
@@ -125,6 +125,8 @@ pub struct Flattener<'a> {
     /// External subcircuit/model names backed by out-of-line implementations
     /// (for example `.VERILOGA` includes).
     external_subckts: HashSet<String>,
+    /// Global nodes that must not be renamed while flattening hierarchy.
+    global_nodes: HashSet<String>,
 }
 
 impl<'a> Flattener<'a> {
@@ -151,6 +153,7 @@ impl<'a> Flattener<'a> {
             param_resolver,
             instance_metadata: Vec::new(),
             external_subckts: HashSet::new(),
+            global_nodes: HashSet::new(),
         }
     }
 
@@ -168,6 +171,13 @@ impl<'a> Flattener<'a> {
     pub fn flatten(&mut self, netlist: &Netlist) -> Result<Vec<Element>, ParseError> {
         let mut flat_elements = Vec::new();
         self.external_subckts = Self::collect_external_subckts(netlist);
+        self.global_nodes = netlist.global_nodes.clone();
+        let global_params: HashMap<String, Value> = netlist
+            .params
+            .all_params()
+            .into_iter()
+            .map(|(name, value)| (canonical_param_name(&name), value))
+            .collect();
 
         // Set global parameters from netlist
         for (name, value) in netlist.params.all_params() {
@@ -175,7 +185,14 @@ impl<'a> Flattener<'a> {
         }
 
         for element in &netlist.elements {
-            self.flatten_element(element, "", &HashMap::new(), 0, &mut flat_elements)?;
+            self.flatten_element(
+                element,
+                "",
+                &HashMap::new(),
+                &global_params,
+                0,
+                &mut flat_elements,
+            )?;
         }
 
         Ok(flat_elements)
@@ -187,6 +204,7 @@ impl<'a> Flattener<'a> {
         element: &Element,
         prefix: &str,
         node_map: &HashMap<String, String>,
+        scope_params: &HashMap<String, Value>,
         depth: usize,
         output: &mut Vec<Element>,
     ) -> Result<(), ParseError> {
@@ -212,12 +230,16 @@ impl<'a> Flattener<'a> {
                         params,
                         prefix,
                         node_map,
+                        scope_params,
                         depth,
                         output,
                     )?;
                 } else if self.is_external_subckt(subckt_name) {
                     // Preserve external instance (e.g. Verilog-A model) as a leaf.
-                    let new_element = self.remap_element(element, prefix, node_map);
+                    let new_element = self.resolve_external_subcircuit_params(
+                        self.remap_element(element, prefix, node_map),
+                        scope_params,
+                    )?;
                     output.push(new_element);
                 } else {
                     return Err(ParseError::Syntax {
@@ -258,9 +280,10 @@ impl<'a> Flattener<'a> {
         &mut self,
         instance: &Element,
         subckt_name: &str,
-        instance_params: &[(String, Value)],
+        instance_params: &[(String, ParametricValue)],
         prefix: &str,
         parent_node_map: &HashMap<String, String>,
+        caller_scope_params: &HashMap<String, Value>,
         depth: usize,
         output: &mut Vec<Element>,
     ) -> Result<(), ParseError> {
@@ -291,23 +314,21 @@ impl<'a> Flattener<'a> {
             }
         }
 
-        // Build parameter map for value substitution
-        let mut param_map: HashMap<&str, Value> = subckt
-            .params
-            .iter()
-            .map(|(k, v)| (k.as_str(), *v))
-            .collect();
-
-        // Instance parameters override definition defaults
-        for (name, value) in instance_params {
-            param_map.insert(name.as_str(), *value);
-        }
+        let param_map =
+            build_subcircuit_param_scope(subckt, caller_scope_params, instance_params)?;
 
         // Expand each element in the subcircuit
         for sub_element in &subckt.elements {
             // Apply parameter substitution to element values
-            let substituted = self.substitute_params(sub_element, &param_map);
-            self.flatten_element(&substituted, &new_prefix, &node_map, depth + 1, output)?;
+            let substituted = self.substitute_params(sub_element, &param_map)?;
+            self.flatten_element(
+                &substituted,
+                &new_prefix,
+                &node_map,
+                &param_map,
+                depth + 1,
+                output,
+            )?;
         }
 
         Ok(())
@@ -335,11 +356,23 @@ impl<'a> Flattener<'a> {
 
         // Remap the element kind, handling CCCS/CCVS control element names
         let new_kind = match &element.kind {
-            ElementKind::BehavioralVoltage { expression } => ElementKind::BehavioralVoltage {
+            ElementKind::BehavioralVoltage {
+                expression,
+                tc1,
+                tc2,
+            } => ElementKind::BehavioralVoltage {
                 expression: self.remap_behavioral_expression(expression, prefix, node_map),
+                tc1: *tc1,
+                tc2: *tc2,
             },
-            ElementKind::BehavioralCurrent { expression } => ElementKind::BehavioralCurrent {
+            ElementKind::BehavioralCurrent {
+                expression,
+                tc1,
+                tc2,
+            } => ElementKind::BehavioralCurrent {
                 expression: self.remap_behavioral_expression(expression, prefix, node_map),
+                tc1: *tc1,
+                tc2: *tc2,
             },
             ElementKind::Cccs {
                 gain,
@@ -386,6 +419,11 @@ impl<'a> Flattener<'a> {
         // Ground is never renamed
         if node == "0" || node.eq_ignore_ascii_case("gnd") {
             return "0".to_string();
+        }
+
+        // .GLOBAL nodes retain their original names across hierarchy levels.
+        if self.global_nodes.contains(&node.to_ascii_uppercase()) {
+            return node.to_string();
         }
 
         // Check if this is a port that maps to an external node
@@ -469,18 +507,31 @@ impl<'a> Flattener<'a> {
     ///
     /// Since our current AST stores resolved f64 values, we substitute
     /// by scaling/replacing values based on parameter lookups.
-    fn substitute_params(&self, element: &Element, param_map: &HashMap<&str, Value>) -> Element {
+    fn substitute_params(
+        &self,
+        element: &Element,
+        param_map: &HashMap<String, Value>,
+    ) -> Result<Element, ParseError> {
         let new_kind = match &element.kind {
             // Passive components
             ElementKind::Resistor {
                 value,
+                value_expr,
                 model,
                 instance_params,
-            } => ElementKind::Resistor {
-                value: *value,
-                model: model.clone(),
-                instance_params: instance_params.clone(),
-            },
+            } => {
+                let resolved_value = if let Some(expr) = value_expr {
+                    resolve_parametric_value(&ParametricValue::Expression(expr.clone()), param_map)?
+                } else {
+                    *value
+                };
+                ElementKind::Resistor {
+                    value: resolved_value,
+                    value_expr: None,
+                    model: model.clone(),
+                    instance_params: instance_params.clone(),
+                }
+            }
             ElementKind::Capacitor {
                 value,
                 initial_voltage,
@@ -501,20 +552,12 @@ impl<'a> Flattener<'a> {
                 subckt_name,
                 params: instance_params,
             } => {
-                // Merge: instance params override those in param_map
-                let mut merged_params: Vec<(String, Value)> = instance_params.clone();
-
-                // Substitute any parameter references in instance params
-                for (name, value) in &mut merged_params {
-                    // If the value matches a known parameter name (sentinel value),
-                    // substitute with the actual parameter value
-                    if let Some(&param_value) = param_map.get(name.as_str()) {
-                        // Only substitute if the value appears to be a reference
-                        // (in practice, the parser would resolve expressions)
-                        if value.is_nan() || *value == 0.0 {
-                            *value = param_value;
-                        }
-                    }
+                let mut merged_params = Vec::with_capacity(instance_params.len());
+                for (name, value) in instance_params {
+                    merged_params.push((
+                        name.clone(),
+                        ParametricValue::Resolved(resolve_parametric_value(value, param_map)?),
+                    ));
                 }
 
                 ElementKind::Subcircuit {
@@ -557,12 +600,68 @@ impl<'a> Flattener<'a> {
             other => other.clone(),
         };
 
-        Element {
+        Ok(Element {
             name: element.name.clone(),
             kind: new_kind,
             nodes: element.nodes.clone(),
+        })
+    }
+
+    fn resolve_external_subcircuit_params(
+        &self,
+        mut element: Element,
+        scope_params: &HashMap<String, Value>,
+    ) -> Result<Element, ParseError> {
+        if let ElementKind::Subcircuit { params, .. } = &mut element.kind {
+            for (_, value) in params.iter_mut() {
+                let resolved = resolve_parametric_value(value, scope_params)?;
+                *value = ParametricValue::Resolved(resolved);
+            }
+        }
+        Ok(element)
+    }
+}
+
+fn resolve_parametric_value(
+    value: &ParametricValue,
+    param_map: &HashMap<String, Value>,
+) -> Result<Value, ParseError> {
+    match value {
+        ParametricValue::Resolved(v) => Ok(*v),
+        ParametricValue::Expression(expr) => {
+            let mut ctx = ParamContext::new();
+            for (name, value) in param_map {
+                ctx.set(name, *value);
+            }
+            super::expr::eval_expression(expr, &ctx).map_err(|e| ParseError::InvalidValue(e.to_string()))
         }
     }
+}
+
+fn canonical_param_name(name: &str) -> String {
+    name.to_ascii_uppercase()
+}
+
+fn build_subcircuit_param_scope(
+    subckt: &SubcircuitDef,
+    caller_scope_params: &HashMap<String, Value>,
+    instance_params: &[(String, ParametricValue)],
+) -> Result<HashMap<String, Value>, ParseError> {
+    let mut param_map: HashMap<String, Value> = caller_scope_params
+        .iter()
+        .map(|(name, value)| (canonical_param_name(name), *value))
+        .collect();
+
+    for (name, value) in &subckt.params {
+        param_map.insert(canonical_param_name(name), *value);
+    }
+
+    for (name, value) in instance_params {
+        let resolved = resolve_parametric_value(value, caller_scope_params)?;
+        param_map.insert(canonical_param_name(name), resolved);
+    }
+
+    Ok(param_map)
 }
 
 /// Convenience function to flatten a netlist
@@ -818,7 +917,10 @@ V1 1 0 10
             let r_param = params.iter().find(|(n, _)| n == "R");
             assert!(r_param.is_some(), "Expected R parameter");
             assert!(
-                (r_param.unwrap().1 - 2000.0).abs() < 1e-10,
+                matches!(
+                    r_param.unwrap().1,
+                    ParametricValue::Resolved(v) if (v - 2000.0).abs() < 1e-10
+                ),
                 "R should be 2k"
             );
         } else {
@@ -888,9 +990,10 @@ X1 in 0 custom_model g=2m
             } => {
                 assert!(subckt_name.eq_ignore_ascii_case("custom_model"));
                 assert!(
-                    params
-                        .iter()
-                        .any(|(name, value)| name.eq_ignore_ascii_case("g") && value.is_finite())
+                    params.iter().any(|(name, value)| {
+                        name.eq_ignore_ascii_case("g")
+                            && matches!(value, ParametricValue::Resolved(v) if v.is_finite())
+                    })
                 );
             }
             other => panic!(
@@ -919,6 +1022,258 @@ X1 in 0 missing_model
     }
 
     #[test]
+    fn test_flatten_preserves_global_nodes_across_subcircuits() {
+        let netlist_str = r#"Global Nodes
+.global VDD
+.subckt child out
+R1 out 0 1k
+R2 VDD 0 2k
+.ends
+V1 VDD 0 5
+X1 out child
+.end
+"#;
+        let netlist = parse_netlist(netlist_str).unwrap();
+        assert!(netlist.is_global("VDD"));
+
+        let flat = flatten_netlist(&netlist).unwrap();
+
+        let r1 = flat
+            .iter()
+            .find(|element| element.name == "X1.R1")
+            .expect("expected flattened local resistor");
+        assert!(r1.nodes[0].eq_ignore_ascii_case("OUT"));
+        assert_eq!(r1.nodes[1], "0");
+
+        let r2 = flat
+            .iter()
+            .find(|element| element.name == "X1.R2")
+            .expect("expected flattened global resistor");
+        assert!(r2.nodes[0].eq_ignore_ascii_case("VDD"));
+        assert_eq!(r2.nodes[1], "0");
+    }
+
+    #[test]
+    fn test_flatten_subcircuits_inherit_global_parameter_scope() {
+        let netlist_str = r#"Inherited Parameters
+.param rval=2k
+.subckt child in out
+R1 in out {rval}
+.ends
+V1 in 0 1
+X1 in out child
+R2 out 0 1k
+.end
+"#;
+        let netlist = parse_netlist(netlist_str).unwrap();
+        let flat = flatten_netlist(&netlist).unwrap();
+
+        let r1 = flat
+            .iter()
+            .find(|element| element.name == "X1.R1")
+            .expect("expected flattened subcircuit resistor");
+        match &r1.kind {
+            ElementKind::Resistor { value, value_expr, .. } => {
+                assert_eq!(value_expr, &None);
+                assert!((*value - 2_000.0).abs() < 1e-9, "expected 2k, got {value}");
+            }
+            other => panic!("expected resistor, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_flatten_nested_numeric_port_subcircuits_keep_port_order_and_model_scope() {
+        let netlist_str = r#"Model Scope
+I2 n1002_t 0 DC=-1
+I3 n1003_t 0 DC=-1
+I4 n1004_t 0 DC=-1
+I5 n1005_t 0 DC=-1
+I6 n1006_t 0 DC=-1
+I7 n1007_t 0 DC=-1
+X2 n1002_t n1003_t n1004_t n1005_t n1006_t n1007_t sub2
+
+.subckt sub2 3 41a 41b 42a 42b 5
+  R2 3 0 my
+  X31 41a 41b sub3
+  X32 42a 42b sub3
+  .subckt sub3 4 5
+    .model my r r=8k
+    R5 4 0 1k
+    R6 5 0 my
+  .ends
+  .model just r r=43
+  R7 5 0 just
+.ends
+
+.model my r r=4k
+.end
+"#;
+        let netlist = parse_netlist(netlist_str).unwrap();
+        let x2 = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("X2"))
+            .expect("expected top-level subckt instance");
+        assert_eq!(
+            x2.nodes,
+            vec![
+                "N1002_T".to_string(),
+                "N1003_T".to_string(),
+                "N1004_T".to_string(),
+                "N1005_T".to_string(),
+                "N1006_T".to_string(),
+                "N1007_T".to_string()
+            ]
+        );
+
+        let sub2 = netlist
+            .subcircuits
+            .iter()
+            .find(|subckt| subckt.name == "sub2")
+            .expect("expected parent subckt");
+        assert_eq!(
+            sub2.ports,
+            vec![
+                "3".to_string(),
+                "41A".to_string(),
+                "41B".to_string(),
+                "42A".to_string(),
+                "42B".to_string(),
+                "5".to_string()
+            ]
+        );
+        let x31 = sub2
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("X31"))
+            .expect("expected nested subckt instance");
+        assert_eq!(x31.nodes, vec!["41A".to_string(), "41B".to_string()]);
+
+        let sub3 = netlist
+            .subcircuits
+            .iter()
+            .find(|subckt| subckt.name == "sub2.sub3")
+            .expect("expected qualified nested subckt");
+        assert_eq!(sub3.ports, vec!["4".to_string(), "5".to_string()]);
+
+        let flat = flatten_netlist(&netlist).unwrap();
+        let x2_r2 = flat
+            .iter()
+            .find(|element| element.name == "X2.R2")
+            .expect("expected X2.R2");
+        match &x2_r2.kind {
+            ElementKind::Resistor { model, .. } => assert!(
+                model.as_deref().is_some_and(|name| name.eq_ignore_ascii_case("my")),
+                "parent resistor should bind to the top-level model, got {:?}",
+                model
+            ),
+            other => panic!("expected resistor, got {:?}", other),
+        }
+
+        let x31_r5 = flat
+            .iter()
+            .find(|element| element.name == "X2.X31.R5")
+            .expect("expected X2.X31.R5");
+        assert_eq!(x31_r5.nodes, vec!["N1003_T".to_string(), "0".to_string()]);
+
+        let x31_r6 = flat
+            .iter()
+            .find(|element| element.name == "X2.X31.R6")
+            .expect("expected X2.X31.R6");
+        assert_eq!(x31_r6.nodes, vec!["N1004_T".to_string(), "0".to_string()]);
+        match &x31_r6.kind {
+            ElementKind::Resistor { model, .. } => assert!(
+                model
+                    .as_deref()
+                    .is_some_and(|name| name.eq_ignore_ascii_case("sub2.sub3::my")),
+                "nested resistor should bind to nested local model, got {:?}",
+                model
+            ),
+            other => panic!("expected resistor, got {:?}", other),
+        }
+
+        let x32_r5 = flat
+            .iter()
+            .find(|element| element.name == "X2.X32.R5")
+            .expect("expected X2.X32.R5");
+        assert_eq!(x32_r5.nodes, vec!["N1005_T".to_string(), "0".to_string()]);
+
+        let x32_r6 = flat
+            .iter()
+            .find(|element| element.name == "X2.X32.R6")
+            .expect("expected X2.X32.R6");
+        assert_eq!(x32_r6.nodes, vec!["N1006_T".to_string(), "0".to_string()]);
+        match &x32_r6.kind {
+            ElementKind::Resistor { model, .. } => assert!(
+                model
+                    .as_deref()
+                    .is_some_and(|name| name.eq_ignore_ascii_case("sub2.sub3::my")),
+                "nested resistor should bind to nested local model, got {:?}",
+                model
+            ),
+            other => panic!("expected resistor, got {:?}", other),
+        }
+
+        let x2_r7 = flat
+            .iter()
+            .find(|element| element.name == "X2.R7")
+            .expect("expected X2.R7");
+        assert_eq!(x2_r7.nodes, vec!["N1007_T".to_string(), "0".to_string()]);
+        match &x2_r7.kind {
+            ElementKind::Resistor { model, .. } => assert!(
+                model
+                    .as_deref()
+                    .is_some_and(|name| name.eq_ignore_ascii_case("sub2::just")),
+                "parent-local resistor should bind to parent-local model, got {:?}",
+                model
+            ),
+            other => panic!("expected resistor, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_flatten_resolves_nested_resistor_parameter_expressions_per_instance_scope() {
+        let netlist_str = r#"Scope Expressions
+.param foo=2k
+.subckt sub1 n1 n2 foo=5k
+.subckt sub n1 n2 foo=10k
+R1 n1 n2 'foo'
+.ends
+X1 n1 n2 sub foo='3*foo'
+R2 n1 n2 '5*foo'
+.ends
+XTOP n1 0 sub1 foo='foo*3'
+.end
+"#;
+        let netlist = parse_netlist(netlist_str).unwrap();
+        let flat = flatten_netlist(&netlist).unwrap();
+
+        let nested = flat
+            .iter()
+            .find(|element| element.name == "XTOP.X1.R1")
+            .expect("expected nested resistor");
+        match &nested.kind {
+            ElementKind::Resistor { value, value_expr, .. } => {
+                assert_eq!(value_expr, &None);
+                assert!((*value - 18_000.0).abs() < 1e-9, "expected 18k, got {value}");
+            }
+            other => panic!("expected resistor, got {:?}", other),
+        }
+
+        let outer = flat
+            .iter()
+            .find(|element| element.name == "XTOP.R2")
+            .expect("expected outer resistor");
+        match &outer.kind {
+            ElementKind::Resistor { value, value_expr, .. } => {
+                assert_eq!(value_expr, &None);
+                assert!((*value - 30_000.0).abs() < 1e-9, "expected 30k, got {value}");
+            }
+            other => panic!("expected resistor, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_flatten_remaps_behavioral_internal_voltage_probe_nodes() {
         let netlist_str = r#"Behavioral Probe Remap
 .SUBCKT BTEST OUT
@@ -936,7 +1291,7 @@ RLOAD out 0 1k
             .find(|e| e.name == "X1.B1")
             .expect("expected flattened behavioral source");
         let expression = match &b1.kind {
-            ElementKind::BehavioralVoltage { expression } => expression,
+            ElementKind::BehavioralVoltage { expression, .. } => expression,
             other => panic!("expected behavioral voltage source, got {:?}", other),
         };
 
@@ -971,7 +1326,7 @@ RLOAD out 0 1k
             .find(|e| e.name == "X1.B1")
             .expect("expected flattened behavioral source");
         let expression = match &b1.kind {
-            ElementKind::BehavioralVoltage { expression } => expression,
+            ElementKind::BehavioralVoltage { expression, .. } => expression,
             other => panic!("expected behavioral voltage source, got {:?}", other),
         };
         assert!(
@@ -998,7 +1353,7 @@ RLOAD out 0 1k
             .find(|e| e.name == "X1.B1")
             .expect("expected flattened behavioral source");
         let expression = match &b1.kind {
-            ElementKind::BehavioralVoltage { expression } => expression,
+            ElementKind::BehavioralVoltage { expression, .. } => expression,
             other => panic!("expected behavioral voltage source, got {:?}", other),
         };
         assert!(

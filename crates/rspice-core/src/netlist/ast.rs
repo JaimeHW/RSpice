@@ -121,6 +121,8 @@ pub enum ElementKind {
     Resistor {
         /// Explicit resistance value in Ohms when provided directly.
         value: Value,
+        /// Optional deferred expression for parameterized resistor values.
+        value_expr: Option<String>,
         /// Optional model name for model-based resistor instances.
         model: Option<String>,
         /// Optional instance parameters (e.g., `L`, `W`, `M`, `R`).
@@ -228,10 +230,18 @@ pub enum ElementKind {
     // Behavioral Sources
     //-------------------------------------------------------------------------
     /// Behavioral voltage source: B1 n+ n- V=expr
-    BehavioralVoltage { expression: String },
+    BehavioralVoltage {
+        expression: String,
+        tc1: Value,
+        tc2: Value,
+    },
 
     /// Behavioral current source: B1 n+ n- I=expr
-    BehavioralCurrent { expression: String },
+    BehavioralCurrent {
+        expression: String,
+        tc1: Value,
+        tc2: Value,
+    },
 
     //-------------------------------------------------------------------------
     // Switches
@@ -294,7 +304,7 @@ pub enum ElementKind {
     /// Subcircuit instance: X1 node1 node2... SUBCKTNAME [PARAM=val...]
     Subcircuit {
         subckt_name: String,
-        params: Vec<(String, Value)>,
+        params: Vec<(String, ParametricValue)>,
     },
 
     //-------------------------------------------------------------------------
@@ -919,6 +929,7 @@ pub struct ModelDef {
     pub name: String,
     pub model_type: String,
     pub params: Vec<(String, Value)>,
+    pub expr_params: Vec<(String, String)>,
     pub string_params: Vec<(String, String)>,
 }
 
@@ -979,6 +990,7 @@ mod tests {
             name: "R1".to_string(),
             kind: ElementKind::Resistor {
                 value: 1000.0,
+                value_expr: None,
                 model: None,
                 instance_params: Vec::new(),
             },

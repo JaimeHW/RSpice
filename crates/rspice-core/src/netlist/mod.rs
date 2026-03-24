@@ -139,46 +139,7 @@ impl Netlist {
         file_path: &std::path::Path,
     ) -> Result<String, ParseError> {
         let mut processor = IncludeProcessor::new(file_path);
-        let mut result = String::new();
-
-        for line in content.lines() {
-            let trimmed = line.trim();
-            let upper = trimmed.to_uppercase();
-
-            if upper.starts_with(".INCLUDE") || upper.starts_with(".INC ") {
-                // Parse and process include directive
-                if let Some(filename) = parse_include_directive(trimmed) {
-                    match processor.process_include(&filename) {
-                        Ok(included_content) => {
-                            result.push_str(&included_content);
-                            result.push('\n');
-                        }
-                        Err(e) => {
-                            // Log warning but don't fail - file may not exist
-                            log::warn!("Include failed: {}", e);
-                        }
-                    }
-                }
-            } else if upper.starts_with(".LIB") && !upper.starts_with(".LIBS") {
-                // Parse and process lib directive
-                if let Some((filename, section)) = parse_lib_directive(trimmed) {
-                    match processor.process_lib(&filename, section.as_deref()) {
-                        Ok(lib_content) => {
-                            result.push_str(&lib_content);
-                            result.push('\n');
-                        }
-                        Err(e) => {
-                            log::warn!("Library include failed: {}", e);
-                        }
-                    }
-                }
-            } else {
-                result.push_str(line);
-                result.push('\n');
-            }
-        }
-
-        Ok(result)
+        processor.expand_content(content, file_path)
     }
 
     /// Strip .control/.endc blocks from netlist

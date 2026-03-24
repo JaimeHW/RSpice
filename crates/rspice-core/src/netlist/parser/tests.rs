@@ -100,6 +100,7 @@ R1 in out RMOD L=10u W=2u M=2
             value,
             model,
             instance_params,
+            ..
         } => {
             assert!(
                 value.is_nan(),
@@ -130,6 +131,7 @@ R1 in out RMOD R=2k L=10u W=2u
             value,
             model,
             instance_params,
+            ..
         } => {
             assert_eq!(model.as_deref(), Some("RMOD"));
             assert!((value - 2000.0).abs() < 1e-12);
@@ -139,6 +141,29 @@ R1 in out RMOD R=2k L=10u W=2u
             assert!((params["R"] - 2000.0).abs() < 1e-12);
             assert!((params["L"] - 10e-6).abs() < 1e-18);
             assert!((params["W"] - 2e-6).abs() < 1e-18);
+        }
+        other => panic!("Expected resistor, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_resistor_preserves_parameter_expression_for_late_resolution() {
+    let netlist = r#"Parametric Resistor
+.PARAM FOO=2k
+R1 in out '3*foo'
+.END
+"#;
+    let result = parse_netlist(netlist).expect("netlist should parse");
+    match &result.elements[0].kind {
+        ElementKind::Resistor {
+            value,
+            value_expr,
+            model,
+            ..
+        } => {
+            assert!(value.is_nan(), "deferred resistor value should stay unresolved");
+            assert_eq!(model, &None);
+            assert_eq!(value_expr.as_deref(), Some("3*foo"));
         }
         other => panic!("Expected resistor, got {:?}", other),
     }
@@ -1709,8 +1734,13 @@ R1 out 0 1k
         .expect("missing B1");
 
     match &b1.kind {
-        ElementKind::BehavioralVoltage { expression } => {
+        ElementKind::BehavioralVoltage {
+            expression,
+            tc1,
+            tc2,
+        } => {
             assert_eq!(expression, "1+2");
+            assert_eq!((*tc1, *tc2), (0.0, 0.0));
         }
         other => panic!("expected behavioral voltage source, got {:?}", other),
     }
@@ -1731,10 +1761,43 @@ R1 out 0 1k
         .expect("missing B1");
 
     match &b1.kind {
-        ElementKind::BehavioralVoltage { expression } => {
+        ElementKind::BehavioralVoltage {
+            expression,
+            tc1,
+            tc2,
+        } => {
             assert_eq!(expression, "1+2");
+            assert_eq!((*tc1, *tc2), (0.0, 0.0));
         }
         other => panic!("expected behavioral voltage source, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_behavioral_expression_stops_before_temperature_coefficients() {
+    let netlist = r#"Behavioral Temp Coeff
+B1 out 0 I=V(in) tc1=1m tc2=2u
+V1 in 0 1
+.END
+"#;
+    let parsed = parse_netlist(netlist).expect("netlist should parse");
+    let b1 = parsed
+        .elements
+        .iter()
+        .find(|e| e.name.eq_ignore_ascii_case("B1"))
+        .expect("missing B1");
+
+    match &b1.kind {
+        ElementKind::BehavioralCurrent {
+            expression,
+            tc1,
+            tc2,
+        } => {
+            assert_eq!(expression.to_ascii_uppercase(), "V ( IN )");
+            assert!((*tc1 - 1e-3).abs() < 1e-15);
+            assert!((*tc2 - 2e-6).abs() < 1e-18);
+        }
+        other => panic!("expected behavioral current source, got {:?}", other),
     }
 }
 

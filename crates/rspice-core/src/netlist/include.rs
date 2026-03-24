@@ -28,14 +28,36 @@ use super::ParseError;
 pub struct IncludeProcessor {
     /// Base directory for resolving relative paths
     base_dir: PathBuf,
-    /// Set of already-included files (canonical paths) to detect cycles
-    included_files: HashSet<PathBuf>,
+    /// Currently active include/lib stack entries used for recursion detection
+    active_includes: HashSet<IncludeKey>,
     /// Additional library search paths
     lib_paths: Vec<PathBuf>,
     /// Maximum include depth to prevent stack overflow
     max_depth: usize,
     /// Current include depth
     current_depth: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct IncludeKey {
+    path: PathBuf,
+    section: Option<String>,
+}
+
+impl IncludeKey {
+    fn new(path: PathBuf, section: Option<&str>) -> Self {
+        Self {
+            path,
+            section: section.map(|name| name.to_ascii_uppercase()),
+        }
+    }
+
+    fn describe(&self) -> String {
+        match &self.section {
+            Some(section) => format!("{} [{}]", self.path.display(), section),
+            None => self.path.display().to_string(),
+        }
+    }
 }
 
 impl IncludeProcessor {
@@ -52,7 +74,7 @@ impl IncludeProcessor {
 
         Self {
             base_dir,
-            included_files: HashSet::new(),
+            active_includes: HashSet::new(),
             lib_paths: Vec::new(),
             max_depth: 10, // Reasonable limit for include nesting
             current_depth: 0,
@@ -76,41 +98,8 @@ impl IncludeProcessor {
     /// # Returns
     /// The file contents, or an error if the file cannot be read
     pub fn process_include(&mut self, filename: &str) -> Result<String, ParseError> {
-        self.current_depth += 1;
-
-        if self.current_depth > self.max_depth {
-            self.current_depth -= 1;
-            return Err(ParseError::Syntax {
-                line: 0,
-                message: format!("Include depth exceeded maximum of {}", self.max_depth),
-            });
-        }
-
-        let path = self.resolve_path(filename)?;
-
-        // Check for circular inclusion
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
-        if self.included_files.contains(&canonical) {
-            self.current_depth -= 1;
-            // Already included - return empty string (not an error, just skip)
-            log::debug!("Skipping already-included file: {:?}", path);
-            return Ok(String::new());
-        }
-
-        self.included_files.insert(canonical);
-
-        let content = fs::read_to_string(&path).map_err(|e| ParseError::Syntax {
-            line: 0,
-            message: format!("Failed to include '{}': {}", filename, e),
-        })?;
-
-        // Included model/library files often contain a terminal `.END`.
-        // Keeping it inline would terminate parsing of the parent netlist early,
-        // so strip only bare `.END` records from included content.
-        let content = strip_terminal_end_cards(&content);
-
-        self.current_depth -= 1;
-        Ok(content)
+        let base_dir = self.base_dir.clone();
+        self.process_include_from(&base_dir, filename)
     }
 
     /// Process a .LIB directive
@@ -129,20 +118,22 @@ impl IncludeProcessor {
         filename: &str,
         section: Option<&str>,
     ) -> Result<String, ParseError> {
-        let content = self.process_include(filename)?;
+        let base_dir = self.base_dir.clone();
+        self.process_lib_from(&base_dir, filename, section)
+    }
 
-        if content.is_empty() {
-            return Ok(content);
-        }
-
-        match section {
-            Some(sect) => self.extract_section(&content, sect),
-            None => Ok(content),
-        }
+    /// Recursively expand `.INCLUDE` and `.LIB` directives in raw content.
+    pub fn expand_content(
+        &mut self,
+        content: &str,
+        current_path: &Path,
+    ) -> Result<String, ParseError> {
+        let current_dir = current_path.parent().unwrap_or(Path::new("."));
+        self.expand_content_from(content, current_dir)
     }
 
     /// Resolve a filename to an absolute path
-    fn resolve_path(&self, filename: &str) -> Result<PathBuf, ParseError> {
+    fn resolve_path_from(&self, base_dir: &Path, filename: &str) -> Result<PathBuf, ParseError> {
         // Remove quotes if present
         let clean_name = filename.trim_matches('"').trim_matches('\'');
 
@@ -160,7 +151,7 @@ impl IncludeProcessor {
         }
 
         // Try relative to base directory first
-        let relative = self.base_dir.join(path);
+        let relative = base_dir.join(path);
         if relative.exists() {
             return Ok(relative);
         }
@@ -177,7 +168,7 @@ impl IncludeProcessor {
         let common_paths = ["lib", "models", "../lib", "../models"];
 
         for common in common_paths {
-            let candidate = self.base_dir.join(common).join(path);
+            let candidate = base_dir.join(common).join(path);
             if candidate.exists() {
                 return Ok(candidate);
             }
@@ -188,9 +179,125 @@ impl IncludeProcessor {
             message: format!(
                 "Include file not found: {} (searched {})",
                 clean_name,
-                self.base_dir.display()
+                base_dir.display()
             ),
         })
+    }
+
+    fn process_include_from(
+        &mut self,
+        base_dir: &Path,
+        filename: &str,
+    ) -> Result<String, ParseError> {
+        let path = self.resolve_path_from(base_dir, filename)?;
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+        let key = IncludeKey::new(canonical, None);
+        self.enter_include(&key)?;
+
+        let result = (|| {
+            let content = fs::read_to_string(&path).map_err(|e| ParseError::Syntax {
+                line: 0,
+                message: format!("Failed to include '{}': {}", filename, e),
+            })?;
+
+            let content = strip_terminal_end_cards(&content);
+            self.expand_content(&content, &path)
+        })();
+
+        self.leave_include(&key);
+        result
+    }
+
+    fn process_lib_from(
+        &mut self,
+        base_dir: &Path,
+        filename: &str,
+        section: Option<&str>,
+    ) -> Result<String, ParseError> {
+        let path = self.resolve_path_from(base_dir, filename)?;
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+        let key = IncludeKey::new(canonical, section);
+        self.enter_include(&key)?;
+
+        let result = (|| {
+            let content = fs::read_to_string(&path).map_err(|e| ParseError::Syntax {
+                line: 0,
+                message: format!("Failed to include '{}': {}", filename, e),
+            })?;
+            let content = strip_terminal_end_cards(&content);
+            let selected = match section {
+                Some(sect) => self.extract_section(&content, sect)?,
+                None => content,
+            };
+            self.expand_content(&selected, &path)
+        })();
+
+        self.leave_include(&key);
+        result
+    }
+
+    fn expand_content_from(
+        &mut self,
+        content: &str,
+        base_dir: &Path,
+    ) -> Result<String, ParseError> {
+        let mut result = String::new();
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let upper = trimmed.to_ascii_uppercase();
+
+            if upper.starts_with(".INCLUDE") || upper.starts_with(".INC ") {
+                if let Some(filename) = parse_include_directive(trimmed) {
+                    let included = self.process_include_from(base_dir, &filename)?;
+                    result.push_str(&included);
+                    if !included.ends_with('\n') {
+                        result.push('\n');
+                    }
+                    continue;
+                }
+            }
+
+            if upper.starts_with(".LIB") && !upper.starts_with(".LIBS") {
+                if let Some((filename, section)) = parse_lib_directive(trimmed) {
+                    let included = self.process_lib_from(base_dir, &filename, section.as_deref())?;
+                    result.push_str(&included);
+                    if !included.ends_with('\n') {
+                        result.push('\n');
+                    }
+                    continue;
+                }
+            }
+
+            result.push_str(line);
+            result.push('\n');
+        }
+
+        Ok(result)
+    }
+
+    fn enter_include(&mut self, key: &IncludeKey) -> Result<(), ParseError> {
+        if self.current_depth >= self.max_depth {
+            return Err(ParseError::Syntax {
+                line: 0,
+                message: format!("Include depth exceeded maximum of {}", self.max_depth),
+            });
+        }
+
+        if !self.active_includes.insert(key.clone()) {
+            return Err(ParseError::Syntax {
+                line: 0,
+                message: format!("Circular include/lib detected: {}", key.describe()),
+            });
+        }
+
+        self.current_depth += 1;
+        Ok(())
+    }
+
+    fn leave_include(&mut self, key: &IncludeKey) {
+        self.current_depth = self.current_depth.saturating_sub(1);
+        self.active_includes.remove(key);
     }
 
     /// Extract a named section from library content
@@ -252,7 +359,7 @@ impl IncludeProcessor {
 
     /// Reset the processor for a new netlist
     pub fn reset(&mut self) {
-        self.included_files.clear();
+        self.active_includes.clear();
         self.current_depth = 0;
     }
 
@@ -296,12 +403,15 @@ pub fn parse_include_directive(line: &str) -> Option<String> {
     let trimmed = line.trim();
     let upper = trimmed.to_uppercase();
 
-    if !upper.starts_with(".INCLUDE") {
+    if !upper.starts_with(".INCLUDE") && !upper.starts_with(".INC") {
         return None;
     }
 
-    // Skip the .INCLUDE keyword
-    let rest = &trimmed[8..].trim();
+    let rest = if upper.starts_with(".INCLUDE") {
+        trimmed[8..].trim()
+    } else {
+        trimmed[4..].trim()
+    };
 
     // Handle quoted paths
     if rest.starts_with('"') {
@@ -382,7 +492,7 @@ mod tests {
     fn test_include_processor_creation() {
         let proc = IncludeProcessor::new(Path::new("."));
         assert_eq!(proc.current_depth, 0);
-        assert!(proc.included_files.is_empty());
+        assert!(proc.active_includes.is_empty());
     }
 
     #[test]
@@ -497,11 +607,90 @@ M1 OUT IN VDD VDD PMOS
     fn test_reset() {
         let mut proc = IncludeProcessor::new(Path::new("."));
         proc.current_depth = 5;
-        proc.included_files.insert(PathBuf::from("/test/file"));
+        proc.active_includes
+            .insert(IncludeKey::new(PathBuf::from("/test/file"), None));
 
         proc.reset();
 
         assert_eq!(proc.current_depth, 0);
-        assert!(proc.included_files.is_empty());
+        assert!(proc.active_includes.is_empty());
+    }
+
+    fn unique_temp_dir(test_name: &str) -> PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time should be monotonic")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "rspice_include_{test_name}_{}_{}",
+            std::process::id(),
+            stamp
+        ));
+        fs::create_dir_all(&dir).expect("temp dir should be created");
+        dir
+    }
+
+    #[test]
+    fn test_expand_content_recurses_nested_includes_with_relative_paths() {
+        let dir = unique_temp_dir("nested_include");
+        let root = dir.join("root.cir");
+        let lib_dir = dir.join("lib");
+        let model_dir = dir.join("models");
+        fs::create_dir_all(&lib_dir).unwrap();
+        fs::create_dir_all(&model_dir).unwrap();
+
+        fs::write(
+            &lib_dir.join("child.inc"),
+            ".include \"../models/common.inc\"\nRCHILD in mid 1k\n",
+        )
+        .unwrap();
+        fs::write(&model_dir.join("common.inc"), "CCOMMON mid 0 1p\n").unwrap();
+
+        let mut proc = IncludeProcessor::new(&root);
+        let expanded = proc
+            .expand_content(".include \"lib/child.inc\"\nV1 in 0 1\n", &root)
+            .unwrap();
+
+        assert!(expanded.contains("CCOMMON mid 0 1p"));
+        assert!(expanded.contains("RCHILD in mid 1k"));
+        assert!(expanded.contains("V1 in 0 1"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_process_lib_allows_same_file_different_sections_recursively() {
+        let dir = unique_temp_dir("nested_lib");
+        let lib_path = dir.join("models.lib");
+        fs::write(
+            &lib_path,
+            ".LIB RES\nR1 out 0 1k\n.ENDL RES\n\n.LIB MOS\n.LIB \"models.lib\" RES\nC1 out 0 1p\n.ENDL MOS\n",
+        )
+        .unwrap();
+
+        let mut proc = IncludeProcessor::new(&lib_path);
+        let expanded = proc.process_lib("models.lib", Some("MOS")).unwrap();
+
+        assert!(expanded.contains("R1 out 0 1k"));
+        assert!(expanded.contains("C1 out 0 1p"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_process_include_reports_real_circular_recursion() {
+        let dir = unique_temp_dir("cycle");
+        let root = dir.join("root.cir");
+        fs::write(&root, ".include \"root.cir\"\n").unwrap();
+
+        let mut proc = IncludeProcessor::new(&root);
+        let err = proc.process_include("root.cir").expect_err("cycle should fail");
+        assert!(
+            err.to_string().contains("Circular include/lib detected"),
+            "unexpected error: {}",
+            err
+        );
+
+        let _ = fs::remove_dir_all(dir);
     }
 }

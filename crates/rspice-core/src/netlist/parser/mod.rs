@@ -11,11 +11,12 @@ use super::lexer::{LexError, TokenKind, TokenStream, tokenize};
 use super::xspice_parser;
 use super::{
     AnalysisCommand, Element, ElementKind, FreqVariation, InitialCondition, ModelDef,
-    MonteCarloCommand, MonteCarloDistribution, Netlist, NodeSet, ParamContext, ParseError,
-    PoleZeroAnalysisType, PoleZeroTransferType, SensitivityAcSweep, SourceSpec, StepCommand,
-    StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
+    MonteCarloCommand, MonteCarloDistribution, Netlist, NodeSet, ParamContext, ParametricValue,
+    ParseError, PoleZeroAnalysisType, PoleZeroTransferType, SensitivityAcSweep, SourceSpec,
+    StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
 };
 use crate::Value;
+use std::collections::HashMap;
 
 mod command_parsers;
 use command_parsers::*;
@@ -46,9 +47,8 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
     let mut measurements = Vec::new();
     let mut options = super::SimulationOptions::default();
 
-    // State for tracking subcircuit blocks
-    let mut in_subcircuit = false;
-    let mut current_subckt: Option<SubcircuitDef> = None;
+    // State for tracking nested subcircuit blocks
+    let mut subckt_stack: Vec<SubcktFrame> = Vec::new();
 
     let mut line_num = 1;
     let mut continuation = String::new();
@@ -81,8 +81,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
                 &mut analyses,
                 &mut models,
                 &mut subcircuits,
-                &mut in_subcircuit,
-                &mut current_subckt,
+                &mut subckt_stack,
                 &mut params,
                 &mut initial_conditions,
                 &mut node_sets,
@@ -118,8 +117,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
             &mut analyses,
             &mut models,
             &mut subcircuits,
-            &mut in_subcircuit,
-            &mut current_subckt,
+            &mut subckt_stack,
             &mut params,
             &mut initial_conditions,
             &mut node_sets,
@@ -127,6 +125,13 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
             &mut measurements,
             &mut options,
         )?;
+    }
+
+    if !subckt_stack.is_empty() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "Unterminated .SUBCKT block".to_string(),
+        });
     }
 
     Ok(Netlist {
@@ -144,6 +149,79 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
         veriloga_includes,
         source_text: Some(input.to_string()),
     })
+}
+
+#[derive(Debug, Clone)]
+struct SubcktFrame {
+    def: SubcircuitDef,
+    qualified_name: String,
+    local_params: ParamContext,
+    nested_aliases: HashMap<String, String>,
+    local_model_aliases: HashMap<String, String>,
+}
+
+fn qualify_nested_subckt_name(parent_scope: Option<&str>, local_name: &str) -> String {
+    match parent_scope {
+        Some(scope) if !scope.is_empty() => format!("{scope}.{local_name}"),
+        _ => local_name.to_string(),
+    }
+}
+
+fn qualify_local_model_name(scope: &str, local_name: &str) -> String {
+    format!("{scope}::{local_name}")
+}
+
+fn parse_model_definition(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<ModelDef, ParseError> {
+    let name = expect_ident(stream, line_num)?;
+    let model_type = expect_ident(stream, line_num)?;
+    let model_params = parse_model_params(stream, params)?;
+
+    Ok(ModelDef {
+        name,
+        model_type,
+        params: model_params.numeric,
+        expr_params: model_params.expr,
+        string_params: model_params.string,
+    })
+}
+
+fn rewrite_scoped_references(
+    elements: &mut [Element],
+    nested_aliases: &HashMap<String, String>,
+    visible_model_aliases: &HashMap<String, String>,
+) {
+    for element in elements {
+        if let ElementKind::Subcircuit { subckt_name, .. } = &mut element.kind {
+            if let Some(qualified) = nested_aliases.get(&subckt_name.to_ascii_uppercase()) {
+                *subckt_name = qualified.clone();
+            }
+        }
+
+        let model_ref = match &mut element.kind {
+            ElementKind::Resistor { model, .. } => model.as_mut(),
+            ElementKind::JilesAthertonInductor { model, .. } => Some(model),
+            ElementKind::Diode { model }
+            | ElementKind::Bjt { model, .. }
+            | ElementKind::Mosfet { model, .. }
+            | ElementKind::Jfet { model, .. }
+            | ElementKind::Mesfet { model, .. }
+            | ElementKind::VSwitch { model, .. }
+            | ElementKind::ISwitch { model, .. }
+            | ElementKind::Xspice { model, .. } => Some(model),
+            ElementKind::TransmissionLine { model, .. } => model.as_mut(),
+            _ => None,
+        };
+
+        if let Some(model_name) = model_ref {
+            if let Some(qualified) = visible_model_aliases.get(&model_name.to_ascii_uppercase()) {
+                *model_name = qualified.clone();
+            }
+        }
+    }
 }
 
 fn strip_inline_semicolon_comment(line: &str) -> &str {
@@ -247,8 +325,7 @@ fn process_line(
     analyses: &mut Vec<AnalysisCommand>,
     models: &mut Vec<ModelDef>,
     subcircuits: &mut Vec<SubcircuitDef>,
-    in_subcircuit: &mut bool,
-    current_subckt: &mut Option<SubcircuitDef>,
+    subckt_stack: &mut Vec<SubcktFrame>,
     params: &mut ParamContext,
     initial_conditions: &mut Vec<InitialCondition>,
     node_sets: &mut Vec<NodeSet>,
@@ -261,48 +338,97 @@ fn process_line(
     // Check for .SUBCKT start
     if upper.starts_with(".SUBCKT") {
         let subckt = parse_subckt_def(line, line_num)?;
-        *in_subcircuit = true;
-        *current_subckt = Some(subckt);
+        let parent_scope = subckt_stack.last().map(|frame| frame.qualified_name.as_str());
+        let qualified_name = qualify_nested_subckt_name(parent_scope, &subckt.name);
+        let mut local_params = subckt_stack
+            .last()
+            .map(|frame| frame.local_params.clone())
+            .unwrap_or_else(|| params.clone());
+        for (name, value) in &subckt.params {
+            local_params.set(name, *value);
+        }
+        subckt_stack.push(SubcktFrame {
+            def: subckt,
+            qualified_name,
+            local_params,
+            nested_aliases: HashMap::new(),
+            local_model_aliases: HashMap::new(),
+        });
         return Ok(());
     }
 
     // Check for .ENDS
     if upper.starts_with(".ENDS") {
-        if let Some(subckt) = current_subckt.take() {
-            subcircuits.push(subckt);
+        if let Some(mut frame) = subckt_stack.pop() {
+            let mut visible_model_aliases = HashMap::new();
+            for ancestor in subckt_stack.iter() {
+                for (alias, qualified) in &ancestor.local_model_aliases {
+                    visible_model_aliases.insert(alias.clone(), qualified.clone());
+                }
+            }
+            for (alias, qualified) in &frame.local_model_aliases {
+                visible_model_aliases.insert(alias.clone(), qualified.clone());
+            }
+
+            rewrite_scoped_references(
+                &mut frame.def.elements,
+                &frame.nested_aliases,
+                &visible_model_aliases,
+            );
+
+            let original_name = frame.def.name.to_ascii_uppercase();
+            frame.def.name = frame.qualified_name.clone();
+            let finalized = frame.def;
+
+            if let Some(parent) = subckt_stack.last_mut() {
+                parent
+                    .nested_aliases
+                    .insert(original_name, finalized.name.clone());
+                parent.def.nested_subcircuits.push(finalized.clone());
+            }
+
+            subcircuits.push(finalized);
         }
-        *in_subcircuit = false;
         return Ok(());
     }
 
     // If inside subcircuit, add elements to subcircuit
-    if *in_subcircuit {
-        if let Some(subckt) = current_subckt {
+    if let Some(frame) = subckt_stack.last_mut() {
+        if upper.starts_with(".MODEL") {
+            let tokens = tokenize(line).map_err(|e| lex_to_parse_error(e, line_num))?;
+            let mut stream = TokenStream::new(tokens);
+            stream.advance(); // skip .MODEL
+            let mut model = parse_model_definition(&mut stream, line_num, &frame.local_params)?;
+            let local_name = model.name.clone();
+            let qualified_name = qualify_local_model_name(&frame.qualified_name, &local_name);
+            frame.local_model_aliases.insert(
+                local_name.to_ascii_uppercase(),
+                qualified_name.clone(),
+            );
+            model.name = qualified_name;
+            models.push(model);
+            return Ok(());
+        }
+
+        {
             let mut subckt_elements = Vec::new();
-
-            // Create a merged parameter context with subcircuit's default parameters
-            // This allows expressions like 'gold' to reference subcircuit params
-            let mut subckt_params = params.clone();
-            for (name, value) in &subckt.params {
-                subckt_params.set(name, *value);
-            }
-
             // Subcircuits don't get standalone measurements parsing
             let mut dummy_measurements = Vec::new();
             parse_line(
                 line,
                 line_num,
                 &mut subckt_elements,
+                true,
                 analyses,
                 models,
-                &mut subckt_params,
+                &mut frame.local_params,
                 initial_conditions,
                 node_sets,
                 global_nodes,
                 &mut dummy_measurements,
                 options,
             )?;
-            subckt.elements.extend(subckt_elements);
+            frame.def.elements.extend(subckt_elements);
         }
         return Ok(());
     }
@@ -312,6 +438,7 @@ fn process_line(
         line,
         line_num,
         elements,
+        false,
         analyses,
         models,
         params,
@@ -327,6 +454,7 @@ fn parse_line(
     line: &str,
     line_num: usize,
     elements: &mut Vec<Element>,
+    defer_simple_param_refs: bool,
     analyses: &mut Vec<AnalysisCommand>,
     models: &mut Vec<ModelDef>,
     params: &mut ParamContext,
@@ -372,7 +500,13 @@ fn parse_line(
             measurements,
             options,
         ),
-        'R' => parse_resistor(&mut stream, line_num, elements, params),
+        'R' => parse_resistor(
+            &mut stream,
+            line_num,
+            elements,
+            params,
+            defer_simple_param_refs,
+        ),
         'C' => parse_capacitor(&mut stream, line_num, elements, params),
         'L' => parse_inductor(&mut stream, line_num, elements, params),
         'V' => parse_voltage_source(&mut stream, line_num, elements, params),
@@ -381,12 +515,12 @@ fn parse_line(
         'Q' => parse_bjt(&mut stream, line_num, elements, params),
         'M' => parse_mosfet(&mut stream, line_num, elements, params),
         'J' => parse_jfet(&mut stream, line_num, elements, params),
-        'X' => parse_subcircuit_instance(&mut stream, line_num, elements),
+        'X' => parse_subcircuit_instance(line, line_num, elements, params),
         'E' => parse_vcvs(&mut stream, line_num, elements, params),
         'F' => parse_cccs(&mut stream, line_num, elements, params),
         'G' => parse_vccs(&mut stream, line_num, elements, params),
         'H' => parse_ccvs(&mut stream, line_num, elements, params),
-        'B' => parse_behavioral(&mut stream, line_num, elements),
+        'B' => parse_behavioral(&mut stream, line_num, elements, params),
         // Coupling and switches
         'K' => parse_coupling(&mut stream, line_num, elements, params),
         'S' => parse_vswitch(&mut stream, line_num, elements),
@@ -487,16 +621,7 @@ fn parse_command(
             });
         }
         ".MODEL" => {
-            let name = expect_ident(stream, line_num)?;
-            let model_type = expect_ident(stream, line_num)?;
-            let model_params = parse_model_params(stream, params)?;
-
-            models.push(ModelDef {
-                name,
-                model_type,
-                params: model_params.numeric,
-                string_params: model_params.string,
-            });
+            models.push(parse_model_definition(stream, line_num, params)?);
         }
         ".PARAM" | ".CSPARAM" => {
             parse_param_statement(stream, line_num, params)?;
@@ -936,6 +1061,7 @@ fn parse_resistor(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
@@ -945,6 +1071,7 @@ fn parse_resistor(
     skip_optional_param_name(stream, "R");
 
     let mut value: Option<Value> = None;
+    let mut value_expr: Option<String> = None;
     let mut model: Option<String> = None;
     let mut instance_params: Vec<(String, Value)> = Vec::new();
 
@@ -956,21 +1083,41 @@ fn parse_resistor(
     // 3) First named parameter (e.g. R=, VALUE=, MODEL=, L=, W=...)
     if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         match &stream.peek().kind {
-            TokenKind::Number(_)
-            | TokenKind::Expression(_)
-            | TokenKind::Plus
-            | TokenKind::Minus => {
+            TokenKind::Number(_) => {
                 value = Some(expect_value(stream, line_num, params)?);
             }
+            TokenKind::Expression(_) => {
+                if let Some(expr) = take_value_expression_string(stream, params) {
+                    if !defer_simple_param_refs && let Some(resolved) = params.get(&expr) {
+                        value = Some(resolved);
+                    } else {
+                        value_expr = Some(expr);
+                    }
+                }
+            }
+            TokenKind::Plus | TokenKind::Minus => {
+                if matches!(stream.peek_n(1).kind, TokenKind::Expression(_)) {
+                    if let Some(expr) = take_value_expression_string(stream, params) {
+                        if !defer_simple_param_refs && let Some(resolved) = params.get(&expr) {
+                            value = Some(resolved);
+                        } else {
+                            value_expr = Some(expr);
+                        }
+                    }
+                } else {
+                    value = Some(expect_value(stream, line_num, params)?);
+                }
+            }
             TokenKind::Ident(s) => {
-                if let Some(v) = params.get(s) {
+                let ident = s.clone();
+                if !defer_simple_param_refs && params.get(&ident).is_some() {
                     stream.advance();
-                    value = Some(v);
-                } else if let Ok(v) = crate::netlist::lexer::parse_spice_value(s) {
+                    value = params.get(&ident);
+                } else if let Ok(v) = crate::netlist::lexer::parse_spice_value(&ident) {
                     stream.advance();
                     value = Some(v);
                 } else if !matches!(stream.peek_n(1).kind, TokenKind::Equals) {
-                    model = Some(s.clone());
+                    model = Some(ident);
                     stream.advance();
                 }
             }
@@ -1006,6 +1153,19 @@ fn parse_resistor(
                         continue;
                     }
 
+                    if name_upper == "R" || name_upper == "VALUE" {
+                        if let Some(expr) = take_value_expression_string(stream, params) {
+                            if !defer_simple_param_refs && let Some(resolved) = params.get(&expr) {
+                                value = Some(resolved);
+                                value_expr = None;
+                            } else {
+                                value_expr = Some(expr);
+                                value = None;
+                            }
+                            continue;
+                        }
+                    }
+
                     let param_value =
                         try_value(stream, params).ok_or_else(|| ParseError::Syntax {
                             line: line_num,
@@ -1017,6 +1177,7 @@ fn parse_resistor(
 
                     if name_upper == "R" || name_upper == "VALUE" {
                         value = Some(param_value);
+                        value_expr = None;
                     }
                     instance_params.push((name_upper, param_value));
                 } else if model.is_none() && value.is_none() {
@@ -1024,12 +1185,24 @@ fn parse_resistor(
                     model = Some(raw_name);
                 }
             }
-            TokenKind::Number(_)
-            | TokenKind::Expression(_)
-            | TokenKind::Plus
-            | TokenKind::Minus => {
+            TokenKind::Number(_) => {
                 // Allow trailing unnamed numeric value as explicit resistance override.
                 value = Some(expect_value(stream, line_num, params)?);
+                value_expr = None;
+            }
+            TokenKind::Expression(_) | TokenKind::Plus | TokenKind::Minus => {
+                if let Some(expr) = take_value_expression_string(stream, params) {
+                    if !defer_simple_param_refs && let Some(resolved) = params.get(&expr) {
+                        value = Some(resolved);
+                        value_expr = None;
+                    } else {
+                        value_expr = Some(expr);
+                        value = None;
+                    }
+                } else {
+                    value = Some(expect_value(stream, line_num, params)?);
+                    value_expr = None;
+                }
             }
             _ => {
                 stream.advance();
@@ -1044,7 +1217,7 @@ fn parse_resistor(
             .map(|(_, v)| *v);
     }
 
-    if value.is_none() && model.is_none() {
+    if value.is_none() && value_expr.is_none() && model.is_none() {
         return Err(ParseError::Syntax {
             line: line_num,
             message: "Resistor requires either a value or a model".to_string(),
@@ -1055,6 +1228,7 @@ fn parse_resistor(
         name,
         kind: ElementKind::Resistor {
             value: value.unwrap_or(Value::NAN),
+            value_expr,
             model,
             instance_params,
         },
@@ -1617,75 +1791,55 @@ fn parse_coupled_tlines(
 
 /// Parse subcircuit instance: X1 node1 node2... SUBCKTNAME [PARAM=val ...]
 fn parse_subcircuit_instance(
-    stream: &mut TokenStream,
+    line: &str,
     line_num: usize,
     elements: &mut Vec<Element>,
+    params_ctx: &ParamContext,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
-
-    // Collect nodes until we hit a non-node identifier (the subcircuit name)
-    let mut nodes = Vec::new();
-    let mut subckt_name = String::new();
-
-    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        skip_commas(stream);
-
-        if stream.is_eof() || matches!(stream.peek().kind, TokenKind::Newline) {
-            break;
-        }
-
-        // If we see an equals sign ahead, stop collecting nodes
-        if matches!(stream.peek_n(1).kind, TokenKind::Equals) {
-            break;
-        }
-
-        let node_or_name = expect_node(stream, line_num)?;
-
-        // The last identifier before any parameters is the subcircuit name
-        if !subckt_name.is_empty() {
-            nodes.push(subckt_name);
-        }
-        subckt_name = node_or_name;
-    }
-
-    if subckt_name.is_empty() {
+    let fields = split_spice_fields(line);
+    if fields.len() < 2 {
         return Err(ParseError::Syntax {
             line: line_num,
             message: "Subcircuit instance requires name and subcircuit reference".to_string(),
         });
     }
 
-    // Parse instance parameters: PARAM=value pairs
-    let mut params = Vec::new();
-    let params_ctx = ParamContext::new();
-
-    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        skip_commas(stream);
-
-        if stream.is_eof() || matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+    let name = fields[0].clone();
+    let mut param_start = fields.len();
+    for (idx, field) in fields.iter().enumerate().skip(1) {
+        if field.eq_ignore_ascii_case("PARAMS")
+            || field.eq_ignore_ascii_case("PARAMS:")
+            || field.contains('=')
+        {
+            param_start = idx;
             break;
         }
+    }
 
-        // Skip PARAMS: keyword if present
-        if let TokenKind::Ident(s) = &stream.peek().kind {
-            let upper = s.to_uppercase();
-            if upper == "PARAMS" || upper == "PARAMS:" {
-                stream.advance();
-                continue;
-            }
+    if param_start < 2 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "Subcircuit instance requires name and subcircuit reference".to_string(),
+        });
+    }
+
+    let subckt_name = fields[param_start - 1].clone();
+    let nodes = fields[1..param_start - 1]
+        .iter()
+        .map(|field| field.to_ascii_uppercase())
+        .collect::<Vec<_>>();
+
+    // Parse instance parameters: PARAM=value pairs
+    let mut params = Vec::new();
+    for field in fields.iter().skip(param_start) {
+        if field.eq_ignore_ascii_case("PARAMS") || field.eq_ignore_ascii_case("PARAMS:") {
+            continue;
         }
-
-        if let TokenKind::Ident(param_name) = &stream.peek().kind {
-            let param_name = param_name.clone();
-            stream.advance();
-
-            if stream.consume(&TokenKind::Equals) {
-                if let Some(value) = try_value(stream, &params_ctx) {
-                    params.push((param_name, value));
-                }
-            }
-        } else {
-            stream.advance(); // Skip unknown token
+        if let Some((param_name, raw_value)) = field.split_once('=') {
+            params.push((
+                param_name.to_string(),
+                parse_parametric_field_value(raw_value, params_ctx),
+            ));
         }
     }
 
@@ -1699,6 +1853,114 @@ fn parse_subcircuit_instance(
     });
 
     Ok(())
+}
+
+fn split_spice_fields(line: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut current = String::new();
+    let mut single_quote = false;
+    let mut double_quote = false;
+    let mut brace_depth = 0usize;
+
+    for ch in line.chars() {
+        match ch {
+            '\'' if !double_quote => {
+                single_quote = !single_quote;
+                current.push(ch);
+            }
+            '"' if !single_quote => {
+                double_quote = !double_quote;
+                current.push(ch);
+            }
+            '{' if !single_quote && !double_quote => {
+                brace_depth += 1;
+                current.push(ch);
+            }
+            '}' if !single_quote && !double_quote => {
+                brace_depth = brace_depth.saturating_sub(1);
+                current.push(ch);
+            }
+            ',' | ' ' | '\t' if !single_quote && !double_quote && brace_depth == 0 => {
+                if !current.is_empty() {
+                    fields.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.is_empty() {
+        fields.push(current);
+    }
+
+    fields
+}
+
+fn strip_wrapping_expression_delimiters(raw: &str) -> &str {
+    let trimmed = raw.trim();
+    if trimmed.len() >= 2 {
+        let first = trimmed.as_bytes()[0] as char;
+        let last = trimmed.as_bytes()[trimmed.len() - 1] as char;
+        if (first == '\'' && last == '\'')
+            || (first == '"' && last == '"')
+            || (first == '{' && last == '}')
+        {
+            return &trimmed[1..trimmed.len() - 1];
+        }
+    }
+    trimmed
+}
+
+fn parse_numeric_field_value(
+    raw_value: &str,
+    params: &ParamContext,
+    line_num: usize,
+) -> Result<Value, ParseError> {
+    let expr = strip_wrapping_expression_delimiters(raw_value);
+    if !looks_like_expression(expr) {
+        if let Ok(value) = crate::netlist::lexer::parse_spice_value(expr) {
+            return Ok(value);
+        }
+    }
+    if let Some(value) = params.get(expr) {
+        return Ok(value);
+    }
+    eval_expression(expr, params).map_err(|e| {
+        ParseError::InvalidValue(format!("line {}: {}", line_num, e))
+    })
+}
+
+fn parse_parametric_field_value(raw_value: &str, params: &ParamContext) -> ParametricValue {
+    let expr = strip_wrapping_expression_delimiters(raw_value);
+    if !looks_like_expression(expr) {
+        if let Ok(value) = crate::netlist::lexer::parse_spice_value(expr) {
+            return ParametricValue::Resolved(value);
+        }
+    }
+    if params.get(expr).is_some() || expr.chars().any(|ch| "+-*/()".contains(ch)) {
+        return ParametricValue::Expression(expr.to_string());
+    }
+    if let Ok(value) = eval_expression(expr, params) {
+        return ParametricValue::Resolved(value);
+    }
+    ParametricValue::Expression(expr.to_string())
+}
+
+fn looks_like_expression(expr: &str) -> bool {
+    let trimmed = expr.trim();
+    for (idx, ch) in trimmed.char_indices() {
+        match ch {
+            '*' | '/' | '(' | ')' => return true,
+            '+' | '-' if idx > 0 => {
+                let prev = trimmed.as_bytes()[idx - 1] as char;
+                if prev != 'e' && prev != 'E' {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 fn parse_vcvs(
@@ -1803,6 +2065,7 @@ fn parse_behavioral(
     stream: &mut TokenStream,
     line_num: usize,
     elements: &mut Vec<Element>,
+    params: &ParamContext,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
@@ -1827,6 +2090,9 @@ fn parse_behavioral(
         expr_parts.push(inline_expr.to_string());
     }
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        if behavioral_trailing_assignment(stream) {
+            break;
+        }
         if let Some(fragment) = behavioral_expr_token_fragment(&stream.peek().kind) {
             expr_parts.push(fragment);
         }
@@ -1840,9 +2106,37 @@ fn parse_behavioral(
         });
     }
 
+    let mut tc1 = 0.0;
+    let mut tc2 = 0.0;
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        skip_commas(stream);
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
+        }
+
+        let param_name = expect_ident(stream, line_num)?;
+        if !stream.consume(&TokenKind::Equals) {
+            continue;
+        }
+        let param_value = expect_value(stream, line_num, params)?;
+        match param_name.as_str() {
+            "TC1" => tc1 = param_value,
+            "TC2" => tc2 = param_value,
+            _ => {}
+        }
+    }
+
     let kind = match spec_designator.as_str() {
-        "V" => ElementKind::BehavioralVoltage { expression },
-        "I" => ElementKind::BehavioralCurrent { expression },
+        "V" => ElementKind::BehavioralVoltage {
+            expression,
+            tc1,
+            tc2,
+        },
+        "I" => ElementKind::BehavioralCurrent {
+            expression,
+            tc1,
+            tc2,
+        },
         _ => {
             return Err(ParseError::Syntax {
                 line: line_num,
@@ -1858,6 +2152,18 @@ fn parse_behavioral(
     });
 
     Ok(())
+}
+
+fn behavioral_trailing_assignment(stream: &TokenStream) -> bool {
+    match &stream.peek().kind {
+        TokenKind::Ident(name)
+            if (name.eq_ignore_ascii_case("TC1") || name.eq_ignore_ascii_case("TC2"))
+                && matches!(stream.peek_n(1).kind, TokenKind::Equals) =>
+        {
+            true
+        }
+        _ => false,
+    }
 }
 
 fn behavioral_expr_token_fragment(token: &TokenKind) -> Option<String> {
@@ -2254,70 +2560,47 @@ fn parse_exp_spec(
 
 /// Parse subcircuit definition: .SUBCKT name ports [PARAMS: p1=v1 p2=v2] or .SUBCKT name ports p1=v1
 fn parse_subckt_def(line: &str, line_num: usize) -> Result<SubcircuitDef, ParseError> {
-    let tokens = tokenize(line).map_err(|e| lex_to_parse_error(e, line_num))?;
-    let mut stream = TokenStream::new(tokens);
+    let fields = split_spice_fields(line);
+    if fields.len() < 2 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: ".SUBCKT requires a subcircuit name".to_string(),
+        });
+    }
 
-    // Skip .SUBCKT
-    stream.advance();
-
-    let name = expect_ident(&mut stream, line_num)?;
-
-    // Collect ports until we hit = (parameter) or PARAMS keyword or end of line
+    let name = fields[1].clone();
     let mut ports = Vec::new();
     let params_ctx = ParamContext::new();
 
-    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        skip_commas(&mut stream);
-
-        // Check if next token is followed by = (indicating parameter, not port)
-        if matches!(stream.peek_n(1).kind, TokenKind::Equals) {
+    let mut idx = 2usize;
+    while idx < fields.len() {
+        let field = &fields[idx];
+        if field.eq_ignore_ascii_case("PARAMS") || field.eq_ignore_ascii_case("PARAMS:") {
+            idx += 1;
             break;
         }
-
-        // Check for PARAMS: keyword
-        if let TokenKind::Ident(s) = &stream.peek().kind {
-            let upper = s.to_uppercase();
-            if upper == "PARAMS" || upper == "PARAMS:" {
-                stream.advance();
-                // Consume : if separate
-                if let TokenKind::Ident(s2) = &stream.peek().kind {
-                    if s2 == ":" {
-                        stream.advance();
-                    }
-                }
-                break;
-            }
-        }
-
-        if stream.is_eof() || matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        if field.contains('=') {
             break;
         }
-
-        ports.push(expect_node(&mut stream, line_num)?);
+        ports.push(field.to_ascii_uppercase());
+        idx += 1;
     }
 
     // Parse default parameters: NAME=VALUE pairs
     let mut params = Vec::new();
-
-    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        skip_commas(&mut stream);
-
-        if stream.is_eof() || matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-            break;
+    while idx < fields.len() {
+        let field = &fields[idx];
+        if field.eq_ignore_ascii_case("PARAMS") || field.eq_ignore_ascii_case("PARAMS:") {
+            idx += 1;
+            continue;
         }
 
-        if let TokenKind::Ident(param_name) = &stream.peek().kind {
-            let param_name = param_name.clone();
-            stream.advance();
-
-            if stream.consume(&TokenKind::Equals) {
-                if let Some(value) = try_value(&mut stream, &params_ctx) {
-                    params.push((param_name, value));
-                }
-            }
-        } else {
-            stream.advance(); // Skip unknown token
+        if let Some((param_name, raw_value)) = field.split_once('=') {
+            let value = parse_numeric_field_value(raw_value, &params_ctx, line_num)?;
+            params.push((param_name.to_string(), value));
         }
+
+        idx += 1;
     }
 
     Ok(SubcircuitDef {
@@ -2337,6 +2620,7 @@ fn parse_subckt_def(line: &str, line_num: usize) -> Result<SubcircuitDef, ParseE
 
 struct ParsedModelParams {
     numeric: Vec<(String, Value)>,
+    expr: Vec<(String, String)>,
     string: Vec<(String, String)>,
 }
 
@@ -2345,6 +2629,7 @@ fn parse_model_params(
     params: &ParamContext,
 ) -> Result<ParsedModelParams, ParseError> {
     let mut numeric_params = Vec::new();
+    let mut expr_params = Vec::new();
     let mut string_params = Vec::new();
 
     // Skip optional opening paren
@@ -2372,6 +2657,15 @@ fn parse_model_params(
                         stream.advance();
                         string_params.push((name, value));
                     }
+                    TokenKind::Expression(expr) => {
+                        let expr = expr.clone();
+                        stream.advance();
+                        if let Ok(value) = eval_expression(&expr, params) {
+                            numeric_params.push((name, value));
+                        } else {
+                            expr_params.push((name, expr));
+                        }
+                    }
                     _ => {
                         if let Some(value) = try_value(stream, params) {
                             numeric_params.push((name, value));
@@ -2389,6 +2683,7 @@ fn parse_model_params(
 
     Ok(ParsedModelParams {
         numeric: numeric_params,
+        expr: expr_params,
         string: string_params,
     })
 }
@@ -2513,6 +2808,47 @@ fn try_value(stream: &mut TokenStream, params: &ParamContext) -> Option<Value> {
                 Some(v)
             } else {
                 None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn take_value_expression_string(
+    stream: &mut TokenStream,
+    params: &ParamContext,
+) -> Option<String> {
+    skip_commas(stream);
+
+    let sign = match &stream.peek().kind {
+        TokenKind::Plus => {
+            stream.advance();
+            ""
+        }
+        TokenKind::Minus => {
+            stream.advance();
+            "-"
+        }
+        _ => "",
+    };
+
+    match &stream.peek().kind {
+        TokenKind::Expression(expr) => {
+            let expr = expr.clone();
+            stream.advance();
+            if sign.is_empty() {
+                Some(expr)
+            } else {
+                Some(format!("-({expr})"))
+            }
+        }
+        TokenKind::Ident(name) if params.get(name).is_some() => {
+            let ident = name.clone();
+            stream.advance();
+            if sign.is_empty() {
+                Some(ident)
+            } else {
+                Some(format!("-({ident})"))
             }
         }
         _ => None,

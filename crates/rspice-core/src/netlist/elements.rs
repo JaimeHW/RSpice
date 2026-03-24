@@ -405,8 +405,16 @@ pub fn parse_behavioral(
     }
 
     let kind = match spec_designator.as_str() {
-        "V" => ElementKind::BehavioralVoltage { expression },
-        "I" => ElementKind::BehavioralCurrent { expression },
+        "V" => ElementKind::BehavioralVoltage {
+            expression,
+            tc1: 0.0,
+            tc2: 0.0,
+        },
+        "I" => ElementKind::BehavioralCurrent {
+            expression,
+            tc1: 0.0,
+            tc2: 0.0,
+        },
         _ => {
             return Err(ParseError::Syntax {
                 line: line_num,
