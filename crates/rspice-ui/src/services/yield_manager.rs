@@ -389,7 +389,7 @@ mod tests {
             let mut measurements = HashMap::new();
             measurements.insert("gain".to_string(), val);
 
-            let res = SimulationResult::Empty { measurements };
+            let res = SimulationResult::MeasurementsOnly { measurements };
             results.push(res);
         }
 
@@ -408,13 +408,13 @@ mod tests {
         manager.add_spec(YieldSpec::lower("gain", 1.0, "V"));
 
         let results = vec![
-            SimulationResult::Empty {
+            SimulationResult::MeasurementsOnly {
                 measurements: HashMap::from([("gain".to_string(), 1.2)]),
             },
-            SimulationResult::Empty {
+            SimulationResult::MeasurementsOnly {
                 measurements: HashMap::new(),
             },
-            SimulationResult::Empty {
+            SimulationResult::MeasurementsOnly {
                 measurements: HashMap::from([("gain".to_string(), f64::NAN)]),
             },
         ];

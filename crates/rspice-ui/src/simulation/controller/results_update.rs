@@ -304,7 +304,7 @@ impl SimulationController {
                 state.open_preferred_viewer_for_analysis(crate::state::AnalysisType::Soa);
             }
 
-            SimulationResult::Empty { .. } => {
+            SimulationResult::MeasurementsOnly { .. } => {
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(
                     "Analysis complete (no waveform data)".to_string(),
                 ));

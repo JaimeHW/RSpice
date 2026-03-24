@@ -164,7 +164,7 @@ impl SimulationController {
             SimulationResult::DcOp(_)
             | SimulationResult::PoleZero { .. }
             | SimulationResult::Sensitivity { .. }
-            | SimulationResult::Empty { .. } => Vec::new(),
+            | SimulationResult::MeasurementsOnly { .. } => Vec::new(),
         }
     }
 
@@ -248,7 +248,7 @@ impl SimulationController {
             )
             .with_waveforms(self.waveforms_for_result(sim_result)),
 
-            SimulationResult::Empty { .. } => {
+            SimulationResult::MeasurementsOnly { .. } => {
                 AnalysisResult::new(1, analysis_type, label.to_string())
             }
         }

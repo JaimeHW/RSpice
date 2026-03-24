@@ -498,23 +498,25 @@ impl FfiModelRegistry {
 }
 
 //=============================================================================
-// Placeholder Device Implementation
+// Test Device Implementation
 //=============================================================================
 
-/// A placeholder external device for testing
+/// Simple resistive external device used by FFI tests.
 ///
 /// Represents a simple two-terminal resistor that can be
 /// controlled by FFI. Useful for testing the interface.
+#[cfg(test)]
 #[derive(Debug)]
-pub struct PlaceholderDevice {
+struct TestResistiveFfiDevice {
     name: String,
     terminals: Vec<usize>,
     resistance: Value,
     params: HashMap<String, Value>,
 }
 
-impl PlaceholderDevice {
-    /// Create a new placeholder device
+#[cfg(test)]
+impl TestResistiveFfiDevice {
+    /// Create a new resistive test device
     pub fn new(name: &str, node_pos: usize, node_neg: usize, resistance: Value) -> Self {
         let mut params = HashMap::new();
         params.insert("R".to_string(), resistance);
@@ -528,7 +530,8 @@ impl PlaceholderDevice {
     }
 }
 
-impl ExternalDevice for PlaceholderDevice {
+#[cfg(test)]
+impl ExternalDevice for TestResistiveFfiDevice {
     fn name(&self) -> &str {
         &self.name
     }
@@ -658,7 +661,7 @@ mod tests {
 
     #[test]
     fn test_placeholder_device_creation() {
-        let dev = PlaceholderDevice::new("R1", 1, 0, 1000.0);
+        let dev = TestResistiveFfiDevice::new("R1", 1, 0, 1000.0);
         assert_eq!(dev.name(), "R1");
         assert_eq!(dev.num_terminals(), 2);
         assert_eq!(dev.terminals(), &[1, 0]);
@@ -666,7 +669,7 @@ mod tests {
 
     #[test]
     fn test_placeholder_device_stamping() {
-        let dev = PlaceholderDevice::new("R1", 1, 2, 1000.0);
+        let dev = TestResistiveFfiDevice::new("R1", 1, 2, 1000.0);
         let ctx = FfiContext::default();
         let mut stamper = TestStamper { stamps: vec![] };
         let mut rhs = vec![0.0; 3];
@@ -680,7 +683,7 @@ mod tests {
 
     #[test]
     fn test_placeholder_device_params() {
-        let mut dev = PlaceholderDevice::new("R1", 1, 0, 1000.0);
+        let mut dev = TestResistiveFfiDevice::new("R1", 1, 0, 1000.0);
 
         assert_eq!(dev.get_param("R"), Some(1000.0));
         assert!(dev.set_param("R", 2000.0));

@@ -274,7 +274,7 @@ fn test_cell_view_named() {
     let view = CellView::named("custom_view", ViewType::Documentation);
     assert_eq!(view.name, "custom_view");
     assert_eq!(view.view_type, ViewType::Documentation);
-    matches!(view.content, ViewContent::Empty);
+        matches!(view.content, ViewContent::Placeholder);
 }
 
 #[test]

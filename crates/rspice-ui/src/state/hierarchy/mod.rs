@@ -316,7 +316,7 @@ impl Cell {
         let should_generate = match self.views.get("symbol") {
             None => true,
             Some(view) => match &view.content {
-                ViewContent::Empty => true,
+                ViewContent::Placeholder => true,
                 ViewContent::Symbol(symbol) => {
                     symbol.pins.is_empty() && !self.interface.pins.is_empty()
                 }
@@ -393,7 +393,7 @@ pub struct CellView {
     pub modified: String,
 }
 
-/// View type enumeration
+    /// View type enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ViewType {
     /// Schematic (circuit design)
@@ -403,7 +403,7 @@ pub enum ViewType {
     Symbol,
     /// Netlist (text-based circuit)
     Netlist,
-    /// Layout (physical design) - placeholder for future
+    /// Layout (physical design metadata; editing is not implemented yet)
     Layout,
     /// Documentation
     Documentation,
@@ -418,8 +418,8 @@ pub enum ViewContent {
     Symbol(SymbolContent),
     /// Netlist text content
     Netlist(String),
-    /// Empty/placeholder
-    Empty,
+    /// Placeholder payload for reserved views without concrete editable content.
+    Placeholder,
 }
 
 impl CellView {
@@ -458,7 +458,7 @@ impl CellView {
         Self {
             name: name.to_string(),
             view_type,
-            content: ViewContent::Empty,
+            content: ViewContent::Placeholder,
             modified: String::new(),
         }
     }

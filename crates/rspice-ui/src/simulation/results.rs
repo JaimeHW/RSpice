@@ -357,8 +357,9 @@ pub enum SimulationResult {
         violations: Vec<SoAViolation>,
     },
 
-    /// Empty placeholder result (for unimplemented analyses)
-    Empty {
+    /// Scalar-only result payload for analyses that report measurements
+    /// without generating waveform families.
+    MeasurementsOnly {
         /// Associated measurements
         measurements: HashMap<String, f64>,
     },
@@ -366,7 +367,7 @@ pub enum SimulationResult {
 
 impl Default for SimulationResult {
     fn default() -> Self {
-        Self::Empty {
+        Self::MeasurementsOnly {
             measurements: HashMap::new(),
         }
     }
@@ -438,7 +439,7 @@ impl SimulationResult {
                     .and_then(|inner| variables.iter().find(|var| var.name == inner))
                     .map(|var| var.mean)
             }
-            SimulationResult::Empty { measurements } => measurements.get(key).copied(),
+            SimulationResult::MeasurementsOnly { measurements } => measurements.get(key).copied(),
         }
     }
 
@@ -518,7 +519,7 @@ impl SimulationResult {
                 .iter()
                 .map(|var| (var.name.clone(), var.mean))
                 .collect(),
-            SimulationResult::Empty { measurements } => measurements.clone(),
+            SimulationResult::MeasurementsOnly { measurements } => measurements.clone(),
         }
     }
 }
@@ -672,7 +673,7 @@ impl SimulationResult {
             SimulationResult::Soa {
                 time, waveforms, ..
             } => !time.is_empty() && !waveforms.is_empty(),
-            SimulationResult::Empty { .. } => false,
+            SimulationResult::MeasurementsOnly { .. } => false,
         }
     }
 
@@ -692,7 +693,7 @@ impl SimulationResult {
             SimulationResult::Reliability { .. } => "Reliability",
             SimulationResult::Optimization { .. } => "Optimization",
             SimulationResult::Soa { .. } => "Safety (SOA)",
-            SimulationResult::Empty { .. } => "Empty",
+            SimulationResult::MeasurementsOnly { .. } => "Measurements Only",
         }
     }
 }
