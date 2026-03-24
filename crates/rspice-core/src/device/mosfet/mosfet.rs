@@ -146,11 +146,16 @@ pub struct Mosfet {
     vds: Value,
     vbs: Value,
     id: Value,
+    gm: Value,
+    gds: Value,
+    gmb: Value,
+    id_eq: Value,
     region: MosRegion,
 
     // Previous iteration values
     vgs_prev: Value,
     vds_prev: Value,
+    vbs_prev: Value,
 
     /// Pre-computed matrix indices for O(1) stamping
     pub indices: MosfetIndices,
@@ -243,10 +248,15 @@ impl Mosfet {
             vds: 0.0,
             vbs: 0.0,
             id: 0.0,
+            gm: 0.0,
+            gds: 0.0,
+            gmb: 0.0,
+            id_eq: 0.0,
             region: MosRegion::Cutoff,
 
             vgs_prev: 0.0,
             vds_prev: 0.0,
+            vbs_prev: 0.0,
             indices: MosfetIndices::default(),
         }
     }
@@ -256,6 +266,43 @@ impl Mosfet {
         self.w = w;
         self.l = l;
         self
+    }
+
+    #[inline]
+    fn terminal_voltage(voltages: &[Value], node: NodeId) -> Value {
+        if node == 0 { 0.0 } else { voltages[node - 1] }
+    }
+
+    #[inline]
+    fn branch_voltages(&self, voltages: &[Value]) -> (Value, Value, Value) {
+        let vd = Self::terminal_voltage(voltages, self.node_drain);
+        let vg = Self::terminal_voltage(voltages, self.node_gate);
+        let vs = Self::terminal_voltage(voltages, self.node_source);
+        let vb = Self::terminal_voltage(voltages, self.node_bulk);
+        (vg - vs, vd - vs, vb - vs)
+    }
+
+    #[inline]
+    fn linearized_operating_point(
+        &self,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+    ) -> (Value, MosRegion, Value, Value, Value, Value) {
+        let (id, region) = self.calculate_id(vgs, vds, vbs);
+        let (gm, gds, gmb) = self.small_signal(vgs, vds, vbs);
+        let id_eq = id - gm * vgs - gds * vds - gmb * vbs;
+        (id, region, gm, gds, gmb, id_eq)
+    }
+
+    #[inline]
+    fn cached_linearization_matches(&self, vgs: Value, vds: Value, vbs: Value) -> bool {
+        self.vgs.is_finite()
+            && self.vds.is_finite()
+            && self.vbs.is_finite()
+            && self.vgs == vgs
+            && self.vds == vds
+            && self.vbs == vbs
     }
 
     /// Set model parameters from a DeviceModel
@@ -533,37 +580,13 @@ impl Mosfet {
 
     /// Stamp using O(1) direct indexing (call after link)
     pub fn stamp_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value], voltages: &[Value]) {
-        let vd = if self.node_drain == 0 {
-            0.0
+        let (vgs, vds, vbs) = self.branch_voltages(voltages);
+        let (gm, gds, gmb, id_eq) = if self.cached_linearization_matches(vgs, vds, vbs) {
+            (self.gm, self.gds, self.gmb, self.id_eq)
         } else {
-            voltages[self.node_drain - 1]
+            let (_, _, gm, gds, gmb, id_eq) = self.linearized_operating_point(vgs, vds, vbs);
+            (gm, gds, gmb, id_eq)
         };
-        let vg = if self.node_gate == 0 {
-            0.0
-        } else {
-            voltages[self.node_gate - 1]
-        };
-        let vs = if self.node_source == 0 {
-            0.0
-        } else {
-            voltages[self.node_source - 1]
-        };
-        let vb = if self.node_bulk == 0 {
-            0.0
-        } else {
-            voltages[self.node_bulk - 1]
-        };
-
-        let vgs = vg - vs;
-        let vds = vd - vs;
-        let vbs = vb - vs;
-
-        // Conductances
-        let (gm, gds, gmb) = self.small_signal(vgs, vds, vbs);
-
-        // Drain current and equivalent current source
-        let (id, _) = self.calculate_id(vgs, vds, vbs);
-        let id_eq = id - gm * vgs - gds * vds - gmb * vbs;
 
         // Stamp matrix using direct indexing
         // Drain row
@@ -1186,37 +1209,23 @@ impl Mosfet {
 
 impl NonlinearDevice for Mosfet {
     fn update(&mut self, voltages: &[Value]) {
-        let vd = if self.node_drain == 0 {
-            0.0
-        } else {
-            voltages[self.node_drain - 1]
-        };
-        let vg = if self.node_gate == 0 {
-            0.0
-        } else {
-            voltages[self.node_gate - 1]
-        };
-        let vs = if self.node_source == 0 {
-            0.0
-        } else {
-            voltages[self.node_source - 1]
-        };
-        let vb = if self.node_bulk == 0 {
-            0.0
-        } else {
-            voltages[self.node_bulk - 1]
-        };
-
         self.vgs_prev = self.vgs;
         self.vds_prev = self.vds;
+        self.vbs_prev = self.vbs;
 
-        self.vgs = vg - vs;
-        self.vds = vd - vs;
-        self.vbs = vb - vs;
+        let (vgs, vds, vbs) = self.branch_voltages(voltages);
+        self.vgs = vgs;
+        self.vds = vds;
+        self.vbs = vbs;
 
-        let (id, region) = self.calculate_id(self.vgs, self.vds, self.vbs);
+        let (id, region, gm, gds, gmb, id_eq) =
+            self.linearized_operating_point(self.vgs, self.vds, self.vbs);
         self.id = id;
         self.region = region;
+        self.gm = gm;
+        self.gds = gds;
+        self.gmb = gmb;
+        self.id_eq = id_eq;
     }
 
     fn stamp_nonlinear(
@@ -1225,37 +1234,13 @@ impl NonlinearDevice for Mosfet {
         matrix: &mut impl MatrixStamper,
         _rhs: &mut [Value],
     ) {
-        let vd = if self.node_drain == 0 {
-            0.0
+        let (vgs, vds, vbs) = self.branch_voltages(voltages);
+        let (gm, gds, gmb, id_eq) = if self.cached_linearization_matches(vgs, vds, vbs) {
+            (self.gm, self.gds, self.gmb, self.id_eq)
         } else {
-            voltages[self.node_drain - 1]
+            let (_, _, gm, gds, gmb, id_eq) = self.linearized_operating_point(vgs, vds, vbs);
+            (gm, gds, gmb, id_eq)
         };
-        let vg = if self.node_gate == 0 {
-            0.0
-        } else {
-            voltages[self.node_gate - 1]
-        };
-        let vs = if self.node_source == 0 {
-            0.0
-        } else {
-            voltages[self.node_source - 1]
-        };
-        let vb = if self.node_bulk == 0 {
-            0.0
-        } else {
-            voltages[self.node_bulk - 1]
-        };
-
-        let vgs = vg - vs;
-        let vds = vd - vs;
-        let vbs = vb - vs;
-
-        // Conductances
-        let (gm, gds, gmb) = self.small_signal(vgs, vds, vbs);
-
-        // Drain current and equivalent current source
-        let (id, _) = self.calculate_id(vgs, vds, vbs);
-        let id_eq = id - gm * vgs - gds * vds - gmb * vbs;
 
         // Stamp the linearized model (Gate draws no DC current)
         // Drain node equation
@@ -1276,15 +1261,51 @@ impl NonlinearDevice for Mosfet {
     }
 
     fn is_converged(&self, tolerance: Value) -> bool {
+        const RELTOL: Value = 1e-3;
+
+        if !self.vgs.is_finite()
+            || !self.vgs_prev.is_finite()
+            || !self.vds.is_finite()
+            || !self.vds_prev.is_finite()
+            || !self.vbs.is_finite()
+            || !self.vbs_prev.is_finite()
+        {
+            return false;
+        }
+
         let vgs_diff = (self.vgs - self.vgs_prev).abs();
         let vds_diff = (self.vds - self.vds_prev).abs();
-        vgs_diff < tolerance && vds_diff < tolerance
+        let vbs_diff = (self.vbs - self.vbs_prev).abs();
+
+        let vgs_tol = RELTOL * self.vgs.abs().max(self.vgs_prev.abs()) + tolerance;
+        let vds_tol = RELTOL * self.vds.abs().max(self.vds_prev.abs()) + tolerance;
+        let vbs_tol = RELTOL * self.vbs.abs().max(self.vbs_prev.abs()) + tolerance;
+
+        vgs_diff < vgs_tol && vds_diff < vds_tol && vbs_diff < vbs_tol
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::device::traits::MatrixStamper;
+    use std::collections::HashMap;
+
+    #[derive(Default)]
+    struct CaptureMatrix {
+        g: HashMap<(NodeId, NodeId), Value>,
+        rhs: HashMap<NodeId, Value>,
+    }
+
+    impl MatrixStamper for CaptureMatrix {
+        fn stamp(&mut self, row: NodeId, col: NodeId, value: Value) {
+            *self.g.entry((row, col)).or_insert(0.0) += value;
+        }
+
+        fn stamp_rhs(&mut self, index: NodeId, value: Value) {
+            *self.rhs.entry(index).or_insert(0.0) += value;
+        }
+    }
 
     #[test]
     fn test_mosfet_creation() {
@@ -1382,6 +1403,117 @@ mod tests {
         ];
         let m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0).with_instance_params(&params);
         assert!((m.w - 60e-6).abs() < 1e-18);
+    }
+
+    #[test]
+    fn test_is_converged_accepts_small_relative_branch_deltas() {
+        let mut m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0);
+        m.vgs_prev = 1.0;
+        m.vgs = 1.0008;
+        m.vds_prev = 2.0;
+        m.vds = 2.0008;
+        m.vbs_prev = -0.4;
+        m.vbs = -0.3996;
+
+        assert!(
+            m.is_converged(1e-6),
+            "relative tolerance should allow sub-millivolt branch deltas around operating bias"
+        );
+    }
+
+    #[test]
+    fn test_is_converged_rejects_large_branch_delta() {
+        let mut m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0);
+        m.vgs_prev = 1.0;
+        m.vgs = 1.01;
+        m.vds_prev = 2.0;
+        m.vds = 2.0;
+        m.vbs_prev = 0.0;
+        m.vbs = 0.0;
+
+        assert!(
+            !m.is_converged(1e-6),
+            "large branch-voltage jump must fail convergence"
+        );
+    }
+
+    #[test]
+    fn test_is_converged_rejects_body_voltage_jump() {
+        let mut m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0);
+        m.vgs_prev = 1.2;
+        m.vgs = 1.2001;
+        m.vds_prev = 1.8;
+        m.vds = 1.8001;
+        m.vbs_prev = -0.2;
+        m.vbs = -0.23;
+
+        assert!(
+            !m.is_converged(1e-6),
+            "body-bias discontinuities must participate in convergence checks"
+        );
+    }
+
+    #[test]
+    fn test_is_converged_rejects_non_finite_history() {
+        let mut m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0);
+        m.vgs_prev = f64::NAN;
+        m.vgs = 1.0;
+        m.vds_prev = 2.0;
+        m.vds = 2.0;
+        m.vbs_prev = 0.0;
+        m.vbs = 0.0;
+
+        assert!(
+            !m.is_converged(1e-6),
+            "non-finite branch history must force another Newton update"
+        );
+    }
+
+    #[test]
+    fn test_update_caches_linearized_operating_point() {
+        let mut m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0);
+        let voltages = vec![0.15, 1.35, 0.95];
+
+        m.update(&voltages);
+
+        let (id, region, gm, gds, gmb, id_eq) =
+            m.linearized_operating_point(m.vgs, m.vds, m.vbs);
+        assert!((m.id - id).abs() < 1e-18);
+        assert_eq!(m.region, region);
+        assert!((m.gm - gm).abs() < 1e-18);
+        assert!((m.gds - gds).abs() < 1e-18);
+        assert!((m.gmb - gmb).abs() < 1e-18);
+        assert!((m.id_eq - id_eq).abs() < 1e-18);
+    }
+
+    #[test]
+    fn test_stamp_nonlinear_recomputes_for_changed_voltage_context() {
+        let mut m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0);
+        let cached_voltages = vec![0.1, 1.2, 0.85];
+        let live_voltages = vec![0.2, 1.35, 0.95];
+
+        m.update(&cached_voltages);
+        // Corrupt the cached linearization to prove stamping recomputes when
+        // called with a different Newton state.
+        m.gm = 123.0;
+        m.gds = 456.0;
+        m.gmb = 789.0;
+        m.id_eq = 321.0;
+
+        let (vgs, vds, vbs) = m.branch_voltages(&live_voltages);
+        let (_, _, gm, gds, gmb, id_eq) = m.linearized_operating_point(vgs, vds, vbs);
+
+        let mut matrix = CaptureMatrix::default();
+        m.stamp_nonlinear(&live_voltages, &mut matrix, &mut []);
+
+        assert!((matrix.g.get(&(3, 3)).copied().unwrap_or(0.0) - gds).abs() < 1e-18);
+        assert!((matrix.g.get(&(3, 2)).copied().unwrap_or(0.0) - gm).abs() < 1e-18);
+        assert!(
+            (matrix.g.get(&(3, 1)).copied().unwrap_or(0.0) - (-gm - gds - gmb)).abs() < 1e-18
+        );
+        assert!((matrix.g.get(&(1, 3)).copied().unwrap_or(0.0) - (-gds)).abs() < 1e-18);
+        assert!((matrix.rhs.get(&3).copied().unwrap_or(0.0) - (-id_eq)).abs() < 1e-18);
+        assert!((matrix.rhs.get(&1).copied().unwrap_or(0.0) - id_eq).abs() < 1e-18);
     }
 
     #[test]
