@@ -166,10 +166,12 @@ fn test_registry_has_all_common_types() {
     assert!(registry.get(ComponentType::Resistor).is_some());
     assert!(registry.get(ComponentType::Capacitor).is_some());
     assert!(registry.get(ComponentType::Inductor).is_some());
+    assert!(registry.get(ComponentType::CoupledInductor).is_some());
 
     // Sources
     assert!(registry.get(ComponentType::VoltageSource).is_some());
     assert!(registry.get(ComponentType::CurrentSource).is_some());
+    assert!(registry.get(ComponentType::Ground).is_some());
 
     // Semiconductors
     assert!(registry.get(ComponentType::Diode).is_some());
@@ -309,6 +311,75 @@ fn test_registry_inductor_commercial_parameters() {
     // Verify inductance uses Expression type
     let l_def = sheet.get("l").unwrap();
     assert_eq!(l_def.prop_type, PropertyType::Expression);
+}
+
+#[test]
+fn test_registry_source_symbol_variants() {
+    let registry = PropertyRegistry::new();
+
+    let voltage_source = registry.get(ComponentType::VoltageSource).unwrap();
+    let symbol = voltage_source.get("symbol").unwrap();
+    let PropertyValue::Enum { selected, options } = &symbol.default_value else {
+        panic!("expected voltage source symbol enum");
+    };
+    assert_eq!(selected, "default");
+    assert!(options.contains(&"battery".to_string()));
+    assert!(options.contains(&"battery_multi_cell".to_string()));
+
+    let ground = registry.get(ComponentType::Ground).unwrap();
+    let symbol = ground.get("symbol").unwrap();
+    let PropertyValue::Enum { selected, options } = &symbol.default_value else {
+        panic!("expected ground symbol enum");
+    };
+    assert_eq!(selected, "default");
+    assert!(options.contains(&"earth".to_string()));
+    assert!(options.contains(&"chassis".to_string()));
+}
+
+#[test]
+fn test_registry_semiconductor_symbol_variants() {
+    let registry = PropertyRegistry::new();
+
+    let diode = registry.get(ComponentType::Diode).unwrap();
+    let diode_symbol = diode.get("symbol").unwrap();
+    let PropertyValue::Enum { options, .. } = &diode_symbol.default_value else {
+        panic!("expected diode symbol enum");
+    };
+    assert!(options.contains(&"schottky".to_string()));
+    assert!(options.contains(&"zener".to_string()));
+    assert!(options.contains(&"led".to_string()));
+
+    let npn = registry.get(ComponentType::NpnBjt).unwrap();
+    let npn_symbol = npn.get("symbol").unwrap();
+    let PropertyValue::Enum { options, .. } = &npn_symbol.default_value else {
+        panic!("expected bjt symbol enum");
+    };
+    assert!(options.contains(&"discrete".to_string()));
+
+    let njfet = registry.get(ComponentType::Njfet).unwrap();
+    let jfet_symbol = njfet.get("symbol").unwrap();
+    let PropertyValue::Enum { options, .. } = &jfet_symbol.default_value else {
+        panic!("expected jfet symbol enum");
+    };
+    assert!(options.contains(&"discrete".to_string()));
+}
+
+#[test]
+fn test_registry_coupled_inductor_properties() {
+    let registry = PropertyRegistry::new();
+    let sheet = registry.get(ComponentType::CoupledInductor).unwrap();
+
+    assert!(sheet.get("name").is_some());
+    assert!(sheet.get("k").is_some());
+    assert!(sheet.get("inductors").is_some());
+
+    let k_def = sheet.get("k").unwrap();
+    assert!(k_def.required);
+    assert_eq!(k_def.prop_type, PropertyType::Expression);
+
+    let windings = sheet.get("inductors").unwrap();
+    assert!(windings.required);
+    assert_eq!(windings.prop_type, PropertyType::String);
 }
 
 // =========================================================================

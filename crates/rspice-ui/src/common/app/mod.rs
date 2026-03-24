@@ -253,7 +253,11 @@ impl RSpiceApp {
         // Load symbol library
         let symbol_library = match crate::schematic::symbols::SymbolLibrary::load_embedded() {
             Ok(lib) => {
-                log::info!("Loaded {} SVG component symbols", lib.len());
+                log::info!(
+                    "Loaded {} default SVG component mappings from {} embedded SVG assets",
+                    lib.len(),
+                    lib.asset_count()
+                );
                 Some(lib)
             }
             Err(e) => {

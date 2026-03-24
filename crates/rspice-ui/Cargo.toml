@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Modern circuit simulator GUI for RSpice - Commercial-grade egui application"
 authors = ["RSpice Contributors"]
+build = "build.rs"
 
 # Library crate
 [lib]

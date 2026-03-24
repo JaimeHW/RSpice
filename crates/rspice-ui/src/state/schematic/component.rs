@@ -82,6 +82,13 @@ pub struct Component {
     /// Additional SPICE parameters (e.g., "TC=0.01,0.001")
     pub params: String,
 
+    /// Optional schematic symbol variant identifier.
+    ///
+    /// This is a UI-only appearance choice and is never emitted into the
+    /// generated SPICE netlist.
+    #[serde(default)]
+    pub symbol_variant: Option<String>,
+
     /// Name label position (Auto for smart placement, Custom for user-defined)
     #[serde(default)]
     pub name_label_pos: LabelPosition,
@@ -129,6 +136,7 @@ impl Component {
             name: String::new(),
             value: String::new(),
             params: String::new(),
+            symbol_variant: None,
             name_label_pos: LabelPosition::Auto,
             value_label_pos: LabelPosition::Auto,
             mirror_h: false,
@@ -141,6 +149,12 @@ impl Component {
     pub fn with_name_value(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.name = name.into();
         self.value = value.into();
+        self
+    }
+
+    /// Create a component with a specific schematic symbol variant.
+    pub fn with_symbol_variant(mut self, symbol_variant: impl Into<String>) -> Self {
+        self.symbol_variant = Some(symbol_variant.into());
         self
     }
 

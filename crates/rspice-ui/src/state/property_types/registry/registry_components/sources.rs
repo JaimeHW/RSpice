@@ -1,5 +1,22 @@
 use super::*;
 
+fn source_symbol_property(
+    description: &str,
+    default_variant: &str,
+    options: &[&str],
+) -> PropertyDefinition {
+    PropertyDefinition::new("symbol")
+        .with_display_name("Symbol")
+        .with_description(description)
+        .with_type(PropertyType::Enum)
+        .with_default(PropertyValue::enumeration(
+            default_variant,
+            options.iter().map(|option| (*option).to_string()).collect(),
+        ))
+        .with_order(900)
+        .with_category("Appearance")
+}
+
 impl PropertyRegistry {
     pub(in super::super) fn register_sources(&mut self) {
         // DC Voltage Source
@@ -23,6 +40,8 @@ impl PropertyRegistry {
         self.register_isource_pwl();
         self.register_isource_exp();
         self.register_isource_noise();
+
+        self.register_ground();
     }
 
     /// Register DC Voltage Source with Spectre-parity parameters.
@@ -187,8 +206,32 @@ impl PropertyRegistry {
                 .with_order(50)
                 .with_category("Noise"),
         );
+        sheet.add(source_symbol_property(
+            "Schematic symbol skin for this voltage source",
+            "default",
+            &["default", "battery", "battery_multi_cell"],
+        ));
 
         self.sheets.insert(ComponentType::VoltageSource, sheet);
+    }
+
+    pub(in super::super) fn register_ground(&mut self) {
+        let mut sheet = PropertySheet::new();
+        sheet.add(
+            PropertyDefinition::new("name")
+                .with_display_name("Net Name")
+                .with_description("Displayed ground net label")
+                .with_type(PropertyType::String)
+                .with_default(PropertyValue::string("0"))
+                .with_order(0)
+                .with_category("Instance"),
+        );
+        sheet.add(source_symbol_property(
+            "Schematic symbol skin for ground",
+            "default",
+            &["default", "earth", "chassis"],
+        ));
+        self.sheets.insert(ComponentType::Ground, sheet);
     }
 
     /// Register AC Voltage Source with Spectre-parity parameters.

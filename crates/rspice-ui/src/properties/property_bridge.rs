@@ -49,6 +49,7 @@ pub fn get_primary_property_name(kind: ComponentType) -> &'static str {
         ComponentType::Resistor => "r",
         ComponentType::Capacitor => "c",
         ComponentType::Inductor => "l",
+        ComponentType::CoupledInductor => "k",
         ComponentType::VoltageSource => "dc",
         ComponentType::VoltageSourceAc => "ac_mag",
         ComponentType::VoltageSourcePulse => "v1",
@@ -78,6 +79,7 @@ pub fn get_value_display_name(kind: ComponentType) -> &'static str {
         ComponentType::Resistor => "Resistance",
         ComponentType::Capacitor => "Capacitance",
         ComponentType::Inductor => "Inductance",
+        ComponentType::CoupledInductor => "Coupling Coefficient",
         ComponentType::VoltageSource => "DC Voltage",
         ComponentType::VoltageSourceAc => "AC Magnitude",
         ComponentType::VoltageSourcePulse => "Initial Voltage",
@@ -257,6 +259,24 @@ pub fn collect_properties_from_component(
         PropertyValue::String(component.name.clone()),
     );
 
+    if let Some(sheet) = registry.get(component.kind) {
+        if let Some(def) = sheet.iter().find(|def| def.name == "symbol") {
+            if let PropertyValue::Enum { options, .. } = &def.default_value {
+                let selected = component
+                    .symbol_variant
+                    .clone()
+                    .unwrap_or_else(|| options.first().cloned().unwrap_or_default());
+                properties.insert(
+                    "symbol".to_string(),
+                    PropertyValue::Enum {
+                        selected,
+                        options: options.clone(),
+                    },
+                );
+            }
+        }
+    }
+
     // Get the primary property name for this component type
     let primary_prop = get_primary_property_name(component.kind);
 
@@ -352,12 +372,20 @@ pub fn apply_properties_to_component(
         component.value = property_value_to_string(prop_value);
     }
 
+    if let Some(PropertyValue::Enum { selected, .. }) = properties.get("symbol") {
+        component.symbol_variant = if selected.is_empty() || selected == "default" {
+            None
+        } else {
+            Some(selected.clone())
+        };
+    }
+
     // Collect secondary parameters
     let mut secondary_params: HashMap<String, String> = HashMap::new();
 
     for (key, value) in properties {
         // Skip name and primary property
-        if key == "name" || key == primary_prop {
+        if key == "name" || key == primary_prop || key == "symbol" {
             continue;
         }
 
@@ -742,6 +770,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_collect_properties_includes_symbol_variant_enum() {
+        let registry = PropertyRegistry::new();
+        let component = Component::new(3, ComponentType::VoltageSource, Point::new(0, 0))
+            .with_name_value("V1", "5")
+            .with_symbol_variant("battery");
+
+        let props = collect_properties_from_component(&component, &registry);
+        let Some(PropertyValue::Enum { selected, options }) = props.get("symbol") else {
+            panic!("expected symbol enum property");
+        };
+
+        assert_eq!(selected, "battery");
+        assert!(options.contains(&"default".to_string()));
+        assert!(options.contains(&"battery".to_string()));
+        assert!(options.contains(&"battery_multi_cell".to_string()));
+    }
+
     // =========================================================================
     // Property Application Tests
     // =========================================================================
@@ -836,6 +882,38 @@ mod tests {
         assert!(!parsed.contains_key("m"));
     }
 
+    #[test]
+    fn test_apply_properties_persists_symbol_variant_without_netlist_leakage() {
+        let registry = PropertyRegistry::new();
+        let mut component = Component::new(1, ComponentType::Diode, Point::new(0, 0))
+            .with_name_value("D1", "1");
+
+        let mut props = HashMap::new();
+        props.insert("name".to_string(), PropertyValue::String("D1".to_string()));
+        props.insert("is".to_string(), PropertyValue::Expression("1".to_string()));
+        props.insert(
+            "symbol".to_string(),
+            PropertyValue::Enum {
+                selected: "zener".to_string(),
+                options: vec![
+                    "default".to_string(),
+                    "schottky".to_string(),
+                    "zener".to_string(),
+                    "led".to_string(),
+                    "tunnel".to_string(),
+                ],
+            },
+        );
+
+        apply_properties_to_component(&mut component, &props, &registry);
+
+        assert_eq!(component.symbol_variant.as_deref(), Some("zener"));
+        assert!(
+            !component.params.contains("symbol"),
+            "symbol appearance should never leak into SPICE params"
+        );
+    }
+
     // =========================================================================
     // Full Round-Trip Tests (Component → Props → Component)
     // =========================================================================
@@ -880,6 +958,26 @@ mod tests {
 
         assert_eq!(restored.name, original.name);
         assert_eq!(restored.value, original.value);
+    }
+
+    #[test]
+    fn test_full_roundtrip_coupled_inductor() {
+        let registry = PropertyRegistry::new();
+
+        let mut original =
+            Component::new(1, ComponentType::CoupledInductor, Point::new(0, 0))
+                .with_name_value("K1", "0.995");
+        original.params = "inductors=\"L1 L2\"".to_string();
+
+        let props = collect_properties_from_component(&original, &registry);
+        let mut restored = Component::new(1, ComponentType::CoupledInductor, Point::new(0, 0));
+        apply_properties_to_component(&mut restored, &props, &registry);
+
+        assert_eq!(restored.name, "K1");
+        assert_eq!(restored.value, "0.995");
+
+        let restored_params = parse_params_string(&restored.params);
+        assert_eq!(restored_params.get("inductors"), Some(&"L1 L2".to_string()));
     }
 
     // =========================================================================

@@ -1,5 +1,23 @@
 use super::*;
 
+fn symbol_variant_property(
+    display_name: &str,
+    description: &str,
+    default_variant: &str,
+    options: &[&str],
+) -> PropertyDefinition {
+    PropertyDefinition::new("symbol")
+        .with_display_name(display_name)
+        .with_description(description)
+        .with_type(PropertyType::Enum)
+        .with_default(PropertyValue::enumeration(
+            default_variant,
+            options.iter().map(|option| (*option).to_string()).collect(),
+        ))
+        .with_order(900)
+        .with_category("Appearance")
+}
+
 impl PropertyRegistry {
     pub(in super::super) fn register_semiconductors(&mut self) {
         // Diode with commercial-grade parameters
@@ -106,6 +124,12 @@ impl PropertyRegistry {
                 .with_order(41)
                 .with_category("Initial Conditions"),
         );
+        diode.add(symbol_variant_property(
+            "Symbol",
+            "Schematic symbol skin for the diode family",
+            "default",
+            &["default", "schottky", "zener", "led", "tunnel"],
+        ));
 
         self.sheets.insert(ComponentType::Diode, diode);
     }
@@ -406,10 +430,22 @@ impl PropertyRegistry {
 
     /// Register BJT (NPN/PNP) with commercial-grade parameters
     pub(in super::super) fn register_bjt(&mut self) {
-        let npn = self.create_bjt_sheet("Q1", "npn");
+        let mut npn = self.create_bjt_sheet("Q1", "npn");
+        npn.add(symbol_variant_property(
+            "Symbol",
+            "Schematic symbol skin for this BJT",
+            "default",
+            &["default", "discrete"],
+        ));
         self.sheets.insert(ComponentType::NpnBjt, npn);
 
-        let pnp = self.create_bjt_sheet("Q1", "pnp");
+        let mut pnp = self.create_bjt_sheet("Q1", "pnp");
+        pnp.add(symbol_variant_property(
+            "Symbol",
+            "Schematic symbol skin for this BJT",
+            "default",
+            &["default", "discrete"],
+        ));
         self.sheets.insert(ComponentType::PnpBjt, pnp);
     }
 
@@ -552,10 +588,22 @@ impl PropertyRegistry {
 
     /// Register JFET (NJFET/PJFET) with commercial-grade parameters
     pub(in super::super) fn register_jfet(&mut self) {
-        let njfet = self.create_jfet_sheet("J1", "njfet");
+        let mut njfet = self.create_jfet_sheet("J1", "njfet");
+        njfet.add(symbol_variant_property(
+            "Symbol",
+            "Schematic symbol skin for this JFET",
+            "default",
+            &["default", "discrete"],
+        ));
         self.sheets.insert(ComponentType::Njfet, njfet);
 
-        let pjfet = self.create_jfet_sheet("J1", "pjfet");
+        let mut pjfet = self.create_jfet_sheet("J1", "pjfet");
+        pjfet.add(symbol_variant_property(
+            "Symbol",
+            "Schematic symbol skin for this JFET",
+            "default",
+            &["default", "discrete"],
+        ));
         self.sheets.insert(ComponentType::Pjfet, pjfet);
     }
 
