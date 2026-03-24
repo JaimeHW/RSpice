@@ -1346,9 +1346,6 @@ impl TestRunner {
                 {
                     return Some("CPL transmission line model".to_string());
                 }
-                if token == ".model" && Self::is_unsupported_soi_level_model(&trimmed) {
-                    return Some("BSIMSOI LEVEL=55/56/57 model".to_string());
-                }
             }
 
             // Check if line starts with device letter followed by alphanumeric (e.g., "t1", "k1")
@@ -1367,56 +1364,6 @@ impl TestRunner {
 
         None
     }
-
-    fn is_unsupported_soi_level_model(model_line: &str) -> bool {
-        let normalized: String = model_line
-            .chars()
-            .map(|ch| match ch {
-                '(' | ')' | ',' => ' ',
-                _ => ch,
-            })
-            .collect();
-        let tokens: Vec<&str> = normalized.split_whitespace().collect();
-        if tokens.len() < 3 {
-            return false;
-        }
-
-        let model_type = tokens[2];
-        if model_type != "nmos" && model_type != "pmos" {
-            return false;
-        }
-
-        let mut idx = 3usize;
-        while idx < tokens.len() {
-            let token = tokens[idx];
-            if token == "level" || token == "level=" {
-                if idx + 1 < tokens.len() && Self::is_unsupported_soi_level_value(tokens[idx + 1]) {
-                    return true;
-                }
-            } else if let Some(value) = token.strip_prefix("level=") {
-                if value.is_empty() {
-                    if idx + 1 < tokens.len()
-                        && Self::is_unsupported_soi_level_value(tokens[idx + 1])
-                    {
-                        return true;
-                    }
-                } else if Self::is_unsupported_soi_level_value(value) {
-                    return true;
-                }
-            }
-            idx += 1;
-        }
-
-        false
-    }
-
-    fn is_unsupported_soi_level_value(level: &str) -> bool {
-        let Ok(value) = level.parse::<f64>() else {
-            return false;
-        };
-        ((value - 55.0).abs() < 0.5) || ((value - 56.0).abs() < 0.5) || ((value - 57.0).abs() < 0.5)
-    }
-
     fn strip_netlist_comment(line: &str) -> &str {
         let no_inline = line.split_once(';').map(|(head, _)| head).unwrap_or(line);
         let trimmed = no_inline.trim_start();
@@ -2686,17 +2633,15 @@ R1 1 0 1k
                 .check_unsupported(".model ymod txl (r=1 l=2e-9 c=3e-12)")
                 .is_none()
         );
-        assert_eq!(
+        assert!(
             runner
                 .check_unsupported(".model n1 nmos (level=55 tox=4.5e-9)")
-                .as_deref(),
-            Some("BSIMSOI LEVEL=55/56/57 model")
+                .is_none()
         );
-        assert_eq!(
+        assert!(
             runner
                 .check_unsupported(".model p1 pmos level= 57")
-                .as_deref(),
-            Some("BSIMSOI LEVEL=55/56/57 model")
+                .is_none()
         );
         assert!(
             runner
