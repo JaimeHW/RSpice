@@ -113,6 +113,11 @@ fn suite_config(subdir: &str) -> TestRunnerConfig {
         "vbic" => {
             cfg.max_time_per_test_ms = 120_000;
         }
+        // Industrial SOI decks include long ring-oscillator transients that
+        // are valid but expensive even in optimized builds.
+        "bsim3soidd" | "bsim3soifd" | "bsim3soipd" => {
+            cfg.max_time_per_test_ms = 1_800_000; // 30 minutes
+        }
         // Distributed transmission-line decks are currently compared with a
         // wider envelope because RSpice uses a simplified lossy companion model
         // rather than ngspice's full LTRA convolution kernel.
