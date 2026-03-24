@@ -1322,8 +1322,6 @@ impl TestRunner {
             // All previously listed devices are now supported
         ];
 
-        let mut has_xspice = false;
-
         for line in source.lines() {
             let trimmed = Self::strip_netlist_comment(line)
                 .trim()
@@ -1372,22 +1370,6 @@ impl TestRunner {
                 }
             }
 
-            // XSPICE code models are instantiated with A-elements (Aname ... model).
-            if trimmed.starts_with('a') {
-                if let Some(next_char) = trimmed.chars().nth(1) {
-                    if next_char.is_ascii_alphanumeric() || next_char == '_' {
-                        return Some("XSPICE code model (A-device)".to_string());
-                    }
-                }
-            }
-
-            if trimmed.contains("xspice") {
-                has_xspice = true;
-            }
-        }
-
-        if has_xspice {
-            return Some("XSPICE".to_string());
         }
 
         None
@@ -2692,11 +2674,10 @@ R1 1 0 1k
                 .check_unsupported("r1 1 2 1k\n.dc v1 0 5 0.1")
                 .is_none()
         );
-        assert_eq!(
+        assert!(
             runner
                 .check_unsupported("a_source [a1 a2] d_source1")
-                .as_deref(),
-            Some("XSPICE code model (A-device)")
+                .is_none()
         );
         assert_eq!(
             runner.check_unsupported(".model cpl1 cpl (R=1)").as_deref(),
