@@ -1337,15 +1337,6 @@ impl TestRunner {
                         return Some(reason.to_string());
                     }
                 }
-
-                // Multiconductor CPL transmission-line models are currently unsupported.
-                if token == ".model"
-                    && trimmed
-                        .split_whitespace()
-                        .any(|part| part.eq_ignore_ascii_case("cpl"))
-                {
-                    return Some("CPL transmission line model".to_string());
-                }
             }
 
             // Check if line starts with device letter followed by alphanumeric (e.g., "t1", "k1")
@@ -1359,7 +1350,6 @@ impl TestRunner {
                     }
                 }
             }
-
         }
 
         None
@@ -2619,10 +2609,7 @@ R1 1 0 1k
                 .check_unsupported("a_source [a1 a2] d_source1")
                 .is_none()
         );
-        assert_eq!(
-            runner.check_unsupported(".model cpl1 cpl (R=1)").as_deref(),
-            Some("CPL transmission line model")
-        );
+        assert_eq!(runner.check_unsupported(".model cpl1 cpl (R=1)"), None);
         assert!(
             runner
                 .check_unsupported(".model ymod ltra (r=1 l=2e-9 c=3e-12)")
