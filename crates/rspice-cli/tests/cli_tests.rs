@@ -4,6 +4,7 @@
 
 use assert_cmd::Command;
 use predicates::prelude::*;
+use rustyhdf5::{AttrValue, File as Hdf5File};
 use std::path::PathBuf;
 
 fn fixtures_dir() -> PathBuf {
@@ -822,7 +823,7 @@ fn test_compile_va_missing_file() {
 }
 
 // ============================================================================
-// HDF5 Output Test (Feature Disabled)
+// HDF5 Tests
 // ============================================================================
 
 #[test]
@@ -833,4 +834,73 @@ fn test_hdf5_format_listed() {
         .assert()
         .success()
         .stdout(predicate::str::contains("hdf5"));
+}
+
+#[test]
+fn test_run_hdf5_output_creates_operating_point_file() {
+    let fixture_path = fixture("resistor_divider.sp");
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let output_path = temp_dir.path().join("output.h5");
+
+    Command::cargo_bin("rspice")
+        .unwrap()
+        .args([
+            "run",
+            fixture_path.to_str().unwrap(),
+            "-o",
+            output_path.to_str().unwrap(),
+            "--format",
+            "hdf5",
+            "-q",
+        ])
+        .assert()
+        .success();
+
+    let file = Hdf5File::open(&output_path).expect("HDF5 output should open");
+    let root = file.root();
+    let attrs = root.attrs().expect("root attrs");
+    assert!(matches!(attrs.get("title"), Some(AttrValue::String(title)) if title == "DC Operating Point"));
+
+    let mut groups = root.groups().expect("root groups");
+    groups.sort();
+    assert!(groups.contains(&"operating_point".to_string()));
+
+    let operating_point = file.group("operating_point").expect("operating point group");
+    let mut datasets = operating_point.datasets().expect("datasets");
+    datasets.sort();
+    assert!(datasets.contains(&"independent".to_string()));
+    assert!(datasets.contains(&"signal_0000".to_string()));
+}
+
+#[test]
+fn test_convert_csv_to_hdf5_creates_waveform_file() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let input_path = temp_dir.path().join("input.csv");
+    let output_path = temp_dir.path().join("output.h5");
+
+    std::fs::write(&input_path, "time,V(out)\n0.0,0.0\n1.0,1.25\n").unwrap();
+
+    Command::cargo_bin("rspice")
+        .unwrap()
+        .args([
+            "convert",
+            input_path.to_str().unwrap(),
+            output_path.to_str().unwrap(),
+            "--to",
+            "hdf5",
+        ])
+        .assert()
+        .success();
+
+    let file = Hdf5File::open(&output_path).expect("converted HDF5 should open");
+    let transient = file.group("transient").expect("transient group");
+    let attrs = transient.attrs().expect("transient attrs");
+    assert!(matches!(attrs.get("independent_name"), Some(AttrValue::String(name)) if name == "time"));
+    let values = transient
+        .dataset("signal_0000")
+        .expect("signal dataset")
+        .read_f64()
+        .expect("signal values");
+    assert_eq!(values, vec![0.0, 1.25]);
 }

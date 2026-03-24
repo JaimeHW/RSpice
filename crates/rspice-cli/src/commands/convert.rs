@@ -3,6 +3,7 @@
 //! Converts between simulation output formats.
 
 use crate::cli::{CliError, ConvertArgs, OutputFormat};
+use crate::hdf5::{Hdf5SimulationData, Hdf5WaveformSection, read_hdf5, write_hdf5};
 use std::io::Write;
 
 /// Execute the convert command
@@ -24,10 +25,10 @@ pub fn execute(args: ConvertArgs, _verbose: bool, quiet: bool) -> Result<(), Cli
     }
 
     // Detect input format
-    let _from_format = args.from.unwrap_or_else(|| detect_format(&args.input));
+    let from_format = args.from.unwrap_or_else(|| detect_format(&args.input));
 
     // Read input data
-    let data = read_input(&args)?;
+    let data = read_input(&args, from_format)?;
 
     // Write output
     write_output(&args, &data)?;
@@ -60,7 +61,20 @@ fn detect_format(path: &std::path::Path) -> OutputFormat {
 }
 
 /// Read input file into waveform data
-fn read_input(args: &ConvertArgs) -> Result<WaveformData, CliError> {
+fn read_input(args: &ConvertArgs, from_format: OutputFormat) -> Result<WaveformData, CliError> {
+    if matches!(from_format, OutputFormat::Hdf5) {
+        let data = read_hdf5(&args.input).map_err(|err| CliError::ConversionError {
+            message: err.to_string(),
+        })?;
+        return waveform_data_from_hdf5(data);
+    }
+
+    let separator = if matches!(from_format, OutputFormat::Tsv) {
+        '\t'
+    } else {
+        ','
+    };
+
     let content = std::fs::read_to_string(&args.input).map_err(|e| CliError::InputReadError {
         path: args.input.clone(),
         source: e,
@@ -74,13 +88,16 @@ fn read_input(args: &ConvertArgs) -> Result<WaveformData, CliError> {
         });
     }
 
-    let header: Vec<String> = lines[0].split(',').map(|s| s.trim().to_string()).collect();
+    let header: Vec<String> = lines[0]
+        .split(separator)
+        .map(|s| s.trim().to_string())
+        .collect();
 
     let mut independent_values = Vec::new();
     let mut variable_values: Vec<Vec<f64>> = vec![Vec::new(); header.len().saturating_sub(1)];
 
     for line in lines.iter().skip(1) {
-        let values: Vec<&str> = line.split(',').collect();
+        let values: Vec<&str> = line.split(separator).collect();
         if let Some(first) = values.first() {
             if let Ok(v) = first.trim().parse::<f64>() {
                 independent_values.push(v);
@@ -116,13 +133,69 @@ fn write_output(args: &ConvertArgs, data: &WaveformData) -> Result<(), CliError>
         OutputFormat::Json => write_json(&mut file, data)?,
         OutputFormat::Raw | OutputFormat::RawAscii => write_raw(&mut file, data)?,
         OutputFormat::Hdf5 => {
-            return Err(CliError::ConversionError {
-                message: "HDF5 conversion requires --features hdf5".to_string(),
-            });
+            drop(file);
+            write_hdf5_output(&args.output, data)?;
         }
     }
 
     Ok(())
+}
+
+fn write_hdf5_output(path: &std::path::Path, data: &WaveformData) -> Result<(), CliError> {
+    let mut hdf5_data = Hdf5SimulationData::new();
+    hdf5_data.title = "Converted Waveform Data".to_string();
+
+    let mut section =
+        Hdf5WaveformSection::new(data.independent_var.clone(), data.independent_values.clone());
+    for (name, values) in data.variable_names.iter().zip(&data.variable_values) {
+        section.add_signal(name.clone(), values.clone());
+    }
+    hdf5_data.transient = Some(section);
+
+    write_hdf5(path, &hdf5_data).map_err(|err| CliError::ConversionError {
+        message: err.to_string(),
+    })
+}
+
+fn waveform_data_from_hdf5(data: Hdf5SimulationData) -> Result<WaveformData, CliError> {
+    if let Some(section) = data.transient {
+        return Ok(waveform_data_from_section(section));
+    }
+    if let Some(section) = data.dc_sweep {
+        return Ok(waveform_data_from_section(section));
+    }
+    if let Some(section) = data.operating_point {
+        return Ok(waveform_data_from_section(section));
+    }
+    if let Some(ac) = data.ac {
+        let mut variable_names = Vec::with_capacity(ac.signals.len() * 2);
+        let mut variable_values = Vec::with_capacity(ac.signals.len() * 2);
+        for signal in ac.signals {
+            variable_names.push(format!("{}.real", signal.name));
+            variable_values.push(signal.real);
+            variable_names.push(format!("{}.imag", signal.name));
+            variable_values.push(signal.imag);
+        }
+        return Ok(WaveformData {
+            independent_var: "frequency".to_string(),
+            independent_values: ac.frequency,
+            variable_names,
+            variable_values,
+        });
+    }
+
+    Err(CliError::ConversionError {
+        message: "HDF5 file did not contain a supported waveform section".to_string(),
+    })
+}
+
+fn waveform_data_from_section(section: Hdf5WaveformSection) -> WaveformData {
+    WaveformData {
+        independent_var: section.independent_name,
+        independent_values: section.independent_values,
+        variable_names: section.signals.iter().map(|signal| signal.name.clone()).collect(),
+        variable_values: section.signals.into_iter().map(|signal| signal.values).collect(),
+    }
 }
 
 fn write_csv(file: &mut std::fs::File, data: &WaveformData, sep: &str) -> Result<(), CliError> {
@@ -192,6 +265,7 @@ fn write_raw(file: &mut std::fs::File, data: &WaveformData) -> Result<(), CliErr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hdf5::{Hdf5AcSection, Hdf5SimulationData};
 
     #[test]
     fn test_detect_format() {
@@ -203,5 +277,58 @@ mod tests {
             detect_format(std::path::Path::new("test.raw")),
             OutputFormat::Raw
         );
+        assert_eq!(
+            detect_format(std::path::Path::new("test.h5")),
+            OutputFormat::Hdf5
+        );
+    }
+
+    #[test]
+    fn test_waveform_data_from_hdf5_transient_section() {
+        let mut data = Hdf5SimulationData::new();
+        let mut transient = Hdf5WaveformSection::new("time", vec![0.0, 1.0]);
+        transient.add_signal("V(out)", vec![0.0, 1.0]);
+        data.transient = Some(transient);
+
+        let waveform = waveform_data_from_hdf5(data).expect("transient section should convert");
+        assert_eq!(waveform.independent_var, "time");
+        assert_eq!(waveform.variable_names, vec!["V(out)"]);
+        assert_eq!(waveform.variable_values[0], vec![0.0, 1.0]);
+    }
+
+    #[test]
+    fn test_waveform_data_from_hdf5_ac_section_flattens_complex_signals() {
+        let mut data = Hdf5SimulationData::new();
+        let mut ac = Hdf5AcSection::new(vec![1.0, 10.0]);
+        ac.add_signal("V(out)", vec![1.0, 0.5], vec![0.0, -0.25]);
+        data.ac = Some(ac);
+
+        let waveform = waveform_data_from_hdf5(data).expect("AC section should convert");
+        assert_eq!(waveform.independent_var, "frequency");
+        assert_eq!(
+            waveform.variable_names,
+            vec!["V(out).real".to_string(), "V(out).imag".to_string()]
+        );
+        assert_eq!(waveform.variable_values[0], vec![1.0, 0.5]);
+        assert_eq!(waveform.variable_values[1], vec![0.0, -0.25]);
+    }
+
+    #[test]
+    fn test_write_hdf5_output_round_trip() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let path = temp.path().join("converted.h5");
+        let waveform = WaveformData {
+            independent_var: "time".to_string(),
+            independent_values: vec![0.0, 1.0],
+            variable_names: vec!["V(out)".to_string()],
+            variable_values: vec![vec![0.1, 0.2]],
+        };
+
+        write_hdf5_output(&path, &waveform).expect("HDF5 output should succeed");
+        let restored = read_hdf5(&path).expect("round-trip read should succeed");
+        let section = restored.transient.expect("transient section");
+        assert_eq!(section.independent_name, "time");
+        assert_eq!(section.signals[0].name, "V(out)");
+        assert_eq!(section.signals[0].values, vec![0.1, 0.2]);
     }
 }

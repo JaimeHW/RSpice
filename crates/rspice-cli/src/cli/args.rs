@@ -405,7 +405,7 @@ pub enum OutputFormat {
     Json,
     /// Tab-separated values
     Tsv,
-    /// HDF5 format (requires --features hdf5)
+    /// HDF5 format
     Hdf5,
 }
 

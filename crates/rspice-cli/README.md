@@ -275,12 +275,13 @@ Convert between simulation output formats.
 rspice convert <INPUT> <OUTPUT> --to <FORMAT>
 ```
 
-**Supported Formats:** `raw`, `ascii`, `csv`, `json`, `tsv`
+**Supported Formats:** `raw`, `ascii`, `csv`, `json`, `tsv`, `hdf5`
 
 **Example:**
 
 ```bash
 rspice convert results.raw results.csv --to csv
+rspice convert results.csv results.h5 --to hdf5
 ```
 
 ---
