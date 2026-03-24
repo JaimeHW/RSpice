@@ -494,7 +494,8 @@ fn parse_command(
             models.push(ModelDef {
                 name,
                 model_type,
-                params: model_params,
+                params: model_params.numeric,
+                string_params: model_params.string,
             });
         }
         ".PARAM" | ".CSPARAM" => {
@@ -2325,11 +2326,17 @@ fn parse_subckt_def(line: &str, line_num: usize) -> Result<SubcircuitDef, ParseE
 // Model Parameter Parsing
 //=============================================================================
 
+struct ParsedModelParams {
+    numeric: Vec<(String, Value)>,
+    string: Vec<(String, String)>,
+}
+
 fn parse_model_params(
     stream: &mut TokenStream,
     params: &ParamContext,
-) -> Result<Vec<(String, Value)>, ParseError> {
-    let mut model_params = Vec::new();
+) -> Result<ParsedModelParams, ParseError> {
+    let mut numeric_params = Vec::new();
+    let mut string_params = Vec::new();
 
     // Skip optional opening paren
     stream.consume(&TokenKind::LParen);
@@ -2350,8 +2357,17 @@ fn parse_model_params(
             stream.advance();
 
             if stream.consume(&TokenKind::Equals) {
-                if let Some(value) = try_value(stream, params) {
-                    model_params.push((name, value));
+                match &stream.peek().kind {
+                    TokenKind::StringLit(value) => {
+                        let value = value.clone();
+                        stream.advance();
+                        string_params.push((name, value));
+                    }
+                    _ => {
+                        if let Some(value) = try_value(stream, params) {
+                            numeric_params.push((name, value));
+                        }
+                    }
                 }
             }
         } else {
@@ -2362,7 +2378,10 @@ fn parse_model_params(
     // Skip optional closing paren
     stream.consume(&TokenKind::RParen);
 
-    Ok(model_params)
+    Ok(ParsedModelParams {
+        numeric: numeric_params,
+        string: string_params,
+    })
 }
 
 //=============================================================================

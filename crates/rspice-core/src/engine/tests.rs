@@ -8,6 +8,20 @@ mod engine_tests {
     use crate::Value;
     use crate::abort_signal::ImmediateAbort;
     use crate::engine::Engine;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "rspice_engine_{}_{}_{}",
+            prefix,
+            std::process::id(),
+            stamp
+        ))
+    }
 
     #[test]
     fn test_simple_resistor_divider() {
@@ -1657,6 +1671,67 @@ A1 in out no_such_model
             msg.contains("Unknown XSPICE model"),
             "expected unknown XSPICE model error, got {}",
             msg
+        );
+    }
+
+    #[test]
+    fn test_xspice_model_alias_resolves_builtin_code_model() {
+        let temp_dir = unique_temp_dir("xspice_alias");
+        std::fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let netlist_path = temp_dir.join("alias.cir");
+        let stimulus_path = temp_dir.join("stimulus.txt");
+        std::fs::write(&stimulus_path, "* digital stimulus placeholder").expect("stimulus file");
+
+        let netlist = Netlist::parse_with_path(
+            "\
+* XSPICE alias should resolve through .model definition
+.model dsrc d_source (input_file=\"stimulus.txt\")
+A1 [out] dsrc
+.end
+",
+            &netlist_path,
+        )
+        .expect("netlist should parse");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("xspice model alias should build");
+        assert_eq!(circuit.xspice_instances.len(), 1);
+
+        let instance = &circuit.xspice_instances[0];
+        assert_eq!(instance.model_name(), "d_source");
+        assert_eq!(
+            std::path::PathBuf::from(
+                instance
+                    .string_param("input_file")
+                    .expect("input_file string param should be set")
+            ),
+            stimulus_path
+        );
+    }
+
+    #[test]
+    fn test_xspice_model_alias_merges_model_and_instance_params() {
+        let netlist = Netlist::parse(
+            r#"
+* XSPICE alias should merge .model defaults with instance overrides
+V1 in 0 1
+A1 in out gain_alias gain=4
+RLOAD out 0 1k
+.model gain_alias gain (gain=2)
+.end
+"#,
+        )
+        .expect("netlist should parse");
+
+        let result = Engine::default()
+            .run_dc_op(&netlist)
+            .expect("xspice alias netlist should converge");
+        let vout = result.voltage(2);
+        assert!(
+            (vout - 4.0).abs() < 1e-6,
+            "instance parameter override should win over .model default; got {}",
+            vout
         );
     }
 

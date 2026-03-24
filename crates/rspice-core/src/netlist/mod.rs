@@ -107,7 +107,10 @@ pub struct VerilogAInclude {
 impl Netlist {
     /// Parse a netlist from a string
     pub fn parse(input: &str) -> Result<Self, ParseError> {
-        parser::parse_netlist(input)
+        let sanitized = Self::strip_control_blocks(input);
+        let mut netlist = parser::parse_netlist(&sanitized)?;
+        netlist.source_text = Some(input.to_string());
+        Ok(netlist)
     }
 
     /// Parse a netlist from a string with include resolution
@@ -116,17 +119,15 @@ impl Netlist {
     /// file path to resolve relative paths.
     pub fn parse_with_path(input: &str, file_path: &std::path::Path) -> Result<Self, ParseError> {
         let processed = Self::preprocess_includes(input, file_path)?;
-        Self::parse(&processed)
+        let mut netlist = Self::parse(&processed)?;
+        Self::normalize_model_string_paths(&mut netlist, file_path);
+        Ok(netlist)
     }
 
     /// Parse a netlist from a file with include expansion
     pub fn parse_file(path: &std::path::Path) -> Result<Self, ParseError> {
         let content = read_file_with_encoding(path)?;
-
-        // Preprocess includes
-        let processed = Self::preprocess_includes(&content, path)?;
-
-        Self::parse(&processed)
+        Self::parse_with_path(&content, path)
     }
 
     /// Preprocess netlist content to expand .include and .lib directives
@@ -214,6 +215,33 @@ impl Netlist {
         }
 
         result
+    }
+
+    fn normalize_model_string_paths(&mut self, file_path: &std::path::Path) {
+        let Some(base_dir) = file_path.parent() else {
+            return;
+        };
+
+        for model in &mut self.models {
+            for (name, value) in &mut model.string_params {
+                if !Self::model_string_param_is_path(name) {
+                    continue;
+                }
+
+                let candidate = std::path::Path::new(value);
+                if candidate.is_absolute() {
+                    continue;
+                }
+
+                let resolved = base_dir.join(candidate);
+                *value = resolved.to_string_lossy().into_owned();
+            }
+        }
+    }
+
+    fn model_string_param_is_path(name: &str) -> bool {
+        let normalized = name.trim().to_ascii_lowercase();
+        normalized.ends_with("file") || normalized.ends_with("_file") || normalized.ends_with("path")
     }
 
     /// Add a global node
@@ -316,4 +344,93 @@ fn decode_utf16_be(bytes: &[u8]) -> Result<String, std::io::Error> {
         .collect();
 
     String::from_utf16(&utf16).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "rspice_netlist_{}_{}_{}",
+            prefix,
+            std::process::id(),
+            stamp
+        ))
+    }
+
+    #[test]
+    fn parse_ignores_control_blocks_in_normal_path() {
+        let netlist = Netlist::parse(
+            "\
+control block parsing
+R1 out 0 1k
+.control
+set noacct
+tran 1n 10n
+.endc
+.op
+.end
+",
+        )
+        .expect("netlist with control block should parse");
+
+        assert_eq!(netlist.elements.len(), 1);
+        assert_eq!(netlist.analyses.len(), 1);
+        assert!(matches!(netlist.analyses[0], AnalysisCommand::Op));
+        assert_eq!(
+            netlist.source_text.as_deref(),
+            Some(
+                "\
+control block parsing
+R1 out 0 1k
+.control
+set noacct
+tran 1n 10n
+.endc
+.op
+.end
+"
+            )
+        );
+    }
+
+    #[test]
+    fn parse_with_path_resolves_model_string_paths_relative_to_source() {
+        let temp_dir = unique_temp_dir("model_string_paths");
+        std::fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let netlist_path = temp_dir.join("deck.cir");
+        let stimuli_path = temp_dir.join("stimulus.txt");
+        std::fs::write(&stimuli_path, "placeholder").expect("stimulus file");
+
+        let netlist = Netlist::parse_with_path(
+            "\
+relative path model test
+.model src d_source (input_file=\"stimulus.txt\")
+A1 [out] src
+.end
+",
+            &netlist_path,
+        )
+        .expect("netlist should parse");
+
+        let model = netlist
+            .models
+            .iter()
+            .find(|m| m.name.eq_ignore_ascii_case("src"))
+            .expect("model should be present");
+        let input_file = model
+            .string_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("input_file"))
+            .map(|(_, value)| value.clone())
+            .expect("input_file string param should be preserved");
+
+        assert_eq!(std::path::PathBuf::from(input_file), stimuli_path);
+    }
 }

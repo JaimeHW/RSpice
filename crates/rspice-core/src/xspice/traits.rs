@@ -249,6 +249,8 @@ pub struct ParamSpec {
     pub param_type: ParamType,
     /// Default value (as f64 for numeric, stored differently for strings)
     pub default: Value,
+    /// Default string value for string-typed parameters
+    pub string_default: Option<String>,
     /// Minimum value (for numeric types)
     pub min: Option<Value>,
     /// Maximum value (for numeric types)
@@ -266,6 +268,7 @@ impl ParamSpec {
             name: name.into(),
             param_type: ParamType::Real,
             default,
+            string_default: None,
             min: None,
             max: None,
             required: false,
@@ -279,6 +282,7 @@ impl ParamSpec {
             name: name.into(),
             param_type: ParamType::Integer,
             default: default as f64,
+            string_default: None,
             min: None,
             max: None,
             required: false,
@@ -292,6 +296,21 @@ impl ParamSpec {
             name: name.into(),
             param_type: ParamType::Boolean,
             default: if default { 1.0 } else { 0.0 },
+            string_default: None,
+            min: None,
+            max: None,
+            required: false,
+            description: String::new(),
+        }
+    }
+
+    /// Create a string parameter with default
+    pub fn string(name: impl Into<String>, default: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            param_type: ParamType::String,
+            default: 0.0,
+            string_default: Some(default.into()),
             min: None,
             max: None,
             required: false,

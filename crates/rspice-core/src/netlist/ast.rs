@@ -919,6 +919,7 @@ pub struct ModelDef {
     pub name: String,
     pub model_type: String,
     pub params: Vec<(String, Value)>,
+    pub string_params: Vec<(String, String)>,
 }
 
 /// Subcircuit definition: .SUBCKT name ports [PARAMS: ...]

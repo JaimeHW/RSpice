@@ -96,6 +96,84 @@ fn model_params_upper_map(params: &[(String, f64)]) -> HashMap<String, f64> {
         .collect()
 }
 
+fn resolve_xspice_node(circuit: &mut CircuitData, name: &str) -> usize {
+    if name.eq_ignore_ascii_case("0") {
+        0
+    } else {
+        circuit.get_or_create_node(name)
+    }
+}
+
+fn coerce_xspice_connection(
+    circuit: &mut CircuitData,
+    port_spec: &crate::xspice::PortSpec,
+    parsed_port: &crate::netlist::XspicePort,
+) -> Result<crate::xspice::PortConnection, SimulationError> {
+    use crate::netlist::XspicePort;
+    use crate::xspice::{PortConnection, PortType};
+
+    let expects_event = matches!(
+        port_spec.default_type,
+        PortType::Digital | PortType::Real | PortType::Integer
+    );
+
+    let convert_scalar = |circuit: &mut CircuitData, node_name: &str| {
+        let node = resolve_xspice_node(circuit, node_name);
+        if port_spec.is_vector {
+            if expects_event {
+                PortConnection::DigitalVector(vec![node])
+            } else {
+                PortConnection::AnalogVector(vec![node])
+            }
+        } else if expects_event {
+            PortConnection::Digital(node)
+        } else {
+            PortConnection::Analog(node)
+        }
+    };
+
+    let convert_vector = |circuit: &mut CircuitData, node_names: &[String]| {
+        let nodes: Vec<usize> = node_names
+            .iter()
+            .map(|name| resolve_xspice_node(circuit, name))
+            .collect();
+
+        if port_spec.is_vector {
+            if expects_event {
+                Ok(PortConnection::DigitalVector(nodes))
+            } else {
+                Ok(PortConnection::AnalogVector(nodes))
+            }
+        } else if nodes.len() == 1 {
+            if expects_event {
+                Ok(PortConnection::Digital(nodes[0]))
+            } else {
+                Ok(PortConnection::Analog(nodes[0]))
+            }
+        } else {
+            Err(SimulationError::Circuit(format!(
+                "XSPICE port '{}' expects a scalar connection but got {} nodes",
+                port_spec.name,
+                nodes.len()
+            )))
+        }
+    };
+
+    match parsed_port {
+        XspicePort::Analog(name) | XspicePort::Digital(name) => Ok(convert_scalar(circuit, name)),
+        XspicePort::AnalogVector(names) | XspicePort::DigitalVector(names) => {
+            convert_vector(circuit, names)
+        }
+        XspicePort::DifferentialVoltage { pos, neg }
+        | XspicePort::DifferentialCurrent { pos, neg } => {
+            let pos_node = resolve_xspice_node(circuit, pos);
+            let neg_node = resolve_xspice_node(circuit, neg);
+            Ok(PortConnection::Differential(pos_node, neg_node))
+        }
+        XspicePort::Null => Ok(PortConnection::Null),
+    }
+}
+
 impl Engine {
     /// Build circuit from netlist (flattens subcircuits first)
     pub fn build_circuit(&self, netlist: &Netlist) -> Result<CircuitData, SimulationError> {
@@ -1064,84 +1142,42 @@ impl Engine {
                     ports,
                     params,
                 } => {
-                    // Convert parsed XspicePort to PortConnection with resolved node IDs
-                    let mut connections: Vec<crate::xspice::PortConnection> = Vec::new();
-                    for port in ports {
-                        let connection = match port {
-                            crate::netlist::XspicePort::Analog(name) => {
-                                let node = if name.eq_ignore_ascii_case("0") {
-                                    0
-                                } else {
-                                    circuit.get_or_create_node(name)
-                                };
-                                crate::xspice::PortConnection::Analog(node)
-                            }
-                            crate::netlist::XspicePort::Digital(name) => {
-                                let node = if name.eq_ignore_ascii_case("0") {
-                                    0
-                                } else {
-                                    circuit.get_or_create_node(name)
-                                };
-                                crate::xspice::PortConnection::Digital(node)
-                            }
-                            crate::netlist::XspicePort::AnalogVector(names) => {
-                                let nodes: Vec<usize> = names
-                                    .iter()
-                                    .map(|n| {
-                                        if n.eq_ignore_ascii_case("0") {
-                                            0
-                                        } else {
-                                            circuit.get_or_create_node(n)
-                                        }
-                                    })
-                                    .collect();
-                                crate::xspice::PortConnection::AnalogVector(nodes)
-                            }
-                            crate::netlist::XspicePort::DigitalVector(names) => {
-                                let nodes: Vec<usize> = names
-                                    .iter()
-                                    .map(|n| {
-                                        if n.eq_ignore_ascii_case("0") {
-                                            0
-                                        } else {
-                                            circuit.get_or_create_node(n)
-                                        }
-                                    })
-                                    .collect();
-                                crate::xspice::PortConnection::DigitalVector(nodes)
-                            }
-                            crate::netlist::XspicePort::DifferentialVoltage { pos, neg }
-                            | crate::netlist::XspicePort::DifferentialCurrent { pos, neg } => {
-                                let pos_node = if pos.eq_ignore_ascii_case("0") {
-                                    0
-                                } else {
-                                    circuit.get_or_create_node(pos)
-                                };
-                                let neg_node = if neg.eq_ignore_ascii_case("0") {
-                                    0
-                                } else {
-                                    circuit.get_or_create_node(neg)
-                                };
-                                crate::xspice::PortConnection::Differential(pos_node, neg_node)
-                            }
-                            crate::netlist::XspicePort::Null => crate::xspice::PortConnection::Null,
-                        };
-                        connections.push(connection);
-                    }
-
-                    // Look up the model in the registry and create instance
-                    let code_model = circuit.xspice_registry.get(model).ok_or_else(|| {
+                    let resolved_model = resolve_xspice_model_instance(
+                        netlist,
+                        &circuit.xspice_registry,
+                        model,
+                        params,
+                    )
+                    .map_err(|e| {
                         SimulationError::Circuit(format!(
-                            "Unknown XSPICE model '{}' for element {}",
-                            model, element.name
+                            "Failed to resolve XSPICE model '{}' for element {}: {}",
+                            model, element.name, e
                         ))
                     })?;
 
+                    let ports_spec = resolved_model.code_model.ports().to_vec();
+                    let mut connections: Vec<crate::xspice::PortConnection> =
+                        Vec::with_capacity(ports.len());
+                    for (port_idx, port) in ports.iter().enumerate() {
+                        let port_spec = ports_spec.get(port_idx).ok_or_else(|| {
+                            SimulationError::Circuit(format!(
+                                "XSPICE element '{}' provides more connections ({}) than model '{}' ports ({})",
+                                element.name,
+                                ports.len(),
+                                resolved_model.code_model.name(),
+                                ports_spec.len()
+                            ))
+                        })?;
+                        let connection = coerce_xspice_connection(&mut circuit, port_spec, port)?;
+                        connections.push(connection);
+                    }
+
                     let mut instance = crate::xspice::XspiceInstance::new(
                         element.name.clone(),
-                        code_model.clone(),
+                        resolved_model.code_model.clone(),
                         connections,
-                        params,
+                        &resolved_model.numeric_params,
+                        &resolved_model.string_params,
                     )
                     .map_err(|e| {
                         SimulationError::Circuit(format!(

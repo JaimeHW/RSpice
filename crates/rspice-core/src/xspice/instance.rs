@@ -98,6 +98,7 @@ impl XspiceInstance {
         model: Arc<dyn CodeModel>,
         connections: Vec<PortConnection>,
         params: &[(String, Value)],
+        string_params: &[(String, String)],
     ) -> CmResult<Self> {
         let name = name.into();
         let ports = model.ports();
@@ -122,12 +123,22 @@ impl XspiceInstance {
 
         // Set default parameter values
         for param_spec in model.parameters() {
-            context.set_param(&param_spec.name, param_spec.default);
+            match param_spec.param_type {
+                super::ParamType::String => {
+                    if let Some(default) = &param_spec.string_default {
+                        context.set_string_param(&param_spec.name, default);
+                    }
+                }
+                _ => context.set_param(&param_spec.name, param_spec.default),
+            }
         }
 
         // Override with instance parameters
         for (name, value) in params {
             context.set_param(name, *value);
+        }
+        for (name, value) in string_params {
+            context.set_string_param(name, value);
         }
 
         // Initialize output ports in context
@@ -175,6 +186,11 @@ impl XspiceInstance {
     /// Get parameter value
     pub fn param(&self, name: &str) -> Value {
         self.context.param(name)
+    }
+
+    /// Get string parameter value
+    pub fn string_param(&self, name: &str) -> Option<&str> {
+        self.context.string_param(name)
     }
 
     /// Set parameter value
@@ -601,6 +617,7 @@ mod tests {
                 PortConnection::Digital(3),
             ],
             &[],
+            &[],
         )
         .expect("instance should build");
 
@@ -621,6 +638,7 @@ mod tests {
                 PortConnection::Analog(2),
                 PortConnection::Digital(3),
             ],
+            &[],
             &[],
         )
         .expect("instance should build");
@@ -684,8 +702,9 @@ mod tests {
     #[test]
     fn test_set_output_branch_rejects_inout_voltage_port() {
         let model: Arc<dyn CodeModel> = Arc::new(TestInoutModel);
-        let mut instance = XspiceInstance::new("A1", model, vec![PortConnection::Analog(1)], &[])
-            .expect("instance should build");
+        let mut instance =
+            XspiceInstance::new("A1", model, vec![PortConnection::Analog(1)], &[], &[])
+                .expect("instance should build");
 
         let err = instance
             .set_output_branch(0, 2)
@@ -700,7 +719,7 @@ mod tests {
     #[test]
     fn test_get_analog_contribution_ignores_inout_ports() {
         let model: Arc<dyn CodeModel> = Arc::new(TestInoutModel);
-        let instance = XspiceInstance::new("A1", model, vec![PortConnection::Analog(1)], &[])
+        let instance = XspiceInstance::new("A1", model, vec![PortConnection::Analog(1)], &[], &[])
             .expect("instance should build");
         assert_eq!(instance.get_analog_contribution(0), None);
     }
