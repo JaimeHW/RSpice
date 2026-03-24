@@ -193,7 +193,7 @@ V1 1 0 5
     /// Test device stamping into matrix and RHS
     #[test]
     fn test_device_stamping() {
-        use rspice_core::device::veriloga::{VerilogADevice, VerilogADeviceExt, VerilogADevices};
+        use rspice_core::device::veriloga::{VerilogADevice, VerilogADevices};
         use rspice_veriloga::VerilogACompiler;
 
         let va_source = r#"

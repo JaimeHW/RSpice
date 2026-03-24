@@ -287,7 +287,7 @@ mod tests {
     #[test]
     fn test_device_ext_trait() {
         let model = create_test_model();
-        let mut device = VerilogADevice::new("R1", model, &[1, 0]);
+        let device = VerilogADevice::new("R1", model, &[1, 0]);
 
         assert_eq!(device.total_nodes(), 2); // 2 terminals, 0 internal
     }
