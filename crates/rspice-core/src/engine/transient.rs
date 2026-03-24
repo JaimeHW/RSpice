@@ -33,6 +33,8 @@ const MAX_FORCE_ACCEPT_DELTA_V: Value = 5e-2;
 /// Relaxed trust-region limit used only during early startup when DC OP failed and
 /// transient had to begin from a linearized seed.
 const STARTUP_RECOVERY_DELTA_V: Value = 2e-1;
+/// Source edge magnitude that triggers transient source-step capping.
+const SOURCE_ACTIVE_DELTA: Value = 1e-2;
 
 #[derive(Debug, Clone, Default)]
 struct JfetTransientHistory {
@@ -1141,6 +1143,35 @@ impl Engine {
     }
 
     #[inline]
+    fn recover_timestep_after_accepted_step(
+        timestep: &mut TimestepController,
+        lte_estimator: &LteEstimator,
+        accepted_solution: &[Value],
+        dt: Value,
+        max_step: Value,
+        is_strictly_linear_transient: bool,
+        expected_source_delta: Value,
+    ) {
+        let scale = if is_strictly_linear_transient {
+            1.0
+        } else {
+            let (lte, _) = lte_estimator.estimate(accepted_solution, dt);
+            lte_estimator.recommend_scale(lte)
+        };
+
+        let mut next_dt = if scale > 1.0 {
+            (dt * scale.min(1.5)).min(max_step)
+        } else {
+            (dt * 1.25).min(max_step)
+        };
+        if expected_source_delta.is_finite() && expected_source_delta > 0.0 {
+            let source_cap = dt * (SOURCE_ACTIVE_DELTA / expected_source_delta).clamp(1.0, 4.0);
+            next_dt = next_dt.min(source_cap);
+        }
+        timestep.force_step(next_dt);
+    }
+
+    #[inline]
     fn update_reactive_history(
         circuit: &mut crate::circuit::Circuit,
         accepted_solution: &[Value],
@@ -1613,28 +1644,17 @@ impl Engine {
         let mut force_accept_cooldown = 0_usize; // Failed retries to defer dt shrink immediately after force-accept
         let mut trap_order = 1_u8; // ngspice-style trap order: start at 1, promote to 2 after accepted smooth step
         const MAX_RETRIES: usize = 200; // Maximum retries per timepoint before force-accept
-        const MAX_WALL_TIME_SECS: u64 = 300; // Wall-clock timeout (5 minutes - use abort for earlier cancellation)
         const FORCE_ACCEPT_COOLDOWN_RETRIES: usize = 2;
         // Keep cancellation responsiveness tight for large transient decks where a
         // single accepted step can still be expensive.
         const ABORT_CHECK_INTERVAL: usize = 16;
         let estimated_steps = ((tstop / max_step).ceil().max(1.0) as usize).saturating_add(1);
         let max_total_iterations = estimated_steps.saturating_mul(40).max(10_000_000);
-        let wall_start = std::time::Instant::now();
         let mut last_progress_log = std::time::Instant::now();
+        let mut rhs = vec![0.0; size];
+        let mut new_solution = solution.clone();
 
         while t < tstop && total_iterations < max_total_iterations {
-            // Wall-clock timeout check
-            if wall_start.elapsed().as_secs() > MAX_WALL_TIME_SECS {
-                log::warn!(
-                    "Transient simulation wall-clock timeout after {}s at t={:.3e}s ({:.1}% complete)",
-                    MAX_WALL_TIME_SECS,
-                    t,
-                    (t / tstop) * 100.0
-                );
-                break;
-            }
-
             // Progress logging every 2 seconds
             if last_progress_log.elapsed().as_secs() >= 2 {
                 log::info!(
@@ -1678,7 +1698,6 @@ impl Engine {
             }
             let configured_min_dt = self.config.min_timestep.max(1e-15);
             let mut dt = dt.min(tstop - t); // Don't overshoot tstop
-            const SOURCE_ACTIVE_DELTA: Value = 1e-2; // 10mV over step window
             let mut expected_source_delta = circuit.voltage_sources.max_expected_delta(t, t + dt);
             if !at_breakpoint {
                 if expected_source_delta >= SOURCE_ACTIVE_DELTA {
@@ -1715,8 +1734,7 @@ impl Engine {
             let coeff = CompanionCoefficients::for_method(current_method);
 
             // Prepare for Newton iteration at this timestep
-            let mut new_solution = solution.clone();
-            let mut rhs = vec![0.0; size];
+            new_solution.clone_from(&solution);
             let mut had_solver_candidate = true;
 
             // Newton-Raphson iteration for this timestep.
@@ -2093,7 +2111,7 @@ impl Engine {
                         circuit.accept_xspice_timestep();
                     }
 
-                    solution = new_solution;
+                    solution.clone_from(&new_solution);
                     result.time.push(t);
                     for (i, voltages) in result.voltages.iter_mut().enumerate() {
                         voltages.push(solution.get(i).copied().unwrap_or(0.0));
@@ -2118,7 +2136,15 @@ impl Engine {
                     // Large cooldowns plus immediate dt growth can trap stiff switching decks
                     // in repeated force-accept loops instead of letting the controller retreat.
                     force_accept_cooldown = FORCE_ACCEPT_COOLDOWN_RETRIES;
-                    timestep.force_step(dt);
+                    Self::recover_timestep_after_accepted_step(
+                        &mut timestep,
+                        &lte_estimator,
+                        &solution,
+                        dt,
+                        max_step,
+                        is_strictly_linear_transient,
+                        expected_source_delta,
+                    );
                     if matches!(
                         current_method,
                         IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear
@@ -2251,14 +2277,22 @@ impl Engine {
                         circuit.accept_xspice_timestep();
                     }
 
-                    solution = new_solution;
+                    solution.clone_from(&new_solution);
                     result.time.push(t);
                     for (i, voltages) in result.voltages.iter_mut().enumerate() {
                         voltages.push(solution.get(i).copied().unwrap_or(0.0));
                     }
                     retry_count = 0; // Reset for next timepoint
                     force_accept_cooldown = FORCE_ACCEPT_COOLDOWN_RETRIES;
-                    timestep.force_step(dt);
+                    Self::recover_timestep_after_accepted_step(
+                        &mut timestep,
+                        &lte_estimator,
+                        &solution,
+                        dt,
+                        max_step,
+                        is_strictly_linear_transient,
+                        expected_source_delta,
+                    );
                     if matches!(
                         current_method,
                         IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear
@@ -2345,7 +2379,7 @@ impl Engine {
                 circuit.accept_xspice_timestep();
             }
 
-            solution = new_solution;
+            solution.clone_from(&new_solution);
 
             // Store results
             result.time.push(t);
