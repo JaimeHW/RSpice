@@ -96,6 +96,10 @@ fn model_params_upper_map(params: &[(String, f64)]) -> HashMap<String, f64> {
         .collect()
 }
 
+fn is_bsimsoi_level(level: i32) -> bool {
+    matches!(level, 55..=57)
+}
+
 fn resolve_xspice_node(circuit: &mut CircuitData, name: &str) -> usize {
     if name.eq_ignore_ascii_case("0") {
         0
@@ -498,11 +502,6 @@ impl Engine {
                     mos_type: _mos_type,
                     instance_params,
                 } => {
-                    let drain = circuit.get_or_create_node(&element.nodes[0]);
-                    let gate = circuit.get_or_create_node(&element.nodes[1]);
-                    let source = circuit.get_or_create_node(&element.nodes[2]);
-                    let bulk = circuit.get_or_create_node(&element.nodes[3]);
-
                     // Resolve NMOS/PMOS from model card when available.
                     let model_def = find_model_def(netlist, model);
                     let resolved_mos_type = if let Some(device_model) = model_def {
@@ -523,6 +522,24 @@ impl Engine {
                         )));
                     };
 
+                    let params_map =
+                        model_def.map(|device_model| model_params_upper_map(&device_model.params));
+                    let level = params_map
+                        .as_ref()
+                        .and_then(|params| params.get("LEVEL").copied())
+                        .unwrap_or(1.0) as i32;
+
+                    let bulk_node_name = if is_bsimsoi_level(level) && element.nodes.len() > 4 {
+                        &element.nodes[4]
+                    } else {
+                        &element.nodes[3]
+                    };
+
+                    let drain = circuit.get_or_create_node(&element.nodes[0]);
+                    let gate = circuit.get_or_create_node(&element.nodes[1]);
+                    let source = circuit.get_or_create_node(&element.nodes[2]);
+                    let bulk = circuit.get_or_create_node(bulk_node_name);
+
                     let mut mosfet = match resolved_mos_type {
                         crate::netlist::MosType::Nmos => crate::device::Mosfet::new_nmos(
                             element.name.clone(),
@@ -541,15 +558,11 @@ impl Engine {
                     };
 
                     // Look up model and apply parameters including LEVEL
-                    if let Some(device_model) = model_def {
-                        let params_map = model_params_upper_map(&device_model.params);
-
-                        // Extract LEVEL from params (default to 1)
-                        let level = params_map.get("LEVEL").copied().unwrap_or(1.0) as i32;
+                    if let Some(params_map) = params_map.as_ref() {
                         mosfet = mosfet.with_level(level);
 
                         // Apply all model parameters (VTO, KP, GAMMA, KC, NC, etc.)
-                        mosfet = mosfet.with_params(&params_map);
+                        mosfet = mosfet.with_params(params_map);
                     }
 
                     mosfet = mosfet.with_instance_params(instance_params);

@@ -1480,6 +1480,43 @@ M1 2 1 0 0 NMOD W=10u M=3 NF=2
     }
 
     #[test]
+    fn test_bsimsoi_external_body_contact_becomes_runtime_bulk_node() {
+        let netlist_str = r#"
+* BSIMSOI tied-body instance should use the external body contact
+M1 d g s e b NMOD
+.MODEL NMOD NMOS (LEVEL=55 VTO=0.7 KP=100u)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+        let m = &circuit.mosfets.devices[0];
+        let body_contact = circuit.get_node_by_name("b").unwrap();
+
+        assert_eq!(m.level, 55);
+        assert_eq!(m.node_bulk, body_contact);
+        assert!(circuit.get_node_by_name("e").is_none());
+    }
+
+    #[test]
+    fn test_bsimsoi_without_external_body_uses_substrate_node() {
+        let netlist_str = r#"
+* BSIMSOI floating-body instance should fall back to the substrate node
+M1 d g s e NMOD
+.MODEL NMOD NMOS (LEVEL=55 VTO=0.7 KP=100u)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+        let m = &circuit.mosfets.devices[0];
+        let substrate = circuit.get_node_by_name("e").unwrap();
+
+        assert_eq!(m.level, 55);
+        assert_eq!(m.node_bulk, substrate);
+    }
+
+    #[test]
     fn test_jfet_model_card_type_sets_pjf_polarity() {
         let netlist_str = r#"
 * JFET model card type should define NJF/PJF polarity

@@ -1322,24 +1322,33 @@ fn parse_mosfet(
     let bulk = expect_node(stream, line_num)?;
 
     // SPICE MOS syntax variants:
-    // - 4-node: Mname D G S B model ...
-    // - 5-node (e.g. BSIMSOI): Mname D G S B E model ...
-    // We disambiguate by looking for an additional bare identifier before
-    // parameter assignments.
-    let first_after_bulk = expect_node(stream, line_num)?;
-    let (extra_node, model) = if matches!(&stream.peek().kind, TokenKind::Ident(_))
-        && !matches!(stream.peek_n(1).kind, TokenKind::Equals)
-    {
-        let model = expect_ident(stream, line_num)?;
-        (Some(first_after_bulk), model)
-    } else {
-        (None, first_after_bulk)
-    };
+    // - 4-node bulk MOS: Mname D G S B model ...
+    // - BSIMSOI special form: Mname D G S E [P] [B] [T] model ...
+    // Collect all bare tail tokens until explicit instance parameters begin.
+    // The final bare token is always the model name; preceding tokens are
+    // optional SOI nodes that must be preserved by the parser.
+    let mut tail_tokens = Vec::new();
+    loop {
+        skip_commas(stream);
+        if stream.is_eof() || matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
+        }
+        if matches!(&stream.peek().kind, TokenKind::Ident(_))
+            && !matches!(stream.peek_n(1).kind, TokenKind::Equals)
+        {
+            tail_tokens.push(expect_node(stream, line_num)?);
+            continue;
+        }
+        break;
+    }
+
+    let model = tail_tokens.pop().ok_or_else(|| ParseError::Syntax {
+        line: line_num,
+        message: "Expected MOSFET model name".to_string(),
+    })?;
 
     let mut nodes = vec![drain, gate, source, bulk];
-    if let Some(extra) = extra_node {
-        nodes.push(extra);
-    }
+    nodes.extend(tail_tokens);
 
     let mut instance_params = Vec::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
