@@ -1626,6 +1626,26 @@ pub struct JilesAthertonBinding {
     pub device: crate::device::passive::JilesAthertonInductor,
 }
 
+/// Runtime binding for a coupled inductor pair.
+#[derive(Debug, Clone)]
+pub struct CoupledInductorPairBinding {
+    /// Branch ordinal (1-indexed) for winding 1.
+    pub branch1_ordinal: NodeId,
+    /// Branch ordinal (1-indexed) for winding 2.
+    pub branch2_ordinal: NodeId,
+    /// Coupled inductor runtime device.
+    pub device: crate::device::CoupledInductorPair,
+}
+
+/// Runtime binding for a multi-winding transformer.
+#[derive(Debug, Clone)]
+pub struct MultiWindingTransformerBinding {
+    /// Branch ordinals (1-indexed) for each winding current.
+    pub branch_ordinals: Vec<NodeId>,
+    /// Transformer runtime device.
+    pub device: crate::device::MultiWindingTransformer,
+}
+
 /// High-performance circuit representation using Struct-of-Arrays
 #[derive(Debug)]
 pub struct CircuitData {
@@ -1671,6 +1691,8 @@ pub struct CircuitData {
     pub iswitches: Vec<crate::device::CurrentSwitch>,
     pub tlines: Vec<crate::device::TransmissionLine>,
     pub couplings: Vec<crate::device::InductorCoupling>,
+    pub coupled_inductor_pairs: Vec<CoupledInductorPairBinding>,
+    pub multi_winding_transformers: Vec<MultiWindingTransformerBinding>,
     pub jiles_atherton_inductors: Vec<JilesAthertonBinding>,
 
     // Behavioral sources (expression-based B-elements)
@@ -1721,6 +1743,8 @@ impl CircuitData {
             iswitches: Vec::new(),
             tlines: Vec::new(),
             couplings: Vec::new(),
+            coupled_inductor_pairs: Vec::new(),
+            multi_winding_transformers: Vec::new(),
             jiles_atherton_inductors: Vec::new(),
             behavioral_sources: BehavioralSources::new(),
             // XSPICE instances
@@ -1923,6 +1947,18 @@ impl CircuitData {
             self.inductors.node_pos[i] = remap(self.inductors.node_pos[i]);
             self.inductors.node_neg[i] = remap(self.inductors.node_neg[i]);
         }
+        for binding in &mut self.coupled_inductor_pairs {
+            binding.device.node1_pos = remap(binding.device.node1_pos);
+            binding.device.node1_neg = remap(binding.device.node1_neg);
+            binding.device.node2_pos = remap(binding.device.node2_pos);
+            binding.device.node2_neg = remap(binding.device.node2_neg);
+        }
+        for binding in &mut self.multi_winding_transformers {
+            for (pos, neg) in &mut binding.device.nodes {
+                *pos = remap(*pos);
+                *neg = remap(*neg);
+            }
+        }
         for binding in &mut self.jiles_atherton_inductors {
             binding.device.node_pos = remap(binding.device.node_pos);
             binding.device.node_neg = remap(binding.device.node_neg);
@@ -2025,6 +2061,34 @@ impl CircuitData {
         });
     }
 
+    /// Register a coupled inductor pair runtime binding.
+    pub fn add_coupled_inductor_pair(
+        &mut self,
+        branch1_ordinal: NodeId,
+        branch2_ordinal: NodeId,
+        device: crate::device::CoupledInductorPair,
+    ) {
+        self.coupled_inductor_pairs
+            .push(CoupledInductorPairBinding {
+                branch1_ordinal,
+                branch2_ordinal,
+                device,
+            });
+    }
+
+    /// Register a multi-winding transformer runtime binding.
+    pub fn add_multi_winding_transformer(
+        &mut self,
+        branch_ordinals: Vec<NodeId>,
+        device: crate::device::MultiWindingTransformer,
+    ) {
+        self.multi_winding_transformers
+            .push(MultiWindingTransformerBinding {
+                branch_ordinals,
+                device,
+            });
+    }
+
     /// Resolve all pending CCCS/CCVS/ISWITCH control element references.
     /// Call this after all elements have been added to the circuit
     /// Returns an error if any control element is not found
@@ -2123,6 +2187,52 @@ impl CircuitData {
         }
     }
 
+    /// Stamp coupled inductor companion models for transient analysis.
+    pub fn stamp_coupled_inductor_pairs_transient(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+    ) {
+        let mut stamper = StaticMatrixStamper { matrix, rhs };
+        for binding in &self.coupled_inductor_pairs {
+            binding
+                .device
+                .stamp_transient_companion(dt, coeff, &mut stamper, &mut []);
+        }
+    }
+
+    /// Stamp multi-winding transformer companion models for transient analysis.
+    pub fn stamp_multi_winding_transformers_transient(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+    ) {
+        let mut stamper = StaticMatrixStamper { matrix, rhs };
+        for binding in &self.multi_winding_transformers {
+            binding
+                .device
+                .stamp_transient_companion(dt, coeff, &mut stamper, &mut []);
+        }
+    }
+
+    /// Update coupled inductor transient history from an accepted solution.
+    pub fn update_coupled_inductor_pair_state(&mut self, solution: &[Value]) {
+        for binding in &mut self.coupled_inductor_pairs {
+            binding.device.update_state_from_solution(solution);
+        }
+    }
+
+    /// Update multi-winding transformer transient history from an accepted solution.
+    pub fn update_multi_winding_transformer_state(&mut self, solution: &[Value]) {
+        for binding in &mut self.multi_winding_transformers {
+            binding.device.update_state_from_solution(solution);
+        }
+    }
+
     /// Get node names sorted by their node index (1, 2, 3, ...)
     /// Returns a Vec where index i contains the name of node (i+1)
     /// This is useful for waveform output labels like V(N001), V(N002)
@@ -2160,6 +2270,8 @@ impl CircuitData {
             + self.vccs.len()
             + self.cccs.len()
             + self.ccvs.len()
+            + self.coupled_inductor_pairs.len()
+            + self.multi_winding_transformers.len()
             + self.jiles_atherton_inductors.len();
         #[cfg(feature = "veriloga")]
         {
@@ -2201,6 +2313,21 @@ impl CircuitData {
         self.mosfets.link_all(matrix);
         for jfet in &mut self.jfets {
             jfet.link(matrix);
+        }
+        for binding in &mut self.coupled_inductor_pairs {
+            let branch1_matrix_index = self.num_nodes + binding.branch1_ordinal;
+            let branch2_matrix_index = self.num_nodes + binding.branch2_ordinal;
+            binding
+                .device
+                .set_branches(branch1_matrix_index, branch2_matrix_index);
+        }
+        for binding in &mut self.multi_winding_transformers {
+            let branches: Vec<NodeId> = binding
+                .branch_ordinals
+                .iter()
+                .map(|branch_ordinal| self.num_nodes + *branch_ordinal)
+                .collect();
+            binding.device.set_branches(branches);
         }
         for binding in &mut self.jiles_atherton_inductors {
             let branch_matrix_index = self.num_nodes + binding.branch_ordinal;
@@ -2271,11 +2398,80 @@ impl CircuitData {
         }
     }
 
+    #[inline]
+    fn stamp_coupled_inductors_dc_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
+        let mut stamper = StaticMatrixStamper { matrix, rhs };
+        for binding in &self.coupled_inductor_pairs {
+            binding.device.stamp_dc_short(&mut stamper, &mut []);
+        }
+    }
+
+    #[inline]
+    fn stamp_coupled_inductors_dc(&self, matrix: &mut TripletMatrix, rhs: &mut [Value]) {
+        for binding in &self.coupled_inductor_pairs {
+            let br1 = self.get_branch_matrix_index(binding.branch1_ordinal);
+            let br2 = self.get_branch_matrix_index(binding.branch2_ordinal);
+            let device = &binding.device;
+
+            if device.node1_pos > 0 {
+                matrix.push(br1 - 1, device.node1_pos - 1, 1.0);
+                matrix.push(device.node1_pos - 1, br1 - 1, 1.0);
+            }
+            if device.node1_neg > 0 {
+                matrix.push(br1 - 1, device.node1_neg - 1, -1.0);
+                matrix.push(device.node1_neg - 1, br1 - 1, -1.0);
+            }
+            if device.node2_pos > 0 {
+                matrix.push(br2 - 1, device.node2_pos - 1, 1.0);
+                matrix.push(device.node2_pos - 1, br2 - 1, 1.0);
+            }
+            if device.node2_neg > 0 {
+                matrix.push(br2 - 1, device.node2_neg - 1, -1.0);
+                matrix.push(device.node2_neg - 1, br2 - 1, -1.0);
+            }
+
+            rhs[br1 - 1] = 0.0;
+            rhs[br2 - 1] = 0.0;
+        }
+    }
+
+    #[inline]
+    fn stamp_multi_winding_transformers_dc_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+    ) {
+        let mut stamper = StaticMatrixStamper { matrix, rhs };
+        for binding in &self.multi_winding_transformers {
+            binding.device.stamp_dc_short(&mut stamper, &mut []);
+        }
+    }
+
+    #[inline]
+    fn stamp_multi_winding_transformers_dc(&self, matrix: &mut TripletMatrix, rhs: &mut [Value]) {
+        for binding in &self.multi_winding_transformers {
+            for (winding_idx, &(pos, neg)) in binding.device.nodes.iter().enumerate() {
+                let br = self.get_branch_matrix_index(binding.branch_ordinals[winding_idx]);
+                if pos > 0 {
+                    matrix.push(br - 1, pos - 1, 1.0);
+                    matrix.push(pos - 1, br - 1, 1.0);
+                }
+                if neg > 0 {
+                    matrix.push(br - 1, neg - 1, -1.0);
+                    matrix.push(neg - 1, br - 1, -1.0);
+                }
+                rhs[br - 1] = 0.0;
+            }
+        }
+    }
+
     /// Stamp all linear devices for DC analysis using O(1) direct stamping
     pub fn stamp_dc_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
         self.resistors.stamp_all_direct(matrix);
         let num_nodes = self.num_nodes;
         self.inductors.stamp_dc_short_direct(matrix, rhs, num_nodes);
+        self.stamp_coupled_inductors_dc_direct(matrix, rhs);
+        self.stamp_multi_winding_transformers_dc_direct(matrix, rhs);
         self.voltage_sources
             .stamp_all_direct(matrix, rhs, |br_ordinal| num_nodes + br_ordinal);
         self.current_sources.stamp_all(rhs);
@@ -2301,6 +2497,8 @@ impl CircuitData {
         self.resistors.stamp_all_direct(matrix);
         let num_nodes = self.num_nodes;
         self.inductors.stamp_dc_short_direct(matrix, rhs, num_nodes);
+        self.stamp_coupled_inductors_dc_direct(matrix, rhs);
+        self.stamp_multi_winding_transformers_dc_direct(matrix, rhs);
         self.voltage_sources
             .stamp_all_direct(matrix, rhs, |br_ordinal| num_nodes + br_ordinal);
         self.current_sources.stamp_all(rhs);
@@ -2324,6 +2522,8 @@ impl CircuitData {
         self.resistors.stamp_all_direct(matrix);
         let num_nodes = self.num_nodes;
         self.inductors.stamp_dc_short_direct(matrix, rhs, num_nodes);
+        self.stamp_coupled_inductors_dc_direct(matrix, rhs);
+        self.stamp_multi_winding_transformers_dc_direct(matrix, rhs);
         self.voltage_sources
             .stamp_all_direct_scaled(matrix, rhs, scale, |br_ordinal| num_nodes + br_ordinal);
         self.current_sources.stamp_all_scaled(rhs, scale);
@@ -2342,6 +2542,8 @@ impl CircuitData {
         let num_nodes = self.num_nodes;
         self.resistors.stamp_all(matrix);
         self.inductors.stamp_dc_short(matrix, rhs, num_nodes);
+        self.stamp_coupled_inductors_dc(matrix, rhs);
+        self.stamp_multi_winding_transformers_dc(matrix, rhs);
         self.voltage_sources.stamp_all(matrix, rhs);
         self.current_sources.stamp_all(rhs);
         self.vcvs.stamp_all(matrix, num_nodes);

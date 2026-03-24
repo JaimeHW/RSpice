@@ -255,6 +255,57 @@ impl Engine {
             triplets.push((br - 1, br - 1, 0.0));
         }
 
+        // Coupled inductor pair stamps.
+        for binding in &circuit.coupled_inductor_pairs {
+            let device = &binding.device;
+            let br1 = circuit.get_branch_matrix_index(binding.branch1_ordinal);
+            let br2 = circuit.get_branch_matrix_index(binding.branch2_ordinal);
+
+            if device.node1_pos > 0 {
+                triplets.push((br1 - 1, device.node1_pos - 1, 0.0));
+                triplets.push((device.node1_pos - 1, br1 - 1, 0.0));
+            }
+            if device.node1_neg > 0 {
+                triplets.push((br1 - 1, device.node1_neg - 1, 0.0));
+                triplets.push((device.node1_neg - 1, br1 - 1, 0.0));
+            }
+            if device.node2_pos > 0 {
+                triplets.push((br2 - 1, device.node2_pos - 1, 0.0));
+                triplets.push((device.node2_pos - 1, br2 - 1, 0.0));
+            }
+            if device.node2_neg > 0 {
+                triplets.push((br2 - 1, device.node2_neg - 1, 0.0));
+                triplets.push((device.node2_neg - 1, br2 - 1, 0.0));
+            }
+
+            triplets.push((br1 - 1, br1 - 1, 0.0));
+            triplets.push((br1 - 1, br2 - 1, 0.0));
+            triplets.push((br2 - 1, br1 - 1, 0.0));
+            triplets.push((br2 - 1, br2 - 1, 0.0));
+        }
+
+        // Multi-winding transformer stamps.
+        for binding in &circuit.multi_winding_transformers {
+            for (winding_idx, &(pos, neg)) in binding.device.nodes.iter().enumerate() {
+                let br = circuit.get_branch_matrix_index(binding.branch_ordinals[winding_idx]);
+                if pos > 0 {
+                    triplets.push((br - 1, pos - 1, 0.0));
+                    triplets.push((pos - 1, br - 1, 0.0));
+                }
+                if neg > 0 {
+                    triplets.push((br - 1, neg - 1, 0.0));
+                    triplets.push((neg - 1, br - 1, 0.0));
+                }
+            }
+            for row_idx in 0..binding.branch_ordinals.len() {
+                let br_row = circuit.get_branch_matrix_index(binding.branch_ordinals[row_idx]);
+                for col_idx in 0..binding.branch_ordinals.len() {
+                    let br_col = circuit.get_branch_matrix_index(binding.branch_ordinals[col_idx]);
+                    triplets.push((br_row - 1, br_col - 1, 0.0));
+                }
+            }
+        }
+
         // VCVS stamps (branch variable for output voltage)
         for i in 0..circuit.vcvs.len() {
             let np = circuit.vcvs.node_pos[i];

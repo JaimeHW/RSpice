@@ -932,10 +932,7 @@ impl Engine {
             }
 
             let ccs = bjt.cjcp;
-            if ccs.is_finite()
-                && ccs > 0.0
-                && bjt.node_collector != bjt.node_substrate
-            {
+            if ccs.is_finite() && ccs > 0.0 && bjt.node_collector != bjt.node_substrate {
                 let geq = coeff.capacitor_geq(ccs, dt);
                 let ieq = coeff.capacitor_ieq(
                     ccs,
@@ -1221,6 +1218,8 @@ impl Engine {
                 circuit.inductors.v_prev[l_idx] = v_new;
             }
         }
+        circuit.update_coupled_inductor_pair_state(accepted_solution);
+        circuit.update_multi_winding_transformer_state(accepted_solution);
         circuit.refresh_jiles_atherton_inductances(accepted_solution);
 
         // Update transmission-line delayed-wave history from the accepted state.
@@ -1303,10 +1302,7 @@ impl Engine {
             }
 
             let ccs = bjt.cjcp;
-            if ccs.is_finite()
-                && ccs > 0.0
-                && bjt.node_collector != bjt.node_substrate
-            {
+            if ccs.is_finite() && ccs > 0.0 && bjt.node_collector != bjt.node_substrate {
                 let geq = coeff_update.capacitor_geq(ccs, dt);
                 let ieq = coeff_update.capacitor_ieq(
                     ccs,
@@ -1632,6 +1628,8 @@ impl Engine {
                 circuit.inductors.i_prev_prev[l_idx] = i_dc;
             }
         }
+        circuit.update_coupled_inductor_pair_state(&solution);
+        circuit.update_multi_winding_transformer_state(&solution);
         let tline_dc_refs = Self::initialize_tline_history(&mut circuit, &solution, 0.0);
         let mut bjt_history = Self::initialize_bjt_history(&circuit, &solution);
         let mut jfet_history = Self::initialize_jfet_history(&circuit, &solution);
@@ -1706,7 +1704,8 @@ impl Engine {
                     let active_cap = (configured_min_dt / 8.0).max(practical_min);
                     if dt > active_cap {
                         dt = active_cap;
-                        expected_source_delta = circuit.voltage_sources.max_expected_delta(t, t + dt);
+                        expected_source_delta =
+                            circuit.voltage_sources.max_expected_delta(t, t + dt);
                     }
                 } else if dt < configured_min_dt {
                     // Away from sharp source transitions, keep production-grade
@@ -1788,6 +1787,13 @@ impl Engine {
                     dt,
                     &coeff,
                     num_nodes,
+                );
+                circuit.stamp_coupled_inductor_pairs_transient(&mut matrix, &mut rhs, dt, &coeff);
+                circuit.stamp_multi_winding_transformers_transient(
+                    &mut matrix,
+                    &mut rhs,
+                    dt,
+                    &coeff,
                 );
                 Self::stamp_bjt_transient_companions(
                     &circuit,

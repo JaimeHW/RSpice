@@ -37,6 +37,7 @@
 //! ```
 //! where [L] is the inductance matrix with Lij = k*sqrt(Li*Lj) for i≠j.
 
+use crate::analysis::CompanionCoefficients;
 use crate::device::traits::{DynamicDevice, MatrixStamper};
 use crate::{Value, circuit::NodeId};
 
@@ -106,7 +107,9 @@ pub struct CoupledInductorPair {
 
     // State for transient
     current1_prev: Value,
+    current1_prev_prev: Value,
     current2_prev: Value,
+    current2_prev_prev: Value,
     voltage1_prev: Value,
     voltage2_prev: Value,
 }
@@ -138,7 +141,9 @@ impl CoupledInductorPair {
             k: k.abs().min(1.0),
             m,
             current1_prev: 0.0,
+            current1_prev_prev: 0.0,
             current2_prev: 0.0,
+            current2_prev_prev: 0.0,
             voltage1_prev: 0.0,
             voltage2_prev: 0.0,
         }
@@ -153,7 +158,9 @@ impl CoupledInductorPair {
     /// Set initial currents
     pub fn set_initial_currents(&mut self, i1: Value, i2: Value) {
         self.current1_prev = i1;
+        self.current1_prev_prev = i1;
         self.current2_prev = i2;
+        self.current2_prev_prev = i2;
     }
 
     /// Get turns ratio (approximate, for ideal transformer)
@@ -171,24 +178,114 @@ impl CoupledInductorPair {
         self.l2 * (1.0 - self.k * self.k)
     }
 
-    /// Calculate equivalent circuit values for companion model
-    /// Returns (req1, req2, reqm, veq1, veq2) for trapezoidal integration
-    fn companion_values(&self, dt: Value) -> (Value, Value, Value, Value, Value) {
-        // For coupled inductors with trapezoidal integration:
-        // [v1]   [R11 R12] [i1]   [v1_eq]
-        // [v2] = [R21 R22] [i2] + [v2_eq]
-        //
-        // where R11 = 2*L1/dt, R22 = 2*L2/dt, R12 = R21 = 2*M/dt
+    /// Stamp DC short-circuit topology for the pair.
+    pub fn stamp_dc_short(&self, matrix: &mut impl MatrixStamper, _rhs: &mut [Value]) {
+        let branch1 = self.branch1.expect("Branch1 index must be set");
+        let branch2 = self.branch2.expect("Branch2 index must be set");
 
-        let r11 = 2.0 * self.l1 / dt;
-        let r22 = 2.0 * self.l2 / dt;
-        let r12 = 2.0 * self.m / dt;
+        matrix.stamp(branch1, self.node1_pos, 1.0);
+        matrix.stamp(branch1, self.node1_neg, -1.0);
+        matrix.stamp(self.node1_pos, branch1, 1.0);
+        matrix.stamp(self.node1_neg, branch1, -1.0);
 
-        // Equivalent voltage sources
-        let v1_eq = r11 * self.current1_prev + r12 * self.current2_prev + self.voltage1_prev;
-        let v2_eq = r12 * self.current1_prev + r22 * self.current2_prev + self.voltage2_prev;
+        matrix.stamp(branch2, self.node2_pos, 1.0);
+        matrix.stamp(branch2, self.node2_neg, -1.0);
+        matrix.stamp(self.node2_pos, branch2, 1.0);
+        matrix.stamp(self.node2_neg, branch2, -1.0);
+
+        matrix.stamp_rhs(branch1, 0.0);
+        matrix.stamp_rhs(branch2, 0.0);
+    }
+
+    /// Calculate equivalent circuit values for the configured integration method.
+    fn companion_values(
+        &self,
+        dt: Value,
+        coeff: &CompanionCoefficients,
+    ) -> (Value, Value, Value, Value, Value) {
+        let r11 = coeff.inductor_req(self.l1, dt);
+        let r22 = coeff.inductor_req(self.l2, dt);
+        let r12 = coeff.inductor_req(self.m, dt);
+
+        let prev_mix_1 = coeff.coeff_v_n_minus_1
+            * (self.l1 * self.current1_prev_prev + self.m * self.current2_prev_prev)
+            / dt;
+        let prev_mix_2 = coeff.coeff_v_n_minus_1
+            * (self.m * self.current1_prev_prev + self.l2 * self.current2_prev_prev)
+            / dt;
+
+        let v1_eq =
+            r11 * self.current1_prev + r12 * self.current2_prev + self.voltage1_prev + prev_mix_1;
+        let v2_eq =
+            r12 * self.current1_prev + r22 * self.current2_prev + self.voltage2_prev + prev_mix_2;
 
         (r11, r22, r12, v1_eq, v2_eq)
+    }
+
+    /// Stamp the transient companion for the configured integration method.
+    pub fn stamp_transient_companion(
+        &self,
+        dt: Value,
+        coeff: &CompanionCoefficients,
+        matrix: &mut impl MatrixStamper,
+        _rhs: &mut [Value],
+    ) {
+        let branch1 = self.branch1.expect("Branch1 index must be set");
+        let branch2 = self.branch2.expect("Branch2 index must be set");
+
+        let (r11, r22, r12, v1_eq, v2_eq) = self.companion_values(dt, coeff);
+
+        matrix.stamp(branch1, self.node1_pos, 1.0);
+        matrix.stamp(branch1, self.node1_neg, -1.0);
+        matrix.stamp(branch1, branch1, -r11);
+        matrix.stamp(branch1, branch2, -r12);
+
+        matrix.stamp(branch2, self.node2_pos, 1.0);
+        matrix.stamp(branch2, self.node2_neg, -1.0);
+        matrix.stamp(branch2, branch1, -r12);
+        matrix.stamp(branch2, branch2, -r22);
+
+        matrix.stamp(self.node1_pos, branch1, 1.0);
+        matrix.stamp(self.node1_neg, branch1, -1.0);
+        matrix.stamp(self.node2_pos, branch2, 1.0);
+        matrix.stamp(self.node2_neg, branch2, -1.0);
+
+        matrix.stamp_rhs(branch1, v1_eq);
+        matrix.stamp_rhs(branch2, v2_eq);
+    }
+
+    /// Update history from an accepted solution vector.
+    pub fn update_state_from_solution(&mut self, solution: &[Value]) {
+        let v1 = if self.node1_pos == 0 {
+            0.0
+        } else {
+            solution.get(self.node1_pos - 1).copied().unwrap_or(0.0)
+        } - if self.node1_neg == 0 {
+            0.0
+        } else {
+            solution.get(self.node1_neg - 1).copied().unwrap_or(0.0)
+        };
+        let v2 = if self.node2_pos == 0 {
+            0.0
+        } else {
+            solution.get(self.node2_pos - 1).copied().unwrap_or(0.0)
+        } - if self.node2_neg == 0 {
+            0.0
+        } else {
+            solution.get(self.node2_neg - 1).copied().unwrap_or(0.0)
+        };
+
+        let branch1 = self.branch1.expect("Branch1 index must be set");
+        let branch2 = self.branch2.expect("Branch2 index must be set");
+        let i1 = solution.get(branch1 - 1).copied().unwrap_or(0.0);
+        let i2 = solution.get(branch2 - 1).copied().unwrap_or(0.0);
+
+        self.current1_prev_prev = self.current1_prev;
+        self.current1_prev = i1;
+        self.current2_prev_prev = self.current2_prev;
+        self.current2_prev = i2;
+        self.voltage1_prev = v1;
+        self.voltage2_prev = v2;
     }
 }
 
@@ -198,103 +295,13 @@ impl DynamicDevice for CoupledInductorPair {
         _voltages: &[Value],
         dt: Value,
         matrix: &mut impl MatrixStamper,
-        _rhs: &mut [Value],
+        rhs: &mut [Value],
     ) {
-        let branch1 = self.branch1.expect("Branch1 index must be set");
-        let branch2 = self.branch2.expect("Branch2 index must be set");
-
-        let (r11, r22, r12, v1_eq, v2_eq) = self.companion_values(dt);
-
-        // MNA for coupled inductors:
-        // Branch 1 equation: v1+ - v1- = R11*i1 + R12*i2 + V1_eq
-        // Branch 2 equation: v2+ - v2- = R12*i1 + R22*i2 + V2_eq
-
-        // Row for branch1 current
-        matrix.stamp(branch1, self.node1_pos, 1.0);
-        matrix.stamp(branch1, self.node1_neg, -1.0);
-        matrix.stamp(branch1, branch1, -r11);
-        matrix.stamp(branch1, branch2, -r12);
-
-        // Row for branch2 current
-        matrix.stamp(branch2, self.node2_pos, 1.0);
-        matrix.stamp(branch2, self.node2_neg, -1.0);
-        matrix.stamp(branch2, branch1, -r12); // Mutual coupling
-        matrix.stamp(branch2, branch2, -r22);
-
-        // KCL: current contributions to nodes
-        matrix.stamp(self.node1_pos, branch1, 1.0);
-        matrix.stamp(self.node1_neg, branch1, -1.0);
-        matrix.stamp(self.node2_pos, branch2, 1.0);
-        matrix.stamp(self.node2_neg, branch2, -1.0);
-
-        // RHS for equivalent voltage sources
-        matrix.stamp_rhs(branch1, v1_eq);
-        matrix.stamp_rhs(branch2, v2_eq);
+        self.stamp_transient_companion(dt, &CompanionCoefficients::trapezoidal(), matrix, rhs);
     }
 
     fn step(&mut self, voltages: &[Value], _dt: Value) {
-        // Get node voltages
-        let v1_pos = if self.node1_pos == 0 {
-            0.0
-        } else {
-            voltages[self.node1_pos - 1]
-        };
-        let v1_neg = if self.node1_neg == 0 {
-            0.0
-        } else {
-            voltages[self.node1_neg - 1]
-        };
-        let v2_pos = if self.node2_pos == 0 {
-            0.0
-        } else {
-            voltages[self.node2_pos - 1]
-        };
-        let v2_neg = if self.node2_neg == 0 {
-            0.0
-        } else {
-            voltages[self.node2_neg - 1]
-        };
-
-        let v1 = v1_pos - v1_neg;
-        let v2 = v2_pos - v2_neg;
-
-        // Get branch currents (stored in extended voltage vector)
-        let branch1 = self.branch1.unwrap();
-        let branch2 = self.branch2.unwrap();
-        let i1 = if branch1 > 0 && branch1 <= voltages.len() {
-            voltages[branch1 - 1]
-        } else {
-            0.0
-        };
-        let i2 = if branch2 > 0 && branch2 <= voltages.len() {
-            voltages[branch2 - 1]
-        } else {
-            0.0
-        };
-
-        // Update for next step using trapezoidal rule
-        // For coupled inductors: d/dt [L][i] = [v]
-        // This requires solving the coupled system
-
-        // Using the inverse of the inductance matrix:
-        // [L]^-1 = 1/(L1*L2 - M^2) * [L2, -M; -M, L1]
-        let det = self.l1 * self.l2 - self.m * self.m;
-
-        if det.abs() > 1e-20 {
-            let inv_det = 1.0 / det;
-
-            // di/dt = [L]^-1 * [v]
-            let _di1_dt = inv_det * (self.l2 * v1 - self.m * v2);
-            let _di2_dt = inv_det * (-self.m * v1 + self.l1 * v2);
-
-            // Trapezoidal update (simplified, using average of old and new di/dt)
-            // For better accuracy, we'd need to iterate
-            self.current1_prev = i1;
-            self.current2_prev = i2;
-        }
-
-        self.voltage1_prev = v1;
-        self.voltage2_prev = v2;
+        self.update_state_from_solution(voltages);
     }
 }
 
@@ -325,6 +332,8 @@ pub struct MultiWindingTransformer {
     inductance_matrix: Vec<Vec<Value>>,
     /// Previous currents
     currents_prev: Vec<Value>,
+    /// Current history from two accepted steps ago
+    currents_prev_prev: Vec<Value>,
     /// Previous voltages
     voltages_prev: Vec<Value>,
 }
@@ -363,6 +372,7 @@ impl MultiWindingTransformer {
             coupling_matrix: coupling_coefficients,
             inductance_matrix: l_matrix,
             currents_prev: vec![0.0; n],
+            currents_prev_prev: vec![0.0; n],
             voltages_prev: vec![0.0; n],
         }
     }
@@ -382,6 +392,101 @@ impl MultiWindingTransformer {
     pub fn set_initial_current(&mut self, winding: usize, current: Value) {
         if winding < self.num_windings {
             self.currents_prev[winding] = current;
+            self.currents_prev_prev[winding] = current;
+        }
+    }
+
+    /// Stamp DC short-circuit topology for all windings.
+    pub fn stamp_dc_short(&self, matrix: &mut impl MatrixStamper, _rhs: &mut [Value]) {
+        for i in 0..self.num_windings {
+            let branch = self.branches[i].expect("Branch index must be set");
+            let (pos, neg) = self.nodes[i];
+            matrix.stamp(branch, pos, 1.0);
+            matrix.stamp(branch, neg, -1.0);
+            matrix.stamp(pos, branch, 1.0);
+            matrix.stamp(neg, branch, -1.0);
+            matrix.stamp_rhs(branch, 0.0);
+        }
+    }
+
+    fn companion_matrix(
+        &self,
+        dt: Value,
+        coeff: &CompanionCoefficients,
+    ) -> (Vec<Vec<Value>>, Vec<Value>) {
+        let n = self.num_windings;
+        let r_matrix: Vec<Vec<Value>> = self
+            .inductance_matrix
+            .iter()
+            .map(|row| row.iter().map(|&l| coeff.inductor_req(l, dt)).collect())
+            .collect();
+
+        let mut v_eq = vec![0.0; n];
+        for i in 0..n {
+            for j in 0..n {
+                v_eq[i] += r_matrix[i][j] * self.currents_prev[j];
+                if coeff.needs_two_history {
+                    v_eq[i] += coeff.coeff_v_n_minus_1
+                        * self.inductance_matrix[i][j]
+                        * self.currents_prev_prev[j]
+                        / dt;
+                }
+            }
+            v_eq[i] += self.voltages_prev[i];
+        }
+
+        (r_matrix, v_eq)
+    }
+
+    /// Stamp the transient companion for the configured integration method.
+    pub fn stamp_transient_companion(
+        &self,
+        dt: Value,
+        coeff: &CompanionCoefficients,
+        matrix: &mut impl MatrixStamper,
+        _rhs: &mut [Value],
+    ) {
+        let n = self.num_windings;
+        let (r_matrix, v_eq) = self.companion_matrix(dt, coeff);
+
+        for i in 0..n {
+            let branch_i = self.branches[i].expect("Branch index must be set");
+            let (pos_i, neg_i) = self.nodes[i];
+
+            matrix.stamp(branch_i, pos_i, 1.0);
+            matrix.stamp(branch_i, neg_i, -1.0);
+
+            for j in 0..n {
+                let branch_j = self.branches[j].expect("Branch index must be set");
+                matrix.stamp(branch_i, branch_j, -r_matrix[i][j]);
+            }
+
+            matrix.stamp(pos_i, branch_i, 1.0);
+            matrix.stamp(neg_i, branch_i, -1.0);
+            matrix.stamp_rhs(branch_i, v_eq[i]);
+        }
+    }
+
+    /// Update history from an accepted solution vector.
+    pub fn update_state_from_solution(&mut self, solution: &[Value]) {
+        for i in 0..self.num_windings {
+            let (pos, neg) = self.nodes[i];
+            let v_pos = if pos == 0 {
+                0.0
+            } else {
+                solution.get(pos - 1).copied().unwrap_or(0.0)
+            };
+            let v_neg = if neg == 0 {
+                0.0
+            } else {
+                solution.get(neg - 1).copied().unwrap_or(0.0)
+            };
+            self.voltages_prev[i] = v_pos - v_neg;
+
+            if let Some(branch) = self.branches[i] {
+                self.currents_prev_prev[i] = self.currents_prev[i];
+                self.currents_prev[i] = solution.get(branch - 1).copied().unwrap_or(0.0);
+            }
         }
     }
 }
@@ -392,63 +497,13 @@ impl DynamicDevice for MultiWindingTransformer {
         _voltages: &[Value],
         dt: Value,
         matrix: &mut impl MatrixStamper,
-        _rhs: &mut [Value],
+        rhs: &mut [Value],
     ) {
-        let n = self.num_windings;
-
-        // Calculate equivalent resistances: R[i][j] = 2 * L[i][j] / dt
-        let r_matrix: Vec<Vec<Value>> = self
-            .inductance_matrix
-            .iter()
-            .map(|row| row.iter().map(|&l| 2.0 * l / dt).collect())
-            .collect();
-
-        // Calculate equivalent voltages for each branch
-        let mut v_eq = vec![0.0; n];
-        for i in 0..n {
-            for j in 0..n {
-                v_eq[i] += r_matrix[i][j] * self.currents_prev[j];
-            }
-            v_eq[i] += self.voltages_prev[i];
-        }
-
-        // Stamp each branch
-        for i in 0..n {
-            let branch_i = self.branches[i].expect("Branch index must be set");
-            let (pos_i, neg_i) = self.nodes[i];
-
-            // Row for branch i: v_pos - v_neg = sum_j(R[i][j] * i[j]) + V_eq[i]
-            matrix.stamp(branch_i, pos_i, 1.0);
-            matrix.stamp(branch_i, neg_i, -1.0);
-
-            for j in 0..n {
-                let branch_j = self.branches[j].expect("Branch index must be set");
-                matrix.stamp(branch_i, branch_j, -r_matrix[i][j]);
-            }
-
-            // KCL stamps
-            matrix.stamp(pos_i, branch_i, 1.0);
-            matrix.stamp(neg_i, branch_i, -1.0);
-
-            // RHS
-            matrix.stamp_rhs(branch_i, v_eq[i]);
-        }
+        self.stamp_transient_companion(dt, &CompanionCoefficients::trapezoidal(), matrix, rhs);
     }
 
     fn step(&mut self, voltages: &[Value], _dt: Value) {
-        // Update previous values
-        for i in 0..self.num_windings {
-            let (pos, neg) = self.nodes[i];
-            let v_pos = if pos == 0 { 0.0 } else { voltages[pos - 1] };
-            let v_neg = if neg == 0 { 0.0 } else { voltages[neg - 1] };
-            self.voltages_prev[i] = v_pos - v_neg;
-
-            if let Some(branch) = self.branches[i] {
-                if branch > 0 && branch <= voltages.len() {
-                    self.currents_prev[i] = voltages[branch - 1];
-                }
-            }
-        }
+        self.update_state_from_solution(voltages);
     }
 }
 
@@ -459,6 +514,22 @@ impl DynamicDevice for MultiWindingTransformer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Default)]
+    struct TestStamper {
+        matrix: Vec<(NodeId, NodeId, Value)>,
+        rhs: Vec<(NodeId, Value)>,
+    }
+
+    impl MatrixStamper for TestStamper {
+        fn stamp(&mut self, row: NodeId, col: NodeId, value: Value) {
+            self.matrix.push((row, col, value));
+        }
+
+        fn stamp_rhs(&mut self, index: NodeId, value: Value) {
+            self.rhs.push((index, value));
+        }
+    }
 
     #[test]
     fn test_inductor_coupling() {
@@ -584,5 +655,169 @@ mod tests {
         // Turns ratio = sqrt(1e-3 / 10e-6) = sqrt(100) = 10
         let n = pair.turns_ratio();
         assert!((n - 10.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_set_initial_currents_primes_both_history_slots() {
+        let mut pair = CoupledInductorPair::new("T1".to_string(), 1, 0, 1e-3, 2, 0, 1e-3, 1.0);
+        pair.set_initial_currents(0.12, -0.08);
+
+        assert!((pair.current1_prev - 0.12).abs() < 1e-15);
+        assert!((pair.current1_prev_prev - 0.12).abs() < 1e-15);
+        assert!((pair.current2_prev + 0.08).abs() < 1e-15);
+        assert!((pair.current2_prev_prev + 0.08).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_stamp_dc_short_exposes_both_branch_constraints() {
+        let mut pair = CoupledInductorPair::new("T1".to_string(), 1, 0, 1e-3, 2, 3, 2e-3, 0.95);
+        pair.set_branches(4, 5);
+
+        let mut stamper = TestStamper::default();
+        pair.stamp_dc_short(&mut stamper, &mut []);
+
+        assert!(stamper.matrix.contains(&(4, 1, 1.0)));
+        assert!(stamper.matrix.contains(&(1, 4, 1.0)));
+        assert!(stamper.matrix.contains(&(5, 2, 1.0)));
+        assert!(stamper.matrix.contains(&(5, 3, -1.0)));
+        assert!(stamper.matrix.contains(&(3, 5, -1.0)));
+    }
+
+    #[test]
+    fn test_stamp_transient_companion_emits_mutual_branch_terms() {
+        let mut pair = CoupledInductorPair::new("T1".to_string(), 1, 0, 2e-3, 2, 0, 8e-3, 0.5);
+        pair.set_branches(3, 4);
+        pair.current1_prev = 0.01;
+        pair.current1_prev_prev = 0.007;
+        pair.current2_prev = -0.02;
+        pair.current2_prev_prev = -0.015;
+        pair.voltage1_prev = 0.3;
+        pair.voltage2_prev = -0.1;
+
+        let coeff = CompanionCoefficients::gear2();
+        let mut stamper = TestStamper::default();
+        pair.stamp_transient_companion(1e-6, &coeff, &mut stamper, &mut []);
+
+        let mutual = pair.m * coeff.coeff_g / 1e-6;
+        assert!(stamper.matrix.contains(&(3, 4, -mutual)));
+        assert!(stamper.matrix.contains(&(4, 3, -mutual)));
+        assert!(
+            stamper
+                .rhs
+                .iter()
+                .any(|(idx, value)| *idx == 3 && value.abs() > 0.0)
+        );
+        assert!(
+            stamper
+                .rhs
+                .iter()
+                .any(|(idx, value)| *idx == 4 && value.abs() > 0.0)
+        );
+    }
+
+    #[test]
+    fn test_update_state_from_solution_rotates_history() {
+        let mut pair = CoupledInductorPair::new("T1".to_string(), 1, 0, 1e-3, 2, 0, 1e-3, 1.0);
+        pair.set_branches(3, 4);
+        pair.current1_prev = 0.01;
+        pair.current2_prev = -0.02;
+
+        let solution = vec![1.25, -0.75, 0.03, -0.04];
+        pair.update_state_from_solution(&solution);
+
+        assert!((pair.current1_prev_prev - 0.01).abs() < 1e-15);
+        assert!((pair.current1_prev - 0.03).abs() < 1e-15);
+        assert!((pair.current2_prev_prev + 0.02).abs() < 1e-15);
+        assert!((pair.current2_prev + 0.04).abs() < 1e-15);
+        assert!((pair.voltage1_prev - 1.25).abs() < 1e-15);
+        assert!((pair.voltage2_prev + 0.75).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_multi_winding_initial_current_primes_history() {
+        let mut transformer = MultiWindingTransformer::new(
+            "T1".to_string(),
+            vec![(1, 0), (2, 0), (3, 0)],
+            vec![1e-3, 1e-3, 1e-3],
+            vec![
+                vec![1.0, 0.2, 0.1],
+                vec![0.2, 1.0, 0.15],
+                vec![0.1, 0.15, 1.0],
+            ],
+        );
+        transformer.set_initial_current(1, -0.25);
+
+        assert!((transformer.currents_prev[1] + 0.25).abs() < 1e-15);
+        assert!((transformer.currents_prev_prev[1] + 0.25).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_multi_winding_transient_companion_stamps_dense_branch_matrix() {
+        let mut transformer = MultiWindingTransformer::new(
+            "T1".to_string(),
+            vec![(1, 0), (2, 0), (3, 0)],
+            vec![1e-3, 2e-3, 3e-3],
+            vec![
+                vec![1.0, 0.2, 0.1],
+                vec![0.2, 1.0, 0.15],
+                vec![0.1, 0.15, 1.0],
+            ],
+        );
+        transformer.set_branches(vec![4, 5, 6]);
+        transformer.set_initial_current(0, 0.01);
+        transformer.set_initial_current(1, -0.02);
+        transformer.set_initial_current(2, 0.03);
+
+        let coeff = CompanionCoefficients::gear2();
+        let mut stamper = TestStamper::default();
+        transformer.stamp_transient_companion(1e-6, &coeff, &mut stamper, &mut []);
+
+        let m01 = coeff.inductor_req(0.2 * (1e-3_f64 * 2e-3_f64).sqrt(), 1e-6);
+        let m12 = coeff.inductor_req(0.15 * (2e-3_f64 * 3e-3_f64).sqrt(), 1e-6);
+        let m20 = coeff.inductor_req(0.1 * (3e-3_f64 * 1e-3_f64).sqrt(), 1e-6);
+        assert!(stamper.matrix.contains(&(4, 5, -m01)));
+        assert!(stamper.matrix.contains(&(5, 6, -m12)));
+        assert!(stamper.matrix.contains(&(6, 4, -m20)));
+        assert!(
+            stamper
+                .rhs
+                .iter()
+                .any(|(idx, value)| *idx == 4 && value.abs() > 0.0)
+        );
+        assert!(
+            stamper
+                .rhs
+                .iter()
+                .any(|(idx, value)| *idx == 5 && value.abs() > 0.0)
+        );
+        assert!(
+            stamper
+                .rhs
+                .iter()
+                .any(|(idx, value)| *idx == 6 && value.abs() > 0.0)
+        );
+    }
+
+    #[test]
+    fn test_multi_winding_update_state_rotates_history() {
+        let mut transformer = MultiWindingTransformer::new(
+            "T1".to_string(),
+            vec![(1, 0), (2, 0)],
+            vec![1e-3, 1e-3],
+            vec![vec![1.0, 0.5], vec![0.5, 1.0]],
+        );
+        transformer.set_branches(vec![3, 4]);
+        transformer.currents_prev[0] = 0.02;
+        transformer.currents_prev[1] = -0.03;
+
+        let solution = vec![1.2, -0.8, 0.07, -0.09];
+        transformer.update_state_from_solution(&solution);
+
+        assert!((transformer.currents_prev_prev[0] - 0.02).abs() < 1e-15);
+        assert!((transformer.currents_prev_prev[1] + 0.03).abs() < 1e-15);
+        assert!((transformer.currents_prev[0] - 0.07).abs() < 1e-15);
+        assert!((transformer.currents_prev[1] + 0.09).abs() < 1e-15);
+        assert!((transformer.voltages_prev[0] - 1.2).abs() < 1e-15);
+        assert!((transformer.voltages_prev[1] + 0.8).abs() < 1e-15);
     }
 }
