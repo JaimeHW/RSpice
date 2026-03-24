@@ -4,6 +4,8 @@
 
 #[cfg(test)]
 mod engine_tests {
+    #![allow(clippy::field_reassign_with_default)]
+
     use crate::Netlist;
     use crate::Value;
     use crate::abort_signal::ImmediateAbort;
@@ -1351,12 +1353,9 @@ Q1 3 2 0 2N2222
 "#;
         let netlist = Netlist::parse(netlist_str).unwrap();
         let engine = Engine::default();
-        match engine.run_dc_op(&netlist) {
-            Ok(r) => {
-                let vcc = r.voltage(1);
-                assert!((vcc - 5.0).abs() < 0.1, "Expected Vcc=5V, got {}V", vcc);
-            }
-            Err(_) => {} // BJT convergence failure acceptable
+        if let Ok(r) = engine.run_dc_op(&netlist) {
+            let vcc = r.voltage(1);
+            assert!((vcc - 5.0).abs() < 0.1, "Expected Vcc=5V, got {}V", vcc);
         }
     }
 

@@ -7,6 +7,7 @@
 //! - Sensitivity analysis
 //! - Parametric step sweep
 
+#![allow(clippy::too_many_arguments)]
 use super::{Engine, SimulationError};
 use crate::analysis::monte_carlo::{
     Distribution, MonteCarloResult, VariableStatistics, Xorshift128Plus,
@@ -502,9 +503,7 @@ impl Engine {
                     unbound_params.join(", ")
                 )));
             }
-            if normalized_filter.is_none() && !bound_params.is_empty() {
-                monte_params = bound_params;
-            } else if normalized_filter.is_some() {
+            if !bound_params.is_empty() {
                 monte_params = bound_params;
             } else if !unbound_params.is_empty() {
                 return Err(SimulationError::Circuit(
@@ -615,7 +614,7 @@ impl Engine {
     /// Run pole-zero analysis
     ///
     /// Finds poles and zeros of the transfer function from input to output node.
-    /// Uses the MNA formulation: (G + s·C)·V = I
+    /// Uses the MNA formulation: (G + sÂ·C)Â·V = I
     pub fn run_pz(
         &self,
         netlist: &Netlist,
@@ -1257,7 +1256,7 @@ impl Engine {
                         device_name,
                         param_name
                             .map(|p| format!(".{}", p))
-                            .unwrap_or_else(String::new),
+                            .unwrap_or_default(),
                         value,
                         e
                     );

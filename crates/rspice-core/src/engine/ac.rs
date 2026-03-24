@@ -359,7 +359,7 @@ impl Engine {
 
                 // Cgs: gate-source capacitance
                 let jwcgs = omega * cgs;
-                if ng > 0 && ng > 0 {
+                if ng > 0 {
                     ac_matrix.add_imag(ng - 1, ng - 1, jwcgs);
                 }
                 if ng > 0 && ns > 0 {
@@ -368,13 +368,13 @@ impl Engine {
                 if ns > 0 && ng > 0 {
                     ac_matrix.add_imag(ns - 1, ng - 1, -jwcgs);
                 }
-                if ns > 0 && ns > 0 {
+                if ns > 0 {
                     ac_matrix.add_imag(ns - 1, ns - 1, jwcgs);
                 }
 
                 // Cgd: gate-drain capacitance
                 let jwcgd = omega * cgd;
-                if ng > 0 && ng > 0 {
+                if ng > 0 {
                     ac_matrix.add_imag(ng - 1, ng - 1, jwcgd);
                 }
                 if ng > 0 && nd > 0 {
@@ -383,13 +383,13 @@ impl Engine {
                 if nd > 0 && ng > 0 {
                     ac_matrix.add_imag(nd - 1, ng - 1, -jwcgd);
                 }
-                if nd > 0 && nd > 0 {
+                if nd > 0 {
                     ac_matrix.add_imag(nd - 1, nd - 1, jwcgd);
                 }
 
                 // Cgb: gate-bulk capacitance
                 let jwcgb = omega * cgb;
-                if ng > 0 && ng > 0 {
+                if ng > 0 {
                     ac_matrix.add_imag(ng - 1, ng - 1, jwcgb);
                 }
                 if ng > 0 && nb > 0 {
@@ -398,7 +398,7 @@ impl Engine {
                 if nb > 0 && ng > 0 {
                     ac_matrix.add_imag(nb - 1, ng - 1, -jwcgb);
                 }
-                if nb > 0 && nb > 0 {
+                if nb > 0 {
                     ac_matrix.add_imag(nb - 1, nb - 1, jwcgb);
                 }
             }

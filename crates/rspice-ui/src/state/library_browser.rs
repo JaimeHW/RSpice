@@ -82,7 +82,7 @@ impl ViewType {
     }
 
     /// Parse view type from string
-    pub fn from_str(s: &str) -> Self {
+    pub fn from_name(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "schematic" | "sch" => ViewType::Schematic,
             "symbol" | "sym" => ViewType::Symbol,
@@ -188,7 +188,7 @@ impl View {
             .and_then(|s| s.to_str())
             .unwrap_or("unknown")
             .to_string();
-        let view_type = ViewType::from_str(&name);
+        let view_type = ViewType::from_name(&name);
         Self {
             name,
             view_type,
@@ -835,13 +835,13 @@ mod tests {
 
     #[test]
     fn test_view_type_from_str() {
-        assert_eq!(ViewType::from_str("schematic"), ViewType::Schematic);
-        assert_eq!(ViewType::from_str("sch"), ViewType::Schematic);
-        assert_eq!(ViewType::from_str("symbol"), ViewType::Symbol);
-        assert_eq!(ViewType::from_str("layout"), ViewType::Layout);
-        assert_eq!(ViewType::from_str("testbench"), ViewType::Testbench);
-        assert_eq!(ViewType::from_str("veriloga"), ViewType::VerilogA);
-        assert_eq!(ViewType::from_str("unknown"), ViewType::Custom);
+        assert_eq!(ViewType::from_name("schematic"), ViewType::Schematic);
+        assert_eq!(ViewType::from_name("sch"), ViewType::Schematic);
+        assert_eq!(ViewType::from_name("symbol"), ViewType::Symbol);
+        assert_eq!(ViewType::from_name("layout"), ViewType::Layout);
+        assert_eq!(ViewType::from_name("testbench"), ViewType::Testbench);
+        assert_eq!(ViewType::from_name("veriloga"), ViewType::VerilogA);
+        assert_eq!(ViewType::from_name("unknown"), ViewType::Custom);
     }
 
     #[test]

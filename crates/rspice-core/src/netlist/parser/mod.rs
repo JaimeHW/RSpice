@@ -6,6 +6,7 @@
 //! - .PARAM statements with expression evaluation
 //! - Subcircuit definitions and instances
 
+#![allow(clippy::too_many_arguments)]
 use super::expr::eval_expression;
 use super::lexer::{LexError, TokenKind, TokenStream, tokenize};
 use super::xspice_parser;
@@ -66,9 +67,9 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
         }
 
         // Handle line continuation (+ at start of line)
-        if trimmed.starts_with('+') {
+        if let Some(rest) = trimmed.strip_prefix('+') {
             continuation.push(' ');
-            continuation.push_str(&trimmed[1..]);
+            continuation.push_str(rest);
             continue;
         }
 
@@ -2155,15 +2156,12 @@ fn parse_behavioral(
 }
 
 fn behavioral_trailing_assignment(stream: &TokenStream) -> bool {
-    match &stream.peek().kind {
+    matches!(
+        &stream.peek().kind,
         TokenKind::Ident(name)
             if (name.eq_ignore_ascii_case("TC1") || name.eq_ignore_ascii_case("TC2"))
-                && matches!(stream.peek_n(1).kind, TokenKind::Equals) =>
-        {
-            true
-        }
-        _ => false,
-    }
+                && matches!(stream.peek_n(1).kind, TokenKind::Equals)
+    )
 }
 
 fn behavioral_expr_token_fragment(token: &TokenKind) -> Option<String> {
@@ -2207,115 +2205,112 @@ fn parse_source_spec(
     }
 
     // Check for keywords
-    match &stream.peek().kind {
-        TokenKind::Ident(s) => {
-            let upper = s.to_uppercase();
-            match upper.as_str() {
-                "DC" => {
-                    stream.advance();
-                    // Allow optional = after DC (e.g., "dc = 5" or "dc 5")
-                    skip_commas(stream);
-                    stream.consume(&TokenKind::Equals);
-                    let dc_value = expect_value(stream, line_num, params)?;
+    if let TokenKind::Ident(s) = &stream.peek().kind {
+        let upper = s.to_uppercase();
+        match upper.as_str() {
+            "DC" => {
+                stream.advance();
+                // Allow optional = after DC (e.g., "dc = 5" or "dc 5")
+                skip_commas(stream);
+                stream.consume(&TokenKind::Equals);
+                let dc_value = expect_value(stream, line_num, params)?;
 
-                    let mut ac_terms: Option<(Value, Value)> = None;
+                let mut ac_terms: Option<(Value, Value)> = None;
 
-                    // Optional AC specification after DC
-                    skip_commas(stream);
-                    if let TokenKind::Ident(next) = &stream.peek().kind {
-                        if next.to_uppercase() == "AC" {
-                            stream.advance();
-                            let ac_magnitude = try_value(stream, params).unwrap_or(1.0);
-                            // SPICE AC phase is specified in degrees; store radians internally.
-                            let ac_phase = try_value(stream, params).unwrap_or(0.0).to_radians();
-                            ac_terms = Some((ac_magnitude, ac_phase));
-                        }
+                // Optional AC specification after DC
+                skip_commas(stream);
+                if let TokenKind::Ident(next) = &stream.peek().kind {
+                    if next.to_uppercase() == "AC" {
+                        stream.advance();
+                        let ac_magnitude = try_value(stream, params).unwrap_or(1.0);
+                        // SPICE AC phase is specified in degrees; store radians internally.
+                        let ac_phase = try_value(stream, params).unwrap_or(0.0).to_radians();
+                        ac_terms = Some((ac_magnitude, ac_phase));
                     }
-
-                    let transient = parse_transient_source_spec_keyword(stream, line_num, params)?;
-                    return Ok(match (ac_terms, transient) {
-                        (Some((ac_magnitude, ac_phase)), Some(transient)) => {
-                            SourceSpec::DcAcTransient {
-                                dc_value,
-                                ac_magnitude,
-                                ac_phase,
-                                transient: Box::new(transient),
-                            }
-                        }
-                        (Some((ac_magnitude, ac_phase)), None) => SourceSpec::DcAc {
-                            dc_value,
-                            ac_magnitude,
-                            ac_phase,
-                        },
-                        (None, Some(transient)) => SourceSpec::DcTransient {
-                            dc_value,
-                            transient: Box::new(transient),
-                        },
-                        (None, None) => SourceSpec::Dc(dc_value),
-                    });
                 }
-                "AC" => {
-                    stream.advance();
-                    // AC magnitude is optional - defaults to 1.0 if not specified
-                    let ac_magnitude = try_value(stream, params).unwrap_or(1.0);
-                    // SPICE AC phase is specified in degrees; store radians internally.
-                    let ac_phase = try_value(stream, params).unwrap_or(0.0).to_radians();
 
-                    // Support ngspice ordering like:
-                    //   AC 1 DC 0 SIN(...)
-                    // by accepting optional DC and transient terms after AC.
-                    skip_commas(stream);
-                    let mut dc_value = 0.0;
-                    let mut has_dc_term = false;
-                    if let TokenKind::Ident(next) = &stream.peek().kind {
-                        if next.to_uppercase() == "DC" {
-                            stream.advance();
-                            skip_commas(stream);
-                            stream.consume(&TokenKind::Equals);
-                            dc_value = expect_value(stream, line_num, params)?;
-                            has_dc_term = true;
-                        }
-                    }
-
-                    let transient = parse_transient_source_spec_keyword(stream, line_num, params)?;
-                    return Ok(match transient {
-                        Some(transient) => SourceSpec::DcAcTransient {
+                let transient = parse_transient_source_spec_keyword(stream, line_num, params)?;
+                return Ok(match (ac_terms, transient) {
+                    (Some((ac_magnitude, ac_phase)), Some(transient)) => {
+                        SourceSpec::DcAcTransient {
                             dc_value,
                             ac_magnitude,
                             ac_phase,
                             transient: Box::new(transient),
-                        },
-                        None if has_dc_term => SourceSpec::DcAc {
-                            dc_value,
-                            ac_magnitude,
-                            ac_phase,
-                        },
-                        None => SourceSpec::Ac {
-                            magnitude: ac_magnitude,
-                            phase: ac_phase,
-                        },
-                    });
-                }
-                "PULSE" => {
-                    stream.advance();
-                    return parse_pulse_spec(stream, line_num, params);
-                }
-                "SIN" | "SINE" => {
-                    stream.advance();
-                    return parse_sin_spec(stream, line_num, params);
-                }
-                "PWL" => {
-                    stream.advance();
-                    return parse_pwl_spec(stream, line_num, params);
-                }
-                "EXP" => {
-                    stream.advance();
-                    return parse_exp_spec(stream, line_num, params);
-                }
-                _ => {}
+                        }
+                    }
+                    (Some((ac_magnitude, ac_phase)), None) => SourceSpec::DcAc {
+                        dc_value,
+                        ac_magnitude,
+                        ac_phase,
+                    },
+                    (None, Some(transient)) => SourceSpec::DcTransient {
+                        dc_value,
+                        transient: Box::new(transient),
+                    },
+                    (None, None) => SourceSpec::Dc(dc_value),
+                });
             }
+            "AC" => {
+                stream.advance();
+                // AC magnitude is optional - defaults to 1.0 if not specified
+                let ac_magnitude = try_value(stream, params).unwrap_or(1.0);
+                // SPICE AC phase is specified in degrees; store radians internally.
+                let ac_phase = try_value(stream, params).unwrap_or(0.0).to_radians();
+
+                // Support ngspice ordering like:
+                //   AC 1 DC 0 SIN(...)
+                // by accepting optional DC and transient terms after AC.
+                skip_commas(stream);
+                let mut dc_value = 0.0;
+                let mut has_dc_term = false;
+                if let TokenKind::Ident(next) = &stream.peek().kind {
+                    if next.to_uppercase() == "DC" {
+                        stream.advance();
+                        skip_commas(stream);
+                        stream.consume(&TokenKind::Equals);
+                        dc_value = expect_value(stream, line_num, params)?;
+                        has_dc_term = true;
+                    }
+                }
+
+                let transient = parse_transient_source_spec_keyword(stream, line_num, params)?;
+                return Ok(match transient {
+                    Some(transient) => SourceSpec::DcAcTransient {
+                        dc_value,
+                        ac_magnitude,
+                        ac_phase,
+                        transient: Box::new(transient),
+                    },
+                    None if has_dc_term => SourceSpec::DcAc {
+                        dc_value,
+                        ac_magnitude,
+                        ac_phase,
+                    },
+                    None => SourceSpec::Ac {
+                        magnitude: ac_magnitude,
+                        phase: ac_phase,
+                    },
+                });
+            }
+            "PULSE" => {
+                stream.advance();
+                return parse_pulse_spec(stream, line_num, params);
+            }
+            "SIN" | "SINE" => {
+                stream.advance();
+                return parse_sin_spec(stream, line_num, params);
+            }
+            "PWL" => {
+                stream.advance();
+                return parse_pwl_spec(stream, line_num, params);
+            }
+            "EXP" => {
+                stream.advance();
+                return parse_exp_spec(stream, line_num, params);
+            }
+            _ => {}
         }
-        _ => {}
     }
 
     // Default: try to parse as DC value

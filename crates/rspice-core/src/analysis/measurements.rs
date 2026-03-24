@@ -58,20 +58,17 @@ pub const DEFAULT_THD_HARMONICS: usize = 10;
 
 /// Direction of threshold crossing
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum EdgeDirection {
     /// Rising edge (crossing from below)
     Rising,
     /// Falling edge (crossing from above)
     Falling,
     /// Either direction
+    #[default]
     Either,
 }
 
-impl Default for EdgeDirection {
-    fn default() -> Self {
-        Self::Either
-    }
-}
 
 //=============================================================================
 // Threshold Crossing

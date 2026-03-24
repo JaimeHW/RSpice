@@ -908,13 +908,7 @@ fn eval_function(name: &str, args: &[Expr], ctx: &ParamContext) -> Result<Value,
         "U2" => {
             // Smooth step: 0 for x<=0, x for 0<x<1, 1 for x>=1
             let x = get_arg(0)?;
-            Ok(if x <= 0.0 {
-                0.0
-            } else if x >= 1.0 {
-                1.0
-            } else {
-                x
-            })
+            Ok(x.clamp(0.0, 1.0))
         }
         // Comparison functions (return 0 or 1)
         "EQ0" => {
@@ -1279,7 +1273,7 @@ mod tests {
         let result = eval_expression("TABLE(0.5, 0,0, 0.6,0.001, 0.7,0.1, 0.8,1.0)", &ctx).unwrap();
         // x=0.5 is between first point (0,0) and (0.6,0.001)
         assert!(
-            result >= 0.0 && result < 0.001,
+            (0.0..0.001).contains(&result),
             "Expected ~0.00083, got {}",
             result
         );

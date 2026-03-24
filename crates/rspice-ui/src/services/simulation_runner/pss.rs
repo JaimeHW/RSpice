@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use super::build_engine_config;
 use rspice_core::analysis::PssConfig;
 use rspice_core::engine::Engine;

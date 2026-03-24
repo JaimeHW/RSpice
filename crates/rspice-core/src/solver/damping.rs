@@ -51,6 +51,7 @@ pub const LINE_SEARCH_FACTOR: Value = 0.5;
 
 /// Damping strategy enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum DampingStrategy {
     /// No damping (pure Newton)
     None,
@@ -63,14 +64,10 @@ pub enum DampingStrategy {
     /// Bank-Rose adaptive damping
     BankRose,
     /// Combined: voltage limiting + line search
+    #[default]
     Combined,
 }
 
-impl Default for DampingStrategy {
-    fn default() -> Self {
-        Self::Combined
-    }
-}
 
 //=============================================================================
 // Damping Controller

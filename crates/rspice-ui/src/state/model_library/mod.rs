@@ -81,7 +81,7 @@ impl ModelType {
     }
 
     /// Parse from string
-    pub fn from_str(s: &str) -> Self {
+    pub fn from_name(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "nmos" | "nch" | "n" => ModelType::Nmos,
             "pmos" | "pch" | "p" => ModelType::Pmos,

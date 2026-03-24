@@ -407,20 +407,19 @@ pub fn parse_include_directive(line: &str) -> Option<String> {
         return None;
     }
 
-    let rest = if upper.starts_with(".INCLUDE") {
-        trimmed[8..].trim()
-    } else {
-        trimmed[4..].trim()
-    };
+    let rest = upper
+        .strip_prefix(".INCLUDE")
+        .map(|_| trimmed[8..].trim())
+        .or_else(|| upper.strip_prefix(".INC").map(|_| trimmed[4..].trim()))?;
 
     // Handle quoted paths
-    if rest.starts_with('"') {
-        if let Some(end) = rest[1..].find('"') {
-            return Some(rest[1..end + 1].to_string());
+    if let Some(quoted) = rest.strip_prefix('"') {
+        if let Some(end) = quoted.find('"') {
+            return Some(quoted[..end].to_string());
         }
-    } else if rest.starts_with('\'') {
-        if let Some(end) = rest[1..].find('\'') {
-            return Some(rest[1..end + 1].to_string());
+    } else if let Some(quoted) = rest.strip_prefix('\'') {
+        if let Some(end) = quoted.find('\'') {
+            return Some(quoted[..end].to_string());
         }
     }
 
@@ -640,11 +639,11 @@ M1 OUT IN VDD VDD PMOS
         fs::create_dir_all(&model_dir).unwrap();
 
         fs::write(
-            &lib_dir.join("child.inc"),
+            lib_dir.join("child.inc"),
             ".include \"../models/common.inc\"\nRCHILD in mid 1k\n",
         )
         .unwrap();
-        fs::write(&model_dir.join("common.inc"), "CCOMMON mid 0 1p\n").unwrap();
+        fs::write(model_dir.join("common.inc"), "CCOMMON mid 0 1p\n").unwrap();
 
         let mut proc = IncludeProcessor::new(&root);
         let expanded = proc

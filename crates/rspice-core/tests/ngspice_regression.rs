@@ -655,7 +655,7 @@ fn test_discover_tests() {
     // Verify paths look correct
     for path in general_tests.iter().take(3) {
         println!("  - {}", path.display());
-        assert!(path.extension().map_or(false, |e| e == "cir"));
+        assert!(path.extension().is_some_and(|e| e == "cir"));
     }
 }
 

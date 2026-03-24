@@ -43,7 +43,7 @@ impl Engine {
         // Populate node names from circuit (results include actual net names)
         let sorted_names = circuit.node_names_sorted();
         result.node_names = std::iter::once("0".to_string()) // Ground is node 0
-            .chain(sorted_names.into_iter())
+            .chain(sorted_names)
             .collect();
 
         for (i, &v) in solution.iter().enumerate() {

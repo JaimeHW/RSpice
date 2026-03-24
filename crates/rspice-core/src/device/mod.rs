@@ -5,6 +5,7 @@
 //! - `semiconductor/` - Diodes, BJTs
 //! - `mosfet/` - MOSFETs, VDMOSFETs, JFETs, BSIM4, EKV
 //! - `veriloga/` - Verilog-A compiled models (optional feature)
+#![allow(clippy::large_enum_variant)]
 
 // Organized device subdirectories
 pub mod mosfet;

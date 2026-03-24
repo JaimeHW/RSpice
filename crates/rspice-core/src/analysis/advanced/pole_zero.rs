@@ -7,16 +7,16 @@
 //! For a linear circuit, the transfer function H(s) can be expressed as:
 //!
 //! ```text
-//! H(s) = K · ∏(s - zᵢ) / ∏(s - pⱼ)
+//! H(s) = K Â· âˆ(s - záµ¢) / âˆ(s - pâ±¼)
 //! ```
 //!
-//! - **Poles (pⱼ)**: Values of s where H(s) → ∞ (natural frequencies)
-//! - **Zeros (zᵢ)**: Values of s where H(s) = 0
+//! - **Poles (pâ±¼)**: Values of s where H(s) â†’ âˆž (natural frequencies)
+//! - **Zeros (záµ¢)**: Values of s where H(s) = 0
 //!
 //! # Algorithm
 //!
-//! 1. Build MNA matrix as Y(s) = G + s·C where G is conductance, C is capacitance
-//! 2. **Poles**: Solve generalized eigenvalue problem G·x = -s·C·x
+//! 1. Build MNA matrix as Y(s) = G + sÂ·C where G is conductance, C is capacitance
+//! 2. **Poles**: Solve generalized eigenvalue problem GÂ·x = -sÂ·CÂ·x
 //! 3. **Zeros**: Augment matrix with input/output and solve eigenvalue problem
 //!
 //! # Example
@@ -25,6 +25,7 @@
 //! .PZ V(out) Vin CUR PZ    ; Find poles and zeros, current input
 //! ```
 
+#![allow(clippy::needless_range_loop)]
 use crate::Value;
 use std::f64::consts::PI;
 
@@ -74,14 +75,14 @@ impl Complex {
     }
 
     /// Get damping factor (for complex pole)
-    /// ζ = -Re(p) / |p|
+    /// Î¶ = -Re(p) / |p|
     pub fn damping_factor(&self) -> Value {
         let mag = self.magnitude();
         if mag > 1e-15 { -self.re / mag } else { 0.0 }
     }
 
     /// Get time constant (for real pole)
-    /// τ = -1/Re(p)
+    /// Ï„ = -1/Re(p)
     pub fn time_constant(&self) -> Option<Value> {
         if self.is_real(1e-10) && self.re.abs() > 1e-15 {
             Some(-1.0 / self.re)
@@ -114,7 +115,7 @@ pub struct PoleZeroResult {
     pub zeros: Vec<Complex>,
     /// DC gain H(0)
     pub dc_gain: Value,
-    /// High-frequency gain H(∞) if finite
+    /// High-frequency gain H(âˆž) if finite
     pub hf_gain: Option<Value>,
     /// Input specification
     pub input: String,
@@ -388,8 +389,8 @@ pub struct PoleZeroAnalyzer {
 impl PoleZeroAnalyzer {
     /// Create analyzer from G and C matrices
     ///
-    /// The MNA equation is: (G + s·C)·x = b
-    /// Poles are values of s where det(G + s·C) = 0
+    /// The MNA equation is: (G + sÂ·C)Â·x = b
+    /// Poles are values of s where det(G + sÂ·C) = 0
     pub fn new(g_matrix: Matrix, c_matrix: Matrix) -> Self {
         let num_nodes = g_matrix.dims().0;
         Self {
@@ -401,8 +402,8 @@ impl PoleZeroAnalyzer {
 
     /// Find poles using companion matrix method
     ///
-    /// Poles are eigenvalues of -C⁻¹·G (if C is invertible)
-    /// For singular C, use generalized eigenvalue: G·x = -s·C·x
+    /// Poles are eigenvalues of -Câ»Â¹Â·G (if C is invertible)
+    /// For singular C, use generalized eigenvalue: GÂ·x = -sÂ·CÂ·x
     pub fn find_poles(&self, config: &PoleZeroConfig) -> Vec<Complex> {
         let n = self.num_nodes;
         if n == 0 {
@@ -410,7 +411,7 @@ impl PoleZeroAnalyzer {
         }
 
         // For single-node RC circuit:
-        // G + s·C = 0 → s = -G/C
+        // G + sÂ·C = 0 â†’ s = -G/C
         if n == 1 {
             let g = self.g_matrix.get(0, 0);
             let c = self.c_matrix.get(0, 0);
@@ -916,7 +917,7 @@ impl PoleZeroAnalyzer {
     /// Compute DC gain H(0)
     pub fn dc_gain(&self, input_node: usize, output_node: usize) -> Option<Value> {
         // At DC (s=0), Y = G
-        // Solve G·V = I where I is unit current at input
+        // Solve GÂ·V = I where I is unit current at input
         let n = self.num_nodes;
         if input_node >= n || output_node >= n {
             return None;
@@ -926,7 +927,7 @@ impl PoleZeroAnalyzer {
         let mut b = vec![0.0; n];
         b[input_node] = 1.0;
 
-        // Solve G·x = b using Gaussian elimination
+        // Solve GÂ·x = b using Gaussian elimination
         let x = self.solve_linear(&self.g_matrix, &b)?;
 
         Some(x[output_node])
@@ -1078,7 +1079,7 @@ mod tests {
     #[test]
     fn test_simple_rc_pole() {
         // RC lowpass: pole at s = -1/RC
-        // R = 1k, C = 1µF → pole at s = -1000 rad/s
+        // R = 1k, C = 1ÂµF â†’ pole at s = -1000 rad/s
         let r = 1000.0;
         let c = 1e-6;
         let g = 1.0 / r;
@@ -1264,7 +1265,7 @@ mod tests {
         // A = -G with C = I
         // A = [ -2  10 ]
         //     [ -10 -2 ]
-        // poles = -2 ± j10
+        // poles = -2 Â± j10
         let mut g_matrix = Matrix::zeros(2, 2);
         g_matrix.set(0, 0, 2.0);
         g_matrix.set(0, 1, -10.0);

@@ -79,20 +79,17 @@ pub struct PxfConfig {
 
 /// Sweep type for PXF frequency sweep
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum PxfSweepType {
     /// Linear frequency sweep
     Linear,
     /// Decade (logarithmic) sweep
+    #[default]
     Decade,
     /// Octave sweep
     Octave,
 }
 
-impl Default for PxfSweepType {
-    fn default() -> Self {
-        Self::Decade
-    }
-}
 
 impl Default for PxfConfig {
     fn default() -> Self {
@@ -453,7 +450,7 @@ impl PxfResult {
             .filter(|p| p.freq_in < peak_freq)
             .filter(|p| p.magnitude_db() <= threshold)
             .map(|p| p.freq_in)
-            .last();
+            .next_back();
 
         // Find upper -3dB point
         let upper = self

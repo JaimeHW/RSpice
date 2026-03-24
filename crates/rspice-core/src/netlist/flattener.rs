@@ -14,6 +14,7 @@
 //! - Hierarchical node naming for waveform access
 //! - Proper parameter scoping with precedence resolution
 
+#![allow(clippy::too_many_arguments)]
 use super::hierarchy_path::HierarchyPath;
 use super::param_scope::ParamResolver;
 use super::{Element, ElementKind, Netlist, ParamContext, ParametricValue, ParseError, SubcircuitDef};

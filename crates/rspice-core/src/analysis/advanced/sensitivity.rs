@@ -6,18 +6,18 @@
 //!
 //! # Theory
 //!
-//! For a linear system **G·x = b**, the sensitivity of output xₖ to parameter p is:
+//! For a linear system **GÂ·x = b**, the sensitivity of output xâ‚– to parameter p is:
 //!
 //! ```text
-//! ∂xₖ/∂p = -λᵀ · (∂G/∂p · x + ∂b/∂p)
+//! âˆ‚xâ‚–/âˆ‚p = -Î»áµ€ Â· (âˆ‚G/âˆ‚p Â· x + âˆ‚b/âˆ‚p)
 //! ```
 //!
-//! where λ is the adjoint vector solving **Gᵀ·λ = eₖ** (eₖ is unit vector).
+//! where Î» is the adjoint vector solving **Gáµ€Â·Î» = eâ‚–** (eâ‚– is unit vector).
 //!
 //! # Sensitivity Types
 //!
-//! - **Absolute**: ∂V/∂R (change in voltage per unit change in resistance)
-//! - **Normalized**: (R/V) · ∂V/∂R (percentage change in output per percentage change in parameter)
+//! - **Absolute**: âˆ‚V/âˆ‚R (change in voltage per unit change in resistance)
+//! - **Normalized**: (R/V) Â· âˆ‚V/âˆ‚R (percentage change in output per percentage change in parameter)
 //!
 //! # Example
 //!
@@ -25,6 +25,7 @@
 //! .SENS V(out)      ; Compute DC sensitivity of V(out) to all parameters
 //! ```
 
+#![allow(clippy::needless_range_loop)]
 use crate::Value;
 
 //=============================================================================
@@ -54,9 +55,9 @@ pub struct Sensitivity {
     pub parameter: String,
     /// Nominal parameter value
     pub nominal_value: Value,
-    /// Absolute sensitivity: ∂output/∂param
+    /// Absolute sensitivity: âˆ‚output/âˆ‚param
     pub absolute: Value,
-    /// Normalized sensitivity: (param/output) · ∂output/∂param
+    /// Normalized sensitivity: (param/output) Â· âˆ‚output/âˆ‚param
     pub normalized: Value,
 }
 
@@ -252,7 +253,7 @@ pub struct SensitivityAnalyzer {
     g_matrix: Vec<Vec<Value>>,
     /// Solution vector (node voltages)
     solution: Vec<Value>,
-    /// Adjoint vector λ
+    /// Adjoint vector Î»
     adjoint: Vec<Value>,
     /// Circuit elements
     elements: Vec<ElementDesc>,
@@ -280,16 +281,16 @@ impl SensitivityAnalyzer {
         }
     }
 
-    /// Solve the adjoint system: Gᵀ·λ = eₖ
+    /// Solve the adjoint system: Gáµ€Â·Î» = eâ‚–
     ///
-    /// For symmetric G (resistive networks), Gᵀ = G
+    /// For symmetric G (resistive networks), Gáµ€ = G
     fn solve_adjoint(&mut self, output_node: usize) -> bool {
         if output_node >= self.num_nodes {
             return false;
         }
 
-        // For resistive networks, G is symmetric so we can solve G·λ = eₖ
-        // Build unit vector eₖ
+        // For resistive networks, G is symmetric so we can solve GÂ·Î» = eâ‚–
+        // Build unit vector eâ‚–
         let mut e = vec![0.0; self.num_nodes];
         e[output_node] = 1.0;
 
@@ -353,9 +354,9 @@ impl SensitivityAnalyzer {
     /// Compute sensitivity of a resistor
     ///
     /// For resistor R between nodes i and j:
-    /// ∂V/∂R = -λᵀ · (∂G/∂R · V)
-    ///       = -λᵀ · (-1/R² · stamps) · V
-    ///       = (1/R²) · (λᵢ - λⱼ) · (Vᵢ - Vⱼ)
+    /// âˆ‚V/âˆ‚R = -Î»áµ€ Â· (âˆ‚G/âˆ‚R Â· V)
+    ///       = -Î»áµ€ Â· (-1/RÂ² Â· stamps) Â· V
+    ///       = (1/RÂ²) Â· (Î»áµ¢ - Î»â±¼) Â· (Váµ¢ - Vâ±¼)
     fn resistor_sensitivity(&self, elem: &ElementDesc) -> Value {
         let r = elem.value;
         if r.abs() < 1e-15 {
@@ -365,8 +366,8 @@ impl SensitivityAnalyzer {
         let v_diff = self.voltage_difference(elem.node_pos, elem.node_neg);
         let lambda_diff = self.adjoint_difference(elem.node_pos, elem.node_neg);
 
-        // ∂G/∂R = -G² = -1/R²
-        // Sensitivity = -λᵀ · (∂G/∂R · V) = (1/R²) · (λᵢ - λⱼ) · (Vᵢ - Vⱼ)
+        // âˆ‚G/âˆ‚R = -GÂ² = -1/RÂ²
+        // Sensitivity = -Î»áµ€ Â· (âˆ‚G/âˆ‚R Â· V) = (1/RÂ²) Â· (Î»áµ¢ - Î»â±¼) Â· (Váµ¢ - Vâ±¼)
         (1.0 / (r * r)) * lambda_diff * v_diff
     }
 
@@ -438,7 +439,7 @@ impl SensitivityAnalyzer {
                     return None;
                 }
 
-                // Combine: λ = λ_output - λ_ref
+                // Combine: Î» = Î»_output - Î»_ref
                 for i in 0..self.num_nodes {
                     self.adjoint[i] = adj_output[i] - self.adjoint[i];
                 }
@@ -527,7 +528,7 @@ mod tests {
     fn test_resistor_divider_sensitivity() {
         // Simpler test: single resistor to ground
         // Node 0 has current injected, resistor R to ground
-        // V = I * R, so ∂V/∂R = I = V/R (for I=1)
+        // V = I * R, so âˆ‚V/âˆ‚R = I = V/R (for I=1)
         let r = 1000.0;
         let g = 1.0 / r;
 
@@ -550,12 +551,12 @@ mod tests {
 
         let sens_r1 = result.get("R1").unwrap();
 
-        // For V = I*R with I=1: ∂V/∂R = 1 (positive, proportional)
-        // Using adjoint: sensitivity = (1/R²) * λ_diff * v_diff
+        // For V = I*R with I=1: âˆ‚V/âˆ‚R = 1 (positive, proportional)
+        // Using adjoint: sensitivity = (1/RÂ²) * Î»_diff * v_diff
         // With single node to ground: v_diff = V - 0 = R = 1000
-        // λ solves G·λ = e₀ → g·λ = 1 → λ = R = 1000
-        // λ_diff = R - 0 = R = 1000
-        // Sensitivity = (1/R²) * R * R = 1
+        // Î» solves GÂ·Î» = eâ‚€ â†’ gÂ·Î» = 1 â†’ Î» = R = 1000
+        // Î»_diff = R - 0 = R = 1000
+        // Sensitivity = (1/RÂ²) * R * R = 1
         assert!(
             (sens_r1.absolute - 1.0).abs() < 1e-6,
             "Expected sensitivity=1, got {}",
@@ -565,7 +566,7 @@ mod tests {
 
     #[test]
     fn test_finite_difference_helper() {
-        // Test quadratic function f(x) = x²
+        // Test quadratic function f(x) = xÂ²
         // df/dx = 2x
         // At x = 3, df/dx = 6
         let sensitivity = finite_difference_sensitivity(3.0, 0.001, |x| x * x);
@@ -579,11 +580,11 @@ mod tests {
             ElementType::Resistor,
             "value",
             1000.0,  // 1k resistor
-            -0.0025, // ∂V/∂R
+            -0.0025, // âˆ‚V/âˆ‚R
             5.0,     // V = 5V
         );
 
-        // Normalized = (R/V) * ∂V/∂R = (1000/5) * (-0.0025) = -0.5
+        // Normalized = (R/V) * âˆ‚V/âˆ‚R = (1000/5) * (-0.0025) = -0.5
         assert!((sens.normalized - (-0.5)).abs() < 1e-10);
 
         // Percent per percent = -50%
@@ -630,8 +631,8 @@ mod tests {
 
     /// Test voltage divider analytical sensitivity.
     /// For R1-R2 divider: Vout = Vin * R2/(R1+R2)
-    /// ∂Vout/∂R1 = -Vin * R2 / (R1+R2)²
-    /// ∂Vout/∂R2 = Vin * R1 / (R1+R2)²
+    /// âˆ‚Vout/âˆ‚R1 = -Vin * R2 / (R1+R2)Â²
+    /// âˆ‚Vout/âˆ‚R2 = Vin * R1 / (R1+R2)Â²
     #[test]
     fn test_voltage_divider_analytical_sensitivity() {
         // Build 1k-1k voltage divider: Vout = 5V (half of 10V)
@@ -644,7 +645,7 @@ mod tests {
         let dv_dr1_analytical: f64 = -vin * r2 / ((r1 + r2) * (r1 + r2));
         let dv_dr2_analytical: f64 = vin * r1 / ((r1 + r2) * (r1 + r2));
 
-        // For balanced divider: |∂V/∂R1| = |∂V/∂R2| = Vin/(4R) = 2.5mV/Ω
+        // For balanced divider: |âˆ‚V/âˆ‚R1| = |âˆ‚V/âˆ‚R2| = Vin/(4R) = 2.5mV/Î©
         assert!(
             (dv_dr1_analytical - (-0.0025)).abs() < 1e-10,
             "R1 sensitivity incorrect: {}",
@@ -656,8 +657,8 @@ mod tests {
             dv_dr2_analytical
         );
 
-        // Normalized sensitivity: for balanced divider, both should be ±0.5
-        // (R/V) * ∂V/∂R = (1000/5) * (±0.0025) = ±0.5
+        // Normalized sensitivity: for balanced divider, both should be Â±0.5
+        // (R/V) * âˆ‚V/âˆ‚R = (1000/5) * (Â±0.0025) = Â±0.5
         let norm_r1: f64 = (r1 / vout_expected) * dv_dr1_analytical;
         let norm_r2: f64 = (r2 / vout_expected) * dv_dr2_analytical;
         assert!(
@@ -670,8 +671,8 @@ mod tests {
         );
     }
 
-    /// Test adjoint method produces correct λ vector for simple circuit.
-    /// For single node with R to ground, λ should equal R (G^-1).
+    /// Test adjoint method produces correct Î» vector for simple circuit.
+    /// For single node with R to ground, Î» should equal R (G^-1).
     #[test]
     fn test_adjoint_vector_simple_circuit() {
         let r = 1000.0;
@@ -684,11 +685,11 @@ mod tests {
 
         let mut analyzer = SensitivityAnalyzer::new(g_matrix, solution, elements);
 
-        // After analyzing node 0, adjoint should be λ = G^-1 * e₀ = R * 1 = R
+        // After analyzing node 0, adjoint should be Î» = G^-1 * eâ‚€ = R * 1 = R
         let result = analyzer.analyze(0, None);
         assert!(result.is_some());
 
-        // The adjoint λ = R for single node - validated by correct sensitivity result
+        // The adjoint Î» = R for single node - validated by correct sensitivity result
         let result = result.unwrap();
         let sens = result.get("R1").unwrap();
         assert!(
@@ -743,7 +744,7 @@ mod tests {
         assert!(result.is_some());
 
         let result = result.unwrap();
-        assert!(result.len() >= 1);
+        assert!(!result.is_empty());
     }
 
     /// Test capacitor has zero DC sensitivity.
@@ -841,11 +842,11 @@ mod tests {
             ElementType::Resistor,
             "value",
             1000.0,
-            0.005, // ∂V/∂R = 5mV/Ω
+            0.005, // âˆ‚V/âˆ‚R = 5mV/Î©
             10.0,  // V = 10V
         );
 
-        // Normalized = (R/V) * ∂V/∂R = (1000/10) * 0.005 = 0.5
+        // Normalized = (R/V) * âˆ‚V/âˆ‚R = (1000/10) * 0.005 = 0.5
         assert!(
             (sens.normalized - 0.5).abs() < 1e-10,
             "Normalized sensitivity: {}",
@@ -864,8 +865,8 @@ mod tests {
     #[test]
     fn test_finite_difference_vs_adjoint_agreement() {
         // Test that finite difference and adjoint give same result
-        // for f(x) = 1/(1+x), df/dx = -1/(1+x)²
-        // At x=0.5: df/dx = -1/(1.5)² = -0.444...
+        // for f(x) = 1/(1+x), df/dx = -1/(1+x)Â²
+        // At x=0.5: df/dx = -1/(1.5)Â² = -0.444...
 
         let x = 0.5;
         let delta = 1e-6;
@@ -991,7 +992,7 @@ mod tests {
             ElementType::Resistor,
             "value",
             1000.0,
-            -0.01, // Large negative ∂V/∂R
+            -0.01, // Large negative âˆ‚V/âˆ‚R
             5.0,
         ));
         result.add(Sensitivity::new(
@@ -999,7 +1000,7 @@ mod tests {
             ElementType::Resistor,
             "value",
             1000.0,
-            0.005, // Smaller positive ∂V/∂R
+            0.005, // Smaller positive âˆ‚V/âˆ‚R
             5.0,
         ));
 

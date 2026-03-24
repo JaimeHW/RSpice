@@ -14,6 +14,7 @@ use std::path::PathBuf;
 /// Configuration for the RSpice CLI
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct Config {
     /// Simulation settings
     pub simulation: SimulationConfig,
@@ -80,6 +81,7 @@ pub struct OutputConfig {
 /// Path-related configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct PathConfig {
     /// Include paths for .include directives
     pub include_paths: Vec<PathBuf>,
@@ -91,15 +93,6 @@ pub struct PathConfig {
     pub veriloga_includes: Vec<PathBuf>,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            simulation: SimulationConfig::default(),
-            output: OutputConfig::default(),
-            paths: PathConfig::default(),
-        }
-    }
-}
 
 impl Default for SimulationConfig {
     fn default() -> Self {
@@ -129,15 +122,6 @@ impl Default for OutputConfig {
     }
 }
 
-impl Default for PathConfig {
-    fn default() -> Self {
-        Self {
-            include_paths: Vec::new(),
-            library_paths: Vec::new(),
-            veriloga_includes: Vec::new(),
-        }
-    }
-}
 
 impl Config {
     /// Load configuration from default locations

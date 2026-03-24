@@ -5,6 +5,7 @@
 //! - Pre-computed matrix indices for zero-cost stamping in the hot loop
 //! - Separation of topology (static) from values (mutable)
 
+#![allow(clippy::too_many_arguments)]
 use crate::Value;
 use crate::analysis::{CompanionCoefficients, IntegrationMethod};
 use crate::device::behavioral::BehavioralSources;
@@ -1294,7 +1295,7 @@ impl Inductors {
             );
 
             // MNA stamp for inductor companion model (V-source branch)
-            // L: v = L*di/dt → v_n+1 - v_eq = r_eq * i_n+1
+            // L: v = L*di/dt â†’ v_n+1 - v_eq = r_eq * i_n+1
             if np > 0 {
                 matrix.add(br - 1, np - 1, 1.0);
                 matrix.add(np - 1, br - 1, 1.0);
@@ -1384,7 +1385,7 @@ impl Inductors {
 
             // Update current: i = i_prev + (dt / 2L) * (v + v_prev)
             let l = self.inductances[i];
-            self.i_prev[i] = self.i_prev[i] + (dt / (2.0 * l)) * (v + self.v_prev[i]);
+            self.i_prev[i] += (dt / (2.0 * l)) * (v + self.v_prev[i]);
             self.v_prev[i] = v;
 
             // Also get branch current from solution for accuracy
@@ -2275,7 +2276,7 @@ impl CircuitData {
             + self.jiles_atherton_inductors.len();
         #[cfg(feature = "veriloga")]
         {
-            return count + self.veriloga_devices.len();
+            count + self.veriloga_devices.len()
         }
         #[cfg(not(feature = "veriloga"))]
         {

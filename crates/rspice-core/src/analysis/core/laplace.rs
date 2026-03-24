@@ -195,15 +195,15 @@ impl DiscreteFilter {
         match order {
             0 => {
                 // Zero-order: H(s) = n0/d0 => H(z) = n0/d0
-                let gain = tf.numerator.get(0).copied().unwrap_or(1.0)
-                    / tf.denominator.get(0).copied().unwrap_or(1.0);
+                let gain = tf.numerator.first().copied().unwrap_or(1.0)
+                    / tf.denominator.first().copied().unwrap_or(1.0);
                 (vec![gain], vec![1.0])
             }
             1 => {
                 // First-order: H(s) = (n0 + n1*s) / (d0 + d1*s)
-                let n0 = tf.numerator.get(0).copied().unwrap_or(0.0);
+                let n0 = tf.numerator.first().copied().unwrap_or(0.0);
                 let n1 = tf.numerator.get(1).copied().unwrap_or(0.0);
-                let d0 = tf.denominator.get(0).copied().unwrap_or(1.0);
+                let d0 = tf.denominator.first().copied().unwrap_or(1.0);
                 let d1 = tf.denominator.get(1).copied().unwrap_or(0.0);
 
                 // s = k * (1-z^-1)/(1+z^-1) = k * (z-1)/(z+1)
@@ -224,10 +224,10 @@ impl DiscreteFilter {
             _ => {
                 // Second order and higher - use simplified approximation
                 // For proper implementation, would need polynomial convolution
-                let n0 = tf.numerator.get(0).copied().unwrap_or(0.0);
+                let n0 = tf.numerator.first().copied().unwrap_or(0.0);
                 let n1 = tf.numerator.get(1).copied().unwrap_or(0.0);
                 let n2 = tf.numerator.get(2).copied().unwrap_or(0.0);
-                let d0 = tf.denominator.get(0).copied().unwrap_or(1.0);
+                let d0 = tf.denominator.first().copied().unwrap_or(1.0);
                 let d1 = tf.denominator.get(1).copied().unwrap_or(0.0);
                 let d2 = tf.denominator.get(2).copied().unwrap_or(0.0);
 

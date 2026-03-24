@@ -13,6 +13,8 @@
 //! # Architecture
 //!
 //! ```text
+
+#![allow(clippy::type_complexity)]
 //! calc(V(out) + V(in))
 //!         │
 //!         ▼

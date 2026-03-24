@@ -200,17 +200,19 @@ pub fn run_optimization_analysis_with_config(
 ) -> Result<OptimizationData, String> {
     config.validate()?;
 
-    let mut optimizer_config = OptimizerConfig::default();
-    optimizer_config.algorithm = match config.algorithm {
-        OptimizationAlgorithmMode::GradientDescent => OptimizerAlgo::GradientDescent,
-        OptimizationAlgorithmMode::PatternSearch => OptimizerAlgo::PatternSearch,
-        OptimizationAlgorithmMode::SimulatedAnnealing => OptimizerAlgo::SimulatedAnnealing,
+    let optimizer_config = OptimizerConfig {
+        algorithm: match config.algorithm {
+            OptimizationAlgorithmMode::GradientDescent => OptimizerAlgo::GradientDescent,
+            OptimizationAlgorithmMode::PatternSearch => OptimizerAlgo::PatternSearch,
+            OptimizationAlgorithmMode::SimulatedAnnealing => OptimizerAlgo::SimulatedAnnealing,
+        },
+        max_iterations: config.max_iterations,
+        cost_tolerance: config.cost_tolerance,
+        fd_step: config.fd_step,
+        initial_step: config.initial_step,
+        min_step: config.min_step,
+        ..OptimizerConfig::default()
     };
-    optimizer_config.max_iterations = config.max_iterations;
-    optimizer_config.cost_tolerance = config.cost_tolerance;
-    optimizer_config.fd_step = config.fd_step;
-    optimizer_config.initial_step = config.initial_step;
-    optimizer_config.min_step = config.min_step;
 
     let mut optimizer = OptimizerEngine::with_config(optimizer_config);
     for var in &config.variables {

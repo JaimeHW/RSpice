@@ -80,7 +80,7 @@ impl DynamicDevice for Capacitor {
         // Update companion model current source for next step
         // For trapezoidal: ieq = 2C/dt * v + i_prev = 2C/dt * v + 2C/dt * v_prev + ieq_prev
         let geq = self.geq(dt);
-        self.ieq = geq * v + geq * self.voltage_prev + self.ieq;
+        self.ieq += geq * v + geq * self.voltage_prev;
 
         self.voltage_prev = v;
     }

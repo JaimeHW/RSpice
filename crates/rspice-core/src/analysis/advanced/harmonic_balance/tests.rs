@@ -46,7 +46,7 @@ mod integration_tests {
         let gain = if v_in > 0.0 { v_out / v_in } else { 0.0 };
 
         // Due to simplified setup, just check it's reasonable
-        assert!(gain >= 0.0 && gain <= 1.0, "Gain {} should be 0-1", gain);
+        assert!((0.0..=1.0).contains(&gain), "Gain {} should be 0-1", gain);
     }
 
     /// Test DC operating point

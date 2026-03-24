@@ -19,7 +19,14 @@ impl AnalysisPlan {
     }
 
     /// Append an analysis.
+    #[allow(clippy::should_implement_trait)]
     pub fn add(mut self, analysis: AnalysisSpec) -> Self {
+        self.analyses.push(analysis);
+        self
+    }
+
+    /// Append an analysis with an explicit builder-style name.
+    pub fn with_analysis(mut self, analysis: AnalysisSpec) -> Self {
         self.analyses.push(analysis);
         self
     }

@@ -350,8 +350,7 @@ impl OptimizerEngine {
         let n = self.variables.len();
         let mut grad = vec![0.0; n];
 
-        for i in 0..n {
-            let var = &self.variables[i];
+        for (grad_entry, var) in grad.iter_mut().zip(self.variables.iter()) {
             let range = var.max - var.min;
             let h = range * self.config.fd_step;
 
@@ -366,7 +365,7 @@ impl OptimizerEngine {
             let cost_minus = cost_fn(&vars_minus);
 
             // Central difference
-            grad[i] = (cost_plus - cost_minus) / (2.0 * h);
+            *grad_entry = (cost_plus - cost_minus) / (2.0 * h);
         }
 
         self.gradient = grad.clone();

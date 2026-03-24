@@ -440,8 +440,10 @@ impl Default for GanHemt {
 
 /// Process corner definitions
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default)]
 pub enum ProcessCorner {
     /// Typical parameters (TT)
+    #[default]
     Typical,
     /// Fast NMOS, Fast PMOS (FF)
     FastFast,
@@ -453,11 +455,6 @@ pub enum ProcessCorner {
     SlowFast,
 }
 
-impl Default for ProcessCorner {
-    fn default() -> Self {
-        Self::Typical
-    }
-}
 
 impl ProcessCorner {
     /// Get all standard corners

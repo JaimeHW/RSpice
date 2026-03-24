@@ -1,6 +1,8 @@
 //! Multi-Rate Transient Analysis
 //!
 //! Efficient simulation of circuits with widely varying time constants,
+
+#![cfg_attr(test, allow(clippy::field_reassign_with_default))]
 //! critical for mixed-signal designs where slow analog signals interact
 //! with fast digital or RF blocks.
 //!
@@ -34,10 +36,12 @@ use std::collections::HashMap;
 
 /// Rate class for circuit partitioning
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default)]
 pub enum RateClass {
     /// Very fast signals (RF, clock, switching)
     Fast,
     /// Normal speed signals (general analog)
+    #[default]
     Normal,
     /// Slow signals (DC bias, thermal, control loops)
     Slow,
@@ -67,11 +71,6 @@ impl RateClass {
     }
 }
 
-impl Default for RateClass {
-    fn default() -> Self {
-        Self::Normal
-    }
-}
 
 //=============================================================================
 // Circuit Partition

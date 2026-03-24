@@ -3,6 +3,7 @@
 //! This module handles the conversion from parsed netlist elements
 //! to the runtime circuit representation.
 
+#![allow(clippy::needless_range_loop)]
 use super::behavioral_expr::prepare_behavioral_expression;
 use super::{Engine, SimulationError, extract_dc_value};
 use crate::netlist::{ElementKind, flatten_netlist};

@@ -6,12 +6,12 @@ use super::*;
 
 #[test]
 fn test_model_type_from_str() {
-    assert_eq!(ModelType::from_str("nmos"), ModelType::Nmos);
-    assert_eq!(ModelType::from_str("PMOS"), ModelType::Pmos);
-    assert_eq!(ModelType::from_str("nch"), ModelType::Nmos);
-    assert_eq!(ModelType::from_str("pch"), ModelType::Pmos);
-    assert_eq!(ModelType::from_str("resistor"), ModelType::Resistor);
-    assert_eq!(ModelType::from_str("unknown"), ModelType::Other);
+    assert_eq!(ModelType::from_name("nmos"), ModelType::Nmos);
+    assert_eq!(ModelType::from_name("PMOS"), ModelType::Pmos);
+    assert_eq!(ModelType::from_name("nch"), ModelType::Nmos);
+    assert_eq!(ModelType::from_name("pch"), ModelType::Pmos);
+    assert_eq!(ModelType::from_name("resistor"), ModelType::Resistor);
+    assert_eq!(ModelType::from_name("unknown"), ModelType::Other);
 }
 
 #[test]
@@ -879,25 +879,25 @@ fn test_library_remove_nonexistent() {
 #[test]
 fn test_model_type_from_str_comprehensive() {
     // Standard casing
-    assert_eq!(ModelType::from_str("nmos"), ModelType::Nmos);
-    assert_eq!(ModelType::from_str("pmos"), ModelType::Pmos);
-    assert_eq!(ModelType::from_str("npn"), ModelType::Npn);
-    assert_eq!(ModelType::from_str("pnp"), ModelType::Pnp);
+        assert_eq!(ModelType::from_name("nmos"), ModelType::Nmos);
+        assert_eq!(ModelType::from_name("pmos"), ModelType::Pmos);
+        assert_eq!(ModelType::from_name("npn"), ModelType::Npn);
+        assert_eq!(ModelType::from_name("pnp"), ModelType::Pnp);
 
     // Mixed casing
-    assert_eq!(ModelType::from_str("NMOS"), ModelType::Nmos);
-    assert_eq!(ModelType::from_str("NMos"), ModelType::Nmos);
-    assert_eq!(ModelType::from_str("nMoS"), ModelType::Nmos);
+        assert_eq!(ModelType::from_name("NMOS"), ModelType::Nmos);
+        assert_eq!(ModelType::from_name("NMos"), ModelType::Nmos);
+        assert_eq!(ModelType::from_name("nMoS"), ModelType::Nmos);
 
     // Alternative names
-    assert_eq!(ModelType::from_str("r"), ModelType::Resistor);
-    assert_eq!(ModelType::from_str("c"), ModelType::Capacitor);
-    assert_eq!(ModelType::from_str("l"), ModelType::Inductor);
-    assert_eq!(ModelType::from_str("d"), ModelType::Diode);
+        assert_eq!(ModelType::from_name("r"), ModelType::Resistor);
+        assert_eq!(ModelType::from_name("c"), ModelType::Capacitor);
+        assert_eq!(ModelType::from_name("l"), ModelType::Inductor);
+        assert_eq!(ModelType::from_name("d"), ModelType::Diode);
 
     // Unknown types
-    assert_eq!(ModelType::from_str("unknown_type"), ModelType::Other);
-    assert_eq!(ModelType::from_str(""), ModelType::Other);
+        assert_eq!(ModelType::from_name("unknown_type"), ModelType::Other);
+        assert_eq!(ModelType::from_name(""), ModelType::Other);
 }
 
 // =========================================================================

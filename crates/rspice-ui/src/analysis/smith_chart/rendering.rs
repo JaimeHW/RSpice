@@ -4,6 +4,8 @@
 //! Renders constant-R circles, constant-X arcs, VSWR circles,
 //! S-parameter traces, and markers.
 
+#![allow(clippy::too_many_arguments)]
+
 use egui::{
     Color32, FontId, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2,
 };

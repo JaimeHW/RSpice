@@ -6,16 +6,16 @@
 //! # Floquet Theory Background
 //!
 //! For a linear time-varying (LTV) system with period T, the state transition matrix
-//! Φ(t, t₀) satisfies:
+//! Î¦(t, tâ‚€) satisfies:
 //!
-//! dΦ/dt = A(t) * Φ(t, t₀),  Φ(t₀, t₀) = I
+//! dÎ¦/dt = A(t) * Î¦(t, tâ‚€),  Î¦(tâ‚€, tâ‚€) = I
 //!
 //! where A(t) is the time-varying Jacobian with A(t+T) = A(t).
 //!
-//! The **monodromy matrix** M = Φ(T, 0) captures the complete period evolution.
-//! Its eigenvalues (Floquet multipliers μ) and eigenvectors determine stability.
+//! The **monodromy matrix** M = Î¦(T, 0) captures the complete period evolution.
+//! Its eigenvalues (Floquet multipliers Î¼) and eigenvectors determine stability.
 //!
-//! Floquet exponents: λ = ln(μ) / T
+//! Floquet exponents: Î» = ln(Î¼) / T
 //!
 //! # Phase Noise Application (Hajimiri-Lee Model)
 //!
@@ -24,10 +24,10 @@
 //! impact on phase - captured by the **Impulse Sensitivity Function (ISF)**.
 //!
 //! Single-sideband phase noise:
-//! L(Δω) = Γ_rms² * i_n² / (2 * Δω² * q_max²)
+//! L(Î”Ï‰) = Î“_rmsÂ² * i_nÂ² / (2 * Î”Ï‰Â² * q_maxÂ²)
 //!
-//! where Γ_rms is the RMS value of the ISF, i_n² is noise current PSD,
-//! Δω is offset from carrier, and q_max is max charge displacement.
+//! where Î“_rms is the RMS value of the ISF, i_nÂ² is noise current PSD,
+//! Î”Ï‰ is offset from carrier, and q_max is max charge displacement.
 //!
 //! # Implementation
 //!
@@ -35,8 +35,9 @@
 //! - Monodromy matrix computation from time-varying Jacobians
 //! - Eigenvalue decomposition for Floquet exponents
 //! - ISF/PPV computation for noise sensitivity
-//! - Transfer functions with proper 1/f² behavior near carrier
+//! - Transfer functions with proper 1/fÂ² behavior near carrier
 
+#![allow(clippy::needless_range_loop)]
 use crate::Value;
 use num_complex::Complex64;
 use std::f64::consts::PI;
@@ -69,14 +70,14 @@ pub struct FloquetAnalyzer {
     /// Floquet multipliers (eigenvalues of monodromy matrix)
     floquet_multipliers: Vec<Complex64>,
 
-    /// Floquet exponents λ = ln(μ)/T
+    /// Floquet exponents Î» = ln(Î¼)/T
     floquet_exponents: Vec<Complex64>,
 
     /// Impulse Sensitivity Function samples over one period
     /// isf[node][time_sample] - how noise at node affects phase at each time
     isf_samples: Vec<Vec<Value>>,
 
-    /// RMS value of ISF for each node (Γ_rms)
+    /// RMS value of ISF for each node (Î“_rms)
     isf_rms: Vec<Value>,
 
     /// Maximum charge displacement (q_max) for each node
@@ -191,7 +192,7 @@ impl FloquetAnalyzer {
             return Ok(());
         }
 
-        // Step 1: Compute monodromy matrix M = Φ(T, 0)
+        // Step 1: Compute monodromy matrix M = Î¦(T, 0)
         let monodromy = self.compute_monodromy_matrix()?;
 
         // Step 2: Eigenvalue decomposition
@@ -204,7 +205,7 @@ impl FloquetAnalyzer {
         Ok(())
     }
 
-    /// Compute monodromy matrix M = Φ(T, 0) via numerical integration
+    /// Compute monodromy matrix M = Î¦(T, 0) via numerical integration
     ///
     /// Uses the fundamental matrix solution of dx/dt = A(t)x
     /// integrated over one complete period using trapezoidal rule.
@@ -214,7 +215,7 @@ impl FloquetAnalyzer {
             return Err(FloquetError::NoStates);
         }
 
-        // Initialize Φ(0,0) = I
+        // Initialize Î¦(0,0) = I
         let mut phi: Vec<Vec<Complex64>> = (0..n)
             .map(|i| {
                 (0..n)
@@ -232,16 +233,16 @@ impl FloquetAnalyzer {
         // Time step
         let dt = self.period / self.num_time_samples as f64;
 
-        // Integrate dΦ/dt = A(t)Φ using trapezoidal rule
+        // Integrate dÎ¦/dt = A(t)Î¦ using trapezoidal rule
         for k in 0..self.num_time_samples {
             let a_k = &self.jacobian_samples[k];
             let a_next = &self.jacobian_samples[(k + 1) % self.num_time_samples];
 
-            // Φ_{k+1} ≈ (I - dt/2 * A_{k+1})^{-1} * (I + dt/2 * A_k) * Φ_k
-            // Simplified: Φ_{k+1} ≈ (I + dt * A_k) * Φ_k (forward Euler)
-            // Better: Φ_{k+1} ≈ exp(dt * (A_k + A_{k+1})/2) * Φ_k (midpoint)
+            // Î¦_{k+1} â‰ˆ (I - dt/2 * A_{k+1})^{-1} * (I + dt/2 * A_k) * Î¦_k
+            // Simplified: Î¦_{k+1} â‰ˆ (I + dt * A_k) * Î¦_k (forward Euler)
+            // Better: Î¦_{k+1} â‰ˆ exp(dt * (A_k + A_{k+1})/2) * Î¦_k (midpoint)
 
-            // Use matrix exponential approximation: exp(dt*A) ≈ I + dt*A + (dt*A)²/2
+            // Use matrix exponential approximation: exp(dt*A) â‰ˆ I + dt*A + (dt*A)Â²/2
             let a_mid: Vec<Vec<Value>> = (0..n)
                 .map(|i| (0..n).map(|j| 0.5 * (a_k[i][j] + a_next[i][j])).collect())
                 .collect();
@@ -253,10 +254,10 @@ impl FloquetAnalyzer {
         Ok(phi)
     }
 
-    /// Compute matrix exponential exp(dt * A) using Padé approximation
+    /// Compute matrix exponential exp(dt * A) using PadÃ© approximation
     ///
-    /// For small dt*||A||, uses Taylor series: I + dt*A + (dt*A)²/2! + ...
-    /// For larger values, uses scaling and squaring with Padé approximant.
+    /// For small dt*||A||, uses Taylor series: I + dt*A + (dt*A)Â²/2! + ...
+    /// For larger values, uses scaling and squaring with PadÃ© approximant.
     fn matrix_exponential(&self, a: &[Vec<Value>], dt: Value) -> Vec<Vec<Complex64>> {
         let n = a.len();
         if n == 0 {
@@ -365,7 +366,7 @@ impl FloquetAnalyzer {
     /// Compute eigenvalue decomposition of monodromy matrix
     ///
     /// Uses power iteration and deflation for dominant eigenvalues.
-    /// For phase noise, the critical mode is the one with |μ| ≈ 1.
+    /// For phase noise, the critical mode is the one with |Î¼| â‰ˆ 1.
     fn compute_eigendecomposition(
         &mut self,
         monodromy: &[Vec<Complex64>],
@@ -376,7 +377,7 @@ impl FloquetAnalyzer {
         }
 
         // Use power iteration to find dominant eigenvalues
-        // For a well-conditioned oscillator, we expect one mode with |μ| ≈ 1 (phase mode)
+        // For a well-conditioned oscillator, we expect one mode with |Î¼| â‰ˆ 1 (phase mode)
 
         let mut multipliers = Vec::with_capacity(n.min(4));
         let mut modes = Vec::with_capacity(n.min(4));
@@ -392,7 +393,7 @@ impl FloquetAnalyzer {
             let mode = FloquetMode::new(mode_idx, exponent, eigenvector.clone());
             modes.push(mode);
 
-            // Deflate matrix: M' = M - μ * v * v^H / ||v||²
+            // Deflate matrix: M' = M - Î¼ * v * v^H / ||v||Â²
             let norm_sq: Value = eigenvector.iter().map(|x| x.norm_sqr()).sum();
             if norm_sq > 1e-30 {
                 for i in 0..deflated.len() {
@@ -447,7 +448,7 @@ impl FloquetAnalyzer {
                 .map(|i| (0..n).map(|j| matrix[i][j] * v[j]).sum())
                 .collect();
 
-            // Rayleigh quotient: λ = v^H * w / v^H * v
+            // Rayleigh quotient: Î» = v^H * w / v^H * v
             let num: Complex64 = (0..n).map(|i| v[i].conj() * w[i]).sum();
             let denom: Value = v.iter().map(|x| x.norm_sqr()).sum();
             lambda = num / denom;
@@ -471,10 +472,10 @@ impl FloquetAnalyzer {
 
     /// Compute Impulse Sensitivity Function (ISF) from adjoint system
     ///
-    /// The ISF Γ(t) satisfies the adjoint equation:
-    /// dΓ/dt = -A^T(t) * Γ
+    /// The ISF Î“(t) satisfies the adjoint equation:
+    /// dÎ“/dt = -A^T(t) * Î“
     ///
-    /// with normalization: ∫₀^T Γ(t) · x'(t) dt = 1
+    /// with normalization: âˆ«â‚€^T Î“(t) Â· x'(t) dt = 1
     fn compute_isf(&mut self) -> Result<(), FloquetError> {
         let n_nodes = self.waveform_samples.len();
         let n_samples = self.num_time_samples;
@@ -491,7 +492,7 @@ impl FloquetAnalyzer {
         self.q_max = vec![0.0; n_nodes];
 
         // For each node, compute ISF from waveform derivative
-        // Simplified Hajimiri model: Γ(t) ∝ dV/dt normalized
+        // Simplified Hajimiri model: Î“(t) âˆ dV/dt normalized
         for node in 0..n_nodes {
             if self.waveform_samples[node].len() < n_samples {
                 continue;
@@ -521,8 +522,8 @@ impl FloquetAnalyzer {
             let v_swing = v_max - v_min;
 
             // Approximate effective capacitance from slew rate
-            // q_max ≈ C_eff * V_swing, slew ≈ I/C_eff, so q_max ≈ V_swing * I / slew
-            // Simplified: q_max ∝ V_swing / (max dV/dt) * some_factor
+            // q_max â‰ˆ C_eff * V_swing, slew â‰ˆ I/C_eff, so q_max â‰ˆ V_swing * I / slew
+            // Simplified: q_max âˆ V_swing / (max dV/dt) * some_factor
             if max_dvdt > 1e-20 {
                 self.q_max[node] = v_swing * self.period / (2.0 * PI);
             } else {
@@ -537,7 +538,7 @@ impl FloquetAnalyzer {
                 }
             }
 
-            // Compute RMS of ISF: Γ_rms² = (1/T) ∫₀^T Γ²(t) dt
+            // Compute RMS of ISF: Î“_rmsÂ² = (1/T) âˆ«â‚€^T Î“Â²(t) dt
             let isf_sq_sum: Value = self.isf_samples[node].iter().map(|x| x * x).sum();
             self.isf_rms[node] = (isf_sq_sum / n_samples as f64).sqrt();
         }
@@ -548,17 +549,17 @@ impl FloquetAnalyzer {
     /// Compute approximate ISF when no detailed waveform is available
     pub fn compute_approximate_isf(&mut self) {
         // Without detailed circuit data, assume sinusoidal oscillation
-        // ISF for a sinusoidal oscillator: Γ(t) = cos(ωt)
-        // This gives Γ_rms = 1/√2
+        // ISF for a sinusoidal oscillator: Î“(t) = cos(Ï‰t)
+        // This gives Î“_rms = 1/âˆš2
 
         let n_nodes = self.num_states.max(1);
         let n_samples = self.num_time_samples.max(64);
 
         self.isf_samples = vec![vec![0.0; n_samples]; n_nodes];
-        self.isf_rms = vec![1.0 / 2.0_f64.sqrt(); n_nodes]; // Γ_rms = 1/√2
+        self.isf_rms = vec![1.0 / 2.0_f64.sqrt(); n_nodes]; // Î“_rms = 1/âˆš2
         self.q_max = vec![1e-12; n_nodes]; // Default 1pC
 
-        // Sample ISF = cos(2πt/T)
+        // Sample ISF = cos(2Ï€t/T)
         for node in 0..n_nodes {
             for i in 0..n_samples {
                 let t = i as f64 / n_samples as f64;
@@ -620,9 +621,9 @@ impl FloquetAnalyzer {
         let mut tf = TransferFunction::new(offset_freq);
 
         // For oscillators, phase noise transfer function has form:
-        // |H(Δf)|² = Γ_rms² / (2 * q_max² * (2π * Δf)²)
+        // |H(Î”f)|Â² = Î“_rmsÂ² / (2 * q_maxÂ² * (2Ï€ * Î”f)Â²)
         //
-        // This gives the characteristic 1/f² (-20 dB/decade) slope
+        // This gives the characteristic 1/fÂ² (-20 dB/decade) slope
 
         let isf_rms = if node_idx < self.isf_rms.len() {
             self.isf_rms[node_idx]
@@ -640,11 +641,11 @@ impl FloquetAnalyzer {
             1e-12 // Default 1pC
         };
 
-        // |H(Δω)|² = Γ_rms² / (2 * q_max² * Δω²)
-        // |H(Δf)| = Γ_rms / (q_max * 2π * Δf * √2)
+        // |H(Î”Ï‰)|Â² = Î“_rmsÂ² / (2 * q_maxÂ² * Î”Ï‰Â²)
+        // |H(Î”f)| = Î“_rms / (q_max * 2Ï€ * Î”f * âˆš2)
         if omega_offset.abs() > 1e-20 && q_max.abs() > 1e-30 {
             tf.magnitude = isf_rms / (q_max * omega_offset * 2.0_f64.sqrt());
-            tf.phase = -PI / 2.0; // 90° phase shift from integration
+            tf.phase = -PI / 2.0; // 90Â° phase shift from integration
         } else {
             // At DC offset, transfer function is limited by loop bandwidth
             tf.magnitude = isf_rms / q_max * self.period; // Approximate
@@ -654,17 +655,17 @@ impl FloquetAnalyzer {
         tf
     }
 
-    /// Compute noise transfer from device noise to phase PSD [rad²/Hz]
+    /// Compute noise transfer from device noise to phase PSD [radÂ²/Hz]
     ///
     /// This implements the Hajimiri-Lee equation:
-    /// S_φ(Δf) = Γ_rms² * S_in / (2 * q_max² * (2π*Δf)²)
+    /// S_Ï†(Î”f) = Î“_rmsÂ² * S_in / (2 * q_maxÂ² * (2Ï€*Î”f)Â²)
     ///
     /// Arguments:
     /// - offset_freq: Offset from carrier [Hz]
-    /// - noise_psd: Device noise power spectral density [A²/Hz or V²/Hz]
+    /// - noise_psd: Device noise power spectral density [AÂ²/Hz or VÂ²/Hz]
     /// - node_idx: Circuit node where noise is injected
     ///
-    /// Returns: Phase noise PSD [rad²/Hz]
+    /// Returns: Phase noise PSD [radÂ²/Hz]
     pub fn noise_to_phase_transfer(
         &self,
         offset_freq: Value,
@@ -672,13 +673,13 @@ impl FloquetAnalyzer {
         node_idx: usize,
     ) -> Value {
         let tf = self.transfer_function(offset_freq, node_idx);
-        // S_φ = |H(f)|² * S_n
+        // S_Ï† = |H(f)|Â² * S_n
         tf.magnitude * tf.magnitude * noise_psd
     }
 
     /// Convert phase noise PSD to single-sideband dBc/Hz
     ///
-    /// L(f) = S_φ(f) / 2  (single-sideband)
+    /// L(f) = S_Ï†(f) / 2  (single-sideband)
     /// dBc/Hz = 10 * log10(L(f))
     pub fn phase_psd_to_dbc(&self, phase_psd_rad2_hz: Value) -> Value {
         if phase_psd_rad2_hz <= 0.0 {
@@ -720,7 +721,7 @@ pub struct FloquetMode {
     /// Mode index
     pub index: usize,
 
-    /// Floquet exponent λ (complex)
+    /// Floquet exponent Î» (complex)
     pub exponent: Complex64,
 
     /// Eigenvector components
@@ -744,9 +745,9 @@ impl FloquetMode {
 
     /// Classify mode based on Floquet exponent
     ///
-    /// - Phase mode: Re(λ) ≈ 0 (neutral stability, |μ| ≈ 1)
-    /// - Stable mode: Re(λ) < 0 (|μ| < 1)
-    /// - Unstable mode: Re(λ) > 0 (|μ| > 1)
+    /// - Phase mode: Re(Î») â‰ˆ 0 (neutral stability, |Î¼| â‰ˆ 1)
+    /// - Stable mode: Re(Î») < 0 (|Î¼| < 1)
+    /// - Unstable mode: Re(Î») > 0 (|Î¼| > 1)
     fn classify_mode(exponent: Complex64) -> FloquetModeType {
         let re = exponent.re;
         let threshold = 1e-6; // Threshold for "approximately zero"
@@ -760,12 +761,12 @@ impl FloquetMode {
         }
     }
 
-    /// Get damping factor σ = -Re(λ)
+    /// Get damping factor Ïƒ = -Re(Î»)
     pub fn damping(&self) -> Value {
         -self.exponent.re
     }
 
-    /// Get natural frequency ω = Im(λ)
+    /// Get natural frequency Ï‰ = Im(Î»)
     pub fn natural_freq(&self) -> Value {
         self.exponent.im
     }
@@ -778,11 +779,11 @@ impl FloquetMode {
 /// Classification of Floquet modes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FloquetModeType {
-    /// Phase mode: eigenvalue on unit circle, |μ| ≈ 1
+    /// Phase mode: eigenvalue on unit circle, |Î¼| â‰ˆ 1
     Phase,
-    /// Stable mode: eigenvalue inside unit circle, |μ| < 1
+    /// Stable mode: eigenvalue inside unit circle, |Î¼| < 1
     Stable,
-    /// Unstable mode: eigenvalue outside unit circle, |μ| > 1
+    /// Unstable mode: eigenvalue outside unit circle, |Î¼| > 1
     Unstable,
 }
 
@@ -817,7 +818,7 @@ impl TransferFunction {
         self.phase * 180.0 / PI
     }
 
-    /// Get complex transfer function H = |H| * e^(jφ)
+    /// Get complex transfer function H = |H| * e^(jÏ†)
     pub fn complex(&self) -> Complex64 {
         Complex64::from_polar(self.magnitude, self.phase)
     }
@@ -967,7 +968,7 @@ mod floquet_tests {
         let result = analyzer.matrix_exponential(&diag_matrix, 1.0);
 
         assert!((result[0][0].re - 1.0_f64.exp()).abs() < 0.01);
-        assert!((result[1][1].re - 2.0_f64.exp()).abs() < 0.1); // e^2 ≈ 7.389
+        assert!((result[1][1].re - 2.0_f64.exp()).abs() < 0.1); // e^2 â‰ˆ 7.389
         assert!(result[0][1].norm() < 1e-6);
         assert!(result[1][0].norm() < 1e-6);
     }
@@ -976,7 +977,7 @@ mod floquet_tests {
     fn test_matrix_exponential_small_dt() {
         let analyzer = FloquetAnalyzer::new(1e-9, 10);
 
-        // For small dt, exp(dt*A) ≈ I + dt*A
+        // For small dt, exp(dt*A) â‰ˆ I + dt*A
         let matrix = vec![vec![0.1, 0.2], vec![0.3, 0.4]];
         let dt = 0.001;
         let result = analyzer.matrix_exponential(&matrix, dt);
@@ -1026,7 +1027,7 @@ mod floquet_tests {
 
     #[test]
     fn test_transfer_function_1_over_f_squared() {
-        // For Hajimiri model, |H(f)|² ∝ 1/f²
+        // For Hajimiri model, |H(f)|Â² âˆ 1/fÂ²
         // So |H(f1)|/|H(f2)| = f2/f1
         let mut analyzer = FloquetAnalyzer::new(1e-9, 10);
         analyzer.compute_approximate_isf();
@@ -1123,8 +1124,8 @@ mod floquet_tests {
     fn test_phase_noise_dbc_calculation() {
         let analyzer = FloquetAnalyzer::new(1e-9, 10);
 
-        // 1e-10 rad²/Hz should give -103 dBc/Hz (SSB)
-        // L = S_φ/2 = 5e-11, 10*log10(5e-11) ≈ -103
+        // 1e-10 radÂ²/Hz should give -103 dBc/Hz (SSB)
+        // L = S_Ï†/2 = 5e-11, 10*log10(5e-11) â‰ˆ -103
         let dbc = analyzer.phase_psd_to_dbc(1e-10);
         assert!(dbc < -100.0 && dbc > -110.0);
     }
@@ -1142,7 +1143,7 @@ mod floquet_tests {
     fn test_phase_noise_dbc_typical_values() {
         let analyzer = FloquetAnalyzer::new(1e-9, 10);
 
-        // -80 dBc/Hz corresponds to S_φ = 2e-8 rad²/Hz
+        // -80 dBc/Hz corresponds to S_Ï† = 2e-8 radÂ²/Hz
         let target_psd = 2.0 * 10.0_f64.powf(-8.0);
         let dbc = analyzer.phase_psd_to_dbc(target_psd);
         assert!((dbc - (-80.0)).abs() < 1.0);
@@ -1170,7 +1171,7 @@ mod floquet_tests {
         let psd_1k = analyzer.noise_to_phase_transfer(1e3, noise_psd, 0);
         let psd_10k = analyzer.noise_to_phase_transfer(10e3, noise_psd, 0);
 
-        // With 1/f² transfer, phase PSD ratio should be 100 per decade
+        // With 1/fÂ² transfer, phase PSD ratio should be 100 per decade
         let ratio = psd_1k / psd_10k;
         assert!(
             (ratio - 100.0).abs() < 5.0,
@@ -1204,7 +1205,7 @@ mod floquet_tests {
         analyzer.num_states = 3;
         analyzer.compute_approximate_isf();
 
-        // For cos(ωt), Γ_rms = 1/√2 ≈ 0.707
+        // For cos(Ï‰t), Î“_rms = 1/âˆš2 â‰ˆ 0.707
         for rms in &analyzer.isf_rms {
             assert!(
                 (*rms - 1.0 / 2.0_f64.sqrt()).abs() < 0.01,
@@ -1220,10 +1221,10 @@ mod floquet_tests {
         analyzer.num_states = 1;
         analyzer.compute_approximate_isf();
 
-        // ISF should be cos(2πt/T)
+        // ISF should be cos(2Ï€t/T)
         // At t=0 (sample 0): cos(0) = 1
-        // At t=T/4 (sample 16 for 64 samples): cos(π/2) = 0
-        // At t=T/2 (sample 32): cos(π) = -1
+        // At t=T/4 (sample 16 for 64 samples): cos(Ï€/2) = 0
+        // At t=T/2 (sample 32): cos(Ï€) = -1
         let n = analyzer.isf_samples[0].len();
         assert!((analyzer.isf_samples[0][0] - 1.0).abs() < 0.01);
         assert!(analyzer.isf_samples[0][n / 4].abs() < 0.1);
@@ -1236,8 +1237,8 @@ mod floquet_tests {
 
     #[test]
     fn test_flicker_noise_slope() {
-        // With 1/f noise (PSD ∝ 1/f) added to 1/f² transfer function,
-        // total phase noise ∝ 1/f³ near carrier (-30 dB/decade)
+        // With 1/f noise (PSD âˆ 1/f) added to 1/fÂ² transfer function,
+        // total phase noise âˆ 1/fÂ³ near carrier (-30 dB/decade)
         let mut analyzer = FloquetAnalyzer::new(1e-9, 10);
         analyzer.compute_approximate_isf();
 
@@ -1249,8 +1250,8 @@ mod floquet_tests {
         let phase_psd_1k = analyzer.noise_to_phase_transfer(1e3, noise_1k, 0);
         let phase_psd_10k = analyzer.noise_to_phase_transfer(10e3, noise_10k, 0);
 
-        // With 1/f noise × 1/f² TF = 1/f³
-        // Ratio should be 10³ = 1000 per decade
+        // With 1/f noise Ã— 1/fÂ² TF = 1/fÂ³
+        // Ratio should be 10Â³ = 1000 per decade
         // In dB: 30 dB/decade
         let dbc_1k = analyzer.phase_psd_to_dbc(phase_psd_1k);
         let dbc_10k = analyzer.phase_psd_to_dbc(phase_psd_10k);
@@ -1265,8 +1266,8 @@ mod floquet_tests {
 
     #[test]
     fn test_white_noise_slope() {
-        // With white noise (flat PSD) through 1/f² transfer function,
-        // phase noise ∝ 1/f² (-20 dB/decade)
+        // With white noise (flat PSD) through 1/fÂ² transfer function,
+        // phase noise âˆ 1/fÂ² (-20 dB/decade)
         let mut analyzer = FloquetAnalyzer::new(1e-9, 10);
         analyzer.compute_approximate_isf();
 
@@ -1321,8 +1322,8 @@ mod floquet_tests {
     fn test_set_multipliers() {
         let mut analyzer = FloquetAnalyzer::new(1e-9, 10);
         let multipliers = vec![
-            Complex64::new(1.0, 0.0), // Phase mode (|μ| = 1)
-            Complex64::new(0.5, 0.0), // Stable mode (|μ| < 1)
+            Complex64::new(1.0, 0.0), // Phase mode (|Î¼| = 1)
+            Complex64::new(0.5, 0.0), // Stable mode (|Î¼| < 1)
         ];
         analyzer.set_multipliers(multipliers);
 
@@ -1346,8 +1347,8 @@ mod floquet_tests {
     fn test_floquet_exponents_from_multipliers() {
         let mut analyzer = FloquetAnalyzer::new(1.0, 10); // T = 1s
 
-        // μ = e^(λT), so λ = ln(μ)/T
-        // For μ = e^2 ≈ 7.389, λ = 2
+        // Î¼ = e^(Î»T), so Î» = ln(Î¼)/T
+        // For Î¼ = e^2 â‰ˆ 7.389, Î» = 2
         let multipliers = vec![Complex64::new(2.0_f64.exp(), 0.0)];
         analyzer.set_multipliers(multipliers);
 

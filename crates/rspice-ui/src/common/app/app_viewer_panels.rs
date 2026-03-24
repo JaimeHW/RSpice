@@ -450,14 +450,11 @@ impl RSpiceApp {
         ui: &mut Ui,
         viewer: crate::viewers::ActiveViewer,
     ) -> Option<DerivedViewerLoadState> {
-        let Some(analysis_type) = self
+        let analysis_type = self
             .state
             .simulation
             .active_analysis()
-            .map(|analysis| analysis.analysis_type)
-        else {
-            return None;
-        };
+            .map(|analysis| analysis.analysis_type)?;
         if !crate::simulation::SimulationController::analysis_supports_transient_derivation(
             analysis_type,
         ) {

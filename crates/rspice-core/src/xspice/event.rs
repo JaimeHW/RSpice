@@ -137,7 +137,7 @@ impl EventQueue {
 
     /// Check if there's an event at or before the given time
     pub fn has_event_at_or_before(&self, time: Value) -> bool {
-        self.events.peek().map_or(false, |e| e.time <= time)
+        self.events.peek().is_some_and(|e| e.time <= time)
     }
 
     /// Pop all events at or before the given time
@@ -262,12 +262,7 @@ impl BreakpointManager {
 
     /// Get the next breakpoint after the given time
     pub fn next_after(&self, time: Value) -> Option<Value> {
-        for &bp in &self.breakpoints {
-            if bp > time + self.tolerance {
-                return Some(bp);
-            }
-        }
-        None
+        self.breakpoints.iter().find(|&&bp| bp > time + self.tolerance).copied()
     }
 
     /// Remove breakpoints at or before the given time

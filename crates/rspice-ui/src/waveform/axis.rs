@@ -493,7 +493,7 @@ mod tests {
 
         // Ticks should be within range (with small margin)
         for &tick in &ticks.major_ticks {
-            assert!(tick >= -0.1 && tick <= 10.1);
+            assert!((-0.1..=10.1).contains(&tick));
         }
     }
 

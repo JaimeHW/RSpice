@@ -1,3 +1,5 @@
+#![allow(clippy::needless_range_loop)]
+
 use super::{build_engine_config, generate_freq_points};
 use num_complex::Complex64;
 use rspice_core::analysis::ac::AcResult;

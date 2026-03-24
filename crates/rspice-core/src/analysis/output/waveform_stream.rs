@@ -160,14 +160,12 @@ impl StreamingWaveformWriter {
             }
         } else {
             // Write as ASCII
-            let mut row = 0;
-            for chunk in self.buffer.chunks(row_size) {
+            for (row, chunk) in self.buffer.chunks(row_size).enumerate() {
                 write!(self.writer, "{}", row)?;
                 for &val in chunk {
                     write!(self.writer, "\t{:.9e}", val)?;
                 }
                 writeln!(self.writer)?;
-                row += 1;
             }
         }
 

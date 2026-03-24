@@ -756,8 +756,6 @@ fn test_hb_analysis_result_fields() {
     if let Ok(result) = engine.run_hb(&netlist, config) {
         assert_eq!(result.fundamental_freq, 2.5e6);
         assert_eq!(result.num_harmonics, 7);
-        // converged should be boolean
-        assert!(result.converged || !result.converged);
     }
 }
 

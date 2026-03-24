@@ -72,7 +72,7 @@ Vin in 0 DC 0 AC 1
 
     // Verify output
     assert!(
-        (v_out - 0.7071).abs() < 0.05,
+        (v_out - std::f64::consts::FRAC_1_SQRT_2).abs() < 0.05,
         "Magnitude at cutoff should be ~0.707, got {}. (in={}, out={})",
         v_out,
         v_in,
@@ -205,7 +205,7 @@ R2 out 0 1k
     // Verify all results are valid simulations
     for (val, result) in &results {
         assert!(
-            result.node_voltages.len() > 0,
+            !result.node_voltages.is_empty(),
             "Should have voltage results at sweep point {}",
             val
         );
@@ -435,7 +435,7 @@ R2 out 0 {Rval}
     // 2. Rval=3k -> V(out) = 7.5V
     // 3. Rval=9k -> V(out) = 9V
 
-    let values = vec![1000.0, 3000.0, 9000.0];
+    let values = [1000.0, 3000.0, 9000.0];
     let expected_outs = [5.0, 7.5, 9.0];
 
     for (i, &val) in values.iter().enumerate() {

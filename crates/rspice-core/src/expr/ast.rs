@@ -3,6 +3,7 @@
 //! Represents mathematical expressions for behavioral sources.
 
 use crate::Value;
+use std::ops::{Add, Div, Mul, Neg, Sub};
 
 /// Mathematical expression AST node
 #[derive(Debug, Clone, PartialEq)]
@@ -107,6 +108,7 @@ pub enum Function {
     If, // if(cond, then, else)
 }
 
+#[allow(clippy::should_implement_trait)]
 impl Expr {
     /// Create a constant expression
     pub fn constant(value: Value) -> Self {
@@ -164,6 +166,65 @@ impl Expr {
         Expr::Unary {
             op: UnaryOp::Neg,
             operand: Box::new(operand),
+        }
+    }
+}
+
+impl Add for Expr {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Expr::Binary {
+            op: BinaryOp::Add,
+            left: Box::new(self),
+            right: Box::new(rhs),
+        }
+    }
+}
+
+impl Sub for Expr {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Expr::Binary {
+            op: BinaryOp::Sub,
+            left: Box::new(self),
+            right: Box::new(rhs),
+        }
+    }
+}
+
+impl Mul for Expr {
+    type Output = Self;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        Expr::Binary {
+            op: BinaryOp::Mul,
+            left: Box::new(self),
+            right: Box::new(rhs),
+        }
+    }
+}
+
+impl Div for Expr {
+    type Output = Self;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        Expr::Binary {
+            op: BinaryOp::Div,
+            left: Box::new(self),
+            right: Box::new(rhs),
+        }
+    }
+}
+
+impl Neg for Expr {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        Expr::Unary {
+            op: UnaryOp::Neg,
+            operand: Box::new(self),
         }
     }
 }

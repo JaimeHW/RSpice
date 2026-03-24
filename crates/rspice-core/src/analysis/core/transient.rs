@@ -1,5 +1,6 @@
 //! Transient Time-Domain Analysis
 
+#![allow(clippy::type_complexity)]
 use crate::Value;
 use crate::analysis::AnalysisConfig;
 
@@ -18,12 +19,15 @@ pub struct TransientAnalysis {
     method: IntegrationMethod,
     /// Use Initial Conditions (UIC) - skip DC operating point, use IC= values
     /// When true:
-    /// - Skip DC operating point calculation
-    /// - Use IC= values on capacitors and inductors directly
-    /// - Set all unspecified node voltages to 0V
+    ///   - Skip DC operating point calculation
+    ///   - Use IC= values on capacitors and inductors directly
+    ///   - Set all unspecified node voltages to 0V
+    ///
     /// This is useful for oscillators and circuits that don't have a stable DC OP
     use_initial_conditions: bool,
 }
+
+type ChargeLteInputs<'a> = (&'a [Value], &'a [Value], &'a [Value], &'a [Value]);
 
 /// Numerical integration methods for transient analysis
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -443,7 +447,7 @@ impl LteEstimator {
     /// Richardson extrapolation LTE estimate (more accurate)
     ///
     /// Uses solutions computed with steps h and h/2 to estimate the true error:
-    /// `LTE ≈ (x_h - x_{h/2}) / (2^p - 1)` where p is the method order.
+    /// `LTE â‰ˆ (x_h - x_{h/2}) / (2^p - 1)` where p is the method order.
     ///
     /// This provides a more accurate LTE estimate by exploiting the known
     /// convergence order of the integration method.
@@ -576,7 +580,7 @@ impl LteEstimator {
         &self,
         voltages: &[Value],
         dt: Value,
-        charges: Option<(&[Value], &[Value], &[Value], &[Value])>,
+        charges: Option<ChargeLteInputs<'_>>,
     ) -> (Value, bool) {
         // Standard voltage-based LTE
         let (v_lte, v_accept) = self.estimate(voltages, dt);
@@ -628,8 +632,8 @@ pub struct CompanionCoefficients {
 impl CompanionCoefficients {
     /// Get coefficients for Backward Euler (first order, unconditionally stable)
     ///
-    /// C·dv/dt = i  →  C·(v_{n+1} - v_n)/dt = i_{n+1}
-    /// Companion: G_eq = C/dt, I_eq = G_eq·v_n
+    /// CÂ·dv/dt = i  â†’  CÂ·(v_{n+1} - v_n)/dt = i_{n+1}
+    /// Companion: G_eq = C/dt, I_eq = G_eqÂ·v_n
     #[inline]
     pub fn backward_euler() -> Self {
         Self {
@@ -644,8 +648,8 @@ impl CompanionCoefficients {
     /// Get coefficients for Trapezoidal rule (second order, A-stable)
     ///
     /// Uses average of derivatives at n and n+1:
-    /// C·(v_{n+1} - v_n)/dt = 0.5·(i_{n+1} + i_n)
-    /// Companion: G_eq = 2C/dt, I_eq = G_eq·v_n + i_n
+    /// CÂ·(v_{n+1} - v_n)/dt = 0.5Â·(i_{n+1} + i_n)
+    /// Companion: G_eq = 2C/dt, I_eq = G_eqÂ·v_n + i_n
     #[inline]
     pub fn trapezoidal() -> Self {
         Self {
@@ -660,8 +664,8 @@ impl CompanionCoefficients {
     /// Get coefficients for Gear2/BDF2 (second order, L-stable, good for stiff)
     ///
     /// Uses backward difference formula:
-    /// (3·v_{n+1} - 4·v_n + v_{n-1}) / (2·dt) = f_{n+1}
-    /// Companion: G_eq = 3C/(2·dt), I_eq = (4C·v_n - C·v_{n-1})/(2·dt)
+    /// (3Â·v_{n+1} - 4Â·v_n + v_{n-1}) / (2Â·dt) = f_{n+1}
+    /// Companion: G_eq = 3C/(2Â·dt), I_eq = (4CÂ·v_n - CÂ·v_{n-1})/(2Â·dt)
     #[inline]
     pub fn gear2() -> Self {
         Self {
@@ -730,7 +734,7 @@ impl CompanionCoefficients {
     ) -> Value {
         let base = self.coeff_g * inductance * i_n / dt + v_n;
         if self.needs_two_history {
-            // For BDF2 inductor: V_eq = R_eq·i_n + (4/3)·L·i_n/dt - (1/3)·L·i_{n-1}/dt
+            // For BDF2 inductor: V_eq = R_eqÂ·i_n + (4/3)Â·LÂ·i_n/dt - (1/3)Â·LÂ·i_{n-1}/dt
             base + self.coeff_v_n_minus_1 * inductance * i_n_minus_1 / dt
         } else {
             base
@@ -1091,7 +1095,7 @@ mod tests {
         // Test order 2 (Trapezoidal, Gear2): exponent = 1/3
         lte.set_method_order(2);
         let scale = lte.recommend_scale(1e-6);
-        // (1e-3 / 1e-6)^(1/3) = 1000^0.333 ≈ 10, clamped to 2.0
+        // (1e-3 / 1e-6)^(1/3) = 1000^0.333 â‰ˆ 10, clamped to 2.0
         assert!((scale - 2.0).abs() < 1e-10);
     }
 
@@ -1128,7 +1132,7 @@ mod tests {
 
         let (lte_est, accept) = lte.richardson_estimate(&x_full, &x_half);
 
-        // LTE ≈ |x_half - x_full| / 3
+        // LTE â‰ˆ |x_half - x_full| / 3
         // max(|0.03|, |0.06|, |0.09|) / 3 = 0.09 / 3 = 0.03
         // Weighted normalization keeps the value in the same order as reltol.
         assert!(
@@ -1210,7 +1214,7 @@ mod tests {
         let (lte_est, accept) =
             lte.estimate_charge_lte(&charges, &prev_charges, &currents, &prev_currents, dt);
 
-        // Error: |2.2e-15 - 2e-15| / 2.2e-15 = 0.2e-15 / 2.2e-15 ≈ 0.09
+        // Error: |2.2e-15 - 2e-15| / 2.2e-15 = 0.2e-15 / 2.2e-15 â‰ˆ 0.09
         assert!(lte_est > 0.05, "Should detect 10% error, got {}", lte_est);
         assert!(!accept, "Should reject 10% charge error");
     }

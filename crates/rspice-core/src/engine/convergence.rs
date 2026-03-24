@@ -5,6 +5,8 @@
 //! - Source stepping for convergence
 //! - Linear and nonlinear solver interfaces
 
+#![allow(clippy::too_many_arguments)]
+#![cfg_attr(test, allow(clippy::field_reassign_with_default))]
 use super::{DampingStrategy, Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::solver::{
@@ -292,7 +294,7 @@ impl Engine {
             current = next;
         }
 
-        if values.last().map_or(true, |&v| v > end) {
+        if values.last().is_none_or(|&v| v > end) {
             values.push(end);
         }
 
@@ -875,7 +877,7 @@ impl Engine {
             return Ok(sol);
         }
 
-        let mut last_err = direct_result.err().expect("checked Err branch");
+        let mut last_err = direct_result.expect_err("checked Err branch");
         let conv_cfg = &self.config.convergence_config;
 
         if conv_cfg.gmin_stepping {
@@ -952,8 +954,8 @@ impl Engine {
     /// The linear presolve doesn't include BJT connections, so the base
     /// and emitter may have unrealistic voltage differences. This function
     /// corrects the initial guess to place the BJT in forward-active region:
-    /// - VBE ≈ 0.7V (typical forward bias)
-    /// - VCE > VCE(sat) ≈ 0.2V (avoid saturation)
+    /// - VBE â‰ˆ 0.7V (typical forward bias)
+    /// - VCE > VCE(sat) â‰ˆ 0.2V (avoid saturation)
     fn apply_bjt_initial_guess_correction(guess: &mut [Value], circuit: &CircuitData) {
         const VBE_FORWARD: Value = 0.7; // Typical forward B-E voltage
         const VCE_SAT: Value = 0.2; // Saturation voltage
@@ -982,7 +984,7 @@ impl Engine {
             let is_npn = matches!(bjt.bjt_type, crate::device::BjtType::Npn);
 
             if is_npn {
-                // NPN: Vc > Vb > Ve, VBE ≈ 0.7V, VCE > 0.2V
+                // NPN: Vc > Vb > Ve, VBE â‰ˆ 0.7V, VCE > 0.2V
                 // Keep emitter at linear presolve value (grounded through resistor)
                 // Set base = emitter + 0.7V
                 // Set collector to be above base (midpoint to VCC or similar)
@@ -1009,7 +1011,7 @@ impl Engine {
                     }
                 }
             } else {
-                // PNP: Ve > Vb > Vc, VEB ≈ 0.7V, VEC > 0.2V
+                // PNP: Ve > Vb > Vc, VEB â‰ˆ 0.7V, VEC > 0.2V
                 let ve_new = ve;
                 let vb_new = ve_new - VBE_FORWARD;
                 let vc_new = vb_new - VCE_SAT;
@@ -1388,7 +1390,7 @@ impl Engine {
 
     /// Check voltage convergence using explicit absolute and relative tolerances.
     ///
-    /// Criterion: `|ΔV| <= VABSTOL + RELTOL * max(|Vnew|, |Vold|)`
+    /// Criterion: `|Î”V| <= VABSTOL + RELTOL * max(|Vnew|, |Vold|)`
     pub(crate) fn check_voltage_convergence_with_tolerances(
         old: &[Value],
         new: &[Value],
@@ -1787,7 +1789,7 @@ impl Engine {
 
         let size = circuit.matrix_size();
 
-        // Check for suspicious values - not just clamped at ±999V but also
+        // Check for suspicious values - not just clamped at Â±999V but also
         // suspiciously uniform values that indicate failed source stepping.
         // Reset to zero if the guess looks like garbage.
         let is_garbage = Self::has_suspicious_uniformity(initial_guess);

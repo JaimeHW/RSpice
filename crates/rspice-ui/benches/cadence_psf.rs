@@ -13,8 +13,8 @@ fn patch_u32(bytes: &mut [u8], offset: usize, value: u32) {
     bytes[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
 }
 
-fn patch_u32_to_current_len(bytes: &mut Vec<u8>, offset: usize) {
-    let value = to_u32(bytes.len());
+fn patch_u32_to_current_len(bytes: &mut [u8], current_len: usize, offset: usize) {
+    let value = to_u32(current_len);
     patch_u32(bytes, offset, value);
 }
 
@@ -50,7 +50,8 @@ fn build_large_non_windowed_real_psf(point_count: usize, trace_count: usize) -> 
     push_u32(&mut bytes, 0);
     push_named_int(&mut bytes, "PSF sweep points", point_count as i32);
     push_named_int(&mut bytes, "PSF traces", trace_count as i32);
-    patch_u32_to_current_len(&mut bytes, header_end_pos);
+    let current_len = bytes.len();
+    patch_u32_to_current_len(bytes.as_mut_slice(), current_len, header_end_pos);
 
     let types_start = bytes.len();
     push_u32(&mut bytes, 0);
@@ -73,7 +74,8 @@ fn build_large_non_windowed_real_psf(point_count: usize, trace_count: usize) -> 
     push_u32(&mut bytes, 0);
     push_u32(&mut bytes, 11);
 
-    patch_u32_to_current_len(&mut bytes, types_end_pos);
+    let current_len = bytes.len();
+    patch_u32_to_current_len(bytes.as_mut_slice(), current_len, types_end_pos);
 
     let sweep_start = bytes.len();
     push_u32(&mut bytes, 0);
@@ -81,7 +83,8 @@ fn build_large_non_windowed_real_psf(point_count: usize, trace_count: usize) -> 
     push_u32(&mut bytes, 0);
     push_u32(&mut bytes, 16);
     push_signal_ref(&mut bytes, 100, "time", 2);
-    patch_u32_to_current_len(&mut bytes, sweep_end_pos);
+    let current_len = bytes.len();
+    patch_u32_to_current_len(bytes.as_mut_slice(), current_len, sweep_end_pos);
 
     let trace_start = bytes.len();
     push_u32(&mut bytes, 0);
@@ -98,7 +101,8 @@ fn build_large_non_windowed_real_psf(point_count: usize, trace_count: usize) -> 
             1,
         );
     }
-    patch_u32_to_current_len(&mut bytes, trace_end_pos);
+    let current_len = bytes.len();
+    patch_u32_to_current_len(bytes.as_mut_slice(), current_len, trace_end_pos);
 
     let value_start = bytes.len();
     push_u32(&mut bytes, 0);
@@ -116,7 +120,8 @@ fn build_large_non_windowed_real_psf(point_count: usize, trace_count: usize) -> 
             );
         }
     }
-    patch_u32_to_current_len(&mut bytes, value_end_pos);
+    let current_len = bytes.len();
+    patch_u32_to_current_len(bytes.as_mut_slice(), current_len, value_end_pos);
 
     let toc_offset = bytes.len();
     for (kind, start) in [
@@ -151,7 +156,8 @@ fn build_large_windowed_real_psf(
     push_named_int(&mut bytes, "PSF sweep points", point_count as i32);
     push_named_int(&mut bytes, "PSF traces", trace_count as i32);
     push_named_int(&mut bytes, "PSF window size", window_size as i32);
-    patch_u32_to_current_len(&mut bytes, header_end_pos);
+    let current_len = bytes.len();
+    patch_u32_to_current_len(bytes.as_mut_slice(), current_len, header_end_pos);
 
     let types_start = bytes.len();
     push_u32(&mut bytes, 0);
@@ -174,7 +180,8 @@ fn build_large_windowed_real_psf(
     push_u32(&mut bytes, 0);
     push_u32(&mut bytes, 11);
 
-    patch_u32_to_current_len(&mut bytes, types_end_pos);
+    let current_len = bytes.len();
+    patch_u32_to_current_len(bytes.as_mut_slice(), current_len, types_end_pos);
 
     let sweep_start = bytes.len();
     push_u32(&mut bytes, 0);
@@ -182,7 +189,8 @@ fn build_large_windowed_real_psf(
     push_u32(&mut bytes, 0);
     push_u32(&mut bytes, 16);
     push_signal_ref(&mut bytes, 100, "time", 2);
-    patch_u32_to_current_len(&mut bytes, sweep_end_pos);
+    let current_len = bytes.len();
+    patch_u32_to_current_len(bytes.as_mut_slice(), current_len, sweep_end_pos);
 
     let trace_start = bytes.len();
     push_u32(&mut bytes, 0);
@@ -199,7 +207,8 @@ fn build_large_windowed_real_psf(
             1,
         );
     }
-    patch_u32_to_current_len(&mut bytes, trace_end_pos);
+    let current_len = bytes.len();
+    patch_u32_to_current_len(bytes.as_mut_slice(), current_len, trace_end_pos);
 
     let value_start = bytes.len();
     push_u32(&mut bytes, 0);
@@ -237,7 +246,8 @@ fn build_large_windowed_real_psf(
 
         emitted_points += block_points;
     }
-    patch_u32_to_current_len(&mut bytes, value_end_pos);
+    let current_len = bytes.len();
+    patch_u32_to_current_len(bytes.as_mut_slice(), current_len, value_end_pos);
 
     let toc_offset = bytes.len();
     for (kind, start) in [

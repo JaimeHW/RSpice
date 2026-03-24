@@ -3,6 +3,8 @@
 //! This module provides a local parser for Cadence/Spectre PSF binary payloads
 //! so waveform import does not depend on external crates.
 
+#![allow(clippy::too_many_arguments)]
+
 use std::collections::HashMap;
 use std::fmt;
 

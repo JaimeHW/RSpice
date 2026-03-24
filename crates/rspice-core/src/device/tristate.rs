@@ -44,6 +44,7 @@ use std::fmt;
 
 /// Drive strength levels (IEEE 1164 inspired)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Default)]
 pub enum DriveStrength {
     /// High impedance - no drive
     HighZ = 0,
@@ -52,6 +53,7 @@ pub enum DriveStrength {
     /// Pull strength (e.g., resistive pull-up/down)
     Pull = 2,
     /// Strong drive (e.g., active CMOS output)
+    #[default]
     Strong = 3,
     /// Supply level (direct VDD/VSS connection)
     Supply = 4,
@@ -90,11 +92,6 @@ impl DriveStrength {
     }
 }
 
-impl Default for DriveStrength {
-    fn default() -> Self {
-        DriveStrength::Strong
-    }
-}
 
 impl fmt::Display for DriveStrength {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -114,12 +111,14 @@ impl fmt::Display for DriveStrength {
 
 /// Logic value (high/low/unknown/high-z)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default)]
 pub enum LogicValue {
     /// Logic low (0)
     Low,
     /// Logic high (1)
     High,
     /// Unknown/conflict (X)
+    #[default]
     Unknown,
     /// High impedance (Z)
     HighZ,
@@ -158,11 +157,6 @@ impl LogicValue {
     }
 }
 
-impl Default for LogicValue {
-    fn default() -> Self {
-        LogicValue::Unknown
-    }
-}
 
 impl fmt::Display for LogicValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

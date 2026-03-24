@@ -267,7 +267,7 @@ mod tests {
 
     #[test]
     fn test_no_abort_default() {
-        let signal = NoAbort::default();
+        let signal = NoAbort;
         assert!(!signal.is_aborted());
     }
 

@@ -3,6 +3,7 @@
 //! Grid-aligned coordinate system for schematic elements.
 
 use serde::{Deserialize, Serialize};
+use std::ops::{Add, Sub};
 
 // =============================================================================
 // Point
@@ -90,14 +91,32 @@ impl Point {
 
     /// Add another point (vector addition)
     #[inline]
+    #[allow(clippy::should_implement_trait)]
     pub fn add(self, other: Point) -> Point {
         Point::new(self.x + other.x, self.y + other.y)
     }
 
     /// Subtract another point (vector subtraction)
     #[inline]
+    #[allow(clippy::should_implement_trait)]
     pub fn sub(self, other: Point) -> Point {
         Point::new(self.x - other.x, self.y - other.y)
+    }
+}
+
+impl Add for Point {
+    type Output = Point;
+
+    fn add(self, rhs: Point) -> Self::Output {
+        self.add(rhs)
+    }
+}
+
+impl Sub for Point {
+    type Output = Point;
+
+    fn sub(self, rhs: Point) -> Self::Output {
+        self.sub(rhs)
     }
 }
 

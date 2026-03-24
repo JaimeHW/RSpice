@@ -36,18 +36,15 @@ pub enum Bsim3Type {
 
 /// BSIM3 operating region
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum Bsim3Region {
+    #[default]
     Cutoff,
     Linear,
     Saturation,
     Subthreshold,
 }
 
-impl Default for Bsim3Region {
-    fn default() -> Self {
-        Self::Cutoff
-    }
-}
 
 /// BSIM3v3 model parameters
 ///
@@ -486,7 +483,7 @@ impl Bsim3 {
             let is0 = p.u0 * 1e-4 * cox * (n - 1.0) * vt * vt * weff / leff;
 
             // Exponential term with proper weak inversion slope
-            let exp_arg = (vgst_raw / (n * vt)).min(40.0).max(-40.0);
+            let exp_arg = (vgst_raw / (n * vt)).clamp(-40.0, 40.0);
 
             // Drain-source dependence for weak inversion
             let vds_factor = 1.0 - (-vds_eff / vt).exp();

@@ -373,7 +373,7 @@ impl EyeDiagramState {
 
     /// Load eye data and recalculate measurements
     pub fn load_data(&mut self, data: EyeData) {
-        self.ui_count = data.ui_count.max(1) as u32;
+        self.ui_count = data.ui_count.max(1);
         self.data = data;
         if let Some(idx) = self.selected_trace {
             if idx >= self.data.traces.len() {

@@ -13,20 +13,17 @@ use crate::Value;
 
 /// Type of frequency sweep for PAC analysis
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum PacSweepType {
     /// Linear frequency sweep
     Linear,
     /// Decade (logarithmic) frequency sweep
+    #[default]
     Decade,
     /// Octave frequency sweep
     Octave,
 }
 
-impl Default for PacSweepType {
-    fn default() -> Self {
-        Self::Decade
-    }
-}
 
 //=============================================================================
 // PAC Configuration

@@ -1103,10 +1103,10 @@ fn persistence_intensity_exponent(decay: f32) -> f32 {
     0.35 + (1.0 - clamped) * 3.3
 }
 
-fn ensure_persistence_grid<'a>(
+fn ensure_persistence_grid(
     plot_rect: Rect,
-    state: &'a mut EyeDiagramState,
-) -> Option<&'a EyePersistenceCache> {
+    state: &mut EyeDiagramState,
+) -> Option<&EyePersistenceCache> {
     let key = persistence_cache_key(plot_rect, state)?;
     let cache_hit = state
         .persistence_cache
@@ -1848,8 +1848,8 @@ mod tests {
         assert!(pattern.iter().all(|&b| b == 0 || b == 1));
 
         // Should have both 0s and 1s
-        assert!(pattern.iter().any(|&b| b == 0));
-        assert!(pattern.iter().any(|&b| b == 1));
+        assert!(pattern.contains(&0));
+        assert!(pattern.contains(&1));
     }
 
     #[test]

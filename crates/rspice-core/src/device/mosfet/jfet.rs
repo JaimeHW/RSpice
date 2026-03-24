@@ -6,22 +6,22 @@
 //!
 //! For N-JFET (P-JFET uses opposite polarities):
 //!
-//! **Cutoff** (Vgs - Vto ≤ 0):
+//! **Cutoff** (Vgs - Vto â‰¤ 0):
 //! ```text
 //! Ids = 0
 //! ```
 //!
 //! **Linear** (Vds < Vgs - Vto):
 //! ```text
-//! Ids = Beta * (2*(Vgs-Vto)*Vds - Vds²) * (1 + Lambda*Vds)
+//! Ids = Beta * (2*(Vgs-Vto)*Vds - VdsÂ²) * (1 + Lambda*Vds)
 //! ```
 //!
-//! **Saturation** (Vds ≥ Vgs - Vto):
+//! **Saturation** (Vds â‰¥ Vgs - Vto):
 //! ```text
-//! Ids = Beta * (Vgs - Vto)² * (1 + Lambda*Vds)
+//! Ids = Beta * (Vgs - Vto)Â² * (1 + Lambda*Vds)
 //! ```
 //!
-//! where Beta is typically derived from IDSS: `Beta = IDSS / Vto²`
+//! where Beta is typically derived from IDSS: `Beta = IDSS / VtoÂ²`
 //!
 //! # Example
 //!
@@ -30,6 +30,7 @@
 //! .MODEL JMOD NJF(VTO=-2 BETA=1E-3 LAMBDA=0.01)
 //! ```
 
+#![allow(clippy::too_many_arguments)]
 use crate::Value;
 use crate::circuit::NodeId;
 use crate::device::traits::{MatrixStamper, NonlinearDevice};
@@ -76,7 +77,7 @@ pub enum JfetChannelModel {
 pub struct JfetParams {
     /// Threshold voltage (V) - negative for N-JFET depletion mode
     pub vto: Value,
-    /// Transconductance coefficient (A/V²)
+    /// Transconductance coefficient (A/VÂ²)
     pub beta: Value,
     /// Channel-length modulation (1/V)
     pub lambda: Value,
@@ -90,9 +91,9 @@ pub struct JfetParams {
     pub pb: Value,
     /// Capacitance grading coefficient
     pub m: Value,
-    /// Drain ohmic resistance (Ω)
+    /// Drain ohmic resistance (Î©)
     pub rd: Value,
-    /// Source ohmic resistance (Ω)
+    /// Source ohmic resistance (Î©)
     pub rs: Value,
     /// Forward bias junction coefficient
     pub fc: Value,
@@ -273,7 +274,7 @@ impl JfetParams {
     /// Create parameters from IDSS and VTO
     ///
     /// IDSS is the drain current at Vgs=0, Vds >> Vgs-Vto (saturation)
-    /// Beta = IDSS / Vto²
+    /// Beta = IDSS / VtoÂ²
     pub fn from_idss(idss: Value, vto: Value) -> Self {
         let beta = idss / (vto * vto);
         Self {
@@ -1143,11 +1144,10 @@ impl Jfet {
                 continue;
             }
 
-            if name.eq_ignore_ascii_case("TD") {
-                if *value > 0.0 {
+            if name.eq_ignore_ascii_case("TD")
+                && *value > 0.0 {
                     td_override = Some(*value + 273.15);
                 }
-            }
         }
 
         if let Some(w) = width {
@@ -1168,11 +1168,10 @@ impl Jfet {
             }
         }
 
-        if matches!(self.params.channel_model, JfetChannelModel::Hfet1) {
-            if nf.is_finite() && nf > 0.0 {
+        if matches!(self.params.channel_model, JfetChannelModel::Hfet1)
+            && nf.is_finite() && nf > 0.0 {
                 self.width *= nf;
             }
-        }
 
         if mult.is_finite() && mult > 0.0 {
             self.m *= mult;
@@ -2799,7 +2798,7 @@ impl Jfet {
                 self.capacitances(pol * vgs, pol * vgd)
             }
             JfetChannelModel::Hfet1 => match self.params.hfet_level {
-                2 | 3 | 4 => {
+                2..=4 => {
                     let pol = self.jfet_type.polarity();
                     let vds_int = pol * (vgs - vgd);
                     let local_inverse = vds_int < 0.0;
@@ -2880,7 +2879,7 @@ impl Jfet {
         let g = self.gate;
         let s = self.source;
 
-        if d > 0 && d > 0 {
+        if d > 0 {
             self.indices.dd = matrix.get_index(d - 1, d - 1);
         }
         if d > 0 && g > 0 {
@@ -2893,7 +2892,7 @@ impl Jfet {
         if g > 0 && d > 0 {
             self.indices.gd = matrix.get_index(g - 1, d - 1);
         }
-        if g > 0 && g > 0 {
+        if g > 0 {
             self.indices.gg = matrix.get_index(g - 1, g - 1);
         }
         if g > 0 && s > 0 {
@@ -2906,7 +2905,7 @@ impl Jfet {
         if s > 0 && g > 0 {
             self.indices.sg = matrix.get_index(s - 1, g - 1);
         }
-        if s > 0 && s > 0 {
+        if s > 0 {
             self.indices.ss = matrix.get_index(s - 1, s - 1);
         }
     }
@@ -3177,7 +3176,7 @@ mod tests {
         let params = JfetParams::default(); // VTO = -2V
         let jfet = Jfet::njf("J1", 1, 2, 0).with_params(params);
 
-        // Vgs = -3V < Vto = -2V → cutoff
+        // Vgs = -3V < Vto = -2V â†’ cutoff
         let (ids, gm, gds) = jfet.calculate(-3.0, 5.0, 300.0);
 
         assert!(ids.abs() < 1e-15, "Ids should be ~0 in cutoff, got {}", ids);
@@ -3193,10 +3192,10 @@ mod tests {
             .with_lambda(0.0);
         let jfet = Jfet::njf("J1", 1, 2, 0).with_params(params);
 
-        // Vgs = 0V, Vds = 5V → saturation (Vds > Vgs - Vto = 0 - (-2) = 2)
+        // Vgs = 0V, Vds = 5V â†’ saturation (Vds > Vgs - Vto = 0 - (-2) = 2)
         let (ids, gm, gds) = jfet.calculate(0.0, 5.0, 300.0);
 
-        // Ids = beta * (Vgs - Vto)² = 1e-3 * (0 - (-2))² = 1e-3 * 4 = 4mA
+        // Ids = beta * (Vgs - Vto)Â² = 1e-3 * (0 - (-2))Â² = 1e-3 * 4 = 4mA
         assert!((ids - 4e-3).abs() < 1e-6, "Expected Ids=4mA, got {}", ids);
 
         // gm = 2 * beta * (Vgs - Vto) = 2 * 1e-3 * 2 = 4mS
@@ -3214,10 +3213,10 @@ mod tests {
             .with_lambda(0.0);
         let jfet = Jfet::njf("J1", 1, 2, 0).with_params(params);
 
-        // Vgs = 0V, Vds = 1V → linear (Vds < Vgs - Vto = 2)
+        // Vgs = 0V, Vds = 1V â†’ linear (Vds < Vgs - Vto = 2)
         let (ids, gm, gds) = jfet.calculate(0.0, 1.0, 300.0);
 
-        // Ids = beta * (2*(Vgs-Vto)*Vds - Vds²) = 1e-3 * (2*2*1 - 1) = 1e-3 * 3 = 3mA
+        // Ids = beta * (2*(Vgs-Vto)*Vds - VdsÂ²) = 1e-3 * (2*2*1 - 1) = 1e-3 * 3 = 3mA
         assert!((ids - 3e-3).abs() < 1e-6, "Expected Ids=3mA, got {}", ids);
 
         // gm = 2 * beta * Vds = 2 * 1e-3 * 1 = 2mS
@@ -3282,10 +3281,10 @@ mod tests {
         // Ids should increase with Vds due to lambda
         assert!(ids2 > ids1, "Ids should increase with Vds when lambda > 0");
 
-        // gds = beta * Vgst² * lambda = 1e-3 * 4 * 0.01 = 40µS
+        // gds = beta * VgstÂ² * lambda = 1e-3 * 4 * 0.01 = 40ÂµS
         assert!(
             (gds1 - 40e-6).abs() < 1e-9,
-            "Expected gds=40µS, got {}",
+            "Expected gds=40ÂµS, got {}",
             gds1
         );
     }
@@ -3328,7 +3327,7 @@ mod tests {
         // Should be close to 10mA (exactly 10mA with lambda=0)
         assert!(
             (ids - 10e-3).abs() < 1e-6,
-            "Expected Ids≈IDSS=10mA, got {}",
+            "Expected Idsâ‰ˆIDSS=10mA, got {}",
             ids
         );
     }
@@ -3886,7 +3885,7 @@ mod tests {
     #[test]
     fn test_hfet_leak_large_reverse_bias_matches_gmin_branch() {
         let (il, gl) = Jfet::hfet_leak(1e-12, 0.02585, -1.0, 90.0, 5e-12, 5e-6, 1.32, 6.9);
-        let expected_il = 1e-12 * -1.0 - 5e-12;
+        let expected_il = -1e-12 - 5e-12;
         assert!((gl - 1e-12).abs() < 1e-24, "reverse branch should use gmin");
         assert!(
             (il - expected_il).abs() < 1e-18,

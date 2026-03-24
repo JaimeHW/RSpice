@@ -10,24 +10,25 @@
 //!
 //! # Theory
 //!
-//! For a periodic orbit x*(t) with period T, small perturbations δx(t) evolve as:
+//! For a periodic orbit x*(t) with period T, small perturbations Î´x(t) evolve as:
 //!
-//! δx(t) ≈ Φ(t,0) · δx(0)
+//! Î´x(t) â‰ˆ Î¦(t,0) Â· Î´x(0)
 //!
-//! where Φ(t,0) is the state transition (Monodromy) matrix. The eigenvalues of
-//! Φ(T,0) are called **Floquet multipliers** (λ). Stability is determined by:
+//! where Î¦(t,0) is the state transition (Monodromy) matrix. The eigenvalues of
+//! Î¦(T,0) are called **Floquet multipliers** (Î»). Stability is determined by:
 //!
-//! - |λ| < 1 for all λ (except one λ = 1 for autonomous systems): Stable
-//! - |λ| > 1 for any λ: Unstable
-//! - |λ| = 1 (beyond the trivial one): Marginally stable / bifurcation point
+//! - |Î»| < 1 for all Î» (except one Î» = 1 for autonomous systems): Stable
+//! - |Î»| > 1 for any Î»: Unstable
+//! - |Î»| = 1 (beyond the trivial one): Marginally stable / bifurcation point
 //!
 //! # Floquet Exponents
 //!
-//! Floquet exponents μ relate to multipliers as: λ = exp(μ·T)
+//! Floquet exponents Î¼ relate to multipliers as: Î» = exp(Î¼Â·T)
 //!
-//! For oscillators, one μ = 0 always (corresponding to phase shifts along orbit).
+//! For oscillators, one Î¼ = 0 always (corresponding to phase shifts along orbit).
 //! The other exponents determine amplitude stability.
 
+#![allow(clippy::needless_range_loop)]
 use crate::Value;
 use num_complex::Complex64;
 use std::f64::consts::PI;
@@ -54,7 +55,7 @@ pub struct PstbConfig {
     /// Whether to compute eigenvectors (mode shapes)
     pub compute_eigenvectors: bool,
 
-    /// Stability margin threshold (|λ| below this is considered stable)
+    /// Stability margin threshold (|Î»| below this is considered stable)
     pub stability_threshold: Value,
 
     /// Enable subharmonic detection (multipliers at roots of unity)
@@ -126,7 +127,7 @@ pub struct FloquetMultiplier {
     /// Complex eigenvalue (Floquet multiplier)
     pub value: Complex64,
 
-    /// Floquet exponent: μ = ln(λ)/T
+    /// Floquet exponent: Î¼ = ln(Î»)/T
     pub exponent: Complex64,
 
     /// Index in sorted order (0 = most unstable)
@@ -135,10 +136,10 @@ pub struct FloquetMultiplier {
     /// Whether this multiplier indicates instability
     pub is_unstable: bool,
 
-    /// Whether this is the trivial multiplier (λ ≈ 1 for autonomous systems)
+    /// Whether this is the trivial multiplier (Î» â‰ˆ 1 for autonomous systems)
     pub is_trivial: bool,
 
-    /// Subharmonic order if |λ| ≈ 1 and λ is near a root of unity
+    /// Subharmonic order if |Î»| â‰ˆ 1 and Î» is near a root of unity
     pub subharmonic_order: Option<usize>,
 
     /// Associated eigenvector (if computed)
@@ -151,10 +152,10 @@ impl FloquetMultiplier {
         let exponent = value.ln() / period;
         let magnitude = value.norm();
 
-        // Check if this is the trivial multiplier (λ ≈ 1)
+        // Check if this is the trivial multiplier (Î» â‰ˆ 1)
         let is_trivial = (value - Complex64::new(1.0, 0.0)).norm() < 1e-6;
 
-        // Check for subharmonic (λ near n-th root of unity)
+        // Check for subharmonic (Î» near n-th root of unity)
         let subharmonic_order = Self::detect_subharmonic(&value);
 
         Self {
@@ -213,7 +214,7 @@ impl FloquetMultiplier {
         self.exponent.im.abs() / (2.0 * PI)
     }
 
-    /// Stability margin in dB (20·log10(1/|λ|))
+    /// Stability margin in dB (20Â·log10(1/|Î»|))
     pub fn stability_margin_db(&self) -> Value {
         -20.0 * self.magnitude().log10()
     }
@@ -235,13 +236,13 @@ pub enum StabilityType {
     /// Pair of complex multipliers outside unit circle
     UnstableComplex,
 
-    /// Multiplier at λ = -1 (period-doubling bifurcation)
+    /// Multiplier at Î» = -1 (period-doubling bifurcation)
     PeriodDoubling,
 
     /// Complex pair on unit circle (Neimark-Sacker/torus bifurcation)
     NeimarkSacker,
 
-    /// Multiplier at λ = +1 (saddle-node bifurcation)
+    /// Multiplier at Î» = +1 (saddle-node bifurcation)
     SaddleNode,
 
     /// Marginal stability (numerical uncertainty)
@@ -317,7 +318,7 @@ impl PstbResult {
         self.multipliers.iter().filter(|m| m.is_unstable).collect()
     }
 
-    /// Get the trivial multiplier (should be ≈ 1)
+    /// Get the trivial multiplier (should be â‰ˆ 1)
     pub fn trivial_multiplier(&self) -> Option<&FloquetMultiplier> {
         self.multipliers.iter().find(|m| m.is_trivial)
     }
@@ -567,7 +568,7 @@ impl PstbAnalyzer {
             *x /= v_norm;
         }
 
-        // Small complex shift keeps (A - λI) solvable for inverse iteration.
+        // Small complex shift keeps (A - Î»I) solvable for inverse iteration.
         let shift = self.config.eigenvalue_tolerance.max(1e-12);
         let lambda_shifted = lambda + Complex64::new(shift, shift * 0.1);
 
@@ -606,7 +607,7 @@ impl PstbAnalyzer {
         }
     }
 
-    /// Solve (A - λI)x = rhs for x, where A is real and λ, rhs are complex.
+    /// Solve (A - Î»I)x = rhs for x, where A is real and Î», rhs are complex.
     fn solve_shifted_complex_system(
         &self,
         matrix: &[Vec<Value>],
@@ -767,12 +768,12 @@ impl PstbAnalyzer {
                 let mag = m.magnitude();
                 let imag = m.value.im.abs();
 
-                // Near λ = -1: period doubling
+                // Near Î» = -1: period doubling
                 if (m.value + Complex64::new(1.0, 0.0)).norm() < 0.01 {
                     return StabilityType::PeriodDoubling;
                 }
 
-                // Near λ = +1 (non-trivial): saddle-node
+                // Near Î» = +1 (non-trivial): saddle-node
                 if (m.value - Complex64::new(1.0, 0.0)).norm() < 0.01 && !m.is_trivial {
                     return StabilityType::SaddleNode;
                 }
@@ -902,7 +903,7 @@ mod tests {
 
     #[test]
     fn test_floquet_multiplier_damping() {
-        // Decaying oscillation: λ = 0.8 * exp(i*π/4)
+        // Decaying oscillation: Î» = 0.8 * exp(i*Ï€/4)
         let mag = 0.8;
         let angle = PI / 4.0;
         let value = Complex64::from_polar(mag, angle);
@@ -918,7 +919,7 @@ mod tests {
 
     #[test]
     fn test_floquet_subharmonic_detection() {
-        // Period-2 subharmonic: λ = -1 (second root of unity)
+        // Period-2 subharmonic: Î» = -1 (second root of unity)
         let value = Complex64::new(-1.0, 0.0);
         let fm = FloquetMultiplier::new(value, 1.0, 1.01);
         assert_eq!(fm.subharmonic_order, Some(2));
@@ -966,7 +967,7 @@ mod tests {
         let mut analyzer = PstbAnalyzer::new(config);
 
         // Stable node: both eigenvalues inside unit circle
-        // λ₁ = 0.8, λ₂ = 0.5
+        // Î»â‚ = 0.8, Î»â‚‚ = 0.5
         let monodromy = vec![vec![0.8, 0.0], vec![0.0, 0.5]];
 
         let result = analyzer.analyze_monodromy(&monodromy, 1e-9);
@@ -983,7 +984,7 @@ mod tests {
         let mut analyzer = PstbAnalyzer::new(config);
 
         // Unstable: one eigenvalue outside unit circle
-        // λ₁ = 1.2, λ₂ = 0.5
+        // Î»â‚ = 1.2, Î»â‚‚ = 0.5
         let monodromy = vec![vec![1.2, 0.0], vec![0.0, 0.5]];
 
         let result = analyzer.analyze_monodromy(&monodromy, 1e-9);
@@ -999,7 +1000,7 @@ mod tests {
         let config = PstbConfig::default();
         let mut analyzer = PstbAnalyzer::new(config);
 
-        // Stable focus: complex eigenvalues with |λ| < 1
+        // Stable focus: complex eigenvalues with |Î»| < 1
         // Rotation by 30 degrees, decay by 0.9
         let mag = 0.9;
         let angle = PI / 6.0;
@@ -1012,7 +1013,7 @@ mod tests {
         assert!(result.is_stable());
         assert_eq!(result.multipliers.len(), 2);
 
-        // Both should have magnitude ≈ 0.9
+        // Both should have magnitude â‰ˆ 0.9
         for m in &result.multipliers {
             assert!((m.magnitude() - 0.9).abs() < 0.01);
         }
@@ -1023,7 +1024,7 @@ mod tests {
         let config = PstbConfig::default();
         let mut analyzer = PstbAnalyzer::new(config);
 
-        // Period doubling: λ = -1 (at bifurcation)
+        // Period doubling: Î» = -1 (at bifurcation)
         let monodromy = vec![vec![-1.0, 0.0], vec![0.0, 0.5]];
 
         let result = analyzer.analyze_monodromy(&monodromy, 1e-9);
@@ -1037,7 +1038,7 @@ mod tests {
         let config = PstbConfig::default();
         let mut analyzer = PstbAnalyzer::new(config);
 
-        // Autonomous system: one λ = 1 (trivial), one λ = 0.7 (stable)
+        // Autonomous system: one Î» = 1 (trivial), one Î» = 0.7 (stable)
         let monodromy = vec![vec![1.0, 0.0], vec![0.0, 0.7]];
 
         let result = analyzer.analyze_monodromy(&monodromy, 1e-9);
@@ -1180,7 +1181,7 @@ mod tests {
             vec![mag * angle.sin(), mag * angle.cos()],
         ];
 
-        let period = 1e-6; // 1 μs period = 1 MHz fundamental
+        let period = 1e-6; // 1 Î¼s period = 1 MHz fundamental
         let result = analyzer.analyze_monodromy(&monodromy, period);
 
         let freqs = result.mode_frequencies();
@@ -1275,7 +1276,7 @@ mod tests {
         let config = PstbConfig::default();
         let mut analyzer = PstbAnalyzer::new(config);
 
-        // Typical oscillator: one λ = 1 (phase), one λ = 0.9 (amplitude)
+        // Typical oscillator: one Î» = 1 (phase), one Î» = 0.9 (amplitude)
         let monodromy = vec![vec![1.0, 0.0], vec![0.0, 0.9]];
         let result = analyzer.analyze_monodromy(&monodromy, 1e-9);
 

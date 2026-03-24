@@ -16,8 +16,10 @@ pub fn execute(args: CompileVaArgs, verbose: bool, _quiet: bool) -> Result<(), C
     }
 
     // Configure compiler options
-    let mut options = CompilerOptions::default();
-    options.strict_mode = args.strict;
+    let mut options = CompilerOptions {
+        strict_mode: args.strict,
+        ..CompilerOptions::default()
+    };
 
     // Add include paths
     for include_dir in &args.includes {
@@ -47,9 +49,9 @@ pub fn execute(args: CompileVaArgs, verbose: bool, _quiet: bool) -> Result<(), C
 
     // Display model information
     println!();
-    println!("╔══════════════════════════════════════════════════════════════════╗");
-    println!("║  Verilog-A Model: {:<48} ║", model.name);
-    println!("╚══════════════════════════════════════════════════════════════════╝");
+    println!("====================================================================");
+    println!("Verilog-A Model: {}", model.name);
+    println!("====================================================================");
     println!();
 
     // Terminals
@@ -100,7 +102,7 @@ pub fn execute(args: CompileVaArgs, verbose: bool, _quiet: bool) -> Result<(), C
     }
 
     // Summary
-    println!("✓ Compilation successful");
+    println!("Compilation successful");
 
     // Usage example
     if args.show_usage {

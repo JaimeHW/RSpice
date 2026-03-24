@@ -411,9 +411,14 @@ impl SessionManager {
     }
 
     /// Deserialize session from JSON
-    pub fn from_json(&mut self, json: &str) -> Result<(), serde_json::Error> {
+    pub fn load_json(&mut self, json: &str) -> Result<(), serde_json::Error> {
         self.current = serde_json::from_str(json)?;
         Ok(())
+    }
+
+    #[allow(clippy::wrong_self_convention)]
+    pub fn from_json(&mut self, json: &str) -> Result<(), serde_json::Error> {
+        self.load_json(json)
     }
 
     /// Create new session

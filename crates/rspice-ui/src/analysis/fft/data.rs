@@ -2,6 +2,8 @@
 //!
 //! Core data types for FFT and spectrum analysis.
 
+#![allow(clippy::type_complexity)]
+
 use std::{
     collections::HashMap,
     f64::consts::PI,
@@ -681,8 +683,8 @@ impl SpectrumAnalysis {
         }
         let start = center.saturating_sub(radius);
         let end = (center + radius).min(mask.len() - 1);
-        for idx in start..=end {
-            mask[idx] = true;
+        for value in mask.iter_mut().take(end + 1).skip(start) {
+            *value = true;
         }
     }
 

@@ -208,7 +208,7 @@ impl HierarchyPath {
         if self.is_root() {
             node_name.to_string()
         } else {
-            format!("{}{}{}", self.to_string(), self.separator, node_name)
+            format!("{}{}{}", self, self.separator, node_name)
         }
     }
 
@@ -336,7 +336,7 @@ impl HierarchyPath {
         if self.is_root() {
             element_name.to_string()
         } else {
-            format!("{}{}{}", self.to_string(), self.separator, element_name)
+            format!("{}{}{}", self, self.separator, element_name)
         }
     }
 
@@ -368,7 +368,7 @@ impl HierarchyPath {
                 node.to_string()
             }
         } else {
-            format!("{}{}{}", self.to_string(), self.separator, node)
+            format!("{}{}{}", self, self.separator, node)
         }
     }
 }

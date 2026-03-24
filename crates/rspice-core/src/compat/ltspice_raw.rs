@@ -320,7 +320,7 @@ fn parse_ascii_data<R: BufRead>(
         // First variable starts with point number
         let value_str = if current_var == 0 {
             // Skip the point number prefix
-            line.split_whitespace().nth(1).or(Some(line)).unwrap()
+            line.split_whitespace().nth(1).unwrap_or(line)
         } else {
             line.split_whitespace().next().unwrap_or(line)
         };

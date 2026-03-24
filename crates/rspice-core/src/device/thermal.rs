@@ -66,8 +66,10 @@ pub const THERMAL_TOLERANCE: Value = 0.1;
 
 /// Type of thermal network model
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum ThermalNetworkType {
     /// Single RC pole (simple lumped model)
+    #[default]
     SinglePole,
     /// Foster network (parallel RC sections in series)
     Foster,
@@ -77,11 +79,6 @@ pub enum ThermalNetworkType {
     Isothermal,
 }
 
-impl Default for ThermalNetworkType {
-    fn default() -> Self {
-        Self::SinglePole
-    }
-}
 
 //=============================================================================
 // Thermal RC Element

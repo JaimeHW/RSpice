@@ -736,7 +736,7 @@ fn test_build_full_jacobian_linear_only() {
 
     // Node 1, harmonic 0: J = -0.001 from resistor
     let h = 3; // 2 harmonics + DC
-    let y11_dc = jac[1 * h][1 * h]; // node 1, harmonic 0
+    let y11_dc = jac[h][h]; // node 1, harmonic 0
     assert!(
         (y11_dc.re - (-0.001)).abs() < 1e-10,
         "J(1,1) at DC should be -0.001: {}",
@@ -744,7 +744,7 @@ fn test_build_full_jacobian_linear_only() {
     );
 
     // Off-diagonal: J = -(-0.001) = +0.001 (negative of off-diagonal admittance)
-    let y01_dc = jac[0][1 * h];
+    let y01_dc = jac[0][h];
     assert!(
         (y01_dc.re - 0.001).abs() < 1e-10,
         "J(0,1) at DC should be +0.001: {}",

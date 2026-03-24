@@ -732,11 +732,11 @@ mod tests {
         };
 
         // Override width for testing
-        let width = 8;
+        let width: usize = 8;
         let value: u64 = 0xAB;
 
         // Manual formatting check
-        let hex = format!("{:0width$X}", value, width = (width + 3) / 4);
+        let hex = format!("{:0width$X}", value, width = width.div_ceil(4));
         assert_eq!(hex, "AB");
 
         let binary = format!("{:0width$b}", value, width = width);

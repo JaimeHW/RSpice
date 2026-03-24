@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use super::{
     build_engine_config, build_voltage_output_expr, infer_primary_output_node,
     infer_primary_source_name, is_ground_like,

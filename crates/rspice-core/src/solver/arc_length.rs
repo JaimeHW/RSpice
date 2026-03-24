@@ -70,8 +70,10 @@ pub const ARC_MAX_NEWTON_ITERS: usize = 15;
 
 /// State of the arc-length continuation solver
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum ArcLengthState {
     /// Ready to start (λ = 0)
+    #[default]
     Ready,
     /// In progress (0 < λ < 1)
     InProgress,
@@ -81,11 +83,6 @@ pub enum ArcLengthState {
     Failed,
 }
 
-impl Default for ArcLengthState {
-    fn default() -> Self {
-        Self::Ready
-    }
-}
 
 //=============================================================================
 // Arc-Length Continuation Controller

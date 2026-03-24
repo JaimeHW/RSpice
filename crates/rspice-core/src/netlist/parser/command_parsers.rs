@@ -518,7 +518,7 @@ pub(super) fn parse_voltage_reference(spec: &str) -> Result<(String, Option<Stri
 
     // Remove V( prefix and ) suffix
     let inner = spec
-        .trim_start_matches(|c: char| c == 'V' || c == 'v')
+        .trim_start_matches(['V', 'v'])
         .trim_start_matches('(')
         .trim_end_matches(')');
 

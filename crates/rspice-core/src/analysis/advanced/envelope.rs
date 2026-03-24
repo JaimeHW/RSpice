@@ -1,6 +1,8 @@
 //! Envelope Transient (envlp) Analysis
 //!
 //! Time-domain simulation of modulated signals using envelope following.
+
+#![cfg_attr(test, allow(clippy::field_reassign_with_default))]
 //! This is critical for RF/wireless circuits with amplitude or frequency
 //! modulated signals (AM, FM, QAM, etc.).
 //!
@@ -803,10 +805,12 @@ pub struct IqSource {
 
 /// Pulse shaping filter types
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Default)]
 pub enum PulseShape {
     /// Rectangular (no shaping)
     Rectangular,
     /// Raised cosine
+    #[default]
     RaisedCosine,
     /// Root raised cosine
     RootRaisedCosine,
@@ -814,11 +818,6 @@ pub enum PulseShape {
     Gaussian,
 }
 
-impl Default for PulseShape {
-    fn default() -> Self {
-        Self::RaisedCosine
-    }
-}
 
 impl IqSource {
     /// Create new IQ source

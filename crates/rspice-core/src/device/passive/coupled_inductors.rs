@@ -15,7 +15,7 @@
 //! ```text
 //! M = k * sqrt(L1 * L2)
 //! ```
-//! where k is the coupling coefficient (0 < k ≤ 1).
+//! where k is the coupling coefficient (0 < k â‰¤ 1).
 //!
 //! For perfectly coupled inductors (k=1), the turns ratio is:
 //! ```text
@@ -25,18 +25,19 @@
 //! # Implementation
 //! Uses the flux linkage formulation:
 //! ```text
-//! λ1 = L1*i1 + M*i2
-//! λ2 = M*i1 + L2*i2
-//! v1 = dλ1/dt, v2 = dλ2/dt
+//! Î»1 = L1*i1 + M*i2
+//! Î»2 = M*i1 + L2*i2
+//! v1 = dÎ»1/dt, v2 = dÎ»2/dt
 //! ```
 //!
 //! For N coupled inductors, this generalizes to matrix form:
 //! ```text
-//! [λ] = [L] * [i]
-//! [v] = d[λ]/dt
+//! [Î»] = [L] * [i]
+//! [v] = d[Î»]/dt
 //! ```
-//! where [L] is the inductance matrix with Lij = k*sqrt(Li*Lj) for i≠j.
+//! where [L] is the inductance matrix with Lij = k*sqrt(Li*Lj) for iâ‰ j.
 
+#![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 use crate::analysis::CompanionCoefficients;
 use crate::device::traits::{DynamicDevice, MatrixStamper};
 use crate::{Value, circuit::NodeId};
@@ -52,7 +53,7 @@ pub struct InductorCoupling {
     pub name: String,
     /// Names of coupled inductors
     pub inductor_names: Vec<String>,
-    /// Coupling coefficient (0 < k ≤ 1)
+    /// Coupling coefficient (0 < k â‰¤ 1)
     pub coefficient: Value,
 }
 
@@ -550,10 +551,10 @@ mod tests {
             "T1".to_string(),
             1,
             0,
-            100e-6, // Primary: 100µH
+            100e-6, // Primary: 100ÂµH
             2,
             0,
-            25e-6, // Secondary: 25µH (2:1 turns ratio)
+            25e-6, // Secondary: 25ÂµH (2:1 turns ratio)
             0.99,
         );
 
@@ -648,7 +649,7 @@ mod tests {
             1e-3, // Primary: 1mH
             2,
             0,
-            10e-6, // Secondary: 10µH
+            10e-6, // Secondary: 10ÂµH
             0.99,
         );
 

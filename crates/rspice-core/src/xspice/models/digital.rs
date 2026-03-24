@@ -627,9 +627,9 @@ impl CodeModel for DFlipFlop {
             q = if data.state.is_high() { 1 } else { 0 };
         }
 
-        let delay = if set.map_or(false, |s| s.state.is_high()) {
+        let delay = if set.is_some_and(|s| s.state.is_high()) {
             set_delay
-        } else if reset.map_or(false, |r| r.state.is_high()) {
+        } else if reset.is_some_and(|r| r.state.is_high()) {
             reset_delay
         } else {
             clk_delay

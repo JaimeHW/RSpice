@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use super::{build_engine_config, build_multi_tone_hb_layout};
 use rspice_core::engine::Engine;
 use rspice_core::Value;

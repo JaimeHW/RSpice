@@ -94,8 +94,7 @@ impl DynamicDevice for Inductor {
 
         // Update current for next step using trapezoidal rule
         // i = i_prev + (dt / 2L) * (v + v_prev)
-        self.current_prev =
-            self.current_prev + (dt / (2.0 * self.inductance)) * (v + self.voltage_prev);
+        self.current_prev += (dt / (2.0 * self.inductance)) * (v + self.voltage_prev);
         self.voltage_prev = v;
     }
 }

@@ -1,5 +1,7 @@
 //! Parametric and corner sweep runners.
 
+#![allow(clippy::needless_range_loop, clippy::type_complexity)]
+
 use super::{build_engine_config, generate_freq_points};
 use rspice_core::engine::{Engine, TransientResult};
 #[cfg(test)]

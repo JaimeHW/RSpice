@@ -22,6 +22,26 @@
 
 // Temporary allowance for existing external/SPICE naming conventions.
 #![allow(non_snake_case)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::assertions_on_constants,
+        clippy::bool_assert_comparison,
+        clippy::cloned_ref_to_slice_refs,
+        clippy::default_constructed_unit_structs,
+        clippy::expect_fun_call,
+        clippy::field_reassign_with_default,
+        clippy::items_after_test_module,
+        clippy::len_zero,
+        clippy::manual_range_contains,
+        clippy::manual_repeat_n,
+        clippy::needless_range_loop,
+        clippy::unnecessary_cast,
+        clippy::unnecessary_get_then_check,
+        clippy::unnecessary_unwrap,
+        clippy::useless_vec
+    )
+)]
 
 // =============================================================================
 // Domain Modules (Organized by Feature)

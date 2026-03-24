@@ -3,6 +3,7 @@
 //! Provides efficient FFT operations using rustfft for converting between
 //! time-domain waveforms and frequency-domain spectral coefficients.
 
+#![allow(clippy::needless_range_loop)]
 use num_complex::Complex64;
 use rustfft::{Fft, FftDirection, FftPlanner};
 use std::sync::Arc;
@@ -155,9 +156,9 @@ impl HbFft {
         spectrum
     }
 
-    /// Compute derivative spectrum (multiply by jω)
+    /// Compute derivative spectrum (multiply by jÏ‰)
     ///
-    /// For a signal x(t), if X(ω) is its spectrum, then dx/dt has spectrum jωX(ω)
+    /// For a signal x(t), if X(Ï‰) is its spectrum, then dx/dt has spectrum jÏ‰X(Ï‰)
     ///
     /// # Arguments
     /// * `spectrum` - Input spectral coefficients
@@ -179,9 +180,9 @@ impl HbFft {
             .collect()
     }
 
-    /// Compute integral spectrum (divide by jω)
+    /// Compute integral spectrum (divide by jÏ‰)
     ///
-    /// For a signal x(t), if X(ω) is its spectrum, then ∫x dt has spectrum X(ω)/(jω)
+    /// For a signal x(t), if X(Ï‰) is its spectrum, then âˆ«x dt has spectrum X(Ï‰)/(jÏ‰)
     /// Note: DC component remains unchanged
     ///
     /// # Arguments
@@ -208,14 +209,14 @@ impl HbFft {
             .collect()
     }
 
-    /// Compute spectral power (|X|²) for each harmonic
+    /// Compute spectral power (|X|Â²) for each harmonic
     pub fn spectral_power(&self, spectrum: &[Complex64]) -> Vec<Value> {
         spectrum.iter().map(|c| c.norm_sqr()).collect()
     }
 
     /// Compute total signal power via Parseval's theorem
     pub fn total_power(&self, spectrum: &[Complex64]) -> Value {
-        // For real signal: P = |X₀|² + 2*Σ|Xₖ|² for k > 0
+        // For real signal: P = |Xâ‚€|Â² + 2*Î£|Xâ‚–|Â² for k > 0
         let dc_power = spectrum.first().map(|c| c.norm_sqr()).unwrap_or(0.0);
         let harmonic_power: Value = spectrum.iter().skip(1).map(|c| c.norm_sqr()).sum();
         dc_power + 2.0 * harmonic_power
@@ -323,9 +324,9 @@ mod fft_tests {
         let fft = HbFft::new(3, 2);
         let f0 = 1e6; // 1 MHz
 
-        // cos(2πf₀t) -> -2πf₀ sin(2πf₀t)
+        // cos(2Ï€fâ‚€t) -> -2Ï€fâ‚€ sin(2Ï€fâ‚€t)
         // Spectrum of cos: [0, 0.5, 0, 0]
-        // Derivative spectrum should be: [0, j*2πf₀*0.5, 0, 0]
+        // Derivative spectrum should be: [0, j*2Ï€fâ‚€*0.5, 0, 0]
         let spectrum = vec![
             Complex64::new(0.0, 0.0),
             Complex64::new(0.5, 0.0),
@@ -338,7 +339,7 @@ mod fft_tests {
         // DC derivative should be 0
         assert!(deriv[0].norm() < 1e-10);
 
-        // H1 should have phase shift of 90° (imaginary)
+        // H1 should have phase shift of 90Â° (imaginary)
         let expected_h1 = 2.0 * PI * f0 * 0.5;
         assert!(
             (deriv[1].im - expected_h1).abs() < 1e-3,

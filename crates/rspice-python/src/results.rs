@@ -6,8 +6,9 @@
 //! - `AcResult` - Frequency-domain complex phasors
 //! - `DcSweepResult` - Collection of DC solutions
 
-use num_complex::Complex64;
 use numpy::{PyArray1, ToPyArray};
+#[cfg(test)]
+use num_complex::Complex64;
 use pyo3::prelude::*;
 use rspice_core::analysis::AcResult;
 use rspice_core::engine::TransientResult;

@@ -360,12 +360,12 @@ fn parse_value(text: &str) -> Option<f64> {
         (&text[..text.len() - 1], 1e9)
     } else if text.ends_with("meg") || text.ends_with("MEG") {
         (&text[..text.len() - 3], 1e6)
-    } else if text.ends_with('M') {
-        (&text[..text.len() - 1], 1e6)
+    } else if let Some(stripped) = text.strip_suffix('M') {
+        (stripped, 1e6)
     } else if text.ends_with('k') || text.ends_with('K') {
         (&text[..text.len() - 1], 1e3)
-    } else if text.ends_with('m') {
-        (&text[..text.len() - 1], 1e-3)
+    } else if let Some(stripped) = text.strip_suffix('m') {
+        (stripped, 1e-3)
     } else if text.ends_with('u') || text.ends_with('U') {
         (&text[..text.len() - 1], 1e-6)
     } else if text.ends_with('n') || text.ends_with('N') {

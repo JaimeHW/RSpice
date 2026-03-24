@@ -244,7 +244,7 @@ pub fn load_csv<P: AsRef<Path>>(path: P) -> Result<Vec<(Value, Value)>, PwlFileE
 
         // Try to parse as two numeric values
         let parts: Vec<&str> = trimmed
-            .split(|c| c == ',' || c == ';' || c == '\t' || c == ' ')
+            .split([',', ';', '\t', ' '])
             .filter(|s| !s.is_empty())
             .collect();
 

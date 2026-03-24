@@ -8,6 +8,8 @@
 //!
 //! Follows Cadence Spectre patterns for symbol management.
 
+#![allow(clippy::too_many_arguments)]
+
 use crate::state::ComponentType;
 use egui::{Painter, Pos2, Stroke};
 use std::collections::HashMap;

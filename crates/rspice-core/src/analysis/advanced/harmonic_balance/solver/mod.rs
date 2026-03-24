@@ -1,8 +1,9 @@
 //! Harmonic Balance Newton Solver
 //!
 //! Core solver for Harmonic Balance analysis using Newton-Raphson iteration.
-//! Solves the frequency-domain circuit equations: G*X + jω*C*X + F_NL(X) = I_S
+//! Solves the frequency-domain circuit equations: G*X + jÏ‰*C*X + F_NL(X) = I_S
 
+#![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 use num_complex::Complex64;
 use std::f64::consts::PI;
 
@@ -172,7 +173,7 @@ impl VoltageSourceBranch {
 /// Harmonic Balance solver
 ///
 /// HB solver supporting:
-/// - Linear elements: R, C, L (with proper jωL admittance)
+/// - Linear elements: R, C, L (with proper jÏ‰L admittance)
 /// - MNA voltage sources with branch currents
 /// - Nonlinear device Newton iteration via FFT/IFFT
 #[derive(Debug)]
@@ -202,7 +203,7 @@ pub struct HbSolver {
 
     /// Inductance matrix for each node combination
     /// Stored as sparse: (row, col) -> L
-    /// Admittance Y = 1/(jωL) at each harmonic
+    /// Admittance Y = 1/(jÏ‰L) at each harmonic
     l_matrix: Vec<(usize, usize, Value)>,
 
     /// Voltage source branches for MNA
@@ -296,7 +297,7 @@ pub struct NonlinearDeviceParams {
     pub br: Value,
     /// Threshold voltage (MOSFET)
     pub vth: Value,
-    /// Transconductance parameter K = μCox W/L (MOSFET)
+    /// Transconductance parameter K = Î¼Cox W/L (MOSFET)
     pub kp: Value,
     /// Channel length modulation (MOSFET)
     pub lambda: Value,
@@ -556,7 +557,7 @@ impl NonlinearDeviceInstance {
         }
     }
 
-    /// Compute Jacobian entries (∂I/∂V for each terminal pair)
+    /// Compute Jacobian entries (âˆ‚I/âˆ‚V for each terminal pair)
     /// Returns Vec of ((from_node, to_node), dI/dV) - linearized conductance stamps
     pub fn jacobian(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
         match self.device_type {
@@ -1198,9 +1199,9 @@ impl HbSolver {
 
     /// Add inductance stamp
     ///
-    /// In frequency domain, inductor admittance is Y_L = 1/(jωL).
-    /// At DC (ω=0), inductor is short circuit (infinite admittance) - handled specially.
-    /// At harmonic k: Y_L(k) = 1/(j * k * ω₀ * L) = -j/(k * ω₀ * L)
+    /// In frequency domain, inductor admittance is Y_L = 1/(jÏ‰L).
+    /// At DC (Ï‰=0), inductor is short circuit (infinite admittance) - handled specially.
+    /// At harmonic k: Y_L(k) = 1/(j * k * Ï‰â‚€ * L) = -j/(k * Ï‰â‚€ * L)
     pub fn add_inductance(&mut self, node_i: usize, node_j: usize, l: Value) {
         self.l_matrix.push((node_i, node_j, l));
     }
@@ -1332,11 +1333,11 @@ impl HbSolver {
 
     /// Compute residual for linear circuit (KCL: sum of currents INTO node = 0)
     ///
-    /// Residual = I_source - (G*X + jω*C*X + (1/jωL)*X)
+    /// Residual = I_source - (G*X + jÏ‰*C*X + (1/jÏ‰L)*X)
     ///          = I_source - Y*X
     ///
-    /// For inductors, admittance Y_L = 1/(jωL) = -j/(ωL)
-    /// At DC (ω=0): inductor is short circuit, requires special handling
+    /// For inductors, admittance Y_L = 1/(jÏ‰L) = -j/(Ï‰L)
+    /// At DC (Ï‰=0): inductor is short circuit, requires special handling
     pub fn compute_linear_residual(&self, state: &mut HbSolverState) {
         let omega0 = 2.0 * PI * self.config.fundamental_freq;
 
@@ -1369,7 +1370,7 @@ impl HbSolver {
             }
         }
 
-        // Subtract jω*C*X contribution (capacitor admittance current)
+        // Subtract jÏ‰*C*X contribution (capacitor admittance current)
         for &(i, j, c) in &self.c_matrix {
             if i < state.x.len() && j < state.x.len() {
                 for k in 0..=self.num_harmonics {
@@ -1382,8 +1383,8 @@ impl HbSolver {
             }
         }
 
-        // Subtract 1/(jωL)*X contribution (inductor admittance current)
-        // Y_L = 1/(jωL) = -j/(ωL)
+        // Subtract 1/(jÏ‰L)*X contribution (inductor admittance current)
+        // Y_L = 1/(jÏ‰L) = -j/(Ï‰L)
         // At DC (k=0): inductor is short circuit - enforce V=0 (large admittance)
         for &(i, j, l) in &self.l_matrix {
             if i < state.x.len() && j < state.x.len() && l.abs() > 1e-30 {
@@ -1396,7 +1397,7 @@ impl HbSolver {
                             const DC_SHORT_CONDUCTANCE: Value = 1e6;
                             state.residual[i][k] -= DC_SHORT_CONDUCTANCE * state.x[j][k];
                         } else {
-                            // AC: Y_L = 1/(jωL) = -j/(ωL)
+                            // AC: Y_L = 1/(jÏ‰L) = -j/(Ï‰L)
                             let y_l = Complex64::new(0.0, -1.0 / (omega_k * l));
                             state.residual[i][k] -= y_l * state.x[j][k];
                         }
@@ -1410,7 +1411,7 @@ impl HbSolver {
 
     /// Compute Jacobian for linear circuit (block diagonal)
     ///
-    /// J[node_i, k][node_j, l] = δ_{kl} * (G_{ij} + jω_k * C_{ij} + 1/(jω_k * L_{ij}))
+    /// J[node_i, k][node_j, l] = Î´_{kl} * (G_{ij} + jÏ‰_k * C_{ij} + 1/(jÏ‰_k * L_{ij}))
     #[allow(dead_code)]
     fn compute_linear_jacobian(&self) -> Vec<Vec<Vec<Vec<Complex64>>>> {
         let omega0 = 2.0 * PI * self.config.fundamental_freq;
@@ -1429,7 +1430,7 @@ impl HbSolver {
             }
         }
 
-        // jω*C contribution (diagonal in harmonics)
+        // jÏ‰*C contribution (diagonal in harmonics)
         for &(i, j, c) in &self.c_matrix {
             if i < n && j < n {
                 for k in 0..h {
@@ -1440,7 +1441,7 @@ impl HbSolver {
             }
         }
 
-        // 1/(jωL) contribution (diagonal in harmonics)
+        // 1/(jÏ‰L) contribution (diagonal in harmonics)
         for &(i, j, l) in &self.l_matrix {
             if i < n && j < n && l.abs() > 1e-30 {
                 for k in 0..h {
@@ -1450,7 +1451,7 @@ impl HbSolver {
                         const DC_SHORT_CONDUCTANCE: Value = 1e6;
                         jac[i][k][j][k] += DC_SHORT_CONDUCTANCE;
                     } else {
-                        // AC: Y_L = 1/(jωL) = -j/(ωL)
+                        // AC: Y_L = 1/(jÏ‰L) = -j/(Ï‰L)
                         let y_l = Complex64::new(0.0, -1.0 / (omega_k * l));
                         jac[i][k][j][k] += y_l;
                     }
@@ -1582,7 +1583,7 @@ impl HbSolver {
 
     /// Solve for linear circuit (direct solve for diagonal harmonic blocks).
     ///
-    /// Builds Y = G + jωC + 1/(jωL) and augments with MNA branch equations for
+    /// Builds Y = G + jÏ‰C + 1/(jÏ‰L) and augments with MNA branch equations for
     /// ideal voltage sources when present.
     pub fn solve_linear(&self, state: &mut HbSolverState) -> Result<(), HbError> {
         let omega0 = 2.0 * PI * self.config.fundamental_freq;
@@ -1852,7 +1853,7 @@ impl HbSolver {
     // This establishes nonlinear device operating points and provides a
     // much better initial guess for the HB Newton iteration.
     //
-    // Flow: DC Solve → Initialize Harmonics → Full HB Newton
+    // Flow: DC Solve â†’ Initialize Harmonics â†’ Full HB Newton
     // =========================================================================
 
     /// Solve DC operating point before full HB iteration
@@ -1872,7 +1873,7 @@ impl HbSolver {
     ) -> Result<Vec<Value>, HbError> {
         // DC tolerances (more realistic than HB defaults)
         // For DC analysis, we're solving KCL: sum of currents = 0
-        // Typical circuit currents are in mA-µA range, so abstol should be ~pA
+        // Typical circuit currents are in mA-ÂµA range, so abstol should be ~pA
         let dc_reltol = self.config.tolerance.max(1e-3); // At least 0.1% relative
         let dc_abstol = self.config.abstol.max(1e-9); // At least 1 pA absolute
 
@@ -1999,11 +2000,10 @@ impl HbSolver {
         self.source_spectra = original_sources;
 
         // Final DC solve with full sources
-        if source_stepper.is_complete() {
-            if self.dc_newton_inner_loop(state, target_gmin, dc_max_iter, dc_reltol, dc_abstol) {
+        if source_stepper.is_complete()
+            && self.dc_newton_inner_loop(state, target_gmin, dc_max_iter, dc_reltol, dc_abstol) {
                 return Ok(self.extract_dc_solution(state));
             }
-        }
 
         // DC solve failed - return what we have
         Err(HbError::ConvergenceFailed {
@@ -2014,7 +2014,7 @@ impl HbSolver {
 
     /// Solve DC for linear circuit (no nonlinear devices)
     fn solve_dc_linear(&self, state: &mut HbSolverState) -> Result<(), HbError> {
-        // Build DC conductance matrix (G only, no jωC or 1/jωL at DC)
+        // Build DC conductance matrix (G only, no jÏ‰C or 1/jÏ‰L at DC)
         let n = self.num_nodes;
         let mut g_dc = vec![vec![0.0; n]; n];
 
@@ -2101,7 +2101,7 @@ impl HbSolver {
             let jacobian = self.build_dc_jacobian(state, gmin);
 
             // Solve for delta_x: J * delta = -residual (standard Newton-Raphson)
-            // We need -R because: R(x) = 0, Taylor: R(x+delta) ≈ R(x) + J*delta = 0
+            // We need -R because: R(x) = 0, Taylor: R(x+delta) â‰ˆ R(x) + J*delta = 0
             // So J*delta = -R
             let neg_residual: Vec<Value> = (0..self.num_nodes)
                 .map(|node| {
@@ -2227,7 +2227,7 @@ impl HbSolver {
 
         // Nonlinear device Jacobians
         // Device returns MNA conductance stamps (+gd on diagonal for diode)
-        // But dI_into/dV = -gd (more voltage → more current leaving → less current into)
+        // But dI_into/dV = -gd (more voltage â†’ more current leaving â†’ less current into)
         // Since J = dR/dV = dI_into/dV - G - gmin, we need to subtract the device stamps
         // J = -G_device - G_linear - gmin
         for device in &self.nonlinear_devices {
@@ -2634,7 +2634,7 @@ impl HbSolver {
     /// 3. Use GMIN as a constant stabilizer throughout
     ///
     /// The Jacobian includes:
-    /// - Linear part: block-diagonal Y = G + jωC + 1/(jωL) per harmonic
+    /// - Linear part: block-diagonal Y = G + jÏ‰C + 1/(jÏ‰L) per harmonic
     /// - Nonlinear part: FFT-based convolution of time-domain Jacobians
     /// - GMIN: diagonal conductance for numerical stability
     pub fn solve_newton(&mut self, state: &mut HbSolverState) -> Result<(), HbError> {
@@ -2719,8 +2719,7 @@ impl HbSolver {
                     state.converged = true;
                     return Ok(());
                 }
-            } else {
-            }
+            } 
         }
 
         // Step 3: Try source stepping
@@ -2783,13 +2782,12 @@ impl HbSolver {
         self.source_spectra = original_sources;
 
         // If source stepping completed, do final Newton with original sources
-        if source_stepper.is_complete() {
-            if self.newton_inner_loop(state, gmin, self.config.max_iterations, tol, abstol) {
+        if source_stepper.is_complete()
+            && self.newton_inner_loop(state, gmin, self.config.max_iterations, tol, abstol) {
                 state.converged = true;
                 state.iteration = total_iterations;
                 return Ok(());
             }
-        }
 
         // Step 4: Try pseudo-transient
         // Add damping capacitors to each node and integrate to steady-state
@@ -2822,13 +2820,12 @@ impl HbSolver {
         }
 
         // If pseudo-transient completed, do final high-accuracy Newton
-        if ptran.is_complete() {
-            if self.newton_inner_loop(state, gmin, self.config.max_iterations, tol, abstol) {
+        if ptran.is_complete()
+            && self.newton_inner_loop(state, gmin, self.config.max_iterations, tol, abstol) {
                 state.converged = true;
                 state.iteration = total_iterations + ptran_iterations;
                 return Ok(());
             }
-        }
 
         Err(HbError::ConvergenceFailed {
             iterations: total_iterations + ptran_iterations,
@@ -2862,7 +2859,7 @@ impl HbSolver {
             // 3. Build full Jacobian (linear + nonlinear + GMIN)
             let jacobian = self.build_full_jacobian_with_gmin(state, gmin);
 
-            // 4. Solve J * ΔX = -R for Newton update
+            // 4. Solve J * Î”X = -R for Newton update
             let delta_x = match self.solve_jacobian_system(&jacobian, state) {
                 Ok(dx) => dx,
                 Err(_) => return false, // Singular matrix
@@ -2906,7 +2903,7 @@ impl HbSolver {
 
     /// Build Jacobian with GMIN on diagonal
     ///
-    /// Residual = I_source - Y*V - gmin*V, so J = ∂res/∂V = -Y - gmin
+    /// Residual = I_source - Y*V - gmin*V, so J = âˆ‚res/âˆ‚V = -Y - gmin
     fn build_full_jacobian_with_gmin(
         &mut self,
         state: &HbSolverState,
@@ -3104,7 +3101,7 @@ impl HbSolver {
         let mut jac = vec![vec![Complex64::new(0.0, 0.0); size]; size];
 
         // --- Linear part: block-diagonal per harmonic ---
-        // Residual = I_source - Y*V, so J = ∂res/∂V = -Y
+        // Residual = I_source - Y*V, so J = âˆ‚res/âˆ‚V = -Y
         for k in 0..h {
             let omega_k = (k as f64) * omega0;
 
@@ -3117,7 +3114,7 @@ impl HbSolver {
                 }
             }
 
-            // Capacitance contribution: -jωC
+            // Capacitance contribution: -jÏ‰C
             for &(i, j, c) in &self.c_matrix {
                 if i < n && j < n {
                     let row = i * h + k;
@@ -3126,7 +3123,7 @@ impl HbSolver {
                 }
             }
 
-            // Inductance contribution: -1/(jωL)
+            // Inductance contribution: -1/(jÏ‰L)
             for &(i, j, l) in &self.l_matrix {
                 if i < n && j < n && l.abs() > 1e-30 {
                     let row = i * h + k;
@@ -3135,7 +3132,7 @@ impl HbSolver {
                         // DC: short circuit
                         jac[row][col] -= 1e6;
                     } else {
-                        // AC: Y_L = -j/(ωL)
+                        // AC: Y_L = -j/(Ï‰L)
                         jac[row][col] -= Complex64::new(0.0, -1.0 / (omega_k * l));
                     }
                 }
@@ -3251,7 +3248,7 @@ impl HbSolver {
                                 g_spectrum[g_idx].conj()
                             };
                             // SUBTRACT device Jacobian for KCL: residual = I_source - I_device
-                            // So J = ∂res/∂V = -∂I_device/∂V = -gd
+                            // So J = âˆ‚res/âˆ‚V = -âˆ‚I_device/âˆ‚V = -gd
                             jac[row][col] -= g_val;
                         }
                     }
@@ -3260,7 +3257,7 @@ impl HbSolver {
         }
     }
 
-    /// Solve the Jacobian system: J * ΔX = -R
+    /// Solve the Jacobian system: J * Î”X = -R
     ///
     /// Uses LU factorization with partial pivoting.
     /// Returns flattened delta_x vector that maps back to [node][harmonic].
@@ -3299,7 +3296,7 @@ impl HbSolver {
 
     /// Apply Armijo line search for robust convergence
     ///
-    /// Starts with α = 1 (full Newton step), reduces if residual doesn't decrease.
+    /// Starts with Î± = 1 (full Newton step), reduces if residual doesn't decrease.
     /// This is critical for convergence on highly nonlinear circuits.
     #[cfg(test)]
     fn apply_line_search(
@@ -3320,7 +3317,7 @@ impl HbSolver {
 
         // Try different step sizes
         while alpha >= min_alpha {
-            // Apply update: X_new = X_old + α * ΔX
+            // Apply update: X_new = X_old + Î± * Î”X
             for (node, dx_node) in delta_x.iter().enumerate() {
                 for (k, &dx) in dx_node.iter().enumerate() {
                     if node < state.x.len() && k < state.x[node].len() {

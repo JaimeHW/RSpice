@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use super::pnoise_sideband::{
     build_pnoise_sideband_translated_frequencies, fold_sideband_contributors,
     fold_sideband_noise_results, resolve_pnoise_sideband_stride,

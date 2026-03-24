@@ -153,6 +153,15 @@ pub fn compute_psd(time: &[f64], values: &[f64], window: WindowFunction) -> Opti
     Some(result)
 }
 
+fn map_window(window: WindowFunction) -> super::window::WindowFunction {
+    match window {
+        WindowFunction::Rectangular => super::window::WindowFunction::Rectangular,
+        WindowFunction::Hanning => super::window::WindowFunction::Hanning,
+        WindowFunction::Hamming => super::window::WindowFunction::Hamming,
+        WindowFunction::Blackman => super::window::WindowFunction::Blackman,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,14 +263,5 @@ mod tests {
             .as_ref()
             .map(|r| r.sample_rate.is_finite() && r.sample_rate > 0.0)
             .unwrap_or(false));
-    }
-}
-
-fn map_window(window: WindowFunction) -> super::window::WindowFunction {
-    match window {
-        WindowFunction::Rectangular => super::window::WindowFunction::Rectangular,
-        WindowFunction::Hanning => super::window::WindowFunction::Hanning,
-        WindowFunction::Hamming => super::window::WindowFunction::Hamming,
-        WindowFunction::Blackman => super::window::WindowFunction::Blackman,
     }
 }

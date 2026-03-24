@@ -10,6 +10,9 @@
 //! - `KeyBinding`: A key + modifiers combination
 //! - `ShortcutRegistry`: Maps key bindings to actions with customization support
 //!
+
+#![allow(clippy::type_complexity)]
+
 //! # Example
 //!
 //! ```ignore

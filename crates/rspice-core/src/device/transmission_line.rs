@@ -10,7 +10,7 @@
 //!
 //! # Theory
 //! A lossless transmission line is characterized by:
-//! - Z0: Characteristic impedance (Ω)
+//! - Z0: Characteristic impedance (Î©)
 //! - TD: Propagation delay (s)
 //!
 //! The telegrapher's equations relate voltage and current at both ends:
@@ -23,6 +23,7 @@
 //! Uses delay buffers to store past values and interpolates for accurate delays.
 //! The transmission line is modeled as dependent sources with delay.
 
+#![allow(clippy::too_many_arguments)]
 use crate::{Value, circuit::NodeId};
 use std::collections::VecDeque;
 
@@ -131,8 +132,8 @@ impl DelayBuffer {
     /// Given points p0 and p1 with values v0, v1 and slopes m0, m1,
     /// interpolates smoothly with continuous first derivative.
     ///
-    /// H(t) = (2t³ - 3t² + 1)v0 + (t³ - 2t² + t)Δt·m0
-    ///      + (-2t³ + 3t²)v1 + (t³ - t²)Δt·m1
+    /// H(t) = (2tÂ³ - 3tÂ² + 1)v0 + (tÂ³ - 2tÂ² + t)Î”tÂ·m0
+    ///      + (-2tÂ³ + 3tÂ²)v1 + (tÂ³ - tÂ²)Î”tÂ·m1
     #[inline]
     fn cubic_hermite(p0: &Sample, p1: &Sample, t: Value) -> Value {
         let dt = p1.time - p0.time;
@@ -140,7 +141,7 @@ impl DelayBuffer {
             return p1.value;
         }
 
-        // Normalized parameter s ∈ [0, 1]
+        // Normalized parameter s âˆˆ [0, 1]
         let s = (t - p0.time) / dt;
         let s2 = s * s;
         let s3 = s2 * s;
@@ -182,7 +183,7 @@ pub struct TransmissionLine {
     pub node2_neg: NodeId,
 
     // Parameters
-    /// Characteristic impedance (Ω)
+    /// Characteristic impedance (Î©)
     pub z0: Value,
     /// Propagation delay (s)
     pub td: Value,
@@ -387,11 +388,11 @@ pub struct LossyTransmissionLine {
     pub base: TransmissionLine,
 
     // Loss parameters (per unit length, normalized)
-    /// DC resistance (Ω)
+    /// DC resistance (Î©)
     pub r: Value,
     /// Shunt conductance (S)
     pub g: Value,
-    /// Skin effect resistance (Ω/√Hz)
+    /// Skin effect resistance (Î©/âˆšHz)
     pub rs: Value,
 
     /// Attenuation factor
@@ -416,7 +417,7 @@ impl LossyTransmissionLine {
         // Calculate attenuation: exp(-(R/2Z0 + G*Z0/2) * length)
         // For normalized line, use TD as proxy for length
         let alpha = r / (2.0 * z0) + g * z0 / 2.0;
-        let attenuation = (-alpha * td / 1e-9).exp().max(0.001).min(1.0);
+        let attenuation = (-alpha * td / 1e-9).exp().clamp(0.001, 1.0);
 
         Self {
             base,
@@ -444,38 +445,6 @@ impl LossyTransmissionLine {
 }
 
 //=============================================================================
-// Stub Helpers
-//=============================================================================
-
-/// Create an open-circuited stub
-#[allow(dead_code)]
-pub fn open_stub(
-    name: String,
-    node_pos: NodeId,
-    node_neg: NodeId,
-    z0: Value,
-    td: Value,
-) -> TransmissionLine {
-    // Open stub has infinite impedance at the far end
-    // Use the same node for both ends of port 2 effectively makes it open
-    TransmissionLine::new(name, node_pos, node_neg, 0, 0, z0, td)
-}
-
-/// Create a short-circuited stub  
-#[allow(dead_code)]
-pub fn short_stub(
-    name: String,
-    node_pos: NodeId,
-    node_neg: NodeId,
-    z0: Value,
-    td: Value,
-) -> TransmissionLine {
-    // For a shorted stub, we'd need to add a short at the far end
-    // This is a simplified version - in practice, add a very low resistance
-    TransmissionLine::new(name, node_pos, node_neg, 0, 0, z0, td)
-}
-
-//=============================================================================
 // Tests
 //=============================================================================
 
@@ -491,7 +460,7 @@ mod tests {
             0,
             2,
             0,
-            50.0, // 50Ω
+            50.0, // 50Î©
             1e-9, // 1ns delay
         );
 
@@ -559,7 +528,7 @@ mod tests {
             0,
             50.0,
             1e-9,
-            1.0,   // 1Ω series resistance
+            1.0,   // 1Î© series resistance
             0.001, // 1mS shunt conductance
         );
 

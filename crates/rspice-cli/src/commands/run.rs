@@ -6,12 +6,15 @@
 //! - Progress reporting
 //! - Waveform compression
 
+#![allow(clippy::too_many_arguments)]
+
 use crate::cli::{CliError, Config, OutputFormat, RunArgs};
 use crate::report::{JUnitReporter, JsonMeasReporter, SimulationReport, TapReporter};
 use indicatif::{ProgressBar, ProgressStyle};
 use rspice_core::netlist::AnalysisCommand;
 use rspice_core::{
-    ConvergencePreset, Engine, Netlist, SimulationConfig, SimulationConfigOverrides,
+    ConvergenceConfig, ConvergencePreset, Engine, Netlist, SimulationConfig,
+    SimulationConfigOverrides,
     resolve_simulation_config,
 };
 use std::collections::HashMap;
@@ -213,16 +216,21 @@ fn load_netlist(path: &Path) -> Result<Netlist, CliError> {
 
 /// Build simulation configuration from args and config
 fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> SimulationConfig {
-    let mut base = SimulationConfig::default();
-    base.temperature = config.simulation.temperature + 273.15;
-    base.max_iterations = config.simulation.max_iterations;
-    base.min_timestep = config.simulation.min_timestep;
-    base.max_timestep = config.simulation.max_timestep;
-    base.tolerance = config.simulation.reltol;
-    base.convergence_config.voltage_reltol = config.simulation.reltol;
-    base.convergence_config.voltage_abstol = config.simulation.abstol;
-    base.convergence_config.current_abstol = config.simulation.abstol;
-    base.convergence_config.residual_reltol = config.simulation.residual_reltol;
+    let base = SimulationConfig {
+        temperature: config.simulation.temperature + 273.15,
+        max_iterations: config.simulation.max_iterations,
+        min_timestep: config.simulation.min_timestep,
+        max_timestep: config.simulation.max_timestep,
+        tolerance: config.simulation.reltol,
+        convergence_config: ConvergenceConfig {
+            voltage_reltol: config.simulation.reltol,
+            voltage_abstol: config.simulation.abstol,
+            current_abstol: config.simulation.abstol,
+            residual_reltol: config.simulation.residual_reltol,
+            ..ConvergenceConfig::default()
+        },
+        ..SimulationConfig::default()
+    };
 
     let convergence_mode = args
         .convergence
@@ -1098,7 +1106,7 @@ fn run_measurements(
     for mr in meas_results {
         reports.push(MeasurementReport {
             name: mr.name,
-            value: mr.value.map(|v| f64::from(v)),
+            value: mr.value,
             expected: None,
             tolerance: None,
             passed: mr.value.is_some(),

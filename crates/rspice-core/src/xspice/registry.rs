@@ -70,50 +70,50 @@ impl CodeModelRegistry {
     /// Register all built-in models
     pub fn register_builtins(&mut self) {
         // Analog behavioral models
-        self.register(Arc::new(super::models::Gain::default()));
-        self.register(Arc::new(super::models::Summer::default()));
-        self.register(Arc::new(super::models::Multiplier::default()));
-        self.register(Arc::new(super::models::Divider::default()));
-        self.register(Arc::new(super::models::Limiter::default()));
-        self.register(Arc::new(super::models::Integrator::default()));
-        self.register(Arc::new(super::models::Differentiator::default()));
-        self.register(Arc::new(super::models::AnalogSwitch::default()));
-        self.register(Arc::new(super::models::SampleHold::default()));
+        self.register(Arc::new(super::models::Gain));
+        self.register(Arc::new(super::models::Summer));
+        self.register(Arc::new(super::models::Multiplier));
+        self.register(Arc::new(super::models::Divider));
+        self.register(Arc::new(super::models::Limiter));
+        self.register(Arc::new(super::models::Integrator));
+        self.register(Arc::new(super::models::Differentiator));
+        self.register(Arc::new(super::models::AnalogSwitch));
+        self.register(Arc::new(super::models::SampleHold));
 
         // A/D and D/A bridges
-        self.register(Arc::new(super::models::AdcBridge::default()));
-        self.register(Arc::new(super::models::DacBridge::default()));
+        self.register(Arc::new(super::models::AdcBridge));
+        self.register(Arc::new(super::models::DacBridge));
 
         // Digital sources
-        self.register(Arc::new(super::models::DigitalSource::default()));
+        self.register(Arc::new(super::models::DigitalSource));
 
         // Digital gates
-        self.register(Arc::new(super::models::DigitalInverter::default()));
-        self.register(Arc::new(super::models::DigitalBuffer::default()));
-        self.register(Arc::new(super::models::DigitalAnd::default()));
-        self.register(Arc::new(super::models::DigitalNand::default()));
-        self.register(Arc::new(super::models::DigitalOr::default()));
-        self.register(Arc::new(super::models::DigitalNor::default()));
-        self.register(Arc::new(super::models::DigitalXor::default()));
-        self.register(Arc::new(super::models::DigitalXnor::default()));
-        self.register(Arc::new(super::models::DigitalTristate::default()));
-        self.register(Arc::new(super::models::DigitalPullup::default()));
-        self.register(Arc::new(super::models::DigitalPulldown::default()));
+        self.register(Arc::new(super::models::DigitalInverter));
+        self.register(Arc::new(super::models::DigitalBuffer));
+        self.register(Arc::new(super::models::DigitalAnd));
+        self.register(Arc::new(super::models::DigitalNand));
+        self.register(Arc::new(super::models::DigitalOr));
+        self.register(Arc::new(super::models::DigitalNor));
+        self.register(Arc::new(super::models::DigitalXor));
+        self.register(Arc::new(super::models::DigitalXnor));
+        self.register(Arc::new(super::models::DigitalTristate));
+        self.register(Arc::new(super::models::DigitalPullup));
+        self.register(Arc::new(super::models::DigitalPulldown));
 
         // Flip-flops and latches
-        self.register(Arc::new(super::models::DFlipFlop::default()));
-        self.register(Arc::new(super::models::JkFlipFlop::default()));
-        self.register(Arc::new(super::models::TFlipFlop::default()));
-        self.register(Arc::new(super::models::SrFlipFlop::default()));
-        self.register(Arc::new(super::models::DLatch::default()));
-        self.register(Arc::new(super::models::SrLatch::default()));
+        self.register(Arc::new(super::models::DFlipFlop));
+        self.register(Arc::new(super::models::JkFlipFlop));
+        self.register(Arc::new(super::models::TFlipFlop));
+        self.register(Arc::new(super::models::SrFlipFlop));
+        self.register(Arc::new(super::models::DLatch));
+        self.register(Arc::new(super::models::SrLatch));
 
         // State machine
-        self.register(Arc::new(super::models::DigitalStateMachine::default()));
+        self.register(Arc::new(super::models::DigitalStateMachine));
 
         // Memory
-        self.register(Arc::new(super::models::DigitalRam::default()));
-        self.register(Arc::new(super::models::DigitalRom::default()));
+        self.register(Arc::new(super::models::DigitalRam));
+        self.register(Arc::new(super::models::DigitalRom));
     }
 
     /// Get models by category

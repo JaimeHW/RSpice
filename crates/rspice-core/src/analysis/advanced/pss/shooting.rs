@@ -3,6 +3,7 @@
 //! Implements the shooting method for finding periodic steady-state solutions.
 //! The core algorithm solves the boundary value problem: find x(0) such that x(T) = x(0).
 
+#![allow(clippy::needless_range_loop)]
 use crate::Value;
 use crate::solver::{SolverError, StaticMatrix};
 
@@ -297,7 +298,7 @@ impl ShootingNewtonSolver {
     /// Extract Floquet multipliers from Monodromy matrix
     ///
     /// Floquet multipliers are eigenvalues of the Monodromy matrix.
-    /// For a stable orbit, all multipliers should have |λ| ≤ 1.
+    /// For a stable orbit, all multipliers should have |Î»| â‰¤ 1.
     /// One multiplier is always 1 (corresponding to perturbations along the orbit).
     pub fn compute_floquet_multipliers(
         &self,
@@ -596,7 +597,7 @@ mod tests {
     fn test_floquet_multipliers_2x2() {
         let solver = ShootingNewtonSolver::default();
 
-        // Monodromy with known eigenvalues λ = 0.9, 0.8
+        // Monodromy with known eigenvalues Î» = 0.9, 0.8
         let monodromy = vec![vec![0.9, 0.0], vec![0.0, 0.8]];
 
         let multipliers = solver.compute_floquet_multipliers(&monodromy);

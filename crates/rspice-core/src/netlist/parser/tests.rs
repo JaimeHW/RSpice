@@ -1312,7 +1312,7 @@ fn test_parse_temp() {
     match &result.analyses[0] {
         AnalysisCommand::Temp { temperatures } => {
             assert_eq!(temperatures.len(), 4);
-            assert!((*temperatures.get(0).unwrap() - -40.0).abs() < 1e-10);
+            assert!((*temperatures.first().unwrap() - -40.0).abs() < 1e-10);
             assert!((*temperatures.get(1).unwrap() - 27.0).abs() < 1e-10);
             assert!((*temperatures.get(2).unwrap() - 85.0).abs() < 1e-10);
             assert!((*temperatures.get(3).unwrap() - 125.0).abs() < 1e-10);

@@ -16,6 +16,7 @@
 //! .MEAS TRAN vavg AVG V(out)
 //! ```
 
+#![allow(clippy::too_many_arguments)]
 use crate::Value;
 use std::collections::HashMap;
 
@@ -25,8 +26,10 @@ use std::collections::HashMap;
 
 /// Edge type for trigger/target detection
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum EdgeType {
     /// Rising edge (signal crosses threshold going up)
+    #[default]
     Rise,
     /// Falling edge (signal crosses threshold going down)
     Fall,
@@ -34,11 +37,6 @@ pub enum EdgeType {
     Cross,
 }
 
-impl Default for EdgeType {
-    fn default() -> Self {
-        EdgeType::Rise
-    }
-}
 
 /// Trigger/Target specification for delay measurements
 #[derive(Debug, Clone)]
@@ -790,7 +788,7 @@ mod tests {
 
         let results = engine.evaluate(&time, &signals);
         assert!(results[0].value.is_some());
-        // RMS of unit sine = 1/sqrt(2) ≈ 0.707
+        // RMS of unit sine = 1/sqrt(2) â‰ˆ 0.707
         assert!((results[0].value.unwrap() - 0.707).abs() < 0.01);
     }
 
@@ -862,7 +860,7 @@ mod tests {
             name: "v_at_quarter".to_string(),
             measure_type: MeasureType::Find {
                 signal: "V(out)".to_string(),
-                at: Some(0.25), // sin(2π*0.25) = sin(π/2) = 1
+                at: Some(0.25), // sin(2Ï€*0.25) = sin(Ï€/2) = 1
                 when_signal: None,
                 when_value: None,
             },

@@ -159,7 +159,7 @@ impl Diode {
         let a = self.node_anode;
         let c = self.node_cathode;
 
-        if a > 0 && a > 0 {
+        if a > 0 {
             self.indices.aa = matrix.get_index(a - 1, a - 1);
         }
         if a > 0 && c > 0 {
@@ -168,7 +168,7 @@ impl Diode {
         if c > 0 && a > 0 {
             self.indices.ca = matrix.get_index(c - 1, a - 1);
         }
-        if c > 0 && c > 0 {
+        if c > 0 {
             self.indices.cc = matrix.get_index(c - 1, c - 1);
         }
     }

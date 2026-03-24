@@ -513,7 +513,7 @@ mod tests {
         for i in 0..5 {
             let id = DeviceId::new(i);
             let stamp = CachedStamp::new();
-            bypass.cache_result(id, &vec![1.0], stamp);
+            bypass.cache_result(id, &[1.0], stamp);
         }
 
         assert_eq!(bypass.cached_device_count(), 5);

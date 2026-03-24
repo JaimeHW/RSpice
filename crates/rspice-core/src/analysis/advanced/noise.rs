@@ -1,6 +1,8 @@
 //! Noise Analysis Module
 //!
 //! Computes noise spectral density as a function of frequency.
+
+#![allow(clippy::needless_range_loop)]
 //! Supports:
 //! - **Thermal noise**: Johnson-Nyquist noise from resistors (4kTR)
 //! - **Shot noise**: From PN junctions in diodes and BJTs (2qI)

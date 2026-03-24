@@ -252,7 +252,7 @@ impl HistogramState {
 
     /// Set bin count and rebuild if needed
     pub fn set_bin_count(&mut self, count: usize) {
-        self.bin_count = count.max(1).min(1000);
+        self.bin_count = count.clamp(1, 1000);
     }
 }
 

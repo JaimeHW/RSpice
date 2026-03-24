@@ -33,6 +33,7 @@ pub struct Cli {
 
 /// Available CLI subcommands
 #[derive(Subcommand, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum Commands {
     /// Run a SPICE simulation
     Run(RunArgs),

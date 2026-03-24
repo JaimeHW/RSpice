@@ -294,7 +294,7 @@ impl PeriodDetector {
 
         // Confidence decreases with higher relative std dev
         let confidence = if mean_period > 0.0 {
-            (1.0 - std_dev / mean_period).max(0.0).min(1.0)
+            (1.0 - std_dev / mean_period).clamp(0.0, 1.0)
         } else {
             0.0
         };
@@ -362,7 +362,7 @@ impl PeriodDetector {
         let std_dev = variance.sqrt();
 
         let confidence = if mean_period > 0.0 {
-            (1.0 - std_dev / mean_period).max(0.0).min(1.0)
+            (1.0 - std_dev / mean_period).clamp(0.0, 1.0)
         } else {
             0.0
         };
@@ -503,9 +503,7 @@ impl PeriodDetector {
         let avg_magnitude = magnitude_sum / magnitude_count as f64;
 
         let confidence = if avg_magnitude > 0.0 {
-            ((peak_magnitude / avg_magnitude - 1.0) / 10.0)
-                .min(1.0)
-                .max(0.0)
+            ((peak_magnitude / avg_magnitude - 1.0) / 10.0).clamp(0.0, 1.0)
         } else {
             0.0
         };
@@ -593,7 +591,7 @@ impl PeriodDetector {
         if !self.is_valid_period(period) {
             return None;
         }
-        let confidence = peak_r.max(0.0).min(1.0);
+        let confidence = peak_r.clamp(0.0, 1.0);
 
         Some(PeriodEstimate {
             period,
@@ -787,7 +785,7 @@ mod tests {
         // d_state_dt = [-0.001, 6.283] (derivative = omega * perpendicular)
         let state_start = vec![1.0, 0.0];
         let state_end = vec![0.999, 0.001]; // Small residual
-        let d_state_dt = vec![-0.001, 6.283]; // Derivative at T (omega ≈ 2π/1ns)
+        let d_state_dt = vec![-0.001, std::f64::consts::TAU]; // Derivative at T (omega ≈ 2π/1ns)
 
         let initial_period = 1e-9;
         let refined = detector.refine_period(initial_period, &state_end, &state_start, &d_state_dt);

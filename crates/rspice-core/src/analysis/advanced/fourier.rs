@@ -121,7 +121,7 @@ impl FourierAnalysis {
                 harmonic_number: n,
                 frequency: freq,
                 magnitude: mag,
-                phase: phase,
+                phase,
             });
         }
 

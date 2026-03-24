@@ -10,6 +10,8 @@
 //! - PSF-Lite binary waveform format (`PSFL`) for import
 //! - PSF ASCII waveform exports (`psfascii`) for import
 //! - Cadence PSF native binary waveform databases for import
+
+#![allow(clippy::needless_range_loop, clippy::type_complexity)]
 //! - Touchstone S-parameter format (`.sNp`) for import/export
 
 use super::binary_io::PsfReader;

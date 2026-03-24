@@ -357,7 +357,7 @@ mod tests {
         let cmp = compare_waveforms(&result_data, &golden_data, &args).unwrap();
 
         assert!(!cmp.passed);
-        assert!(cmp.differences.len() > 0);
+        assert!(!cmp.differences.is_empty());
     }
 
     #[test]

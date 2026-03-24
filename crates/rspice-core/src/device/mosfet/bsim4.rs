@@ -32,16 +32,13 @@ const NI_300K: Value = 1.45e16; // Intrinsic carrier concentration at 300K (m^-3
 
 /// BSIM4 device type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum Bsim4Type {
+    #[default]
     Nmos,
     Pmos,
 }
 
-impl Default for Bsim4Type {
-    fn default() -> Self {
-        Bsim4Type::Nmos
-    }
-}
 
 /// BSIM4 model parameters
 ///
@@ -788,7 +785,7 @@ impl Bsim4 {
             let rate = (delta_temp_ss - self.delta_temp) / tau;
             self.delta_temp += rate * dt;
             // Clamp to physical limits
-            self.delta_temp = self.delta_temp.max(0.0).min(200.0); // Max 200K rise
+            self.delta_temp = self.delta_temp.clamp(0.0, 200.0); // Max 200K rise
         } else {
             // Instantaneous (no thermal capacitance)
             self.delta_temp = delta_temp_ss;

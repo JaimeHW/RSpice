@@ -6,6 +6,7 @@
 //! - Optional waveform compression for long simulations
 //! - Cooperative abort for responsive cancellation
 
+#![allow(clippy::too_many_arguments)]
 use super::{Engine, SimulationError, TransientResult};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::transient::{
@@ -148,8 +149,8 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<(Vec<Value>, InitialSolutionMode), SimulationError> {
         match self.solve_dc_operating_point_with_abort(netlist, circuit, matrix, abort) {
-            Ok(solution) => return Ok((solution, InitialSolutionMode::DcOperatingPoint)),
-            Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
+            Ok(solution) => Ok((solution, InitialSolutionMode::DcOperatingPoint)),
+            Err(SimulationError::Aborted) => Err(SimulationError::Aborted),
             Err(primary_err) => {
                 log::warn!(
                     "Transient initial DC operating point failed: {}. Retrying with robust DC aids.",
@@ -739,7 +740,7 @@ impl Engine {
         let cq_curr =
             Self::jfet_companion_ccap(method, trap_order, dt, q_curr, q_prev, q_prev_prev, cq_prev);
         // Match ngspice load linearization contract for capacitive branches:
-        //   i(v) ≈ ccap + geq * (v - v_hist) = geq * v - (geq * v_hist - ccap).
+        //   i(v) â‰ˆ ccap + geq * (v - v_hist) = geq * v - (geq * v_hist - ccap).
         // With our companion stamp convention (i = geq * v - i_eq), this gives:
         //   i_eq = geq * v_hist - ccap.
         // NOTE: This intentionally uses branch voltage history, not charge, because
@@ -2124,7 +2125,7 @@ impl Engine {
                     }
 
                     // Debug: log force-accept values for node 0
-                    let v0_force = solution.get(0).copied().unwrap_or(0.0);
+                    let v0_force = solution.first().copied().unwrap_or(0.0);
                     static FORCE_LOG_COUNT: std::sync::atomic::AtomicUsize =
                         std::sync::atomic::AtomicUsize::new(0);
                     let count = FORCE_LOG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -2422,7 +2423,7 @@ impl Engine {
         );
 
         // Debug: verify stored voltage range for node 0 (SIN source)
-        if let Some(node0_voltages) = result.voltages.get(0) {
+        if let Some(node0_voltages) = result.voltages.first() {
             let v_min = node0_voltages.iter().cloned().fold(f64::INFINITY, f64::min);
             let v_max = node0_voltages
                 .iter()

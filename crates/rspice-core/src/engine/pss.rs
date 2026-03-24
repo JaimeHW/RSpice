@@ -19,6 +19,7 @@
 //!    - Solve for Newton step and update `x0`
 //! 4. Build final `PssResult` with periodic waveform and harmonics
 
+#![allow(clippy::needless_range_loop)]
 use super::{Engine, SimulationError, TransientResult};
 use crate::analysis::transient::{
     BreakpointManager, CompanionCoefficients, LteEstimator, TimestepController, TrapGearController,
@@ -488,7 +489,7 @@ impl Engine {
             let (x_t_perturbed, _) =
                 self.pss_simulate_one_period(circuit, matrix, period, config)?;
 
-            // Monodromy column: d(x_T)/d(x_0) ≈ (x_T_perturbed - x_T_base) / h
+            // Monodromy column: d(x_T)/d(x_0) â‰ˆ (x_T_perturbed - x_T_base) / h
             for i in 0..n {
                 monodromy[i][j] = (x_t_perturbed[i] - x_t_base[i]) / h;
             }
@@ -878,11 +879,9 @@ mod tests {
     fn test_pss_analysis_result_stability_stable() {
         use num_complex::Complex64;
 
-        let stable_multipliers = vec![
-            Complex64::new(0.8, 0.0),
+        let stable_multipliers = [Complex64::new(0.8, 0.0),
             Complex64::new(0.5, 0.3),
-            Complex64::new(-0.4, 0.2),
-        ];
+            Complex64::new(-0.4, 0.2)];
         let is_stable = stable_multipliers.iter().all(|m| m.norm() <= 1.0 + 1e-6);
         assert!(
             is_stable,
@@ -894,7 +893,7 @@ mod tests {
     fn test_pss_analysis_result_stability_unstable() {
         use num_complex::Complex64;
 
-        let unstable_multipliers = vec![
+        let unstable_multipliers = [
             Complex64::new(1.2, 0.0), // Outside unit circle
             Complex64::new(0.5, 0.0),
         ];
@@ -910,11 +909,9 @@ mod tests {
         use num_complex::Complex64;
 
         // Marginal stability: multipliers exactly on unit circle
-        let marginal_multipliers = vec![
-            Complex64::new(1.0, 0.0),
+        let marginal_multipliers = [Complex64::new(1.0, 0.0),
             Complex64::new(0.0, 1.0),
-            Complex64::new(-1.0, 0.0),
-        ];
+            Complex64::new(-1.0, 0.0)];
         // With 1e-6 tolerance, these should be considered stable
         let is_stable = marginal_multipliers.iter().all(|m| m.norm() <= 1.0 + 1e-6);
         assert!(is_stable);
@@ -1130,7 +1127,7 @@ mod tests {
 
         let pss_result = result.unwrap();
         assert!(pss_result.period > 0.0);
-        assert!(pss_result.result.waveforms.len() > 0);
+        assert!(!pss_result.result.waveforms.is_empty());
     }
 
     #[test]
@@ -1139,7 +1136,7 @@ mod tests {
 
         // LC tank circuit
         // f = 1/(2*pi*sqrt(L*C))
-        // With L=1uH, C=1nF: f ≈ 5.03 MHz
+        // With L=1uH, C=1nF: f â‰ˆ 5.03 MHz
         let netlist_str = r#"
             * LC Tank
             V1 in 0 DC 1

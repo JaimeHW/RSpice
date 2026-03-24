@@ -117,13 +117,13 @@ impl PnoiseConfig {
     /// Validate configuration
     pub fn validate(&self) -> Result<(), PnoiseConfigError> {
         if !self.sweep.is_valid() {
-            return Err(PnoiseConfigError::InvalidSweep);
+            return Err(PnoiseConfigError::Sweep);
         }
         if self.max_sidebands == 0 {
-            return Err(PnoiseConfigError::InvalidSidebands);
+            return Err(PnoiseConfigError::Sidebands);
         }
         if self.reltol <= 0.0 || self.abstol < 0.0 {
-            return Err(PnoiseConfigError::InvalidTolerance);
+            return Err(PnoiseConfigError::Tolerance);
         }
         Ok(())
     }
@@ -295,38 +295,35 @@ impl PnoiseSweep {
 
 /// Sideband analysis mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum PnoiseSideband {
     /// Analyze only upper sidebands (f0 + offset)
     Upper,
     /// Analyze only lower sidebands (f0 - offset)
     Lower,
     /// Analyze both sidebands and combine (typical)
+    #[default]
     Both,
 }
 
-impl Default for PnoiseSideband {
-    fn default() -> Self {
-        Self::Both
-    }
-}
 
 /// Configuration errors
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PnoiseConfigError {
     /// Invalid sweep specification
-    InvalidSweep,
+    Sweep,
     /// Invalid sideband count
-    InvalidSidebands,
+    Sidebands,
     /// Invalid tolerance values
-    InvalidTolerance,
+    Tolerance,
 }
 
 impl std::fmt::Display for PnoiseConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidSweep => write!(f, "Invalid offset frequency sweep"),
-            Self::InvalidSidebands => write!(f, "Invalid sideband configuration"),
-            Self::InvalidTolerance => write!(f, "Invalid tolerance values"),
+            Self::Sweep => write!(f, "Invalid offset frequency sweep"),
+            Self::Sidebands => write!(f, "Invalid sideband configuration"),
+            Self::Tolerance => write!(f, "Invalid tolerance values"),
         }
     }
 }
@@ -383,7 +380,7 @@ mod config_tests {
         let config = PnoiseConfig::new("out", 1.0, 1e6).with_max_sidebands(0);
         assert!(matches!(
             config.validate(),
-            Err(PnoiseConfigError::InvalidSidebands)
+            Err(PnoiseConfigError::Sidebands)
         ));
     }
 
@@ -392,7 +389,7 @@ mod config_tests {
         let config = PnoiseConfig::new("out", 1.0, 1e6).with_reltol(-1.0);
         assert!(matches!(
             config.validate(),
-            Err(PnoiseConfigError::InvalidTolerance)
+            Err(PnoiseConfigError::Tolerance)
         ));
     }
 
@@ -478,17 +475,17 @@ mod config_tests {
     #[test]
     fn test_config_error_display() {
         assert!(
-            PnoiseConfigError::InvalidSweep
+            PnoiseConfigError::Sweep
                 .to_string()
                 .contains("sweep")
         );
         assert!(
-            PnoiseConfigError::InvalidSidebands
+            PnoiseConfigError::Sidebands
                 .to_string()
                 .contains("sideband")
         );
         assert!(
-            PnoiseConfigError::InvalidTolerance
+            PnoiseConfigError::Tolerance
                 .to_string()
                 .contains("tolerance")
         );

@@ -3,6 +3,8 @@
 //! Commercial-grade export capabilities for waveform data including
 //! CSV data export and image export.
 
+#![allow(clippy::type_complexity)]
+
 use std::io::Write;
 use std::path::Path;
 

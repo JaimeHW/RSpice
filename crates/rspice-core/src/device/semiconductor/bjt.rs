@@ -577,7 +577,7 @@ impl Bjt {
         let e = self.node_emitter;
 
         // Collector row
-        if c > 0 && c > 0 {
+        if c > 0 {
             self.indices.cc = matrix.get_index(c - 1, c - 1);
         }
         if c > 0 && b > 0 {
@@ -590,7 +590,7 @@ impl Bjt {
         if b > 0 && c > 0 {
             self.indices.bc = matrix.get_index(b - 1, c - 1);
         }
-        if b > 0 && b > 0 {
+        if b > 0 {
             self.indices.bb = matrix.get_index(b - 1, b - 1);
         }
         if b > 0 && e > 0 {
@@ -603,7 +603,7 @@ impl Bjt {
         if e > 0 && b > 0 {
             self.indices.eb = matrix.get_index(e - 1, b - 1);
         }
-        if e > 0 && e > 0 {
+        if e > 0 {
             self.indices.ee = matrix.get_index(e - 1, e - 1);
         }
     }

@@ -521,11 +521,10 @@ impl Mosfet {
                 continue;
             }
 
-            if name.eq_ignore_ascii_case("NF") {
-                if *value > 0.0 {
+            if name.eq_ignore_ascii_case("NF")
+                && *value > 0.0 {
                     nf = *value;
                 }
-            }
         }
 
         if let Some(w) = width_override {
@@ -551,7 +550,7 @@ impl Mosfet {
         let b = self.node_bulk;
 
         // Drain row (4 columns)
-        if d > 0 && d > 0 {
+        if d > 0 {
             self.indices.dd = matrix.get_index(d - 1, d - 1);
         }
         if d > 0 && g > 0 {
@@ -570,7 +569,7 @@ impl Mosfet {
         if s > 0 && g > 0 {
             self.indices.sg = matrix.get_index(s - 1, g - 1);
         }
-        if s > 0 && s > 0 {
+        if s > 0 {
             self.indices.ss = matrix.get_index(s - 1, s - 1);
         }
         if s > 0 && b > 0 {
@@ -942,6 +941,7 @@ impl Mosfet {
     /// - Velocity saturation
     /// - Drain-Induced Barrier Lowering (DIBL)
     /// - Channel length modulation
+    ///
     /// BSIM3-like drain current with C1 continuous transitions
     fn calculate_id_bsim3(&self, vgs: Value, vds: Value, vbs: Value) -> (Value, MosRegion) {
         let p = self.polarity();

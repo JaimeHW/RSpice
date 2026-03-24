@@ -1,6 +1,8 @@
 //! Wire Types Module
 //!
 //! Wire segments, wire drawing state, and wire connections for schematic capture.
+
+#![allow(clippy::module_inception)]
 //!
 //! This module provides robust wire handling with:
 //! - Individual segment representation with geometric metadata

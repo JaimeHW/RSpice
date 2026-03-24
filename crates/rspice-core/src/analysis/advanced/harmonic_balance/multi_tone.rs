@@ -62,7 +62,7 @@ impl FrequencyIndex {
 
     /// Get the total order (sum of absolute harmonic indices)
     pub fn order(&self) -> usize {
-        self.indices.iter().map(|k| k.abs() as usize).sum()
+        self.indices.iter().map(|k| k.unsigned_abs() as usize).sum()
     }
 
     /// Compute the frequency from tone frequencies
@@ -186,7 +186,7 @@ impl FrequencyMap {
             let partial_order: usize = current
                 .iter()
                 .take(tone + 1)
-                .map(|x| x.abs() as usize)
+                .map(|x| x.unsigned_abs() as usize)
                 .sum();
             if partial_order <= self.max_order {
                 self.generate_indices_recursive(current.clone(), tone + 1);
@@ -293,7 +293,7 @@ mod multi_tone_tests {
         // With max_order=2 and 2 harmonics each:
         // Valid indices where |k1| + |k2| <= 2
         // This gives a diamond pattern
-        assert!(map.len() > 0);
+        assert!(!map.is_empty());
 
         // DC should be present
         assert!(map.find(&FrequencyIndex::dc(2)).is_some());

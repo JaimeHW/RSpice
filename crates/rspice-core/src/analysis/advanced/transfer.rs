@@ -19,6 +19,7 @@
 //! .TF V(out) Vin
 //! ```
 
+#![allow(clippy::needless_range_loop)]
 use crate::Value;
 
 /// Result of transfer function analysis
@@ -339,7 +340,7 @@ pub struct AcTransferPoint {
     /// Frequency (Hz)
     pub frequency: Value,
 
-    /// Complex transfer function H(jω)
+    /// Complex transfer function H(jÏ‰)
     pub transfer: Complex64,
 
     /// Magnitude (linear)
@@ -729,20 +730,17 @@ pub struct AcTransferConfig {
 
 /// AC frequency sweep type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum AcSweepType {
     /// Linear sweep
     Linear,
     /// Decade (logarithmic) sweep
+    #[default]
     Decade,
     /// Octave sweep
     Octave,
 }
 
-impl Default for AcSweepType {
-    fn default() -> Self {
-        Self::Decade
-    }
-}
 
 impl AcTransferConfig {
     /// Create decade sweep configuration
@@ -856,7 +854,7 @@ impl AcTransferAnalyzer {
 
     /// Analyze using a transfer function evaluator
     ///
-    /// The evaluator should return H(jω) for given frequency
+    /// The evaluator should return H(jÏ‰) for given frequency
     pub fn analyze<F>(&self, mut evaluator: F) -> AcTransferResult
     where
         F: FnMut(Value) -> Complex64,
@@ -874,7 +872,7 @@ impl AcTransferAnalyzer {
 
     /// Create a test lowpass filter transfer function
     ///
-    /// H(s) = ω₀ / (s + ω₀) = 1 / (1 + s/ω₀)
+    /// H(s) = Ï‰â‚€ / (s + Ï‰â‚€) = 1 / (1 + s/Ï‰â‚€)
     pub fn test_lowpass(&self, cutoff_freq: Value) -> AcTransferResult {
         let omega_0 = 2.0 * PI * cutoff_freq;
 
@@ -886,7 +884,7 @@ impl AcTransferAnalyzer {
 
     /// Create a test highpass filter transfer function
     ///
-    /// H(s) = s / (s + ω₀)
+    /// H(s) = s / (s + Ï‰â‚€)
     pub fn test_highpass(&self, cutoff_freq: Value) -> AcTransferResult {
         let omega_0 = 2.0 * PI * cutoff_freq;
 
@@ -898,7 +896,7 @@ impl AcTransferAnalyzer {
 
     /// Create a test bandpass filter transfer function
     ///
-    /// H(s) = ωₒ/Q · s / (s² + ωₒ/Q · s + ωₒ²)
+    /// H(s) = Ï‰â‚’/Q Â· s / (sÂ² + Ï‰â‚’/Q Â· s + Ï‰â‚’Â²)
     pub fn test_bandpass(&self, center_freq: Value, q_factor: Value) -> AcTransferResult {
         let omega_0 = 2.0 * PI * center_freq;
         let omega_q = omega_0 / q_factor;
@@ -914,7 +912,7 @@ impl AcTransferAnalyzer {
 
     /// Create a test two-pole lowpass (Butterworth-like)
     ///
-    /// H(s) = ω₀² / (s² + √2·ω₀·s + ω₀²)
+    /// H(s) = Ï‰â‚€Â² / (sÂ² + âˆš2Â·Ï‰â‚€Â·s + Ï‰â‚€Â²)
     pub fn test_butterworth_lowpass(&self, cutoff_freq: Value) -> AcTransferResult {
         let omega_0 = 2.0 * PI * cutoff_freq;
         let omega_0_sq = omega_0 * omega_0;
@@ -944,8 +942,8 @@ mod tests {
     /// ```
     ///
     /// Node equations:
-    /// Node 1: (V1-V2)/R1 = I_in  →  V1/R1 - V2/R1 = I_in
-    /// Node 2: (V2-V1)/R1 + V2/R2 = 0  →  -V1/R1 + V2(1/R1+1/R2) = 0
+    /// Node 1: (V1-V2)/R1 = I_in  â†’  V1/R1 - V2/R1 = I_in
+    /// Node 2: (V2-V1)/R1 + V2/R2 = 0  â†’  -V1/R1 + V2(1/R1+1/R2) = 0
     fn resistor_divider_matrix() -> Vec<Vec<Value>> {
         let g1 = 1.0 / 1000.0; // 1/R1
         let g2 = 1.0 / 1000.0; // 1/R2
@@ -979,11 +977,11 @@ mod tests {
         );
 
         // Output impedance looking into node 2:
-        // With the conductance matrix, injecting 1A at node 2 gives V2 = 1/(g1+g2) = R1||R2 = 500Ω
+        // With the conductance matrix, injecting 1A at node 2 gives V2 = 1/(g1+g2) = R1||R2 = 500Î©
         // However, our matrix G has node 2 connected to ground via R2 and to node 1 via R1
         // The impedance at node 2 with node 1 floating is given by the matrix solve
-        // G·V = I where I=[0, 1]ᵀ gives V[1] = 1000 (the R1||R2 would need input shorted)
-        // So the actual Zout from the matrix is 1000Ω
+        // GÂ·V = I where I=[0, 1]áµ€ gives V[1] = 1000 (the R1||R2 would need input shorted)
+        // So the actual Zout from the matrix is 1000Î©
         assert!(
             (zout - 1000.0).abs() < 1e-6,
             "Expected Zout=1000, got {}",
@@ -1041,7 +1039,7 @@ mod tests {
     fn test_gain_db() {
         let result = TransferFunctionResult::new("V(out)", "Vin", 0.5, 2000.0, 500.0);
 
-        // 0.5 in dB = 20*log10(0.5) ≈ -6.02 dB
+        // 0.5 in dB = 20*log10(0.5) â‰ˆ -6.02 dB
         let db = result.gain_db();
         assert!((db - (-6.0206)).abs() < 0.01);
     }
@@ -1065,7 +1063,7 @@ mod tests {
 
     #[test]
     fn test_ac_transfer_point_creation() {
-        let h = Complex64::new(0.707, 0.707); // |H| = 1, ∠45°
+        let h = Complex64::new(0.707, 0.707); // |H| = 1, âˆ 45Â°
         let point = AcTransferPoint::new(1e3, h);
 
         assert!((point.magnitude - 1.0).abs() < 0.01);
@@ -1075,7 +1073,7 @@ mod tests {
 
     #[test]
     fn test_ac_transfer_point_group_delay() {
-        // Constant 1 μs group delay
+        // Constant 1 Î¼s group delay
         let delay = 1e-6;
         let f1 = 1e3;
         let f2 = 2e3;
@@ -1084,7 +1082,7 @@ mod tests {
         let p2 = AcTransferPoint::new(f2, Complex64::from_polar(1.0, -2.0 * PI * f2 * delay));
 
         let gd = p1.group_delay(&p2);
-        assert!((gd - delay).abs() < 1e-8, "Expected ~1μs, got {}", gd);
+        assert!((gd - delay).abs() < 1e-8, "Expected ~1Î¼s, got {}", gd);
     }
 
     #[test]
@@ -1275,9 +1273,9 @@ mod tests {
             Complex64::new(gain, 0.0) / (1.0 + s / pole)
         });
 
-        // Single pole → ~90° phase margin
+        // Single pole â†’ ~90Â° phase margin
         if let Some(pm) = result.phase_margin {
-            assert!(pm > 60.0 && pm < 100.0, "PM should be ~90°, got {}", pm);
+            assert!(pm > 60.0 && pm < 100.0, "PM should be ~90Â°, got {}", pm);
         }
     }
 
