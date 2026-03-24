@@ -250,8 +250,10 @@ R1 2 0 1k
         let netlist = PyNetlist::parse(".end").unwrap();
         let engine = PyEngine::new(None);
 
-        let result = engine.run_dc_op(&netlist);
-        assert!(result.is_err());
+        let result = engine
+            .run_dc_op(&netlist)
+            .expect("empty circuit should return an empty result");
+        assert_eq!(result.voltage_by_index(0), 0.0);
     }
 
     //=========================================================================

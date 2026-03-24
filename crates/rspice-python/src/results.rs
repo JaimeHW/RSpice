@@ -79,7 +79,7 @@ impl PySimulationResult {
     /// Returns:
     ///     list[str]: List of node names indexed by node ID
     #[getter]
-    fn node_names(&self) -> Vec<String> {
+    pub fn node_names(&self) -> Vec<String> {
         self.inner.node_names.clone()
     }
 
@@ -122,7 +122,7 @@ impl PySimulationResult {
 
     /// Number of nodes in the circuit (excluding ground)
     #[getter]
-    fn num_nodes(&self) -> usize {
+    pub fn num_nodes(&self) -> usize {
         self.inner.node_voltages.len().saturating_sub(1)
     }
 

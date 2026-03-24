@@ -979,12 +979,15 @@ L1 2 0 1m
     }
 
     #[test]
-    fn test_empty_netlist_error() {
+    fn test_empty_netlist_returns_empty_grounded_result() {
         let netlist = PyNetlist::parse(".end").unwrap();
         let engine = PyEngine::new(None);
-        let result = engine.run_dc_op(&netlist);
-        // Empty netlist should produce an error
-        assert!(result.is_err());
+        let result = engine
+            .run_dc_op(&netlist)
+            .expect("empty netlist should produce an empty result");
+        assert_eq!(result.num_nodes(), 0);
+        assert_eq!(result.node_names(), vec!["0".to_string()]);
+        assert_eq!(result.voltage_by_index(0), 0.0);
     }
 
     //=========================================================================
