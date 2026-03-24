@@ -21,6 +21,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
+use std::ops::{Add, AddAssign, Div, Mul, Sub};
 
 /// Complex number representation for poles and zeros
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -51,6 +52,59 @@ impl Complex {
             re: self.re,
             im: -self.im,
         }
+    }
+
+    pub fn abs2(&self) -> f64 {
+        self.re * self.re + self.im * self.im
+    }
+}
+
+impl Add for Complex {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self::new(self.re + rhs.re, self.im + rhs.im)
+    }
+}
+
+impl AddAssign for Complex {
+    fn add_assign(&mut self, rhs: Self) {
+        self.re += rhs.re;
+        self.im += rhs.im;
+    }
+}
+
+impl Sub for Complex {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self::new(self.re - rhs.re, self.im - rhs.im)
+    }
+}
+
+impl Mul for Complex {
+    type Output = Self;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        Self::new(
+            self.re * rhs.re - self.im * rhs.im,
+            self.re * rhs.im + self.im * rhs.re,
+        )
+    }
+}
+
+impl Div for Complex {
+    type Output = Self;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        let denom = rhs.abs2();
+        if denom.abs() < 1e-30 {
+            return Self::new(f64::INFINITY, f64::INFINITY);
+        }
+        Self::new(
+            (self.re * rhs.re + self.im * rhs.im) / denom,
+            (self.im * rhs.re - self.re * rhs.im) / denom,
+        )
     }
 }
 
@@ -449,30 +503,87 @@ impl StateSpaceFilter {
             return (self.d.abs(), if self.d >= 0.0 { 0.0 } else { PI });
         }
 
-        // H(jw) = C * (jwI - A)^(-1) * B + D
-        // For simplicity, evaluate numerator/denominator polynomials directly
-        // This is more efficient than matrix inversion for frequency response
+        // Evaluate H(jw) = C * (jwI - A)^(-1) * B + D directly from the
+        // state-space form so the response stays consistent with the runtime
+        // filter realization instead of relying on reconstructed polynomials.
+        let state = match solve_complex_system(&self.a, &self.b, omega) {
+            Some(state) => state,
+            None => return (f64::INFINITY, 0.0),
+        };
 
-        // Build (jw)^k terms
-        let mut jw_powers = Vec::with_capacity(self.order + 1);
-        let jw = Complex::new(0.0, omega);
-        jw_powers.push(Complex::real(1.0)); // (jw)^0
-
-        for _ in 0..self.order {
-            let last = *jw_powers.last().unwrap();
-            jw_powers.push(Complex::new(
-                last.re * jw.re - last.im * jw.im,
-                last.re * jw.im + last.im * jw.re,
-            ));
+        let mut response = Complex::real(self.d);
+        for (&c, state_value) in self.c.iter().zip(state.iter()) {
+            response += Complex::real(c) * *state_value;
         }
 
-        // This is a simplified evaluation; full implementation would
-        // reconstruct polynomials from state-space form
-        let magnitude = 1.0; // Placeholder
-        let phase = 0.0; // Placeholder
-
-        (magnitude, phase)
+        (response.magnitude(), response.phase())
     }
+}
+
+fn solve_complex_system(a: &[Vec<f64>], b: &[f64], omega: f64) -> Option<Vec<Complex>> {
+    let n = b.len();
+    if n == 0 {
+        return Some(Vec::new());
+    }
+
+    let mut mat = vec![vec![Complex::real(0.0); n]; n];
+    let mut rhs = vec![Complex::real(0.0); n];
+
+    for i in 0..n {
+        rhs[i] = Complex::real(b[i]);
+        for j in 0..n {
+            let imag = if i == j { omega } else { 0.0 };
+            mat[i][j] = Complex::new(-a[i][j], imag);
+        }
+    }
+
+    for k in 0..n {
+        let mut pivot_row = k;
+        let mut pivot_mag = mat[k][k].magnitude();
+        for (row_idx, row) in mat.iter().enumerate().skip(k + 1) {
+            let mag = row[k].magnitude();
+            if mag > pivot_mag {
+                pivot_mag = mag;
+                pivot_row = row_idx;
+            }
+        }
+
+        if pivot_mag < 1e-18 {
+            return None;
+        }
+
+        if pivot_row != k {
+            mat.swap(k, pivot_row);
+            rhs.swap(k, pivot_row);
+        }
+
+        let pivot = mat[k][k];
+        let pivot_row_values = mat[k].clone();
+        let rhs_pivot = rhs[k];
+        for row_idx in (k + 1)..n {
+            let factor = mat[row_idx][k] / pivot;
+            mat[row_idx][k] = Complex::real(0.0);
+            for col_idx in (k + 1)..n {
+                mat[row_idx][col_idx] = mat[row_idx][col_idx] - factor * pivot_row_values[col_idx];
+            }
+            rhs[row_idx] = rhs[row_idx] - factor * rhs_pivot;
+        }
+    }
+
+    let mut solution = vec![Complex::real(0.0); n];
+    for row_idx in (0..n).rev() {
+        let pivot = mat[row_idx][row_idx];
+        if pivot.magnitude() < 1e-18 {
+            return None;
+        }
+        let mut sum = rhs[row_idx];
+        for col_idx in (row_idx + 1)..n {
+            sum = sum - mat[row_idx][col_idx] * solution[col_idx];
+        }
+        solution[row_idx] = sum / pivot;
+    }
+
+    Some(solution)
 }
 
 /// Laplace transform filter type
@@ -721,5 +832,64 @@ mod tests {
         let state_after_first = filter.state[0];
         filter.step(1.0, 1e-4);
         assert!((filter.state_prev[0] - state_after_first).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_frequency_response_static_gain() {
+        let filter = StateSpaceFilter::from_transfer_function(&[5.0], &[1.0]);
+        let (magnitude, phase) = filter.frequency_response(1e3);
+        assert!((magnitude - 5.0).abs() < 1e-12);
+        assert!(phase.abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_frequency_response_first_order_lowpass_matches_cutoff() {
+        let cutoff_hz = 1_000.0;
+        let filter = StateSpaceFilter::lowpass_first_order(cutoff_hz);
+        let (magnitude, phase) = filter.frequency_response(cutoff_hz);
+
+        assert!((magnitude - std::f64::consts::FRAC_1_SQRT_2).abs() < 5e-3);
+        assert!((phase + std::f64::consts::FRAC_PI_4).abs() < 5e-3);
+    }
+
+    #[test]
+    fn test_frequency_response_first_order_lowpass_matches_analytic_high_frequency() {
+        let cutoff_hz = 1_000.0;
+        let filter = StateSpaceFilter::lowpass_first_order(cutoff_hz);
+        let freq_hz = cutoff_hz * 10.0;
+        let ratio = freq_hz / cutoff_hz;
+        let expected_mag = 1.0 / (1.0 + ratio * ratio).sqrt();
+        let expected_phase = -ratio.atan();
+
+        let (magnitude, phase) = filter.frequency_response(freq_hz);
+        assert!((magnitude - expected_mag).abs() < 5e-3);
+        assert!((phase - expected_phase).abs() < 5e-3);
+    }
+
+    #[test]
+    fn test_frequency_response_second_order_lowpass_dc_gain() {
+        let filter = StateSpaceFilter::lowpass_second_order(1_000.0, 0.707);
+        let (magnitude, phase) = filter.frequency_response(0.0);
+        assert!((magnitude - 1.0).abs() < 1e-9);
+        assert!(phase.abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_frequency_response_pole_zero_matches_transfer_function_form() {
+        let poles = vec![Complex::real(-2.0 * PI * 500.0)];
+        let zeros = vec![Complex::real(0.0)];
+
+        let pole_zero = StateSpaceFilter::from_poles_zeros(&poles, &zeros, 1.0);
+        let transfer = StateSpaceFilter::from_transfer_function(
+            &[1.0, 0.0],
+            &[1.0, 2.0 * PI * 500.0],
+        );
+
+        for freq_hz in [10.0, 500.0, 10_000.0] {
+            let (pz_mag, pz_phase) = pole_zero.frequency_response(freq_hz);
+            let (tf_mag, tf_phase) = transfer.frequency_response(freq_hz);
+            assert!((pz_mag - tf_mag).abs() < 5e-3, "magnitude mismatch at {freq_hz} Hz");
+            assert!((pz_phase - tf_phase).abs() < 5e-3, "phase mismatch at {freq_hz} Hz");
+        }
     }
 }
