@@ -686,6 +686,88 @@ fn test_inductor_with_params() {
 }
 
 #[test]
+fn test_inductor_coupling_metadata_generates_k_statement() {
+    let mut schematic = SchematicState::default();
+
+    let mut l1 =
+        Component::new(1, ComponentType::Inductor, Point::new(0, 0)).with_name_value("L1", "10u");
+    l1.params = "coupled_to=L2 coupling_factor=0.98 ic=0".to_string();
+    let l2 = Component::new(2, ComponentType::Inductor, Point::new(80, 0))
+        .with_name_value("L2", "40u");
+
+    schematic.components.push(l1);
+    schematic.components.push(l2);
+
+    let result = generate_netlist(&schematic);
+
+    assert!(result.errors.is_empty(), "unexpected netlist errors: {:?}", result.errors);
+    assert!(result.netlist.contains("L1 "));
+    assert!(result.netlist.contains("L2 "));
+    assert!(result.netlist.contains("ic=0"));
+    assert!(!result.netlist.contains("coupling_factor="));
+    assert!(!result.netlist.contains("coupled_to="));
+    assert!(result.netlist.contains("KL1_L2 L1 L2 0.98"));
+}
+
+#[test]
+fn test_explicit_coupled_inductor_component_generates_k_statement() {
+    let mut schematic = SchematicState::default();
+
+    let l1 =
+        Component::new(1, ComponentType::Inductor, Point::new(0, 0)).with_name_value("L1", "10u");
+    let l2 = Component::new(2, ComponentType::Inductor, Point::new(80, 0))
+        .with_name_value("L2", "40u");
+    let mut k1 = Component::new(3, ComponentType::CoupledInductor, Point::new(40, 20))
+        .with_name_value("K1", "0.995");
+    k1.params = "inductors=\"L1 L2\"".to_string();
+
+    schematic.components.push(l1);
+    schematic.components.push(l2);
+    schematic.components.push(k1);
+
+    let result = generate_netlist(&schematic);
+
+    assert!(result.errors.is_empty(), "unexpected netlist errors: {:?}", result.errors);
+    assert!(result.netlist.contains("K1 L1 L2 0.995"));
+}
+
+#[test]
+fn test_generate_netlist_reports_unknown_coupling_target() {
+    let mut schematic = SchematicState::default();
+
+    let mut l1 =
+        Component::new(1, ComponentType::Inductor, Point::new(0, 0)).with_name_value("L1", "10u");
+    l1.params = "coupled_to=Lmissing coupling_factor=0.98".to_string();
+    schematic.components.push(l1);
+
+    let result = generate_netlist(&schematic);
+
+    assert!(result.errors.iter().any(|err| err.contains("unknown inductor")));
+}
+
+#[test]
+fn test_generate_netlist_rejects_conflicting_coupling_metadata() {
+    let mut schematic = SchematicState::default();
+
+    let mut l1 =
+        Component::new(1, ComponentType::Inductor, Point::new(0, 0)).with_name_value("L1", "10u");
+    l1.params = "coupled_to=L2 coupling_factor=0.98".to_string();
+    let mut l2 = Component::new(2, ComponentType::Inductor, Point::new(80, 0))
+        .with_name_value("L2", "40u");
+    l2.params = "coupled_to=L1 coupling_factor=0.97".to_string();
+
+    schematic.components.push(l1);
+    schematic.components.push(l2);
+
+    let result = generate_netlist(&schematic);
+
+    assert!(result
+        .errors
+        .iter()
+        .any(|err| err.contains("Conflicting coupling definitions")));
+}
+
+#[test]
 fn test_diode_with_params() {
     let schematic = SchematicState::default();
     let mut gen = NetlistGenerator::new(&schematic);

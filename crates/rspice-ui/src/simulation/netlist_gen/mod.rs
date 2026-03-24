@@ -547,7 +547,9 @@ impl<'a> NetlistGenerator<'a> {
         self.lines.push("* Circuit netlist".to_string());
 
         for component in &self.schematic.components {
-            if component.kind == ComponentType::Ground {
+            if component.kind == ComponentType::Ground
+                || component.kind == ComponentType::CoupledInductor
+            {
                 // Ground symbol is implicit (node 0)
                 continue;
             }
@@ -555,6 +557,10 @@ impl<'a> NetlistGenerator<'a> {
             if let Some(line) = self.generate_instance_line(component) {
                 self.lines.push(line);
             }
+        }
+
+        for line in self.collect_coupling_lines() {
+            self.lines.push(line);
         }
     }
 
@@ -565,22 +571,27 @@ impl<'a> NetlistGenerator<'a> {
             .iter()
             .map(|(_, pos)| self.get_node_name(*pos))
             .collect();
+        let instance_name = self.instance_name(component);
 
         match component.kind {
             // Two-terminal passive components: X name node+ node- value [params]
             // Spectre format: R1 net1 net2 1k m=2 tc1=0.01
-            ComponentType::Resistor
-            | ComponentType::Capacitor
-            | ComponentType::Inductor
-            | ComponentType::Diode => {
-                let prefix = component.kind.spice_prefix();
+            ComponentType::Resistor | ComponentType::Capacitor | ComponentType::Diode => {
                 let nodes = self.format_nodes(&node_names, 2);
                 let value_with_params =
                     self.format_value_with_params(&component.value, &component.params);
-                Some(format!(
-                    "{}{} {} {}",
-                    prefix, component.name, nodes, value_with_params
-                ))
+                Some(format!("{} {} {}", instance_name, nodes, value_with_params))
+            }
+
+            ComponentType::Inductor | ComponentType::SaturableInductor => {
+                let nodes = self.format_nodes(&node_names, 2);
+                let filtered_params = self.filter_component_params(
+                    &component.params,
+                    &["coupled_to", "coupling_factor"],
+                );
+                let value_with_params =
+                    self.format_value_with_params(&component.value, &filtered_params);
+                Some(format!("{} {} {}", instance_name, nodes, value_with_params))
             }
 
             // Two-terminal voltage sources: V name node+ node- value [params]
@@ -589,10 +600,7 @@ impl<'a> NetlistGenerator<'a> {
                 let nodes = self.format_nodes(&node_names, 2);
                 let source_value = self.format_source_value(component);
                 let params = self.format_params(&component.params);
-                Some(format!(
-                    "{} {} {}{}",
-                    component.name, nodes, source_value, params
-                ))
+                Some(format!("{} {} {}{}", instance_name, nodes, source_value, params))
             }
             // Voltage sources with positional params (SIN, PULSE, etc.) - no extra params needed
             ComponentType::VoltageSourcePulse
@@ -602,7 +610,7 @@ impl<'a> NetlistGenerator<'a> {
             | ComponentType::VoltageSourceSffm => {
                 let nodes = self.format_nodes(&node_names, 2);
                 let source_value = self.format_source_value(component);
-                Some(format!("{} {} {}", component.name, nodes, source_value))
+                Some(format!("{} {} {}", instance_name, nodes, source_value))
             }
 
             // Two-terminal current sources: I name node+ node- value [params]
@@ -611,10 +619,7 @@ impl<'a> NetlistGenerator<'a> {
                 let nodes = self.format_nodes(&node_names, 2);
                 let source_value = self.format_source_value(component);
                 let params = self.format_params(&component.params);
-                Some(format!(
-                    "{} {} {}{}",
-                    component.name, nodes, source_value, params
-                ))
+                Some(format!("{} {} {}{}", instance_name, nodes, source_value, params))
             }
             // Current sources with positional params (SIN, PULSE, etc.) - no extra params needed
             ComponentType::CurrentSourcePulse
@@ -624,7 +629,7 @@ impl<'a> NetlistGenerator<'a> {
             | ComponentType::CurrentSourceNoise => {
                 let nodes = self.format_nodes(&node_names, 2);
                 let source_value = self.format_source_value(component);
-                Some(format!("{} {} {}", component.name, nodes, source_value))
+                Some(format!("{} {} {}", instance_name, nodes, source_value))
             }
 
             // Three-terminal BJT: Q name C B E model [params]
@@ -635,7 +640,7 @@ impl<'a> NetlistGenerator<'a> {
                     Self::extract_model_override(component);
                 let model = self.get_bjt_model(component, explicit_model.as_deref());
                 let params = self.format_params(&params_without_model);
-                Some(format!("{} {} {}{}", component.name, nodes, model, params))
+                Some(format!("{} {} {}{}", instance_name, nodes, model, params))
             }
 
             // Four-terminal MOSFET: M name D G S B model [params]
@@ -644,7 +649,7 @@ impl<'a> NetlistGenerator<'a> {
                 let nodes = self.format_nodes(&node_names, 4);
                 let model = self.get_mosfet_model(component);
                 let params = self.format_params(&component.params);
-                Some(format!("{} {} {}{}", component.name, nodes, model, params))
+                Some(format!("{} {} {}{}", instance_name, nodes, model, params))
             }
 
             // Three-terminal JFET: J name D G S model [params]
@@ -653,7 +658,7 @@ impl<'a> NetlistGenerator<'a> {
                 let nodes = self.format_nodes(&node_names, 3);
                 let model = self.get_jfet_model(component);
                 let params = self.format_params(&component.params);
-                Some(format!("{} {} {}{}", component.name, nodes, model, params))
+                Some(format!("{} {} {}{}", instance_name, nodes, model, params))
             }
 
             // Controlled sources (4 terminals: + - control+ control-)
@@ -662,32 +667,34 @@ impl<'a> NetlistGenerator<'a> {
                 let nodes = self.format_nodes(&node_names, 4);
                 let gain_with_params =
                     self.format_value_with_params(&component.value, &component.params);
-                Some(format!("{} {} {}", component.name, nodes, gain_with_params))
+                Some(format!("{} {} {}", instance_name, nodes, gain_with_params))
             }
 
             ComponentType::Vccs => {
                 let nodes = self.format_nodes(&node_names, 4);
                 let gain_with_params =
                     self.format_value_with_params(&component.value, &component.params);
-                Some(format!("{} {} {}", component.name, nodes, gain_with_params))
+                Some(format!("{} {} {}", instance_name, nodes, gain_with_params))
             }
 
             ComponentType::Ccvs => {
                 let nodes = self.format_nodes(&node_names, 4);
                 let gain_with_params =
                     self.format_value_with_params(&component.value, &component.params);
-                Some(format!("{} {} {}", component.name, nodes, gain_with_params))
+                Some(format!("{} {} {}", instance_name, nodes, gain_with_params))
             }
 
             ComponentType::Cccs => {
                 let nodes = self.format_nodes(&node_names, 4);
                 let gain_with_params =
                     self.format_value_with_params(&component.value, &component.params);
-                Some(format!("{} {} {}", component.name, nodes, gain_with_params))
+                Some(format!("{} {} {}", instance_name, nodes, gain_with_params))
             }
 
             // Ground - handled separately
             ComponentType::Ground => None,
+            // Coupling statements are synthesized in a dedicated validation pass.
+            ComponentType::CoupledInductor => None,
 
             // Generic library/cell/view instance.
             // Emits a standard X-instance referring to the bound master name
@@ -742,11 +749,6 @@ impl<'a> NetlistGenerator<'a> {
                     return None;
                 }
 
-                let mut instance_name = component.spice_instance_name();
-                if !instance_name.starts_with('X') && !instance_name.starts_with('x') {
-                    instance_name = format!("X{}", instance_name);
-                }
-
                 let nodes = node_names.join(" ");
                 let params = self.format_params(&component.params);
                 Some(format!(
@@ -758,22 +760,18 @@ impl<'a> NetlistGenerator<'a> {
             // XSPICE components: A name nodes model [params]
             _ if component.kind.is_xspice() => {
                 let nodes = node_names.join(" ");
-                let model = format!("{}_model", component.name.to_lowercase());
+                let model = format!("{}_model", instance_name.to_lowercase());
                 let params = self.format_params(&component.params);
-                Some(format!("{} {} {}{}", component.name, nodes, model, params))
+                Some(format!("{} {} {}{}", instance_name, nodes, model, params))
             }
 
             // Catch-all for unhandled types
             // Include params for forward compatibility
             _ => {
-                let prefix = component.kind.spice_prefix();
                 let nodes = node_names.join(" ");
                 let value_with_params =
                     self.format_value_with_params(&component.value, &component.params);
-                Some(format!(
-                    "{}{} {} {}",
-                    prefix, component.name, nodes, value_with_params
-                ))
+                Some(format!("{} {} {}", instance_name, nodes, value_with_params))
             }
         }
     }
@@ -795,6 +793,329 @@ impl<'a> NetlistGenerator<'a> {
     fn quote_path_for_netlist(path: &str) -> String {
         let escaped = path.replace('"', "\\\"");
         format!("\"{}\"", escaped)
+    }
+
+    fn instance_name(&self, component: &Component) -> String {
+        let base = component.spice_instance_name();
+        let prefix = component.kind.spice_prefix();
+
+        if prefix.is_empty() || base.is_empty() {
+            return base;
+        }
+
+        if base.len() >= prefix.len() && base[..prefix.len()].eq_ignore_ascii_case(prefix) {
+            base
+        } else {
+            format!("{}{}", prefix, base)
+        }
+    }
+
+    fn filter_component_params(&self, params: &str, excluded: &[&str]) -> String {
+        if params.trim().is_empty() {
+            return String::new();
+        }
+
+        let mut params_map = crate::properties::parse_params_string(params);
+        for key in excluded {
+            params_map.remove(&key.to_ascii_lowercase());
+        }
+        crate::properties::property_bridge::format_params_string(&params_map)
+    }
+
+    fn collect_coupling_lines(&mut self) -> Vec<String> {
+        let inductor_lookup = self.build_inductor_lookup();
+        let mut emitted: BTreeMap<String, (String, String, String)> = BTreeMap::new();
+
+        for component in &self.schematic.components {
+            if component.kind == ComponentType::CoupledInductor {
+                if let Some((key, coefficient, line, source)) =
+                    self.explicit_coupling_line(component, &inductor_lookup)
+                {
+                    self.insert_coupling_line(&mut emitted, key, coefficient, line, source);
+                }
+            }
+        }
+
+        for component in &self.schematic.components {
+            if Self::is_couplable_inductor(component.kind) {
+                if let Some((key, coefficient, line, source)) =
+                    self.metadata_coupling_line(component, &inductor_lookup)
+                {
+                    self.insert_coupling_line(&mut emitted, key, coefficient, line, source);
+                }
+            }
+        }
+
+        emitted
+            .into_values()
+            .map(|(line, _, _)| line)
+            .collect::<Vec<_>>()
+    }
+
+    fn build_inductor_lookup(&mut self) -> HashMap<String, String> {
+        let mut lookup = HashMap::new();
+
+        for component in &self.schematic.components {
+            if !Self::is_couplable_inductor(component.kind) {
+                continue;
+            }
+
+            let emitted = self.instance_name(component);
+            self.register_inductor_alias(&mut lookup, emitted.as_str(), emitted.as_str());
+            if !component.name.trim().is_empty() {
+                self.register_inductor_alias(&mut lookup, component.name.trim(), emitted.as_str());
+            }
+        }
+
+        lookup
+    }
+
+    fn register_inductor_alias(
+        &mut self,
+        lookup: &mut HashMap<String, String>,
+        alias: &str,
+        emitted: &str,
+    ) {
+        let key = alias.trim().to_ascii_uppercase();
+        if key.is_empty() {
+            return;
+        }
+
+        if let Some(existing) = lookup.get(&key) {
+            if existing != emitted {
+                self.errors.push(format!(
+                    "Coupled inductor reference '{}' is ambiguous; rename the inductors so each winding has a unique instance name",
+                    alias
+                ));
+            }
+            return;
+        }
+
+        lookup.insert(key, emitted.to_string());
+    }
+
+    fn explicit_coupling_line(
+        &mut self,
+        component: &Component,
+        inductor_lookup: &HashMap<String, String>,
+    ) -> Option<(String, String, String, String)> {
+        let params = crate::properties::parse_params_string(&component.params);
+        let raw_windings = params
+            .get("inductors")
+            .cloned()
+            .unwrap_or_else(|| {
+                ["l1", "l2", "l3", "l4"]
+                    .iter()
+                    .filter_map(|key| params.get(*key))
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            });
+        let winding_refs = Self::parse_inductor_list(&raw_windings);
+        if winding_refs.len() < 2 {
+            self.errors.push(format!(
+                "Coupled inductor '{}' must reference at least two inductor instances",
+                component.spice_instance_name()
+            ));
+            return None;
+        }
+
+        let coefficient = component.value.trim();
+        if coefficient.is_empty() {
+            self.errors.push(format!(
+                "Coupled inductor '{}' is missing a coupling coefficient",
+                component.spice_instance_name()
+            ));
+            return None;
+        }
+        if let Ok(value) = coefficient.parse::<f64>() {
+            if !value.is_finite() || value <= 0.0 || value > 1.0 {
+                self.errors.push(format!(
+                    "Coupled inductor '{}' has invalid coupling coefficient {} (expected 0 < k <= 1)",
+                    component.spice_instance_name(),
+                    coefficient
+                ));
+                return None;
+            }
+        }
+
+        let emitted_windings =
+            self.resolve_inductor_refs(&winding_refs, inductor_lookup, component.spice_instance_name().as_str())?;
+        let key = Self::coupling_key(&emitted_windings);
+        let line = format!(
+            "{} {} {}",
+            self.instance_name(component),
+            emitted_windings.join(" "),
+            coefficient
+        );
+        Some((
+            key,
+            coefficient.to_string(),
+            line,
+            format!("coupling '{}'", component.spice_instance_name()),
+        ))
+    }
+
+    fn metadata_coupling_line(
+        &mut self,
+        component: &Component,
+        inductor_lookup: &HashMap<String, String>,
+    ) -> Option<(String, String, String, String)> {
+        let params = crate::properties::parse_params_string(&component.params);
+        let coupled_to = params
+            .get("coupled_to")
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty());
+        let factor = params
+            .get("coupling_factor")
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty());
+
+        let factor_is_default_zero = factor
+            .and_then(|value| value.parse::<f64>().ok())
+            .is_some_and(|value| value == 0.0);
+        if coupled_to.is_none() && (factor.is_none() || factor_is_default_zero) {
+            return None;
+        }
+
+        let Some(coupled_to) = coupled_to else {
+            self.errors.push(format!(
+                "Inductor '{}' defines a coupling factor but no target winding",
+                component.spice_instance_name()
+            ));
+            return None;
+        };
+        let Some(factor) = factor else {
+            self.errors.push(format!(
+                "Inductor '{}' references '{}' but is missing a non-zero coupling factor",
+                component.spice_instance_name(),
+                coupled_to
+            ));
+            return None;
+        };
+        let Ok(factor_value) = factor.parse::<f64>() else {
+            self.errors.push(format!(
+                "Inductor '{}' has non-numeric coupling factor '{}'",
+                component.spice_instance_name(),
+                factor
+            ));
+            return None;
+        };
+        if !factor_value.is_finite() || factor_value <= 0.0 || factor_value > 1.0 {
+            self.errors.push(format!(
+                "Inductor '{}' has invalid coupling factor {} (expected 0 < k <= 1)",
+                component.spice_instance_name(),
+                factor
+            ));
+            return None;
+        }
+
+        let this_name = self.instance_name(component);
+        let emitted_windings = self.resolve_inductor_refs(
+            &[this_name.clone(), coupled_to.to_string()],
+            inductor_lookup,
+            component.spice_instance_name().as_str(),
+        )?;
+        let key = Self::coupling_key(&emitted_windings);
+        let line = format!(
+            "{} {} {}",
+            Self::derived_coupling_name(&emitted_windings),
+            emitted_windings.join(" "),
+            factor
+        );
+        Some((
+            key,
+            factor.to_string(),
+            line,
+            format!("inductor '{}'", component.spice_instance_name()),
+        ))
+    }
+
+    fn resolve_inductor_refs(
+        &mut self,
+        refs: &[String],
+        inductor_lookup: &HashMap<String, String>,
+        owner: &str,
+    ) -> Option<Vec<String>> {
+        let mut resolved = Vec::with_capacity(refs.len());
+        let mut seen = HashSet::new();
+
+        for reference in refs {
+            let key = reference.trim().to_ascii_uppercase();
+            let Some(emitted) = inductor_lookup.get(&key) else {
+                self.errors.push(format!(
+                    "Coupling '{}' references unknown inductor '{}'",
+                    owner, reference
+                ));
+                return None;
+            };
+
+            if !seen.insert(emitted.clone()) {
+                self.errors.push(format!(
+                    "Coupling '{}' references '{}' more than once",
+                    owner, reference
+                ));
+                return None;
+            }
+            resolved.push(emitted.clone());
+        }
+
+        Some(resolved)
+    }
+
+    fn insert_coupling_line(
+        &mut self,
+        emitted: &mut BTreeMap<String, (String, String, String)>,
+        key: String,
+        coefficient: String,
+        line: String,
+        source: String,
+    ) {
+        if let Some((_, existing_coefficient, existing_source)) = emitted.get(&key) {
+            if existing_coefficient != &coefficient {
+                self.errors.push(format!(
+                    "Conflicting coupling definitions for [{}]: {} from {} vs {} from {}",
+                    key, existing_coefficient, existing_source, coefficient, source
+                ));
+            }
+            return;
+        }
+
+        emitted.insert(key, (line, coefficient, source));
+    }
+
+    fn parse_inductor_list(raw: &str) -> Vec<String> {
+        raw.split(|ch: char| ch.is_ascii_whitespace() || ch == ',')
+            .map(str::trim)
+            .filter(|token| !token.is_empty())
+            .map(ToOwned::to_owned)
+            .collect()
+    }
+
+    fn coupling_key(windings: &[String]) -> String {
+        let mut normalized = windings
+            .iter()
+            .map(|name| name.to_ascii_uppercase())
+            .collect::<Vec<_>>();
+        normalized.sort();
+        normalized.join("|")
+    }
+
+    fn derived_coupling_name(windings: &[String]) -> String {
+        let mut normalized = windings
+            .iter()
+            .map(|name| {
+                name.chars()
+                    .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>();
+        normalized.sort();
+        format!("K{}", normalized.join("_"))
+    }
+
+    fn is_couplable_inductor(kind: ComponentType) -> bool {
+        matches!(kind, ComponentType::Inductor | ComponentType::SaturableInductor)
     }
 
     /// Format node list for SPICE line
