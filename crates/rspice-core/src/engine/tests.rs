@@ -3373,6 +3373,117 @@ P1 1 0 2 0 3 0 PMOD
     }
 
     #[test]
+    fn test_build_cpl_p_line_synthesizes_distributed_coupled_network() {
+        let netlist_str = r#"
+* Two-conductor CPL line with shared reference
+P1 V1 V2 0 V3 V4 0 CPL1
+.MODEL CPL1 CPL
++R = 0.5 0 0.5
++L = 247.3e-9  31.65e-9
++              247.3e-9
++C = 31.4e-12 -2.45e-12
++              31.4e-12
++G = 0 0 0
++LENGTH = 0.3048
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let circuit = engine
+            .build_circuit(&netlist)
+            .expect("CPL P-line should synthesize a distributed RLGC ladder");
+
+        assert!(
+            circuit.tlines.is_empty(),
+            "CPL lines should expand into explicit distributed primitives, not scalar tlines"
+        );
+        assert_eq!(
+            circuit.multi_winding_transformers.len(),
+            8,
+            "2-conductor CPL line should create one coupled section per distributed segment"
+        );
+        assert_eq!(
+            circuit.coupled_inductor_pairs.len(),
+            0,
+            "CPL implementation should use the dense multi-winding realization path"
+        );
+        assert!(
+            circuit.capacitors.len() >= 24,
+            "Expected distributed shunt capacitance network for CPL line"
+        );
+    }
+
+    #[test]
+    fn test_build_cpl_p_line_supports_distinct_reference_nodes() {
+        let netlist_str = r#"
+* Two-conductor CPL line with different near/far references
+P1 V1 V2 RNEAR V3 V4 RFAR CPL1
+.MODEL CPL1 CPL
++R = 0.5 0 0.5
++L = 247.3e-9  31.65e-9
++              247.3e-9
++C = 31.4e-12 -2.45e-12
++              31.4e-12
++G = 0 0 0
++LENGTH = 0.3048
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let circuit = engine
+            .build_circuit(&netlist)
+            .expect("CPL line with distinct references should still build");
+
+        let near_ref = circuit
+            .get_node_by_name("RNEAR")
+            .expect("near reference should exist");
+        let far_ref = circuit
+            .get_node_by_name("RFAR")
+            .expect("far reference should exist");
+        assert_ne!(
+            near_ref, far_ref,
+            "references should remain distinct external nodes"
+        );
+        assert!(
+            circuit
+                .resistors
+                .names
+                .iter()
+                .any(|name| name.contains("__cpl.refwire")),
+            "distinct references should create an internal reference chain"
+        );
+    }
+
+    #[test]
+    fn test_build_cpl_rejects_off_diagonal_series_resistance() {
+        let netlist_str = r#"
+* CPL model with unsupported off-diagonal series resistance
+P1 V1 V2 0 V3 V4 0 CPL1
+.MODEL CPL1 CPL
++R = 0.5 0.01 0.5
++L = 247.3e-9  31.65e-9
++              247.3e-9
++C = 31.4e-12 -2.45e-12
++              31.4e-12
++G = 0 0 0
++LENGTH = 0.3048
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+
+        let err = engine
+            .build_circuit(&netlist)
+            .expect_err("off-diagonal series resistance should be rejected explicitly");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("off-diagonal series resistance"),
+            "expected explicit realization error, got {}",
+            msg
+        );
+    }
+
+    #[test]
     fn test_build_jiles_atherton_inductor_integrates_runtime_model() {
         let netlist_str = r#"
 * Jiles-Atherton inductor should build with runtime integration

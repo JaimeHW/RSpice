@@ -100,6 +100,343 @@ fn is_bsimsoi_level(level: i32) -> bool {
     matches!(level, 55..=57)
 }
 
+const CPL_SECTION_MIN: usize = 8;
+const CPL_SECTION_MAX: usize = 16;
+const CPL_REALIZATION_TOL: f64 = 1e-18;
+const CPL_REFERENCE_SHORT_RESISTANCE: f64 = 1e-6;
+
+fn cpl_section_count(conductors: usize) -> usize {
+    (conductors.saturating_mul(4)).clamp(CPL_SECTION_MIN, CPL_SECTION_MAX)
+}
+
+fn validate_cpl_model_params(
+    model_name: &str,
+    params: &CplModelParams,
+) -> Result<(), SimulationError> {
+    let conductors = params.l.len();
+    for (label, matrix) in [
+        ("R", &params.r),
+        ("L", &params.l),
+        ("C", &params.c),
+        ("G", &params.g),
+    ] {
+        if matrix.len() != conductors || matrix.iter().any(|row| row.len() != conductors) {
+            return Err(SimulationError::Circuit(format!(
+                "CPL model '{}' has malformed {} matrix dimensions",
+                model_name, label
+            )));
+        }
+        for (row_idx, row) in matrix.iter().enumerate() {
+            for (col_idx, value) in row.iter().enumerate() {
+                if !value.is_finite() {
+                    return Err(SimulationError::Circuit(format!(
+                        "CPL model '{}' has non-finite {}[{},{}]",
+                        model_name,
+                        label,
+                        row_idx + 1,
+                        col_idx + 1
+                    )));
+                }
+            }
+        }
+    }
+
+    for i in 0..conductors {
+        if params.r[i][i] < -CPL_REALIZATION_TOL {
+            return Err(SimulationError::Circuit(format!(
+                "CPL model '{}' has negative series resistance on conductor {}",
+                model_name,
+                i + 1
+            )));
+        }
+        if params.l[i][i] <= 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "CPL model '{}' has non-positive self inductance on conductor {}",
+                model_name,
+                i + 1
+            )));
+        }
+        if params.c[i][i] <= 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "CPL model '{}' has non-positive self capacitance on conductor {}",
+                model_name,
+                i + 1
+            )));
+        }
+        if params.g[i][i] < -CPL_REALIZATION_TOL {
+            return Err(SimulationError::Circuit(format!(
+                "CPL model '{}' has negative shunt conductance on conductor {}",
+                model_name,
+                i + 1
+            )));
+        }
+
+        for j in 0..conductors {
+            if i == j {
+                continue;
+            }
+
+            if params.r[i][j].abs() > CPL_REALIZATION_TOL {
+                return Err(SimulationError::Circuit(format!(
+                    "CPL model '{}' uses off-diagonal series resistance R[{},{}], which is not yet realizable",
+                    model_name,
+                    i + 1,
+                    j + 1
+                )));
+            }
+            if params.l[i][j] < -CPL_REALIZATION_TOL {
+                return Err(SimulationError::Circuit(format!(
+                    "CPL model '{}' uses negative mutual inductance L[{},{}], which is not yet realizable",
+                    model_name,
+                    i + 1,
+                    j + 1
+                )));
+            }
+            if params.c[i][j] > CPL_REALIZATION_TOL {
+                return Err(SimulationError::Circuit(format!(
+                    "CPL model '{}' has positive off-diagonal capacitance C[{},{}], expected Maxwell form",
+                    model_name,
+                    i + 1,
+                    j + 1
+                )));
+            }
+            if params.g[i][j] > CPL_REALIZATION_TOL {
+                return Err(SimulationError::Circuit(format!(
+                    "CPL model '{}' has positive off-diagonal conductance G[{},{}], expected Maxwell form",
+                    model_name,
+                    i + 1,
+                    j + 1
+                )));
+            }
+        }
+
+        let c_to_ref: f64 = params.c[i].iter().sum();
+        if c_to_ref < -CPL_REALIZATION_TOL {
+            return Err(SimulationError::Circuit(format!(
+                "CPL model '{}' has non-passive capacitance row sum on conductor {}",
+                model_name,
+                i + 1
+            )));
+        }
+
+        let g_to_ref: f64 = params.g[i].iter().sum();
+        if g_to_ref < -CPL_REALIZATION_TOL {
+            return Err(SimulationError::Circuit(format!(
+                "CPL model '{}' has non-passive conductance row sum on conductor {}",
+                model_name,
+                i + 1
+            )));
+        }
+    }
+
+    for i in 0..conductors {
+        for j in (i + 1)..conductors {
+            let coupling_limit = (params.l[i][i] * params.l[j][j]).sqrt();
+            if params.l[i][j].abs() > coupling_limit + CPL_REALIZATION_TOL {
+                return Err(SimulationError::Circuit(format!(
+                    "CPL model '{}' has mutual inductance L[{},{}]={} exceeding sqrt(Lii*Ljj)={}",
+                    model_name,
+                    i + 1,
+                    j + 1,
+                    params.l[i][j],
+                    coupling_limit
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn build_cpl_multiconductor_line(
+    circuit: &mut CircuitData,
+    netlist: &Netlist,
+    element: &crate::netlist::Element,
+    model_name: &str,
+) -> Result<(), SimulationError> {
+    if element.nodes.len() < 6 || element.nodes.len() % 2 != 0 {
+        return Err(SimulationError::Circuit(format!(
+            "CPL transmission line '{}' requires 2*N+2 nodes (N conductors plus shared reference)",
+            element.name
+        )));
+    }
+
+    let conductors = element.nodes.len() / 2 - 1;
+    if conductors < 2 {
+        return Err(SimulationError::Circuit(format!(
+            "CPL transmission line '{}' requires at least two signal conductors",
+            element.name
+        )));
+    }
+
+    let params = resolve_cpl_model_params(netlist, model_name, conductors)?.ok_or_else(|| {
+        SimulationError::Circuit(format!(
+            "Transmission line '{}' references unknown model '{}'",
+            element.name, model_name
+        ))
+    })?;
+    validate_cpl_model_params(model_name, &params)?;
+
+    let sections = cpl_section_count(conductors);
+    let section_length = params.length / sections as f64;
+    if !section_length.is_finite() || section_length <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "CPL model '{}' resolved invalid section length {}",
+            model_name, section_length
+        )));
+    }
+
+    let near_ref = circuit.get_or_create_node(&element.nodes[conductors]);
+    let far_ref = circuit.get_or_create_node(&element.nodes[element.nodes.len() - 1]);
+
+    let mut boundary_nodes = vec![vec![0usize; conductors]; sections + 1];
+    for conductor in 0..conductors {
+        boundary_nodes[0][conductor] = circuit.get_or_create_node(&element.nodes[conductor]);
+        boundary_nodes[sections][conductor] =
+            circuit.get_or_create_node(&element.nodes[conductors + 1 + conductor]);
+    }
+    for section in 1..sections {
+        for conductor in 0..conductors {
+            let node_name = format!("{}.__cpl.b{}.c{}", element.name, section, conductor + 1);
+            boundary_nodes[section][conductor] = circuit.get_or_create_node(&node_name);
+        }
+    }
+
+    let mut boundary_refs = vec![near_ref; sections + 1];
+    boundary_refs[0] = near_ref;
+    boundary_refs[sections] = far_ref;
+    if near_ref != far_ref {
+        for section in 1..sections {
+            let node_name = format!("{}.__cpl.ref{}", element.name, section);
+            boundary_refs[section] = circuit.get_or_create_node(&node_name);
+        }
+        for section in 0..sections {
+            let name = format!("{}.__cpl.refwire{}", element.name, section + 1);
+            circuit.resistors.add(
+                name,
+                boundary_refs[section],
+                boundary_refs[section + 1],
+                CPL_REFERENCE_SHORT_RESISTANCE,
+            );
+        }
+    }
+
+    for boundary in 0..=sections {
+        let weight = if boundary == 0 || boundary == sections {
+            0.5
+        } else {
+            1.0
+        };
+        let lump_length = section_length * weight;
+        let reference = boundary_refs[boundary];
+
+        for i in 0..conductors {
+            let node_i = boundary_nodes[boundary][i];
+
+            let c_to_ref = params.c[i].iter().sum::<f64>() * lump_length;
+            if c_to_ref > CPL_REALIZATION_TOL && node_i != reference {
+                let name = format!("{}.__cpl.cb{}.c{}", element.name, boundary, i + 1);
+                circuit.capacitors.add(name, node_i, reference, c_to_ref);
+            }
+
+            let g_to_ref = params.g[i].iter().sum::<f64>() * lump_length;
+            if g_to_ref > CPL_REALIZATION_TOL && node_i != reference {
+                let name = format!("{}.__cpl.gb{}.c{}", element.name, boundary, i + 1);
+                circuit.resistors.add(
+                    name,
+                    node_i,
+                    reference,
+                    1.0 / g_to_ref.max(CPL_REALIZATION_TOL),
+                );
+            }
+
+            for j in (i + 1)..conductors {
+                let node_j = boundary_nodes[boundary][j];
+
+                let c_mutual = (-params.c[i][j]).max(0.0) * lump_length;
+                if c_mutual > CPL_REALIZATION_TOL && node_i != node_j {
+                    let name = format!("{}.__cpl.cb{}.m{}{}", element.name, boundary, i + 1, j + 1);
+                    circuit.capacitors.add(name, node_i, node_j, c_mutual);
+                }
+
+                let g_mutual = (-params.g[i][j]).max(0.0) * lump_length;
+                if g_mutual > CPL_REALIZATION_TOL && node_i != node_j {
+                    let name = format!("{}.__cpl.gb{}.m{}{}", element.name, boundary, i + 1, j + 1);
+                    circuit.resistors.add(
+                        name,
+                        node_i,
+                        node_j,
+                        1.0 / g_mutual.max(CPL_REALIZATION_TOL),
+                    );
+                }
+            }
+        }
+    }
+
+    for section in 0..sections {
+        let start_nodes = boundary_nodes[section].clone();
+        let end_nodes = boundary_nodes[section + 1].clone();
+        let mut winding_nodes = Vec::with_capacity(conductors);
+        let mut inductances = Vec::with_capacity(conductors);
+        let mut coupling_matrix = vec![vec![0.0; conductors]; conductors];
+        for i in 0..conductors {
+            coupling_matrix[i][i] = 1.0;
+        }
+
+        for i in 0..conductors {
+            let series_r = params.r[i][i] * section_length;
+            let winding_start = if series_r > CPL_REALIZATION_TOL {
+                let next_node = circuit.get_or_create_node(&format!(
+                    "{}.__cpl.s{}.r{}.1",
+                    element.name,
+                    section + 1,
+                    i + 1
+                ));
+                circuit.resistors.add(
+                    format!("{}.__cpl.s{}.r{}", element.name, section + 1, i + 1),
+                    start_nodes[i],
+                    next_node,
+                    series_r,
+                );
+                next_node
+            } else {
+                start_nodes[i]
+            };
+
+            winding_nodes.push((winding_start, end_nodes[i]));
+            inductances.push(params.l[i][i] * section_length);
+        }
+
+        for i in 0..conductors {
+            for j in (i + 1)..conductors {
+                let k = if params.l[i][j].abs() <= CPL_REALIZATION_TOL {
+                    0.0
+                } else {
+                    params.l[i][j] / (params.l[i][i] * params.l[j][j]).sqrt()
+                };
+                coupling_matrix[i][j] = k;
+                coupling_matrix[j][i] = k;
+            }
+        }
+
+        let transformer_name = format!("{}.__cpl.s{}.xfmr", element.name, section + 1);
+        let branch_ordinals: Vec<usize> = (0..conductors)
+            .map(|winding| {
+                circuit.allocate_branch_named(&format!("{}#{}", transformer_name, winding + 1))
+            })
+            .collect();
+        let transformer = crate::device::MultiWindingTransformer::new(
+            transformer_name,
+            winding_nodes,
+            inductances,
+            coupling_matrix,
+        );
+        circuit.add_multi_winding_transformer(branch_ordinals, transformer);
+    }
+
+    Ok(())
+}
+
 fn resolve_xspice_node(circuit: &mut CircuitData, name: &str) -> usize {
     if name.eq_ignore_ascii_case("0") {
         0
@@ -1011,37 +1348,41 @@ impl Engine {
                         )));
                     }
 
-                    let p1p = circuit.get_or_create_node(&element.nodes[0]);
-                    let p1n = circuit.get_or_create_node(&element.nodes[1]);
-                    let p2p = circuit.get_or_create_node(&element.nodes[2]);
-                    let p2n = circuit.get_or_create_node(&element.nodes[3]);
+                    if let Some(model_name) = model.as_deref() {
+                        if let Some(model_def) = find_model_def(netlist, model_name) {
+                            if model_def.model_type.eq_ignore_ascii_case("CPL") {
+                                build_cpl_multiconductor_line(
+                                    &mut circuit,
+                                    netlist,
+                                    element,
+                                    model_name,
+                                )?;
+                                continue;
+                            }
 
-                    if let (Some(model_name), Some(model_def)) = (
-                        model.as_deref(),
-                        model
-                            .as_deref()
-                            .and_then(|name| find_model_def(netlist, name)),
-                    ) {
-                        ensure_model_type(
-                            "Transmission line",
-                            &element.name,
-                            model_name,
-                            model_def,
-                            &["LTRA", "TXL"],
-                        )?;
+                            ensure_model_type(
+                                "Transmission line",
+                                &element.name,
+                                model_name,
+                                model_def,
+                                &["LTRA", "TXL"],
+                            )?;
+                        } else if z0.is_none() {
+                            return Err(SimulationError::Circuit(format!(
+                                "Transmission line '{}' references unknown model '{}'",
+                                element.name, model_name
+                            )));
+                        }
                     }
 
                     let model_params = model
                         .as_deref()
                         .and_then(|name| resolve_tline_model_params(netlist, name));
 
-                    if model.is_some() && model_params.is_none() && z0.is_none() {
-                        return Err(SimulationError::Circuit(format!(
-                            "Transmission line '{}' references unknown model '{}'",
-                            element.name,
-                            model.as_deref().unwrap_or_default()
-                        )));
-                    }
+                    let p1p = circuit.get_or_create_node(&element.nodes[0]);
+                    let p1n = circuit.get_or_create_node(&element.nodes[1]);
+                    let p2p = circuit.get_or_create_node(&element.nodes[2]);
+                    let p2n = circuit.get_or_create_node(&element.nodes[3]);
 
                     let freq_eff = (*freq).or(model_params.and_then(|m| m.freq));
                     let nl_eff = (*nl).or(model_params.and_then(|m| m.nl));

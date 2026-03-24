@@ -13,6 +13,15 @@ pub(super) struct TransmissionLineModelParams {
     pub(super) atten: Option<f64>,
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct CplModelParams {
+    pub(super) r: Vec<Vec<f64>>,
+    pub(super) l: Vec<Vec<f64>>,
+    pub(super) c: Vec<Vec<f64>>,
+    pub(super) g: Vec<Vec<f64>>,
+    pub(super) length: f64,
+}
+
 pub(super) fn model_param(params: &[(String, f64)], names: &[&str]) -> Option<f64> {
     params.iter().find_map(|(name, value)| {
         if names
@@ -218,6 +227,204 @@ pub(super) fn resolve_tline_model_params(
     }
 
     Some(params)
+}
+
+fn strip_netlist_comment(line: &str) -> &str {
+    let mut end = line.len();
+    for (idx, ch) in line.char_indices() {
+        if ch == ';' || ch == '$' {
+            end = idx;
+            break;
+        }
+    }
+    &line[..end]
+}
+
+fn extract_cpl_model_body(source: &str, model_name: &str) -> Option<Vec<String>> {
+    let mut lines = source.lines().peekable();
+    while let Some(line) = lines.next() {
+        let trimmed = strip_netlist_comment(line).trim();
+        if trimmed.is_empty() || trimmed.starts_with('*') {
+            continue;
+        }
+
+        let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+        if tokens.len() >= 3
+            && tokens[0].eq_ignore_ascii_case(".model")
+            && tokens[1].eq_ignore_ascii_case(model_name)
+            && tokens[2].eq_ignore_ascii_case("cpl")
+        {
+            let mut body = Vec::new();
+            let inline = tokens.iter().skip(3).copied().collect::<Vec<_>>().join(" ");
+            if !inline.trim().is_empty() {
+                body.push(inline);
+            }
+
+            while let Some(next_line) = lines.peek() {
+                let trimmed = strip_netlist_comment(next_line).trim();
+                let Some(stripped) = trimmed.strip_prefix('+') else {
+                    break;
+                };
+                body.push(stripped.trim().to_string());
+                lines.next();
+            }
+
+            return Some(body);
+        }
+    }
+
+    None
+}
+
+#[derive(Default)]
+struct ParsedCplEntries {
+    r: Vec<f64>,
+    l: Vec<f64>,
+    c: Vec<f64>,
+    g: Vec<f64>,
+    length: Option<f64>,
+}
+
+fn parse_cpl_entries(
+    model_name: &str,
+    body: &[String],
+) -> Result<ParsedCplEntries, SimulationError> {
+    let mut parsed = ParsedCplEntries::default();
+    let mut current_key: Option<String> = None;
+
+    for line in body {
+        let normalized = line.replace(['(', ')', ','], " ");
+        let trimmed = normalized.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let (key, values_str) = if let Some((lhs, rhs)) = trimmed.split_once('=') {
+            let key = lhs.trim().to_ascii_uppercase();
+            current_key = Some(key.clone());
+            (key, rhs)
+        } else {
+            let Some(key) = current_key.clone() else {
+                continue;
+            };
+            (key, trimmed)
+        };
+
+        let values = values_str
+            .split_whitespace()
+            .filter_map(|token| token.parse::<f64>().ok())
+            .collect::<Vec<_>>();
+
+        match key.as_str() {
+            "R" => parsed.r.extend(values),
+            "L" => parsed.l.extend(values),
+            "C" => parsed.c.extend(values),
+            "G" => parsed.g.extend(values),
+            "LEN" | "LENGTH" => {
+                parsed.length = values.first().copied();
+            }
+            _ => {}
+        }
+    }
+
+    if parsed.length.is_none() {
+        return Err(SimulationError::Circuit(format!(
+            "CPL model '{}' is missing LENGTH/LEN",
+            model_name
+        )));
+    }
+
+    Ok(parsed)
+}
+
+fn symmetric_matrix_from_upper_triangle(
+    model_name: &str,
+    label: &str,
+    values: &[f64],
+    dimension: usize,
+) -> Result<Vec<Vec<f64>>, SimulationError> {
+    let expected = dimension * (dimension + 1) / 2;
+    if values.len() != expected {
+        return Err(SimulationError::Circuit(format!(
+            "CPL model '{}' has {} {} entries, expected {} for {} conductors",
+            model_name,
+            values.len(),
+            label,
+            expected,
+            dimension
+        )));
+    }
+
+    let mut matrix = vec![vec![0.0; dimension]; dimension];
+    let mut idx = 0usize;
+    for row in 0..dimension {
+        for col in row..dimension {
+            let value = values[idx];
+            matrix[row][col] = value;
+            matrix[col][row] = value;
+            idx += 1;
+        }
+    }
+    Ok(matrix)
+}
+
+pub(super) fn resolve_cpl_model_params(
+    netlist: &Netlist,
+    model_name: &str,
+    conductors: usize,
+) -> Result<Option<CplModelParams>, SimulationError> {
+    let model = netlist
+        .models
+        .iter()
+        .find(|m| m.name.eq_ignore_ascii_case(model_name));
+    let Some(model) = model else {
+        return Ok(None);
+    };
+    if !model.model_type.eq_ignore_ascii_case("CPL") {
+        return Ok(None);
+    }
+
+    let source = netlist.source_text.as_deref().ok_or_else(|| {
+        SimulationError::Circuit(format!(
+            "CPL model '{}' requires raw source text for RLGC matrix resolution",
+            model_name
+        ))
+    })?;
+    let body = extract_cpl_model_body(source, model_name).ok_or_else(|| {
+        SimulationError::Circuit(format!(
+            "Unable to locate raw .MODEL block for CPL model '{}'",
+            model_name
+        ))
+    })?;
+    let parsed = parse_cpl_entries(model_name, &body)?;
+    let expected = conductors * (conductors + 1) / 2;
+
+    let r_entries = if parsed.r.is_empty() {
+        vec![0.0; expected]
+    } else {
+        parsed.r
+    };
+    let g_entries = if parsed.g.is_empty() {
+        vec![0.0; expected]
+    } else {
+        parsed.g
+    };
+
+    let length = parsed.length.unwrap_or(0.0);
+    if !length.is_finite() || length <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "CPL model '{}' has invalid LENGTH={} (must be finite and > 0)",
+            model_name, length
+        )));
+    }
+
+    Ok(Some(CplModelParams {
+        r: symmetric_matrix_from_upper_triangle(model_name, "R", &r_entries, conductors)?,
+        l: symmetric_matrix_from_upper_triangle(model_name, "L", &parsed.l, conductors)?,
+        c: symmetric_matrix_from_upper_triangle(model_name, "C", &parsed.c, conductors)?,
+        g: symmetric_matrix_from_upper_triangle(model_name, "G", &g_entries, conductors)?,
+        length,
+    }))
 }
 
 pub(super) fn tline_model_attenuation(params: TransmissionLineModelParams, z0: f64) -> Option<f64> {
@@ -454,10 +661,7 @@ pub(super) struct ResolvedXspiceModel {
     pub(super) string_params: Vec<(String, String)>,
 }
 
-fn merge_numeric_params(
-    base: &[(String, f64)],
-    overrides: &[(String, f64)],
-) -> Vec<(String, f64)> {
+fn merge_numeric_params(base: &[(String, f64)], overrides: &[(String, f64)]) -> Vec<(String, f64)> {
     let mut merged = base.to_vec();
 
     for (name, value) in overrides {
@@ -508,7 +712,8 @@ pub(super) fn resolve_xspice_model_instance(
 
 #[cfg(test)]
 mod tests {
-    use super::{merge_numeric_params, resolve_mesfet_type_from_model};
+    use super::{merge_numeric_params, resolve_cpl_model_params, resolve_mesfet_type_from_model};
+    use crate::Netlist;
 
     #[test]
     fn resolve_mesfet_type_accepts_hfet_aliases() {
@@ -558,6 +763,86 @@ mod tests {
                 .find(|(name, _)| name.eq_ignore_ascii_case("delay"))
                 .map(|(_, value)| *value),
             Some(5.0)
+        );
+    }
+
+    #[test]
+    fn resolve_cpl_model_params_parses_upper_triangular_matrices() {
+        let netlist = Netlist::parse(
+            r#"
+P1 V1 V2 0 V3 V4 0 CPL1
+.model cpl1 cpl
++R = 0.5 0 0.5
++L = 247.3e-9 31.65e-9
++            247.3e-9
++C = 31.4e-12 -2.45e-12
++            31.4e-12
++G = 0 0 0
++length = 0.3048
+.end
+"#,
+        )
+        .expect("netlist should parse");
+
+        let cpl = resolve_cpl_model_params(&netlist, "cpl1", 2)
+            .expect("CPL model should resolve")
+            .expect("CPL model should exist");
+
+        assert!((cpl.length - 0.3048).abs() < 1e-15);
+        assert!((cpl.r[0][0] - 0.5).abs() < 1e-15);
+        assert!((cpl.r[0][1] - 0.0).abs() < 1e-15);
+        assert!((cpl.r[1][1] - 0.5).abs() < 1e-15);
+        assert!((cpl.l[0][1] - 31.65e-9).abs() < 1e-21);
+        assert!((cpl.c[0][1] + 2.45e-12).abs() < 1e-24);
+        assert!((cpl.g[0][0] - 0.0).abs() < 1e-18);
+    }
+
+    #[test]
+    fn resolve_cpl_model_params_defaults_optional_r_and_g_to_zero() {
+        let netlist = Netlist::parse(
+            r#"
+P1 V1 V2 0 V3 V4 0 CPL1
+.model cpl1 cpl
++L = 247.3e-9  31.65e-9
++              247.3e-9
++C = 31.4e-12 -2.45e-12
++              31.4e-12
++length = 0.3048
+.end
+"#,
+        )
+        .expect("netlist should parse");
+
+        let cpl = resolve_cpl_model_params(&netlist, "cpl1", 2)
+            .expect("CPL model should resolve")
+            .expect("CPL model should exist");
+
+        assert!(cpl.r.iter().flatten().all(|value| value.abs() < 1e-18));
+        assert!(cpl.g.iter().flatten().all(|value| value.abs() < 1e-18));
+    }
+
+    #[test]
+    fn resolve_cpl_model_params_requires_length() {
+        let netlist = Netlist::parse(
+            r#"
+P1 V1 V2 0 V3 V4 0 CPL1
+.model cpl1 cpl
++R = 0.5 0 0.5
++L = 247.3e-9  31.65e-9
++              247.3e-9
++C = 31.4e-12 -2.45e-12
++              31.4e-12
+.end
+"#,
+        )
+        .expect("netlist should parse");
+
+        let err =
+            resolve_cpl_model_params(&netlist, "cpl1", 2).expect_err("missing LENGTH should error");
+        assert!(
+            err.to_string().contains("missing LENGTH"),
+            "expected missing LENGTH error, got {}",
+            err
         );
     }
 }
