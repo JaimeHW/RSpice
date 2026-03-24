@@ -318,32 +318,25 @@ impl<'a> ExprParser<'a> {
 
     /// Parse multiplicative expressions (*, /)
     fn parse_multiplicative(&mut self) -> Result<Expr, ExprError> {
-        let mut left = self.parse_power()?;
+        let mut left = self.parse_unary()?;
 
         loop {
             self.skip_ws();
             if self.consume('*') {
-                // Check for power operator **
                 if self.consume('*') {
-                    self.skip_ws();
-                    let right = self.parse_unary()?;
-                    left = Expr::BinOp {
-                        op: BinOpKind::Pow,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    };
-                } else {
-                    self.skip_ws();
-                    let right = self.parse_power()?;
-                    left = Expr::BinOp {
-                        op: BinOpKind::Mul,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    };
+                    self.pos -= 2;
+                    break;
                 }
+                self.skip_ws();
+                let right = self.parse_unary()?;
+                left = Expr::BinOp {
+                    op: BinOpKind::Mul,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                };
             } else if self.consume('/') {
                 self.skip_ws();
-                let right = self.parse_power()?;
+                let right = self.parse_unary()?;
                 left = Expr::BinOp {
                     op: BinOpKind::Div,
                     left: Box::new(left),
@@ -359,10 +352,24 @@ impl<'a> ExprParser<'a> {
 
     /// Parse power expressions (^)
     fn parse_power(&mut self) -> Result<Expr, ExprError> {
-        let base = self.parse_unary()?;
+        let base = self.parse_primary()?;
 
         self.skip_ws();
-        if self.consume('^') {
+        let op_start = self.pos;
+        let is_power = if self.consume('^') {
+            true
+        } else if self.consume('*') {
+            if self.consume('*') {
+                true
+            } else {
+                self.pos = op_start;
+                false
+            }
+        } else {
+            false
+        };
+
+        if is_power {
             self.skip_ws();
             let exp = self.parse_unary()?;
             Ok(Expr::BinOp {
@@ -401,10 +408,10 @@ impl<'a> ExprParser<'a> {
             } else {
                 // Put back the '!' - this shouldn't happen in well-formed input
                 self.pos -= 1;
-                self.parse_primary()
+                self.parse_power()
             }
         } else {
-            self.parse_primary()
+            self.parse_power()
         }
     }
 
@@ -1099,6 +1106,8 @@ mod tests {
         assert!(approx_eq(eval_simple("-5").unwrap(), -5.0));
         assert!(approx_eq(eval_simple("--5").unwrap(), 5.0));
         assert!(approx_eq(eval_simple("2*-3").unwrap(), -6.0));
+        assert!(approx_eq(eval_simple("-2**2").unwrap(), -4.0));
+        assert!(approx_eq(eval_simple("-2^2").unwrap(), -4.0));
     }
 
     #[test]

@@ -365,7 +365,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_multiplicative(&mut self) -> Expr {
-        let mut left = self.parse_power();
+        let mut left = self.parse_unary();
         loop {
             let op = match &self.current {
                 Token::Star => BinaryOp::Mul,
@@ -373,7 +373,7 @@ impl<'a> Parser<'a> {
                 _ => break,
             };
             self.advance();
-            let right = self.parse_power();
+            let right = self.parse_unary();
             left = Expr::Binary {
                 op,
                 left: Box::new(left),
@@ -384,10 +384,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_power(&mut self) -> Expr {
-        let left = self.parse_unary();
+        let left = self.parse_primary();
         if self.current == Token::Caret {
             self.advance();
-            let right = self.parse_power(); // Right associative
+            let right = self.parse_unary(); // Right associative, but exponent binds tighter than unary.
             Expr::Binary {
                 op: BinaryOp::Pow,
                 left: Box::new(left),
@@ -407,6 +407,10 @@ impl<'a> Parser<'a> {
                     operand: Box::new(self.parse_unary()),
                 }
             }
+            Token::Plus => {
+                self.advance();
+                self.parse_unary()
+            }
             Token::Not => {
                 self.advance();
                 Expr::Unary {
@@ -414,7 +418,7 @@ impl<'a> Parser<'a> {
                     operand: Box::new(self.parse_unary()),
                 }
             }
-            _ => self.parse_primary(),
+            _ => self.parse_power(),
         }
     }
 
@@ -677,6 +681,22 @@ mod tests {
             }
             _ => panic!("Expected addition at top"),
         }
+    }
+
+    #[test]
+    fn test_parse_unary_minus_binds_outside_power() {
+        let expr = parse_expression("-2^2");
+        assert_eq!(
+            expr,
+            Expr::Unary {
+                op: UnaryOp::Neg,
+                operand: Box::new(Expr::Binary {
+                    op: BinaryOp::Pow,
+                    left: Box::new(Expr::Const(2.0)),
+                    right: Box::new(Expr::Const(2.0)),
+                }),
+            }
+        );
     }
 
     #[test]

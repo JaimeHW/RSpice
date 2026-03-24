@@ -171,7 +171,13 @@ fn substitute_function_args(expr: &NetExpr, args: &HashMap<String, NetExpr>) -> 
 
 fn serialize_expr(expr: &NetExpr) -> String {
     match expr {
-        NetExpr::Number(v) => format!("{}", v),
+        NetExpr::Number(v) => {
+            if *v < 0.0 {
+                format!("({})", v)
+            } else {
+                format!("{}", v)
+            }
+        }
         NetExpr::Param(name) => name.clone(),
         NetExpr::UnaryOp { op, operand } => match op {
             UnaryOpKind::Neg => format!("(-{})", serialize_expr(operand)),
@@ -277,6 +283,24 @@ mod tests {
             err.contains("recursive"),
             "expected recursion guard error, got {}",
             err
+        );
+    }
+
+    #[test]
+    fn test_prepare_behavioral_expression_parenthesizes_negative_numeric_power_base() {
+        let mut params = ParamContext::new();
+        params.set("aux1003", -2.0);
+
+        let prepared = prepare_behavioral_expression("aux1003**2", &params).unwrap();
+        let ast = parse_expression_strict(&prepared).unwrap();
+        let program = compile(&ast);
+        let mut vm = Vm::new();
+        let out = vm.execute(&program, &Context::dc(&[], &[]));
+        assert!(
+            (out - 4.0).abs() < 1e-12,
+            "expected (-2)^2 behavior, got {} from {}",
+            out,
+            prepared
         );
     }
 }
