@@ -183,9 +183,11 @@ maturin develop --release
 ```python
 import rspice
 
-# Run a simulation
-results = rspice.run("circuit.sp")
-print(results.variables)
+# Parse a netlist and run a simulation
+netlist = rspice.Netlist.parse("V1 1 0 10\nR1 1 0 1k\n.end")
+engine = rspice.Engine()
+result = engine.run_dc_op(netlist)
+print(result.voltage(1))
 ```
 
 
