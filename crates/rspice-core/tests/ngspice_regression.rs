@@ -4,7 +4,10 @@
 //! Tests are organized by analysis type and device model category.
 
 use rspice_core::testing::{TestRunner, TestRunnerConfig, TestStatistics};
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Test Helpers
@@ -59,6 +62,62 @@ fn suite_is_cmc_qaspec(subdir: &str) -> bool {
     false
 }
 
+fn normalize_suite_path(path: &Path) -> String {
+    path.iter()
+        .map(|segment| segment.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn all_discoverable_suite_dirs() -> Vec<String> {
+    let tests_dir = get_tests_dir();
+    let runner = TestRunner::new(tests_dir.clone(), TestRunnerConfig::default());
+    let mut suites = Vec::new();
+    let mut stack = vec![PathBuf::new()];
+    let mut visited_dirs = 0usize;
+
+    while let Some(rel) = stack.pop() {
+        visited_dirs += 1;
+        if visited_dirs > 512 {
+            break;
+        }
+
+        let dir = if rel.as_os_str().is_empty() {
+            tests_dir.clone()
+        } else {
+            tests_dir.join(&rel)
+        };
+
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        let mut child_dirs = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                child_dirs.push(path);
+            }
+        }
+        child_dirs.sort();
+
+        if !rel.as_os_str().is_empty() {
+            let suite = normalize_suite_path(&rel);
+            if !runner.discover_tests(&suite).is_empty() {
+                suites.push(suite);
+            }
+        }
+
+        for child in child_dirs.into_iter().rev() {
+            if let Ok(child_rel) = child.strip_prefix(&tests_dir) {
+                stack.push(child_rel.to_path_buf());
+            }
+        }
+    }
+
+    suites.sort();
+    suites
+}
+
 fn run_and_report(runner: &TestRunner, subdir: &str) -> TestStatistics {
     let results = runner.run_suite(subdir);
     if !results.is_empty() {
@@ -88,6 +147,13 @@ fn run_and_report(runner: &TestRunner, subdir: &str) -> TestStatistics {
         stats.passed,
         stats.skipped,
         stats.pass_rate()
+    );
+    assert_eq!(
+        stats.skipped,
+        0,
+        "Suite '{}' skipped {} circuit(s); all discovered decks must execute.",
+        subdir,
+        stats.skipped
     );
 
     stats
@@ -351,6 +417,102 @@ fn test_ngspice_regression_func_suite() {
     );
 }
 
+#[test]
+fn test_ngspice_regression_lib_processing_suite() {
+    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
+    let stats = run_and_report(&runner, "regression/lib-processing");
+
+    println!(
+        "Regression Lib Processing: {} tests, {:.1}% pass rate",
+        stats.total,
+        stats.pass_rate()
+    );
+}
+
+#[test]
+fn test_ngspice_regression_misc_suite() {
+    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
+    let stats = run_and_report(&runner, "regression/misc");
+
+    println!(
+        "Regression Misc: {} tests, {:.1}% pass rate",
+        stats.total,
+        stats.pass_rate()
+    );
+}
+
+#[test]
+fn test_ngspice_regression_model_suite() {
+    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
+    let stats = run_and_report(&runner, "regression/model");
+
+    println!(
+        "Regression Model: {} tests, {:.1}% pass rate",
+        stats.total,
+        stats.pass_rate()
+    );
+}
+
+#[test]
+fn test_ngspice_regression_pipe_suite() {
+    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
+    let stats = run_and_report(&runner, "regression/pipe");
+
+    println!(
+        "Regression Pipe: {} tests, {:.1}% pass rate",
+        stats.total,
+        stats.pass_rate()
+    );
+}
+
+#[test]
+fn test_ngspice_regression_pz_suite() {
+    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
+    let stats = run_and_report(&runner, "regression/pz");
+
+    println!(
+        "Regression PZ: {} tests, {:.1}% pass rate",
+        stats.total,
+        stats.pass_rate()
+    );
+}
+
+#[test]
+fn test_ngspice_regression_sens_suite() {
+    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
+    let stats = run_and_report(&runner, "regression/sens");
+
+    println!(
+        "Regression Sens: {} tests, {:.1}% pass rate",
+        stats.total,
+        stats.pass_rate()
+    );
+}
+
+#[test]
+fn test_ngspice_regression_subckt_processing_suite() {
+    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
+    let stats = run_and_report(&runner, "regression/subckt-processing");
+
+    println!(
+        "Regression Subckt Processing: {} tests, {:.1}% pass rate",
+        stats.total,
+        stats.pass_rate()
+    );
+}
+
+#[test]
+fn test_ngspice_regression_temper_suite() {
+    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
+    let stats = run_and_report(&runner, "regression/temper");
+
+    println!(
+        "Regression Temper: {} tests, {:.1}% pass rate",
+        stats.total,
+        stats.pass_rate()
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SOI MOSFET Tests
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -409,35 +571,7 @@ fn test_ngspice_mesa_suite() {
 
 #[test]
 fn test_full_ngspice_suite_summary() {
-    // All test suites with .cir files
-    let suites = [
-        // Core tests
-        "general",
-        "resistance",
-        "filters",
-        "transient",
-        "transmission",
-        "polezero",
-        "sensitivity",
-        "jfet",
-        "vbic",
-        "mesa",
-        "mos6",
-        // SOI MOSFET
-        "bsim3soidd",
-        "bsim3soifd",
-        "bsim3soipd",
-        // Additional model tests
-        "hfet",
-        "mes",
-        "bsim1",
-        "bsim2",
-        // Regression tests (.control blocks ignored - runs simulation part)
-        "regression/parser",
-        "regression/func",
-        // XSPICE digital decks (currently skipped when A-device support is unavailable)
-        "xspice/digital",
-    ];
+    let suites = all_discoverable_suite_dirs();
 
     let mut total_stats = TestStatistics {
         total: 0,
@@ -447,7 +581,7 @@ fn test_full_ngspice_suite_summary() {
         total_time_ms: 0,
     };
 
-    for suite in suites {
+    for suite in &suites {
         let runner = TestRunner::new(get_tests_dir(), suite_config(suite));
         let results = runner.run_suite(suite);
         let stats = TestRunner::statistics(&results);
@@ -496,6 +630,12 @@ fn test_full_ngspice_suite_summary() {
         total_stats.skipped,
         total_stats.pass_rate()
     );
+    assert_eq!(
+        total_stats.skipped,
+        0,
+        "Full ngspice suite skipped {} circuit(s); all discovered decks must execute.",
+        total_stats.skipped
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -520,6 +660,47 @@ fn test_discover_tests() {
 }
 
 #[test]
+fn test_all_discoverable_suite_dirs_are_covered() {
+    let suites = all_discoverable_suite_dirs();
+    let expected = vec![
+        "bsim1",
+        "bsim2",
+        "bsim3soidd",
+        "bsim3soifd",
+        "bsim3soipd",
+        "filters",
+        "general",
+        "hfet",
+        "jfet",
+        "mes",
+        "mesa",
+        "mos6",
+        "polezero",
+        "regression/func",
+        "regression/lib-processing",
+        "regression/misc",
+        "regression/model",
+        "regression/parser",
+        "regression/pipe",
+        "regression/pz",
+        "regression/sens",
+        "regression/subckt-processing",
+        "regression/temper",
+        "resistance",
+        "sensitivity",
+        "transient",
+        "transmission",
+        "vbic",
+        "xspice/digital",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect::<Vec<_>>();
+
+    assert_eq!(suites, expected);
+}
+
+#[test]
 fn test_cmc_suite_detection() {
     assert!(suite_is_cmc_qaspec("bsim3"));
     assert!(suite_is_cmc_qaspec("bsim4"));
@@ -531,9 +712,9 @@ fn test_cmc_suite_detection() {
 fn test_unsupported_detection() {
     let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
 
-    // Verify skip behavior is configured
+    // Full-suite validation must fail unsupported decks rather than silently skip them.
     let config = runner.config();
-    assert!(config.skip_unsupported);
+    assert!(!config.skip_unsupported);
 }
 
 #[test]

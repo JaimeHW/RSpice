@@ -174,7 +174,7 @@ impl Default for TestRunnerConfig {
             relative_tolerance: 0.01, // 1%
             absolute_tolerance: 1e-12,
             max_mismatches: 10,
-            skip_unsupported: true,
+            skip_unsupported: false,
             verbose: false,
             max_time_per_test_ms: 30000, // 30 seconds max per test
         }
@@ -364,8 +364,8 @@ impl TestRunner {
         let source = Netlist::strip_control_blocks(&source);
 
         // Check for unsupported features
-        if self.config.skip_unsupported {
-            if let Some(reason) = self.check_unsupported(&source) {
+        if let Some(reason) = self.check_unsupported(&source) {
+            if self.config.skip_unsupported {
                 return TestResult {
                     name,
                     passed: true, // Mark as passed (skipped)
@@ -375,6 +375,14 @@ impl TestRunner {
                     analysis_type: None,
                 };
             }
+            return TestResult {
+                name,
+                passed: false,
+                error: Some(format!("Unsupported test deck: {}", reason)),
+                mismatches: Vec::new(),
+                duration_ms: start.elapsed().as_millis(),
+                analysis_type: None,
+            };
         }
 
         // Parse analysis directives. Run all analyses in deck order.
@@ -2091,7 +2099,7 @@ mod tests {
         let config = TestRunnerConfig::default();
         assert!((config.relative_tolerance - 0.01).abs() < 1e-10);
         assert!((config.absolute_tolerance - 1e-12).abs() < 1e-20);
-        assert!(config.skip_unsupported);
+        assert!(!config.skip_unsupported);
     }
 
     #[test]
