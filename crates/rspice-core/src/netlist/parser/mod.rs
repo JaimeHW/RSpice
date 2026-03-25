@@ -6,7 +6,6 @@
 //! - .PARAM statements with expression evaluation
 //! - Subcircuit definitions and instances
 
-#![allow(clippy::too_many_arguments)]
 use super::expr::eval_expression;
 use super::lexer::{LexError, TokenKind, TokenStream, tokenize};
 use super::xspice_parser;
@@ -17,10 +16,13 @@ use super::{
     StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
 };
 use crate::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 mod command_parsers;
 use command_parsers::*;
+
+type MeasureStatement = crate::analysis::MeasureStatement;
+
 //=============================================================================
 // Main Parser
 //=============================================================================
@@ -35,21 +37,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
 
     // First line is the title
     let title = lines[0].to_string();
-
-    let mut elements = Vec::new();
-    let mut analyses = Vec::new();
-    let mut models = Vec::new();
-    let mut subcircuits = Vec::new();
-    let mut params = ParamContext::new();
-    let mut initial_conditions = Vec::new();
-    let mut node_sets = Vec::new();
-    let mut global_nodes = std::collections::HashSet::new();
-    let mut veriloga_includes = Vec::new();
-    let mut measurements = Vec::new();
-    let mut options = super::SimulationOptions::default();
-
-    // State for tracking nested subcircuit blocks
-    let mut subckt_stack: Vec<SubcktFrame> = Vec::new();
+    let mut state = ParseState::new();
 
     let mut line_num = 1;
     let mut continuation = String::new();
@@ -75,21 +63,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
 
         // Process previous continued line if exists
         if !continuation.is_empty() {
-            process_line(
-                &continuation,
-                line_num - 1,
-                &mut elements,
-                &mut analyses,
-                &mut models,
-                &mut subcircuits,
-                &mut subckt_stack,
-                &mut params,
-                &mut initial_conditions,
-                &mut node_sets,
-                &mut global_nodes,
-                &mut measurements,
-                &mut options,
-            )?;
+            process_line(&continuation, line_num - 1, &mut state)?;
             continuation.clear();
         }
 
@@ -101,7 +75,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
         // Handle .VERILOGA directive directly (before continuation handling)
         if let Some(include) = parse_veriloga_directive(trimmed) {
             log::debug!("Found .VERILOGA include: {:?}", include.file_path);
-            veriloga_includes.push(include);
+            state.push_veriloga_include(include);
             continue; // Skip normal processing
         }
 
@@ -111,46 +85,10 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
 
     // Process final line
     if !continuation.is_empty() {
-        process_line(
-            &continuation,
-            line_num,
-            &mut elements,
-            &mut analyses,
-            &mut models,
-            &mut subcircuits,
-            &mut subckt_stack,
-            &mut params,
-            &mut initial_conditions,
-            &mut node_sets,
-            &mut global_nodes,
-            &mut measurements,
-            &mut options,
-        )?;
+        process_line(&continuation, line_num, &mut state)?;
     }
 
-    if !subckt_stack.is_empty() {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: "Unterminated .SUBCKT block".to_string(),
-        });
-    }
-
-    Ok(Netlist {
-        title,
-        elements,
-        analyses,
-        models,
-        subcircuits,
-        params,
-        initial_conditions,
-        node_sets,
-        global_nodes,
-        measurements,
-        options,
-        veriloga_includes,
-        source_text: Some(input.to_string()),
-        source_path: None,
-    })
+    state.into_netlist(title, input, line_num)
 }
 
 #[derive(Debug, Clone)]
@@ -160,6 +98,85 @@ struct SubcktFrame {
     local_params: ParamContext,
     nested_aliases: HashMap<String, String>,
     local_model_aliases: HashMap<String, String>,
+}
+
+#[derive(Debug)]
+struct ParseState {
+    elements: Vec<Element>,
+    analyses: Vec<AnalysisCommand>,
+    models: Vec<ModelDef>,
+    subcircuits: Vec<SubcircuitDef>,
+    params: ParamContext,
+    initial_conditions: Vec<InitialCondition>,
+    node_sets: Vec<NodeSet>,
+    global_nodes: HashSet<String>,
+    veriloga_includes: Vec<VerilogAInclude>,
+    measurements: Vec<MeasureStatement>,
+    options: super::SimulationOptions,
+    subckt_stack: Vec<SubcktFrame>,
+}
+
+impl ParseState {
+    fn new() -> Self {
+        Self {
+            elements: Vec::new(),
+            analyses: Vec::new(),
+            models: Vec::new(),
+            subcircuits: Vec::new(),
+            params: ParamContext::new(),
+            initial_conditions: Vec::new(),
+            node_sets: Vec::new(),
+            global_nodes: HashSet::new(),
+            veriloga_includes: Vec::new(),
+            measurements: Vec::new(),
+            options: super::SimulationOptions::default(),
+            subckt_stack: Vec::new(),
+        }
+    }
+
+    fn push_veriloga_include(&mut self, include: VerilogAInclude) {
+        self.veriloga_includes.push(include);
+    }
+
+    fn into_netlist(
+        self,
+        title: String,
+        input: &str,
+        line_num: usize,
+    ) -> Result<Netlist, ParseError> {
+        if !self.subckt_stack.is_empty() {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: "Unterminated .SUBCKT block".to_string(),
+            });
+        }
+
+        Ok(Netlist {
+            title,
+            elements: self.elements,
+            analyses: self.analyses,
+            models: self.models,
+            subcircuits: self.subcircuits,
+            params: self.params,
+            initial_conditions: self.initial_conditions,
+            node_sets: self.node_sets,
+            global_nodes: self.global_nodes,
+            measurements: self.measurements,
+            options: self.options,
+            veriloga_includes: self.veriloga_includes,
+            source_text: Some(input.to_string()),
+            source_path: None,
+        })
+    }
+}
+
+struct ParseLineContext<'a> {
+    analyses: &'a mut Vec<AnalysisCommand>,
+    models: &'a mut Vec<ModelDef>,
+    initial_conditions: &'a mut Vec<InitialCondition>,
+    node_sets: &'a mut Vec<NodeSet>,
+    global_nodes: &'a mut HashSet<String>,
+    options: &'a mut super::SimulationOptions,
 }
 
 fn qualify_nested_subckt_name(parent_scope: Option<&str>, local_name: &str) -> String {
@@ -320,38 +337,26 @@ fn consume_quoted_or_token(input: &str) -> Option<(String, &str)> {
     Some((token, rest))
 }
 
-fn process_line(
-    line: &str,
-    line_num: usize,
-    elements: &mut Vec<Element>,
-    analyses: &mut Vec<AnalysisCommand>,
-    models: &mut Vec<ModelDef>,
-    subcircuits: &mut Vec<SubcircuitDef>,
-    subckt_stack: &mut Vec<SubcktFrame>,
-    params: &mut ParamContext,
-    initial_conditions: &mut Vec<InitialCondition>,
-    node_sets: &mut Vec<NodeSet>,
-    global_nodes: &mut std::collections::HashSet<String>,
-    measurements: &mut Vec<crate::analysis::MeasureStatement>,
-    options: &mut super::SimulationOptions,
-) -> Result<(), ParseError> {
+fn process_line(line: &str, line_num: usize, state: &mut ParseState) -> Result<(), ParseError> {
     let upper = line.to_uppercase();
 
     // Check for .SUBCKT start
     if upper.starts_with(".SUBCKT") {
         let subckt = parse_subckt_def(line, line_num)?;
-        let parent_scope = subckt_stack
+        let parent_scope = state
+            .subckt_stack
             .last()
             .map(|frame| frame.qualified_name.as_str());
         let qualified_name = qualify_nested_subckt_name(parent_scope, &subckt.name);
-        let mut local_params = subckt_stack
+        let mut local_params = state
+            .subckt_stack
             .last()
             .map(|frame| frame.local_params.clone())
-            .unwrap_or_else(|| params.clone());
+            .unwrap_or_else(|| state.params.clone());
         for (name, value) in &subckt.params {
             local_params.set(name, *value);
         }
-        subckt_stack.push(SubcktFrame {
+        state.subckt_stack.push(SubcktFrame {
             def: subckt,
             qualified_name,
             local_params,
@@ -363,9 +368,9 @@ fn process_line(
 
     // Check for .ENDS
     if upper.starts_with(".ENDS") {
-        if let Some(mut frame) = subckt_stack.pop() {
+        if let Some(mut frame) = state.subckt_stack.pop() {
             let mut visible_model_aliases = HashMap::new();
-            for ancestor in subckt_stack.iter() {
+            for ancestor in &state.subckt_stack {
                 for (alias, qualified) in &ancestor.local_model_aliases {
                     visible_model_aliases.insert(alias.clone(), qualified.clone());
                 }
@@ -384,21 +389,26 @@ fn process_line(
             frame.def.name = frame.qualified_name.clone();
             let finalized = frame.def;
 
-            if let Some(parent) = subckt_stack.last_mut() {
+            if let Some(parent) = state.subckt_stack.last_mut() {
                 parent
                     .nested_aliases
                     .insert(original_name, finalized.name.clone());
                 parent.def.nested_subcircuits.push(finalized.clone());
             }
 
-            subcircuits.push(finalized);
+            state.subcircuits.push(finalized);
         }
         return Ok(());
     }
 
     // If inside subcircuit, add elements to subcircuit
-    if let Some(frame) = subckt_stack.last_mut() {
+    if state.subckt_stack.last().is_some() {
         if upper.starts_with(".MODEL") {
+            let models = &mut state.models;
+            let frame = state
+                .subckt_stack
+                .last_mut()
+                .expect("subcircuit presence already checked");
             let tokens = tokenize(line).map_err(|e| lex_to_parse_error(e, line_num))?;
             let mut stream = TokenStream::new(tokens);
             stream.advance(); // skip .MODEL
@@ -414,6 +424,16 @@ fn process_line(
         }
 
         {
+            let analyses = &mut state.analyses;
+            let models = &mut state.models;
+            let initial_conditions = &mut state.initial_conditions;
+            let node_sets = &mut state.node_sets;
+            let global_nodes = &mut state.global_nodes;
+            let options = &mut state.options;
+            let frame = state
+                .subckt_stack
+                .last_mut()
+                .expect("subcircuit presence already checked");
             let mut subckt_elements = Vec::new();
             // Subcircuits don't get standalone measurements parsing
             let mut dummy_measurements = Vec::new();
@@ -422,14 +442,16 @@ fn process_line(
                 line_num,
                 &mut subckt_elements,
                 true,
-                analyses,
-                models,
                 &mut frame.local_params,
-                initial_conditions,
-                node_sets,
-                global_nodes,
                 &mut dummy_measurements,
-                options,
+                ParseLineContext {
+                    analyses,
+                    models,
+                    initial_conditions,
+                    node_sets,
+                    global_nodes,
+                    options,
+                },
             )?;
             frame.def.elements.extend(subckt_elements);
         }
@@ -440,16 +462,18 @@ fn process_line(
     parse_line(
         line,
         line_num,
-        elements,
+        &mut state.elements,
         false,
-        analyses,
-        models,
-        params,
-        initial_conditions,
-        node_sets,
-        global_nodes,
-        measurements,
-        options,
+        &mut state.params,
+        &mut state.measurements,
+        ParseLineContext {
+            analyses: &mut state.analyses,
+            models: &mut state.models,
+            initial_conditions: &mut state.initial_conditions,
+            node_sets: &mut state.node_sets,
+            global_nodes: &mut state.global_nodes,
+            options: &mut state.options,
+        },
     )
 }
 
@@ -458,15 +482,19 @@ fn parse_line(
     line_num: usize,
     elements: &mut Vec<Element>,
     defer_simple_param_refs: bool,
-    analyses: &mut Vec<AnalysisCommand>,
-    models: &mut Vec<ModelDef>,
     params: &mut ParamContext,
-    initial_conditions: &mut Vec<InitialCondition>,
-    node_sets: &mut Vec<NodeSet>,
-    global_nodes: &mut std::collections::HashSet<String>,
-    measurements: &mut Vec<crate::analysis::MeasureStatement>,
-    options: &mut super::SimulationOptions,
+    measurements: &mut Vec<MeasureStatement>,
+    context: ParseLineContext<'_>,
 ) -> Result<(), ParseError> {
+    let ParseLineContext {
+        analyses,
+        models,
+        initial_conditions,
+        node_sets,
+        global_nodes,
+        options,
+    } = context;
+
     // Tokenize the line
     let tokens = tokenize(line).map_err(|e| lex_to_parse_error(e, line_num))?;
     let mut stream = TokenStream::new(tokens);
