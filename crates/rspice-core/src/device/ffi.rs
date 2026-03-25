@@ -40,7 +40,7 @@ use std::collections::HashMap;
 ///
 /// This structure is designed to be ABI-compatible with C code.
 #[repr(C)]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct FfiContext {
     /// Simulation time (s)
     pub time: Value,
@@ -58,9 +58,13 @@ pub struct FfiContext {
     pub stamp_current: Option<extern "C" fn(row: usize, value: Value)>,
 }
 
-// SAFETY: FfiContext is only used within a single thread during simulation
-unsafe impl Send for FfiContext {}
-unsafe impl Sync for FfiContext {}
+/// Lifetime-bound wrapper that keeps the voltage buffer alive while exposing a
+/// C-compatible `FfiContext` view to external devices.
+#[derive(Debug)]
+pub struct FfiContextWithVoltages<'a> {
+    raw: FfiContext,
+    _voltages: &'a [Value],
+}
 
 impl Default for FfiContext {
     fn default() -> Self {
@@ -87,11 +91,46 @@ impl FfiContext {
         }
     }
 
-    /// Set node voltages from a slice
-    pub fn with_voltages(mut self, voltages: &[Value]) -> Self {
+    /// Bind node voltages to the context for the lifetime of the returned wrapper.
+    pub fn with_voltages<'a>(mut self, voltages: &'a [Value]) -> FfiContextWithVoltages<'a> {
         self.num_nodes = voltages.len();
         self.node_voltages = voltages.as_ptr();
-        self
+        FfiContextWithVoltages {
+            raw: self,
+            _voltages: voltages,
+        }
+    }
+}
+
+impl<'a> std::ops::Deref for FfiContextWithVoltages<'a> {
+    type Target = FfiContext;
+
+    fn deref(&self) -> &Self::Target {
+        &self.raw
+    }
+}
+
+impl<'a> FfiContextWithVoltages<'a> {
+    /// Access the underlying C-compatible context.
+    pub fn as_ffi(&self) -> &FfiContext {
+        &self.raw
+    }
+}
+
+impl<'a> Clone for FfiContextWithVoltages<'a> {
+    fn clone(&self) -> Self {
+        Self {
+            raw: FfiContext {
+                time: self.raw.time,
+                dt: self.raw.dt,
+                temperature: self.raw.temperature,
+                num_nodes: self.raw.num_nodes,
+                node_voltages: self.raw.node_voltages,
+                stamp_conductance: self.raw.stamp_conductance,
+                stamp_current: self.raw.stamp_current,
+            },
+            _voltages: self._voltages,
+        }
     }
 }
 
@@ -137,7 +176,7 @@ pub mod ffi_types {
 /// 1. Rust code directly
 /// 2. Wrapper around FFI-loaded functions
 /// 3. WASM modules (future)
-pub trait ExternalDevice: std::fmt::Debug + Send + Sync {
+pub trait ExternalDevice: std::fmt::Debug {
     /// Get device name
     fn name(&self) -> &str;
 
@@ -338,11 +377,6 @@ mod dynamic {
                 .finish()
         }
     }
-
-    // SAFETY: The C library is responsible for thread safety.
-    // We assume external devices are used single-threaded per simulation.
-    unsafe impl Send for DynamicExternalDevice {}
-    unsafe impl Sync for DynamicExternalDevice {}
 
     impl Drop for DynamicExternalDevice {
         fn drop(&mut self) {
@@ -657,6 +691,30 @@ mod tests {
         let ctx = FfiContext::new(0.0, 0.0, 300.0).with_voltages(&voltages);
         assert_eq!(ctx.num_nodes, 3);
         assert!(!ctx.node_voltages.is_null());
+        assert_eq!(ctx.as_ffi().num_nodes, 3);
+    }
+
+    #[test]
+    fn test_ffi_context_with_voltages_exposes_slice_values() {
+        let voltages = vec![1.25, -0.5, 3.75];
+        let ctx = FfiContext::new(1.0, 2.0, 350.0).with_voltages(&voltages);
+
+        let observed = unsafe { std::slice::from_raw_parts(ctx.node_voltages, ctx.num_nodes) };
+        assert_eq!(observed, voltages.as_slice());
+        assert_eq!(ctx.as_ffi().node_voltages, voltages.as_ptr());
+    }
+
+    #[test]
+    fn test_ffi_context_with_voltages_clone_preserves_buffer() {
+        let voltages = vec![0.1, 0.2, 0.3, 0.4];
+        let ctx = FfiContext::new(0.0, 0.0, 300.0).with_voltages(&voltages);
+        let clone = ctx.clone();
+
+        assert_eq!(clone.num_nodes, ctx.num_nodes);
+        assert_eq!(clone.node_voltages, ctx.node_voltages);
+
+        let observed = unsafe { std::slice::from_raw_parts(clone.node_voltages, clone.num_nodes) };
+        assert_eq!(observed, voltages.as_slice());
     }
 
     #[test]
