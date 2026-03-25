@@ -650,6 +650,12 @@ impl LibraryManager {
         add_primitive(&mut lib, "Resistor", "Passives", "Two-terminal resistor");
         add_primitive(&mut lib, "Capacitor", "Passives", "Two-terminal capacitor");
         add_primitive(&mut lib, "Inductor", "Passives", "Two-terminal inductor");
+        add_primitive(
+            &mut lib,
+            "Transformer",
+            "Passives",
+            "Two-winding coupled transformer",
+        );
         add_primitive(&mut lib, "Ground", "Passives", "Ground reference node");
 
         // ===== SOURCES =====
@@ -1259,7 +1265,7 @@ mod tests {
         let lib = mgr
             .get_library(LibraryManager::PRIMITIVES_LIBRARY)
             .expect("primitives library must exist");
-        assert_eq!(lib.cell_count(), 29);
+        assert_eq!(lib.cell_count(), 30);
     }
 
     #[test]
@@ -1294,11 +1300,12 @@ mod tests {
     fn test_primitives_passives_category() {
         let mgr = LibraryManager::with_primitives();
         let passives = mgr.cells_in_category(LibraryManager::PRIMITIVES_LIBRARY, "Passives");
-        assert_eq!(passives.len(), 4);
+        assert_eq!(passives.len(), 5);
         let names: Vec<&str> = passives.iter().map(|c| c.name.as_str()).collect();
         assert!(names.contains(&"Resistor"));
         assert!(names.contains(&"Capacitor"));
         assert!(names.contains(&"Inductor"));
+        assert!(names.contains(&"Transformer"));
         assert!(names.contains(&"Ground"));
     }
 

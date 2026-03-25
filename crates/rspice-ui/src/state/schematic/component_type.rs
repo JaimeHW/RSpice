@@ -370,12 +370,15 @@ impl ComponentType {
             ComponentType::Resistor | ComponentType::Capacitor | ComponentType::Inductor => {
                 vec![("+", Point::new(-hw, 0)), ("-", Point::new(hw, 0))]
             }
-            ComponentType::Transformer => vec![
-                ("P1", Point::new(-hw, -hh)),
-                ("P2", Point::new(-hw, hh)),
-                ("S1", Point::new(hw, -hh)),
-                ("S2", Point::new(hw, hh)),
-            ],
+            ComponentType::Transformer => {
+                let pin_inset = 10;
+                vec![
+                    ("P1", Point::new(-hw + pin_inset, -hh)),
+                    ("P2", Point::new(-hw + pin_inset, hh)),
+                    ("S1", Point::new(hw - pin_inset, -hh)),
+                    ("S2", Point::new(hw - pin_inset, hh)),
+                ]
+            }
             ComponentType::Diode => vec![
                 ("A", Point::new(-hw, 0)), // Anode
                 ("K", Point::new(hw, 0)),  // Cathode
@@ -805,9 +808,9 @@ mod tests {
         assert_eq!(offsets[1].0, "P2");
         assert_eq!(offsets[2].0, "S1");
         assert_eq!(offsets[3].0, "S2");
-        assert_eq!(offsets[0].1.x, -30);
+        assert_eq!(offsets[0].1.x, -20);
         assert_eq!(offsets[0].1.y, -40);
-        assert_eq!(offsets[3].1.x, 30);
+        assert_eq!(offsets[3].1.x, 20);
         assert_eq!(offsets[3].1.y, 40);
     }
 

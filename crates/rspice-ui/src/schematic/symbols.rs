@@ -999,25 +999,26 @@ fn add_default_pins(symbol: &mut Symbol, component_type: ComponentType) {
             ];
         }
         ComponentType::Transformer => {
+            let pin_inset = 10.0;
             symbol.pins = vec![
                 SymbolPin {
                     name: "P1".to_string(),
-                    position: (cx - w, cy - h),
+                    position: (cx - w + pin_inset, cy - h),
                     direction: PinDirection::Left,
                 },
                 SymbolPin {
                     name: "P2".to_string(),
-                    position: (cx - w, cy + h),
+                    position: (cx - w + pin_inset, cy + h),
                     direction: PinDirection::Left,
                 },
                 SymbolPin {
                     name: "S1".to_string(),
-                    position: (cx + w, cy - h),
+                    position: (cx + w - pin_inset, cy - h),
                     direction: PinDirection::Right,
                 },
                 SymbolPin {
                     name: "S2".to_string(),
-                    position: (cx + w, cy + h),
+                    position: (cx + w - pin_inset, cy + h),
                     direction: PinDirection::Right,
                 },
             ];
@@ -1613,11 +1614,30 @@ mod tests {
         let transformer = library
             .get(ComponentType::Transformer)
             .expect("Transformer symbol should be available");
+        let (cx, cy) = transformer.center();
+        let half_width = transformer.width() / 2.0;
+        let half_height = transformer.height() / 2.0;
         assert_eq!(transformer.pins.len(), 4);
         assert_eq!(transformer.pins[0].name, "P1");
         assert_eq!(transformer.pins[1].name, "P2");
         assert_eq!(transformer.pins[2].name, "S1");
         assert_eq!(transformer.pins[3].name, "S2");
+        assert_eq!(
+            transformer.pins[0].position,
+            (cx - half_width + 10.0, cy - half_height)
+        );
+        assert_eq!(
+            transformer.pins[1].position,
+            (cx - half_width + 10.0, cy + half_height)
+        );
+        assert_eq!(
+            transformer.pins[2].position,
+            (cx + half_width - 10.0, cy - half_height)
+        );
+        assert_eq!(
+            transformer.pins[3].position,
+            (cx + half_width - 10.0, cy + half_height)
+        );
     }
 
     #[test]

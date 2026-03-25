@@ -259,6 +259,7 @@ fn cell_name_to_component_type(cell_name: &str) -> Option<ComponentType> {
         "Resistor" => Some(ComponentType::Resistor),
         "Capacitor" => Some(ComponentType::Capacitor),
         "Inductor" => Some(ComponentType::Inductor),
+        "Transformer" => Some(ComponentType::Transformer),
         "Ground" => Some(ComponentType::Ground),
         // Voltage Sources
         "VSource DC" => Some(ComponentType::VoltageSource),
@@ -727,6 +728,10 @@ mod tests {
         assert_eq!(
             super::cell_name_to_component_type("Inductor"),
             Some(ComponentType::Inductor)
+        );
+        assert_eq!(
+            super::cell_name_to_component_type("Transformer"),
+            Some(ComponentType::Transformer)
         );
         assert_eq!(
             super::cell_name_to_component_type("Ground"),
