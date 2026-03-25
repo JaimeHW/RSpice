@@ -1,4 +1,4 @@
-use super::build_engine_config;
+use super::{build_engine_config, parse_runner_netlist};
 use crate::output_spec::{
     collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
     normalized_sensitivity, parse_output_spec, resolve_sensitivity_ac_frequency,
@@ -7,6 +7,7 @@ use crate::output_spec::{
 };
 use rspice_core::engine::Engine;
 use rspice_core::Value;
+use std::path::Path;
 
 /// Sensitivity analysis data
 #[derive(Debug, Clone)]
@@ -24,14 +25,25 @@ pub fn run_sensitivity_analysis(
     ac_mode: bool,
     frequency: Option<Value>,
 ) -> Result<SensitivityData, String> {
+    run_sensitivity_analysis_with_source_path(netlist_text, output_var, ac_mode, frequency, None)
+}
+
+/// Run sensitivity analysis with a source path used to resolve relative
+/// includes and model file references.
+pub fn run_sensitivity_analysis_with_source_path(
+    netlist_text: &str,
+    output_var: &str,
+    ac_mode: bool,
+    frequency: Option<Value>,
+    source_path: Option<&Path>,
+) -> Result<SensitivityData, String> {
     let output_var = output_var.trim();
     if output_var.is_empty() {
         return Err("Sensitivity output_var is required".to_string());
     }
     let ac_frequency = resolve_sensitivity_ac_frequency(ac_mode, frequency)?;
 
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    let netlist = parse_runner_netlist(netlist_text, source_path)?;
     let engine = Engine::new(build_engine_config(&netlist, None));
 
     let circuit = engine.build_circuit(&netlist).map_err(|e| {

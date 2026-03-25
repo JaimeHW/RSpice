@@ -1,9 +1,10 @@
 //! Pole-zero analysis runner.
 
-use super::build_engine_config;
+use super::{build_engine_config, parse_runner_netlist};
 use crate::output_spec::resolve_node_or_ground_index;
 use rspice_core::engine::Engine;
 use rspice_core::Value;
+use std::path::Path;
 
 /// Pole-zero analysis data
 #[derive(Debug, Clone)]
@@ -26,6 +27,30 @@ pub fn run_pole_zero_analysis(
     transfer_type: &str,
     analysis_type: &str,
 ) -> Result<PoleZeroData, String> {
+    run_pole_zero_analysis_with_source_path(
+        netlist_text,
+        input_node,
+        input_ref,
+        output_node,
+        output_ref,
+        transfer_type,
+        analysis_type,
+        None,
+    )
+}
+
+/// Run pole-zero analysis with a source path used to resolve relative includes
+/// and model file references.
+pub fn run_pole_zero_analysis_with_source_path(
+    netlist_text: &str,
+    input_node: &str,
+    input_ref: &str,
+    output_node: &str,
+    output_ref: &str,
+    transfer_type: &str,
+    analysis_type: &str,
+    source_path: Option<&Path>,
+) -> Result<PoleZeroData, String> {
     let input_node = input_node.trim();
     let output_node = output_node.trim();
     if input_node.is_empty() {
@@ -45,8 +70,7 @@ pub fn run_pole_zero_analysis(
         return Err("Pole-zero analysis_type must be PZ, POL, or ZER".to_string());
     }
 
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    let netlist = parse_runner_netlist(netlist_text, source_path)?;
     let engine = Engine::new(build_engine_config(&netlist, None));
 
     let dc_result = engine

@@ -2,13 +2,14 @@
 
 use super::{
     build_engine_config, build_voltage_output_expr, generate_freq_points,
-    infer_primary_output_node, infer_primary_source_name,
+    infer_primary_output_node, infer_primary_source_name, parse_runner_netlist,
 };
 use crate::output_spec::{ac_output_value, parse_output_spec};
 use num_complex::Complex64;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{ElementKind, SourceSpec};
 use rspice_core::Value;
+use std::path::Path;
 
 /// Frequency sweep type for transfer function analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,10 +112,19 @@ pub fn run_tf_analysis_with_config(
     netlist_text: &str,
     config: &TfRunConfig,
 ) -> Result<TfData, String> {
+    run_tf_analysis_with_config_and_source_path(netlist_text, config, None)
+}
+
+/// Run transfer-function analysis with explicit configuration and a source path
+/// used to resolve relative includes and model file references.
+pub fn run_tf_analysis_with_config_and_source_path(
+    netlist_text: &str,
+    config: &TfRunConfig,
+    source_path: Option<&Path>,
+) -> Result<TfData, String> {
     config.validate()?;
 
-    let parsed_netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    let parsed_netlist = parse_runner_netlist(netlist_text, source_path)?;
 
     // Build a baseline netlist with all AC source magnitudes forced to zero.
     // We then explicitly excite only the requested input source to keep the
@@ -278,15 +288,23 @@ pub fn run_tf_analysis_with_config(
 
 /// Run transfer-function analysis using inferred/default settings.
 pub fn run_tf_analysis(netlist_text: &str) -> Result<TfData, String> {
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    run_tf_analysis_with_source_path(netlist_text, None)
+}
+
+/// Run transfer-function analysis using inferred/default settings and a source
+/// path used to resolve relative includes and model file references.
+pub fn run_tf_analysis_with_source_path(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+) -> Result<TfData, String> {
+    let netlist = parse_runner_netlist(netlist_text, source_path)?;
     let engine = Engine::new(build_engine_config(&netlist, None));
     let dc_result = engine
         .run_dc_op(&netlist)
         .map_err(|e| format!("DC OP error (required for TF defaults): {}", e))?;
 
     let cfg = infer_tf_run_config(&netlist, &dc_result.node_names)?;
-    run_tf_analysis_with_config(netlist_text, &cfg)
+    run_tf_analysis_with_config_and_source_path(netlist_text, &cfg, source_path)
 }
 
 fn infer_tf_run_config(

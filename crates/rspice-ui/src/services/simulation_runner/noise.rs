@@ -1,9 +1,10 @@
 //! Noise analysis runner.
 
-use super::{build_engine_config, generate_freq_points};
+use super::{build_engine_config, generate_freq_points, parse_runner_netlist};
 use rspice_core::analysis::noise::NoiseResult;
 use rspice_core::engine::Engine;
 use rspice_core::Value;
+use std::path::Path;
 
 /// Noise analysis data for spectral density plots
 #[derive(Debug, Clone)]
@@ -70,9 +71,29 @@ pub fn run_noise_analysis(
     points_per_decade: usize,
     temperature: Value, // Kelvin, default 300K
 ) -> Result<NoiseData, String> {
-    // Parse the netlist
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    run_noise_analysis_with_source_path(
+        netlist_text,
+        output_node,
+        start_freq,
+        stop_freq,
+        points_per_decade,
+        temperature,
+        None,
+    )
+}
+
+/// Run noise analysis with a source path used to resolve relative includes and
+/// model file references.
+pub fn run_noise_analysis_with_source_path(
+    netlist_text: &str,
+    output_node: &str,
+    start_freq: Value,
+    stop_freq: Value,
+    points_per_decade: usize,
+    temperature: Value,
+    source_path: Option<&Path>,
+) -> Result<NoiseData, String> {
+    let netlist = parse_runner_netlist(netlist_text, source_path)?;
 
     // Create engine
     let engine = Engine::new(build_engine_config(&netlist, None));
@@ -104,6 +125,33 @@ pub fn run_noise_analysis(
 mod tests {
     use super::*;
     use rspice_core::analysis::noise::{NoiseContribution, NoiseSourceType};
+    use std::path::PathBuf;
+
+    fn write_noise_include_fixture() -> (tempfile::TempDir, PathBuf, String) {
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let source_path = temp_dir.path().join("project").join("noise_top.rsch");
+        std::fs::create_dir_all(
+            source_path
+                .parent()
+                .expect("source path should have parent directory"),
+        )
+        .expect("project directory should be created");
+        std::fs::create_dir_all(temp_dir.path().join("models"))
+            .expect("models directory should be created");
+        std::fs::write(
+            temp_dir.path().join("models").join("noise_stage.inc"),
+            "R1 in out 1k\nC1 out 0 1n\n",
+        )
+        .expect("include file should be written");
+
+        let netlist = "* noise include fixture\n\
+V1 in 0 DC 1 AC 1\n\
+.include ../models/noise_stage.inc\n\
+.end\n"
+            .to_string();
+
+        (temp_dir, source_path, netlist)
+    }
 
     #[test]
     fn test_noise_data_from_results_empty() {
@@ -167,5 +215,32 @@ mod tests {
         assert_eq!(lower.frequencies, mixed.frequencies);
         assert_eq!(lower.output_noise.len(), lower.frequencies.len());
         assert_eq!(mixed.output_noise.len(), mixed.frequencies.len());
+    }
+
+    #[test]
+    fn test_run_noise_analysis_with_source_path_resolves_relative_include() {
+        let (_temp_dir, source_path, netlist) = write_noise_include_fixture();
+
+        let without_source = run_noise_analysis(&netlist, "out", 1.0, 1e6, 5, 300.0);
+        assert!(
+            without_source.is_err(),
+            "relative include should fail without source path"
+        );
+
+        let with_source = run_noise_analysis_with_source_path(
+            &netlist,
+            "out",
+            1.0,
+            1e6,
+            5,
+            300.0,
+            Some(&source_path),
+        )
+        .expect("source-aware noise analysis should resolve include");
+        assert!(with_source.num_points > 0);
+        assert_eq!(
+            with_source.output_noise.len(),
+            with_source.frequencies.len()
+        );
     }
 }

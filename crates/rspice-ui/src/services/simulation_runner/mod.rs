@@ -61,7 +61,7 @@ use helpers::{
     normalize_voltage_signal_name, parse_runner_netlist,
 };
 pub use monte_carlo::{run_monte_carlo_analysis, MonteCarloData, MonteCarloVariableData};
-pub use noise::{run_noise_analysis, NoiseData};
+pub use noise::{run_noise_analysis, run_noise_analysis_with_source_path, NoiseData};
 pub use optimization::{
     run_optimization_analysis, run_optimization_analysis_with_config, OptimizationAlgorithmMode,
     OptimizationData, OptimizationGoalMode, OptimizationRunConfig, OptimizationVariable,
@@ -76,14 +76,18 @@ pub use pnoise::{
 };
 #[cfg(test)]
 use pnoise_sideband::{build_pnoise_sideband_translated_frequencies, fold_sideband_samples};
-pub use pole_zero::{run_pole_zero_analysis, PoleZeroData};
+pub use pole_zero::{
+    run_pole_zero_analysis, run_pole_zero_analysis_with_source_path, PoleZeroData,
+};
 pub use pss::{run_pss_analysis, PssData};
 pub use pstb::{run_pstb_analysis, run_pstb_analysis_with_config, PstbData, PstbRunConfig};
 pub use reliability::{
     run_reliability_analysis, run_reliability_analysis_with_config, ReliabilityData,
     ReliabilityRunConfig,
 };
-pub use sensitivity::{run_sensitivity_analysis, SensitivityData};
+pub use sensitivity::{
+    run_sensitivity_analysis, run_sensitivity_analysis_with_source_path, SensitivityData,
+};
 pub use soa::{run_soa_analysis, run_soa_analysis_with_config, SoaData, SoaRunConfig};
 pub use sparameter::{
     run_sparameter_analysis, SParameterData, SParameterPort, SParameterRunConfig, SParameterSweep,
@@ -94,7 +98,10 @@ pub use sweeps::{
     run_parametric_analysis_with_config, CornerBaseMode, CornerData, CornerFrequencySweep,
     CornerProcess, CornerRunConfig, ParametricData, TempRunConfig,
 };
-pub use tf::{run_tf_analysis, run_tf_analysis_with_config, TfData, TfFrequencySweep, TfRunConfig};
+pub use tf::{
+    run_tf_analysis, run_tf_analysis_with_config, run_tf_analysis_with_config_and_source_path,
+    run_tf_analysis_with_source_path, TfData, TfFrequencySweep, TfRunConfig,
+};
 pub use transient::{
     run_simulation, run_simulation_with_options, run_simulation_with_options_and_source_path,
     run_simulation_with_source_path, run_transient_analysis,
