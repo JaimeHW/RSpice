@@ -24,10 +24,9 @@ use super::config::AnalysisConfig;
 use super::results::{DcOpResult, SimulationResult, WaveformData};
 use super::runner::SimulationError;
 use crate::output_spec::{
-    collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
+    OutputSpec, collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
     normalized_sensitivity, parse_output_spec, resolve_sensitivity_ac_frequency,
     run_ac_output_at_frequency, run_dc_output_sensitivity, validate_sensitivity_output_spec,
-    OutputSpec,
 };
 
 //=============================================================================
@@ -234,6 +233,19 @@ impl EngineBridge {
             .unwrap_or_else(|| format!("I({})", branch_idx + 1))
     }
 
+    #[inline]
+    fn dc_branch_waveform_name(
+        result: &rspice_core::SimulationResult,
+        branch_idx: usize,
+    ) -> String {
+        result
+            .branch_names
+            .get(branch_idx)
+            .filter(|name| !name.is_empty())
+            .map(|name| format!("I({})", name))
+            .unwrap_or_else(|| format!("I({})", branch_idx + 1))
+    }
+
     //-------------------------------------------------------------------------
     // DC Operating Point
     //-------------------------------------------------------------------------
@@ -272,7 +284,8 @@ impl EngineBridge {
 
         // Copy branch currents
         for (i, &current) in core_result.branch_currents.iter().enumerate() {
-            result.branch_currents.insert(format!("I({})", i), current);
+            let name = Self::dc_branch_waveform_name(core_result, i);
+            result.branch_currents.insert(name, current);
         }
 
         result

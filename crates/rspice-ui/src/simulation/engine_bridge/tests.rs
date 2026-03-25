@@ -365,6 +365,19 @@ fn test_convert_dc_result_with_nodes() {
     assert_eq!(ui_result.node_voltages.len(), 2);
 }
 
+#[test]
+fn test_convert_dc_result_uses_branch_names() {
+    let bridge = EngineBridge::new();
+    let mut core_result = rspice_core::SimulationResult::new(1, 1);
+    core_result.branch_currents[0] = -1.25e-3;
+    core_result.branch_names = vec!["V1".to_string()];
+
+    let ui_result = bridge.convert_dc_result(&core_result);
+
+    assert_eq!(ui_result.branch_currents.get("I(V1)"), Some(&-1.25e-3));
+    assert!(!ui_result.branch_currents.contains_key("I(0)"));
+}
+
 // -------------------------------------------------------------------------
 // Integration Tests with Various Analyses
 // -------------------------------------------------------------------------
