@@ -217,6 +217,56 @@ fn test_create_perturbed_netlist_rebuilds_only_bound_elements() {
 }
 
 #[test]
+fn test_create_perturbed_netlist_preserves_source_relative_model_paths() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "rspice_perturbed_model_paths_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+    let netlist_path = temp_dir.join("deck.cir");
+    let stimulus_path = temp_dir.join("stimulus.txt");
+    std::fs::write(&stimulus_path, "* digital stimulus placeholder").expect("stimulus file");
+
+    let netlist = Netlist::parse_with_path(
+        "\
+* Perturbed model path preservation
+.PARAM RVAL=1k
+.model dsrc d_source (input_file=\"stimulus.txt\")
+A1 [out] dsrc
+R1 out 0 {RVAL}
+.end
+",
+        &netlist_path,
+    )
+    .expect("netlist should parse with source path");
+
+    let (perturbed, rebuilt) = Engine::create_perturbed_netlist(&netlist, "RVAL", 2e3)
+        .expect("perturbed netlist should build");
+    assert_eq!(rebuilt, 1);
+    assert_eq!(
+        perturbed.source_path.as_deref(),
+        Some(netlist_path.as_path())
+    );
+
+    let model = perturbed
+        .models
+        .iter()
+        .find(|model| model.name.eq_ignore_ascii_case("dsrc"))
+        .expect("model should be preserved");
+    let input_file = model
+        .string_params
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("input_file"))
+        .map(|(_, value)| value.clone())
+        .expect("input_file string param should be preserved");
+    assert_eq!(std::path::PathBuf::from(input_file), stimulus_path);
+}
+
+#[test]
 fn test_run_sensitivity_dc_matches_expected_divider_derivative() {
     let netlist = crate::netlist::parse_netlist(
         "* Divider sensitivity\n.PARAM RVAL=1k\nV1 in 0 1\nR1 in out {RVAL}\nR2 out 0 1k\n.end\n",
