@@ -473,9 +473,7 @@ fn render_model_list(ui: &mut Ui, state: &mut ModelBrowserState, manager: &Model
 
 /// Render model details in the right pane.
 fn render_model_details(ui: &mut Ui, state: &ModelBrowserState, manager: &ModelLibraryManager) {
-    if let (Some(ref lib_name), Some(ref model_name)) =
-        (&state.selected_library, &state.selected_model)
-    {
+    if let (Some(lib_name), Some(model_name)) = (&state.selected_library, &state.selected_model) {
         if let Some(lib) = manager.get_library(lib_name) {
             if let Some(model) = lib.get_model(model_name) {
                 // Model name header

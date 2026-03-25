@@ -2,7 +2,7 @@
 //!
 //! Commercial-grade netlist generation following Cadence Spectre conventions:
 //! - Node connectivity extraction via wire tracing
-//! - Ground detection (GND nets → node 0)
+//! - Ground detection (GND nets â†’ node 0)
 //! - SPICE instance line generation for all component types
 //! - Subcircuit and model statement generation
 //! - Analysis command generation from UI configuration
@@ -69,14 +69,14 @@ pub fn generate_netlist_with_analysis(
     schematic: &SchematicState,
     analysis_lines: &[String],
 ) -> NetlistResult {
-    let mut gen = NetlistGenerator::new(schematic);
-    let netlist = gen.generate_with_analysis(analysis_lines);
+    let mut generator = NetlistGenerator::new(schematic);
+    let netlist = generator.generate_with_analysis(analysis_lines);
 
     // Build the nets map from the generator's data
     let mut nets: HashMap<String, Vec<Point>> = HashMap::new();
     let mut point_to_net: HashMap<Point, String> = HashMap::new();
 
-    for net in gen.nets() {
+    for net in generator.nets() {
         let name = net.spice_name();
         let points: Vec<Point> = net.points.iter().copied().collect();
         for &p in &points {
@@ -89,8 +89,8 @@ pub fn generate_netlist_with_analysis(
         netlist,
         nets,
         point_to_net,
-        warnings: gen.warnings().to_vec(),
-        errors: gen.errors().to_vec(),
+        warnings: generator.warnings().to_vec(),
+        errors: generator.errors().to_vec(),
     }
 }
 

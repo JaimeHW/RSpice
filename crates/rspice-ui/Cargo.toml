@@ -1,9 +1,12 @@
 [package]
 name = "rspice-ui"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 description = "Modern circuit simulator GUI for RSpice - Commercial-grade egui application"
-authors = ["RSpice Contributors"]
+authors.workspace = true
+license-file.workspace = true
+repository.workspace = true
+rust-version.workspace = true
 build = "build.rs"
 
 # Library crate

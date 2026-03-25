@@ -74,17 +74,17 @@ fn test_net_spice_name_ground() {
 #[test]
 fn test_generator_new() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
-    assert!(gen.nets.is_empty());
-    assert!(gen.point_to_net.is_empty());
-    assert!(gen.ground_net.is_none());
+    let generator = NetlistGenerator::new(&schematic);
+    assert!(generator.nets.is_empty());
+    assert!(generator.point_to_net.is_empty());
+    assert!(generator.ground_net.is_none());
 }
 
 #[test]
 fn test_generator_empty_schematic() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
-    let netlist = gen.generate();
+    let mut generator = NetlistGenerator::new(&schematic);
+    let netlist = generator.generate();
 
     assert!(netlist.contains("* RSpice Netlist"));
     assert!(netlist.contains("* Components: 0"));
@@ -98,26 +98,26 @@ fn test_generator_empty_schematic() {
 #[test]
 fn test_format_value_empty() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
-    assert_eq!(gen.format_value(""), "1");
+    let generator = NetlistGenerator::new(&schematic);
+    assert_eq!(generator.format_value(""), "1");
 }
 
 #[test]
 fn test_format_value_with_si_prefix() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
-    assert_eq!(gen.format_value("1k"), "1k");
-    assert_eq!(gen.format_value("10u"), "10u");
-    assert_eq!(gen.format_value("100n"), "100n");
-    assert_eq!(gen.format_value("1.5meg"), "1.5meg");
+    let generator = NetlistGenerator::new(&schematic);
+    assert_eq!(generator.format_value("1k"), "1k");
+    assert_eq!(generator.format_value("10u"), "10u");
+    assert_eq!(generator.format_value("100n"), "100n");
+    assert_eq!(generator.format_value("1.5meg"), "1.5meg");
 }
 
 #[test]
 fn test_format_value_numeric() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
-    assert_eq!(gen.format_value("1000"), "1000");
-    assert_eq!(gen.format_value("1e-9"), "1e-9");
+    let generator = NetlistGenerator::new(&schematic);
+    assert_eq!(generator.format_value("1000"), "1000");
+    assert_eq!(generator.format_value("1e-9"), "1e-9");
 }
 
 // -------------------------------------------------------------------------
@@ -127,33 +127,33 @@ fn test_format_value_numeric() {
 #[test]
 fn test_format_nodes_exact() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
+    let generator = NetlistGenerator::new(&schematic);
     let nodes = vec!["1".to_string(), "2".to_string()];
-    assert_eq!(gen.format_nodes(&nodes, 2), "1 2");
+    assert_eq!(generator.format_nodes(&nodes, 2), "1 2");
 }
 
 #[test]
 fn test_format_nodes_more_than_expected() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
+    let generator = NetlistGenerator::new(&schematic);
     let nodes = vec!["1".to_string(), "2".to_string(), "3".to_string()];
-    assert_eq!(gen.format_nodes(&nodes, 2), "1 2");
+    assert_eq!(generator.format_nodes(&nodes, 2), "1 2");
 }
 
 #[test]
 fn test_format_nodes_less_than_expected() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
+    let generator = NetlistGenerator::new(&schematic);
     let nodes = vec!["1".to_string()];
-    assert_eq!(gen.format_nodes(&nodes, 2), "1 0");
+    assert_eq!(generator.format_nodes(&nodes, 2), "1 0");
 }
 
 #[test]
 fn test_format_nodes_empty() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
+    let generator = NetlistGenerator::new(&schematic);
     let nodes: Vec<String> = vec![];
-    assert_eq!(gen.format_nodes(&nodes, 2), "0 0");
+    assert_eq!(generator.format_nodes(&nodes, 2), "0 0");
 }
 
 // -------------------------------------------------------------------------
@@ -163,39 +163,39 @@ fn test_format_nodes_empty() {
 #[test]
 fn test_format_source_value_dc() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
+    let generator = NetlistGenerator::new(&schematic);
 
     let mut comp = Component::new(1, ComponentType::VoltageSource, Point::new(0, 0));
     comp.value = "5".to_string();
-    assert!(gen.format_source_value(&comp).contains("DC 5"));
+    assert!(generator.format_source_value(&comp).contains("DC 5"));
 }
 
 #[test]
 fn test_format_source_value_ac() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
+    let generator = NetlistGenerator::new(&schematic);
 
     let mut comp = Component::new(1, ComponentType::VoltageSourceAc, Point::new(0, 0));
     comp.value = "1".to_string();
-    assert!(gen.format_source_value(&comp).contains("AC 1"));
+    assert!(generator.format_source_value(&comp).contains("AC 1"));
 }
 
 #[test]
 fn test_format_source_value_pulse() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
+    let generator = NetlistGenerator::new(&schematic);
 
     let comp = Component::new(1, ComponentType::VoltageSourcePulse, Point::new(0, 0));
-    assert!(gen.format_source_value(&comp).contains("PULSE("));
+    assert!(generator.format_source_value(&comp).contains("PULSE("));
 }
 
 #[test]
 fn test_format_source_value_sin() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
+    let generator = NetlistGenerator::new(&schematic);
 
     let comp = Component::new(1, ComponentType::VoltageSourceSin, Point::new(0, 0));
-    assert!(gen.format_source_value(&comp).contains("SIN("));
+    assert!(generator.format_source_value(&comp).contains("SIN("));
 }
 
 // -------------------------------------------------------------------------
@@ -205,63 +205,63 @@ fn test_format_source_value_sin() {
 #[test]
 fn test_get_bjt_model_npn() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let comp = Component::new(1, ComponentType::NpnBjt, Point::new(0, 0)).with_name_value("Q1", "");
-    let model = gen.get_bjt_model(&comp, None);
+    let model = generator.get_bjt_model(&comp, None);
 
     assert!(model.contains("npn"));
-    assert!(gen.models.values().any(|m| m.contains("NPN")));
+    assert!(generator.models.values().any(|m| m.contains("NPN")));
 }
 
 #[test]
 fn test_get_bjt_model_pnp() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let comp = Component::new(1, ComponentType::PnpBjt, Point::new(0, 0)).with_name_value("Q2", "");
-    let model = gen.get_bjt_model(&comp, None);
+    let model = generator.get_bjt_model(&comp, None);
 
     assert!(model.contains("pnp"));
-    assert!(gen.models.values().any(|m| m.contains("PNP")));
+    assert!(generator.models.values().any(|m| m.contains("PNP")));
 }
 
 #[test]
 fn test_get_mosfet_model_nmos() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let comp = Component::new(1, ComponentType::Nmos, Point::new(0, 0)).with_name_value("M1", "");
-    let model = gen.get_mosfet_model(&comp);
+    let model = generator.get_mosfet_model(&comp);
 
     assert!(model.contains("nmos"));
-    assert!(gen.models.values().any(|m| m.contains("NMOS")));
-    assert!(gen.models.values().any(|m| m.contains("VTO=0.7")));
+    assert!(generator.models.values().any(|m| m.contains("NMOS")));
+    assert!(generator.models.values().any(|m| m.contains("VTO=0.7")));
 }
 
 #[test]
 fn test_get_mosfet_model_pmos() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let comp = Component::new(1, ComponentType::Pmos, Point::new(0, 0)).with_name_value("M2", "");
-    let model = gen.get_mosfet_model(&comp);
+    let model = generator.get_mosfet_model(&comp);
 
     assert!(model.contains("pmos"));
-    assert!(gen.models.values().any(|m| m.contains("PMOS")));
-    assert!(gen.models.values().any(|m| m.contains("VTO=-0.7")));
+    assert!(generator.models.values().any(|m| m.contains("PMOS")));
+    assert!(generator.models.values().any(|m| m.contains("VTO=-0.7")));
 }
 
 #[test]
 fn test_get_jfet_model() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let comp = Component::new(1, ComponentType::Njfet, Point::new(0, 0)).with_name_value("J1", "");
-    let model = gen.get_jfet_model(&comp);
+    let model = generator.get_jfet_model(&comp);
 
     assert!(model.contains("njf"));
-    assert!(gen.models.values().any(|m| m.contains("NJF")));
+    assert!(generator.models.values().any(|m| m.contains("NJF")));
 }
 
 // -------------------------------------------------------------------------
@@ -271,22 +271,22 @@ fn test_get_jfet_model() {
 #[test]
 fn test_generator_nets_accessor() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
-    assert!(gen.nets().is_empty());
+    let generator = NetlistGenerator::new(&schematic);
+    assert!(generator.nets().is_empty());
 }
 
 #[test]
 fn test_generator_has_ground_initially_false() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
-    assert!(!gen.has_ground());
+    let generator = NetlistGenerator::new(&schematic);
+    assert!(!generator.has_ground());
 }
 
 #[test]
 fn test_generator_ground_net_id_initially_none() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
-    assert!(gen.ground_net_id().is_none());
+    let generator = NetlistGenerator::new(&schematic);
+    assert!(generator.ground_net_id().is_none());
 }
 
 // -------------------------------------------------------------------------
@@ -296,10 +296,10 @@ fn test_generator_ground_net_id_initially_none() {
 #[test]
 fn test_generate_with_analysis_commands() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let analysis = vec![".tran 1n 100n".to_string(), ".ac dec 10 1 1meg".to_string()];
-    let netlist = gen.generate_with_analysis(&analysis);
+    let netlist = generator.generate_with_analysis(&analysis);
 
     assert!(netlist.contains(".tran 1n 100n"));
     assert!(netlist.contains(".ac dec 10 1 1meg"));
@@ -309,9 +309,9 @@ fn test_generate_with_analysis_commands() {
 #[test]
 fn test_generate_with_empty_analysis() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
-    let netlist = gen.generate_with_analysis(&[]);
+    let netlist = generator.generate_with_analysis(&[]);
 
     assert!(netlist.contains("* RSpice Netlist"));
     assert!(netlist.contains(".end"));
@@ -322,9 +322,9 @@ fn test_generate_with_empty_analysis() {
 #[test]
 fn test_generate_without_analysis_has_no_placeholder_op() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
-    let netlist = gen.generate();
+    let netlist = generator.generate();
 
     assert!(netlist.contains("* RSpice Netlist"));
     assert!(netlist.contains(".end"));
@@ -335,12 +335,12 @@ fn test_generate_without_analysis_has_no_placeholder_op() {
 #[test]
 fn test_generate_resets_internal_state_between_calls() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
-    let first = gen.generate_with_analysis(&[".ac dec 10 1 1meg".to_string()]);
+    let first = generator.generate_with_analysis(&[".ac dec 10 1 1meg".to_string()]);
     assert!(first.contains(".ac dec 10 1 1meg"));
 
-    let second = gen.generate_with_analysis(&[]);
+    let second = generator.generate_with_analysis(&[]);
     assert!(!second.contains(".ac dec 10 1 1meg"));
     assert!(!second.contains("* Analysis commands"));
 }
@@ -406,8 +406,8 @@ fn test_generate_veriloga_include_and_cell_instance() {
     comp.params = "g=2m".to_string();
     schematic.components.push(comp);
 
-    let mut gen = NetlistGenerator::new(&schematic);
-    let netlist = gen.generate();
+    let mut generator = NetlistGenerator::new(&schematic);
+    let netlist = generator.generate();
 
     assert!(netlist.contains(".VERILOGA \"models/my resistor.va\" my_resistor"));
     assert!(netlist.contains("X1"));
@@ -427,8 +427,8 @@ fn test_generate_generic_include_for_spice_bound_cell_instance() {
     comp.library_cell = Some(binding);
     schematic.components.push(comp);
 
-    let mut gen = NetlistGenerator::new(&schematic);
-    let netlist = gen.generate();
+    let mut generator = NetlistGenerator::new(&schematic);
+    let netlist = generator.generate();
 
     assert!(netlist.contains(".include \"models/lp_filter.sp\""));
     assert!(netlist.contains("Xlp1 "));
@@ -451,8 +451,8 @@ fn test_generate_deduplicates_generic_library_includes() {
         schematic.components.push(comp);
     }
 
-    let mut gen = NetlistGenerator::new(&schematic);
-    let netlist = gen.generate();
+    let mut generator = NetlistGenerator::new(&schematic);
+    let netlist = generator.generate();
     let include_count = netlist.matches(".include \"models/amp.sp\"").count();
     assert_eq!(include_count, 1, "generic include should be emitted once");
 }
@@ -460,7 +460,7 @@ fn test_generate_deduplicates_generic_library_includes() {
 #[test]
 fn test_cell_instance_line_uses_module_or_cell_fallback() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut binding = LibraryCellInstance::new("veriloga", "fallback_cell", "veriloga");
     binding.source_path = Some(std::path::PathBuf::from("fallback.va"));
@@ -470,7 +470,7 @@ fn test_cell_instance_line_uses_module_or_cell_fallback() {
         .with_name_value("inst1", "");
     comp.library_cell = Some(binding);
 
-    let line = gen
+    let line = generator
         .generate_instance_line(&comp)
         .expect("cell instance should netlist");
 
@@ -493,10 +493,12 @@ fn test_generate_netlist_reports_error_for_missing_terminal_order() {
 
     let result = generate_netlist(&schematic);
     assert!(!result.errors.is_empty());
-    assert!(result
-        .errors
-        .iter()
-        .any(|err| err.contains("terminal order metadata")));
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|err| err.contains("terminal order metadata"))
+    );
 }
 
 #[test]
@@ -517,10 +519,12 @@ fn test_generate_netlist_warns_on_conflicting_veriloga_module_binding() {
 
     let result = generate_netlist(&schematic);
     assert!(!result.warnings.is_empty());
-    assert!(result
-        .warnings
-        .iter()
-        .any(|warn| warn.contains("Conflicting Verilog-A module bindings")));
+    assert!(
+        result
+            .warnings
+            .iter()
+            .any(|warn| warn.contains("Conflicting Verilog-A module bindings"))
+    );
 }
 
 // -------------------------------------------------------------------------
@@ -543,10 +547,10 @@ fn test_chrono_lite_timestamp() {
 #[test]
 fn test_get_node_name_floating() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
+    let generator = NetlistGenerator::new(&schematic);
 
     // Point not in any net should return float_XXX
-    let name = gen.get_node_name(Point::new(5, 3));
+    let name = generator.get_node_name(Point::new(5, 3));
     assert!(name.starts_with("float_"));
 }
 
@@ -564,53 +568,53 @@ fn test_get_node_name_floating() {
 #[test]
 fn test_format_params_empty() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
-    assert_eq!(gen.format_params(""), "");
-    assert_eq!(gen.format_params("   "), "");
+    let generator = NetlistGenerator::new(&schematic);
+    assert_eq!(generator.format_params(""), "");
+    assert_eq!(generator.format_params("   "), "");
 }
 
 #[test]
 fn test_format_params_single() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
-    assert_eq!(gen.format_params("m=2"), " m=2");
+    let generator = NetlistGenerator::new(&schematic);
+    assert_eq!(generator.format_params("m=2"), " m=2");
 }
 
 #[test]
 fn test_format_params_multiple() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
-    assert_eq!(gen.format_params("m=2 tc1=0.01"), " m=2 tc1=0.01");
+    let generator = NetlistGenerator::new(&schematic);
+    assert_eq!(generator.format_params("m=2 tc1=0.01"), " m=2 tc1=0.01");
 }
 
 #[test]
 fn test_format_params_with_whitespace() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
+    let generator = NetlistGenerator::new(&schematic);
     // Leading/trailing whitespace should be trimmed
-    assert_eq!(gen.format_params("  m=2  "), " m=2");
+    assert_eq!(generator.format_params("  m=2  "), " m=2");
 }
 
 #[test]
 fn test_format_value_with_params_value_only() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
-    assert_eq!(gen.format_value_with_params("1k", ""), "1k");
+    let generator = NetlistGenerator::new(&schematic);
+    assert_eq!(generator.format_value_with_params("1k", ""), "1k");
 }
 
 #[test]
 fn test_format_value_with_params_both() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
-    assert_eq!(gen.format_value_with_params("1k", "m=2"), "1k m=2");
+    let generator = NetlistGenerator::new(&schematic);
+    assert_eq!(generator.format_value_with_params("1k", "m=2"), "1k m=2");
 }
 
 #[test]
 fn test_format_value_with_params_complex() {
     let schematic = SchematicState::default();
-    let gen = NetlistGenerator::new(&schematic);
+    let generator = NetlistGenerator::new(&schematic);
     assert_eq!(
-        gen.format_value_with_params("4.7k", "m=2 tc1=0.01 tc2=0.001"),
+        generator.format_value_with_params("4.7k", "m=2 tc1=0.01 tc2=0.001"),
         "4.7k m=2 tc1=0.01 tc2=0.001"
     );
 }
@@ -622,13 +626,13 @@ fn test_format_value_with_params_complex() {
 #[test]
 fn test_resistor_with_params() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp =
         Component::new(1, ComponentType::Resistor, Point::new(0, 0)).with_name_value("R1", "1k");
     comp.params = "m=2 tc1=0.01".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.contains("R1"));
     assert!(line.contains("1k"));
@@ -639,12 +643,12 @@ fn test_resistor_with_params() {
 #[test]
 fn test_resistor_without_params() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let comp =
         Component::new(1, ComponentType::Resistor, Point::new(0, 0)).with_name_value("R1", "1k");
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.contains("R1"));
     assert!(line.contains("1k"));
@@ -655,13 +659,13 @@ fn test_resistor_without_params() {
 #[test]
 fn test_capacitor_with_params() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp =
         Component::new(1, ComponentType::Capacitor, Point::new(0, 0)).with_name_value("C1", "100p");
     comp.params = "ic=0 m=4".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.contains("C1"));
     assert!(line.contains("100p"));
@@ -672,13 +676,13 @@ fn test_capacitor_with_params() {
 #[test]
 fn test_inductor_with_params() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp =
         Component::new(1, ComponentType::Inductor, Point::new(0, 0)).with_name_value("L1", "10u");
     comp.params = "ic=0 m=1".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.contains("L1"));
     assert!(line.contains("10u"));
@@ -750,10 +754,12 @@ fn test_generate_netlist_reports_unknown_coupling_target() {
 
     let result = generate_netlist(&schematic);
 
-    assert!(result
-        .errors
-        .iter()
-        .any(|err| err.contains("unknown inductor")));
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|err| err.contains("unknown inductor"))
+    );
 }
 
 #[test]
@@ -772,22 +778,24 @@ fn test_generate_netlist_rejects_conflicting_coupling_metadata() {
 
     let result = generate_netlist(&schematic);
 
-    assert!(result
-        .errors
-        .iter()
-        .any(|err| err.contains("Conflicting coupling definitions")));
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|err| err.contains("Conflicting coupling definitions"))
+    );
 }
 
 #[test]
 fn test_transformer_generates_coupled_winding_lines() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp = Component::new(1, ComponentType::Transformer, Point::new(0, 0))
         .with_name_value("T1", "10m");
     comp.params = "turns_ratio=2 k=0.997 rp=50m rs=75m icp=1m ics=2m".to_string();
 
-    let lines = gen
+    let lines = generator
         .transformer_instance_lines(&comp)
         .expect("transformer synthesis should succeed");
 
@@ -806,37 +814,41 @@ fn test_transformer_generates_coupled_winding_lines() {
 #[test]
 fn test_transformer_explicit_secondary_inductance_overrides_ratio() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp = Component::new(1, ComponentType::Transformer, Point::new(0, 0))
         .with_name_value("T1", "10m");
     comp.params = "ls=3m turns_ratio=4".to_string();
 
-    let lines = gen
+    let lines = generator
         .transformer_instance_lines(&comp)
         .expect("transformer synthesis should succeed");
 
     assert!(lines[1].ends_with(" 3m"));
-    assert!(gen
-        .warnings
-        .iter()
-        .any(|warning| warning.contains("using explicit secondary inductance")));
+    assert!(
+        generator
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("using explicit secondary inductance"))
+    );
 }
 
 #[test]
 fn test_transformer_rejects_invalid_coupling_factor() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp = Component::new(1, ComponentType::Transformer, Point::new(0, 0))
         .with_name_value("T1", "10m");
     comp.params = "k=1.2".to_string();
 
-    assert!(gen.transformer_instance_lines(&comp).is_none());
-    assert!(gen
-        .errors
-        .iter()
-        .any(|err| err.contains("invalid coupling factor")));
+    assert!(generator.transformer_instance_lines(&comp).is_none());
+    assert!(
+        generator
+            .errors
+            .iter()
+            .any(|err| err.contains("invalid coupling factor"))
+    );
 }
 
 #[test]
@@ -864,13 +876,13 @@ fn test_generate_netlist_synthesizes_transformer_without_raw_t_instance() {
 #[test]
 fn test_diode_with_params() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp =
         Component::new(1, ComponentType::Diode, Point::new(0, 0)).with_name_value("D1", "1n");
     comp.params = "area=2 m=1".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.contains("D1"));
     assert!(line.contains("area=2"));
@@ -883,13 +895,13 @@ fn test_diode_with_params() {
 #[test]
 fn test_voltage_source_dc_with_params() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp = Component::new(1, ComponentType::VoltageSource, Point::new(0, 0))
         .with_name_value("V1", "5");
     comp.params = "acmag=1 acphase=0".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.contains("V1"));
     assert!(line.contains("DC 5"));
@@ -900,13 +912,13 @@ fn test_voltage_source_dc_with_params() {
 #[test]
 fn test_voltage_source_ac_with_params() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp = Component::new(1, ComponentType::VoltageSourceAc, Point::new(0, 0))
         .with_name_value("V2", "1");
     comp.params = "phase=45".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.contains("V2"));
     assert!(line.contains("AC 1"));
@@ -916,7 +928,7 @@ fn test_voltage_source_ac_with_params() {
 #[test]
 fn test_voltage_source_pulse_with_params() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     // Pulse sources use structured parameters for V1, V2, TD, TR, TF, PW, PER
     // The component.params contains key=value pairs for these parameters
@@ -924,7 +936,7 @@ fn test_voltage_source_pulse_with_params() {
         .with_name_value("V3", "");
     comp.params = "v1=0 v2=5 td=0 tr=1n tf=1n pw=10n period=20n".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.contains("V3"));
     assert!(line.contains("PULSE("));
@@ -935,13 +947,13 @@ fn test_voltage_source_pulse_with_params() {
 #[test]
 fn test_current_source_with_params() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp = Component::new(1, ComponentType::CurrentSource, Point::new(0, 0))
         .with_name_value("I1", "1m");
     comp.params = "acmag=100u".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.contains("I1"));
     assert!(line.contains("DC 1m"));
@@ -955,13 +967,13 @@ fn test_current_source_with_params() {
 #[test]
 fn test_nmos_with_dimension_params() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp =
         Component::new(1, ComponentType::Nmos, Point::new(0, 0)).with_name_value("M1", "");
     comp.params = "w=1u l=180n as=1p ad=1p ps=2u pd=2u".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.starts_with("M"));
     assert!(line.contains("M1"));
@@ -975,13 +987,13 @@ fn test_nmos_with_dimension_params() {
 #[test]
 fn test_pmos_with_dimension_params() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp =
         Component::new(1, ComponentType::Pmos, Point::new(0, 0)).with_name_value("M2", "");
     comp.params = "w=2u l=180n m=4".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.contains("M2"));
     assert!(line.contains("pmos"));
@@ -993,13 +1005,13 @@ fn test_pmos_with_dimension_params() {
 #[test]
 fn test_npn_bjt_with_params() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp =
         Component::new(1, ComponentType::NpnBjt, Point::new(0, 0)).with_name_value("Q1", "");
     comp.params = "area=2 m=1".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.starts_with("Q"));
     assert!(line.contains("Q1"));
@@ -1010,48 +1022,48 @@ fn test_npn_bjt_with_params() {
 #[test]
 fn test_bjt_uses_value_as_explicit_model_name() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp =
         Component::new(1, ComponentType::NpnBjt, Point::new(0, 0)).with_name_value("Q1", "2N2222");
     comp.params = "area=2".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.contains(" 2N2222 "));
     assert!(line.contains("area=2"));
     assert!(!line.contains("model="));
-    assert!(!gen.models.contains_key("2N2222"));
+    assert!(!generator.models.contains_key("2N2222"));
 }
 
 #[test]
 fn test_bjt_uses_model_param_and_removes_duplicate_model_key() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp =
         Component::new(1, ComponentType::NpnBjt, Point::new(0, 0)).with_name_value("Q1", "");
     comp.params = "model=2N2222 area=2 m=1".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.contains(" 2N2222 "));
     assert!(line.contains("area=2"));
     assert!(line.contains("m=1"));
     assert!(!line.contains("model=2N2222"));
-    assert!(!gen.models.contains_key("2N2222"));
+    assert!(!generator.models.contains_key("2N2222"));
 }
 
 #[test]
 fn test_pnp_bjt_with_params() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp =
         Component::new(1, ComponentType::PnpBjt, Point::new(0, 0)).with_name_value("Q2", "");
     comp.params = "area=1.5".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.contains("Q2"));
     assert!(line.contains("pnp"));
@@ -1061,13 +1073,13 @@ fn test_pnp_bjt_with_params() {
 #[test]
 fn test_njfet_with_params() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp =
         Component::new(1, ComponentType::Njfet, Point::new(0, 0)).with_name_value("J1", "");
     comp.params = "area=1 m=2".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.starts_with("J"));
     assert!(line.contains("J1"));
@@ -1083,13 +1095,13 @@ fn test_njfet_with_params() {
 #[test]
 fn test_vcvs_with_params() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp =
         Component::new(1, ComponentType::Vcvs, Point::new(0, 0)).with_name_value("E1", "10");
     comp.params = "max=5 min=-5".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.starts_with("E"));
     assert!(line.contains("E1"));
@@ -1101,13 +1113,13 @@ fn test_vcvs_with_params() {
 #[test]
 fn test_vccs_with_params() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp =
         Component::new(1, ComponentType::Vccs, Point::new(0, 0)).with_name_value("G1", "1m");
     comp.params = "ic=0".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.starts_with("G"));
     assert!(line.contains("G1"));
@@ -1118,13 +1130,13 @@ fn test_vccs_with_params() {
 #[test]
 fn test_ccvs_with_params() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp =
         Component::new(1, ComponentType::Ccvs, Point::new(0, 0)).with_name_value("H1", "1k");
     comp.params = "max=10".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.starts_with("H"));
     assert!(line.contains("H1"));
@@ -1135,13 +1147,13 @@ fn test_ccvs_with_params() {
 #[test]
 fn test_cccs_with_params() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp =
         Component::new(1, ComponentType::Cccs, Point::new(0, 0)).with_name_value("F1", "100");
     comp.params = "m=2".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.starts_with("F"));
     assert!(line.contains("F1"));
@@ -1156,13 +1168,13 @@ fn test_cccs_with_params() {
 #[test]
 fn test_params_with_negative_values() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp =
         Component::new(1, ComponentType::Resistor, Point::new(0, 0)).with_name_value("R1", "1k");
     comp.params = "tc1=-0.01 tc2=-0.001".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.contains("tc1=-0.01"));
     assert!(line.contains("tc2=-0.001"));
@@ -1171,13 +1183,13 @@ fn test_params_with_negative_values() {
 #[test]
 fn test_params_with_scientific_notation() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp =
         Component::new(1, ComponentType::Nmos, Point::new(0, 0)).with_name_value("M1", "");
     comp.params = "w=1e-6 l=1.8e-7".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.contains("w=1e-6"));
     assert!(line.contains("l=1.8e-7"));
@@ -1186,14 +1198,14 @@ fn test_params_with_scientific_notation() {
 #[test]
 fn test_params_with_expressions() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp =
         Component::new(1, ComponentType::Resistor, Point::new(0, 0)).with_name_value("R1", "1k");
     // Spectre supports expressions in parameters
     comp.params = "m='2*scale'".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.contains("m='2*scale'"));
 }
@@ -1201,13 +1213,13 @@ fn test_params_with_expressions() {
 #[test]
 fn test_params_preserves_order() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp =
         Component::new(1, ComponentType::Nmos, Point::new(0, 0)).with_name_value("M1", "");
     comp.params = "w=1u l=180n as=1p ad=1p".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     // Parameters should maintain their order
     let w_pos = line.find("w=1u").unwrap();
@@ -1223,12 +1235,12 @@ fn test_params_preserves_order() {
 #[test]
 fn test_empty_params_no_trailing_space() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let comp =
         Component::new(1, ComponentType::Resistor, Point::new(0, 0)).with_name_value("R1", "1k");
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     // Line should not end with trailing space when params are empty
     assert!(!line.ends_with(' '));
@@ -1238,13 +1250,13 @@ fn test_empty_params_no_trailing_space() {
 #[test]
 fn test_params_with_quoted_values() {
     let schematic = SchematicState::default();
-    let mut gen = NetlistGenerator::new(&schematic);
+    let mut generator = NetlistGenerator::new(&schematic);
 
     let mut comp =
         Component::new(1, ComponentType::Resistor, Point::new(0, 0)).with_name_value("R1", "1k");
     comp.params = "model=\"res_hi\"".to_string();
 
-    let line = gen.generate_instance_line(&comp).unwrap();
+    let line = generator.generate_instance_line(&comp).unwrap();
 
     assert!(line.contains("model=\"res_hi\""));
 }
