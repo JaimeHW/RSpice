@@ -62,7 +62,7 @@ R2 2 0 4k
         let result = engine.run_dc_op(&netlist).unwrap();
 
         // Verify voltage divider: V2 = 12 * (4k / 6k) = 8V
-        let v2 = result.voltage_by_index(2);
+        let v2 = result.voltage_by_index(2).unwrap();
         assert!((v2 - 8.0).abs() < 0.1, "Expected V2=8V, got {}V", v2);
     }
 
@@ -79,8 +79,8 @@ R2 2 0 4k
         assert!(result.stop_time() > 4e-3);
 
         // Check that voltage increases monotonically
-        let v_start = result.voltage_at(2, 0);
-        let v_end = result.voltage_at(2, result.num_points() - 1);
+        let v_start = result.voltage_at(2, 0).unwrap();
+        let v_end = result.voltage_at(2, result.num_points() - 1).unwrap();
         assert!(
             v_end > v_start,
             "Voltage should increase: start={}, end={}",
@@ -110,8 +110,8 @@ R2 2 0 1k
 
         // Verify linear relationship (divider = 0.5)
         for i in 0..sweep.len() {
-            let vin = sweep.voltage_at(i);
-            let vout = sweep.result_at(i).unwrap().voltage_by_index(2);
+            let vin = sweep.voltage_at(i).unwrap();
+            let vout = sweep.result_at(i).unwrap().voltage_by_index(2).unwrap();
             let expected = vin / 2.0;
             assert!(
                 (vout - expected).abs() < 0.1,
@@ -169,7 +169,7 @@ C1 2 0 1u
         let cfg = engine.config();
         let netlist = PyNetlist::parse("V1 1 0 5\nR1 1 0 1k\n.end").unwrap();
         let result = engine.run_dc_op(&netlist).unwrap();
-        let voltage = result.voltage_by_index(1);
+        let voltage = result.voltage_by_index(1).unwrap();
 
         assert!((cfg.inner.tolerance - 1e-15).abs() < 1e-18);
         // Tight convergence settings should still preserve an engineering-accurate solution.
@@ -219,7 +219,7 @@ R1 2 0 1k
         .unwrap();
 
         let result = engine.run_dc_op(&netlist).unwrap();
-        assert!(result.voltage_by_index(2) > 0.0);
+        assert!(result.voltage_by_index(2).unwrap() > 0.0);
     }
 
     #[test]
@@ -253,7 +253,7 @@ R1 2 0 1k
         let result = engine
             .run_dc_op(&netlist)
             .expect("empty circuit should return an empty result");
-        assert_eq!(result.voltage_by_index(0), 0.0);
+        assert_eq!(result.voltage_by_index(0).unwrap(), 0.0);
     }
 
     //=========================================================================
@@ -279,9 +279,9 @@ R4 4 0 1k
         let result = engine.run_dc_op(&netlist).unwrap();
 
         // Equal resistors in series: V drops by 2.5V at each node
-        assert!((result.voltage_by_index(2) - 7.5).abs() < 0.1);
-        assert!((result.voltage_by_index(3) - 5.0).abs() < 0.1);
-        assert!((result.voltage_by_index(4) - 2.5).abs() < 0.1);
+        assert!((result.voltage_by_index(2).unwrap() - 7.5).abs() < 0.1);
+        assert!((result.voltage_by_index(3).unwrap() - 5.0).abs() < 0.1);
+        assert!((result.voltage_by_index(4).unwrap() - 2.5).abs() < 0.1);
     }
 
     #[test]
@@ -304,8 +304,8 @@ R5 4 0 1k
         let result = engine.run_dc_op(&netlist).unwrap();
 
         // Balanced bridge: V2 = V3 (symmetry)
-        let v2 = result.voltage_by_index(2);
-        let v3 = result.voltage_by_index(3);
+        let v2 = result.voltage_by_index(2).unwrap();
+        let v3 = result.voltage_by_index(3).unwrap();
         assert!(
             (v2 - v3).abs() < 0.1,
             "Bridge should be balanced: V2={}, V3={}",
@@ -331,9 +331,9 @@ R1 3 0 1k
         let engine = PyEngine::new(None);
         let result = engine.run_dc_op(&netlist).unwrap();
 
-        assert!((result.voltage_by_index(1) - 3.0).abs() < 0.1);
-        assert!((result.voltage_by_index(2) - 5.0).abs() < 0.1);
-        assert!((result.voltage_by_index(3) - 10.0).abs() < 0.1);
+        assert!((result.voltage_by_index(1).unwrap() - 3.0).abs() < 0.1);
+        assert!((result.voltage_by_index(2).unwrap() - 5.0).abs() < 0.1);
+        assert!((result.voltage_by_index(3).unwrap() - 10.0).abs() < 0.1);
     }
 
     #[test]
@@ -353,7 +353,7 @@ R2 1 0 100
         let result = engine.run_dc_op(&netlist).unwrap();
 
         // Parallel 100Ω = 50Ω, so V = 10mA * 50Ω = 0.5V
-        let v1 = result.voltage_by_index(1);
+        let v1 = result.voltage_by_index(1).unwrap();
         assert!((v1 - 0.5).abs() < 0.05, "Expected 0.5V, got {}V", v1);
     }
 
@@ -387,7 +387,7 @@ R2 1 0 100
             let result = engine.run_dc_op(&netlist).unwrap();
             match strategy {
                 PyDampingStrategy::None => {
-                    let voltage = result.voltage_by_index(1);
+                    let voltage = result.voltage_by_index(1).unwrap();
                     assert!(
                         (voltage - 5.0).abs() < 0.01,
                         "Failed with strategy {:?}: V(1)={}",
@@ -396,7 +396,7 @@ R2 1 0 100
                     );
                 }
                 _ => {
-                    let voltage = result.voltage_by_index(2);
+                    let voltage = result.voltage_by_index(2).unwrap();
                     assert!(
                         voltage.is_finite() && voltage > 0.0 && voltage < 5.0,
                         "Failed with strategy {:?}: V(2)={}",
@@ -426,11 +426,11 @@ R2 1 0 100
         let result = engine.run_dc_op(&netlist).unwrap();
 
         // V1 = 20V, each resistor drops ~0.95V (21 equal resistors)
-        let v1 = result.voltage_by_index(1);
+        let v1 = result.voltage_by_index(1).unwrap();
         assert!((v1 - 20.0).abs() < 0.1);
 
         // Last node before ground should have small voltage
-        let v_last = result.voltage_by_index(21);
+        let v_last = result.voltage_by_index(21).unwrap();
         let expected_last = 20.0 / 21.0; // ~0.95V
         assert!((v_last - expected_last).abs() < 0.1);
     }
@@ -501,7 +501,7 @@ R1 1 0 1k     $ another style
 
         let engine = PyEngine::new(None);
         let result = engine.run_dc_op(&netlist).unwrap();
-        assert!((result.voltage_by_index(1) - 5.0).abs() < 0.1);
+        assert!((result.voltage_by_index(1).unwrap() - 5.0).abs() < 0.1);
     }
 
     #[test]

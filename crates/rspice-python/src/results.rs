@@ -9,10 +9,103 @@
 #[cfg(test)]
 use num_complex::Complex64;
 use numpy::{PyArray1, ToPyArray};
+use pyo3::exceptions::{PyIndexError, PyKeyError};
 use pyo3::prelude::*;
 use rspice_core::analysis::AcResult;
 use rspice_core::engine::TransientResult;
 use rspice_core::solver::SimulationResult;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ResultAccessError {
+    InvalidNodeIndex {
+        node: usize,
+        available_nodes: usize,
+    },
+    InvalidTimeIndex {
+        time_index: usize,
+        available_points: usize,
+    },
+    InvalidSweepIndex {
+        index: usize,
+        available_points: usize,
+    },
+    UnknownNodeName {
+        name: String,
+    },
+}
+
+impl From<ResultAccessError> for PyErr {
+    fn from(error: ResultAccessError) -> Self {
+        match error {
+            ResultAccessError::InvalidNodeIndex {
+                node,
+                available_nodes,
+            } => PyIndexError::new_err(format!(
+                "node index {node} is out of range for result with {available_nodes} nodes"
+            )),
+            ResultAccessError::InvalidTimeIndex {
+                time_index,
+                available_points,
+            } => PyIndexError::new_err(format!(
+                "time index {time_index} is out of range for result with {available_points} points"
+            )),
+            ResultAccessError::InvalidSweepIndex {
+                index,
+                available_points,
+            } => PyIndexError::new_err(format!(
+                "sweep index {index} is out of range for result with {available_points} points"
+            )),
+            ResultAccessError::UnknownNodeName { name } => {
+                PyKeyError::new_err(format!("unknown node '{name}'"))
+            }
+        }
+    }
+}
+
+type AccessResult<T> = Result<T, ResultAccessError>;
+
+fn invalid_node_index_error(node: usize, available_nodes: usize) -> ResultAccessError {
+    ResultAccessError::InvalidNodeIndex {
+        node,
+        available_nodes,
+    }
+}
+
+fn invalid_time_index_error(time_index: usize, available_points: usize) -> ResultAccessError {
+    ResultAccessError::InvalidTimeIndex {
+        time_index,
+        available_points,
+    }
+}
+
+fn invalid_sweep_index_error(index: usize, available_points: usize) -> ResultAccessError {
+    ResultAccessError::InvalidSweepIndex {
+        index,
+        available_points,
+    }
+}
+
+fn unknown_node_name_error(name: &str) -> ResultAccessError {
+    ResultAccessError::UnknownNodeName {
+        name: name.to_string(),
+    }
+}
+
+fn is_ground_name(name: &str) -> bool {
+    matches!(name, "0") || name.eq_ignore_ascii_case("gnd")
+}
+
+fn checked_simulation_voltage(result: &SimulationResult, node: usize) -> AccessResult<f64> {
+    result
+        .try_voltage(node)
+        .ok_or_else(|| invalid_node_index_error(node, result.node_voltages.len().saturating_sub(1)))
+}
+
+fn checked_simulation_voltage_named(result: &SimulationResult, name: &str) -> AccessResult<f64> {
+    result
+        .try_voltage_named(name)
+        .ok_or_else(|| unknown_node_name_error(name))
+}
 
 /// DC operating point simulation result
 ///
@@ -33,10 +126,12 @@ impl PySimulationResult {
         Self { inner }
     }
 
-    fn find_node_index(names: &[String], name: &str) -> Option<usize> {
-        names
-            .iter()
-            .position(|candidate| candidate.eq_ignore_ascii_case(name))
+    fn checked_voltage(&self, node: usize) -> AccessResult<f64> {
+        checked_simulation_voltage(&self.inner, node)
+    }
+
+    fn checked_voltage_named(&self, name: &str) -> AccessResult<f64> {
+        checked_simulation_voltage_named(&self.inner, name)
     }
 }
 
@@ -50,26 +145,24 @@ impl PySimulationResult {
     /// Returns:
     ///     float: Voltage at the specified node
     ///
+    /// Raises:
+    ///     IndexError: If the node index is out of range
+    ///     KeyError: If the node name does not exist
+    ///
     /// Example:
     ///     >>> v = result.voltage(1)      # By index
     ///     >>> v = result.voltage("out")  # By name
-    fn voltage(&self, node: NodeIdentifier) -> f64 {
+    fn voltage(&self, node: NodeIdentifier) -> PyResult<f64> {
         match node {
-            NodeIdentifier::Index(idx) => self.inner.voltage(idx),
-            NodeIdentifier::Name(name) => {
-                // Find node index by name
-                if let Some(idx) = Self::find_node_index(&self.inner.node_names, &name) {
-                    self.inner.voltage(idx)
-                } else {
-                    0.0
-                }
-            }
+            NodeIdentifier::Index(idx) => self.checked_voltage(idx),
+            NodeIdentifier::Name(name) => self.checked_voltage_named(&name),
         }
+        .map_err(PyErr::from)
     }
 
     /// Get voltage at a node by index (internal method for tests)
-    pub fn voltage_by_index(&self, node: usize) -> f64 {
-        self.inner.voltage(node)
+    pub fn voltage_by_index(&self, node: usize) -> PyResult<f64> {
+        self.checked_voltage(node).map_err(PyErr::from)
     }
 
     /// Get all node voltages as a NumPy array
@@ -170,6 +263,37 @@ impl PyTransientResult {
             .iter()
             .position(|candidate| candidate.eq_ignore_ascii_case(name))
     }
+
+    fn checked_time_index(&self, time_index: usize) -> AccessResult<()> {
+        if time_index < self.inner.time.len() {
+            Ok(())
+        } else {
+            Err(invalid_time_index_error(time_index, self.inner.time.len()))
+        }
+    }
+
+    fn checked_waveform(&self, node: usize) -> AccessResult<Vec<f64>> {
+        if node == 0 {
+            return Ok(vec![0.0; self.inner.num_points()]);
+        }
+
+        self.inner
+            .try_voltage_waveform(node)
+            .map(|waveform| waveform.to_vec())
+            .ok_or_else(|| invalid_node_index_error(node, self.inner.num_nodes))
+    }
+
+    fn checked_waveform_named(&self, name: &str) -> AccessResult<Vec<f64>> {
+        if is_ground_name(name) {
+            return self.checked_waveform(0);
+        }
+
+        let node = self
+            .inner
+            .node_index_named(name)
+            .ok_or_else(|| unknown_node_name_error(name))?;
+        self.checked_waveform(node)
+    }
 }
 
 #[pymethods]
@@ -191,6 +315,10 @@ impl PyTransientResult {
     /// Returns:
     ///     numpy.ndarray: Voltage values at each time point
     ///
+    /// Raises:
+    ///     IndexError: If the node index is out of range
+    ///     KeyError: If the node name does not exist
+    ///
     /// Example:
     ///     >>> v_out = result.voltage_waveform(2)
     ///     >>> v_out = result.voltage_waveform("out")
@@ -198,20 +326,12 @@ impl PyTransientResult {
         &self,
         py: Python<'py>,
         node: NodeIdentifier,
-    ) -> Bound<'py, PyArray1<f64>> {
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let waveform = match node {
-            NodeIdentifier::Index(idx) => self.inner.voltage_waveform(idx).to_vec(),
-            NodeIdentifier::Name(name) => {
-                // Find node index by name
-                if let Some(idx) = Self::find_node_index(&self.inner.node_names, &name) {
-                    // Node names are 1-indexed in the result, so we need to adjust
-                    self.inner.voltage_waveform(idx + 1).to_vec()
-                } else {
-                    Vec::new()
-                }
-            }
+            NodeIdentifier::Index(idx) => self.checked_waveform(idx)?,
+            NodeIdentifier::Name(name) => self.checked_waveform_named(&name)?,
         };
-        waveform.to_pyarray(py)
+        Ok(waveform.to_pyarray(py))
     }
 
     /// Get voltage at a specific node and time index
@@ -222,8 +342,19 @@ impl PyTransientResult {
     ///
     /// Returns:
     ///     float: Voltage at the specified node and time
-    pub fn voltage_at(&self, node: usize, time_index: usize) -> f64 {
-        self.inner.voltage_at(node, time_index)
+    ///
+    /// Raises:
+    ///     IndexError: If the node or time index is out of range
+    pub fn voltage_at(&self, node: usize, time_index: usize) -> PyResult<f64> {
+        self.checked_time_index(time_index).map_err(PyErr::from)?;
+        if node == 0 {
+            return Ok(0.0);
+        }
+
+        self.inner
+            .try_voltage_at(node, time_index)
+            .ok_or_else(|| invalid_node_index_error(node, self.inner.num_nodes))
+            .map_err(PyErr::from)
     }
 
     /// Get the number of time points
@@ -439,6 +570,12 @@ impl PyDcSweepResult {
     pub fn new(results: Vec<(f64, SimulationResult)>) -> Self {
         Self { results }
     }
+
+    fn point(&self, index: usize) -> AccessResult<&(f64, SimulationResult)> {
+        self.results
+            .get(index)
+            .ok_or_else(|| invalid_sweep_index_error(index, self.results.len()))
+    }
 }
 
 #[pymethods]
@@ -478,22 +615,35 @@ impl PyDcSweepResult {
     }
 
     /// Get the sweep value at a specific index (internal for tests)
-    pub fn voltage_at(&self, index: usize) -> f64 {
-        self.results.get(index).map(|(v, _)| *v).unwrap_or(0.0)
+    pub fn voltage_at(&self, index: usize) -> PyResult<f64> {
+        self.point(index)
+            .map(|(value, _)| *value)
+            .map_err(PyErr::from)
     }
 
     /// Get voltage at a node for a specific sweep point
-    fn voltage(&self, index: usize, node: usize) -> f64 {
-        self.results
-            .get(index)
-            .map(|(_, r)| r.voltage(node))
-            .unwrap_or(0.0)
+    ///
+    /// Raises:
+    ///     IndexError: If the sweep point or node index is out of range
+    fn voltage(&self, index: usize, node: usize) -> PyResult<f64> {
+        let (_, result) = self.point(index).map_err(PyErr::from)?;
+        checked_simulation_voltage(result, node).map_err(PyErr::from)
     }
 
     /// Get voltage at a node across all sweep points as a NumPy array
-    fn voltage_array<'py>(&self, py: Python<'py>, node: usize) -> Bound<'py, PyArray1<f64>> {
-        let voltages: Vec<f64> = self.results.iter().map(|(_, r)| r.voltage(node)).collect();
-        voltages.to_pyarray(py)
+    ///
+    /// Raises:
+    ///     IndexError: If the node index is out of range
+    fn voltage_array<'py>(
+        &self,
+        py: Python<'py>,
+        node: usize,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let mut voltages = Vec::with_capacity(self.results.len());
+        for (_, result) in &self.results {
+            voltages.push(checked_simulation_voltage(result, node).map_err(PyErr::from)?);
+        }
+        Ok(voltages.to_pyarray(py))
     }
 
     fn __repr__(&self) -> String {
@@ -1129,10 +1279,10 @@ mod tests {
         let inner = create_test_simulation_result();
         let result = PySimulationResult::new(inner);
 
-        assert!((result.voltage_by_index(0) - 0.0).abs() < 1e-10); // Ground
-        assert!((result.voltage_by_index(1) - 5.0).abs() < 1e-10);
-        assert!((result.voltage_by_index(2) - 2.5).abs() < 1e-10);
-        assert!((result.voltage_by_index(3) - 1.0).abs() < 1e-10);
+        assert!((result.voltage_by_index(0).unwrap() - 0.0).abs() < 1e-10); // Ground
+        assert!((result.voltage_by_index(1).unwrap() - 5.0).abs() < 1e-10);
+        assert!((result.voltage_by_index(2).unwrap() - 2.5).abs() < 1e-10);
+        assert!((result.voltage_by_index(3).unwrap() - 1.0).abs() < 1e-10);
     }
 
     #[test]
@@ -1157,7 +1307,14 @@ mod tests {
         let inner = create_test_simulation_result();
         let result = PySimulationResult::new(inner);
 
-        assert!((result.voltage(NodeIdentifier::Name("OUT".to_string())) - 2.5).abs() < 1e-10);
+        assert!(
+            (result
+                .voltage(NodeIdentifier::Name("OUT".to_string()))
+                .unwrap()
+                - 2.5)
+                .abs()
+                < 1e-10
+        );
     }
 
     #[test]
@@ -1215,11 +1372,11 @@ mod tests {
         let result = PyTransientResult::new(inner);
 
         // Initial voltage should be 0
-        let v_initial = result.voltage_at(1, 0);
+        let v_initial = result.voltage_at(1, 0).unwrap();
         assert!(v_initial.abs() < 0.1);
 
         // Final voltage should be close to 5V
-        let v_final = result.voltage_at(1, 99);
+        let v_final = result.voltage_at(1, 99).unwrap();
         assert!(v_final > 4.0);
     }
 
@@ -1323,9 +1480,9 @@ mod tests {
         let results = vec![(0.0, inner.clone()), (2.5, inner.clone()), (5.0, inner)];
         let sweep = PyDcSweepResult::new(results);
 
-        assert!((sweep.voltage_at(0) - 0.0).abs() < 1e-10);
-        assert!((sweep.voltage_at(1) - 2.5).abs() < 1e-10);
-        assert!((sweep.voltage_at(2) - 5.0).abs() < 1e-10);
+        assert!((sweep.voltage_at(0).unwrap() - 0.0).abs() < 1e-10);
+        assert!((sweep.voltage_at(1).unwrap() - 2.5).abs() < 1e-10);
+        assert!((sweep.voltage_at(2).unwrap() - 5.0).abs() < 1e-10);
     }
 
     #[test]
@@ -1336,7 +1493,7 @@ mod tests {
 
         let result = sweep.result_at(0);
         assert!(result.is_some());
-        assert!((result.unwrap().voltage_by_index(1) - 5.0).abs() < 1e-10);
+        assert!((result.unwrap().voltage_by_index(1).unwrap() - 5.0).abs() < 1e-10);
     }
 
     #[test]
@@ -1346,7 +1503,7 @@ mod tests {
         let results = vec![(0.0, inner)];
         let sweep = PyDcSweepResult::new(results);
 
-        let v = sweep.voltage(0, 2);
+        let v = sweep.voltage(0, 2).unwrap();
         assert!((v - 1.0).abs() < 1e-10);
     }
 
@@ -1372,9 +1529,26 @@ mod tests {
         let inner = create_test_simulation_result();
         let result = PySimulationResult::new(inner);
 
-        // Accessing beyond bounds should return 0
-        let v = result.voltage_by_index(100);
-        assert!((v - 0.0).abs() < 1e-10);
+        assert_eq!(
+            result.checked_voltage(100).unwrap_err(),
+            ResultAccessError::InvalidNodeIndex {
+                node: 100,
+                available_nodes: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn test_simulation_result_unknown_name_returns_key_error() {
+        let inner = create_test_simulation_result();
+        let result = PySimulationResult::new(inner);
+
+        assert_eq!(
+            result.checked_voltage_named("missing").unwrap_err(),
+            ResultAccessError::UnknownNodeName {
+                name: "missing".to_string(),
+            }
+        );
     }
 
     #[test]
@@ -1383,8 +1557,34 @@ mod tests {
         let result = PyTransientResult::new(inner);
 
         // Node 0 is ground, should return 0
-        let v = result.voltage_at(0, 0);
+        let v = result.voltage_at(0, 0).unwrap();
         assert!((v - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_transient_result_invalid_time_index_returns_index_error() {
+        let inner = create_test_transient_result();
+        let result = PyTransientResult::new(inner);
+
+        assert_eq!(
+            result.checked_time_index(100).unwrap_err(),
+            ResultAccessError::InvalidTimeIndex {
+                time_index: 100,
+                available_points: 100,
+            }
+        );
+    }
+
+    #[test]
+    fn test_transient_result_ground_waveform_returns_zero_trace() {
+        let inner = create_test_transient_result();
+        let result = PyTransientResult::new(inner);
+
+        let waveform = result
+            .checked_waveform_named("gnd")
+            .expect("ground waveform should be synthesized");
+        assert_eq!(waveform.len(), result.num_points());
+        assert!(waveform.iter().all(|value| value.abs() < 1e-12));
     }
 
     #[test]
@@ -1403,6 +1603,35 @@ mod tests {
     fn test_dc_sweep_result_at_out_of_bounds() {
         let sweep = PyDcSweepResult::new(vec![]);
         assert!(sweep.result_at(0).is_none());
+    }
+
+    #[test]
+    fn test_dc_sweep_result_invalid_node_returns_index_error() {
+        let inner = create_test_simulation_result();
+        let sweep = PyDcSweepResult::new(vec![(0.0, inner)]);
+
+        let (_, result) = sweep.point(0).expect("first sweep point should exist");
+        assert_eq!(
+            checked_simulation_voltage(result, 100).unwrap_err(),
+            ResultAccessError::InvalidNodeIndex {
+                node: 100,
+                available_nodes: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn test_dc_sweep_result_invalid_index_returns_index_error() {
+        let inner = create_test_simulation_result();
+        let sweep = PyDcSweepResult::new(vec![(0.0, inner)]);
+
+        assert_eq!(
+            sweep.point(1).unwrap_err(),
+            ResultAccessError::InvalidSweepIndex {
+                index: 1,
+                available_points: 1,
+            }
+        );
     }
 
     #[test]

@@ -598,7 +598,7 @@ R1 1 0 1k
         let netlist = simple_resistor_netlist();
         let result = engine.run_dc_op(&netlist).unwrap();
 
-        let v1 = result.voltage_by_index(1);
+        let v1 = result.voltage_by_index(1).unwrap();
         assert!(
             (v1 - 10.0).abs() < 0.01,
             "Expected 10V at node 1, got {}V",
@@ -612,8 +612,8 @@ R1 1 0 1k
         let netlist = voltage_divider_netlist();
         let result = engine.run_dc_op(&netlist).unwrap();
 
-        let v1 = result.voltage_by_index(1);
-        let v2 = result.voltage_by_index(2);
+        let v1 = result.voltage_by_index(1).unwrap();
+        let v2 = result.voltage_by_index(2).unwrap();
         assert!(
             (v1 - 10.0).abs() < 0.01,
             "Expected 10V at node 1, got {}V",
@@ -633,7 +633,7 @@ R1 1 0 1k
         let result = engine.run_dc_op(&netlist).unwrap();
 
         // I * R = 1mA * 1kΩ = 1V
-        let v1 = result.voltage_by_index(1);
+        let v1 = result.voltage_by_index(1).unwrap();
         assert!(
             (v1 - 1.0).abs() < 0.01,
             "Expected 1V at node 1, got {}V",
@@ -648,7 +648,7 @@ R1 1 0 1k
         let result = engine.run_dc_op(&netlist).unwrap();
 
         // Diode should conduct, V2 should be positive
-        let v2 = result.voltage_by_index(2);
+        let v2 = result.voltage_by_index(2).unwrap();
         assert!(v2 > 0.0, "Expected positive voltage at node 2, got {}V", v2);
     }
 
@@ -662,11 +662,11 @@ R1 1 0 1k
         assert_eq!(sweep_result.len(), 6); // 0, 1, 2, 3, 4, 5
 
         // At V1=0, V2 should be 0
-        let first_voltage = sweep_result.voltage_at(0);
+        let first_voltage = sweep_result.voltage_at(0).unwrap();
         assert!((first_voltage - 0.0).abs() < 0.01);
 
         // At V1=4, V2 should be 2 (divider ratio = 0.5)
-        let fourth_voltage = sweep_result.voltage_at(4);
+        let fourth_voltage = sweep_result.voltage_at(4).unwrap();
         assert!((fourth_voltage - 4.0).abs() < 0.01);
     }
 
@@ -679,8 +679,12 @@ R1 1 0 1k
 
         // Check that output tracks input with 0.5 gain
         for i in 0..sweep_result.len() {
-            let vin = sweep_result.voltage_at(i);
-            let v2 = sweep_result.result_at(i).unwrap().voltage_by_index(2);
+            let vin = sweep_result.voltage_at(i).unwrap();
+            let v2 = sweep_result
+                .result_at(i)
+                .unwrap()
+                .voltage_by_index(2)
+                .unwrap();
             let expected = vin / 2.0;
             assert!(
                 (v2 - expected).abs() < 0.1,
@@ -700,8 +704,8 @@ R1 1 0 1k
         let sweep_result = engine.run_dc_sweep(&netlist, "V1", 5.0, 0.0, -1.0).unwrap();
 
         assert_eq!(sweep_result.len(), 6);
-        assert!((sweep_result.voltage_at(0) - 5.0).abs() < 0.01);
-        assert!((sweep_result.voltage_at(5) - 0.0).abs() < 0.01);
+        assert!((sweep_result.voltage_at(0).unwrap() - 5.0).abs() < 0.01);
+        assert!((sweep_result.voltage_at(5).unwrap() - 0.0).abs() < 0.01);
     }
 
     #[test]
@@ -741,7 +745,7 @@ R1 1 0 1k
         assert!(num_points > 10);
 
         // Final voltage should be close to 5V
-        let v_final = result.voltage_at(2, num_points - 1);
+        let v_final = result.voltage_at(2, num_points - 1).unwrap();
         assert!(
             v_final > 4.0,
             "Expected final voltage > 4V, got {}V",
@@ -808,7 +812,7 @@ R1 1 0 1k
 
         // Should converge with robust settings
         let result = engine.run_dc_op(&netlist).unwrap();
-        assert!(result.voltage_by_index(2) > 0.0);
+        assert!(result.voltage_by_index(2).unwrap() > 0.0);
     }
 
     #[test]
@@ -831,8 +835,8 @@ R3 3 0 3k
         // Total R = 6k, I = 12/6k = 2mA
         // V2 = 12 - 1k*2mA = 10V
         // V3 = 3k*2mA = 6V
-        let v2 = result.voltage_by_index(2);
-        let v3 = result.voltage_by_index(3);
+        let v2 = result.voltage_by_index(2).unwrap();
+        let v3 = result.voltage_by_index(3).unwrap();
         assert!((v2 - 10.0).abs() < 0.1, "Expected V2=10V, got {}V", v2);
         assert!((v3 - 6.0).abs() < 0.1, "Expected V3=6V, got {}V", v3);
     }
@@ -853,7 +857,7 @@ R2 1 0 1k
         let engine = PyEngine::new(None);
         let result = engine.run_dc_op(&netlist).unwrap();
 
-        let v1 = result.voltage_by_index(1);
+        let v1 = result.voltage_by_index(1).unwrap();
         assert!(
             (v1 - 5.0).abs() < 0.01,
             "Expected 5V at node 1, got {}V",
@@ -877,8 +881,8 @@ R1 2 0 1k
         let engine = PyEngine::new(None);
         let result = engine.run_dc_op(&netlist).unwrap();
 
-        let v1 = result.voltage_by_index(1);
-        let v2 = result.voltage_by_index(2);
+        let v1 = result.voltage_by_index(1).unwrap();
+        let v2 = result.voltage_by_index(2).unwrap();
         assert!((v1 - 3.0).abs() < 0.01, "Expected V1=3V, got {}V", v1);
         assert!((v2 - 5.0).abs() < 0.01, "Expected V2=5V, got {}V", v2);
     }
@@ -900,8 +904,8 @@ R2 2 0 1k
         let engine = PyEngine::new(None);
         let result = engine.run_dc_op(&netlist).unwrap();
 
-        let v1 = result.voltage_by_index(1);
-        let v2 = result.voltage_by_index(2);
+        let v1 = result.voltage_by_index(1).unwrap();
+        let v2 = result.voltage_by_index(2).unwrap();
         assert!((v1 - 3.0).abs() < 0.01, "Expected V1=3V, got {}V", v1);
         assert!(
             (v2 - 3.0).abs() < 0.1,
@@ -929,7 +933,7 @@ R2 2 0 1k
 
         // G1 produces I = gm * V1 = 0.001 * 2 = 2mA
         // V2 = I * R2 = 2mA * 1kΩ = 2V (but sign depends on direction)
-        let v2 = result.voltage_by_index(2).abs();
+        let v2 = result.voltage_by_index(2).unwrap().abs();
         assert!(v2 > 1.8 && v2 < 2.2, "Expected |V2| ~= 2V, got {}V", v2);
     }
 
@@ -951,7 +955,7 @@ R2 2 0 1k
 
         // R1 is 1GΩ >> R2 = 1kΩ, so almost no current flows
         // V2 ≈ 0
-        let v2 = result.voltage_by_index(2);
+        let v2 = result.voltage_by_index(2).unwrap();
         assert!(v2.abs() < 1e-3, "Expected V2 ~= 0, got {}V", v2);
     }
 
@@ -987,7 +991,7 @@ L1 2 0 1m
             .expect("empty netlist should produce an empty result");
         assert_eq!(result.num_nodes(), 0);
         assert_eq!(result.node_names(), vec!["0".to_string()]);
-        assert_eq!(result.voltage_by_index(0), 0.0);
+        assert_eq!(result.voltage_by_index(0).unwrap(), 0.0);
     }
 
     //=========================================================================
@@ -1162,7 +1166,7 @@ L1 2 0 1m
         for (val, result) in &results {
             assert!(*val > 0.0, "Parameter value should be positive");
             // Voltage at node 2 should change with R2
-            let _v2 = result.voltage_by_index(2);
+            let _v2 = result.voltage_by_index(2).unwrap();
         }
     }
 
