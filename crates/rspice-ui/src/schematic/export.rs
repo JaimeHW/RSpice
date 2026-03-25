@@ -110,12 +110,11 @@ fn calculate_bounds(state: &SchematicState, config: &SvgExportConfig) -> (f64, f
     let mut max_y = f64::MIN;
 
     for comp in &state.components {
-        let x = comp.pos.x as f64 * config.grid_size;
-        let y = comp.pos.y as f64 * config.grid_size;
-        min_x = min_x.min(x - 30.0);
-        min_y = min_y.min(y - 30.0);
-        max_x = max_x.max(x + 30.0);
-        max_y = max_y.max(y + 30.0);
+        let (comp_min_x, comp_min_y, comp_max_x, comp_max_y) = comp.bounding_box();
+        min_x = min_x.min(comp_min_x as f64 * config.grid_size);
+        min_y = min_y.min(comp_min_y as f64 * config.grid_size);
+        max_x = max_x.max(comp_max_x as f64 * config.grid_size);
+        max_y = max_y.max(comp_max_y as f64 * config.grid_size);
     }
 
     for wire in &state.wires {
@@ -167,6 +166,7 @@ fn write_component(svg: &mut String, component: &Component, config: &SvgExportCo
         ComponentType::Inductor | ComponentType::SaturableInductor => {
             write_inductor_symbol(svg, cx, cy, config)
         }
+        ComponentType::Transformer => write_transformer_symbol(svg, cx, cy, config),
         ComponentType::CoupledInductor => write_coupled_inductor_symbol(svg, cx, cy, config),
         ComponentType::VoltageSource
         | ComponentType::VoltageSourceAc
@@ -357,6 +357,103 @@ fn write_inductor_symbol(svg: &mut String, cx: f64, cy: f64, _config: &SvgExport
         cy,
         cx + 20.0,
         cy
+    )
+    .unwrap();
+}
+
+fn write_transformer_symbol(svg: &mut String, cx: f64, cy: f64, config: &SvgExportConfig) {
+    let stroke = &config.component_color;
+    let stroke_width = config.component_stroke_width;
+
+    let left_x = cx - 18.0;
+    let right_x = cx + 18.0;
+    let top_y = cy - 40.0;
+    let bottom_y = cy + 40.0;
+    let coil_top = cy - 24.0;
+    let coil_bottom = cy + 24.0;
+    let core_left = cx - 4.0;
+    let core_right = cx + 4.0;
+
+    writeln!(
+        svg,
+        "<line class=\"component\" x1=\"{left_x}\" y1=\"{top_y}\" x2=\"{left_x}\" y2=\"{coil_top}\" stroke=\"{stroke}\" stroke-width=\"{stroke_width}\"/>"
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        "<line class=\"component\" x1=\"{left_x}\" y1=\"{coil_bottom}\" x2=\"{left_x}\" y2=\"{bottom_y}\" stroke=\"{stroke}\" stroke-width=\"{stroke_width}\"/>"
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        "<line class=\"component\" x1=\"{right_x}\" y1=\"{top_y}\" x2=\"{right_x}\" y2=\"{coil_top}\" stroke=\"{stroke}\" stroke-width=\"{stroke_width}\"/>"
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        "<line class=\"component\" x1=\"{right_x}\" y1=\"{coil_bottom}\" x2=\"{right_x}\" y2=\"{bottom_y}\" stroke=\"{stroke}\" stroke-width=\"{stroke_width}\"/>"
+    )
+    .unwrap();
+
+    for idx in 0..4 {
+        let center_y = cy - 18.0 + (idx as f64 * 12.0);
+        writeln!(
+            svg,
+            "<path class=\"component\" d=\"M {} {} C {} {}, {} {}, {} {}\" stroke=\"{}\" stroke-width=\"{}\" fill=\"none\"/>",
+            left_x,
+            center_y - 6.0,
+            left_x - 8.0,
+            center_y - 6.0,
+            left_x - 8.0,
+            center_y + 6.0,
+            left_x,
+            center_y + 6.0,
+            stroke,
+            stroke_width
+        )
+        .unwrap();
+        writeln!(
+            svg,
+            "<path class=\"component\" d=\"M {} {} C {} {}, {} {}, {} {}\" stroke=\"{}\" stroke-width=\"{}\" fill=\"none\"/>",
+            right_x,
+            center_y - 6.0,
+            right_x + 8.0,
+            center_y - 6.0,
+            right_x + 8.0,
+            center_y + 6.0,
+            right_x,
+            center_y + 6.0,
+            stroke,
+            stroke_width
+        )
+        .unwrap();
+    }
+
+    writeln!(
+        svg,
+        "<line class=\"component\" x1=\"{core_left}\" y1=\"{coil_top}\" x2=\"{core_left}\" y2=\"{coil_bottom}\" stroke=\"{stroke}\" stroke-width=\"{stroke_width}\"/>"
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        "<line class=\"component\" x1=\"{core_right}\" y1=\"{coil_top}\" x2=\"{core_right}\" y2=\"{coil_bottom}\" stroke=\"{stroke}\" stroke-width=\"{stroke_width}\"/>"
+    )
+    .unwrap();
+
+    writeln!(
+        svg,
+        "<circle cx=\"{}\" cy=\"{}\" r=\"2\" fill=\"{}\"/>",
+        left_x - 5.0,
+        top_y + 6.0,
+        stroke
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        "<circle cx=\"{}\" cy=\"{}\" r=\"2\" fill=\"{}\"/>",
+        right_x + 5.0,
+        top_y + 6.0,
+        stroke
     )
     .unwrap();
 }
@@ -1591,12 +1688,26 @@ mod tests {
     }
 
     #[test]
+    fn test_export_transformer_uses_transformer_symbol() {
+        let mut state = SchematicState::default();
+        state.add_component(ComponentType::Transformer, Point::new(10, 10));
+
+        let config = SvgExportConfig::default();
+        let svg = export_to_svg(&state, &config);
+
+        assert!(svg.contains("T1"));
+        assert!(svg.contains("<circle"));
+        assert!(svg.contains("<path class=\"component\""));
+    }
+
+    #[test]
     fn test_export_supports_all_component_kinds_without_fallback() {
         let mut state = SchematicState::default();
         let all_types = [
             ComponentType::Resistor,
             ComponentType::Capacitor,
             ComponentType::Inductor,
+            ComponentType::Transformer,
             ComponentType::CoupledInductor,
             ComponentType::Diode,
             ComponentType::NpnBjt,

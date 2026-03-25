@@ -49,6 +49,7 @@ pub fn get_primary_property_name(kind: ComponentType) -> &'static str {
         ComponentType::Resistor => "r",
         ComponentType::Capacitor => "c",
         ComponentType::Inductor => "l",
+        ComponentType::Transformer => "lp",
         ComponentType::CoupledInductor => "k",
         ComponentType::VoltageSource => "dc",
         ComponentType::VoltageSourceAc => "ac_mag",
@@ -79,6 +80,7 @@ pub fn get_value_display_name(kind: ComponentType) -> &'static str {
         ComponentType::Resistor => "Resistance",
         ComponentType::Capacitor => "Capacitance",
         ComponentType::Inductor => "Inductance",
+        ComponentType::Transformer => "Primary Inductance",
         ComponentType::CoupledInductor => "Coupling Coefficient",
         ComponentType::VoltageSource => "DC Voltage",
         ComponentType::VoltageSourceAc => "AC Magnitude",
@@ -469,6 +471,7 @@ mod tests {
         assert_eq!(get_primary_property_name(ComponentType::Resistor), "r");
         assert_eq!(get_primary_property_name(ComponentType::Capacitor), "c");
         assert_eq!(get_primary_property_name(ComponentType::Inductor), "l");
+        assert_eq!(get_primary_property_name(ComponentType::Transformer), "lp");
     }
 
     #[test]
@@ -717,6 +720,29 @@ mod tests {
         assert_eq!(
             props.get("r"),
             Some(&PropertyValue::Expression("1k".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_collect_properties_transformer() {
+        let registry = PropertyRegistry::new();
+        let mut component = Component::new(1, ComponentType::Transformer, Point::new(0, 0))
+            .with_name_value("T1", "10m");
+        component.params = "icp=2m k=0.995 turns_ratio=4".to_string();
+
+        let props = collect_properties_from_component(&component, &registry);
+
+        assert_eq!(
+            props.get("lp"),
+            Some(&PropertyValue::Expression("10m".to_string()))
+        );
+        assert_eq!(
+            props.get("turns_ratio"),
+            Some(&PropertyValue::Expression("4".to_string()))
+        );
+        assert_eq!(
+            props.get("k"),
+            Some(&PropertyValue::Expression("0.995".to_string()))
         );
     }
 
@@ -980,6 +1006,33 @@ mod tests {
         assert_eq!(restored_params.get("inductors"), Some(&"L1 L2".to_string()));
     }
 
+    #[test]
+    fn test_full_roundtrip_transformer() {
+        let registry = PropertyRegistry::new();
+
+        let mut original = Component::new(1, ComponentType::Transformer, Point::new(0, 0))
+            .with_name_value("T1", "12m");
+        original.params = "icp=1m ics=2m k=0.998 ls=3m rp=50m rs=75m turns_ratio=0.5"
+            .to_string();
+
+        let props = collect_properties_from_component(&original, &registry);
+        let mut restored = Component::new(1, ComponentType::Transformer, Point::new(0, 0));
+        apply_properties_to_component(&mut restored, &props, &registry);
+
+        assert_eq!(restored.name, "T1");
+        assert_eq!(restored.value, "12m");
+
+        let restored_params = parse_params_string(&restored.params);
+        assert_eq!(restored_params.get("k"), Some(&"0.998".to_string()));
+        assert_eq!(restored_params.get("ls"), Some(&"3m".to_string()));
+        assert_eq!(
+            restored_params.get("turns_ratio"),
+            Some(&"0.5".to_string())
+        );
+        assert_eq!(restored_params.get("rp"), Some(&"50m".to_string()));
+        assert_eq!(restored_params.get("rs"), Some(&"75m".to_string()));
+    }
+
     // =========================================================================
     // Edge Case Tests
     // =========================================================================
@@ -1081,6 +1134,10 @@ mod tests {
         assert_eq!(
             get_value_display_name(ComponentType::Inductor),
             "Inductance"
+        );
+        assert_eq!(
+            get_value_display_name(ComponentType::Transformer),
+            "Primary Inductance"
         );
     }
 

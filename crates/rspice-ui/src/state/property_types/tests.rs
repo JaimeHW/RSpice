@@ -166,6 +166,7 @@ fn test_registry_has_all_common_types() {
     assert!(registry.get(ComponentType::Resistor).is_some());
     assert!(registry.get(ComponentType::Capacitor).is_some());
     assert!(registry.get(ComponentType::Inductor).is_some());
+    assert!(registry.get(ComponentType::Transformer).is_some());
     assert!(registry.get(ComponentType::CoupledInductor).is_some());
 
     // Sources
@@ -311,6 +312,26 @@ fn test_registry_inductor_commercial_parameters() {
     // Verify inductance uses Expression type
     let l_def = sheet.get("l").unwrap();
     assert_eq!(l_def.prop_type, PropertyType::Expression);
+}
+
+#[test]
+fn test_registry_transformer_commercial_parameters() {
+    let registry = PropertyRegistry::new();
+    let sheet = registry.get(ComponentType::Transformer).unwrap();
+
+    assert!(sheet.get("name").is_some());
+    assert!(sheet.get("lp").is_some());
+    assert!(sheet.get("turns_ratio").is_some());
+    assert!(sheet.get("ls").is_some());
+    assert!(sheet.get("k").is_some());
+    assert!(sheet.get("rp").is_some());
+    assert!(sheet.get("rs").is_some());
+    assert!(sheet.get("icp").is_some());
+    assert!(sheet.get("ics").is_some());
+
+    let lp_def = sheet.get("lp").unwrap();
+    assert!(lp_def.required);
+    assert_eq!(lp_def.prop_type, PropertyType::Expression);
 }
 
 #[test]

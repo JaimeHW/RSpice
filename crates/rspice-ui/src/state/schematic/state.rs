@@ -479,12 +479,11 @@ impl SchematicState {
 
         // Include component bounds (with approximate size for the symbol)
         for comp in &self.components {
-            let half_w = 30;
-            let half_h = 20;
-            min_x = min_x.min(comp.pos.x - half_w);
-            min_y = min_y.min(comp.pos.y - half_h);
-            max_x = max_x.max(comp.pos.x + half_w);
-            max_y = max_y.max(comp.pos.y + half_h);
+            let (comp_min_x, comp_min_y, comp_max_x, comp_max_y) = comp.bounding_box();
+            min_x = min_x.min(comp_min_x);
+            min_y = min_y.min(comp_min_y);
+            max_x = max_x.max(comp_max_x);
+            max_y = max_y.max(comp_max_y);
         }
 
         // Include wire endpoints

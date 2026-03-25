@@ -170,6 +170,11 @@ impl SymbolLibrary {
             (ComponentType::Capacitor, "cap_unpolarized.svg", "Capacitor"),
             (ComponentType::Inductor, "inductor.svg", "Inductor"),
             (
+                ComponentType::Transformer,
+                "transformer_symmetrical.svg",
+                "Transformer",
+            ),
+            (
                 ComponentType::SaturableInductor,
                 "inductor.svg",
                 "Saturable Inductor",
@@ -993,6 +998,30 @@ fn add_default_pins(symbol: &mut Symbol, component_type: ComponentType) {
                 },
             ];
         }
+        ComponentType::Transformer => {
+            symbol.pins = vec![
+                SymbolPin {
+                    name: "P1".to_string(),
+                    position: (cx - w, cy - h),
+                    direction: PinDirection::Left,
+                },
+                SymbolPin {
+                    name: "P2".to_string(),
+                    position: (cx - w, cy + h),
+                    direction: PinDirection::Left,
+                },
+                SymbolPin {
+                    name: "S1".to_string(),
+                    position: (cx + w, cy - h),
+                    direction: PinDirection::Right,
+                },
+                SymbolPin {
+                    name: "S2".to_string(),
+                    position: (cx + w, cy + h),
+                    direction: PinDirection::Right,
+                },
+            ];
+        }
         ComponentType::VoltageSource
         | ComponentType::VoltageSourceAc
         | ComponentType::VoltageSourcePulse
@@ -1486,6 +1515,7 @@ mod tests {
         let library = SymbolLibrary::load_embedded().expect("Should load library");
 
         let expected_types = [
+            ComponentType::Transformer,
             ComponentType::SaturableInductor,
             ComponentType::VoltageSourcePulse,
             ComponentType::VoltageSourceSin,
@@ -1579,6 +1609,15 @@ mod tests {
             assert_eq!(symbol.pins[1].name, "D");
             assert_eq!(symbol.pins[2].name, "S");
         }
+
+        let transformer = library
+            .get(ComponentType::Transformer)
+            .expect("Transformer symbol should be available");
+        assert_eq!(transformer.pins.len(), 4);
+        assert_eq!(transformer.pins[0].name, "P1");
+        assert_eq!(transformer.pins[1].name, "P2");
+        assert_eq!(transformer.pins[2].name, "S1");
+        assert_eq!(transformer.pins[3].name, "S2");
     }
 
     #[test]

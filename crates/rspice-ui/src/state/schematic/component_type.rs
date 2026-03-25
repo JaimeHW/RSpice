@@ -29,6 +29,8 @@ pub enum ComponentType {
     Capacitor,
     /// Inductor (SPICE prefix: L)
     Inductor,
+    /// Two-winding schematic transformer synthesized into coupled inductors
+    Transformer,
     /// Coupled inductor for transformers (SPICE prefix: K)
     CoupledInductor,
 
@@ -194,6 +196,7 @@ impl ComponentType {
             ComponentType::Resistor => "R",
             ComponentType::Capacitor => "C",
             ComponentType::Inductor => "L",
+            ComponentType::Transformer => "T",
             ComponentType::CoupledInductor => "K",
             ComponentType::Diode => "D",
             ComponentType::NpnBjt | ComponentType::PnpBjt => "Q",
@@ -255,6 +258,7 @@ impl ComponentType {
             ComponentType::Resistor => "Resistor",
             ComponentType::Capacitor => "Capacitor",
             ComponentType::Inductor => "Inductor",
+            ComponentType::Transformer => "Transformer",
             ComponentType::CoupledInductor => "Coupled Inductor",
             ComponentType::Diode => "Diode",
             ComponentType::NpnBjt => "NPN BJT",
@@ -318,6 +322,7 @@ impl ComponentType {
         match self {
             ComponentType::Ground => 1,
             ComponentType::CellInstance => 2,
+            ComponentType::Transformer => 4,
             ComponentType::NpnBjt | ComponentType::PnpBjt => 3,
             ComponentType::Njfet | ComponentType::Pjfet => 3,
             ComponentType::Nmos
@@ -365,6 +370,12 @@ impl ComponentType {
             ComponentType::Resistor | ComponentType::Capacitor | ComponentType::Inductor => {
                 vec![("+", Point::new(-hw, 0)), ("-", Point::new(hw, 0))]
             }
+            ComponentType::Transformer => vec![
+                ("P1", Point::new(-hw, -hh)),
+                ("P2", Point::new(-hw, hh)),
+                ("S1", Point::new(hw, -hh)),
+                ("S2", Point::new(hw, hh)),
+            ],
             ComponentType::Diode => vec![
                 ("A", Point::new(-hw, 0)), // Anode
                 ("K", Point::new(hw, 0)),  // Cathode
@@ -522,6 +533,7 @@ impl ComponentType {
             ComponentType::Resistor
                 | ComponentType::Capacitor
                 | ComponentType::Inductor
+                | ComponentType::Transformer
                 | ComponentType::CoupledInductor
         )
     }
@@ -613,6 +625,8 @@ impl ComponentType {
             // Passive components: horizontal orientation
             // 40 wide x 20 tall → terminals at ±20 grid units (on major grid)
             ComponentType::Resistor | ComponentType::Inductor => (40, 20),
+            // Transformer: taller two-coil body with four winding terminals
+            ComponentType::Transformer => (60, 80),
             // Capacitor: SVG is 31x31 (square aspect ratio)
             // Using 40x40 for uniform scaling - terminals at ±20
             ComponentType::Capacitor => (40, 40),
@@ -703,6 +717,7 @@ impl ComponentType {
             ComponentType::Resistor => "1k",
             ComponentType::Capacitor => "1u",
             ComponentType::Inductor => "1m",
+            ComponentType::Transformer => "1m",
             ComponentType::VoltageSource
             | ComponentType::VoltageSourceAc
             | ComponentType::VoltageSourcePulse
@@ -727,6 +742,7 @@ mod tests {
         assert_eq!(ComponentType::Resistor.spice_prefix(), "R");
         assert_eq!(ComponentType::Capacitor.spice_prefix(), "C");
         assert_eq!(ComponentType::Inductor.spice_prefix(), "L");
+        assert_eq!(ComponentType::Transformer.spice_prefix(), "T");
     }
 
     #[test]
@@ -758,6 +774,7 @@ mod tests {
         assert_eq!(ComponentType::Resistor.terminal_count(), 2);
         assert_eq!(ComponentType::NpnBjt.terminal_count(), 3);
         assert_eq!(ComponentType::Nmos.terminal_count(), 4);
+        assert_eq!(ComponentType::Transformer.terminal_count(), 4);
         assert_eq!(ComponentType::Ground.terminal_count(), 1);
         assert_eq!(ComponentType::Vcvs.terminal_count(), 4);
     }
@@ -781,9 +798,24 @@ mod tests {
     }
 
     #[test]
+    fn test_terminal_offsets_transformer() {
+        let offsets = ComponentType::Transformer.terminal_offsets();
+        assert_eq!(offsets.len(), 4);
+        assert_eq!(offsets[0].0, "P1");
+        assert_eq!(offsets[1].0, "P2");
+        assert_eq!(offsets[2].0, "S1");
+        assert_eq!(offsets[3].0, "S2");
+        assert_eq!(offsets[0].1.x, -30);
+        assert_eq!(offsets[0].1.y, -40);
+        assert_eq!(offsets[3].1.x, 30);
+        assert_eq!(offsets[3].1.y, 40);
+    }
+
+    #[test]
     fn test_is_passive() {
         assert!(ComponentType::Resistor.is_passive());
         assert!(ComponentType::Capacitor.is_passive());
+        assert!(ComponentType::Transformer.is_passive());
         assert!(!ComponentType::Diode.is_passive());
         assert!(!ComponentType::VoltageSource.is_passive());
     }
@@ -824,6 +856,7 @@ mod tests {
         assert_eq!(ComponentType::Resistor.default_value(), "1k");
         assert_eq!(ComponentType::Capacitor.default_value(), "1u");
         assert_eq!(ComponentType::Inductor.default_value(), "1m");
+        assert_eq!(ComponentType::Transformer.default_value(), "1m");
         assert_eq!(ComponentType::VoltageSource.default_value(), "5");
         assert_eq!(ComponentType::Diode.default_value(), "");
     }
@@ -831,6 +864,7 @@ mod tests {
     #[test]
     fn test_display_name() {
         assert_eq!(ComponentType::Resistor.display_name(), "Resistor");
+        assert_eq!(ComponentType::Transformer.display_name(), "Transformer");
         assert_eq!(ComponentType::NpnBjt.display_name(), "NPN BJT");
         assert_eq!(ComponentType::XspiceAndGate.display_name(), "AND Gate");
     }
@@ -1065,6 +1099,7 @@ mod tests {
             ComponentType::Resistor,
             ComponentType::Capacitor,
             ComponentType::Inductor,
+            ComponentType::Transformer,
             ComponentType::Diode,
             ComponentType::Ground,
             ComponentType::Nmos,
@@ -1110,6 +1145,7 @@ mod tests {
         let test_types = [
             ComponentType::Resistor,
             ComponentType::Inductor,
+            ComponentType::Transformer,
             ComponentType::Capacitor,
             ComponentType::Diode,
             ComponentType::VoltageSource,

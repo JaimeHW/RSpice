@@ -768,6 +768,85 @@ fn test_generate_netlist_rejects_conflicting_coupling_metadata() {
 }
 
 #[test]
+fn test_transformer_generates_coupled_winding_lines() {
+    let schematic = SchematicState::default();
+    let mut gen = NetlistGenerator::new(&schematic);
+
+    let mut comp = Component::new(1, ComponentType::Transformer, Point::new(0, 0))
+        .with_name_value("T1", "10m");
+    comp.params = "turns_ratio=2 k=0.997 rp=50m rs=75m icp=1m ics=2m".to_string();
+
+    let lines = gen
+        .transformer_instance_lines(&comp)
+        .expect("transformer synthesis should succeed");
+
+    assert_eq!(lines.len(), 3);
+    assert!(lines[0].starts_with("LT1_PRI "));
+    assert!(lines[0].contains(" 10m "));
+    assert!(lines[0].contains("ic=1m"));
+    assert!(lines[0].contains("r=50m"));
+    assert!(lines[1].starts_with("LT1_SEC "));
+    assert!(lines[1].contains("((10m)*((2)*(2)))"));
+    assert!(lines[1].contains("ic=2m"));
+    assert!(lines[1].contains("r=75m"));
+    assert_eq!(lines[2], "KT1 LT1_PRI LT1_SEC 0.997");
+}
+
+#[test]
+fn test_transformer_explicit_secondary_inductance_overrides_ratio() {
+    let schematic = SchematicState::default();
+    let mut gen = NetlistGenerator::new(&schematic);
+
+    let mut comp = Component::new(1, ComponentType::Transformer, Point::new(0, 0))
+        .with_name_value("T1", "10m");
+    comp.params = "ls=3m turns_ratio=4".to_string();
+
+    let lines = gen
+        .transformer_instance_lines(&comp)
+        .expect("transformer synthesis should succeed");
+
+    assert!(lines[1].ends_with(" 3m"));
+    assert!(gen
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("using explicit secondary inductance")));
+}
+
+#[test]
+fn test_transformer_rejects_invalid_coupling_factor() {
+    let schematic = SchematicState::default();
+    let mut gen = NetlistGenerator::new(&schematic);
+
+    let mut comp = Component::new(1, ComponentType::Transformer, Point::new(0, 0))
+        .with_name_value("T1", "10m");
+    comp.params = "k=1.2".to_string();
+
+    assert!(gen.transformer_instance_lines(&comp).is_none());
+    assert!(gen
+        .errors
+        .iter()
+        .any(|err| err.contains("invalid coupling factor")));
+}
+
+#[test]
+fn test_generate_netlist_synthesizes_transformer_without_raw_t_instance() {
+    let mut schematic = SchematicState::default();
+
+    let mut transformer = Component::new(1, ComponentType::Transformer, Point::new(0, 0))
+        .with_name_value("T1", "12m");
+    transformer.params = "turns_ratio=0.5 k=0.998".to_string();
+    schematic.components.push(transformer);
+
+    let result = generate_netlist(&schematic);
+
+    assert!(result.errors.is_empty(), "unexpected errors: {:?}", result.errors);
+    assert!(result.netlist.contains("LT1_PRI "));
+    assert!(result.netlist.contains("LT1_SEC "));
+    assert!(result.netlist.contains("KT1 LT1_PRI LT1_SEC 0.998"));
+    assert!(!result.netlist.contains("\nT1 "));
+}
+
+#[test]
 fn test_diode_with_params() {
     let schematic = SchematicState::default();
     let mut gen = NetlistGenerator::new(&schematic);

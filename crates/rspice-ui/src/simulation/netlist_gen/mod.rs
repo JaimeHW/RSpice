@@ -549,6 +549,7 @@ impl<'a> NetlistGenerator<'a> {
         for component in &self.schematic.components {
             if component.kind == ComponentType::Ground
                 || component.kind == ComponentType::CoupledInductor
+                || component.kind == ComponentType::Transformer
             {
                 // Ground symbol is implicit (node 0)
                 continue;
@@ -557,6 +558,10 @@ impl<'a> NetlistGenerator<'a> {
             if let Some(line) = self.generate_instance_line(component) {
                 self.lines.push(line);
             }
+        }
+
+        for line in self.collect_transformer_lines() {
+            self.lines.push(line);
         }
 
         for line in self.collect_coupling_lines() {
@@ -693,6 +698,8 @@ impl<'a> NetlistGenerator<'a> {
 
             // Ground - handled separately
             ComponentType::Ground => None,
+            // Transformers are synthesized into winding inductors plus a coupling line.
+            ComponentType::Transformer => None,
             // Coupling statements are synthesized in a dedicated validation pass.
             ComponentType::CoupledInductor => None,
 
@@ -820,6 +827,202 @@ impl<'a> NetlistGenerator<'a> {
             params_map.remove(&key.to_ascii_lowercase());
         }
         crate::properties::property_bridge::format_params_string(&params_map)
+    }
+
+    fn collect_transformer_lines(&mut self) -> Vec<String> {
+        let mut lines = Vec::new();
+        for component in self.schematic.components.clone() {
+            if component.kind != ComponentType::Transformer {
+                continue;
+            }
+
+            if let Some(transformer_lines) = self.transformer_instance_lines(&component) {
+                lines.extend(transformer_lines);
+            }
+        }
+        lines
+    }
+
+    fn transformer_instance_lines(&mut self, component: &Component) -> Option<Vec<String>> {
+        let terminals = component.terminal_positions();
+        let node_names: Vec<String> = terminals
+            .iter()
+            .map(|(_, pos)| self.get_node_name(*pos))
+            .collect();
+        if node_names.len() != 4 {
+            self.errors.push(format!(
+                "Transformer '{}' must expose exactly four winding terminals",
+                component.spice_instance_name()
+            ));
+            return None;
+        }
+
+        let primary_inductance = component.value.trim();
+        if primary_inductance.is_empty() {
+            self.errors.push(format!(
+                "Transformer '{}' is missing a primary inductance",
+                component.spice_instance_name()
+            ));
+            return None;
+        }
+        if let Ok(value) = primary_inductance.parse::<f64>() {
+            if !value.is_finite() || value <= 0.0 {
+                self.errors.push(format!(
+                    "Transformer '{}' has invalid primary inductance {}",
+                    component.spice_instance_name(),
+                    primary_inductance
+                ));
+                return None;
+            }
+        }
+
+        let params = crate::properties::parse_params_string(&component.params);
+        let ratio = params
+            .get("turns_ratio")
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .unwrap_or("1");
+        if let Ok(value) = ratio.parse::<f64>() {
+            if !value.is_finite() || value <= 0.0 {
+                self.errors.push(format!(
+                    "Transformer '{}' has invalid turns ratio {}",
+                    component.spice_instance_name(),
+                    ratio
+                ));
+                return None;
+            }
+        }
+
+        let explicit_secondary = params
+            .get("ls")
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty());
+        if let Some(value) = explicit_secondary {
+            if let Ok(parsed) = value.parse::<f64>() {
+                if !parsed.is_finite() || parsed <= 0.0 {
+                    self.errors.push(format!(
+                        "Transformer '{}' has invalid secondary inductance {}",
+                        component.spice_instance_name(),
+                        value
+                    ));
+                    return None;
+                }
+            }
+            if ratio != "1" {
+                self.warnings.push(format!(
+                    "Transformer '{}' specifies both turns_ratio and secondary inductance; using explicit secondary inductance",
+                    component.spice_instance_name()
+                ));
+            }
+        }
+
+        let coupling = params
+            .get("k")
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .unwrap_or("0.999");
+        if let Ok(value) = coupling.parse::<f64>() {
+            if !value.is_finite() || value <= 0.0 || value > 1.0 {
+                self.errors.push(format!(
+                    "Transformer '{}' has invalid coupling factor {} (expected 0 < k <= 1)",
+                    component.spice_instance_name(),
+                    coupling
+                ));
+                return None;
+            }
+        }
+
+        let secondary_inductance = explicit_secondary
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| Self::derive_secondary_inductance(primary_inductance, ratio));
+
+        let mut primary_params = HashMap::new();
+        if let Some(value) = params
+            .get("rp")
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty() && *value != "0")
+        {
+            primary_params.insert("r".to_string(), value.to_string());
+        }
+        if let Some(value) = params
+            .get("icp")
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty() && *value != "0")
+        {
+            primary_params.insert("ic".to_string(), value.to_string());
+        }
+
+        let mut secondary_params = HashMap::new();
+        if let Some(value) = params
+            .get("rs")
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty() && *value != "0")
+        {
+            secondary_params.insert("r".to_string(), value.to_string());
+        }
+        if let Some(value) = params
+            .get("ics")
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty() && *value != "0")
+        {
+            secondary_params.insert("ic".to_string(), value.to_string());
+        }
+
+        let base = Self::sanitize_transformer_base(&component.spice_instance_name(), component.id);
+        let primary_name = format!("L{}_PRI", base);
+        let secondary_name = format!("L{}_SEC", base);
+        let coupling_name = format!("K{}", base);
+
+        let primary_nodes = self.format_nodes(&node_names[0..2], 2);
+        let secondary_nodes = self.format_nodes(&node_names[2..4], 2);
+        let primary_suffix =
+            crate::properties::property_bridge::format_params_string(&primary_params);
+        let secondary_suffix =
+            crate::properties::property_bridge::format_params_string(&secondary_params);
+        let primary_line = if primary_suffix.is_empty() {
+            format!("{} {} {}", primary_name, primary_nodes, primary_inductance)
+        } else {
+            format!(
+                "{} {} {} {}",
+                primary_name, primary_nodes, primary_inductance, primary_suffix
+            )
+        };
+        let secondary_line = if secondary_suffix.is_empty() {
+            format!("{} {} {}", secondary_name, secondary_nodes, secondary_inductance)
+        } else {
+            format!(
+                "{} {} {} {}",
+                secondary_name, secondary_nodes, secondary_inductance, secondary_suffix
+            )
+        };
+        let coupling_line = format!(
+            "{} {} {} {}",
+            coupling_name, primary_name, secondary_name, coupling
+        );
+
+        Some(vec![primary_line, secondary_line, coupling_line])
+    }
+
+    fn derive_secondary_inductance(primary_inductance: &str, turns_ratio: &str) -> String {
+        format!(
+            "(({})*(({})*({})))",
+            primary_inductance, turns_ratio, turns_ratio
+        )
+    }
+
+    fn sanitize_transformer_base(raw: &str, fallback_id: u64) -> String {
+        let sanitized = raw
+            .chars()
+            .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+            .collect::<String>()
+            .trim_matches('_')
+            .to_string();
+
+        if sanitized.is_empty() {
+            fallback_id.to_string()
+        } else {
+            sanitized
+        }
     }
 
     fn collect_coupling_lines(&mut self) -> Vec<String> {
