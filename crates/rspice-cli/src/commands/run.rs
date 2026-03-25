@@ -1161,22 +1161,33 @@ fn run_measurements(
 ) -> Vec<crate::report::MeasurementReport> {
     use crate::report::MeasurementReport;
 
+    let transient_measurements: Vec<_> = netlist
+        .measurements
+        .iter()
+        .filter(|measurement| measurement.analysis.eq_ignore_ascii_case("TRAN"))
+        .cloned()
+        .collect();
+
     // Build signals map from simulation results using both canonical and
     // numeric aliases so .MEAS statements work with either naming style.
     let mut signals: HashMap<String, &[f64]> = HashMap::new();
     insert_transient_measurement_aliases(&mut signals, result);
 
     let mut meas_engine = rspice_core::MeasureEngine::new();
-    for meas in &netlist.measurements {
-        meas_engine.add(meas.clone());
+    for measurement in &transient_measurements {
+        meas_engine.add(measurement.clone());
     }
     let meas_results = meas_engine.evaluate(&result.time, &signals);
 
     let mut reports = Vec::new();
 
     if !quiet {
-        if meas_results.is_empty() && netlist.measurements.is_empty() {
-            println!("  No .MEAS statements found in netlist");
+        if meas_results.is_empty() && transient_measurements.is_empty() {
+            if netlist.measurements.is_empty() {
+                println!("  No .MEAS statements found in netlist");
+            } else {
+                println!("  No transient .MEAS statements found in netlist");
+            }
         } else {
             println!("  Measurement Results ({}):", meas_results.len());
             for mr in &meas_results {
@@ -2805,6 +2816,32 @@ mod tests {
 
         assert_eq!(measurement.value, Some(3.25));
         assert!(measurement.passed);
+    }
+
+    #[test]
+    fn test_run_measurements_ignores_non_transient_statements() {
+        let mut netlist = rspice_core::Netlist::default();
+        netlist
+            .measurements
+            .push(rspice_core::analysis::MeasureStatement {
+                name: "ac_only".to_string(),
+                analysis: "AC".to_string(),
+                measure_type: rspice_core::analysis::MeasureType::Find {
+                    signal: "V(out)".to_string(),
+                    at: Some(1.5e-3),
+                    when_signal: None,
+                    when_value: None,
+                },
+            });
+        let result = rspice_core::engine::TransientResult {
+            time: vec![0.0, 1e-3, 2e-3],
+            voltages: vec![vec![5.0, 5.0, 5.0], vec![0.0, 2.5, 4.0]],
+            num_nodes: 2,
+            node_names: vec!["IN".to_string(), "OUT".to_string()],
+        };
+
+        let reports = run_measurements(&netlist, &result, true);
+        assert!(reports.is_empty());
     }
 
     #[test]
