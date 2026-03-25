@@ -21,6 +21,25 @@ fn fixture(name: &str) -> PathBuf {
     path
 }
 
+fn group_signal_names(file: &Hdf5File, group_name: &str) -> Vec<String> {
+    let group = file.group(group_name).expect("group should exist");
+    let attrs = group.attrs().expect("group attrs");
+    let signal_count = match attrs.get("signal_count") {
+        Some(AttrValue::I64(value)) => *value as usize,
+        other => panic!("expected signal_count attr, got {:?}", other),
+    };
+
+    (0..signal_count)
+        .map(|index| {
+            let key = format!("signal_{index:04}_name");
+            match attrs.get(&key) {
+                Some(AttrValue::String(name)) => name.clone(),
+                other => panic!("expected string attr for {key}, got {:?}", other),
+            }
+        })
+        .collect()
+}
+
 // ============================================================================
 // Help and Version Tests
 // ============================================================================
@@ -879,6 +898,129 @@ fn test_run_hdf5_output_creates_operating_point_file() {
     datasets.sort();
     assert!(datasets.contains(&"independent".to_string()));
     assert!(datasets.contains(&"signal_0000".to_string()));
+}
+
+#[test]
+fn test_run_hdf5_operating_point_preserves_named_nodes_and_currents() {
+    let fixture_path = fixture("named_divider.sp");
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let output_path = temp_dir.path().join("named_op.h5");
+
+    Command::cargo_bin("rspice")
+        .unwrap()
+        .args([
+            "run",
+            fixture_path.to_str().unwrap(),
+            "-o",
+            output_path.to_str().unwrap(),
+            "--format",
+            "hdf5",
+            "-q",
+        ])
+        .assert()
+        .success();
+
+    let file = Hdf5File::open(&output_path).expect("HDF5 output should open");
+    let signal_names = group_signal_names(&file, "operating_point");
+    assert!(signal_names.contains(&"V(IN)".to_string()));
+    assert!(signal_names.contains(&"V(OUT)".to_string()));
+    assert!(signal_names.contains(&"I(V1)".to_string()));
+}
+
+#[test]
+fn test_run_hdf5_transient_preserves_named_nodes() {
+    let fixture_path = fixture("named_rc_transient.sp");
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let output_path = temp_dir.path().join("named_tran.h5");
+
+    Command::cargo_bin("rspice")
+        .unwrap()
+        .args([
+            "run",
+            fixture_path.to_str().unwrap(),
+            "-o",
+            output_path.to_str().unwrap(),
+            "--format",
+            "hdf5",
+            "-q",
+        ])
+        .assert()
+        .success();
+
+    let file = Hdf5File::open(&output_path).expect("HDF5 output should open");
+    let signal_names = group_signal_names(&file, "transient");
+    assert!(signal_names.contains(&"V(IN)".to_string()));
+    assert!(signal_names.contains(&"V(OUT)".to_string()));
+}
+
+#[test]
+fn test_run_hdf5_ac_preserves_named_nodes_and_branch_currents() {
+    let fixture_path = fixture("named_rc_lowpass.sp");
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let output_path = temp_dir.path().join("named_ac.h5");
+
+    Command::cargo_bin("rspice")
+        .unwrap()
+        .args([
+            "run",
+            fixture_path.to_str().unwrap(),
+            "-o",
+            output_path.to_str().unwrap(),
+            "--format",
+            "hdf5",
+            "-q",
+        ])
+        .assert()
+        .success();
+
+    let file = Hdf5File::open(&output_path).expect("HDF5 output should open");
+    let signal_names = group_signal_names(&file, "ac");
+    assert!(signal_names.contains(&"V(IN)".to_string()));
+    assert!(signal_names.contains(&"V(OUT)".to_string()));
+    assert!(signal_names.contains(&"I(V1)".to_string()));
+}
+
+#[test]
+fn test_run_hdf5_dc_sweep_exports_all_named_nodes() {
+    let fixture_path = fixture("ladder_dc_sweep.sp");
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let output_path = temp_dir.path().join("ladder_dc.h5");
+
+    Command::cargo_bin("rspice")
+        .unwrap()
+        .args([
+            "run",
+            fixture_path.to_str().unwrap(),
+            "-o",
+            output_path.to_str().unwrap(),
+            "--format",
+            "hdf5",
+            "-q",
+        ])
+        .assert()
+        .success();
+
+    let file = Hdf5File::open(&output_path).expect("HDF5 output should open");
+    let signal_names = group_signal_names(&file, "dc_sweep");
+    assert_eq!(signal_names.len(), 6);
+    assert!(signal_names.contains(&"V(IN)".to_string()));
+    assert!(signal_names.contains(&"V(N5)".to_string()));
+}
+
+#[test]
+fn test_run_meas_uses_named_transient_node_aliases() {
+    let fixture_path = fixture("named_rc_transient.sp");
+
+    Command::cargo_bin("rspice")
+        .unwrap()
+        .args(["run", fixture_path.to_str().unwrap(), "--meas"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("vout_max").or(predicate::str::contains("VOUT_MAX")));
 }
 
 #[test]

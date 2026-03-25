@@ -8,6 +8,11 @@
 
 #![allow(clippy::too_many_arguments)]
 
+use super::run_signals::{
+    ac_signals, dc_operating_point_current_signals, dc_operating_point_signals,
+    dc_operating_point_voltage_signals, dc_sweep_voltage_signals,
+    insert_transient_measurement_aliases, transient_voltage_signals, voltage_display_name,
+};
 use crate::cli::{CliError, Config, OutputFormat, RunArgs};
 use crate::hdf5::{Hdf5AcSection, Hdf5SimulationData, Hdf5WaveformSection, write_hdf5};
 use crate::report::{JUnitReporter, JsonMeasReporter, SimulationReport, TapReporter};
@@ -473,12 +478,20 @@ fn run_dc_op(
     match engine.run_dc_op(netlist) {
         Ok(result) => {
             if !quiet {
+                let voltage_signals = dc_operating_point_voltage_signals(&result);
+                let current_signals = dc_operating_point_current_signals(&result);
                 println!("DC Operating Point:");
-                for i in 1..=result.node_voltages.len().min(10) {
-                    println!("  V({}) = {:.6} V", i, result.voltage(i));
+                for signal in voltage_signals.iter().take(10) {
+                    println!("  {} = {:.6} V", signal.display_name, signal.values[0]);
                 }
-                if result.node_voltages.len() > 10 {
-                    println!("  ... ({} more nodes)", result.node_voltages.len() - 10);
+                if voltage_signals.len() > 10 {
+                    println!("  ... ({} more node voltages)", voltage_signals.len() - 10);
+                }
+                for signal in current_signals.iter().take(5) {
+                    println!("  {} = {:.6} A", signal.display_name, signal.values[0]);
+                }
+                if current_signals.len() > 5 {
+                    println!("  ... ({} more branch currents)", current_signals.len() - 5);
                 }
             }
 
@@ -504,13 +517,15 @@ fn write_dc_op_output(
 ) -> Result<(), CliError> {
     use std::io::Write;
 
+    let signals = dc_operating_point_signals(result);
+
     if matches!(args.format, OutputFormat::Hdf5) {
         let mut data = Hdf5SimulationData::new();
         data.title = "DC Operating Point".to_string();
 
         let mut operating_point = Hdf5WaveformSection::new("point", vec![0.0]);
-        for i in 1..=result.node_voltages.len() {
-            operating_point.add_signal(format!("V({i})"), vec![result.voltage(i)]);
+        for signal in &signals {
+            operating_point.add_signal(signal.display_name.clone(), signal.values.clone());
         }
         data.operating_point = Some(operating_point);
 
@@ -526,8 +541,11 @@ fn write_dc_op_output(
     match args.format {
         OutputFormat::Json => {
             let mut vars = serde_json::Map::new();
-            for i in 1..=result.node_voltages.len() {
-                vars.insert(format!("V({})", i), serde_json::json!(result.voltage(i)));
+            for signal in &signals {
+                vars.insert(
+                    signal.display_name.clone(),
+                    serde_json::json!(signal.values[0]),
+                );
             }
             let json = serde_json::json!({
                 "analysis": "dc_op",
@@ -541,31 +559,31 @@ fn write_dc_op_output(
             })?;
         }
         OutputFormat::Csv => {
-            writeln!(file, "node,voltage").map_err(|e| CliError::OutputError {
+            writeln!(file, "signal,value").map_err(|e| CliError::OutputError {
                 path: path.to_path_buf(),
                 source: e,
             })?;
-            for i in 1..=result.node_voltages.len() {
-                writeln!(file, "V({}),{:.9e}", i, result.voltage(i)).map_err(|e| {
-                    CliError::OutputError {
+            for signal in &signals {
+                writeln!(file, "{},{:.9e}", signal.display_name, signal.values[0]).map_err(
+                    |e| CliError::OutputError {
                         path: path.to_path_buf(),
                         source: e,
-                    }
-                })?;
+                    },
+                )?;
             }
         }
         OutputFormat::Tsv => {
-            writeln!(file, "node\tvoltage").map_err(|e| CliError::OutputError {
+            writeln!(file, "signal\tvalue").map_err(|e| CliError::OutputError {
                 path: path.to_path_buf(),
                 source: e,
             })?;
-            for i in 1..=result.node_voltages.len() {
-                writeln!(file, "V({})\t{:.9e}", i, result.voltage(i)).map_err(|e| {
-                    CliError::OutputError {
+            for signal in &signals {
+                writeln!(file, "{}\t{:.9e}", signal.display_name, signal.values[0]).map_err(
+                    |e| CliError::OutputError {
                         path: path.to_path_buf(),
                         source: e,
-                    }
-                })?;
+                    },
+                )?;
             }
         }
         OutputFormat::Raw | OutputFormat::RawAscii => {
@@ -581,7 +599,7 @@ fn write_dc_op_output(
                 path: path.to_path_buf(),
                 source: e,
             })?;
-            writeln!(file, "No. Variables: {}", result.node_voltages.len()).map_err(|e| {
+            writeln!(file, "No. Variables: {}", signals.len()).map_err(|e| {
                 CliError::OutputError {
                     path: path.to_path_buf(),
                     source: e,
@@ -595,12 +613,17 @@ fn write_dc_op_output(
                 path: path.to_path_buf(),
                 source: e,
             })?;
-            for i in 1..=result.node_voltages.len() {
-                writeln!(file, "\t{}\tV({})\tvoltage", i - 1, i).map_err(|e| {
-                    CliError::OutputError {
-                        path: path.to_path_buf(),
-                        source: e,
-                    }
+            for (index, signal) in signals.iter().enumerate() {
+                writeln!(
+                    file,
+                    "\t{}\t{}\t{}",
+                    index,
+                    signal.display_name,
+                    signal.kind.raw_variable_type()
+                )
+                .map_err(|e| CliError::OutputError {
+                    path: path.to_path_buf(),
+                    source: e,
                 })?;
             }
             writeln!(file, "Values:").map_err(|e| CliError::OutputError {
@@ -611,8 +634,8 @@ fn write_dc_op_output(
                 path: path.to_path_buf(),
                 source: e,
             })?;
-            for i in 1..=result.node_voltages.len() {
-                writeln!(file, "\t{:.9e}", result.voltage(i)).map_err(|e| {
+            for signal in &signals {
+                writeln!(file, "\t{:.9e}", signal.values[0]).map_err(|e| {
                     CliError::OutputError {
                         path: path.to_path_buf(),
                         source: e,
@@ -631,37 +654,6 @@ fn map_hdf5_output_error(path: &Path, err: crate::hdf5::Hdf5Error) -> CliError {
         path: path.to_path_buf(),
         source: std::io::Error::other(err.to_string()),
     }
-}
-
-fn voltage_signal_names(count: usize) -> Vec<String> {
-    (1..=count).map(|index| format!("V({index})")).collect()
-}
-
-fn transient_signal_names(result: &rspice_core::engine::TransientResult) -> Vec<String> {
-    if result.node_names.len() == result.voltages.len() {
-        result
-            .node_names
-            .iter()
-            .enumerate()
-            .map(|(index, name)| format_voltage_signal_name(name, index + 1))
-            .collect()
-    } else {
-        voltage_signal_names(result.voltages.len())
-    }
-}
-
-fn format_voltage_signal_name(name: &str, fallback_index: usize) -> String {
-    let trimmed = name.trim();
-    if trimmed.is_empty() {
-        return format!("V({fallback_index})");
-    }
-    if trimmed.starts_with("V(") && trimmed.ends_with(')') {
-        return trimmed.to_string();
-    }
-    if trimmed.parse::<usize>().ok() == Some(fallback_index) {
-        return format!("V({fallback_index})");
-    }
-    format!("V({trimmed})")
 }
 
 /// Run DC sweep analysis
@@ -691,33 +683,26 @@ fn run_dc_sweep(
             // Export if output path specified
             if let Some(ref output_path) = args.output {
                 let sweep_vals: Vec<f64> = results.iter().map(|(v, _)| *v).collect();
-                let mut node_waveforms: Vec<Vec<f64>> = Vec::new();
-                if !results.is_empty() {
-                    let num_nodes = results[0].1.node_voltages.len();
-                    for node in 0..num_nodes.min(5) {
-                        let waveform: Vec<f64> =
-                            results.iter().map(|(_, r)| r.voltage(node + 1)).collect();
-                        node_waveforms.push(waveform);
-                    }
-                }
-                let node_names: Vec<String> =
-                    (1..=node_waveforms.len()).map(|i| i.to_string()).collect();
+                let signals = dc_sweep_voltage_signals(&results);
                 if matches!(args.format, OutputFormat::Hdf5) {
                     let mut data = Hdf5SimulationData::new();
                     data.title = "DC Sweep".to_string();
 
                     let mut dc_sweep = Hdf5WaveformSection::new(source, sweep_vals.clone());
-                    for (signal_name, waveform) in voltage_signal_names(node_waveforms.len())
-                        .into_iter()
-                        .zip(&node_waveforms)
-                    {
-                        dc_sweep.add_signal(signal_name, waveform.clone());
+                    for signal in &signals {
+                        dc_sweep.add_signal(signal.display_name.clone(), signal.values.clone());
                     }
                     data.dc_sweep = Some(dc_sweep);
 
                     write_hdf5(output_path, &data)
                         .map_err(|err| map_hdf5_output_error(output_path, err))?;
                 } else {
+                    let node_names: Vec<String> = signals
+                        .iter()
+                        .map(|signal| signal.raw_name.clone())
+                        .collect();
+                    let node_waveforms: Vec<Vec<f64>> =
+                        signals.iter().map(|signal| signal.values.clone()).collect();
                     let format = match args.format {
                         OutputFormat::RawAscii => rspice_core::analysis::RawFormat::Ascii,
                         _ => rspice_core::analysis::RawFormat::Binary,
@@ -836,24 +821,26 @@ fn run_transient(
 
             // Export if output path specified
             if let Some(ref output_path) = args.output {
+                let signals = transient_voltage_signals(&result);
                 if matches!(args.format, OutputFormat::Hdf5) {
                     let mut data = Hdf5SimulationData::new();
                     data.title = "Transient Analysis".to_string();
 
                     let mut transient = Hdf5WaveformSection::new("time", result.time.clone());
-                    for (signal_name, waveform) in transient_signal_names(&result)
-                        .into_iter()
-                        .zip(&result.voltages)
-                    {
-                        transient.add_signal(signal_name, waveform.clone());
+                    for signal in &signals {
+                        transient.add_signal(signal.display_name.clone(), signal.values.clone());
                     }
                     data.transient = Some(transient);
 
                     write_hdf5(output_path, &data)
                         .map_err(|err| map_hdf5_output_error(output_path, err))?;
                 } else {
-                    let node_names: Vec<String> =
-                        (1..=result.voltages.len()).map(|i| i.to_string()).collect();
+                    let node_names: Vec<String> = signals
+                        .iter()
+                        .map(|signal| signal.raw_name.clone())
+                        .collect();
+                    let waveforms: Vec<Vec<f64>> =
+                        signals.iter().map(|signal| signal.values.clone()).collect();
                     let format = match args.format {
                         OutputFormat::RawAscii => rspice_core::analysis::RawFormat::Ascii,
                         _ => rspice_core::analysis::RawFormat::Binary,
@@ -862,7 +849,7 @@ fn run_transient(
                         output_path,
                         &result.time,
                         &node_names,
-                        &result.voltages,
+                        &waveforms,
                         format,
                     )
                     .map_err(|e| CliError::OutputError {
@@ -909,14 +896,20 @@ fn run_ac(
                 if verbose && !results.is_empty() {
                     let first = &results[0];
                     let last = results.last().unwrap();
+                    let first_label = first
+                        .node_names
+                        .first()
+                        .map_or_else(|| "V(1)".to_string(), |name| voltage_display_name(name, 1));
                     println!(
-                        "  @ {:e} Hz: |V(1)| = {:.4}",
+                        "  @ {:e} Hz: |{}| = {:.4}",
                         first.frequency,
+                        first_label,
                         first.voltage_magnitude(1)
                     );
                     println!(
-                        "  @ {:e} Hz: |V(1)| = {:.4}",
+                        "  @ {:e} Hz: |{}| = {:.4}",
                         last.frequency,
+                        first_label,
                         last.voltage_magnitude(1)
                     );
                 }
@@ -924,24 +917,19 @@ fn run_ac(
 
             // Export if output path specified
             if let Some(ref output_path) = args.output {
+                let signals = ac_signals(&results);
                 if matches!(args.format, OutputFormat::Hdf5) {
                     let mut data = Hdf5SimulationData::new();
                     data.title = "AC Analysis".to_string();
 
                     let mut ac =
                         Hdf5AcSection::new(results.iter().map(|result| result.frequency).collect());
-                    if let Some(first) = results.first() {
-                        for node in 1..=first.voltages.len() {
-                            let mut real = Vec::with_capacity(results.len());
-                            let mut imag = Vec::with_capacity(results.len());
-                            for result in &results {
-                                let value =
-                                    result.voltages.get(node - 1).copied().unwrap_or_default();
-                                real.push(value.re);
-                                imag.push(value.im);
-                            }
-                            ac.add_signal(format!("V({node})"), real, imag);
-                        }
+                    for signal in &signals {
+                        ac.add_signal(
+                            signal.display_name.clone(),
+                            signal.real.clone(),
+                            signal.imag.clone(),
+                        );
                     }
                     data.ac = Some(ac);
 
@@ -1173,13 +1161,10 @@ fn run_measurements(
 ) -> Vec<crate::report::MeasurementReport> {
     use crate::report::MeasurementReport;
 
-    // Build signals map from simulation results
+    // Build signals map from simulation results using both canonical and
+    // numeric aliases so .MEAS statements work with either naming style.
     let mut signals: HashMap<String, &[f64]> = HashMap::new();
-    for (i, waveform) in result.voltages.iter().enumerate() {
-        let name = format!("V({})", i + 1);
-        signals.insert(name.clone(), waveform.as_slice());
-        signals.insert(name.to_lowercase(), waveform.as_slice());
-    }
+    insert_transient_measurement_aliases(&mut signals, result);
 
     let mut meas_engine = rspice_core::MeasureEngine::new();
     for meas in &netlist.measurements {
@@ -2788,6 +2773,38 @@ mod tests {
             Some(("out".to_string(), None))
         );
         assert_eq!(parse_voltage_probe_spec(""), None);
+    }
+
+    #[test]
+    fn test_run_measurements_supports_named_node_aliases() {
+        let mut netlist = rspice_core::Netlist::default();
+        netlist
+            .measurements
+            .push(rspice_core::analysis::MeasureStatement {
+                name: "vout_final".to_string(),
+                analysis: "TRAN".to_string(),
+                measure_type: rspice_core::analysis::MeasureType::Find {
+                    signal: "V(out)".to_string(),
+                    at: Some(1.5e-3),
+                    when_signal: None,
+                    when_value: None,
+                },
+            });
+        let result = rspice_core::engine::TransientResult {
+            time: vec![0.0, 1e-3, 2e-3],
+            voltages: vec![vec![5.0, 5.0, 5.0], vec![0.0, 2.5, 4.0]],
+            num_nodes: 2,
+            node_names: vec!["IN".to_string(), "OUT".to_string()],
+        };
+
+        let reports = run_measurements(&netlist, &result, true);
+        let measurement = reports
+            .iter()
+            .find(|report| report.name.eq_ignore_ascii_case("vout_final"))
+            .expect("named-node measurement should be present");
+
+        assert_eq!(measurement.value, Some(3.25));
+        assert!(measurement.passed);
     }
 
     #[test]

@@ -14,6 +14,7 @@ pub mod compile_va;
 pub mod convert;
 pub mod info;
 pub mod run;
+mod run_signals;
 
 pub use check::execute as check;
 pub use compile_va::execute as compile_va;
