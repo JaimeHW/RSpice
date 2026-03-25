@@ -50,8 +50,7 @@ pub const LINE_SEARCH_FACTOR: Value = 0.5;
 //=============================================================================
 
 /// Damping strategy enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DampingStrategy {
     /// No damping (pure Newton)
     None,
@@ -67,7 +66,6 @@ pub enum DampingStrategy {
     #[default]
     Combined,
 }
-
 
 //=============================================================================
 // Damping Controller

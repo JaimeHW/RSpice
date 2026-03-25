@@ -155,10 +155,7 @@ fn resolve_resistor_eval_context(
     Ok((ctx, current_temp_c, model_tnom_c))
 }
 
-fn model_binning_param(
-    model_def: &crate::netlist::ModelDef,
-    name: &str,
-) -> Option<f64> {
+fn model_binning_param(model_def: &crate::netlist::ModelDef, name: &str) -> Option<f64> {
     model_param(&model_def.params, &[name])
 }
 
@@ -274,15 +271,17 @@ pub(super) fn resolve_resistor_instance_value(
                 instance_param(instance_params, &["NRS", "NRSQ", "NSQ", "SQUARES"])
             {
                 nsq
-            } else if let Some(nsq) = resolve_model_param(
-                model_def,
-                &["NRS", "NRSQ", "NSQ", "SQUARES"],
-                &eval_ctx,
-            )? {
+            } else if let Some(nsq) =
+                resolve_model_param(model_def, &["NRS", "NRSQ", "NSQ", "SQUARES"], &eval_ctx)?
+            {
                 nsq
             } else {
                 let l = instance_param(instance_params, &["L", "LENGTH"])
-                    .or_else(|| resolve_model_param(model_def, &["L", "LENGTH"], &eval_ctx).ok().flatten())
+                    .or_else(|| {
+                        resolve_model_param(model_def, &["L", "LENGTH"], &eval_ctx)
+                            .ok()
+                            .flatten()
+                    })
                     .ok_or_else(|| {
                         SimulationError::Circuit(format!(
                             "Resistor '{}' model '{}' requires L/LENGTH when using RSH",
@@ -340,15 +339,27 @@ pub(super) fn resolve_resistor_instance_value(
     })?;
 
     let tc1 = instance_param(instance_params, &["TC1"])
-        .or_else(|| model_def.and_then(|model_def| resolve_model_param(model_def, &["TC1"], &eval_ctx).ok().flatten()))
+        .or_else(|| {
+            model_def.and_then(|model_def| {
+                resolve_model_param(model_def, &["TC1"], &eval_ctx)
+                    .ok()
+                    .flatten()
+            })
+        })
         .unwrap_or(0.0);
     let tc2 = instance_param(instance_params, &["TC2"])
-        .or_else(|| model_def.and_then(|model_def| resolve_model_param(model_def, &["TC2"], &eval_ctx).ok().flatten()))
+        .or_else(|| {
+            model_def.and_then(|model_def| {
+                resolve_model_param(model_def, &["TC2"], &eval_ctx)
+                    .ok()
+                    .flatten()
+            })
+        })
         .unwrap_or(0.0);
     if tc1 != 0.0 || tc2 != 0.0 {
         let temp_ctx = crate::analysis::TemperatureContext::from_celsius(current_temp_c, tnom_c);
-        resolved =
-            crate::analysis::ResistorTempCoeffs::new(tc1, tc2).scale_resistance(resolved, &temp_ctx);
+        resolved = crate::analysis::ResistorTempCoeffs::new(tc1, tc2)
+            .scale_resistance(resolved, &temp_ctx);
     }
 
     if let Some(mult) = instance_param(instance_params, &["M", "MULT"]) {

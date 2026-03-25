@@ -2001,9 +2001,10 @@ impl HbSolver {
 
         // Final DC solve with full sources
         if source_stepper.is_complete()
-            && self.dc_newton_inner_loop(state, target_gmin, dc_max_iter, dc_reltol, dc_abstol) {
-                return Ok(self.extract_dc_solution(state));
-            }
+            && self.dc_newton_inner_loop(state, target_gmin, dc_max_iter, dc_reltol, dc_abstol)
+        {
+            return Ok(self.extract_dc_solution(state));
+        }
 
         // DC solve failed - return what we have
         Err(HbError::ConvergenceFailed {
@@ -2719,7 +2720,7 @@ impl HbSolver {
                     state.converged = true;
                     return Ok(());
                 }
-            } 
+            }
         }
 
         // Step 3: Try source stepping
@@ -2783,11 +2784,12 @@ impl HbSolver {
 
         // If source stepping completed, do final Newton with original sources
         if source_stepper.is_complete()
-            && self.newton_inner_loop(state, gmin, self.config.max_iterations, tol, abstol) {
-                state.converged = true;
-                state.iteration = total_iterations;
-                return Ok(());
-            }
+            && self.newton_inner_loop(state, gmin, self.config.max_iterations, tol, abstol)
+        {
+            state.converged = true;
+            state.iteration = total_iterations;
+            return Ok(());
+        }
 
         // Step 4: Try pseudo-transient
         // Add damping capacitors to each node and integrate to steady-state
@@ -2821,11 +2823,12 @@ impl HbSolver {
 
         // If pseudo-transient completed, do final high-accuracy Newton
         if ptran.is_complete()
-            && self.newton_inner_loop(state, gmin, self.config.max_iterations, tol, abstol) {
-                state.converged = true;
-                state.iteration = total_iterations + ptran_iterations;
-                return Ok(());
-            }
+            && self.newton_inner_loop(state, gmin, self.config.max_iterations, tol, abstol)
+        {
+            state.converged = true;
+            state.iteration = total_iterations + ptran_iterations;
+            return Ok(());
+        }
 
         Err(HbError::ConvergenceFailed {
             iterations: total_iterations + ptran_iterations,

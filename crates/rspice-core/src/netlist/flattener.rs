@@ -17,7 +17,9 @@
 #![allow(clippy::too_many_arguments)]
 use super::hierarchy_path::HierarchyPath;
 use super::param_scope::ParamResolver;
-use super::{Element, ElementKind, Netlist, ParamContext, ParametricValue, ParseError, SubcircuitDef};
+use super::{
+    Element, ElementKind, Netlist, ParamContext, ParametricValue, ParseError, SubcircuitDef,
+};
 use crate::Value;
 use std::collections::{HashMap, HashSet};
 
@@ -315,8 +317,7 @@ impl<'a> Flattener<'a> {
             }
         }
 
-        let param_map =
-            build_subcircuit_param_scope(subckt, caller_scope_params, instance_params)?;
+        let param_map = build_subcircuit_param_scope(subckt, caller_scope_params, instance_params)?;
 
         // Expand each element in the subcircuit
         for sub_element in &subckt.elements {
@@ -634,7 +635,8 @@ fn resolve_parametric_value(
             for (name, value) in param_map {
                 ctx.set(name, *value);
             }
-            super::expr::eval_expression(expr, &ctx).map_err(|e| ParseError::InvalidValue(e.to_string()))
+            super::expr::eval_expression(expr, &ctx)
+                .map_err(|e| ParseError::InvalidValue(e.to_string()))
         }
     }
 }
@@ -990,12 +992,10 @@ X1 in 0 custom_model g=2m
                 params,
             } => {
                 assert!(subckt_name.eq_ignore_ascii_case("custom_model"));
-                assert!(
-                    params.iter().any(|(name, value)| {
-                        name.eq_ignore_ascii_case("g")
-                            && matches!(value, ParametricValue::Resolved(v) if v.is_finite())
-                    })
-                );
+                assert!(params.iter().any(|(name, value)| {
+                    name.eq_ignore_ascii_case("g")
+                        && matches!(value, ParametricValue::Resolved(v) if v.is_finite())
+                }));
             }
             other => panic!(
                 "Expected Subcircuit kind for external instance, got {:?}",
@@ -1074,7 +1074,9 @@ R2 out 0 1k
             .find(|element| element.name == "X1.R1")
             .expect("expected flattened subcircuit resistor");
         match &r1.kind {
-            ElementKind::Resistor { value, value_expr, .. } => {
+            ElementKind::Resistor {
+                value, value_expr, ..
+            } => {
                 assert_eq!(value_expr, &None);
                 assert!((*value - 2_000.0).abs() < 1e-9, "expected 2k, got {value}");
             }
@@ -1164,7 +1166,9 @@ X2 n1002_t n1003_t n1004_t n1005_t n1006_t n1007_t sub2
             .expect("expected X2.R2");
         match &x2_r2.kind {
             ElementKind::Resistor { model, .. } => assert!(
-                model.as_deref().is_some_and(|name| name.eq_ignore_ascii_case("my")),
+                model
+                    .as_deref()
+                    .is_some_and(|name| name.eq_ignore_ascii_case("my")),
                 "parent resistor should bind to the top-level model, got {:?}",
                 model
             ),
@@ -1254,9 +1258,14 @@ XTOP n1 0 sub1 foo='foo*3'
             .find(|element| element.name == "XTOP.X1.R1")
             .expect("expected nested resistor");
         match &nested.kind {
-            ElementKind::Resistor { value, value_expr, .. } => {
+            ElementKind::Resistor {
+                value, value_expr, ..
+            } => {
                 assert_eq!(value_expr, &None);
-                assert!((*value - 18_000.0).abs() < 1e-9, "expected 18k, got {value}");
+                assert!(
+                    (*value - 18_000.0).abs() < 1e-9,
+                    "expected 18k, got {value}"
+                );
             }
             other => panic!("expected resistor, got {:?}", other),
         }
@@ -1266,9 +1275,14 @@ XTOP n1 0 sub1 foo='foo*3'
             .find(|element| element.name == "XTOP.R2")
             .expect("expected outer resistor");
         match &outer.kind {
-            ElementKind::Resistor { value, value_expr, .. } => {
+            ElementKind::Resistor {
+                value, value_expr, ..
+            } => {
                 assert_eq!(value_expr, &None);
-                assert!((*value - 30_000.0).abs() < 1e-9, "expected 30k, got {value}");
+                assert!(
+                    (*value - 30_000.0).abs() < 1e-9,
+                    "expected 30k, got {value}"
+                );
             }
             other => panic!("expected resistor, got {:?}", other),
         }

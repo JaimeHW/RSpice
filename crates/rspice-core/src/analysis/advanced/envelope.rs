@@ -804,8 +804,7 @@ pub struct IqSource {
 }
 
 /// Pulse shaping filter types
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum PulseShape {
     /// Rectangular (no shaping)
     Rectangular,
@@ -817,7 +816,6 @@ pub enum PulseShape {
     /// Gaussian
     Gaussian,
 }
-
 
 impl IqSource {
     /// Create new IQ source

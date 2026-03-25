@@ -390,10 +390,8 @@ mod tests {
 
     #[test]
     fn test_diode_with_breakdown_model_params() {
-        let params = std::collections::HashMap::from([
-            ("BV".to_string(), 5.1),
-            ("IBV".to_string(), 0.02),
-        ]);
+        let params =
+            std::collections::HashMap::from([("BV".to_string(), 5.1), ("IBV".to_string(), 0.02)]);
         let d = Diode::new("DZ".to_string(), 1, 0).with_model_params(&params);
 
         assert_eq!(d.bv, Some(5.1));
@@ -430,10 +428,8 @@ mod tests {
 
     #[test]
     fn test_diode_reverse_breakdown_matches_ibv_at_bv() {
-        let params = std::collections::HashMap::from([
-            ("BV".to_string(), 5.1),
-            ("IBV".to_string(), 0.02),
-        ]);
+        let params =
+            std::collections::HashMap::from([("BV".to_string(), 5.1), ("IBV".to_string(), 0.02)]);
         let d = Diode::new("DZ".to_string(), 1, 0).with_model_params(&params);
 
         let id = d.current(-5.1);
@@ -446,10 +442,8 @@ mod tests {
 
     #[test]
     fn test_diode_reverse_breakdown_increases_beyond_knee() {
-        let params = std::collections::HashMap::from([
-            ("BV".to_string(), 5.1),
-            ("IBV".to_string(), 0.02),
-        ]);
+        let params =
+            std::collections::HashMap::from([("BV".to_string(), 5.1), ("IBV".to_string(), 0.02)]);
         let d = Diode::new("DZ".to_string(), 1, 0).with_model_params(&params);
 
         let just_before = d.current(-4.5).abs();
@@ -509,10 +503,8 @@ mod tests {
 
     #[test]
     fn test_diode_breakdown_conductance_is_positive_and_finite() {
-        let params = std::collections::HashMap::from([
-            ("BV".to_string(), 5.1),
-            ("IBV".to_string(), 0.02),
-        ]);
+        let params =
+            std::collections::HashMap::from([("BV".to_string(), 5.1), ("IBV".to_string(), 0.02)]);
         let d = Diode::new("DZ".to_string(), 1, 0).with_model_params(&params);
 
         let gd = d.diode_conductance(-5.5);
@@ -632,10 +624,8 @@ mod tests {
 
     #[test]
     fn test_diode_breakdown_large_reverse_stays_finite() {
-        let params = std::collections::HashMap::from([
-            ("BV".to_string(), 5.1),
-            ("IBV".to_string(), 0.02),
-        ]);
+        let params =
+            std::collections::HashMap::from([("BV".to_string(), 5.1), ("IBV".to_string(), 0.02)]);
         let d = Diode::new("DZ".to_string(), 1, 0).with_model_params(&params);
 
         let id = d.current(-100.0);

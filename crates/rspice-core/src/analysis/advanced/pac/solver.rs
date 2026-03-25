@@ -96,8 +96,7 @@ pub struct PacAnalyzer {
 }
 
 /// Internal state of the PAC analyzer
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PacAnalyzerState {
     /// Ready for new analysis
     #[default]
@@ -109,7 +108,6 @@ pub enum PacAnalyzerState {
     /// Analysis failed
     Failed,
 }
-
 
 impl PacAnalyzer {
     /// Create a new PAC analyzer
@@ -144,9 +142,7 @@ impl PacAnalyzer {
 
     /// Validate configuration
     pub fn validate(&self) -> Result<(), PacError> {
-        self.config
-            .validate()
-            .map_err(PacError::InvalidConfig)
+        self.config.validate().map_err(PacError::InvalidConfig)
     }
 
     /// Run PAC analysis given a PSS solution

@@ -262,7 +262,10 @@ impl BreakpointManager {
 
     /// Get the next breakpoint after the given time
     pub fn next_after(&self, time: Value) -> Option<Value> {
-        self.breakpoints.iter().find(|&&bp| bp > time + self.tolerance).copied()
+        self.breakpoints
+            .iter()
+            .find(|&&bp| bp > time + self.tolerance)
+            .copied()
     }
 
     /// Remove breakpoints at or before the given time

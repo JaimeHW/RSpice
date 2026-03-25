@@ -294,8 +294,7 @@ impl PnoiseSweep {
 }
 
 /// Sideband analysis mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PnoiseSideband {
     /// Analyze only upper sidebands (f0 + offset)
     Upper,
@@ -305,7 +304,6 @@ pub enum PnoiseSideband {
     #[default]
     Both,
 }
-
 
 /// Configuration errors
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -474,11 +472,7 @@ mod config_tests {
 
     #[test]
     fn test_config_error_display() {
-        assert!(
-            PnoiseConfigError::Sweep
-                .to_string()
-                .contains("sweep")
-        );
+        assert!(PnoiseConfigError::Sweep.to_string().contains("sweep"));
         assert!(
             PnoiseConfigError::Sidebands
                 .to_string()

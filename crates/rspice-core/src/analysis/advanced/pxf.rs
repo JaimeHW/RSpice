@@ -78,8 +78,7 @@ pub struct PxfConfig {
 }
 
 /// Sweep type for PXF frequency sweep
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PxfSweepType {
     /// Linear frequency sweep
     Linear,
@@ -89,7 +88,6 @@ pub enum PxfSweepType {
     /// Octave sweep
     Octave,
 }
-
 
 impl Default for PxfConfig {
     fn default() -> Self {

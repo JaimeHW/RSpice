@@ -70,8 +70,7 @@ pub struct StbConfig {
 }
 
 /// Sweep type for STB analysis
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StbSweepType {
     /// Linear frequency sweep
     Linear,
@@ -79,7 +78,6 @@ pub enum StbSweepType {
     #[default]
     Decade,
 }
-
 
 impl Default for StbConfig {
     fn default() -> Self {

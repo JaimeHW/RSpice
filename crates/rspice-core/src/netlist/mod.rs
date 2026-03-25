@@ -202,7 +202,9 @@ impl Netlist {
 
     fn model_string_param_is_path(name: &str) -> bool {
         let normalized = name.trim().to_ascii_lowercase();
-        normalized.ends_with("file") || normalized.ends_with("_file") || normalized.ends_with("path")
+        normalized.ends_with("file")
+            || normalized.ends_with("_file")
+            || normalized.ends_with("path")
     }
 
     /// Add a global node

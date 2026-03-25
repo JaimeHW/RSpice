@@ -165,7 +165,9 @@ D1 0 vz 1N4733A
 
     let netlist = parse_netlist(netlist_str);
     let engine = Engine::new(SimulationConfig::default());
-    let result = engine.run_dc_op(&netlist).expect("Zener clamp DC OP failed");
+    let result = engine
+        .run_dc_op(&netlist)
+        .expect("Zener clamp DC OP failed");
 
     let vz_idx = result
         .node_names

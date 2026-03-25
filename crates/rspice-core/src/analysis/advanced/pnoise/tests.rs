@@ -157,9 +157,11 @@ mod integration_tests {
 
     #[test]
     fn test_floquet_mode_classification() {
-        let modes = [FloquetMode::new(0, Complex64::new(0.0, 0.0), vec![Complex64::new(1.0, 0.0)]),
+        let modes = [
+            FloquetMode::new(0, Complex64::new(0.0, 0.0), vec![Complex64::new(1.0, 0.0)]),
             FloquetMode::new(1, Complex64::new(-1e6, 0.0), vec![Complex64::new(0.5, 0.5)]),
-            FloquetMode::new(2, Complex64::new(1e5, 0.0), vec![Complex64::new(0.0, 1.0)])];
+            FloquetMode::new(2, Complex64::new(1e5, 0.0), vec![Complex64::new(0.0, 1.0)]),
+        ];
 
         assert_eq!(modes[0].mode_type, FloquetModeType::Phase);
         assert_eq!(modes[1].mode_type, FloquetModeType::Stable);

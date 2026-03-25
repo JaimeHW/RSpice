@@ -57,8 +57,7 @@ pub const DEFAULT_THD_HARMONICS: usize = 10;
 //=============================================================================
 
 /// Direction of threshold crossing
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EdgeDirection {
     /// Rising edge (crossing from below)
     Rising,
@@ -68,7 +67,6 @@ pub enum EdgeDirection {
     #[default]
     Either,
 }
-
 
 //=============================================================================
 // Threshold Crossing

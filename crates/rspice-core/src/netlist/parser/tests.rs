@@ -161,7 +161,10 @@ R1 in out '3*foo'
             model,
             ..
         } => {
-            assert!(value.is_nan(), "deferred resistor value should stay unresolved");
+            assert!(
+                value.is_nan(),
+                "deferred resistor value should stay unresolved"
+            );
             assert_eq!(model, &None);
             assert_eq!(value_expr.as_deref(), Some("3*foo"));
         }

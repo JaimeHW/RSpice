@@ -729,8 +729,7 @@ pub struct AcTransferConfig {
 }
 
 /// AC frequency sweep type
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AcSweepType {
     /// Linear sweep
     Linear,
@@ -740,7 +739,6 @@ pub enum AcSweepType {
     /// Octave sweep
     Octave,
 }
-
 
 impl AcTransferConfig {
     /// Create decade sweep configuration

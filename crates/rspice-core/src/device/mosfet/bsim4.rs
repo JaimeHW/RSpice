@@ -31,14 +31,12 @@ const K_BOLTZMANN: Value = 1.380649e-23; // Boltzmann constant (J/K)
 const NI_300K: Value = 1.45e16; // Intrinsic carrier concentration at 300K (m^-3)
 
 /// BSIM4 device type
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Bsim4Type {
     #[default]
     Nmos,
     Pmos,
 }
-
 
 /// BSIM4 model parameters
 ///

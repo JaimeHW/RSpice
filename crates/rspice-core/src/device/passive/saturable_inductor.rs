@@ -173,10 +173,9 @@ impl SaturableInductor {
         let denom = 1.0 + i_norm_n;
 
         // d/dI [ 1/(1 + |I/Isat|^n) ] = -n * |I/Isat|^(n-1) * sign(I) / (Isat * (1 + |I/Isat|^n)^2)
-        
 
         -(self.l0 - self.l_min) * self.n_sat * i_norm.powf(self.n_sat - 1.0) * current.signum()
-                / (self.i_sat * denom * denom)
+            / (self.i_sat * denom * denom)
     }
 
     /// Calculate equivalent resistance for trapezoidal integration

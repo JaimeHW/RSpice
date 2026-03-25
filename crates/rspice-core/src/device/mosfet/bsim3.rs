@@ -35,8 +35,7 @@ pub enum Bsim3Type {
 }
 
 /// BSIM3 operating region
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Bsim3Region {
     #[default]
     Cutoff,
@@ -44,7 +43,6 @@ pub enum Bsim3Region {
     Saturation,
     Subthreshold,
 }
-
 
 /// BSIM3v3 model parameters
 ///

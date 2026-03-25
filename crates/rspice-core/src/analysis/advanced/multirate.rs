@@ -35,8 +35,7 @@ use std::collections::HashMap;
 //=============================================================================
 
 /// Rate class for circuit partitioning
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum RateClass {
     /// Very fast signals (RF, clock, switching)
     Fast,
@@ -70,7 +69,6 @@ impl RateClass {
         }
     }
 }
-
 
 //=============================================================================
 // Circuit Partition

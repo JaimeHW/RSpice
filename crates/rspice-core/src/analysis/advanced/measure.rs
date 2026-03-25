@@ -25,8 +25,7 @@ use std::collections::HashMap;
 //=============================================================================
 
 /// Edge type for trigger/target detection
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EdgeType {
     /// Rising edge (signal crosses threshold going up)
     #[default]
@@ -36,7 +35,6 @@ pub enum EdgeType {
     /// Either edge
     Cross,
 }
-
 
 /// Trigger/Target specification for delay measurements
 #[derive(Debug, Clone)]

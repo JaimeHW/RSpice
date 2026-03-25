@@ -1144,10 +1144,9 @@ impl Jfet {
                 continue;
             }
 
-            if name.eq_ignore_ascii_case("TD")
-                && *value > 0.0 {
-                    td_override = Some(*value + 273.15);
-                }
+            if name.eq_ignore_ascii_case("TD") && *value > 0.0 {
+                td_override = Some(*value + 273.15);
+            }
         }
 
         if let Some(w) = width {
@@ -1169,9 +1168,11 @@ impl Jfet {
         }
 
         if matches!(self.params.channel_model, JfetChannelModel::Hfet1)
-            && nf.is_finite() && nf > 0.0 {
-                self.width *= nf;
-            }
+            && nf.is_finite()
+            && nf > 0.0
+        {
+            self.width *= nf;
+        }
 
         if mult.is_finite() && mult > 0.0 {
             self.m *= mult;
@@ -2307,8 +2308,11 @@ impl Jfet {
         let g_total = delidgch * p_chain + delidvsate * delvsatevgt;
         let gm_fwd = g_total * delvgtvgs;
         let gds_fwd = delidvds + g_total * sigma;
-        let (mut ids, mut gm, mut gds) =
-            if inverse { (-ids_fwd, gm_fwd, gds_fwd) } else { (ids_fwd, gm_fwd, gds_fwd) };
+        let (mut ids, mut gm, mut gds) = if inverse {
+            (-ids_fwd, gm_fwd, gds_fwd)
+        } else {
+            (ids_fwd, gm_fwd, gds_fwd)
+        };
 
         if !ids.is_finite() {
             ids = 0.0;

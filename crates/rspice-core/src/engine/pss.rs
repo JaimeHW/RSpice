@@ -879,9 +879,11 @@ mod tests {
     fn test_pss_analysis_result_stability_stable() {
         use num_complex::Complex64;
 
-        let stable_multipliers = [Complex64::new(0.8, 0.0),
+        let stable_multipliers = [
+            Complex64::new(0.8, 0.0),
             Complex64::new(0.5, 0.3),
-            Complex64::new(-0.4, 0.2)];
+            Complex64::new(-0.4, 0.2),
+        ];
         let is_stable = stable_multipliers.iter().all(|m| m.norm() <= 1.0 + 1e-6);
         assert!(
             is_stable,
@@ -909,9 +911,11 @@ mod tests {
         use num_complex::Complex64;
 
         // Marginal stability: multipliers exactly on unit circle
-        let marginal_multipliers = [Complex64::new(1.0, 0.0),
+        let marginal_multipliers = [
+            Complex64::new(1.0, 0.0),
             Complex64::new(0.0, 1.0),
-            Complex64::new(-1.0, 0.0)];
+            Complex64::new(-1.0, 0.0),
+        ];
         // With 1e-6 tolerance, these should be considered stable
         let is_stable = marginal_multipliers.iter().all(|m| m.norm() <= 1.0 + 1e-6);
         assert!(is_stable);

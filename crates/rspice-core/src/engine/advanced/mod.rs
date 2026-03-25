@@ -1254,9 +1254,7 @@ impl Engine {
                     log::warn!(
                         "Step DEVICE {}{} = {} failed: {}",
                         device_name,
-                        param_name
-                            .map(|p| format!(".{}", p))
-                            .unwrap_or_default(),
+                        param_name.map(|p| format!(".{}", p)).unwrap_or_default(),
                         value,
                         e
                     );

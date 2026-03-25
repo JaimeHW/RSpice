@@ -521,10 +521,9 @@ impl Mosfet {
                 continue;
             }
 
-            if name.eq_ignore_ascii_case("NF")
-                && *value > 0.0 {
-                    nf = *value;
-                }
+            if name.eq_ignore_ascii_case("NF") && *value > 0.0 {
+                nf = *value;
+            }
         }
 
         if let Some(w) = width_override {
@@ -1476,8 +1475,7 @@ mod tests {
 
         m.update(&voltages);
 
-        let (id, region, gm, gds, gmb, id_eq) =
-            m.linearized_operating_point(m.vgs, m.vds, m.vbs);
+        let (id, region, gm, gds, gmb, id_eq) = m.linearized_operating_point(m.vgs, m.vds, m.vbs);
         assert!((m.id - id).abs() < 1e-18);
         assert_eq!(m.region, region);
         assert!((m.gm - gm).abs() < 1e-18);
@@ -1508,9 +1506,7 @@ mod tests {
 
         assert!((matrix.g.get(&(3, 3)).copied().unwrap_or(0.0) - gds).abs() < 1e-18);
         assert!((matrix.g.get(&(3, 2)).copied().unwrap_or(0.0) - gm).abs() < 1e-18);
-        assert!(
-            (matrix.g.get(&(3, 1)).copied().unwrap_or(0.0) - (-gm - gds - gmb)).abs() < 1e-18
-        );
+        assert!((matrix.g.get(&(3, 1)).copied().unwrap_or(0.0) - (-gm - gds - gmb)).abs() < 1e-18);
         assert!((matrix.g.get(&(1, 3)).copied().unwrap_or(0.0) - (-gds)).abs() < 1e-18);
         assert!((matrix.rhs.get(&3).copied().unwrap_or(0.0) - (-id_eq)).abs() < 1e-18);
         assert!((matrix.rhs.get(&1).copied().unwrap_or(0.0) - id_eq).abs() < 1e-18);

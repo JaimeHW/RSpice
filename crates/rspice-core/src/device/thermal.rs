@@ -65,8 +65,7 @@ pub const THERMAL_TOLERANCE: Value = 0.1;
 //=============================================================================
 
 /// Type of thermal network model
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ThermalNetworkType {
     /// Single RC pole (simple lumped model)
     #[default]
@@ -78,7 +77,6 @@ pub enum ThermalNetworkType {
     /// No thermal modeling (isothermal)
     Isothermal,
 }
-
 
 //=============================================================================
 // Thermal RC Element

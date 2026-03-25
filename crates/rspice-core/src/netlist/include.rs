@@ -260,7 +260,8 @@ impl IncludeProcessor {
 
             if upper.starts_with(".LIB") && !upper.starts_with(".LIBS") {
                 if let Some((filename, section)) = parse_lib_directive(trimmed) {
-                    let included = self.process_lib_from(base_dir, &filename, section.as_deref())?;
+                    let included =
+                        self.process_lib_from(base_dir, &filename, section.as_deref())?;
                     result.push_str(&included);
                     if !included.ends_with('\n') {
                         result.push('\n');
@@ -683,7 +684,9 @@ M1 OUT IN VDD VDD PMOS
         fs::write(&root, ".include \"root.cir\"\n").unwrap();
 
         let mut proc = IncludeProcessor::new(&root);
-        let err = proc.process_include("root.cir").expect_err("cycle should fail");
+        let err = proc
+            .process_include("root.cir")
+            .expect_err("cycle should fail");
         assert!(
             err.to_string().contains("Circular include/lib detected"),
             "unexpected error: {}",

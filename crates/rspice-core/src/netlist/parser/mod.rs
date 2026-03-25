@@ -339,7 +339,9 @@ fn process_line(
     // Check for .SUBCKT start
     if upper.starts_with(".SUBCKT") {
         let subckt = parse_subckt_def(line, line_num)?;
-        let parent_scope = subckt_stack.last().map(|frame| frame.qualified_name.as_str());
+        let parent_scope = subckt_stack
+            .last()
+            .map(|frame| frame.qualified_name.as_str());
         let qualified_name = qualify_nested_subckt_name(parent_scope, &subckt.name);
         let mut local_params = subckt_stack
             .last()
@@ -402,10 +404,9 @@ fn process_line(
             let mut model = parse_model_definition(&mut stream, line_num, &frame.local_params)?;
             let local_name = model.name.clone();
             let qualified_name = qualify_local_model_name(&frame.qualified_name, &local_name);
-            frame.local_model_aliases.insert(
-                local_name.to_ascii_uppercase(),
-                qualified_name.clone(),
-            );
+            frame
+                .local_model_aliases
+                .insert(local_name.to_ascii_uppercase(), qualified_name.clone());
             model.name = qualified_name;
             models.push(model);
             return Ok(());
@@ -1926,9 +1927,8 @@ fn parse_numeric_field_value(
     if let Some(value) = params.get(expr) {
         return Ok(value);
     }
-    eval_expression(expr, params).map_err(|e| {
-        ParseError::InvalidValue(format!("line {}: {}", line_num, e))
-    })
+    eval_expression(expr, params)
+        .map_err(|e| ParseError::InvalidValue(format!("line {}: {}", line_num, e)))
 }
 
 fn parse_parametric_field_value(raw_value: &str, params: &ParamContext) -> ParametricValue {
@@ -2809,10 +2809,7 @@ fn try_value(stream: &mut TokenStream, params: &ParamContext) -> Option<Value> {
     }
 }
 
-fn take_value_expression_string(
-    stream: &mut TokenStream,
-    params: &ParamContext,
-) -> Option<String> {
+fn take_value_expression_string(stream: &mut TokenStream, params: &ParamContext) -> Option<String> {
     skip_commas(stream);
 
     let sign = match &stream.peek().kind {
