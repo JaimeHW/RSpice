@@ -32,6 +32,12 @@ impl PySimulationResult {
     pub fn new(inner: SimulationResult) -> Self {
         Self { inner }
     }
+
+    fn find_node_index(names: &[String], name: &str) -> Option<usize> {
+        names
+            .iter()
+            .position(|candidate| candidate.eq_ignore_ascii_case(name))
+    }
 }
 
 #[pymethods]
@@ -52,7 +58,7 @@ impl PySimulationResult {
             NodeIdentifier::Index(idx) => self.inner.voltage(idx),
             NodeIdentifier::Name(name) => {
                 // Find node index by name
-                if let Some(idx) = self.inner.node_names.iter().position(|n| n == &name) {
+                if let Some(idx) = Self::find_node_index(&self.inner.node_names, &name) {
                     self.inner.voltage(idx)
                 } else {
                     0.0
@@ -158,6 +164,12 @@ impl PyTransientResult {
     pub fn new(inner: TransientResult) -> Self {
         Self { inner }
     }
+
+    fn find_node_index(names: &[String], name: &str) -> Option<usize> {
+        names
+            .iter()
+            .position(|candidate| candidate.eq_ignore_ascii_case(name))
+    }
 }
 
 #[pymethods]
@@ -191,7 +203,7 @@ impl PyTransientResult {
             NodeIdentifier::Index(idx) => self.inner.voltage_waveform(idx).to_vec(),
             NodeIdentifier::Name(name) => {
                 // Find node index by name
-                if let Some(idx) = self.inner.node_names.iter().position(|n| n == &name) {
+                if let Some(idx) = Self::find_node_index(&self.inner.node_names, &name) {
                     // Node names are 1-indexed in the result, so we need to adjust
                     self.inner.voltage_waveform(idx + 1).to_vec()
                 } else {
@@ -1141,6 +1153,14 @@ mod tests {
     }
 
     #[test]
+    fn test_simulation_result_voltage_name_lookup_is_case_insensitive() {
+        let inner = create_test_simulation_result();
+        let result = PySimulationResult::new(inner);
+
+        assert!((result.voltage(NodeIdentifier::Name("OUT".to_string())) - 2.5).abs() < 1e-10);
+    }
+
+    #[test]
     fn test_simulation_result_branch_current() {
         let inner = create_test_simulation_result();
         let result = PySimulationResult::new(inner);
@@ -1220,6 +1240,12 @@ mod tests {
         assert!(repr.contains("TransientResult"));
         assert!(repr.contains("nodes=1"));
         assert!(repr.contains("points=100"));
+    }
+
+    #[test]
+    fn test_transient_result_node_lookup_is_case_insensitive() {
+        let names = vec!["Out".to_string()];
+        assert_eq!(PyTransientResult::find_node_index(&names, "out"), Some(0));
     }
 
     #[test]
