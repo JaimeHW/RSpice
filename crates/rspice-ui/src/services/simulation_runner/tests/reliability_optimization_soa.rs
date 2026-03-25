@@ -1,4 +1,30 @@
 use super::*;
+use std::path::PathBuf;
+
+fn write_device_include_fixture(
+    source_file_name: &str,
+    include_file_name: &str,
+    include_contents: &str,
+    netlist: &str,
+) -> (tempfile::TempDir, PathBuf, String) {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let source_path = temp_dir.path().join("project").join(source_file_name);
+    std::fs::create_dir_all(
+        source_path
+            .parent()
+            .expect("source path should have parent directory"),
+    )
+    .expect("project directory should be created");
+    std::fs::create_dir_all(temp_dir.path().join("models"))
+        .expect("models directory should be created");
+    std::fs::write(
+        temp_dir.path().join("models").join(include_file_name),
+        include_contents,
+    )
+    .expect("include file should be written");
+
+    (temp_dir, source_path, netlist.to_string())
+}
 
 #[test]
 fn test_extract_reliability_stress_data_maps_transistor_biases() {
@@ -98,6 +124,39 @@ R2 out 0 1k
     let err = run_reliability_analysis_with_config(netlist, &cfg)
         .expect_err("reliability should fail when no qualifying devices exist");
     assert!(err.contains("no stressed semiconductor devices"));
+}
+
+#[test]
+fn test_run_reliability_analysis_with_config_and_source_path_resolves_relative_include() {
+    let (_temp_dir, source_path, netlist) = write_device_include_fixture(
+        "reliability_top.rsch",
+        "reliability_stage.inc",
+        "R1 vdd d 1k\nM1 d g 0 0 NM W=10u L=1u\n.model NM NMOS VTO=0.7 KP=200u LAMBDA=0.02\n",
+        "* reliability include fixture\n\
+VDD vdd 0 1.8\n\
+VG g 0 1.2\n\
+.include ../models/reliability_stage.inc\n\
+.end\n",
+    );
+    let cfg = ReliabilityRunConfig {
+        target_years: vec![1.0, 5.0, 10.0],
+        enable_hci: true,
+        enable_nbti: true,
+        enable_em: false,
+        min_stress_voltage: 0.05,
+    };
+
+    let without_source = run_reliability_analysis_with_config(&netlist, &cfg);
+    assert!(
+        without_source.is_err(),
+        "relative include should fail without source path"
+    );
+
+    let with_source =
+        run_reliability_analysis_with_config_and_source_path(&netlist, &cfg, Some(&source_path))
+            .expect("source-aware reliability analysis should resolve include");
+    assert_eq!(with_source.years, vec![1.0, 5.0, 10.0]);
+    assert!(!with_source.device_results.is_empty());
 }
 
 #[test]
@@ -206,6 +265,50 @@ fn test_run_optimization_analysis_rejects_invalid_variable_name() {
 }
 
 #[test]
+fn test_run_optimization_analysis_with_config_and_source_path_resolves_relative_include() {
+    let (_temp_dir, source_path, netlist) = write_device_include_fixture(
+        "optimization_top.rsch",
+        "optimization_stage.inc",
+        ".param RTOP=1k\n.param RBOT=1k\nR1 in out {RTOP}\nR2 out 0 {RBOT}\n",
+        "* optimization include fixture\n\
+V1 in 0 2\n\
+.include ../models/optimization_stage.inc\n\
+.end\n",
+    );
+    let cfg = OptimizationRunConfig {
+        variables: vec![OptimizationVariable {
+            name: "RBOT".to_string(),
+            min: 500.0,
+            max: 3000.0,
+            initial: 1000.0,
+        }],
+        objective_node: "out".to_string(),
+        objective_ref: "0".to_string(),
+        goal: OptimizationGoalMode::Target,
+        target: Some(1.2),
+        algorithm: OptimizationAlgorithmMode::PatternSearch,
+        max_iterations: 80,
+        cost_tolerance: 1e-8,
+        fd_step: 1e-4,
+        initial_step: 0.2,
+        min_step: 1e-8,
+    };
+
+    let without_source = run_optimization_analysis_with_config(&netlist, &cfg);
+    assert!(
+        without_source.is_err(),
+        "relative include should fail without source path"
+    );
+
+    let with_source =
+        run_optimization_analysis_with_config_and_source_path(&netlist, &cfg, Some(&source_path))
+            .expect("source-aware optimization analysis should resolve include");
+    assert!(!with_source.iterations.is_empty());
+    assert!(with_source.variable_traces.contains_key("RBOT"));
+    assert!(with_source.best_variables.contains_key("RBOT"));
+}
+
+#[test]
 fn test_inject_param_overrides_inserts_before_last_end() {
     let netlist = "* test\n.param A=1\nR1 in 0 {A}\n.end\n";
     let vars = std::collections::HashMap::from([("A".to_string(), 2.5)]);
@@ -308,4 +411,42 @@ fn test_run_soa_analysis_rejects_netlist_without_supported_devices() {
     let err = run_soa_analysis(netlist)
         .expect_err("SOA should fail when no supported semiconductor devices exist");
     assert!(err.contains("supported semiconductor devices"));
+}
+
+#[test]
+fn test_run_soa_analysis_with_config_and_source_path_resolves_relative_include() {
+    let (_temp_dir, source_path, netlist) = write_device_include_fixture(
+        "soa_top.rsch",
+        "soa_stage.inc",
+        "M1 d g 0 0 NM W=10u L=1u\n.model NM NMOS VTO=0.7 KP=200u LAMBDA=0.02\n",
+        "* soa include fixture\n\
+VDD d 0 3.3\n\
+VG g 0 PULSE(0 2.5 0 1n 1n 8n 16n)\n\
+.include ../models/soa_stage.inc\n\
+.end\n",
+    );
+    let cfg = SoaRunConfig {
+        stop_time: 32e-9,
+        step_time: 1e-9,
+        check_vgs_max: true,
+        max_vgs: 1.2,
+        check_vds_max: true,
+        max_vds: 3.0,
+        check_vbe_max: false,
+        max_vbe: 1.0,
+        check_vce_max: false,
+        max_vce: 5.0,
+    };
+
+    let without_source = run_soa_analysis_with_config(&netlist, &cfg);
+    assert!(
+        without_source.is_err(),
+        "relative include should fail without source path"
+    );
+
+    let with_source =
+        run_soa_analysis_with_config_and_source_path(&netlist, &cfg, Some(&source_path))
+            .expect("source-aware SOA analysis should resolve include");
+    assert!(!with_source.time.is_empty());
+    assert_eq!(with_source.time.len(), with_source.violation_count.len());
 }
