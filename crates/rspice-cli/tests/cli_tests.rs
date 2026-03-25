@@ -1024,6 +1024,19 @@ fn test_run_meas_uses_named_transient_node_aliases() {
 }
 
 #[test]
+fn test_run_meas_delay_statement_reports_success() {
+    let fixture_path = fixture("delay_measurement.sp");
+
+    Command::cargo_bin("rspice")
+        .unwrap()
+        .args(["run", fixture_path.to_str().unwrap(), "--meas"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("prop_delay").or(predicate::str::contains("PROP_DELAY")))
+        .stdout(predicate::str::contains("FAILED").not());
+}
+
+#[test]
 fn test_convert_csv_to_hdf5_creates_waveform_file() {
     let temp_dir = tempfile::tempdir().unwrap();
     let input_path = temp_dir.path().join("input.csv");
