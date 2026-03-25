@@ -36,7 +36,7 @@ pub(crate) struct ComplexSignal {
     pub(crate) imag: Vec<Value>,
 }
 
-fn unwrap_signal_name<'a>(name: &'a str, prefix: char) -> Option<&'a str> {
+fn unwrap_signal_name(name: &str, prefix: char) -> Option<&str> {
     let trimmed = name.trim();
     let mut chars = trimmed.chars();
     let first = chars.next()?;
