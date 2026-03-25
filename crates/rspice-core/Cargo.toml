@@ -59,5 +59,10 @@ wide = { version = "0.7", optional = true }
 approx.workspace = true
 env_logger.workspace = true
 rspice-veriloga = { path = "../rspice-veriloga" }
+criterion = "0.5"
+
+[[bench]]
+name = "simulation_kernels"
+harness = false
 
 
