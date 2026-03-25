@@ -1,5 +1,28 @@
+use std::path::{Path, PathBuf};
+
 use rspice_core::netlist::ElementKind;
 use rspice_core::Value;
+
+pub(super) fn parse_runner_netlist(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+) -> Result<rspice_core::Netlist, String> {
+    let parse_source = runner_parse_source(source_path);
+    rspice_core::Netlist::parse_with_path(netlist_text, &parse_source)
+        .map_err(|e| format!("Parse error: {}", e))
+}
+
+fn runner_parse_source(source_path: Option<&Path>) -> PathBuf {
+    const GENERATED_NETLIST_NAME: &str = "__rspice_ui_runner_generated__.cir";
+
+    match source_path {
+        Some(path) if path.is_dir() => path.join(GENERATED_NETLIST_NAME),
+        Some(path) => path.to_path_buf(),
+        None => std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(GENERATED_NETLIST_NAME),
+    }
+}
 
 pub(super) fn build_voltage_output_expr(output_node: &str, output_ref: Option<&str>) -> String {
     let output_node = output_node.trim();

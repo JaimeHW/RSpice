@@ -1,8 +1,9 @@
 //! DC sweep analysis runner.
 
-use super::build_engine_config;
+use super::{build_engine_config, parse_runner_netlist};
 use rspice_core::engine::Engine;
 use rspice_core::Value;
+use std::path::Path;
 
 /// DC sweep analysis data
 #[derive(Debug, Clone)]
@@ -25,9 +26,20 @@ pub fn run_dc_sweep(
     stop: Value,
     step: Value,
 ) -> Result<DcSweepData, String> {
-    // Parse the netlist
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    run_dc_sweep_with_source_path(netlist_text, source_name, start, stop, step, None)
+}
+
+/// Run DC sweep analysis with a source path used to resolve relative includes
+/// and model file references.
+pub fn run_dc_sweep_with_source_path(
+    netlist_text: &str,
+    source_name: &str,
+    start: Value,
+    stop: Value,
+    step: Value,
+    source_path: Option<&Path>,
+) -> Result<DcSweepData, String> {
+    let netlist = parse_runner_netlist(netlist_text, source_path)?;
 
     // Create engine and run DC sweep
     let engine = Engine::new(build_engine_config(&netlist, None));

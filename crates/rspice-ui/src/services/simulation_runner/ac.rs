@@ -1,8 +1,9 @@
-use super::{build_engine_config, generate_freq_points};
+use super::{build_engine_config, generate_freq_points, parse_runner_netlist};
 use num_complex::Complex64;
 use rspice_core::analysis::ac::AcResult;
 use rspice_core::engine::Engine;
 use rspice_core::Value;
+use std::path::Path;
 
 /// AC small-signal analysis data for Bode plots
 #[derive(Debug, Clone)]
@@ -66,8 +67,27 @@ pub fn run_ac_analysis(
     num_points: usize,
     sweep_type: &str, // "dec", "oct", or "lin"
 ) -> Result<AcData, String> {
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    run_ac_analysis_with_source_path(
+        netlist_text,
+        start_freq,
+        stop_freq,
+        num_points,
+        sweep_type,
+        None,
+    )
+}
+
+/// Run AC small-signal analysis with a source path used to resolve relative
+/// includes and model file references.
+pub fn run_ac_analysis_with_source_path(
+    netlist_text: &str,
+    start_freq: Value,
+    stop_freq: Value,
+    num_points: usize,
+    sweep_type: &str, // "dec", "oct", or "lin"
+    source_path: Option<&Path>,
+) -> Result<AcData, String> {
+    let netlist = parse_runner_netlist(netlist_text, source_path)?;
     let frequencies = generate_freq_points(start_freq, stop_freq, num_points, sweep_type);
     let engine = Engine::new(build_engine_config(&netlist, None));
     let results = engine

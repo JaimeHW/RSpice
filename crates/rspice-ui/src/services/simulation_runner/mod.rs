@@ -45,8 +45,8 @@ mod stb;
 mod sweeps;
 mod tf;
 mod transient;
-pub use ac::{run_ac_analysis, AcData};
-pub use dc_sweep::{run_dc_sweep, DcSweepData};
+pub use ac::{run_ac_analysis, run_ac_analysis_with_source_path, AcData};
+pub use dc_sweep::{run_dc_sweep, run_dc_sweep_with_source_path, DcSweepData};
 #[cfg(test)]
 use disto::interpolate_magnitude_at_for_tests;
 pub use disto::{run_disto_analysis, DistoData, DistoFrequencySweep, DistoRunConfig, DistoTrace};
@@ -58,7 +58,7 @@ pub use hb::{run_hb_analysis, HbData, HbRunConfig, HbToneRunConfig};
 use helpers::{
     build_voltage_output_expr, generate_freq_points, infer_primary_output_node,
     infer_primary_source_name, is_ground_like, netlist_has_independent_source_named,
-    normalize_voltage_signal_name,
+    normalize_voltage_signal_name, parse_runner_netlist,
 };
 pub use monte_carlo::{run_monte_carlo_analysis, MonteCarloData, MonteCarloVariableData};
 pub use noise::{run_noise_analysis, NoiseData};
@@ -96,8 +96,9 @@ pub use sweeps::{
 };
 pub use tf::{run_tf_analysis, run_tf_analysis_with_config, TfData, TfFrequencySweep, TfRunConfig};
 pub use transient::{
-    run_simulation, run_simulation_with_options, run_transient_analysis, SimulationResult,
-    SimulationStats, TransientData,
+    run_simulation, run_simulation_with_options, run_simulation_with_options_and_source_path,
+    run_simulation_with_source_path, run_transient_analysis,
+    run_transient_analysis_with_source_path, SimulationResult, SimulationStats, TransientData,
 };
 
 #[cfg(test)]

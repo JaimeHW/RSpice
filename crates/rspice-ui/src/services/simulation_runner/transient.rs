@@ -1,7 +1,8 @@
-use super::{build_engine_config, now_ms};
+use super::{build_engine_config, now_ms, parse_runner_netlist};
 use rspice_core::engine::{Engine, TransientResult};
 use rspice_core::netlist::AnalysisCommand;
 use rspice_core::Value;
+use std::path::Path;
 
 /// Result of a simulation run
 #[derive(Debug, Clone)]
@@ -71,7 +72,16 @@ pub struct SimulationStats {
 ///
 /// This function parses the netlist, runs requested analyses, and extracts results.
 pub fn run_simulation(netlist_text: &str) -> SimulationResult {
-    run_simulation_with_options(netlist_text, None)
+    run_simulation_with_options_and_source_path(netlist_text, None, None)
+}
+
+/// Run a simulation from netlist text with a source path used to resolve
+/// relative includes and model file references.
+pub fn run_simulation_with_source_path(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+) -> SimulationResult {
+    run_simulation_with_options_and_source_path(netlist_text, None, source_path)
 }
 
 /// Run a simulation with custom simulation options
@@ -81,18 +91,28 @@ pub fn run_simulation_with_options(
     netlist_text: &str,
     options: Option<&crate::simulation::dialog::SimulationOptions>,
 ) -> SimulationResult {
+    run_simulation_with_options_and_source_path(netlist_text, options, None)
+}
+
+/// Run a simulation with custom simulation options and a source path used to
+/// resolve relative includes and model file references.
+pub fn run_simulation_with_options_and_source_path(
+    netlist_text: &str,
+    options: Option<&crate::simulation::dialog::SimulationOptions>,
+    source_path: Option<&Path>,
+) -> SimulationResult {
     let mut stats = SimulationStats::default();
 
     // Parse the netlist
     let parse_start = now_ms();
-    let netlist = match rspice_core::netlist::parse_netlist(netlist_text) {
+    let netlist = match parse_runner_netlist(netlist_text, source_path) {
         Ok(nl) => nl,
-        Err(e) => {
+        Err(error) => {
             return SimulationResult {
                 success: false,
                 transient: None,
                 dc_op: None,
-                error: Some(format!("Parse error: {}", e)),
+                error: Some(error),
                 stats,
             };
         }
@@ -206,6 +226,17 @@ pub fn run_transient_analysis(
     stop_time: Value,
     step_time: Value,
 ) -> Result<TransientData, String> {
+    run_transient_analysis_with_source_path(netlist_text, stop_time, step_time, None)
+}
+
+/// Run transient analysis with explicit parameters and a source path used to
+/// resolve relative includes and model file references.
+pub fn run_transient_analysis_with_source_path(
+    netlist_text: &str,
+    stop_time: Value,
+    step_time: Value,
+    source_path: Option<&Path>,
+) -> Result<TransientData, String> {
     if stop_time <= 0.0 {
         return Err("Transient stop_time must be > 0".to_string());
     }
@@ -216,8 +247,7 @@ pub fn run_transient_analysis(
         return Err("Transient step_time must be <= stop_time".to_string());
     }
 
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    let netlist = parse_runner_netlist(netlist_text, source_path)?;
 
     let engine = Engine::new(build_engine_config(&netlist, None));
     let result = engine
