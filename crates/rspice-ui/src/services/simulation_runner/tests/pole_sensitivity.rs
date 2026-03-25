@@ -1,4 +1,5 @@
 use super::*;
+use crate::services::simulation_runner::pole_zero::PoleZeroRunSpec;
 use std::path::PathBuf;
 
 fn write_pole_sensitivity_include_fixture() -> (tempfile::TempDir, PathBuf, String) {
@@ -27,23 +28,41 @@ V1 in 0 DC 1 AC 1\n\
     (temp_dir, source_path, netlist)
 }
 
+fn pz_spec<'a>(
+    input_node: &'a str,
+    input_ref: &'a str,
+    output_node: &'a str,
+    output_ref: &'a str,
+    transfer_type: &'a str,
+    analysis_type: &'a str,
+) -> PoleZeroRunSpec<'a> {
+    PoleZeroRunSpec::new(
+        input_node,
+        input_ref,
+        output_node,
+        output_ref,
+        transfer_type,
+        analysis_type,
+    )
+}
+
 #[test]
 fn test_run_pole_zero_analysis_validation() {
     let netlist = "* pz\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n";
 
-    let err = run_pole_zero_analysis(netlist, "in", "0", "out", "0", "BAD", "PZ")
+    let err = run_pole_zero_analysis(netlist, pz_spec("in", "0", "out", "0", "BAD", "PZ"))
         .expect_err("expected transfer_type validation");
     assert!(err.contains("transfer_type"));
 
-    let err = run_pole_zero_analysis(netlist, "in", "nref", "out", "0", "VOL", "PZ")
+    let err = run_pole_zero_analysis(netlist, pz_spec("in", "nref", "out", "0", "VOL", "PZ"))
         .expect_err("expected reference validation");
     assert!(err.contains("not found"));
 
-    let err = run_pole_zero_analysis(netlist, "in", "0", "out", "0", "VOL", "BAD")
+    let err = run_pole_zero_analysis(netlist, pz_spec("in", "0", "out", "0", "VOL", "BAD"))
         .expect_err("expected analysis_type validation");
     assert!(err.contains("analysis_type"));
 
-    run_pole_zero_analysis(netlist, "in", "0", "out", "0", "CUR", "PZ")
+    run_pole_zero_analysis(netlist, pz_spec("in", "0", "out", "0", "CUR", "PZ"))
         .expect("CUR transfer_type should be accepted");
 }
 
@@ -51,11 +70,11 @@ fn test_run_pole_zero_analysis_validation() {
 fn test_run_pole_zero_analysis_filters_analysis_type() {
     let netlist = "* pz\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n";
 
-    let pol = run_pole_zero_analysis(netlist, "in", "0", "out", "0", "VOL", "POL")
+    let pol = run_pole_zero_analysis(netlist, pz_spec("in", "0", "out", "0", "VOL", "POL"))
         .expect("POL run should succeed");
     assert!(pol.zeros.is_empty());
 
-    let zer = run_pole_zero_analysis(netlist, "in", "0", "out", "0", "VOL", "ZER")
+    let zer = run_pole_zero_analysis(netlist, pz_spec("in", "0", "out", "0", "VOL", "ZER"))
         .expect("ZER run should succeed");
     assert!(zer.poles.is_empty());
 }
@@ -65,19 +84,19 @@ fn test_run_pole_zero_analysis_supports_non_ground_references() {
     let netlist =
         "* pz diff\nV1 in 0 1\nR1 in out 1k\nR2 out ref 500\nC1 out ref 1n\nR3 ref 0 1k\n";
 
-    let diff = run_pole_zero_analysis(netlist, "in", "ref", "out", "ref", "VOL", "PZ")
+    let diff = run_pole_zero_analysis(netlist, pz_spec("in", "ref", "out", "ref", "VOL", "PZ"))
         .expect("differential pole-zero should succeed");
 
-    let h11 = run_pole_zero_analysis(netlist, "in", "0", "out", "0", "VOL", "PZ")
+    let h11 = run_pole_zero_analysis(netlist, pz_spec("in", "0", "out", "0", "VOL", "PZ"))
         .expect("h11 should succeed")
         .gain;
-    let h12 = run_pole_zero_analysis(netlist, "ref", "0", "out", "0", "VOL", "PZ")
+    let h12 = run_pole_zero_analysis(netlist, pz_spec("ref", "0", "out", "0", "VOL", "PZ"))
         .expect("h12 should succeed")
         .gain;
-    let h21 = run_pole_zero_analysis(netlist, "in", "0", "ref", "0", "VOL", "PZ")
+    let h21 = run_pole_zero_analysis(netlist, pz_spec("in", "0", "ref", "0", "VOL", "PZ"))
         .expect("h21 should succeed")
         .gain;
-    let h22 = run_pole_zero_analysis(netlist, "ref", "0", "ref", "0", "VOL", "PZ")
+    let h22 = run_pole_zero_analysis(netlist, pz_spec("ref", "0", "ref", "0", "VOL", "PZ"))
         .expect("h22 should succeed")
         .gain;
     let expected = h11 - h12 - h21 + h22;
@@ -89,7 +108,7 @@ fn test_run_pole_zero_analysis_supports_non_ground_references() {
 fn test_run_pole_zero_analysis_voltage_mode_reports_highpass_zero() {
     let netlist = "* hp\nC1 in out 1n\nR1 out 0 1k\n";
 
-    let result = run_pole_zero_analysis(netlist, "in", "0", "out", "0", "VOL", "ZER")
+    let result = run_pole_zero_analysis(netlist, pz_spec("in", "0", "out", "0", "VOL", "ZER"))
         .expect("voltage-mode zero analysis should succeed");
 
     assert!(
@@ -276,7 +295,8 @@ fn test_run_sensitivity_analysis_normalized_reports_zero_when_nominal_is_near_ze
 fn test_run_pole_zero_analysis_with_source_path_resolves_relative_include() {
     let (_temp_dir, source_path, netlist) = write_pole_sensitivity_include_fixture();
 
-    let without_source = run_pole_zero_analysis(&netlist, "in", "0", "out", "0", "VOL", "PZ");
+    let without_source =
+        run_pole_zero_analysis(&netlist, pz_spec("in", "0", "out", "0", "VOL", "PZ"));
     assert!(
         without_source.is_err(),
         "relative include should fail without source path"
@@ -284,12 +304,7 @@ fn test_run_pole_zero_analysis_with_source_path_resolves_relative_include() {
 
     let with_source = run_pole_zero_analysis_with_source_path(
         &netlist,
-        "in",
-        "0",
-        "out",
-        "0",
-        "VOL",
-        "PZ",
+        pz_spec("in", "0", "out", "0", "VOL", "PZ"),
         Some(&source_path),
     )
     .expect("source-aware pole-zero analysis should resolve include");

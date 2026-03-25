@@ -17,58 +17,140 @@ pub struct PoleZeroData {
     pub gain: Value,
 }
 
+/// Request parameters for a pole-zero analysis run.
+#[derive(Debug, Clone, Copy)]
+pub struct PoleZeroRunSpec<'a> {
+    pub input_node: &'a str,
+    pub input_ref: &'a str,
+    pub output_node: &'a str,
+    pub output_ref: &'a str,
+    pub transfer_type: &'a str,
+    pub analysis_type: &'a str,
+}
+
+impl<'a> PoleZeroRunSpec<'a> {
+    pub const fn new(
+        input_node: &'a str,
+        input_ref: &'a str,
+        output_node: &'a str,
+        output_ref: &'a str,
+        transfer_type: &'a str,
+        analysis_type: &'a str,
+    ) -> Self {
+        Self {
+            input_node,
+            input_ref,
+            output_node,
+            output_ref,
+            transfer_type,
+            analysis_type,
+        }
+    }
+
+    fn validate(self) -> Result<ValidatedPoleZeroRunSpec<'a>, String> {
+        let input_node = self.input_node.trim();
+        let input_ref = self.input_ref.trim();
+        let output_node = self.output_node.trim();
+        let output_ref = self.output_ref.trim();
+
+        if input_node.is_empty() {
+            return Err("Pole-zero input_node is required".to_string());
+        }
+        if output_node.is_empty() {
+            return Err("Pole-zero output_node is required".to_string());
+        }
+
+        Ok(ValidatedPoleZeroRunSpec {
+            input_node,
+            input_ref,
+            output_node,
+            output_ref,
+            transfer_type: PoleZeroTransferType::parse(self.transfer_type)?,
+            analysis_type: PoleZeroAnalysisType::parse(self.analysis_type)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PoleZeroTransferType {
+    Voltage,
+    Current,
+}
+
+impl PoleZeroTransferType {
+    fn parse(raw: &str) -> Result<Self, String> {
+        match raw.trim().to_ascii_uppercase().as_str() {
+            "VOL" => Ok(Self::Voltage),
+            "CUR" => Ok(Self::Current),
+            _ => Err("Pole-zero transfer_type must be VOL or CUR".to_string()),
+        }
+    }
+
+    fn input_is_current(self) -> bool {
+        matches!(self, Self::Current)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PoleZeroAnalysisType {
+    PoleZero,
+    PolesOnly,
+    ZerosOnly,
+}
+
+impl PoleZeroAnalysisType {
+    fn parse(raw: &str) -> Result<Self, String> {
+        match raw.trim().to_ascii_uppercase().as_str() {
+            "PZ" => Ok(Self::PoleZero),
+            "POL" => Ok(Self::PolesOnly),
+            "ZER" => Ok(Self::ZerosOnly),
+            _ => Err("Pole-zero analysis_type must be PZ, POL, or ZER".to_string()),
+        }
+    }
+
+    fn compute_flags(self) -> (bool, bool) {
+        match self {
+            Self::PoleZero => (true, true),
+            Self::PolesOnly => (true, false),
+            Self::ZerosOnly => (false, true),
+        }
+    }
+
+    fn filter_results(self, poles: &mut Vec<(Value, Value)>, zeros: &mut Vec<(Value, Value)>) {
+        match self {
+            Self::PolesOnly => zeros.clear(),
+            Self::ZerosOnly => poles.clear(),
+            Self::PoleZero => {}
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ValidatedPoleZeroRunSpec<'a> {
+    input_node: &'a str,
+    input_ref: &'a str,
+    output_node: &'a str,
+    output_ref: &'a str,
+    transfer_type: PoleZeroTransferType,
+    analysis_type: PoleZeroAnalysisType,
+}
+
 /// Run pole-zero analysis.
 pub fn run_pole_zero_analysis(
     netlist_text: &str,
-    input_node: &str,
-    input_ref: &str,
-    output_node: &str,
-    output_ref: &str,
-    transfer_type: &str,
-    analysis_type: &str,
+    spec: PoleZeroRunSpec<'_>,
 ) -> Result<PoleZeroData, String> {
-    run_pole_zero_analysis_with_source_path(
-        netlist_text,
-        input_node,
-        input_ref,
-        output_node,
-        output_ref,
-        transfer_type,
-        analysis_type,
-        None,
-    )
+    run_pole_zero_analysis_with_source_path(netlist_text, spec, None)
 }
 
 /// Run pole-zero analysis with a source path used to resolve relative includes
 /// and model file references.
 pub fn run_pole_zero_analysis_with_source_path(
     netlist_text: &str,
-    input_node: &str,
-    input_ref: &str,
-    output_node: &str,
-    output_ref: &str,
-    transfer_type: &str,
-    analysis_type: &str,
+    spec: PoleZeroRunSpec<'_>,
     source_path: Option<&Path>,
 ) -> Result<PoleZeroData, String> {
-    let input_node = input_node.trim();
-    let output_node = output_node.trim();
-    if input_node.is_empty() {
-        return Err("Pole-zero input_node is required".to_string());
-    }
-    if output_node.is_empty() {
-        return Err("Pole-zero output_node is required".to_string());
-    }
-
-    let transfer_type = transfer_type.trim().to_ascii_uppercase();
-    if transfer_type != "VOL" && transfer_type != "CUR" {
-        return Err("Pole-zero transfer_type must be VOL or CUR".to_string());
-    }
-
-    let analysis_type = analysis_type.trim().to_ascii_uppercase();
-    if analysis_type != "PZ" && analysis_type != "POL" && analysis_type != "ZER" {
-        return Err("Pole-zero analysis_type must be PZ, POL, or ZER".to_string());
-    }
+    let spec = spec.validate()?;
 
     let netlist = parse_runner_netlist(netlist_text, source_path)?;
     let engine = Engine::new(build_engine_config(&netlist, None));
@@ -77,14 +159,14 @@ pub fn run_pole_zero_analysis_with_source_path(
         .run_dc_op(&netlist)
         .map_err(|e| format!("DC OP error (required for pole-zero): {}", e))?;
 
-    let input_idx = resolve_node_or_ground_index(input_node, &dc_result.node_names)
-        .ok_or_else(|| format!("Pole-zero input node '{}' not found", input_node))?;
-    let input_ref_idx = resolve_node_or_ground_index(input_ref, &dc_result.node_names)
-        .ok_or_else(|| format!("Pole-zero input reference '{}' not found", input_ref))?;
-    let output_idx = resolve_node_or_ground_index(output_node, &dc_result.node_names)
-        .ok_or_else(|| format!("Pole-zero output node '{}' not found", output_node))?;
-    let output_ref_idx = resolve_node_or_ground_index(output_ref, &dc_result.node_names)
-        .ok_or_else(|| format!("Pole-zero output reference '{}' not found", output_ref))?;
+    let input_idx = resolve_node_or_ground_index(spec.input_node, &dc_result.node_names)
+        .ok_or_else(|| format!("Pole-zero input node '{}' not found", spec.input_node))?;
+    let input_ref_idx = resolve_node_or_ground_index(spec.input_ref, &dc_result.node_names)
+        .ok_or_else(|| format!("Pole-zero input reference '{}' not found", spec.input_ref))?;
+    let output_idx = resolve_node_or_ground_index(spec.output_node, &dc_result.node_names)
+        .ok_or_else(|| format!("Pole-zero output node '{}' not found", spec.output_node))?;
+    let output_ref_idx = resolve_node_or_ground_index(spec.output_ref, &dc_result.node_names)
+        .ok_or_else(|| format!("Pole-zero output reference '{}' not found", spec.output_ref))?;
 
     if input_idx == input_ref_idx {
         return Err("Pole-zero input_node and input_ref cannot be the same node".to_string());
@@ -98,12 +180,8 @@ pub fn run_pole_zero_analysis_with_source_path(
     let (output_pos, output_neg, output_sign) = canonicalize_pz_port(output_idx, output_ref_idx)
         .map_err(|e| format!("Invalid pole-zero output port: {}", e))?;
 
-    let input_is_current = transfer_type == "CUR";
-    let (compute_poles, compute_zeros) = match analysis_type.as_str() {
-        "POL" => (true, false),
-        "ZER" => (false, true),
-        _ => (true, true),
-    };
+    let input_is_current = spec.transfer_type.input_is_current();
+    let (compute_poles, compute_zeros) = spec.analysis_type.compute_flags();
 
     let pz_result = engine
         .run_pz_ports(
@@ -126,11 +204,7 @@ pub fn run_pole_zero_analysis_with_source_path(
     let mut poles: Vec<(Value, Value)> = pz_result.poles.iter().map(|p| (p.re, p.im)).collect();
     let mut zeros: Vec<(Value, Value)> = pz_result.zeros.iter().map(|z| (z.re, z.im)).collect();
 
-    match analysis_type.as_str() {
-        "POL" => zeros.clear(),
-        "ZER" => poles.clear(),
-        _ => {}
-    }
+    spec.analysis_type.filter_results(&mut poles, &mut zeros);
 
     Ok(PoleZeroData {
         poles,
