@@ -29,5 +29,5 @@ pub mod theme;
 pub mod viewer_style;
 
 // Re-export main application type
-pub use app::{AppState, ConsoleMessage, RSpiceApp};
+pub use app::{AppState, ConsoleMessage, RSpiceApp, WaveformViewRangeError};
 pub use theme::RSpiceTheme;

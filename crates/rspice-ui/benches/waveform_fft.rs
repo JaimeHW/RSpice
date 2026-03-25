@@ -63,14 +63,13 @@ fn bench_waveform_render(c: &mut Criterion) {
     let (time, values) = build_uniform_transient(sample_count, sample_rate, 125_000.0);
 
     let mut app_state = AppState::default();
-    app_state
-        .simulation
-        .replace_waveforms(vec![WaveformData::new("V(out)", time, values, "#4aa3ff")]);
+    app_state.replace_waveform_results(vec![WaveformData::new("V(out)", time, values, "#4aa3ff")]);
 
     let ctx = egui::Context::default();
     run_ui_frame(&ctx, |ui| render_waveform_viewer(ui, &mut app_state));
-    app_state.waveform_viewer.view.x_min = 0.20e-3;
-    app_state.waveform_viewer.view.x_max = 0.24e-3;
+    app_state
+        .set_waveform_view_x_range(0.20e-3, 0.24e-3)
+        .expect("valid waveform benchmark window");
 
     c.bench_function("waveform_render_dense_transient_redraw_1m", |b| {
         b.iter(|| {

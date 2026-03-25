@@ -170,6 +170,28 @@ pub struct AppState {
     pub(crate) analysis: AnalysisWorkspaceState,
 }
 
+/// Errors returned when applying a waveform-view range from external callers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaveformViewRangeError {
+    /// The provided bounds contain `NaN` or infinity.
+    NonFiniteBounds,
+    /// The provided bounds do not describe a positive range.
+    NonPositiveRange,
+}
+
+impl std::fmt::Display for WaveformViewRangeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NonFiniteBounds => f.write_str("waveform view bounds must be finite"),
+            Self::NonPositiveRange => {
+                f.write_str("waveform view bounds must define a positive range")
+            }
+        }
+    }
+}
+
+impl std::error::Error for WaveformViewRangeError {}
+
 impl Default for AppState {
     fn default() -> Self {
         app_state_init::default_app_state()
@@ -213,6 +235,36 @@ impl AppState {
     pub fn clear_primary_log(&mut self) {
         self.console_messages.clear();
         self.log_buffer.clear();
+    }
+
+    /// Replace the waveform results that drive the shared waveform viewer.
+    pub fn replace_waveform_results(&mut self, waveforms: Vec<crate::state::WaveformData>) {
+        self.simulation.replace_waveforms(waveforms);
+    }
+
+    /// Set the visible X-axis window for the waveform viewer.
+    pub fn set_waveform_view_x_range(
+        &mut self,
+        x_min: f64,
+        x_max: f64,
+    ) -> Result<(), WaveformViewRangeError> {
+        if !x_min.is_finite() || !x_max.is_finite() {
+            return Err(WaveformViewRangeError::NonFiniteBounds);
+        }
+        if x_max <= x_min {
+            return Err(WaveformViewRangeError::NonPositiveRange);
+        }
+
+        self.waveform_viewer.view.x_min = x_min;
+        self.waveform_viewer.view.x_max = x_max;
+        self.waveform_viewer.view.enforce_minimum_range();
+
+        let bounds = self.waveform_viewer.data_bounds.clone();
+        if bounds.valid {
+            self.waveform_viewer.view.clamp_to_bounds(&bounds);
+        }
+
+        Ok(())
     }
 }
 

@@ -167,6 +167,58 @@ fn seed_nyquist_data(state: &mut AppState) {
 }
 
 #[test]
+fn test_replace_waveform_results_refreshes_simulation_waveforms() {
+    let mut state = AppState::default();
+    let initial_version = state.simulation.data_version;
+    let waveform =
+        crate::state::WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 0.5], "#4aa3ff");
+
+    state.replace_waveform_results(vec![waveform.clone()]);
+
+    assert_eq!(state.simulation.waveforms, vec![waveform]);
+    assert_eq!(state.simulation.node_to_waveform.get("V(out)"), Some(&0));
+    assert_ne!(state.simulation.data_version, initial_version);
+}
+
+#[test]
+fn test_set_waveform_view_x_range_rejects_invalid_bounds() {
+    let mut state = AppState::default();
+
+    assert_eq!(
+        state.set_waveform_view_x_range(f64::NAN, 1.0),
+        Err(WaveformViewRangeError::NonFiniteBounds)
+    );
+    assert_eq!(
+        state.set_waveform_view_x_range(1.0, 1.0),
+        Err(WaveformViewRangeError::NonPositiveRange)
+    );
+    assert_eq!(
+        state.set_waveform_view_x_range(2.0, 1.0),
+        Err(WaveformViewRangeError::NonPositiveRange)
+    );
+}
+
+#[test]
+fn test_set_waveform_view_x_range_updates_window_and_clamps_to_loaded_bounds() {
+    let mut state = AppState::default();
+    state.replace_waveform_results(vec![crate::state::WaveformData::new(
+        "V(out)",
+        vec![0.0, 1.0],
+        vec![0.0, 0.5],
+        "#4aa3ff",
+    )]);
+    let waveforms = state.simulation.waveforms.clone();
+    state.waveform_viewer.load_from_simulation(&waveforms);
+
+    state
+        .set_waveform_view_x_range(-0.5, 2.0)
+        .expect("range should be accepted");
+
+    assert_eq!(state.waveform_viewer.view.x_min, 0.0);
+    assert_eq!(state.waveform_viewer.view.x_max, 1.0);
+}
+
+#[test]
 fn test_app_state_default() {
     let state = AppState::default();
     assert!(
