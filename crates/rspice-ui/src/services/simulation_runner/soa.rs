@@ -1,8 +1,12 @@
-use super::{is_ground_like, normalize_voltage_signal_name, run_transient_analysis};
+use super::{
+    is_ground_like, normalize_voltage_signal_name, parse_runner_netlist,
+    run_transient_analysis_with_source_path,
+};
 use crate::services::safety::{SoADefinition, SoALimit, SoAManager, SoAParameter, SoAViolation};
 use rspice_core::netlist::{Element, ElementKind};
 use rspice_core::Value;
 use std::collections::HashMap;
+use std::path::Path;
 
 /// Configuration for SOA analysis.
 #[derive(Debug, Clone)]
@@ -90,7 +94,20 @@ pub struct SoaData {
 
 /// Run SOA analysis using default configuration.
 pub fn run_soa_analysis(netlist_text: &str) -> Result<SoaData, String> {
-    run_soa_analysis_with_config(netlist_text, &SoaRunConfig::default())
+    run_soa_analysis_with_source_path(netlist_text, None)
+}
+
+/// Run SOA analysis using default configuration and a source path used to
+/// resolve relative includes and model file references.
+pub fn run_soa_analysis_with_source_path(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+) -> Result<SoaData, String> {
+    run_soa_analysis_with_config_and_source_path(
+        netlist_text,
+        &SoaRunConfig::default(),
+        source_path,
+    )
 }
 
 /// Run SOA analysis using explicit configuration.
@@ -98,11 +115,25 @@ pub fn run_soa_analysis_with_config(
     netlist_text: &str,
     config: &SoaRunConfig,
 ) -> Result<SoaData, String> {
+    run_soa_analysis_with_config_and_source_path(netlist_text, config, None)
+}
+
+/// Run SOA analysis using explicit configuration and a source path used to
+/// resolve relative includes and model file references.
+pub fn run_soa_analysis_with_config_and_source_path(
+    netlist_text: &str,
+    config: &SoaRunConfig,
+    source_path: Option<&Path>,
+) -> Result<SoaData, String> {
     config.validate()?;
 
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
-    let transient = run_transient_analysis(netlist_text, config.stop_time, config.step_time)?;
+    let netlist = parse_runner_netlist(netlist_text, source_path)?;
+    let transient = run_transient_analysis_with_source_path(
+        netlist_text,
+        config.stop_time,
+        config.step_time,
+        source_path,
+    )?;
 
     let mut manager = SoAManager::new();
     register_soa_limits_for_netlist(&mut manager, &netlist.elements, config);

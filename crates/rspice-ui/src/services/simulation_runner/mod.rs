@@ -66,8 +66,10 @@ pub use monte_carlo::{
 };
 pub use noise::{run_noise_analysis, run_noise_analysis_with_source_path, NoiseData};
 pub use optimization::{
-    run_optimization_analysis, run_optimization_analysis_with_config, OptimizationAlgorithmMode,
-    OptimizationData, OptimizationGoalMode, OptimizationRunConfig, OptimizationVariable,
+    run_optimization_analysis, run_optimization_analysis_with_config,
+    run_optimization_analysis_with_config_and_source_path,
+    run_optimization_analysis_with_source_path, OptimizationAlgorithmMode, OptimizationData,
+    OptimizationGoalMode, OptimizationRunConfig, OptimizationVariable,
 };
 pub use pac_pxf::{
     run_pac_analysis, run_pac_analysis_auto, run_pxf_analysis, run_pxf_analysis_with_config,
@@ -85,13 +87,17 @@ pub use pole_zero::{
 pub use pss::{run_pss_analysis, PssData};
 pub use pstb::{run_pstb_analysis, run_pstb_analysis_with_config, PstbData, PstbRunConfig};
 pub use reliability::{
-    run_reliability_analysis, run_reliability_analysis_with_config, ReliabilityData,
-    ReliabilityRunConfig,
+    run_reliability_analysis, run_reliability_analysis_with_config,
+    run_reliability_analysis_with_config_and_source_path,
+    run_reliability_analysis_with_source_path, ReliabilityData, ReliabilityRunConfig,
 };
 pub use sensitivity::{
     run_sensitivity_analysis, run_sensitivity_analysis_with_source_path, SensitivityData,
 };
-pub use soa::{run_soa_analysis, run_soa_analysis_with_config, SoaData, SoaRunConfig};
+pub use soa::{
+    run_soa_analysis, run_soa_analysis_with_config, run_soa_analysis_with_config_and_source_path,
+    run_soa_analysis_with_source_path, SoaData, SoaRunConfig,
+};
 pub use sparameter::{
     run_sparameter_analysis, run_sparameter_analysis_with_source_path, SParameterData,
     SParameterPort, SParameterRunConfig, SParameterSweep,

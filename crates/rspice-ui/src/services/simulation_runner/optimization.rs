@@ -1,10 +1,11 @@
-use super::{build_engine_config, is_ground_like};
+use super::{build_engine_config, is_ground_like, parse_runner_netlist};
 use crate::simulation::optimizer::{
     DesignVar, OptimizationGoal, OptimizerAlgo, OptimizerConfig, OptimizerEngine,
 };
 use rspice_core::engine::Engine;
 use rspice_core::Value;
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 /// Optimization objective strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,13 +191,36 @@ pub struct OptimizationData {
 
 /// Run optimization analysis with default configuration.
 pub fn run_optimization_analysis(netlist_text: &str) -> Result<OptimizationData, String> {
-    run_optimization_analysis_with_config(netlist_text, &OptimizationRunConfig::default())
+    run_optimization_analysis_with_source_path(netlist_text, None)
+}
+
+/// Run optimization analysis with default configuration and a source path used
+/// to resolve relative includes and model file references.
+pub fn run_optimization_analysis_with_source_path(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+) -> Result<OptimizationData, String> {
+    run_optimization_analysis_with_config_and_source_path(
+        netlist_text,
+        &OptimizationRunConfig::default(),
+        source_path,
+    )
 }
 
 /// Run optimization analysis with explicit configuration.
 pub fn run_optimization_analysis_with_config(
     netlist_text: &str,
     config: &OptimizationRunConfig,
+) -> Result<OptimizationData, String> {
+    run_optimization_analysis_with_config_and_source_path(netlist_text, config, None)
+}
+
+/// Run optimization analysis with explicit configuration and a source path used
+/// to resolve relative includes and model file references.
+pub fn run_optimization_analysis_with_config_and_source_path(
+    netlist_text: &str,
+    config: &OptimizationRunConfig,
+    source_path: Option<&Path>,
 ) -> Result<OptimizationData, String> {
     config.validate()?;
 
@@ -246,7 +270,7 @@ pub fn run_optimization_analysis_with_config(
     let mut eval_error: Option<String> = None;
     let mut successful_evals: usize = 0;
     let mut cost_fn = |vars: &HashMap<String, Value>| -> Value {
-        match evaluate_optimization_objective(netlist_text, vars, config) {
+        match evaluate_optimization_objective(netlist_text, vars, config, source_path) {
             Ok(value) => {
                 successful_evals += 1;
                 objective_to_cost(value, config.goal, config.target)
@@ -320,10 +344,10 @@ fn evaluate_optimization_objective(
     netlist_text: &str,
     vars: &HashMap<String, Value>,
     config: &OptimizationRunConfig,
+    source_path: Option<&Path>,
 ) -> Result<Value, String> {
     let overridden = inject_param_overrides(netlist_text, vars);
-    let netlist = rspice_core::netlist::parse_netlist(&overridden)
-        .map_err(|e| format!("Parse error during optimization: {}", e))?;
+    let netlist = parse_runner_netlist(&overridden, source_path)?;
     let engine = Engine::new(build_engine_config(&netlist, None));
     let dc = engine
         .run_dc_op(&netlist)
