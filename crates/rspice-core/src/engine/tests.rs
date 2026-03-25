@@ -784,6 +784,32 @@ R2 2 0 1k
     }
 
     #[test]
+    fn test_ac_results_preserve_node_and_branch_names() {
+        let netlist_str = r#"
+* AC naming metadata
+V1 in 0 AC 1
+E1 out 0 in 0 2
+R1 out 0 1k
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+
+        let results = engine.run_ac(&netlist, &[1e3, 1e4]).unwrap();
+        assert_eq!(results.len(), 2);
+
+        for result in &results {
+            assert_eq!(result.node_names, vec!["IN".to_string(), "OUT".to_string()]);
+            assert_eq!(
+                result.branch_names,
+                vec!["V1".to_string(), "E1".to_string()]
+            );
+            assert_eq!(result.voltages.len(), result.node_names.len());
+            assert_eq!(result.currents.len(), result.branch_names.len());
+        }
+    }
+
+    #[test]
     fn test_ac_vswitch_initial_state_controls_transfer_in_hysteresis_window() {
         let off_netlist = Netlist::parse(
             r#"

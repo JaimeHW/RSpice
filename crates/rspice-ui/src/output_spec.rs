@@ -623,6 +623,8 @@ mod tests {
     fn test_ac_output_value_voltage_and_branch() {
         let ac = AcResult {
             frequency: 1e3,
+            node_names: vec!["1".to_string(), "2".to_string()],
+            branch_names: vec!["V1".to_string()],
             voltages: vec![Complex64::new(2.0, 0.0), Complex64::new(1.0, 0.5)],
             currents: vec![Complex64::new(-1e-3, 2e-4)],
         };
@@ -654,6 +656,8 @@ mod tests {
     fn test_ac_output_value_reports_out_of_range_node() {
         let ac = AcResult {
             frequency: 1e3,
+            node_names: vec!["1".to_string()],
+            branch_names: vec![],
             voltages: vec![Complex64::new(2.0, 0.0)],
             currents: vec![],
         };

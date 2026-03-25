@@ -284,6 +284,8 @@ impl Engine {
 
         let num_nodes = circuit.num_nodes();
         let size = circuit.matrix_size();
+        let node_names = circuit.node_names_sorted();
+        let branch_names = circuit.branch_names_sorted();
 
         // Closure to solve at a single frequency
         let solve_at_freq = |freq: Value| -> Result<AcResult, SimulationError> {
@@ -576,6 +578,8 @@ impl Engine {
 
             Ok(AcResult {
                 frequency: freq,
+                node_names: node_names.clone(),
+                branch_names: branch_names.clone(),
                 voltages: solution[..num_nodes].to_vec(),
                 currents: if size > num_nodes {
                     solution[num_nodes..].to_vec()

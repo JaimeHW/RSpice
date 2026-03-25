@@ -1655,6 +1655,8 @@ pub struct CircuitData {
     /// Branch element name to branch ordinal mapping (for CCCS/CCVS control lookup)
     /// Keys are element names (e.g., "V1", "L1"), values are branch ordinals (1-indexed)
     branch_names: HashMap<String, NodeId>,
+    /// Canonical branch names indexed by branch ordinal - 1.
+    branch_name_by_ordinal: Vec<Option<String>>,
     /// Number of nodes (excluding ground)
     num_nodes: usize,
     /// Number of branch current variables (voltage sources, inductors)
@@ -1721,6 +1723,7 @@ impl CircuitData {
         Self {
             node_map,
             branch_names: HashMap::new(),
+            branch_name_by_ordinal: Vec::new(),
             num_nodes: 0,
             num_branches: 0,
             resistors: Resistors::new(),
@@ -2009,6 +2012,7 @@ impl CircuitData {
     /// Use get_branch_matrix_index() to get the actual matrix row/column.
     pub fn allocate_branch(&mut self) -> NodeId {
         self.num_branches += 1;
+        self.branch_name_by_ordinal.push(None);
         self.num_branches // Return branch ordinal (1, 2, 3...)
     }
 
@@ -2016,6 +2020,9 @@ impl CircuitData {
     /// This allows CCCS/CCVS to look up control branches by name
     pub fn allocate_branch_named(&mut self, name: &str) -> NodeId {
         let branch = self.allocate_branch();
+        if let Some(slot) = self.branch_name_by_ordinal.get_mut(branch - 1) {
+            *slot = Some(name.to_string());
+        }
         // Store both original and uppercase for case-insensitive lookup
         self.branch_names.insert(name.to_string(), branch);
         self.branch_names.insert(name.to_uppercase(), branch);
@@ -2254,6 +2261,16 @@ impl CircuitData {
 
         // Extract just the names in order
         names.into_iter().map(|(_, name)| name).collect()
+    }
+
+    /// Get branch names sorted by their branch ordinal (1, 2, 3, ...).
+    /// Returns a Vec where index i contains the canonical name of branch (i+1).
+    pub fn branch_names_sorted(&self) -> Vec<String> {
+        self.branch_name_by_ordinal
+            .iter()
+            .enumerate()
+            .map(|(idx, name)| name.clone().unwrap_or_else(|| format!("BRANCH{}", idx + 1)))
+            .collect()
     }
 
     /// Total device count (for parallel stamping threshold)

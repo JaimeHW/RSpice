@@ -80,6 +80,10 @@ impl Default for AcAnalysis {
 pub struct AcResult {
     /// Frequency
     pub frequency: Value,
+    /// Stable node names aligned with `voltages`
+    pub node_names: Vec<String>,
+    /// Stable branch names aligned with `currents`
+    pub branch_names: Vec<String>,
     /// Complex node voltages
     pub voltages: Vec<Complex64>,
     /// Complex branch currents  

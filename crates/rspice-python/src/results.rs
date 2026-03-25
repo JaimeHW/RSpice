@@ -6,9 +6,9 @@
 //! - `AcResult` - Frequency-domain complex phasors
 //! - `DcSweepResult` - Collection of DC solutions
 
-use numpy::{PyArray1, ToPyArray};
 #[cfg(test)]
 use num_complex::Complex64;
+use numpy::{PyArray1, ToPyArray};
 use pyo3::prelude::*;
 use rspice_core::analysis::AcResult;
 use rspice_core::engine::TransientResult;
@@ -1100,6 +1100,8 @@ mod tests {
     fn create_test_ac_result(frequency: f64, voltage: Complex64) -> AcResult {
         AcResult {
             frequency,
+            node_names: vec!["1".to_string()],
+            branch_names: vec![],
             voltages: vec![voltage], // Single node for simplicity
             currents: vec![],
         }

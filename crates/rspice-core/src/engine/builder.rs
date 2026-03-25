@@ -172,7 +172,8 @@ fn add_behavioral_resistor(
 ) -> Result<(), SimulationError> {
     let np = circuit.get_or_create_node(&element.nodes[0]);
     let nn = circuit.get_or_create_node(&element.nodes[1]);
-    let current_temp_c = effective_instance_temperature_celsius(instance_params, temperature_kelvin);
+    let current_temp_c =
+        effective_instance_temperature_celsius(instance_params, temperature_kelvin);
     let tnom_c = netlist.options.tnom.unwrap_or(27.0);
     let tc1 = instance_params
         .iter()
@@ -210,7 +211,10 @@ fn add_behavioral_resistor(
         ))
     })?;
     let current_expression = if (mult - 1.0).abs() < f64::EPSILON {
-        format!("(V({},{})/(({})*{}))", element.nodes[0], element.nodes[1], prepared, temp_scale)
+        format!(
+            "(V({},{})/(({})*{}))",
+            element.nodes[0], element.nodes[1], prepared, temp_scale
+        )
     } else {
         format!(
             "(({}*V({},{}))/(({})*{}))",
@@ -1242,7 +1246,7 @@ impl Engine {
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
                     let cp = circuit.get_or_create_node(&control_nodes.0);
                     let cn = circuit.get_or_create_node(&control_nodes.1);
-                    let branch = circuit.allocate_branch();
+                    let branch = circuit.allocate_branch_named(&element.name);
                     circuit
                         .vcvs
                         .add(element.name.clone(), np, nn, cp, cn, branch, *gain);
@@ -1304,7 +1308,10 @@ impl Engine {
                         *tc2,
                     )
                     .map_err(|e| {
-                        SimulationError::Circuit(format!("Behavioral source '{}': {}", element.name, e))
+                        SimulationError::Circuit(format!(
+                            "Behavioral source '{}': {}",
+                            element.name, e
+                        ))
                     })?;
 
                     let bvs = crate::device::BehavioralVoltageSource::new(
@@ -1333,7 +1340,10 @@ impl Engine {
                         *tc2,
                     )
                     .map_err(|e| {
-                        SimulationError::Circuit(format!("Behavioral source '{}': {}", element.name, e))
+                        SimulationError::Circuit(format!(
+                            "Behavioral source '{}': {}",
+                            element.name, e
+                        ))
                     })?;
 
                     let bcs = crate::device::BehavioralCurrentSource::new(
