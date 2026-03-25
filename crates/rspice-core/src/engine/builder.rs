@@ -1415,7 +1415,7 @@ impl Engine {
                             let _ = device.set_parameter(name, resolved);
                         }
                         device.set_temperature(self.config.temperature);
-                        circuit.veriloga_devices.add(device);
+                        circuit.add_veriloga_device(device);
                         continue;
                     }
 

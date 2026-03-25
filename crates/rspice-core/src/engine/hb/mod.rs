@@ -387,7 +387,7 @@ impl Engine {
             || {
                 #[cfg(feature = "veriloga")]
                 {
-                    !circuit.veriloga_devices.is_empty()
+                    circuit.has_veriloga_devices()
                 }
                 #[cfg(not(feature = "veriloga"))]
                 {
@@ -625,7 +625,7 @@ impl Engine {
         }
 
         #[cfg(feature = "veriloga")]
-        for device in circuit.veriloga_devices.iter() {
+        for device in circuit.veriloga_devices().iter() {
             solver.add_veriloga_device(device.clone());
         }
     }

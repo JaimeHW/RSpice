@@ -25,10 +25,10 @@ R1 1 0 1k
         assert_eq!(netlist.elements.len(), 1);
     }
 
-    /// Test that engine can build circuit with VerilogA devices field
+    /// Test that engine exposes a stable query for Verilog-A circuit state.
     #[test]
     fn test_circuit_has_veriloga_devices() {
-        // Simple netlist without VA includes - just verify the field exists
+        // Simple netlist without VA includes - just verify the query remains stable.
         let netlist_str = r#"Circuit Test
 R1 1 0 1k
 V1 1 0 5
@@ -39,8 +39,36 @@ V1 1 0 5
         let engine = Engine::default();
         let circuit = engine.build_circuit(&netlist).unwrap();
 
-        // Verify the veriloga_devices field exists and is empty
-        assert!(circuit.veriloga_devices.is_empty());
+        // Verify the feature-gated Verilog-A query is available and empty.
+        assert!(!circuit.has_veriloga_devices());
+        assert_eq!(circuit.veriloga_device_count(), 0);
+    }
+
+    /// Test that circuits can add Verilog-A devices through the public query surface.
+    #[test]
+    fn test_circuit_veriloga_device_queries() {
+        use rspice_core::CircuitData;
+        use rspice_core::device::veriloga::VerilogADevice;
+        use rspice_veriloga::VerilogACompiler;
+
+        let va_source = r#"
+            nature electrical; units = "V"; access = V; abstol = 1e-12; endnature
+            nature current; units = "A"; access = I; abstol = 1e-12; endnature
+            discipline electrical; potential electrical; flow current; enddiscipline
+            module resistor(p, n);
+                inout p, n; electrical p, n;
+                parameter real g = 0.001;
+                analog I(p, n) <+ g * V(p, n);
+            endmodule
+        "#;
+
+        let model = VerilogACompiler::default().compile(va_source).unwrap();
+        let mut circuit = CircuitData::new();
+        let node = circuit.get_or_create_node("n1");
+        circuit.add_veriloga_device(VerilogADevice::new("RVA1", model, &[node, 0]));
+
+        assert!(circuit.has_veriloga_devices());
+        assert_eq!(circuit.veriloga_device_count(), 1);
     }
 
     /// Test inline Verilog-A compilation through the engine

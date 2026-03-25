@@ -533,7 +533,7 @@ impl Engine {
         }
 
         #[cfg(feature = "veriloga")]
-        for device in circuit.veriloga_devices.iter() {
+        for device in circuit.veriloga_devices().iter() {
             // Build a conservative matrix topology for this Verilog-A device:
             // full coupling among all external and internal nodes used by the
             // instance. This guarantees all Jacobian stamp locations exist.

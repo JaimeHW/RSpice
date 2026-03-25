@@ -2357,7 +2357,7 @@ impl CircuitData {
             + self.jiles_atherton_inductors.len();
         #[cfg(feature = "veriloga")]
         {
-            count + self.veriloga_devices.len()
+            count + self.veriloga_device_count()
         }
         #[cfg(not(feature = "veriloga"))]
         {
@@ -2648,7 +2648,7 @@ impl CircuitData {
             || {
                 #[cfg(feature = "veriloga")]
                 {
-                    !self.veriloga_devices.is_empty()
+                    self.has_veriloga_devices()
                 }
                 #[cfg(not(feature = "veriloga"))]
                 {
@@ -2671,7 +2671,7 @@ impl CircuitData {
             || {
                 #[cfg(feature = "veriloga")]
                 {
-                    !self.veriloga_devices.is_empty()
+                    self.has_veriloga_devices()
                 }
                 #[cfg(not(feature = "veriloga"))]
                 {
@@ -2706,7 +2706,7 @@ impl CircuitData {
         }
         #[cfg(feature = "veriloga")]
         {
-            self.veriloga_devices.update_all_voltages(voltages);
+            self.veriloga_devices_mut().update_all_voltages(voltages);
         }
     }
 
@@ -2733,8 +2733,9 @@ impl CircuitData {
         }
         #[cfg(feature = "veriloga")]
         {
-            self.veriloga_devices.update_all_voltages(voltages);
-            self.veriloga_devices.stamp_all(
+            let veriloga_devices = self.veriloga_devices_mut();
+            veriloga_devices.update_all_voltages(voltages);
+            veriloga_devices.stamp_all(
                 voltages,
                 |row, col, value| matrix.add(row, col, value),
                 |index, value| {
@@ -2778,6 +2779,33 @@ impl CircuitData {
     #[inline]
     pub fn has_xspice_devices(&self) -> bool {
         !self.xspice_instances.is_empty()
+    }
+
+    #[cfg(feature = "veriloga")]
+    #[inline]
+    pub fn has_veriloga_devices(&self) -> bool {
+        !self.veriloga_devices.is_empty()
+    }
+
+    #[cfg(feature = "veriloga")]
+    #[inline]
+    pub fn veriloga_device_count(&self) -> usize {
+        self.veriloga_devices.len()
+    }
+
+    #[cfg(feature = "veriloga")]
+    pub fn add_veriloga_device(&mut self, device: crate::device::veriloga::VerilogADevice) {
+        self.veriloga_devices.add(device);
+    }
+
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn veriloga_devices(&self) -> &crate::device::veriloga::VerilogADevices {
+        &self.veriloga_devices
+    }
+
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn veriloga_devices_mut(&mut self) -> &mut crate::device::veriloga::VerilogADevices {
+        &mut self.veriloga_devices
     }
 
     /// Evaluate all XSPICE code model instances

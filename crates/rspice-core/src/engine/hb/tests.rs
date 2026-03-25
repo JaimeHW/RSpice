@@ -340,7 +340,7 @@ fn test_hb_veriloga_devices_are_treated_as_supported() {
     let node = circuit.get_or_create_node("n1");
     let mut device = VerilogADevice::new("RVA1", create_veriloga_resistor_model(), &[node, 0]);
     assert!(device.set_parameter("g", 1e-3));
-    circuit.veriloga_devices.add(device);
+    circuit.add_veriloga_device(device);
     let num_nodes = circuit.num_nodes();
 
     assert!(
@@ -360,7 +360,7 @@ fn test_hb_stamps_veriloga_devices_into_solver() {
     let node = circuit.get_or_create_node("n1");
     let mut device = VerilogADevice::new("RVA1", create_veriloga_resistor_model(), &[node, 0]);
     assert!(device.set_parameter("g", 1e-3));
-    circuit.veriloga_devices.add(device);
+    circuit.add_veriloga_device(device);
 
     let num_nodes = circuit.num_nodes();
     let mut solver = HbSolver::new(HbConfig::new(1e6).with_harmonics(1), num_nodes);
