@@ -3203,11 +3203,10 @@ impl HbSolver {
                         let Some(&(row, col)) = prog_locs.get(entry.jacobian_idx) else {
                             continue;
                         };
-                        if let (Some(i), Some(j)) = (row, col) {
-                            if i < n && j < n {
+                        if let (Some(i), Some(j)) = (row, col)
+                            && i < n && j < n {
                                 g_time[i][j][t] += entry.value;
                             }
-                        }
                     }
                 }
             }

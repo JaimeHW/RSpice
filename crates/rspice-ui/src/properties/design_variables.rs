@@ -292,8 +292,8 @@ fn try_simple_arithmetic(expr: &str, context: &HashMap<String, f64>) -> Option<f
     // Very simple: handle single binary operations
     // Format: term OP term
     for op in ['*', '/', '+', '-'] {
-        if let Some(pos) = expr.rfind(op) {
-            if pos > 0 && pos < expr.len() - 1 {
+        if let Some(pos) = expr.rfind(op)
+            && pos > 0 && pos < expr.len() - 1 {
                 let left = expr[..pos].trim();
                 let right = expr[pos + 1..].trim();
 
@@ -308,7 +308,6 @@ fn try_simple_arithmetic(expr: &str, context: &HashMap<String, f64>) -> Option<f
                     _ => return None,
                 });
             }
-        }
     }
     None
 }

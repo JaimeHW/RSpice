@@ -630,8 +630,8 @@ fn parse_voltage_hint_target(
         return Ok(None);
     }
 
-    if let TokenKind::Ident(ident) = &stream.peek().kind {
-        if ident.eq_ignore_ascii_case("V") && matches!(stream.peek_n(1).kind, TokenKind::LParen) {
+    if let TokenKind::Ident(ident) = &stream.peek().kind
+        && ident.eq_ignore_ascii_case("V") && matches!(stream.peek_n(1).kind, TokenKind::LParen) {
             stream.advance(); // V
             stream.advance(); // (
 
@@ -649,7 +649,6 @@ fn parse_voltage_hint_target(
             }
             return Ok(Some(node));
         }
-    }
 
     Ok(Some(expect_node(stream, line_num)?))
 }

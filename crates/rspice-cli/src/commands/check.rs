@@ -135,11 +135,10 @@ fn check_model_references(netlist: &Netlist, result: &mut ValidationResult) {
     let defined: HashSet<String> = netlist.models.iter().map(|m| m.name.clone()).collect();
 
     for elem in &netlist.elements {
-        if let Some(model_name) = get_element_model(elem) {
-            if !defined.contains(&model_name) && !is_builtin_model(&model_name) {
+        if let Some(model_name) = get_element_model(elem)
+            && !defined.contains(&model_name) && !is_builtin_model(&model_name) {
                 result.add_element_warning(&elem.name, format!("Undefined model '{}'", model_name));
             }
-        }
     }
 }
 

@@ -55,8 +55,8 @@ impl SimulationController {
                     ));
                 }
 
-                if let Some(inoise) = input_noise {
-                    if !inoise.is_empty() {
+                if let Some(inoise) = input_noise
+                    && !inoise.is_empty() {
                         results.push(WaveformData::new(
                             "inoise".to_string(),
                             Arc::clone(&shared_freqs),
@@ -64,7 +64,6 @@ impl SimulationController {
                             Self::color_for_index(1),
                         ));
                     }
-                }
 
                 for (idx, (source, values)) in contributors.iter().enumerate() {
                     results.push(WaveformData::new(

@@ -208,15 +208,14 @@ fn parse_header<R: BufRead>(
         } else if in_variables && !line.is_empty() {
             // Parse variable line: "index name type"
             let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 3 {
-                if let Ok(index) = parts[0].parse::<usize>() {
+            if parts.len() >= 3
+                && let Ok(index) = parts[0].parse::<usize>() {
                     variables.push(RawVariable {
                         index,
                         name: parts[1].to_string(),
                         var_type: parts[2].to_string(),
                     });
                 }
-            }
         }
     }
 

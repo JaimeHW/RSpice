@@ -374,21 +374,18 @@ impl Bjt {
         if let Some(&v) = params.get("RE") {
             self.re = v;
         }
-        if let Some(&v) = params.get("XTI") {
-            if v.is_finite() && v > 0.0 {
+        if let Some(&v) = params.get("XTI")
+            && v.is_finite() && v > 0.0 {
                 self.xti = v;
             }
-        }
-        if let Some(&v) = params.get("EG") {
-            if v.is_finite() && v > 0.0 {
+        if let Some(&v) = params.get("EG")
+            && v.is_finite() && v > 0.0 {
                 self.eg = v;
             }
-        }
-        if let Some(&v) = params.get("TNOM") {
-            if v.is_finite() && v > 0.0 {
+        if let Some(&v) = params.get("TNOM")
+            && v.is_finite() && v > 0.0 {
                 self.tnom = if v > 200.0 { v } else { v + 273.15 };
             }
-        }
         if let Some(v) = params
             .get("KF")
             .copied()
@@ -411,20 +408,16 @@ impl Bjt {
             self.ef = v;
         }
         // VBIC aliases used in ngspice level=4 decks.
-        if !has_vaf {
-            if let Some(&v) = params.get("VEF") {
-                if v.is_finite() && v > 0.0 {
+        if !has_vaf
+            && let Some(&v) = params.get("VEF")
+                && v.is_finite() && v > 0.0 {
                     self.vaf = v;
                 }
-            }
-        }
-        if !has_var {
-            if let Some(&v) = params.get("VER") {
-                if v.is_finite() && v > 0.0 {
+        if !has_var
+            && let Some(&v) = params.get("VER")
+                && v.is_finite() && v > 0.0 {
                     self.var = v;
                 }
-            }
-        }
         if !has_rb {
             let rbx = params
                 .get("RBX")
@@ -504,26 +497,22 @@ impl Bjt {
         if let Some(&v) = params.get("IBCN") {
             self.ibcn_nominal = v.max(0.0);
         }
-        if let Some(&v) = params.get("NEI") {
-            if v.is_finite() && v > 0.0 {
+        if let Some(&v) = params.get("NEI")
+            && v.is_finite() && v > 0.0 {
                 self.nei = v;
             }
-        }
-        if let Some(&v) = params.get("NEN") {
-            if v.is_finite() && v > 0.0 {
+        if let Some(&v) = params.get("NEN")
+            && v.is_finite() && v > 0.0 {
                 self.nen = v;
             }
-        }
-        if let Some(&v) = params.get("NCI") {
-            if v.is_finite() && v > 0.0 {
+        if let Some(&v) = params.get("NCI")
+            && v.is_finite() && v > 0.0 {
                 self.nci = v;
             }
-        }
-        if let Some(&v) = params.get("NCN") {
-            if v.is_finite() && v > 0.0 {
+        if let Some(&v) = params.get("NCN")
+            && v.is_finite() && v > 0.0 {
                 self.ncn = v;
             }
-        }
         if !has_ibei {
             self.ibei_nominal = self.is_nominal / self.bf.max(1e-18);
         }

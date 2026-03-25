@@ -270,11 +270,10 @@ impl TabbedPropertyDialogState {
         self.global_error = None;
 
         for (name, value) in &self.values {
-            if let Some(def) = sheet.get(name) {
-                if let Err(error) = def.validate(value) {
+            if let Some(def) = sheet.get(name)
+                && let Err(error) = def.validate(value) {
                     self.validation_errors.insert(name.clone(), error);
                 }
-            }
         }
 
         if !self.validation_errors.is_empty() {
@@ -671,13 +670,11 @@ fn render_property_row(
         }
 
         // Model Browser button for "model" property on semiconductor components
-        if def.name == "model" {
-            if let Some(comp_type) = state.component_type {
-                if comp_type.is_semiconductor() && ui.small_button("📖 Browse...").clicked() {
+        if def.name == "model"
+            && let Some(comp_type) = state.component_type
+                && comp_type.is_semiconductor() && ui.small_button("📖 Browse...").clicked() {
                     state.model_browser.open = true;
                 }
-            }
-        }
 
         // Expression indicator
         if current_value.is_expression() {

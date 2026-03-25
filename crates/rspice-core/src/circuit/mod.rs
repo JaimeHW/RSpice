@@ -696,11 +696,10 @@ impl VoltageSources {
     ) -> Result<Arc<crate::device::pwl_file::PwlWaveform>, String> {
         let key = PwlCacheKey::new(path, time_scale, value_scale, time_offset, value_offset);
 
-        if let Ok(cache) = pwl_waveform_cache().read() {
-            if let Some(wf) = cache.get(&key) {
+        if let Ok(cache) = pwl_waveform_cache().read()
+            && let Some(wf) = cache.get(&key) {
                 return Ok(Arc::clone(wf));
             }
-        }
 
         let waveform = crate::device::pwl_file::load_pwl_file(path)
             .map_err(|e| format!("failed to load PWL file '{}': {}", path, e))?
@@ -1389,11 +1388,10 @@ impl Inductors {
             self.v_prev[i] = v;
 
             // Also get branch current from solution for accuracy
-            if br > 0 {
-                if let Some(&i_br) = currents.get(br - 1) {
+            if br > 0
+                && let Some(&i_br) = currents.get(br - 1) {
                     self.i_prev[i] = i_br;
                 }
-            }
         }
     }
 }
@@ -2251,11 +2249,10 @@ impl CircuitData {
                 )
             };
 
-            if let Some(slot) = self.inductors.inductances.get_mut(inductor_index) {
-                if l_eff.is_finite() && l_eff > 0.0 {
+            if let Some(slot) = self.inductors.inductances.get_mut(inductor_index)
+                && l_eff.is_finite() && l_eff > 0.0 {
                     *slot = l_eff.max(1e-18);
                 }
-            }
         }
     }
 

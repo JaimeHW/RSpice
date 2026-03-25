@@ -173,14 +173,13 @@ impl SimulationController {
         let Some(active_analysis) = self.active_transient_analysis_key(state) else {
             return DerivedViewerLoadState::Unavailable;
         };
-        if let Some(loaded) = self.transient_post.eye_loaded {
-            if loaded.analysis == active_analysis {
+        if let Some(loaded) = self.transient_post.eye_loaded
+            && loaded.analysis == active_analysis {
                 return match loaded.availability {
                     DerivedViewAvailability::Ready => DerivedViewerLoadState::Ready,
                     DerivedViewAvailability::Unavailable => DerivedViewerLoadState::Unavailable,
                 };
             }
-        }
         if self
             .transient_post
             .eye_task
@@ -211,14 +210,13 @@ impl SimulationController {
         let Some(active_analysis) = self.active_transient_analysis_key(state) else {
             return DerivedViewerLoadState::Unavailable;
         };
-        if let Some(loaded) = self.transient_post.fft_loaded {
-            if loaded.analysis == active_analysis {
+        if let Some(loaded) = self.transient_post.fft_loaded
+            && loaded.analysis == active_analysis {
                 return match loaded.availability {
                     DerivedViewAvailability::Ready => DerivedViewerLoadState::Ready,
                     DerivedViewAvailability::Unavailable => DerivedViewerLoadState::Unavailable,
                 };
             }
-        }
         if self
             .transient_post
             .fft_task

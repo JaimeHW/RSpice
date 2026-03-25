@@ -284,7 +284,7 @@ fn read_file_with_encoding(path: &std::path::Path) -> Result<String, std::io::Er
 
 /// Decode UTF-16 LE bytes to String
 fn decode_utf16_le(bytes: &[u8]) -> Result<String, std::io::Error> {
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "UTF-16 data has odd number of bytes",
@@ -301,7 +301,7 @@ fn decode_utf16_le(bytes: &[u8]) -> Result<String, std::io::Error> {
 
 /// Decode UTF-16 BE bytes to String  
 fn decode_utf16_be(bytes: &[u8]) -> Result<String, std::io::Error> {
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "UTF-16 data has odd number of bytes",

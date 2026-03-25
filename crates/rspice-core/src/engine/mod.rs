@@ -459,22 +459,20 @@ impl Engine {
             if !nodeset.voltage.is_finite() {
                 continue;
             }
-            if let Some(node_id) = circuit.get_node_by_name(&nodeset.node) {
-                if node_id > 0 && node_id <= circuit.num_nodes() {
+            if let Some(node_id) = circuit.get_node_by_name(&nodeset.node)
+                && node_id > 0 && node_id <= circuit.num_nodes() {
                     by_node[node_id] = Some(nodeset.voltage);
                 }
-            }
         }
 
         for ic in &netlist.initial_conditions {
             if !ic.voltage.is_finite() {
                 continue;
             }
-            if let Some(node_id) = circuit.get_node_by_name(&ic.node) {
-                if node_id > 0 && node_id <= circuit.num_nodes() {
+            if let Some(node_id) = circuit.get_node_by_name(&ic.node)
+                && node_id > 0 && node_id <= circuit.num_nodes() {
                     by_node[node_id] = Some(ic.voltage);
                 }
-            }
         }
 
         by_node

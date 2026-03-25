@@ -242,11 +242,10 @@ fn clean_time_series(time: &[f64], values: &[f64]) -> Vec<(f64, f64)> {
         if !t.is_finite() || !v.is_finite() {
             continue;
         }
-        if let Some(prev) = last_t {
-            if t <= prev {
+        if let Some(prev) = last_t
+            && t <= prev {
                 continue;
             }
-        }
         cleaned.push((t, v));
         last_t = Some(t);
     }

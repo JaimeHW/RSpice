@@ -812,8 +812,8 @@ impl WaveformPanel {
         let mut y_max = f64::NEG_INFINITY;
 
         for &idx in &self.trace_indices {
-            if let Some(trace) = all_traces.get(idx) {
-                if trace.visible {
+            if let Some(trace) = all_traces.get(idx)
+                && trace.visible {
                     if let Some(min) = trace.y_min() {
                         y_min = y_min.min(min);
                     }
@@ -821,7 +821,6 @@ impl WaveformPanel {
                         y_max = y_max.max(max);
                     }
                 }
-            }
         }
 
         // Add padding and ensure minimum range

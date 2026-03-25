@@ -231,10 +231,10 @@ impl Preprocessor {
         self.dependencies.insert(canonical.clone());
 
         // Add the file's directory to include paths
-        if let Some(parent) = canonical.parent() {
-            if !self.include_paths.contains(&parent.to_path_buf()) {
-                self.include_paths.insert(0, parent.to_path_buf());
-            }
+        if let Some(parent) = canonical.parent()
+            && !self.include_paths.contains(&parent.to_path_buf())
+        {
+            self.include_paths.insert(0, parent.to_path_buf());
         }
 
         // Check for circular includes
@@ -491,12 +491,12 @@ impl Preprocessor {
     /// Find an include file in search paths
     fn find_include(&self, filename: &str) -> Option<PathBuf> {
         // First try relative to current file
-        if let Some(ref current) = self.current_file {
-            if let Some(parent) = current.parent() {
-                let path = parent.join(filename);
-                if path.exists() {
-                    return Some(path);
-                }
+        if let Some(ref current) = self.current_file
+            && let Some(parent) = current.parent()
+        {
+            let path = parent.join(filename);
+            if path.exists() {
+                return Some(path);
             }
         }
 

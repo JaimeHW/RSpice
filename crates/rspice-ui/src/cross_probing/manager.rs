@@ -111,8 +111,8 @@ impl WaveformTarget {
         }
 
         // Check for device parameter format (e.g., Id(M1), Vgs(M1))
-        if let Some(paren_pos) = signal.find('(') {
-            if signal.ends_with(')') {
+        if let Some(paren_pos) = signal.find('(')
+            && signal.ends_with(')') {
                 let param = &signal[..paren_pos];
                 let device = &signal[paren_pos + 1..signal.len() - 1];
                 return Some(WaveformTarget::DeviceParam {
@@ -120,7 +120,6 @@ impl WaveformTarget {
                     param: param.to_string(),
                 });
             }
-        }
 
         // Treat as expression
         Some(WaveformTarget::Expression(signal.to_string()))

@@ -383,11 +383,10 @@ impl AnalysisSpec {
                 if *points_per_unit == 0 {
                     return Err("DISTO points_per_unit must be > 0".to_string());
                 }
-                if let Some(ratio) = f2_over_f1 {
-                    if !ratio.is_finite() || *ratio <= 1.0 {
+                if let Some(ratio) = f2_over_f1
+                    && (!ratio.is_finite() || *ratio <= 1.0) {
                         return Err("DISTO f2_over_f1 must be finite and > 1".to_string());
                     }
-                }
                 Ok(())
             }
             AnalysisSpec::Transient {
@@ -412,13 +411,12 @@ impl AnalysisSpec {
                 if *start_time >= *stop_time {
                     return Err("Transient start_time must be < stop_time".to_string());
                 }
-                if let Some(max_step) = max_timestep {
-                    if !max_step.is_finite() || *max_step <= 0.0 {
+                if let Some(max_step) = max_timestep
+                    && (!max_step.is_finite() || *max_step <= 0.0) {
                         return Err(
                             "Transient max_timestep must be finite and > 0 when set".to_string()
                         );
                     }
-                }
                 Ok(())
             }
             AnalysisSpec::Noise {
@@ -518,11 +516,10 @@ impl AnalysisSpec {
                     return Err("Sensitivity output_var is required".to_string());
                 }
                 if *ac_mode {
-                    if let Some(freq) = frequency {
-                        if *freq <= 0.0 {
+                    if let Some(freq) = frequency
+                        && *freq <= 0.0 {
                             return Err("Sensitivity frequency must be > 0 for AC mode".to_string());
                         }
-                    }
                 } else if frequency.is_some() {
                     return Err("Sensitivity frequency is only valid in AC mode".to_string());
                 }
@@ -620,11 +617,10 @@ impl AnalysisSpec {
                             idx + 1
                         ));
                     }
-                    if let Some(port_z0) = port.z0 {
-                        if !port_z0.is_finite() || port_z0 <= 0.0 {
+                    if let Some(port_z0) = port.z0
+                        && (!port_z0.is_finite() || port_z0 <= 0.0) {
                             return Err(format!("S-parameter port{} z0 must be > 0", idx + 1));
                         }
-                    }
                 }
                 Ok(())
             }
@@ -643,11 +639,10 @@ impl AnalysisSpec {
                 if *num_harmonics == 0 {
                     return Err("Envelope num_harmonics must be > 0".to_string());
                 }
-                if let Some(step) = max_step {
-                    if *step <= 0.0 {
+                if let Some(step) = max_step
+                    && *step <= 0.0 {
                         return Err("Envelope max_step must be > 0 when set".to_string());
                     }
-                }
                 Ok(())
             }
             AnalysisSpec::Fourier {

@@ -570,14 +570,12 @@ fn waveform_last_value_by_name(
 
     if let Some(inner) =
         parse_wrapped_identifier(key, "V").or_else(|| parse_wrapped_identifier(key, "I"))
-    {
-        if let Some(v) = waveforms
+        && let Some(v) = waveforms
             .get(inner)
             .and_then(|wf| wf.y_values.last().copied())
         {
             return Some(v);
         }
-    }
 
     let voltage_key = format!("V({})", key);
     if let Some(v) = waveforms

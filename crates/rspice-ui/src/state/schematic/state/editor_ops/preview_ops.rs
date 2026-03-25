@@ -66,11 +66,10 @@ impl SchematicState {
             if let Some(term_pos) = snap_start {
                 wire.points[0] = term_pos;
             }
-            if let Some(term_pos) = snap_end {
-                if end_idx > 0 {
+            if let Some(term_pos) = snap_end
+                && end_idx > 0 {
                     wire.points[end_idx] = term_pos;
                 }
-            }
         }
 
         self.rebuild_connections();

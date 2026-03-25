@@ -162,11 +162,10 @@ impl TransferAnalyzer {
             return Some(idx);
         }
         // Try parsing as number
-        if let Ok(n) = node.parse::<usize>() {
-            if n > 0 && n <= self.num_nodes {
+        if let Ok(n) = node.parse::<usize>()
+            && n > 0 && n <= self.num_nodes {
                 return Some(n - 1);
             }
-        }
         None
     }
 
@@ -285,11 +284,10 @@ impl TransferAnalyzer {
         // Zero input, inject 1A at output, measure voltage
         let mut b_out = vec![0.0; n];
         b_out[output_node] = 1.0;
-        if let Some(r) = ref_node {
-            if r < n {
+        if let Some(r) = ref_node
+            && r < n {
                 b_out[r] = -1.0;
             }
-        }
 
         let v_out_test = self.solve(&b_out)?;
 
@@ -526,12 +524,11 @@ impl AcTransferResult {
         self.peak_frequency = Some(self.points[peak_idx].frequency);
 
         // DC gain (from lowest frequency if < 100 Hz)
-        if let Some(first) = self.points.first() {
-            if first.frequency < 100.0 {
+        if let Some(first) = self.points.first()
+            && first.frequency < 100.0 {
                 self.dc_gain = Some(first.magnitude);
                 self.dc_gain_db = Some(first.magnitude_db);
             }
-        }
 
         // Find -3dB cutoffs
         let threshold = peak_db - 3.0;

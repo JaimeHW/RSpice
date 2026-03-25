@@ -166,21 +166,19 @@ impl Config {
         // Try ~/.config/rspice/config.toml first
         if let Some(config_dir) = dirs::config_dir() {
             let config_path = config_dir.join("rspice").join("config.toml");
-            if config_path.exists() {
-                if let Ok(config) = Self::load_file(&config_path) {
+            if config_path.exists()
+                && let Ok(config) = Self::load_file(&config_path) {
                     return Some(config);
                 }
-            }
         }
 
         // Try ~/.rspicerc
         if let Some(home) = dirs::home_dir() {
             let rc_path = home.join(".rspicerc");
-            if rc_path.exists() {
-                if let Ok(config) = Self::load_file(&rc_path) {
+            if rc_path.exists()
+                && let Ok(config) = Self::load_file(&rc_path) {
                     return Some(config);
                 }
-            }
         }
 
         None
@@ -189,11 +187,10 @@ impl Config {
     /// Load project configuration from current directory
     fn load_project_config() -> Option<Self> {
         let rc_path = PathBuf::from(".rspicerc");
-        if rc_path.exists() {
-            if let Ok(config) = Self::load_file(&rc_path) {
+        if rc_path.exists()
+            && let Ok(config) = Self::load_file(&rc_path) {
                 return Some(config);
             }
-        }
         None
     }
 
@@ -238,11 +235,10 @@ impl Config {
 
     /// Apply environment variable overrides
     fn apply_env(&mut self) {
-        if let Ok(temp) = std::env::var("RSPICE_TEMPERATURE") {
-            if let Ok(t) = temp.parse() {
+        if let Ok(temp) = std::env::var("RSPICE_TEMPERATURE")
+            && let Ok(t) = temp.parse() {
                 self.simulation.temperature = t;
             }
-        }
 
         if let Ok(format) = std::env::var("RSPICE_OUTPUT_FORMAT") {
             self.output.format = format;

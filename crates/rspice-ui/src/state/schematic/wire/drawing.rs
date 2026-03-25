@@ -128,16 +128,14 @@ impl WireDrawing {
     pub fn get_full_path(&self) -> Vec<Point> {
         let mut path = self.points.clone();
 
-        if let Some(target) = self.preview_pos {
-            if let Some(&last) = self.points.last() {
-                if last != target {
+        if let Some(target) = self.preview_pos
+            && let Some(&last) = self.points.last()
+                && last != target {
                     if let Some(corner) = self.get_route_corner(target) {
                         path.push(corner);
                     }
                     path.push(target);
                 }
-            }
-        }
 
         path
     }

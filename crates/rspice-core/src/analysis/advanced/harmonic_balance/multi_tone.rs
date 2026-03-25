@@ -83,11 +83,10 @@ impl FrequencyIndex {
             return false;
         }
         for (i, &k) in self.indices.iter().enumerate() {
-            if let Some(&max_k) = max_harmonics.get(i) {
-                if k.unsigned_abs() as usize > max_k {
+            if let Some(&max_k) = max_harmonics.get(i)
+                && k.unsigned_abs() as usize > max_k {
                     return false;
                 }
-            }
         }
         true
     }

@@ -103,8 +103,8 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
     );
 
     // Handle dialog result - apply changes back to component
-    if matches!(result, TabbedDialogResult::Applied) {
-        if let Some(comp_id) = state.tabbed_property_dialog.component_id {
+    if matches!(result, TabbedDialogResult::Applied)
+        && let Some(comp_id) = state.tabbed_property_dialog.component_id {
             // Clone the values to avoid borrow conflict
             let values = state.tabbed_property_dialog.values.clone();
 
@@ -128,7 +128,6 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
             // Clear dialog state AFTER applying (values were preserved for this)
             state.tabbed_property_dialog.clear_after_apply();
         }
-    }
 
     result
 }

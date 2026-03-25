@@ -326,11 +326,10 @@ impl SpConfig {
                     port.number
                 ));
             }
-            if let Some(pz0) = port.z0 {
-                if pz0 <= 0.0 {
+            if let Some(pz0) = port.z0
+                && pz0 <= 0.0 {
                     return Err(format!("Port {} impedance must be positive", port.number));
                 }
-            }
         }
 
         // Check for duplicate port numbers

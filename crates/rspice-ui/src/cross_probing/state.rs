@@ -107,11 +107,10 @@ impl SignalFilter {
         }
 
         // Check name pattern
-        if let Some(ref pattern) = self.name_pattern {
-            if !signal.id.matches(pattern) {
+        if let Some(ref pattern) = self.name_pattern
+            && !signal.id.matches(pattern) {
                 return false;
             }
-        }
 
         true
     }

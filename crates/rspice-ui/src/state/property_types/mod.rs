@@ -380,36 +380,33 @@ impl PropertyDefinition {
 
         // Check numeric range
         if let PropertyValue::Number { value: v, .. } = value {
-            if let Some(min) = self.min_value {
-                if *v < min {
+            if let Some(min) = self.min_value
+                && *v < min {
                     return Err(format!(
                         "{} must be at least {}",
                         self.display_name,
                         format_engineering(min)
                     ));
                 }
-            }
-            if let Some(max) = self.max_value {
-                if *v > max {
+            if let Some(max) = self.max_value
+                && *v > max {
                     return Err(format!(
                         "{} must be at most {}",
                         self.display_name,
                         format_engineering(max)
                     ));
                 }
-            }
         }
 
         // Check enum value is valid
-        if let PropertyValue::Enum { selected, options } = value {
-            if !options.contains(selected) {
+        if let PropertyValue::Enum { selected, options } = value
+            && !options.contains(selected) {
                 return Err(format!(
                     "{} must be one of: {}",
                     self.display_name,
                     options.join(", ")
                 ));
             }
-        }
 
         Ok(())
     }

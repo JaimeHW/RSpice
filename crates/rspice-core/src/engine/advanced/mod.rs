@@ -206,8 +206,8 @@ impl Engine {
                 ));
             }
 
-            if let Some((kf, af, ef)) = jfet.flicker_noise_coefficients() {
-                if ids.abs() > 1e-18 {
+            if let Some((kf, af, ef)) = jfet.flicker_noise_coefficients()
+                && ids.abs() > 1e-18 {
                     noise_sources.push(NoiseSource::flicker_with_frequency_exponent(
                         format!("{}:flicker", jfet.name),
                         jfet.drain,
@@ -218,7 +218,6 @@ impl Engine {
                         ids,
                     ));
                 }
-            }
         }
 
         noise_sources
@@ -645,8 +644,8 @@ impl Engine {
                 let stats = VariableStatistics::from_samples(&numeric_name, samples.clone(), 20);
                 variables.insert(numeric_name, stats);
 
-                if let Some(node_names) = &first_node_names {
-                    if let Some(node_name) = node_names.get(node_id) {
+                if let Some(node_names) = &first_node_names
+                    && let Some(node_name) = node_names.get(node_id) {
                         let named_key = format!("V({})", node_name);
                         if named_key != numeric_label {
                             let alias_stats =
@@ -654,7 +653,6 @@ impl Engine {
                             variables.insert(named_key, alias_stats);
                         }
                     }
-                }
             }
         }
 

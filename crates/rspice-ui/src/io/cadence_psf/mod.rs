@@ -1086,8 +1086,8 @@ fn push_named_channel_cached(
     sample: NumericSample,
     point_idx: usize,
 ) -> Result<usize, CadencePsfError> {
-    if let Some(per_signal) = cache.get(&signal_id) {
-        if let Some(idx) = per_signal.get(suffix) {
+    if let Some(per_signal) = cache.get(&signal_id)
+        && let Some(idx) = per_signal.get(suffix) {
             let idx = *idx;
             let channels = values.get_mut(&signal_id).ok_or_else(|| {
                 CadencePsfError::new(format!("missing value vector for signal {}", signal_id))
@@ -1095,7 +1095,6 @@ fn push_named_channel_cached(
             push_scalar_slice(channels.as_mut_slice(), idx, sample)?;
             return Ok(idx);
         }
-    }
 
     let idx = push_named_channel(values, signal_id, suffix, sample, point_idx)?;
     cache

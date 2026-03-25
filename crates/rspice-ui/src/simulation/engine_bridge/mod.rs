@@ -842,11 +842,10 @@ impl EngineBridge {
             ) {
                 return Some(0);
             }
-            if let Ok(idx) = trimmed.parse::<usize>() {
-                if idx < node_names.len() {
+            if let Ok(idx) = trimmed.parse::<usize>()
+                && idx < node_names.len() {
                     return Some(idx);
                 }
-            }
             let upper = trimmed.to_ascii_uppercase();
             node_names
                 .iter()

@@ -90,8 +90,8 @@ impl RSpiceApp {
                 }
             }
             ShortcutCommand::OpenPropertiesEditor => {
-                if let Some(comp_id) = self.state.schematic.selection.single_component() {
-                    if let Some(comp) = self
+                if let Some(comp_id) = self.state.schematic.selection.single_component()
+                    && let Some(comp) = self
                         .state
                         .schematic
                         .components
@@ -106,7 +106,6 @@ impl RSpiceApp {
                         };
                         self.state.property_editor.open_for(comp_id, props);
                     }
-                }
             }
             ShortcutCommand::EscapeCancel => {
                 if self.state.property_editor.open {

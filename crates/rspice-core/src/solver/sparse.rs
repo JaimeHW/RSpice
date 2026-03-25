@@ -72,12 +72,11 @@ impl StaticMatrix {
         let mut position_map = std::collections::HashMap::new();
 
         for (r, c, v) in entries {
-            if let Some(last) = accumulated.last_mut() {
-                if last.0 == r && last.1 == c {
+            if let Some(last) = accumulated.last_mut()
+                && last.0 == r && last.1 == c {
                     last.2 += v;
                     continue;
                 }
-            }
             let idx = accumulated.len();
             position_map.insert((r, c), idx);
             accumulated.push((r, c, v));

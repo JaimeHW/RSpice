@@ -430,18 +430,16 @@ impl<'a> ExprParser<'a> {
         }
 
         // Number
-        if let Some(c) = self.peek() {
-            if c.is_ascii_digit() || c == '.' {
+        if let Some(c) = self.peek()
+            && (c.is_ascii_digit() || c == '.') {
                 return self.parse_number();
             }
-        }
 
         // Identifier (parameter or function)
-        if let Some(c) = self.peek() {
-            if c.is_ascii_alphabetic() || c == '_' {
+        if let Some(c) = self.peek()
+            && (c.is_ascii_alphabetic() || c == '_') {
                 return self.parse_ident_or_fn();
             }
-        }
 
         Err(ExprError::UnexpectedChar(self.peek().unwrap_or('\0')))
     }

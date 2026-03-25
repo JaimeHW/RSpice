@@ -426,8 +426,8 @@ impl FftState {
     /// Update auto-scale ranges
     pub fn update_auto_scale(&mut self) {
         if let Some(ref data) = self.data {
-            if self.freq_auto {
-                if let Some((min, max)) = data.frequency_range() {
+            if self.freq_auto
+                && let Some((min, max)) = data.frequency_range() {
                     match self.freq_scale {
                         FrequencyScale::Linear => {
                             self.freq_min = min;
@@ -439,7 +439,6 @@ impl FftState {
                         }
                     }
                 }
-            }
 
             if self.mag_auto {
                 let mut min_value = f64::INFINITY;

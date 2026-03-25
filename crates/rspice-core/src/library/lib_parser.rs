@@ -116,28 +116,24 @@ impl ParsedModel {
     /// Returns true if the geometry falls within this model's bin range
     pub fn matches_geometry(&self, width: f64, length: f64) -> bool {
         // Check length bounds
-        if let Some(lmin) = self.lmin {
-            if length < lmin {
+        if let Some(lmin) = self.lmin
+            && length < lmin {
                 return false;
             }
-        }
-        if let Some(lmax) = self.lmax {
-            if length > lmax {
+        if let Some(lmax) = self.lmax
+            && length > lmax {
                 return false;
             }
-        }
 
         // Check width bounds
-        if let Some(wmin) = self.wmin {
-            if width < wmin {
+        if let Some(wmin) = self.wmin
+            && width < wmin {
                 return false;
             }
-        }
-        if let Some(wmax) = self.wmax {
-            if width > wmax {
+        if let Some(wmax) = self.wmax
+            && width > wmax {
                 return false;
             }
-        }
 
         true
     }
@@ -577,11 +573,10 @@ impl LibParser {
             if part.contains('=') {
                 // Parameter with default value
                 let mut kv = part.splitn(2, '=');
-                if let (Some(key), Some(val)) = (kv.next(), kv.next()) {
-                    if let Ok(v) = Self::parse_spice_number(val) {
+                if let (Some(key), Some(val)) = (kv.next(), kv.next())
+                    && let Ok(v) = Self::parse_spice_number(val) {
                         params.insert(key.to_string(), v);
                     }
-                }
             } else {
                 pins.push(part.to_string());
             }

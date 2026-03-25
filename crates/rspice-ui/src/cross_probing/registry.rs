@@ -271,11 +271,10 @@ impl CrossProbeRegistry {
     /// Highlight a signal (hover)
     pub fn highlight(&mut self, signal_id: &SignalId, source: ProbeSource) {
         // Clear previous highlight
-        if let Some(ref prev) = self.highlighted {
-            if let Some(signal) = self.signals.get_mut(prev) {
+        if let Some(ref prev) = self.highlighted
+            && let Some(signal) = self.signals.get_mut(prev) {
                 signal.is_highlighted = false;
             }
-        }
 
         // Set new highlight
         if let Some(signal) = self.signals.get_mut(signal_id) {

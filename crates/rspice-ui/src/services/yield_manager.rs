@@ -307,8 +307,8 @@ impl YieldAnalysisManager {
         let mut cp = None;
         let mut cpk = None;
 
-        if let (Some(lsl), Some(usl)) = (spec.min, spec.max) {
-            if lsl.is_finite() && usl.is_finite() && usl > lsl && std_dev > 0.0 {
+        if let (Some(lsl), Some(usl)) = (spec.min, spec.max)
+            && lsl.is_finite() && usl.is_finite() && usl > lsl && std_dev > 0.0 {
                 let cp_val = (usl - lsl) / (6.0 * std_dev);
                 if cp_val.is_finite() {
                     cp = Some(cp_val);
@@ -321,7 +321,6 @@ impl YieldAnalysisManager {
                     cpk = Some(cpk_val);
                 }
             }
-        }
 
         DistributionStats {
             count: finite_values.len(),

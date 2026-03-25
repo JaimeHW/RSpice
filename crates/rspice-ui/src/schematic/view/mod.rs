@@ -66,15 +66,14 @@ pub fn render_schematic_view(
         let mut is_selected = state.schematic.selection.wires.contains(&wire.id);
 
         // Live preview: if dragging selection rect, highlight wires inside the rect
-        if !is_selected {
-            if let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
+        if !is_selected
+            && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
                 // Check if any point of the wire is inside the selection rect
                 is_selected = wire
                     .points
                     .iter()
                     .any(|p| p.x >= min_x && p.x <= max_x && p.y >= min_y && p.y <= max_y);
             }
-        }
 
         let is_highlighted = state.schematic.net_highlight.is_wire_highlighted(wire.id);
         draw_wire(
@@ -92,15 +91,14 @@ pub fn render_schematic_view(
         let mut is_selected = state.schematic.selection.components.contains(&component.id);
 
         // Live preview: if dragging selection rect, highlight components inside the rect
-        if !is_selected {
-            if let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
+        if !is_selected
+            && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
                 // Check if component center is inside the selection rect
                 is_selected = component.pos.x >= min_x
                     && component.pos.x <= max_x
                     && component.pos.y >= min_y
                     && component.pos.y <= max_y;
             }
-        }
 
         draw_component(
             &painter,
@@ -248,8 +246,7 @@ pub fn render_schematic_view(
         // On drag start, check if we're dragging a selected component (move) or empty space (box select)
         if response.drag_started_by(egui::PointerButton::Primary)
             && !ui.input(|i| i.modifiers.shift)
-        {
-            if let Some(pos) = response.interact_pointer_pos() {
+            && let Some(pos) = response.interact_pointer_pos() {
                 let grid_pos = screen_to_grid(pos);
                 // Also check wire grid for more precise vertex detection
                 let wire_grid_pos = screen_to_wire_grid(pos);
@@ -284,11 +281,10 @@ pub fn render_schematic_view(
                     state.schematic.selection_rect.start_at(grid_pos);
                 }
             }
-        }
 
         // Handle ongoing drag - either move selection, update box selection, or move wire vertex
-        if response.dragged_by(egui::PointerButton::Primary) {
-            if let Some(pos) = response.hover_pos() {
+        if response.dragged_by(egui::PointerButton::Primary)
+            && let Some(pos) = response.hover_pos() {
                 let grid_pos = screen_to_grid(pos);
                 let wire_grid_pos = screen_to_wire_grid(pos);
 
@@ -320,7 +316,6 @@ pub fn render_schematic_view(
                     state.schematic.selection_rect.update(grid_pos);
                 }
             }
-        }
 
         // Finish drag - complete box selection, finalize move, or finish wire vertex drag
         if response.drag_stopped_by(egui::PointerButton::Primary) {
@@ -349,8 +344,8 @@ pub fn render_schematic_view(
     }
 
     // Single click handling (for single item selection and placement)
-    if response.clicked_by(egui::PointerButton::Primary) {
-        if let Some(pos) = response.interact_pointer_pos() {
+    if response.clicked_by(egui::PointerButton::Primary)
+        && let Some(pos) = response.interact_pointer_pos() {
             match current_tool {
                 Tool::Place(component_type) => {
                     // Components snap to full grid
@@ -552,11 +547,10 @@ pub fn render_schematic_view(
                 _ => {}
             }
         }
-    }
 
     // Double-click handling - open properties panel for selected component
-    if response.double_clicked_by(egui::PointerButton::Primary) {
-        if let Some(pos) = response.interact_pointer_pos() {
+    if response.double_clicked_by(egui::PointerButton::Primary)
+        && let Some(pos) = response.interact_pointer_pos() {
             let grid_pos = screen_to_grid(pos);
             if let Some(comp_id) = state.schematic.component_at(grid_pos) {
                 // Select the component and open properties panel
@@ -599,7 +593,6 @@ pub fn render_schematic_view(
                 state.panels.properties = true;
             }
         }
-    }
 
     // Right click to finish wire or cancel
     if response.clicked_by(egui::PointerButton::Secondary) && state.schematic.wire_drawing.active {
@@ -610,12 +603,11 @@ pub fn render_schematic_view(
     let wire_active = state.schematic.wire_drawing.active;
 
     // Update wire preview position first (mutable borrow)
-    if wire_active {
-        if let Some(hover_pos) = response.hover_pos() {
+    if wire_active
+        && let Some(hover_pos) = response.hover_pos() {
             let grid_pos = screen_to_wire_grid(hover_pos);
             state.schematic.update_wire_preview(grid_pos);
         }
-    }
 
     // Now draw the wire (gather data, then draw)
     if wire_active {
@@ -634,8 +626,8 @@ pub fn render_schematic_view(
             }
 
             // Draw preview to current mouse position
-            if let Some(preview) = preview_pos_opt {
-                if let Some(last) = wire_points.last() {
+            if let Some(preview) = preview_pos_opt
+                && let Some(last) = wire_points.last() {
                     let p1 = tool_viewport.schematic_to_screen(*last);
                     let p2 = tool_viewport.schematic_to_screen(preview);
                     painter.line_segment(
@@ -643,7 +635,6 @@ pub fn render_schematic_view(
                         Stroke::new(1.0 * tool_viewport.zoom, wire_color.gamma_multiply(0.6)),
                     );
                 }
-            }
 
             // Draw start point marker
             if let Some(start) = wire_points.first() {
@@ -659,8 +650,8 @@ pub fn render_schematic_view(
     // Procedural drawing uses rotation_to_delta() which expects index (0-3)
     let preview_rotation_degrees = state.schematic.preview_rotation.degrees();
     let preview_rotation_index = rotation_to_index(state.schematic.preview_rotation);
-    if let Tool::Place(component_type) = preview_tool {
-        if let Some(hover_pos) = response.hover_pos() {
+    if let Tool::Place(component_type) = preview_tool
+        && let Some(hover_pos) = response.hover_pos() {
             let grid_pos = screen_to_grid(hover_pos);
             let preview_pos = tool_viewport.schematic_to_screen(grid_pos);
 
@@ -779,7 +770,6 @@ pub fn render_schematic_view(
                 }
             }
         }
-    }
 
     // Draw box selection rectangle if active (commercial-grade dashed rectangle)
     if state.schematic.selection_rect.is_active() {

@@ -392,8 +392,8 @@ impl Mosfet {
                 }
             }
         }
-        if gamma_explicit.is_none() || phi_explicit.is_none() {
-            if let Some(nsub_cm3) = nsub {
+        if (gamma_explicit.is_none() || phi_explicit.is_none())
+            && let Some(nsub_cm3) = nsub {
                 // NSUB is cm^-3 in SPICE model cards.
                 let nsub_m3 = nsub_cm3 * 1e6;
                 if phi_explicit.is_none() && nsub_cm3 > N_I_CM3 {
@@ -409,7 +409,6 @@ impl Mosfet {
                     }
                 }
             }
-        }
         // BSIM3 parameters
         if let Some(&v) = params.get("U0").or_else(|| params.get("UO")) {
             self.u0 = v;

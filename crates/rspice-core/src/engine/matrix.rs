@@ -545,11 +545,10 @@ impl Engine {
                 }
             }
             for idx in 0..device.num_internal_nodes() {
-                if let Some(node) = device.internal_node_index(idx) {
-                    if node > 0 {
+                if let Some(node) = device.internal_node_index(idx)
+                    && node > 0 {
                         device_nodes.push(node);
                     }
-                }
             }
             device_nodes.sort_unstable();
             device_nodes.dedup();

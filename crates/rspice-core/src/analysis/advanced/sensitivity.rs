@@ -429,8 +429,8 @@ impl SensitivityAnalyzer {
         }
 
         // If differential output, also solve for reference and combine
-        if let Some(ref_node) = output_ref {
-            if ref_node < self.num_nodes {
+        if let Some(ref_node) = output_ref
+            && ref_node < self.num_nodes {
                 // Save current adjoint
                 let adj_output = self.adjoint.clone();
 
@@ -444,7 +444,6 @@ impl SensitivityAnalyzer {
                     self.adjoint[i] = adj_output[i] - self.adjoint[i];
                 }
             }
-        }
 
         let mut result = SensitivityResult::new(&format!("V({})", output_node + 1), output_value);
 

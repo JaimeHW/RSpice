@@ -131,11 +131,10 @@ pub(crate) fn resolve_sensitivity_ac_frequency(
 }
 
 pub(crate) fn validate_sensitivity_output_spec(output_spec: &OutputSpec) -> Result<(), String> {
-    if let OutputSpec::Voltage(vspec) = output_spec {
-        if vspec.pos == 0 && vspec.neg.is_none() {
+    if let OutputSpec::Voltage(vspec) = output_spec
+        && vspec.pos == 0 && vspec.neg.is_none() {
             return Err("Sensitivity output node cannot be ground".to_string());
         }
-    }
     Ok(())
 }
 

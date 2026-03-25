@@ -329,15 +329,14 @@ impl ComponentManager {
                 &self.components,
                 "ComponentManager::destroy(components-read-for-singleton)",
             );
-            if let Some(info) = components.get(&id) {
-                if info.singleton {
+            if let Some(info) = components.get(&id)
+                && info.singleton {
                     let mut singletons = write_lock(
                         &self.singletons,
                         "ComponentManager::destroy(singletons-write)",
                     );
                     singletons.remove(&info.comp_type);
                 }
-            }
         }
 
         let mut components = write_lock(&self.components, "ComponentManager::destroy(components)");

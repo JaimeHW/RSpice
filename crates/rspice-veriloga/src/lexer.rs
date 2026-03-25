@@ -719,22 +719,22 @@ impl<'a> Lexer<'a> {
             } else if ch == '.' && !has_dot && !has_exp {
                 // Check if next char is digit (to avoid parsing "1.2.3")
                 self.advance();
-                if let Some(next) = self.peek_char() {
-                    if !next.is_ascii_digit() {
-                        // Backtrack - this is integer followed by '.'
-                        // We can't backtrack easily, so mark as error or handle differently
-                        // For now, require digit after dot
-                    }
+                if let Some(next) = self.peek_char()
+                    && !next.is_ascii_digit()
+                {
+                    // Backtrack - this is integer followed by '.'
+                    // We can't backtrack easily, so mark as error or handle differently
+                    // For now, require digit after dot
                 }
                 has_dot = true;
             } else if (ch == 'e' || ch == 'E') && !has_exp {
                 has_exp = true;
                 self.advance();
                 // Optional sign after exponent
-                if let Some(sign) = self.peek_char() {
-                    if sign == '+' || sign == '-' {
-                        self.advance();
-                    }
+                if let Some(sign) = self.peek_char()
+                    && (sign == '+' || sign == '-')
+                {
+                    self.advance();
                 }
             } else {
                 break;
@@ -743,19 +743,19 @@ impl<'a> Lexer<'a> {
 
         // Check for scale factors (T, G, M, k, m, u, n, p, f, a)
         let mut has_scale = false;
-        if let Some(ch) = self.peek_char() {
-            if matches!(
+        if let Some(ch) = self.peek_char()
+            && matches!(
                 ch,
                 'T' | 'G' | 'M' | 'k' | 'K' | 'm' | 'u' | 'n' | 'p' | 'f' | 'a'
-            ) {
-                has_scale = true;
+            )
+        {
+            has_scale = true;
+            self.advance();
+            // Handle 'meg' specifically
+            if (ch == 'm' || ch == 'M') && self.peek_char() == Some('e') {
                 self.advance();
-                // Handle 'meg' specifically
-                if (ch == 'm' || ch == 'M') && self.peek_char() == Some('e') {
+                if self.peek_char() == Some('g') {
                     self.advance();
-                    if self.peek_char() == Some('g') {
-                        self.advance();
-                    }
                 }
             }
         }

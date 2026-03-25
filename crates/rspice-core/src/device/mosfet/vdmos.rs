@@ -920,16 +920,14 @@ impl Vdmos {
         // We stamp gm such that change in Vg causes current change at drain
 
         // RHS contributions
-        if let Some(di_idx) = self.indices.rhs_di {
-            if di_idx > 0 {
+        if let Some(di_idx) = self.indices.rhs_di
+            && di_idx > 0 {
                 rhs[di_idx - 1] -= ieq;
             }
-        }
-        if let Some(si_idx) = self.indices.rhs_si {
-            if si_idx > 0 {
+        if let Some(si_idx) = self.indices.rhs_si
+            && si_idx > 0 {
                 rhs[si_idx - 1] += ieq;
             }
-        }
     }
 }
 

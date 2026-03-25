@@ -445,14 +445,14 @@ impl<'a> SemanticAnalyzer<'a> {
             let range = param.range.as_ref().map(|r| self.parse_range(r));
 
             // Validate default against range
-            if let (Some(default_val), Some(range_constraint)) = (default, &range) {
-                if !range_constraint.contains(default_val) {
-                    self.record_error(SemanticErrorKind::ParameterOutOfRange {
-                        name: param.name.clone(),
-                        value: default_val,
-                        range: format!("{}", range_constraint),
-                    });
-                }
+            if let (Some(default_val), Some(range_constraint)) = (default, &range)
+                && !range_constraint.contains(default_val)
+            {
+                self.record_error(SemanticErrorKind::ParameterOutOfRange {
+                    name: param.name.clone(),
+                    value: default_val,
+                    range: format!("{}", range_constraint),
+                });
             }
 
             analyzed.parameters.push(AnalyzedParameter {
@@ -672,14 +672,14 @@ impl<'a> SemanticAnalyzer<'a> {
 
         let value_type = self.infer_type(&assign.value)?;
 
-        if let Some(sym) = self.symbols.lookup(&target_name) {
-            if !value_type.can_coerce_to(&sym.value_type) {
-                self.record_error(SemanticErrorKind::TypeMismatch {
-                    expected: sym.value_type.to_string(),
-                    found: value_type.to_string(),
-                    context: format!("assignment to '{}'", target_name),
-                });
-            }
+        if let Some(sym) = self.symbols.lookup(&target_name)
+            && !value_type.can_coerce_to(&sym.value_type)
+        {
+            self.record_error(SemanticErrorKind::TypeMismatch {
+                expected: sym.value_type.to_string(),
+                found: value_type.to_string(),
+                context: format!("assignment to '{}'", target_name),
+            });
         }
 
         // Find variable index

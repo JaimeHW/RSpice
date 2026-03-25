@@ -1353,11 +1353,10 @@ impl TestRunner {
             for (prefix, reason) in &line_start_devices {
                 if trimmed.starts_with(prefix) {
                     // Verify next char is alphanumeric (device name) not just a word
-                    if let Some(next_char) = trimmed.chars().nth(1) {
-                        if next_char.is_alphanumeric() {
+                    if let Some(next_char) = trimmed.chars().nth(1)
+                        && next_char.is_alphanumeric() {
                             return Some(reason.to_string());
                         }
-                    }
                 }
             }
         }
@@ -1904,8 +1903,8 @@ impl TestRunner {
         let mut merged: Vec<ReferenceTable> = Vec::new();
 
         for mut table in tables {
-            if let Some(last) = merged.last_mut() {
-                if Self::can_merge_reference_tables(last, &table) {
+            if let Some(last) = merged.last_mut()
+                && Self::can_merge_reference_tables(last, &table) {
                     for (name, mut series) in table.variables.drain() {
                         if let Some(dst) = last.variables.get_mut(&name) {
                             dst.x.append(&mut series.x);
@@ -1914,7 +1913,6 @@ impl TestRunner {
                     }
                     continue;
                 }
-            }
             merged.push(table);
         }
 

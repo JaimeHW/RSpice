@@ -176,8 +176,8 @@ fn write_junit_report<W: Write>(
             ),
         )?;
 
-        if !report.passed {
-            if let Some(ref err) = report.error {
+        if !report.passed
+            && let Some(ref err) = report.error {
                 write_line(
                     writer,
                     path,
@@ -187,7 +187,6 @@ fn write_junit_report<W: Write>(
                     ),
                 )?;
             }
-        }
         write_line(writer, path, format_args!("    </testcase>"))?;
 
         // Measurement test cases
@@ -202,8 +201,8 @@ fn write_junit_report<W: Write>(
                 ),
             )?;
 
-            if !meas.passed {
-                if let Some(ref err) = meas.error {
+            if !meas.passed
+                && let Some(ref err) = meas.error {
                     write_line(
                         writer,
                         path,
@@ -213,7 +212,6 @@ fn write_junit_report<W: Write>(
                         ),
                     )?;
                 }
-            }
             write_line(writer, path, format_args!("    </testcase>"))?;
         }
 

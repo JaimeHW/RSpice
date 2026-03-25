@@ -46,18 +46,15 @@ impl SchematicState {
     pub fn wire_endpoints_at(&self, pos: Point) -> Vec<(u64, usize)> {
         let mut result = Vec::new();
         for wire in &self.wires {
-            if let Some(first) = wire.points.first() {
-                if *first == pos {
+            if let Some(first) = wire.points.first()
+                && *first == pos {
                     result.push((wire.id, 0));
                 }
-            }
-            if wire.points.len() > 1 {
-                if let Some(last) = wire.points.last() {
-                    if *last == pos {
+            if wire.points.len() > 1
+                && let Some(last) = wire.points.last()
+                    && *last == pos {
                         result.push((wire.id, wire.points.len() - 1));
                     }
-                }
-            }
         }
         result
     }
@@ -131,11 +128,10 @@ impl SchematicState {
             }
 
             // Add corner point for orthogonal routing if needed
-            if let Some(corner) = self.wire_drawing.get_route_corner(pos) {
-                if corner != last && corner != pos {
+            if let Some(corner) = self.wire_drawing.get_route_corner(pos)
+                && corner != last && corner != pos {
                     self.wire_drawing.points.push(corner);
                 }
-            }
 
             self.wire_drawing.points.push(pos);
         }

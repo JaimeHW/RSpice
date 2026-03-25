@@ -28,17 +28,15 @@ impl ShortcutRule {
             return false;
         }
 
-        if let Some(required_ctrl) = self.ctrl {
-            if snapshot.ctrl() != required_ctrl {
+        if let Some(required_ctrl) = self.ctrl
+            && snapshot.ctrl() != required_ctrl {
                 return false;
             }
-        }
 
-        if let Some(required_shift) = self.shift {
-            if snapshot.shift() != required_shift {
+        if let Some(required_shift) = self.shift
+            && snapshot.shift() != required_shift {
                 return false;
             }
-        }
 
         true
     }

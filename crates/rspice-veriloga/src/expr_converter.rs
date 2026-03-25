@@ -829,7 +829,7 @@ impl<'a> ExprConverter<'a> {
                 .iter()
                 .all(|arg| matches!(arg, Expression::Number(_)))
         {
-            if data_args.len() % 2 != 0 {
+            if !data_args.len().is_multiple_of(2) {
                 return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
                     "$table_model numeric table data requires x/y pairs".into(),
                 ))
@@ -924,7 +924,7 @@ impl<'a> ExprConverter<'a> {
 
         let normalized_commas = normalized.replace(',', " ");
         let tokens: Vec<&str> = normalized_commas.split_whitespace().collect();
-        if tokens.len() < 4 || tokens.len() % 2 != 0 {
+        if tokens.len() < 4 || !tokens.len().is_multiple_of(2) {
             return Err("table data must contain at least two x/y pairs".to_string());
         }
         for pair in tokens.chunks_exact(2) {

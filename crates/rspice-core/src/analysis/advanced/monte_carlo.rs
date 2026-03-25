@@ -514,11 +514,10 @@ impl MonteCarloRunner {
             let mut value = *nominal;
 
             // Apply lot variation (same for all instances in this run)
-            if let Some(_lot) = &tol.lot {
-                if let Some(&lot_factor) = lot_values.get(name) {
+            if let Some(_lot) = &tol.lot
+                && let Some(&lot_factor) = lot_values.get(name) {
                     value = lot_factor;
                 }
-            }
 
             // Apply device variation (different for each instance)
             if let Some(dev) = &tol.dev {

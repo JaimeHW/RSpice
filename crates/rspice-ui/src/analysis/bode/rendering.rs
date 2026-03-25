@@ -277,11 +277,10 @@ fn render_magnitude_plot(painter: &Painter, rect: Rect, state: &BodePlotState) {
     }
 
     // Traces
-    if let Some(resp) = state.data.primary() {
-        if let Some((f_min, f_max)) = resp.frequency_range() {
+    if let Some(resp) = state.data.primary()
+        && let Some((f_min, f_max)) = resp.frequency_range() {
             render_magnitude_trace(painter, rect, resp, f_min, f_max, state);
         }
-    }
 
     // Label
     painter.text(
@@ -322,11 +321,10 @@ fn render_phase_plot(painter: &Painter, rect: Rect, state: &BodePlotState) {
     }
 
     // Traces
-    if let Some(resp) = state.data.primary() {
-        if let Some((f_min, f_max)) = resp.frequency_range() {
+    if let Some(resp) = state.data.primary()
+        && let Some((f_min, f_max)) = resp.frequency_range() {
             render_phase_trace(painter, rect, resp, f_min, f_max, state);
         }
-    }
 
     // Label
     painter.text(

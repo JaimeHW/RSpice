@@ -611,16 +611,14 @@ impl CodeModel for DFlipFlop {
         let clk_state = if clk.state.is_high() { 1 } else { 0 };
 
         // Async set/reset
-        if let Some(s) = set {
-            if s.state.is_high() {
+        if let Some(s) = set
+            && s.state.is_high() {
                 q = 1;
             }
-        }
-        if let Some(r) = reset {
-            if r.state.is_high() {
+        if let Some(r) = reset
+            && r.state.is_high() {
                 q = 0;
             }
-        }
 
         // Rising edge clock
         if clk_state == 1 && prev_clk == 0 {

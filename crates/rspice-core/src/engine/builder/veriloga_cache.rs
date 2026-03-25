@@ -489,15 +489,14 @@ pub(super) fn persist_model_to_disk_locked(
 
 #[cfg(feature = "veriloga")]
 pub(super) fn remove_cache_file(path: &Path) {
-    if let Err(err) = std::fs::remove_file(path) {
-        if err.kind() != std::io::ErrorKind::NotFound {
+    if let Err(err) = std::fs::remove_file(path)
+        && err.kind() != std::io::ErrorKind::NotFound {
             log::warn!(
                 "failed to remove stale/corrupt Verilog-A cache file '{}': {}",
                 path.display(),
                 err
             );
         }
-    }
 }
 
 #[cfg(feature = "veriloga")]
@@ -713,21 +712,19 @@ pub(super) fn resolve_cached_or_compile_veriloga(
     let canonical = canonicalize_for_cache(path);
     let mut stale_in_memory = false;
 
-    if let Ok(cache) = veriloga_model_cache().read() {
-        if let Some(entry) = cache.get(&canonical) {
+    if let Ok(cache) = veriloga_model_cache().read()
+        && let Some(entry) = cache.get(&canonical) {
             if dependencies_are_fresh(&entry.dependencies) {
                 log::debug!("Verilog-A cache hit (memory): '{}'", canonical.display());
                 return Ok(entry.model.clone());
             }
             stale_in_memory = true;
         }
-    }
 
-    if stale_in_memory {
-        if let Ok(mut cache) = veriloga_model_cache().write() {
+    if stale_in_memory
+        && let Ok(mut cache) = veriloga_model_cache().write() {
             cache.remove(&canonical);
         }
-    }
 
     if let Some(entry) = load_model_from_disk(&canonical) {
         let model = entry.model.clone();

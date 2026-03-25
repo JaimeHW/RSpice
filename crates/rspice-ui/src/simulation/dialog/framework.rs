@@ -286,12 +286,11 @@ pub fn numeric_input(ui: &mut Ui, label: &str, value: &mut f64, unit: &str) -> b
 
         let response = ui.add(egui::TextEdit::singleline(&mut text).desired_width(80.0));
 
-        if response.changed() {
-            if let Some(v) = parse_value(&text) {
+        if response.changed()
+            && let Some(v) = parse_value(&text) {
                 *value = v;
                 changed = true;
             }
-        }
 
         ui.label(
             egui::RichText::new(unit)

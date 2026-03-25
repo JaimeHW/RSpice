@@ -497,11 +497,10 @@ impl PxfResult {
         self.unity_gain_freq = self.find_unity_gain_freq();
 
         // DC gain from lowest frequency point
-        if let Some(first) = self.points.first() {
-            if first.freq_in < 100.0 {
+        if let Some(first) = self.points.first()
+            && first.freq_in < 100.0 {
                 self.dc_gain = Some(first.transfer);
             }
-        }
     }
 }
 

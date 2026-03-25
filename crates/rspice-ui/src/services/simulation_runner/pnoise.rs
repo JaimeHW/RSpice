@@ -272,13 +272,12 @@ fn run_pnoise_analysis_with_config_typed(
             })
         })
         .transpose()?;
-    if let Some(ref_idx) = output_ref_idx {
-        if ref_idx == output_idx {
+    if let Some(ref_idx) = output_ref_idx
+        && ref_idx == output_idx {
             return Err(PnoiseRunError::Resolution(
                 "PNOISE output node and output reference cannot be the same node".to_string(),
             ));
         }
-    }
 
     let frequencies = generate_freq_points(
         config.start_freq,
@@ -507,8 +506,7 @@ fn estimate_carrier_rms_for_node(pss_data: &PssData, output_node: &str) -> Optio
         .harmonics
         .iter()
         .find(|(name, _)| normalize_voltage_signal_name(name) == target)
-    {
-        if let Some((_, magnitude, _)) = harmonics
+        && let Some((_, magnitude, _)) = harmonics
             .iter()
             .filter(|(frequency, magnitude, _)| {
                 frequency.is_finite()
@@ -520,7 +518,6 @@ fn estimate_carrier_rms_for_node(pss_data: &PssData, output_node: &str) -> Optio
         {
             return Some(*magnitude / 2.0_f64.sqrt());
         }
-    }
 
     pss_data
         .waveforms

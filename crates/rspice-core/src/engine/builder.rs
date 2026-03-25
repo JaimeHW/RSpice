@@ -382,7 +382,7 @@ fn build_cpl_multiconductor_line(
     element: &crate::netlist::Element,
     model_name: &str,
 ) -> Result<(), SimulationError> {
-    if element.nodes.len() < 6 || element.nodes.len() % 2 != 0 {
+    if element.nodes.len() < 6 || !element.nodes.len().is_multiple_of(2) {
         return Err(SimulationError::Circuit(format!(
             "CPL transmission line '{}' requires 2*N+2 nodes (N conductors plus shared reference)",
             element.name
@@ -705,8 +705,8 @@ impl Engine {
                     model,
                     instance_params,
                 } => {
-                    if let Some(expression) = value_expr.as_deref() {
-                        if model.is_none() && expression_references_circuit_state(expression) {
+                    if let Some(expression) = value_expr.as_deref()
+                        && model.is_none() && expression_references_circuit_state(expression) {
                             add_behavioral_resistor(
                                 &mut circuit,
                                 netlist,
@@ -717,7 +717,6 @@ impl Engine {
                             )?;
                             continue;
                         }
-                    }
 
                     let resistance = resolve_resistor_instance_value(
                         netlist,

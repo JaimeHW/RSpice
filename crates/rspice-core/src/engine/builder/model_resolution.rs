@@ -226,8 +226,8 @@ pub(super) fn resolve_resistor_instance_value(
     if resistance.is_none() && value.is_finite() && value > 0.0 {
         resistance = Some(value);
     }
-    if resistance.is_none() {
-        if let Some(expr) = value_expr {
+    if resistance.is_none()
+        && let Some(expr) = value_expr {
             resistance = Some(
                 crate::netlist::expr::eval_expression(expr, &eval_ctx).map_err(|e| {
                     SimulationError::Circuit(format!(
@@ -237,7 +237,6 @@ pub(super) fn resolve_resistor_instance_value(
                 })?,
             );
         }
-    }
 
     if let Some(model_def) = model_def {
         if resistance.is_none() {
@@ -407,29 +406,23 @@ pub(super) fn resolve_tline_model_params(
     let c = model_param(&model.params, &["C", "C0"]);
     let len = params.len;
 
-    if params.z0.is_none() {
-        if let (Some(l), Some(c)) = (l, c) {
-            if l > 0.0 && c > 0.0 {
+    if params.z0.is_none()
+        && let (Some(l), Some(c)) = (l, c)
+            && l > 0.0 && c > 0.0 {
                 params.z0 = Some((l / c).sqrt());
             }
-        }
-    }
 
-    if params.td.is_none() {
-        if let (Some(f), Some(nl)) = (params.freq, params.nl) {
-            if f > 0.0 {
+    if params.td.is_none()
+        && let (Some(f), Some(nl)) = (params.freq, params.nl)
+            && f > 0.0 {
                 params.td = Some(nl / f);
             }
-        }
-    }
 
-    if params.td.is_none() {
-        if let (Some(l), Some(c), Some(len)) = (l, c, len) {
-            if l > 0.0 && c > 0.0 && len > 0.0 {
+    if params.td.is_none()
+        && let (Some(l), Some(c), Some(len)) = (l, c, len)
+            && l > 0.0 && c > 0.0 && len > 0.0 {
                 params.td = Some(len * (l * c).sqrt());
             }
-        }
-    }
 
     Some(params)
 }
@@ -636,15 +629,14 @@ pub(super) fn tline_model_attenuation(params: TransmissionLineModelParams, z0: f
     let len = params.len.unwrap_or(1.0).max(0.0);
 
     // Explicit alpha (Np/unit length) takes precedence.
-    if let Some(alpha) = params.alpha {
-        if alpha.is_finite() && alpha >= 0.0 {
+    if let Some(alpha) = params.alpha
+        && alpha.is_finite() && alpha >= 0.0 {
             return Some((-alpha * len).exp());
         }
-    }
 
     // ATTEN/ATTENDB: interpret <=1 as linear ratio, otherwise as dB.
-    if let Some(atten) = params.atten {
-        if atten.is_finite() && atten >= 0.0 {
+    if let Some(atten) = params.atten
+        && atten.is_finite() && atten >= 0.0 {
             if atten <= 1.0 {
                 return Some(atten);
             }
@@ -655,7 +647,6 @@ pub(super) fn tline_model_attenuation(params: TransmissionLineModelParams, z0: f
             };
             return Some(10_f64.powf(-db_total / 20.0));
         }
-    }
 
     // Derive from primary RLGC line loss when available.
     let r = params.r.unwrap_or(0.0).max(0.0);

@@ -113,11 +113,10 @@ impl ModelBrowserState {
     /// Filter models based on search text and type filter.
     pub fn matches_filter(&self, model: &DeviceModel) -> bool {
         // Type filter
-        if let Some(target) = self.type_filter {
-            if model.model_type != target {
+        if let Some(target) = self.type_filter
+            && model.model_type != target {
                 return false;
             }
-        }
 
         // Search text filter
         if !self.search_text.is_empty() {
@@ -345,8 +344,7 @@ pub fn render_model_browser(
                         if ui
                             .add_enabled(can_apply, egui::Button::new("Apply"))
                             .clicked()
-                        {
-                            if let (Some(library), Some(model)) =
+                            && let (Some(library), Some(model)) =
                                 (&state.selected_library, &state.selected_model)
                             {
                                 result = ModelBrowserResult::Selected {
@@ -356,7 +354,6 @@ pub fn render_model_browser(
                                 };
                                 state.close();
                             }
-                        }
                     }
                 });
             });
@@ -473,9 +470,9 @@ fn render_model_list(ui: &mut Ui, state: &mut ModelBrowserState, manager: &Model
 
 /// Render model details in the right pane.
 fn render_model_details(ui: &mut Ui, state: &ModelBrowserState, manager: &ModelLibraryManager) {
-    if let (Some(lib_name), Some(model_name)) = (&state.selected_library, &state.selected_model) {
-        if let Some(lib) = manager.get_library(lib_name) {
-            if let Some(model) = lib.get_model(model_name) {
+    if let (Some(lib_name), Some(model_name)) = (&state.selected_library, &state.selected_model)
+        && let Some(lib) = manager.get_library(lib_name)
+            && let Some(model) = lib.get_model(model_name) {
                 // Model name header
                 ui.label(RichText::new(&model.name).heading());
                 ui.add_space(4.0);
@@ -569,8 +566,6 @@ fn render_model_details(ui: &mut Ui, state: &ModelBrowserState, manager: &ModelL
 
                 return;
             }
-        }
-    }
 
     ui.label(
         RichText::new("Select a model to view details")

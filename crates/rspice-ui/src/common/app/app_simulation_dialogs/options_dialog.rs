@@ -395,8 +395,8 @@ impl RSpiceApp {
                             close_requested = true;
                         }
 
-                        if apply_clicked || ok_clicked {
-                            if let Some(options) =
+                        if (apply_clicked || ok_clicked)
+                            && let Some(options) =
                                 parse_and_validate_options(&mut self.state.dialogs)
                             {
                                 commit_validated_options(&mut self.state.dialogs, &options);
@@ -407,7 +407,6 @@ impl RSpiceApp {
                                     close_requested = true;
                                 }
                             }
-                        }
                     });
                 });
             });

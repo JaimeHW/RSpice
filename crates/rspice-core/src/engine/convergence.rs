@@ -676,8 +676,8 @@ impl Engine {
             return Some(candidate);
         }
 
-        if !suspicious {
-            if let Some(refined) =
+        if !suspicious
+            && let Some(refined) =
                 self.refine_fallback_candidate(circuit, matrix, &candidate, abort)
             {
                 log::info!(
@@ -686,7 +686,6 @@ impl Engine {
                 );
                 return Some(refined);
             }
-        }
 
         if suspicious {
             if Self::has_clamped_values(&candidate) {

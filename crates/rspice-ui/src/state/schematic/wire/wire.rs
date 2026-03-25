@@ -94,11 +94,10 @@ impl Wire {
 
         for se in &self_endpoints {
             for oe in &other_endpoints {
-                if let (Some(s), Some(o)) = (se, oe) {
-                    if s == o {
+                if let (Some(s), Some(o)) = (se, oe)
+                    && s == o {
                         return true;
                     }
-                }
             }
         }
         false

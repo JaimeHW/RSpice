@@ -505,11 +505,10 @@ pub fn generate_component_name(comp_type: &ComponentType, existing: &[Component]
     // Find highest existing number for this prefix
     let mut max_num = 0;
     for comp in existing {
-        if comp.name.starts_with(prefix) {
-            if let Ok(num) = comp.name[prefix.len()..].parse::<u32>() {
+        if comp.name.starts_with(prefix)
+            && let Ok(num) = comp.name[prefix.len()..].parse::<u32>() {
                 max_num = max_num.max(num);
             }
-        }
     }
 
     format!("{}{}", prefix, max_num + 1)

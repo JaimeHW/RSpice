@@ -96,14 +96,13 @@ impl SParameterRunConfig {
                     idx + 1
                 )));
             }
-            if let Some(port_z0) = port.z0 {
-                if !port_z0.is_finite() || port_z0 <= 0.0 {
+            if let Some(port_z0) = port.z0
+                && (!port_z0.is_finite() || port_z0 <= 0.0) {
                     return Err(SParameterRunError::Validation(format!(
                         "S-parameter port{} z0 must be positive",
                         idx + 1
                     )));
                 }
-            }
         }
         Ok(())
     }

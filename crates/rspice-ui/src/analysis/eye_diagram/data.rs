@@ -293,8 +293,8 @@ impl EyeDataBuilder {
 
             let interp_start_idx = sample_start_idx.saturating_sub(1);
             let interp_end_idx = (sample_end_idx + 1).min(n);
-            if interp_end_idx.saturating_sub(interp_start_idx) >= 2 {
-                if let Some(trace) = resample_window_trace(
+            if interp_end_idx.saturating_sub(interp_start_idx) >= 2
+                && let Some(trace) = resample_window_trace(
                     &time[..n],
                     &signal[..n],
                     interp_start_idx,
@@ -306,7 +306,6 @@ impl EyeDataBuilder {
                 ) {
                     eye_data.add_trace(trace);
                 }
-            }
 
             window_start += self.bit_period;
         }

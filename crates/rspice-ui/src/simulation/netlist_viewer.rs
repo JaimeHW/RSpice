@@ -384,11 +384,10 @@ impl NetlistDocument {
 
     /// Toggle fold at line
     pub fn toggle_fold(&mut self, line_number: usize) {
-        if let Some(line) = self.get_line_mut(line_number) {
-            if line.is_fold_start {
+        if let Some(line) = self.get_line_mut(line_number)
+            && line.is_fold_start {
                 line.is_collapsed = !line.is_collapsed;
             }
-        }
     }
 
     /// Get visible lines (respecting folds)

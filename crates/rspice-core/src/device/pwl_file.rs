@@ -535,14 +535,13 @@ mod tests {
                 continue;
             }
             let parts: Vec<&str> = trimmed.split(',').collect();
-            if parts.len() >= 2 {
-                if let (Ok(t), Ok(v)) = (
+            if parts.len() >= 2
+                && let (Ok(t), Ok(v)) = (
                     parts[0].trim().parse::<f64>(),
                     parts[1].trim().parse::<f64>(),
                 ) {
                     points.push((t, v));
                 }
-            }
         }
 
         assert_eq!(points.len(), 3);
