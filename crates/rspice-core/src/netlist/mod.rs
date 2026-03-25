@@ -59,6 +59,7 @@ pub enum ParseError {
 
 use crate::analysis::MeasureStatement;
 use std::collections::HashSet;
+use std::path::PathBuf;
 
 /// Represents a parsed netlist ready for circuit construction
 #[derive(Debug, Clone)]
@@ -90,6 +91,9 @@ pub struct Netlist {
     /// Optional original netlist text used to build this AST.
     /// Stored to support parameter re-application workflows (e.g., sensitivity).
     pub source_text: Option<String>,
+    /// Optional source path for the netlist used to resolve relative includes
+    /// and model-file references during reparsing workflows.
+    pub source_path: Option<PathBuf>,
 }
 
 /// Verilog-A model include directive
@@ -110,6 +114,7 @@ impl Netlist {
         let sanitized = Self::strip_control_blocks(input);
         let mut netlist = parser::parse_netlist(&sanitized)?;
         netlist.source_text = Some(input.to_string());
+        netlist.source_path = None;
         Ok(netlist)
     }
 
@@ -121,6 +126,7 @@ impl Netlist {
         let processed = Self::preprocess_includes(input, file_path)?;
         let mut netlist = Self::parse(&processed)?;
         Self::normalize_model_string_paths(&mut netlist, file_path);
+        netlist.source_path = Some(file_path.to_path_buf());
         Ok(netlist)
     }
 
@@ -234,6 +240,7 @@ impl Default for Netlist {
             options: SimulationOptions::default(),
             veriloga_includes: Vec::new(),
             source_text: None,
+            source_path: None,
         }
     }
 }
@@ -395,5 +402,6 @@ A1 [out] src
             .expect("input_file string param should be preserved");
 
         assert_eq!(std::path::PathBuf::from(input_file), stimuli_path);
+        assert_eq!(netlist.source_path.as_deref(), Some(netlist_path.as_path()));
     }
 }

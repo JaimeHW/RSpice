@@ -149,6 +149,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
         options,
         veriloga_includes,
         source_text: Some(input.to_string()),
+        source_path: None,
     })
 }
 

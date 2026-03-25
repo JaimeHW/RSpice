@@ -919,7 +919,12 @@ impl Engine {
             .count();
         let overridden_source = Self::build_overridden_source_multi(source, &ordered_overrides);
 
-        let mut reparsed = crate::netlist::parse_netlist(&overridden_source).map_err(|e| {
+        let mut reparsed = if let Some(source_path) = netlist.source_path.as_deref() {
+            Netlist::parse_with_path(&overridden_source, source_path)
+        } else {
+            crate::netlist::parse_netlist(&overridden_source)
+        }
+        .map_err(|e| {
             SimulationError::Netlist(format!(
                 "Failed to reparse netlist for parameter override set {:?}: {}",
                 ordered_overrides, e
