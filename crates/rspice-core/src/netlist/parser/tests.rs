@@ -279,6 +279,56 @@ V1 1 0 SIN(0 1 1k)
 }
 
 #[test]
+fn test_parse_meas_find_at_statement() {
+    let netlist = r#"Measure Find At
+.MEAS TRAN vout FIND V(out) AT=1u
+.END
+"#;
+    let result = parse_netlist(netlist).expect("netlist should parse");
+
+    assert_eq!(result.measurements.len(), 1);
+    match &result.measurements[0].measure_type {
+        crate::analysis::MeasureType::Find {
+            signal,
+            at,
+            when_signal,
+            when_value,
+        } => {
+            assert_eq!(signal, "V(OUT)");
+            assert_eq!(*at, Some(1e-6));
+            assert!(when_signal.is_none());
+            assert!(when_value.is_none());
+        }
+        other => panic!("Expected FIND measurement, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_meas_find_when_statement() {
+    let netlist = r#"Measure Find When
+.MEAS TRAN vdiff FIND V(out,ref) WHEN V(in)=0.5
+.END
+"#;
+    let result = parse_netlist(netlist).expect("netlist should parse");
+
+    assert_eq!(result.measurements.len(), 1);
+    match &result.measurements[0].measure_type {
+        crate::analysis::MeasureType::Find {
+            signal,
+            at,
+            when_signal,
+            when_value,
+        } => {
+            assert_eq!(signal, "V(OUT,REF)");
+            assert!(at.is_none());
+            assert_eq!(when_signal.as_deref(), Some("V(IN)"));
+            assert_eq!(*when_value, Some(0.5));
+        }
+        other => panic!("Expected FIND measurement, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_parse_ac_phase_is_degrees_converted_to_radians() {
     let netlist = r#"AC Phase Test
 V1 1 0 AC 1 90
