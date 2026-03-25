@@ -2,11 +2,12 @@
 
 use super::{
     build_engine_config, build_voltage_output_expr, infer_primary_output_node,
-    infer_primary_source_name, is_ground_like,
+    infer_primary_source_name, is_ground_like, parse_runner_netlist,
 };
 use num_complex::Complex64;
 use rspice_core::engine::Engine;
 use rspice_core::Value;
+use std::path::Path;
 // =============================================================================
 // PAC (Periodic AC) Analysis
 // =============================================================================
@@ -216,8 +217,25 @@ fn run_pac_internal(
 
 /// Run PAC analysis by first solving PSS and then linearizing around the periodic solution.
 pub fn run_pac_analysis(netlist_text: &str, config: &PacRunConfig) -> Result<PacData, String> {
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    run_pac_analysis_with_source_path(netlist_text, config, None)
+}
+
+/// Run PAC analysis by first solving PSS and then linearizing around the
+/// periodic solution, resolving relative includes from the source path when
+/// provided.
+pub fn run_pac_analysis_with_source_path(
+    netlist_text: &str,
+    config: &PacRunConfig,
+    source_path: Option<&Path>,
+) -> Result<PacData, String> {
+    let netlist = parse_runner_netlist(netlist_text, source_path)?;
+    run_pac_analysis_for_netlist(&netlist, config)
+}
+
+fn run_pac_analysis_for_netlist(
+    netlist: &rspice_core::Netlist,
+    config: &PacRunConfig,
+) -> Result<PacData, String> {
     let pac_internal = run_pac_internal(&netlist, config)?;
     let output_node_idx = pac_internal.output_node_idx;
     let pac_result = pac_internal.pac_result;
@@ -259,8 +277,16 @@ pub fn run_pac_analysis(netlist_text: &str, config: &PacRunConfig) -> Result<Pac
 
 /// Run PAC analysis using inferred/default settings.
 pub fn run_pac_analysis_auto(netlist_text: &str) -> Result<PacData, String> {
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    run_pac_analysis_auto_with_source_path(netlist_text, None)
+}
+
+/// Run PAC analysis using inferred/default settings and a source path used to
+/// resolve relative includes and model file references.
+pub fn run_pac_analysis_auto_with_source_path(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+) -> Result<PacData, String> {
+    let netlist = parse_runner_netlist(netlist_text, source_path)?;
     let engine = Engine::new(build_engine_config(&netlist, None));
     let dc_result = engine
         .run_dc_op(&netlist)
@@ -276,7 +302,7 @@ pub fn run_pac_analysis_auto(netlist_text: &str) -> Result<PacData, String> {
         output_node,
         ..PacRunConfig::default()
     };
-    run_pac_analysis(netlist_text, &cfg)
+    run_pac_analysis_for_netlist(&netlist, &cfg)
 }
 
 // =============================================================================
@@ -446,12 +472,27 @@ pub fn run_pxf_analysis_with_config(
     netlist_text: &str,
     config: &PxfRunConfig,
 ) -> Result<PxfData, String> {
+    run_pxf_analysis_with_config_and_source_path(netlist_text, config, None)
+}
+
+/// Run PXF analysis with explicit configuration and a source path used to
+/// resolve relative includes and model file references.
+pub fn run_pxf_analysis_with_config_and_source_path(
+    netlist_text: &str,
+    config: &PxfRunConfig,
+    source_path: Option<&Path>,
+) -> Result<PxfData, String> {
+    let netlist = parse_runner_netlist(netlist_text, source_path)?;
+    run_pxf_analysis_for_netlist(&netlist, config)
+}
+
+fn run_pxf_analysis_for_netlist(
+    netlist: &rspice_core::Netlist,
+    config: &PxfRunConfig,
+) -> Result<PxfData, String> {
     use rspice_core::analysis::advanced::pxf::{PxfAnalyzer, PxfConfig};
 
     config.validate()?;
-
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
 
     let required_sideband = config
         .input_sideband
@@ -480,7 +521,7 @@ pub fn run_pxf_analysis_with_config(
         abstol: config.abstol,
     };
 
-    let pac_internal = run_pac_internal(&netlist, &pac_cfg)?;
+    let pac_internal = run_pac_internal(netlist, &pac_cfg)?;
     let pac_result = pac_internal.pac_result;
 
     let sideband_indices = pac_result.conversion_matrix.sideband_indices();
@@ -599,8 +640,16 @@ pub fn run_pxf_analysis_with_config(
 
 /// Run PXF analysis using inferred/default settings.
 pub fn run_pxf_analysis(netlist_text: &str) -> Result<PxfData, String> {
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    run_pxf_analysis_with_source_path(netlist_text, None)
+}
+
+/// Run PXF analysis using inferred/default settings and a source path used to
+/// resolve relative includes and model file references.
+pub fn run_pxf_analysis_with_source_path(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+) -> Result<PxfData, String> {
+    let netlist = parse_runner_netlist(netlist_text, source_path)?;
     let engine = Engine::new(build_engine_config(&netlist, None));
     let dc_result = engine
         .run_dc_op(&netlist)
@@ -616,7 +665,7 @@ pub fn run_pxf_analysis(netlist_text: &str) -> Result<PxfData, String> {
         output_node,
         ..PxfRunConfig::default()
     };
-    run_pxf_analysis_with_config(netlist_text, &cfg)
+    run_pxf_analysis_for_netlist(&netlist, &cfg)
 }
 
 fn normalize_pac_node_name(raw: &str) -> String {

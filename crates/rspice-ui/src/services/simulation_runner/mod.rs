@@ -49,12 +49,17 @@ pub use ac::{run_ac_analysis, run_ac_analysis_with_source_path, AcData};
 pub use dc_sweep::{run_dc_sweep, run_dc_sweep_with_source_path, DcSweepData};
 #[cfg(test)]
 use disto::interpolate_magnitude_at_for_tests;
-pub use disto::{run_disto_analysis, DistoData, DistoFrequencySweep, DistoRunConfig, DistoTrace};
+pub use disto::{
+    run_disto_analysis, run_disto_analysis_with_source_path, DistoData, DistoFrequencySweep,
+    DistoRunConfig, DistoTrace,
+};
 pub use envelope_fourier::{
     run_envelope_analysis, run_fourier_analysis, EnvelopeData, EnvelopeRunConfig, FourierData,
     FourierRunConfig,
 };
-pub use hb::{run_hb_analysis, HbData, HbRunConfig, HbToneRunConfig};
+pub use hb::{
+    run_hb_analysis, run_hb_analysis_with_source_path, HbData, HbRunConfig, HbToneRunConfig,
+};
 use helpers::{
     build_voltage_output_expr, generate_freq_points, infer_primary_output_node,
     infer_primary_source_name, is_ground_like, netlist_has_independent_source_named,
@@ -72,20 +77,27 @@ pub use optimization::{
     OptimizationGoalMode, OptimizationRunConfig, OptimizationVariable,
 };
 pub use pac_pxf::{
-    run_pac_analysis, run_pac_analysis_auto, run_pxf_analysis, run_pxf_analysis_with_config,
-    PacData, PacFrequencySweep, PacRunConfig, PxfData, PxfFrequencySweep, PxfRunConfig,
+    run_pac_analysis, run_pac_analysis_auto, run_pac_analysis_auto_with_source_path,
+    run_pac_analysis_with_source_path, run_pxf_analysis, run_pxf_analysis_with_config,
+    run_pxf_analysis_with_config_and_source_path, run_pxf_analysis_with_source_path, PacData,
+    PacFrequencySweep, PacRunConfig, PxfData, PxfFrequencySweep, PxfRunConfig,
 };
 pub use pnoise::{
-    run_pnoise_analysis, run_pnoise_analysis_with_config, PnoiseData, PnoiseFrequencySweep,
-    PnoiseReference, PnoiseRunConfig,
+    run_pnoise_analysis, run_pnoise_analysis_with_config,
+    run_pnoise_analysis_with_config_and_source_path, run_pnoise_analysis_with_source_path,
+    PnoiseData, PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
 };
 #[cfg(test)]
 use pnoise_sideband::{build_pnoise_sideband_translated_frequencies, fold_sideband_samples};
 pub use pole_zero::{
     run_pole_zero_analysis, run_pole_zero_analysis_with_source_path, PoleZeroData,
 };
-pub use pss::{run_pss_analysis, PssData};
-pub use pstb::{run_pstb_analysis, run_pstb_analysis_with_config, PstbData, PstbRunConfig};
+pub use pss::{run_pss_analysis, run_pss_analysis_with_source_path, PssData};
+pub use pstb::{
+    run_pstb_analysis, run_pstb_analysis_with_config,
+    run_pstb_analysis_with_config_and_source_path, run_pstb_analysis_with_source_path, PstbData,
+    PstbRunConfig,
+};
 pub use reliability::{
     run_reliability_analysis, run_reliability_analysis_with_config,
     run_reliability_analysis_with_config_and_source_path,

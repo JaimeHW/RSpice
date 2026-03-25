@@ -7,13 +7,15 @@ use super::pnoise_sideband::{
 use super::{
     build_engine_config, generate_freq_points, infer_primary_output_node,
     infer_primary_source_name, is_ground_like, netlist_has_independent_source_named,
-    normalize_voltage_signal_name, run_pss_analysis, PssData,
+    normalize_voltage_signal_name, parse_runner_netlist, run_pss_analysis_with_source_path,
+    PssData,
 };
 use crate::output_spec::resolve_node_or_ground_index;
 use rspice_core::analysis::noise::NoiseResult;
 use rspice_core::engine::Engine;
 use rspice_core::Value;
 use std::fmt;
+use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PnoiseRunError {
@@ -194,17 +196,28 @@ pub fn run_pnoise_analysis_with_config(
     netlist_text: &str,
     config: &PnoiseRunConfig,
 ) -> Result<PnoiseData, String> {
-    run_pnoise_analysis_with_config_typed(netlist_text, config).map_err(|error| error.to_string())
+    run_pnoise_analysis_with_config_and_source_path(netlist_text, config, None)
+}
+
+/// Run PNoise analysis with explicit configuration and a source path used to
+/// resolve relative includes and model file references.
+pub fn run_pnoise_analysis_with_config_and_source_path(
+    netlist_text: &str,
+    config: &PnoiseRunConfig,
+    source_path: Option<&Path>,
+) -> Result<PnoiseData, String> {
+    run_pnoise_analysis_with_config_typed(netlist_text, config, source_path)
+        .map_err(|error| error.to_string())
 }
 
 fn run_pnoise_analysis_with_config_typed(
     netlist_text: &str,
     config: &PnoiseRunConfig,
+    source_path: Option<&Path>,
 ) -> Result<PnoiseData, PnoiseRunError> {
     config.validate()?;
 
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| PnoiseRunError::Parse(format!("Parse error: {}", e)))?;
+    let netlist = parse_runner_netlist(netlist_text, source_path).map_err(PnoiseRunError::Parse)?;
     if config.noise_ref == PnoiseReference::Input {
         let source_name = config.input_source.trim();
         if !source_name.is_empty() && !netlist_has_independent_source_named(&netlist, source_name) {
@@ -217,11 +230,12 @@ fn run_pnoise_analysis_with_config_typed(
 
     // PNOISE requires a periodic operating point. We run PSS first and reuse
     // its carrier for phase-noise normalization.
-    let pss_data = run_pss_analysis(
+    let pss_data = run_pss_analysis_with_source_path(
         netlist_text,
         config.pss_fundamental_freq,
         config.pss_num_harmonics,
         config.pss_tolerance,
+        source_path,
     )
     .map_err(PnoiseRunError::Execution)?;
 
@@ -441,12 +455,23 @@ fn compute_input_referred_pnoise(
 
 /// Run PNoise analysis using inferred/default settings.
 pub fn run_pnoise_analysis(netlist_text: &str) -> Result<PnoiseData, String> {
-    run_pnoise_analysis_typed(netlist_text).map_err(|error| error.to_string())
+    run_pnoise_analysis_with_source_path(netlist_text, None)
 }
 
-fn run_pnoise_analysis_typed(netlist_text: &str) -> Result<PnoiseData, PnoiseRunError> {
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| PnoiseRunError::Parse(format!("Parse error: {}", e)))?;
+/// Run PNoise analysis using inferred/default settings and a source path used
+/// to resolve relative includes and model file references.
+pub fn run_pnoise_analysis_with_source_path(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+) -> Result<PnoiseData, String> {
+    run_pnoise_analysis_typed(netlist_text, source_path).map_err(|error| error.to_string())
+}
+
+fn run_pnoise_analysis_typed(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+) -> Result<PnoiseData, PnoiseRunError> {
+    let netlist = parse_runner_netlist(netlist_text, source_path).map_err(PnoiseRunError::Parse)?;
     let engine = Engine::new(build_engine_config(&netlist, None));
     let dc_result = engine.run_dc_op(&netlist).map_err(|e| {
         PnoiseRunError::Execution(format!("DC OP error (required for PNOISE defaults): {}", e))
@@ -464,7 +489,7 @@ fn run_pnoise_analysis_typed(netlist_text: &str) -> Result<PnoiseData, PnoiseRun
         input_source,
         ..PnoiseRunConfig::default()
     };
-    run_pnoise_analysis_with_config_typed(netlist_text, &cfg)
+    run_pnoise_analysis_with_config_typed(netlist_text, &cfg, source_path)
 }
 
 fn find_pss_waveform_by_node<'a>(pss_data: &'a PssData, node: &str) -> Option<&'a [Value]> {

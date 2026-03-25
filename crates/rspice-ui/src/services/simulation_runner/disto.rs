@@ -1,10 +1,12 @@
 use super::{
-    build_disto_two_tone_harmonic_plan, build_engine_config, generate_freq_points, run_ac_analysis,
+    build_disto_two_tone_harmonic_plan, build_engine_config, generate_freq_points,
+    parse_runner_netlist, run_ac_analysis_with_source_path,
 };
 use num_complex::Complex64;
 use rspice_core::engine::Engine;
 use rspice_core::Value;
 use std::fmt;
+use std::path::Path;
 
 /// Sweep type for DISTO analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,16 +124,27 @@ pub fn run_disto_analysis(
     netlist_text: &str,
     config: &DistoRunConfig,
 ) -> Result<DistoData, String> {
-    run_disto_analysis_typed(netlist_text, config).map_err(|error| error.to_string())
+    run_disto_analysis_with_source_path(netlist_text, config, None)
+}
+
+/// Run DISTO analysis with a source path used to resolve relative includes and
+/// model file references.
+pub fn run_disto_analysis_with_source_path(
+    netlist_text: &str,
+    config: &DistoRunConfig,
+    source_path: Option<&Path>,
+) -> Result<DistoData, String> {
+    run_disto_analysis_typed(netlist_text, config, source_path).map_err(|error| error.to_string())
 }
 
 fn run_disto_analysis_typed(
     netlist_text: &str,
     config: &DistoRunConfig,
+    source_path: Option<&Path>,
 ) -> Result<DistoData, DistoRunError> {
     config.validate()?;
 
-    match run_disto_analysis_nonlinear_hb(netlist_text, config) {
+    match run_disto_analysis_nonlinear_hb(netlist_text, config, source_path) {
         Ok(data) => Ok(data),
         Err(nonlinear_error) => {
             if !config.allow_linearized_fallback {
@@ -140,7 +153,7 @@ fn run_disto_analysis_typed(
                     nonlinear_error
                 )));
             }
-            let mut linearized = run_disto_analysis_linearized(netlist_text, config)?;
+            let mut linearized = run_disto_analysis_linearized(netlist_text, config, source_path)?;
             linearized.warnings.push(format!(
                 "DISTO nonlinear HB path was unavailable ({}); used linearized transfer-based fallback.",
                 nonlinear_error
@@ -153,11 +166,11 @@ fn run_disto_analysis_typed(
 fn run_disto_analysis_nonlinear_hb(
     netlist_text: &str,
     config: &DistoRunConfig,
+    source_path: Option<&Path>,
 ) -> Result<DistoData, DistoRunError> {
     use rspice_core::analysis::{HbConfig, HbTone};
 
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| DistoRunError::Parse(format!("Parse error: {}", e)))?;
+    let netlist = parse_runner_netlist(netlist_text, source_path).map_err(DistoRunError::Parse)?;
     let engine = Engine::new(build_engine_config(&netlist, None));
     let two_tone_plan = config
         .f2_over_f1
@@ -312,6 +325,7 @@ fn run_disto_analysis_nonlinear_hb(
 fn run_disto_analysis_linearized(
     netlist_text: &str,
     config: &DistoRunConfig,
+    source_path: Option<&Path>,
 ) -> Result<DistoData, DistoRunError> {
     let f2_over_f1 = config.f2_over_f1.unwrap_or(2.0);
     let max_factor = 3.0_f64
@@ -321,12 +335,13 @@ fn run_disto_analysis_linearized(
         .max((f2_over_f1 - 1.0).abs());
     let extended_stop = config.stop_freq * max_factor;
 
-    let ac = run_ac_analysis(
+    let ac = run_ac_analysis_with_source_path(
         netlist_text,
         config.start_freq,
         extended_stop,
         config.points_per_unit,
         config.sweep.keyword(),
+        source_path,
     )
     .map_err(DistoRunError::Execution)?;
 

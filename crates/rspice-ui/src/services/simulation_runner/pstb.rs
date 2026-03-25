@@ -1,7 +1,8 @@
-use super::build_engine_config;
+use super::{build_engine_config, parse_runner_netlist};
 use rspice_core::engine::Engine;
 use rspice_core::Value;
 use std::fmt;
+use std::path::Path;
 
 #[derive(Debug)]
 enum PstbRunError {
@@ -32,7 +33,7 @@ impl fmt::Display for PstbRunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidConfig(message) => f.write_str(message),
-            Self::Parse(err) => write!(f, "Parse error: {err}"),
+            Self::Parse(err) => f.write_str(err),
             Self::CircuitBuild(err) => write!(f, "PSTB prerequisite circuit-build error: {err}"),
             Self::Pss(err) => write!(f, "PSTB prerequisite PSS error: {err}"),
             Self::ProbeNotFound { probe, available } => write!(
@@ -357,20 +358,31 @@ pub fn run_pstb_analysis_with_config(
     netlist_text: &str,
     config: &PstbRunConfig,
 ) -> Result<PstbData, String> {
-    run_pstb_analysis_with_config_internal(netlist_text, config).map_err(|err| err.to_string())
+    run_pstb_analysis_with_config_and_source_path(netlist_text, config, None)
+}
+
+/// Run PSTB analysis using a PSS operating point and monodromy-based Floquet
+/// analysis, resolving relative includes from the source path when provided.
+pub fn run_pstb_analysis_with_config_and_source_path(
+    netlist_text: &str,
+    config: &PstbRunConfig,
+    source_path: Option<&Path>,
+) -> Result<PstbData, String> {
+    run_pstb_analysis_with_config_internal(netlist_text, config, source_path)
+        .map_err(|err| err.to_string())
 }
 
 fn run_pstb_analysis_with_config_internal(
     netlist_text: &str,
     config: &PstbRunConfig,
+    source_path: Option<&Path>,
 ) -> Result<PstbData, PstbRunError> {
     use rspice_core::analysis::advanced::pstb::{PstbAnalyzer, PstbConfig};
     use rspice_core::analysis::PssConfig;
 
     config.validate()?;
 
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| PstbRunError::Parse(e.to_string()))?;
+    let netlist = parse_runner_netlist(netlist_text, source_path).map_err(PstbRunError::Parse)?;
 
     let mut sim_config = build_engine_config(&netlist, None);
     sim_config.tolerance = config.pss_tolerance;
@@ -496,8 +508,17 @@ fn run_pstb_analysis_with_config_internal(
 
 /// Run PSTB analysis with default configuration.
 pub fn run_pstb_analysis(netlist_text: &str) -> Result<PstbData, String> {
+    run_pstb_analysis_with_source_path(netlist_text, None)
+}
+
+/// Run PSTB analysis with default configuration and a source path used to
+/// resolve relative includes and model file references.
+pub fn run_pstb_analysis_with_source_path(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+) -> Result<PstbData, String> {
     let cfg = PstbRunConfig::default();
-    run_pstb_analysis_with_config(netlist_text, &cfg)
+    run_pstb_analysis_with_config_and_source_path(netlist_text, &cfg, source_path)
 }
 
 #[cfg(test)]
@@ -574,9 +595,12 @@ mod tests {
     #[test]
     fn test_internal_run_surfaces_parse_error_variant() {
         let cfg = PstbRunConfig::default();
-        let err =
-            run_pstb_analysis_with_config_internal("Monte Carlo Invalid Runs\n.MC 0\n.END\n", &cfg)
-                .expect_err("invalid value token should produce parse error");
+        let err = run_pstb_analysis_with_config_internal(
+            "Monte Carlo Invalid Runs\n.MC 0\n.END\n",
+            &cfg,
+            None,
+        )
+        .expect_err("invalid value token should produce parse error");
         assert!(matches!(err, PstbRunError::Parse(_)));
         assert!(err.to_string().contains("Parse error"));
     }

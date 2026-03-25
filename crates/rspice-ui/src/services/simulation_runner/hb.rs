@@ -1,8 +1,9 @@
 #![allow(clippy::type_complexity)]
 
-use super::{build_engine_config, build_multi_tone_hb_layout};
+use super::{build_engine_config, build_multi_tone_hb_layout, parse_runner_netlist};
 use rspice_core::engine::Engine;
 use rspice_core::Value;
+use std::path::Path;
 /// Harmonic Balance analysis data
 #[derive(Debug, Clone)]
 pub struct HbData {
@@ -137,12 +138,20 @@ impl HbRunConfig {
 /// Solves for the steady-state response in the frequency domain,
 /// suitable for RF circuits with multiple tones.
 pub fn run_hb_analysis(netlist_text: &str, config: &HbRunConfig) -> Result<HbData, String> {
+    run_hb_analysis_with_source_path(netlist_text, config, None)
+}
+
+/// Run Harmonic Balance analysis with a source path used to resolve relative
+/// includes and model file references.
+pub fn run_hb_analysis_with_source_path(
+    netlist_text: &str,
+    config: &HbRunConfig,
+    source_path: Option<&Path>,
+) -> Result<HbData, String> {
     use rspice_core::analysis::{HbConfig, HbTone};
     config.validate()?;
 
-    // Parse the netlist
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    let netlist = parse_runner_netlist(netlist_text, source_path)?;
 
     let engine = Engine::new(build_engine_config(&netlist, None));
 
