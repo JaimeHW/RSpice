@@ -6,9 +6,10 @@
 //! - Abort capability
 //! - Result caching
 
+use std::path::PathBuf;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc, Mutex, MutexGuard,
+    atomic::{AtomicBool, Ordering},
 };
 use std::thread::{self, JoinHandle};
 
@@ -42,6 +43,12 @@ enum SimulationRequest {
         spec: Box<AnalysisSpec>,
         options: Box<SpecExecutionOptions>,
     },
+}
+
+#[derive(Debug, Clone)]
+struct NetlistInput {
+    netlist: String,
+    source_path: Option<PathBuf>,
 }
 
 /// Thread-safe simulation runner
@@ -158,7 +165,23 @@ impl SimulationRunner {
         config: AnalysisConfig,
         netlist: String,
     ) -> Result<(), SimulationError> {
-        self.start_request(SimulationRequest::Config(Box::new(config)), netlist)
+        self.start_with_source_path(config, netlist, None)
+    }
+
+    /// Start a simulation with the given configuration and source path.
+    pub fn start_with_source_path(
+        &mut self,
+        config: AnalysisConfig,
+        netlist: String,
+        source_path: Option<PathBuf>,
+    ) -> Result<(), SimulationError> {
+        self.start_request(
+            SimulationRequest::Config(Box::new(config)),
+            NetlistInput {
+                netlist,
+                source_path,
+            },
+        )
     }
 
     /// Start a simulation from strongly-typed analysis spec.
@@ -167,7 +190,12 @@ impl SimulationRunner {
         spec: AnalysisSpec,
         netlist: String,
     ) -> Result<(), SimulationError> {
-        self.start_spec_with_options(spec, netlist, SpecExecutionOptions::default())
+        self.start_spec_with_options_with_source_path(
+            spec,
+            netlist,
+            SpecExecutionOptions::default(),
+            None,
+        )
     }
 
     /// Start a simulation from strongly-typed analysis spec with explicit execution options.
@@ -177,19 +205,34 @@ impl SimulationRunner {
         netlist: String,
         options: SpecExecutionOptions,
     ) -> Result<(), SimulationError> {
+        self.start_spec_with_options_with_source_path(spec, netlist, options, None)
+    }
+
+    /// Start a simulation from strongly-typed analysis spec with explicit
+    /// execution options and a source path for relative include resolution.
+    pub fn start_spec_with_options_with_source_path(
+        &mut self,
+        spec: AnalysisSpec,
+        netlist: String,
+        options: SpecExecutionOptions,
+        source_path: Option<PathBuf>,
+    ) -> Result<(), SimulationError> {
         self.start_request(
             SimulationRequest::Spec {
                 spec: Box::new(spec),
                 options: Box::new(options),
             },
-            netlist,
+            NetlistInput {
+                netlist,
+                source_path,
+            },
         )
     }
 
     fn start_request(
         &mut self,
         request: SimulationRequest,
-        netlist: String,
+        input: NetlistInput,
     ) -> Result<(), SimulationError> {
         if self.is_running() {
             return Err(SimulationError::AlreadyRunning);
@@ -208,7 +251,7 @@ impl SimulationRunner {
 
         // Spawn simulation thread with real engine
         let handle =
-            thread::spawn(move || run_simulation_thread(request, netlist, progress, abort_flag));
+            thread::spawn(move || run_simulation_thread(request, input, progress, abort_flag));
 
         self.thread_handle = Some(handle);
         Ok(())
@@ -217,6 +260,16 @@ impl SimulationRunner {
     /// Run DC operating point analysis
     pub fn run_dc_op(&mut self, netlist: String) -> Result<(), SimulationError> {
         self.start(AnalysisConfig::DcOp, netlist)
+    }
+
+    /// Run DC operating point analysis with a source path for relative include
+    /// resolution.
+    pub fn run_dc_op_with_source_path(
+        &mut self,
+        netlist: String,
+        source_path: Option<PathBuf>,
+    ) -> Result<(), SimulationError> {
+        self.start_with_source_path(AnalysisConfig::DcOp, netlist, source_path)
     }
 
     /// Clear cached results
@@ -246,7 +299,7 @@ fn lock_progress<'a>(
 /// Runs the actual rspice-core simulation engine.
 fn run_simulation_thread(
     request: SimulationRequest,
-    netlist: String,
+    input: NetlistInput,
     progress: Arc<Mutex<SimulationProgress>>,
     abort_flag: Arc<AtomicBool>,
 ) -> Result<SimulationResult, SimulationError> {
@@ -469,7 +522,12 @@ fn run_simulation_thread(
         SimulationRequest::Config(config) => {
             // Run simulation via engine bridge with abort support
             log::info!("Running simulation via engine bridge: {:?}", config);
-            match bridge.run_with_abort(&config, &netlist, &abort_flag) {
+            match bridge.run_with_abort_and_source_path(
+                &config,
+                &input.netlist,
+                input.source_path.as_deref(),
+                &abort_flag,
+            ) {
                 Ok(r) => {
                     log::info!("Engine bridge returned successfully");
                     r
@@ -482,7 +540,14 @@ fn run_simulation_thread(
         }
         SimulationRequest::Spec { spec, options } => {
             log::info!("Running simulation via spec path: {:?}", spec.run_type());
-            spec::run_spec_request(&bridge, *spec, *options, &netlist, &abort_flag)?
+            spec::run_spec_request(
+                &bridge,
+                *spec,
+                *options,
+                &input.netlist,
+                input.source_path.as_deref(),
+                &abort_flag,
+            )?
         }
     };
 

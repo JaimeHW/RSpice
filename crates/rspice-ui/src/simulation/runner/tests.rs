@@ -186,6 +186,64 @@ fn test_run_dc_op_convenience() {
 }
 
 #[test]
+fn test_runner_start_with_source_path_resolves_relative_include() {
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("time should be monotonic")
+        .as_nanos();
+    let temp_dir = std::env::temp_dir().join(format!(
+        "rspice_ui_runner_relative_include_{}_{}",
+        std::process::id(),
+        nanos
+    ));
+    fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+    let source_path = temp_dir.join("designs").join("divider.rsch");
+    fs::create_dir_all(
+        source_path
+            .parent()
+            .expect("source path should have parent"),
+    )
+    .expect("source directory should be created");
+    fs::write(
+        source_path
+            .parent()
+            .expect("source path should have parent")
+            .join("included.sp"),
+        "RINC in 0 1k\n",
+    )
+    .expect("include file should be written");
+
+    let mut runner = SimulationRunner::new();
+    runner
+        .start_with_source_path(
+            AnalysisConfig::DcOp,
+            "* Source-relative include\nV1 in 0 1\n.include \"included.sp\"\n.end\n".to_string(),
+            Some(source_path),
+        )
+        .expect("runner should start with source path");
+
+    let result = wait_for_result(&mut runner, Duration::from_secs(2))
+        .expect("runner should finish within timeout")
+        .expect("simulation should succeed");
+
+    match result {
+        SimulationResult::DcOp(dc) => {
+            assert!(
+                !dc.node_voltages.is_empty(),
+                "expected source-relative include run to complete successfully"
+            );
+        }
+        other => panic!("expected DC result, got {:?}", other),
+    }
+
+    let _ = fs::remove_dir_all(temp_dir);
+}
+
+#[test]
 fn test_analysis_config_from_spec_covers_base_analyses() {
     let specs = vec![
         AnalysisSpec::DcOp,
@@ -739,9 +797,11 @@ R2 out 0 1k
             assert_eq!(x_label, "Corner Index");
             assert_eq!(x_unit, "");
             assert_eq!(corner_labels.len(), 4);
-            assert!(corner_labels
-                .iter()
-                .any(|label| label.contains("FF_1.100000V")));
+            assert!(
+                corner_labels
+                    .iter()
+                    .any(|label| label.contains("FF_1.100000V"))
+            );
         }
         other => panic!("Expected Corner result, got {:?}", other),
     }
@@ -952,9 +1012,11 @@ R2 out 0 50
             assert!(waveforms.contains_key("S21"));
             assert!(waveforms.contains_key("S12"));
             assert!(waveforms.contains_key("S22"));
-            assert!(waveforms
-                .values()
-                .all(|wf| wf.is_complex && wf.y_imag.as_ref().is_some()));
+            assert!(
+                waveforms
+                    .values()
+                    .all(|wf| wf.is_complex && wf.y_imag.as_ref().is_some())
+            );
         }
         other => panic!("Expected AC result for S-parameter, got {:?}", other),
     }
@@ -1080,9 +1142,11 @@ M1 d g 0 0 NM W=10u L=1u
             assert_eq!(years, vec![1.0, 5.0, 10.0]);
             assert!(!device_results.is_empty());
             assert!(!waveforms.is_empty());
-            assert!(waveforms
-                .keys()
-                .any(|name| name.starts_with("DVTH(") || name.starts_with("DRDS(")));
+            assert!(
+                waveforms
+                    .keys()
+                    .any(|name| name.starts_with("DVTH(") || name.starts_with("DRDS("))
+            );
         }
         other => panic!("Expected Reliability result, got {:?}", other),
     }
@@ -1319,9 +1383,11 @@ C1 out 0 1n
                 "expected PXF transfer waveform name, got {:?}",
                 waveforms.keys().collect::<Vec<_>>()
             );
-            assert!(waveforms
-                .values()
-                .any(|wf| wf.is_complex && wf.y_imag.as_ref().is_some()));
+            assert!(
+                waveforms
+                    .values()
+                    .any(|wf| wf.is_complex && wf.y_imag.as_ref().is_some())
+            );
         }
         other => panic!("Expected AC result for PXF, got {:?}", other),
     }
@@ -1349,9 +1415,11 @@ C1 out 0 1n
         .expect("Expected PXF completion result")
         .expect_err("PXF without options should fail");
     assert!(matches!(result, SimulationError::InvalidConfig(_)));
-    assert!(result
-        .to_string()
-        .contains("requires explicit PXF execution options"));
+    assert!(
+        result
+            .to_string()
+            .contains("requires explicit PXF execution options")
+    );
 }
 
 #[test]
@@ -1416,9 +1484,11 @@ C1 out 0 1n
                 "expected Zout waveform, got {:?}",
                 waveforms.keys().collect::<Vec<_>>()
             );
-            assert!(waveforms
-                .values()
-                .any(|wf| wf.is_complex && wf.y_imag.as_ref().is_some()));
+            assert!(
+                waveforms
+                    .values()
+                    .any(|wf| wf.is_complex && wf.y_imag.as_ref().is_some())
+            );
         }
         other => panic!("Expected AC result for TF, got {:?}", other),
     }
@@ -1628,7 +1698,9 @@ C1 out 0 1n
         .expect("Expected PSTB completion result")
         .expect_err("PSTB without options should fail");
     assert!(matches!(result, SimulationError::InvalidConfig(_)));
-    assert!(result
-        .to_string()
-        .contains("requires explicit PSTB execution options"));
+    assert!(
+        result
+            .to_string()
+            .contains("requires explicit PSTB execution options")
+    );
 }

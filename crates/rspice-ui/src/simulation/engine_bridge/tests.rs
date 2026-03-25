@@ -29,7 +29,7 @@ fn test_engine_bridge_with_config() {
 fn test_engine_for_netlist_applies_netlist_options() {
     let bridge = EngineBridge::new();
     let netlist = bridge
-        .parse_netlist(
+        .parse_netlist_with_source_path(
             r#"
 * Netlist options mapping
 V1 1 0 1
@@ -37,6 +37,7 @@ R1 1 0 1k
 .OPTIONS TEMP=85 ITL1=120 METHOD=GEAR RELTOL=2e-4 VNTOL=3e-6 IABSTOL=4e-12 GMIN=1e-11
 .END
 "#,
+            None,
         )
         .expect("netlist should parse");
 
@@ -64,7 +65,7 @@ fn test_engine_for_netlist_preserves_base_for_unspecified_options() {
     base.max_iterations = 88;
     let bridge = EngineBridge::with_config(base);
     let netlist = bridge
-        .parse_netlist(
+        .parse_netlist_with_source_path(
             r#"
 * Netlist options partial override
 V1 1 0 1
@@ -72,6 +73,7 @@ R1 1 0 1k
 .OPTIONS TEMP=125
 .END
 "#,
+            None,
         )
         .expect("netlist should parse");
 
@@ -135,10 +137,13 @@ fn test_parse_netlist_expands_include_directives() {
 
     let bridge = EngineBridge::new();
     let netlist = bridge
-        .parse_netlist(&format!(
-            "V1 1 0 DC 1\n.include \"{}\"\n.end\n",
-            include_file.display()
-        ))
+        .parse_netlist_with_source_path(
+            &format!(
+                "V1 1 0 DC 1\n.include \"{}\"\n.end\n",
+                include_file.display()
+            ),
+            None,
+        )
         .expect("netlist should parse with include expansion");
 
     assert!(
@@ -147,6 +152,54 @@ fn test_parse_netlist_expands_include_directives() {
             .iter()
             .any(|element| element.name.eq_ignore_ascii_case("RINC")),
         "included element should be present after preprocessing"
+    );
+
+    let _ = fs::remove_dir_all(temp_dir);
+}
+
+#[test]
+fn test_parse_netlist_resolves_relative_include_against_source_path() {
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("time should be monotonic")
+        .as_nanos();
+    let temp_dir = std::env::temp_dir().join(format!(
+        "rspice_ui_engine_bridge_relative_include_{}_{}",
+        std::process::id(),
+        nanos
+    ));
+    fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+
+    let source_path = temp_dir.join("project").join("amp_top.rsch");
+    fs::create_dir_all(
+        source_path
+            .parent()
+            .expect("source path should have parent"),
+    )
+    .expect("failed to create source dir");
+    let include_file = source_path
+        .parent()
+        .expect("source path should have parent")
+        .join("included.sp");
+    fs::write(&include_file, "RINC 1 0 1k\n").expect("failed to write include file");
+
+    let bridge = EngineBridge::new();
+    let netlist = bridge
+        .parse_netlist_with_source_path(
+            "V1 1 0 DC 1\n.include \"included.sp\"\n.end\n",
+            Some(&source_path),
+        )
+        .expect("netlist should parse with source-relative include");
+
+    assert!(
+        netlist
+            .elements
+            .iter()
+            .any(|element| element.name.eq_ignore_ascii_case("RINC")),
+        "included element should resolve relative to the provided source path"
     );
 
     let _ = fs::remove_dir_all(temp_dir);
@@ -225,9 +278,11 @@ R3 out 0 1k
             assert!(!waveforms.is_empty());
             assert!(waveforms.keys().any(|name| name.contains("[V2=0")));
             assert!(waveforms.keys().any(|name| name.contains("[V2=1")));
-            assert!(waveforms
-                .values()
-                .all(|wf| wf.y_values.len() == sweep_values.len()));
+            assert!(
+                waveforms
+                    .values()
+                    .all(|wf| wf.y_values.len() == sweep_values.len())
+            );
         }
         other => panic!("expected DC sweep result, got {:?}", other),
     }
@@ -735,9 +790,10 @@ R2 out 0 1k
     let err = bridge
         .run(&cfg, netlist)
         .expect_err("expected validation error");
-    assert!(err
-        .to_string()
-        .contains("only valid when AC mode is enabled"));
+    assert!(
+        err.to_string()
+            .contains("only valid when AC mode is enabled")
+    );
 }
 
 #[test]
@@ -785,9 +841,10 @@ R2 out 0 1k
     let err = bridge
         .run(&cfg, netlist)
         .expect_err("expected unresolved output error");
-    assert!(err
-        .to_string()
-        .contains("could not be resolved to a node or branch"));
+    assert!(
+        err.to_string()
+            .contains("could not be resolved to a node or branch")
+    );
 }
 
 #[test]
@@ -811,9 +868,10 @@ R2 out 0 1k
     let err = bridge
         .run(&cfg, netlist)
         .expect_err("expected unresolved output error");
-    assert!(err
-        .to_string()
-        .contains("could not be resolved to a node or branch"));
+    assert!(
+        err.to_string()
+            .contains("could not be resolved to a node or branch")
+    );
 }
 
 #[test]

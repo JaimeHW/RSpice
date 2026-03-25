@@ -1,6 +1,7 @@
+use std::path::Path;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 
 use super::super::config::{
@@ -17,6 +18,7 @@ pub(super) fn run_spec_request(
     spec: AnalysisSpec,
     options: SpecExecutionOptions,
     netlist: &str,
+    source_path: Option<&Path>,
     abort_flag: &Arc<AtomicBool>,
 ) -> Result<SimulationResult, SimulationError> {
     use crate::services::simulation_runner as svc_runner;
@@ -26,7 +28,7 @@ pub(super) fn run_spec_request(
     }
 
     if let Some(config) = analysis_config_from_spec(&spec) {
-        return bridge.run_with_abort(&config, netlist, abort_flag);
+        return bridge.run_with_abort_and_source_path(&config, netlist, source_path, abort_flag);
     }
 
     match spec {

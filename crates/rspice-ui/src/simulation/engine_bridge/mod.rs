@@ -18,15 +18,15 @@
 //! ```
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use super::config::AnalysisConfig;
 use super::results::{DcOpResult, SimulationResult, WaveformData};
 use super::runner::SimulationError;
 use crate::output_spec::{
-    collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
+    OutputSpec, collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
     normalized_sensitivity, parse_output_spec, resolve_sensitivity_ac_frequency,
     run_ac_output_at_frequency, run_dc_output_sensitivity, validate_sensitivity_output_spec,
-    OutputSpec,
 };
 
 //=============================================================================
@@ -68,8 +68,19 @@ impl EngineBridge {
         config: &AnalysisConfig,
         netlist_str: &str,
     ) -> Result<SimulationResult, SimulationError> {
+        self.run_with_source_path(config, netlist_str, None)
+    }
+
+    /// Run simulation with a source path used to resolve relative includes and
+    /// model file references.
+    pub fn run_with_source_path(
+        &self,
+        config: &AnalysisConfig,
+        netlist_str: &str,
+        source_path: Option<&Path>,
+    ) -> Result<SimulationResult, SimulationError> {
         // Parse netlist
-        let netlist = self.parse_netlist(netlist_str)?;
+        let netlist = self.parse_netlist_with_source_path(netlist_str, source_path)?;
 
         // Dispatch to appropriate analysis
         match config {
@@ -93,8 +104,20 @@ impl EngineBridge {
         netlist_str: &str,
         abort_flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Result<SimulationResult, SimulationError> {
+        self.run_with_abort_and_source_path(config, netlist_str, None, abort_flag)
+    }
+
+    /// Run simulation with cooperative cancellation and a source path for
+    /// relative include/model resolution.
+    pub fn run_with_abort_and_source_path(
+        &self,
+        config: &AnalysisConfig,
+        netlist_str: &str,
+        source_path: Option<&Path>,
+        abort_flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Result<SimulationResult, SimulationError> {
         // Parse netlist
-        let netlist = self.parse_netlist(netlist_str)?;
+        let netlist = self.parse_netlist_with_source_path(netlist_str, source_path)?;
 
         // Arc<AtomicBool> implements AbortSignal directly, so we can use it
         // Dispatch to appropriate analysis (abort-aware where supported)
@@ -115,11 +138,26 @@ impl EngineBridge {
     // Netlist Parsing
     //-------------------------------------------------------------------------
 
-    /// Parse netlist string into core Netlist object
-    fn parse_netlist(&self, netlist_str: &str) -> Result<rspice_core::Netlist, SimulationError> {
-        let parse_base = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        rspice_core::Netlist::parse_with_path(netlist_str, &parse_base)
+    fn parse_netlist_with_source_path(
+        &self,
+        netlist_str: &str,
+        source_path: Option<&Path>,
+    ) -> Result<rspice_core::Netlist, SimulationError> {
+        let parse_source = Self::netlist_parse_source(source_path);
+        rspice_core::Netlist::parse_with_path(netlist_str, &parse_source)
             .map_err(|e| SimulationError::ParseError(e.to_string()))
+    }
+
+    fn netlist_parse_source(source_path: Option<&Path>) -> PathBuf {
+        const GENERATED_NETLIST_NAME: &str = "__rspice_ui_generated__.cir";
+
+        match source_path {
+            Some(path) if path.is_dir() => path.join(GENERATED_NETLIST_NAME),
+            Some(path) => path.to_path_buf(),
+            None => std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join(GENERATED_NETLIST_NAME),
+        }
     }
 
     /// Build an engine instance with netlist `.OPTIONS` layered on top of

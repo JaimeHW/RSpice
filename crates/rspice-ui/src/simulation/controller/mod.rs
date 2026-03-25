@@ -40,8 +40,8 @@ mod results_convert;
 mod results_post;
 mod results_update;
 mod spice_value;
-mod transient_post;
 mod touchstone;
+mod transient_post;
 pub(crate) use transient_post::DerivedViewerLoadState;
 
 #[cfg(test)]
@@ -335,10 +335,15 @@ impl SimulationController {
 
         // Start the simulation
         let start_result = if let Some(cfg) = config {
-            self.runner.start(cfg, netlist)
-        } else {
             self.runner
-                .start_spec_with_options(spec, netlist, spec_options)
+                .start_with_source_path(cfg, netlist, state.schematic.current_file.clone())
+        } else {
+            self.runner.start_spec_with_options_with_source_path(
+                spec,
+                netlist,
+                spec_options,
+                state.schematic.current_file.clone(),
+            )
         };
         match start_result {
             Ok(()) => log::info!(
