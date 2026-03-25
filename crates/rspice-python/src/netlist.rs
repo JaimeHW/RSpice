@@ -5,9 +5,9 @@
 //! - Handle include directives with path resolution
 //! - Access parsed netlist information
 
-use std::borrow::Cow;
 use pyo3::prelude::*;
 use rspice_core::Netlist;
+use std::borrow::Cow;
 use std::path::Path;
 
 /// A parsed SPICE netlist ready for simulation
