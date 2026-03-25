@@ -170,6 +170,13 @@ impl VerilogADevices {
     pub fn total_internal_nodes(&self) -> usize {
         self.devices.iter().map(|d| d.num_internal_nodes()).sum()
     }
+
+    /// Remap all terminal and internal circuit node IDs after topology changes.
+    pub fn remap_circuit_nodes(&mut self, mut remap: impl FnMut(usize) -> usize) {
+        for device in &mut self.devices {
+            device.remap_circuit_nodes(&mut remap);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -381,5 +388,25 @@ mod tests {
         // Set time for transient analysis
         devices.set_time(1e-6);
         // Verifies method doesn't panic
+    }
+
+    #[test]
+    fn test_remap_circuit_nodes_all() {
+        let mut devices = VerilogADevices::new();
+        let model = create_test_model();
+
+        devices.add(VerilogADevice::new("R1", model, &[2, 4]));
+        devices.remap_circuit_nodes(|node| {
+            if node == 2 {
+                0
+            } else if node > 2 {
+                node - 1
+            } else {
+                node
+            }
+        });
+
+        assert_eq!(devices.get(0).unwrap().node_for_terminal(0), 0);
+        assert_eq!(devices.get(0).unwrap().node_for_terminal(1), 3);
     }
 }

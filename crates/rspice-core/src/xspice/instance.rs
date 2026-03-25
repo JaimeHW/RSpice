@@ -429,6 +429,27 @@ impl XspiceInstance {
         &self.connections
     }
 
+    /// Remap circuit node IDs after a topology-level reference-node rewrite.
+    pub fn remap_circuit_nodes(&mut self, mut remap: impl FnMut(usize) -> usize) {
+        for connection in &mut self.connections {
+            match connection {
+                PortConnection::Analog(node) | PortConnection::Digital(node) => {
+                    *node = remap(*node);
+                }
+                PortConnection::Differential(pos, neg) => {
+                    *pos = remap(*pos);
+                    *neg = remap(*neg);
+                }
+                PortConnection::AnalogVector(nodes) | PortConnection::DigitalVector(nodes) => {
+                    for node in nodes {
+                        *node = remap(*node);
+                    }
+                }
+                PortConnection::Null => {}
+            }
+        }
+    }
+
     /// Set analog input value for a port
     ///
     /// Called by CircuitData::evaluate_xspice to provide node voltages.
@@ -722,5 +743,132 @@ mod tests {
         let instance = XspiceInstance::new("A1", model, vec![PortConnection::Analog(1)], &[], &[])
             .expect("instance should build");
         assert_eq!(instance.get_analog_contribution(0), None);
+    }
+
+    struct TestMultiPortModel;
+
+    impl CodeModel for TestMultiPortModel {
+        fn name(&self) -> &str {
+            "test_multi_port"
+        }
+
+        fn description(&self) -> &str {
+            "test model with varied port connections"
+        }
+
+        fn ports(&self) -> &[PortSpec] {
+            static PORTS: std::sync::OnceLock<Vec<PortSpec>> = std::sync::OnceLock::new();
+            PORTS.get_or_init(|| {
+                vec![
+                    PortSpec {
+                        name: "a".to_string(),
+                        direction: PortDirection::In,
+                        default_type: PortType::Voltage,
+                        allowed_types: vec![PortType::Voltage],
+                        is_vector: false,
+                        null_allowed: false,
+                        description: String::new(),
+                    },
+                    PortSpec {
+                        name: "b".to_string(),
+                        direction: PortDirection::In,
+                        default_type: PortType::DifferentialVoltage,
+                        allowed_types: vec![PortType::DifferentialVoltage],
+                        is_vector: false,
+                        null_allowed: false,
+                        description: String::new(),
+                    },
+                    PortSpec {
+                        name: "c".to_string(),
+                        direction: PortDirection::In,
+                        default_type: PortType::Digital,
+                        allowed_types: vec![PortType::Digital],
+                        is_vector: false,
+                        null_allowed: false,
+                        description: String::new(),
+                    },
+                    PortSpec {
+                        name: "d".to_string(),
+                        direction: PortDirection::In,
+                        default_type: PortType::Voltage,
+                        allowed_types: vec![PortType::Voltage],
+                        is_vector: true,
+                        null_allowed: false,
+                        description: String::new(),
+                    },
+                    PortSpec {
+                        name: "e".to_string(),
+                        direction: PortDirection::In,
+                        default_type: PortType::Digital,
+                        allowed_types: vec![PortType::Digital],
+                        is_vector: true,
+                        null_allowed: false,
+                        description: String::new(),
+                    },
+                ]
+            })
+        }
+
+        fn parameters(&self) -> &[ParamSpec] {
+            &[]
+        }
+
+        fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
+            Ok(())
+        }
+
+        fn evaluate(&self, _ctx: &mut CmContext) -> CmResult<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_remap_circuit_nodes_updates_all_connection_variants() {
+        let model: Arc<dyn CodeModel> = Arc::new(TestMultiPortModel);
+        let mut instance = XspiceInstance::new(
+            "A1",
+            model,
+            vec![
+                PortConnection::Analog(2),
+                PortConnection::Differential(2, 4),
+                PortConnection::Digital(5),
+                PortConnection::AnalogVector(vec![1, 2, 4]),
+                PortConnection::DigitalVector(vec![2, 3, 5]),
+            ],
+            &[],
+            &[],
+        )
+        .expect("instance should build");
+
+        instance.remap_circuit_nodes(|node| {
+            if node == 2 {
+                0
+            } else if node > 2 {
+                node - 1
+            } else {
+                node
+            }
+        });
+
+        assert!(matches!(
+            instance.connection_at(0),
+            Some(PortConnection::Analog(0))
+        ));
+        assert!(matches!(
+            instance.connection_at(1),
+            Some(PortConnection::Differential(0, 3))
+        ));
+        assert!(matches!(
+            instance.connection_at(2),
+            Some(PortConnection::Digital(4))
+        ));
+        assert!(matches!(
+            instance.connection_at(3),
+            Some(PortConnection::AnalogVector(nodes)) if nodes == &vec![1, 0, 3]
+        ));
+        assert!(matches!(
+            instance.connection_at(4),
+            Some(PortConnection::DigitalVector(nodes)) if nodes == &vec![0, 2, 4]
+        ));
     }
 }

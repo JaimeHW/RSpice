@@ -1652,6 +1652,8 @@ pub struct MultiWindingTransformerBinding {
 pub struct CircuitData {
     /// Node name to ID mapping
     node_map: HashMap<String, NodeId>,
+    /// Tracks whether any element explicitly referenced the SPICE ground node.
+    has_explicit_ground_reference: bool,
     /// Branch element name to branch ordinal mapping (for CCCS/CCVS control lookup)
     /// Keys are element names (e.g., "V1", "L1"), values are branch ordinals (1-indexed)
     branch_names: HashMap<String, NodeId>,
@@ -1722,6 +1724,7 @@ impl CircuitData {
 
         Self {
             node_map,
+            has_explicit_ground_reference: false,
             branch_names: HashMap::new(),
             branch_name_by_ordinal: Vec::new(),
             num_nodes: 0,
@@ -1763,9 +1766,8 @@ impl CircuitData {
     /// Get or create a node ID for the given name
     /// Node "0" is always ground (NodeId 0) - this is the SPICE standard
     pub fn get_or_create_node(&mut self, name: &str) -> NodeId {
-        // Node "0" is always ground - return 0 immediately
-        if name == "0" {
-            self.node_map.insert("0".to_string(), 0);
+        if Self::is_ground_name(name) {
+            self.has_explicit_ground_reference = true;
             return 0;
         }
 
@@ -1776,6 +1778,11 @@ impl CircuitData {
         self.num_nodes += 1;
         self.node_map.insert(name.to_string(), self.num_nodes);
         self.num_nodes
+    }
+
+    #[inline]
+    fn is_ground_name(name: &str) -> bool {
+        name == "0" || name.eq_ignore_ascii_case("gnd")
     }
 
     /// Look up an existing node ID by name.
@@ -1822,54 +1829,9 @@ impl CircuitData {
             .map_err(CircuitError::InvalidComponent)
     }
 
-    /// Check if any device in the circuit actually uses ground (node 0)
-    /// This is different from just having "0" in the node map - we need to check
-    /// if any device terminal is connected to node 0
-    pub fn has_ground_node(&self) -> bool {
-        // Check resistors
-        for stamp in &self.resistors.stamps {
-            if stamp.pp.row == 0
-                || stamp.pp.col == 0
-                || stamp.pn.row == 0
-                || stamp.pn.col == 0
-                || stamp.np.row == 0
-                || stamp.np.col == 0
-                || stamp.nn.row == 0
-                || stamp.nn.col == 0
-            {
-                return true;
-            }
-        }
-
-        // Check voltage sources
-        for i in 0..self.voltage_sources.len() {
-            if self.voltage_sources.node_pos[i] == 0 || self.voltage_sources.node_neg[i] == 0 {
-                return true;
-            }
-        }
-
-        // Check current sources
-        for i in 0..self.current_sources.len() {
-            if self.current_sources.node_pos[i] == 0 || self.current_sources.node_neg[i] == 0 {
-                return true;
-            }
-        }
-
-        // Check capacitors
-        for stamp in &self.capacitors.stamps {
-            if stamp.pp.row == 0 || stamp.nn.row == 0 {
-                return true;
-            }
-        }
-
-        // Check inductors
-        for i in 0..self.inductors.len() {
-            if self.inductors.node_pos[i] == 0 || self.inductors.node_neg[i] == 0 {
-                return true;
-            }
-        }
-
-        false
+    /// Check whether the circuit explicitly referenced the SPICE ground node.
+    pub fn has_explicit_ground_reference(&self) -> bool {
+        self.has_explicit_ground_reference
     }
 
     /// Ensure a ground reference exists. If no explicit node "0" was specified,
@@ -1877,7 +1839,7 @@ impl CircuitData {
     /// as the reference.
     /// This should be called after all elements are added but before simulation.
     pub fn ensure_ground_reference(&mut self) {
-        if self.has_ground_node() {
+        if self.has_explicit_ground_reference() {
             return; // Already have explicit ground
         }
 
@@ -1907,20 +1869,9 @@ impl CircuitData {
     /// Remap all occurrences of old_node_id to ground (0) and shift all higher
     /// node IDs down by 1 to maintain contiguous matrix indices
     fn remap_node_to_ground(&mut self, old_node_id: NodeId) {
-        // Helper closure to remap a single node ID
-        let remap = |id: NodeId| -> NodeId {
-            if id == old_node_id {
-                0
-            } else if id > old_node_id {
-                id - 1 // Shift down to fill the gap
-            } else {
-                id
-            }
-        };
-
         // Update node map
         for (_, id) in self.node_map.iter_mut() {
-            *id = remap(*id);
+            *id = Self::remap_node_id(*id, old_node_id);
         }
 
         // Update all device node references
@@ -1935,48 +1886,101 @@ impl CircuitData {
         }
 
         // Voltage sources
-        for i in 0..self.voltage_sources.len() {
-            self.voltage_sources.node_pos[i] = remap(self.voltage_sources.node_pos[i]);
-            self.voltage_sources.node_neg[i] = remap(self.voltage_sources.node_neg[i]);
-        }
+        Self::remap_node_slice(&mut self.voltage_sources.node_pos, old_node_id);
+        Self::remap_node_slice(&mut self.voltage_sources.node_neg, old_node_id);
 
         // Current sources
-        for i in 0..self.current_sources.len() {
-            self.current_sources.node_pos[i] = remap(self.current_sources.node_pos[i]);
-            self.current_sources.node_neg[i] = remap(self.current_sources.node_neg[i]);
-        }
+        Self::remap_node_slice(&mut self.current_sources.node_pos, old_node_id);
+        Self::remap_node_slice(&mut self.current_sources.node_neg, old_node_id);
 
         // Inductors
-        for i in 0..self.inductors.len() {
-            self.inductors.node_pos[i] = remap(self.inductors.node_pos[i]);
-            self.inductors.node_neg[i] = remap(self.inductors.node_neg[i]);
+        Self::remap_node_slice(&mut self.inductors.node_pos, old_node_id);
+        Self::remap_node_slice(&mut self.inductors.node_neg, old_node_id);
+        for diode in &mut self.diodes.devices {
+            diode.node_anode = Self::remap_node_id(diode.node_anode, old_node_id);
+            diode.node_cathode = Self::remap_node_id(diode.node_cathode, old_node_id);
+        }
+        for bjt in &mut self.bjts.devices {
+            bjt.node_collector = Self::remap_node_id(bjt.node_collector, old_node_id);
+            bjt.node_base = Self::remap_node_id(bjt.node_base, old_node_id);
+            bjt.node_emitter = Self::remap_node_id(bjt.node_emitter, old_node_id);
+            bjt.node_substrate = Self::remap_node_id(bjt.node_substrate, old_node_id);
+        }
+        for mosfet in &mut self.mosfets.devices {
+            mosfet.node_drain = Self::remap_node_id(mosfet.node_drain, old_node_id);
+            mosfet.node_gate = Self::remap_node_id(mosfet.node_gate, old_node_id);
+            mosfet.node_source = Self::remap_node_id(mosfet.node_source, old_node_id);
+            mosfet.node_bulk = Self::remap_node_id(mosfet.node_bulk, old_node_id);
+        }
+        for jfet in &mut self.jfets {
+            jfet.drain = Self::remap_node_id(jfet.drain, old_node_id);
+            jfet.gate = Self::remap_node_id(jfet.gate, old_node_id);
+            jfet.source = Self::remap_node_id(jfet.source, old_node_id);
+        }
+        Self::remap_node_slice(&mut self.vcvs.node_pos, old_node_id);
+        Self::remap_node_slice(&mut self.vcvs.node_neg, old_node_id);
+        Self::remap_node_slice(&mut self.vcvs.ctrl_pos, old_node_id);
+        Self::remap_node_slice(&mut self.vcvs.ctrl_neg, old_node_id);
+        Self::remap_node_slice(&mut self.vccs.node_pos, old_node_id);
+        Self::remap_node_slice(&mut self.vccs.node_neg, old_node_id);
+        Self::remap_node_slice(&mut self.vccs.ctrl_pos, old_node_id);
+        Self::remap_node_slice(&mut self.vccs.ctrl_neg, old_node_id);
+        Self::remap_node_slice(&mut self.cccs.node_pos, old_node_id);
+        Self::remap_node_slice(&mut self.cccs.node_neg, old_node_id);
+        Self::remap_node_slice(&mut self.ccvs.node_pos, old_node_id);
+        Self::remap_node_slice(&mut self.ccvs.node_neg, old_node_id);
+        for switch in &mut self.vswitches {
+            switch.node_pos = Self::remap_node_id(switch.node_pos, old_node_id);
+            switch.node_neg = Self::remap_node_id(switch.node_neg, old_node_id);
+            switch.ctrl_pos = Self::remap_node_id(switch.ctrl_pos, old_node_id);
+            switch.ctrl_neg = Self::remap_node_id(switch.ctrl_neg, old_node_id);
+        }
+        for switch in &mut self.iswitches {
+            switch.node_pos = Self::remap_node_id(switch.node_pos, old_node_id);
+            switch.node_neg = Self::remap_node_id(switch.node_neg, old_node_id);
+        }
+        for tline in &mut self.tlines {
+            tline.node1_pos = Self::remap_node_id(tline.node1_pos, old_node_id);
+            tline.node1_neg = Self::remap_node_id(tline.node1_neg, old_node_id);
+            tline.node2_pos = Self::remap_node_id(tline.node2_pos, old_node_id);
+            tline.node2_neg = Self::remap_node_id(tline.node2_neg, old_node_id);
         }
         for binding in &mut self.coupled_inductor_pairs {
-            binding.device.node1_pos = remap(binding.device.node1_pos);
-            binding.device.node1_neg = remap(binding.device.node1_neg);
-            binding.device.node2_pos = remap(binding.device.node2_pos);
-            binding.device.node2_neg = remap(binding.device.node2_neg);
+            binding.device.node1_pos = Self::remap_node_id(binding.device.node1_pos, old_node_id);
+            binding.device.node1_neg = Self::remap_node_id(binding.device.node1_neg, old_node_id);
+            binding.device.node2_pos = Self::remap_node_id(binding.device.node2_pos, old_node_id);
+            binding.device.node2_neg = Self::remap_node_id(binding.device.node2_neg, old_node_id);
         }
         for binding in &mut self.multi_winding_transformers {
             for (pos, neg) in &mut binding.device.nodes {
-                *pos = remap(*pos);
-                *neg = remap(*neg);
+                *pos = Self::remap_node_id(*pos, old_node_id);
+                *neg = Self::remap_node_id(*neg, old_node_id);
             }
         }
         for binding in &mut self.jiles_atherton_inductors {
-            binding.device.node_pos = remap(binding.device.node_pos);
-            binding.device.node_neg = remap(binding.device.node_neg);
+            binding.device.node_pos = Self::remap_node_id(binding.device.node_pos, old_node_id);
+            binding.device.node_neg = Self::remap_node_id(binding.device.node_neg, old_node_id);
         }
 
         // Behavioral sources
         for source in &mut self.behavioral_sources.voltage_sources {
-            source.node_pos = remap(source.node_pos);
-            source.node_neg = remap(source.node_neg);
+            source.node_pos = Self::remap_node_id(source.node_pos, old_node_id);
+            source.node_neg = Self::remap_node_id(source.node_neg, old_node_id);
         }
         for source in &mut self.behavioral_sources.current_sources {
-            source.node_pos = remap(source.node_pos);
-            source.node_neg = remap(source.node_neg);
+            source.node_pos = Self::remap_node_id(source.node_pos, old_node_id);
+            source.node_neg = Self::remap_node_id(source.node_neg, old_node_id);
         }
+
+        for instance in &mut self.xspice_instances {
+            instance.remap_circuit_nodes(|node| Self::remap_node_id(node, old_node_id));
+        }
+
+        #[cfg(feature = "veriloga")]
+        self.veriloga_devices
+            .remap_circuit_nodes(|node| Self::remap_node_id(node, old_node_id));
+
+        self.has_explicit_ground_reference = true;
 
         // Decrement num_nodes since one node is now ground
         if self.num_nodes > 0 {
@@ -1986,25 +1990,31 @@ impl CircuitData {
 
     /// Helper to remap a two-terminal stamp with full shifting
     fn remap_stamp_full(stamp: &mut TwoTerminalStamp, old_id: NodeId) {
-        // Helper to remap a single node ID
-        let remap = |id: NodeId| -> NodeId {
-            if id == old_id {
-                0
-            } else if id > old_id {
-                id - 1 // Shift down to fill the gap
-            } else {
-                id
-            }
-        };
+        stamp.pp.row = Self::remap_node_id(stamp.pp.row, old_id);
+        stamp.pp.col = Self::remap_node_id(stamp.pp.col, old_id);
+        stamp.pn.row = Self::remap_node_id(stamp.pn.row, old_id);
+        stamp.pn.col = Self::remap_node_id(stamp.pn.col, old_id);
+        stamp.np.row = Self::remap_node_id(stamp.np.row, old_id);
+        stamp.np.col = Self::remap_node_id(stamp.np.col, old_id);
+        stamp.nn.row = Self::remap_node_id(stamp.nn.row, old_id);
+        stamp.nn.col = Self::remap_node_id(stamp.nn.col, old_id);
+    }
 
-        stamp.pp.row = remap(stamp.pp.row);
-        stamp.pp.col = remap(stamp.pp.col);
-        stamp.pn.row = remap(stamp.pn.row);
-        stamp.pn.col = remap(stamp.pn.col);
-        stamp.np.row = remap(stamp.np.row);
-        stamp.np.col = remap(stamp.np.col);
-        stamp.nn.row = remap(stamp.nn.row);
-        stamp.nn.col = remap(stamp.nn.col);
+    #[inline]
+    fn remap_node_id(id: NodeId, old_id: NodeId) -> NodeId {
+        if id == old_id {
+            0
+        } else if id > old_id {
+            id - 1
+        } else {
+            id
+        }
+    }
+
+    fn remap_node_slice(nodes: &mut [NodeId], old_id: NodeId) {
+        for node in nodes {
+            *node = Self::remap_node_id(*node, old_id);
+        }
     }
 
     /// Allocate a branch current variable - returns branch ordinal (1-indexed)
@@ -2994,6 +3004,7 @@ pub type Circuit = CircuitData;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::device::{Bjt, Diode, Mosfet, VoltageSwitch};
     use crate::netlist::SourceSpec;
     use std::fs;
     use std::path::PathBuf;
@@ -3047,6 +3058,130 @@ mod tests {
         assert_eq!(gnd, 0);
         assert_eq!(gnd2, 0);
         assert_eq!(gnd3, 0);
+        assert!(circuit.has_explicit_ground_reference());
+    }
+
+    #[test]
+    fn test_ensure_ground_reference_preserves_explicit_ground_on_nonlinear_path() {
+        let mut circuit = CircuitData::new();
+        let in_node = circuit.get_or_create_node("in");
+        let ref_node = circuit.get_or_create_node("ref");
+        let ground = circuit.get_or_create_node("0");
+        let branch = circuit.allocate_branch_named("V1");
+
+        circuit
+            .voltage_sources
+            .add("V1".to_string(), in_node, ref_node, branch, 1.0);
+        circuit
+            .diodes
+            .add(Diode::new("D1".to_string(), ref_node, ground));
+
+        circuit.ensure_ground_reference();
+
+        assert_eq!(circuit.get_node_by_name("ref"), Some(ref_node));
+        assert_eq!(circuit.get_node_by_name("in"), Some(in_node));
+        assert_eq!(circuit.voltage_sources.node_neg[0], ref_node);
+        assert_eq!(circuit.diodes.devices[0].node_cathode, 0);
+        assert_eq!(circuit.num_nodes(), 2);
+    }
+
+    #[test]
+    fn test_remap_node_to_ground_updates_diverse_device_families() {
+        let mut circuit = CircuitData::new();
+        let n1 = circuit.get_or_create_node("n1");
+        let ref_node = circuit.get_or_create_node("ref");
+        let ctrl = circuit.get_or_create_node("ctrl");
+        let out = circuit.get_or_create_node("out");
+        let aux = circuit.get_or_create_node("aux");
+
+        let v_branch = circuit.allocate_branch_named("V1");
+        let e_branch = circuit.allocate_branch_named("E1");
+        let h_branch = circuit.allocate_branch_named("H1");
+        let l_branch = circuit.allocate_branch_named("L1");
+
+        circuit
+            .voltage_sources
+            .add("V1".to_string(), n1, ref_node, v_branch, 1.0);
+        circuit
+            .current_sources
+            .add("I1".to_string(), ref_node, aux, 1.0);
+        circuit
+            .resistors
+            .add("R1".to_string(), ref_node, out, 1_000.0);
+        circuit
+            .capacitors
+            .add("C1".to_string(), out, ref_node, 1e-12);
+        circuit
+            .inductors
+            .add("L1".to_string(), ref_node, aux, l_branch, 1e-9);
+        circuit
+            .diodes
+            .add(Diode::new("D1".to_string(), ref_node, aux));
+        circuit
+            .bjts
+            .add(Bjt::new_npn("Q1".to_string(), out, ctrl, ref_node));
+        circuit
+            .mosfets
+            .add(Mosfet::new_nmos("M1".to_string(), out, ctrl, ref_node, aux));
+        circuit
+            .jfets
+            .push(crate::device::Jfet::njf("J1", out, ctrl, ref_node));
+        circuit
+            .vcvs
+            .add("E1".to_string(), out, ref_node, ctrl, aux, e_branch, 2.0);
+        circuit
+            .vccs
+            .add("G1".to_string(), ref_node, out, ctrl, aux, 1e-3);
+        circuit
+            .cccs
+            .add("F1".to_string(), ref_node, aux, v_branch, 5.0);
+        circuit
+            .ccvs
+            .add("H1".to_string(), out, ref_node, h_branch, v_branch, 10.0);
+        circuit.vswitches.push(VoltageSwitch::new(
+            "S1".to_string(),
+            ref_node,
+            out,
+            ctrl,
+            aux,
+        ));
+        circuit.iswitches.push(crate::device::CurrentSwitch::new(
+            "W1".to_string(),
+            ref_node,
+            aux,
+            "V1".to_string(),
+        ));
+        circuit.tlines.push(crate::device::TransmissionLine::new(
+            "T1".to_string(),
+            ref_node,
+            out,
+            aux,
+            ctrl,
+            50.0,
+            1e-9,
+        ));
+
+        circuit.remap_node_to_ground(ref_node);
+
+        assert_eq!(circuit.get_node_by_name("ref"), Some(0));
+        assert_eq!(circuit.get_node_by_name("ctrl"), Some(2));
+        assert_eq!(circuit.get_node_by_name("out"), Some(3));
+        assert_eq!(circuit.get_node_by_name("aux"), Some(4));
+
+        assert_eq!(circuit.voltage_sources.node_neg[0], 0);
+        assert_eq!(circuit.current_sources.node_pos[0], 0);
+        assert_eq!(circuit.diodes.devices[0].node_anode, 0);
+        assert_eq!(circuit.bjts.devices[0].node_emitter, 0);
+        assert_eq!(circuit.mosfets.devices[0].node_source, 0);
+        assert_eq!(circuit.jfets[0].source, 0);
+        assert_eq!(circuit.vcvs.node_neg[0], 0);
+        assert_eq!(circuit.vccs.node_pos[0], 0);
+        assert_eq!(circuit.cccs.node_pos[0], 0);
+        assert_eq!(circuit.ccvs.node_neg[0], 0);
+        assert_eq!(circuit.vswitches[0].node_pos, 0);
+        assert_eq!(circuit.iswitches[0].node_pos, 0);
+        assert_eq!(circuit.tlines[0].node1_pos, 0);
+        assert_eq!(circuit.num_nodes(), 4);
     }
 
     #[test]

@@ -313,6 +313,17 @@ impl VerilogADevice {
         self.internal_node_indices.get(internal_idx).copied()
     }
 
+    /// Remap circuit node IDs after an external topology rewrite.
+    pub fn remap_circuit_nodes(&mut self, mut remap: impl FnMut(usize) -> usize) {
+        for node in &mut self.node_mapping {
+            *node = remap(*node);
+        }
+        for node in &mut self.internal_node_indices {
+            *node = remap(*node);
+        }
+        self.rebuild_matrix_indices();
+    }
+
     /// Build mapped RHS stamp rows for each stamp program.
     ///
     /// Returns one entry per stamp program; each program entry contains
@@ -1721,5 +1732,27 @@ mod tests {
         assert_eq!(locs[0].len(), 2);
         assert_eq!(locs[0][0], (Some(0), Some(0)));
         assert_eq!(locs[0][1], (Some(0), None));
+    }
+
+    #[test]
+    fn test_remap_circuit_nodes_updates_terminals_and_internal_nodes() {
+        let model = create_internal_stamp_model();
+        let mut device = VerilogADevice::new("D1", model, &[2]);
+        device.set_internal_node_indices(&[5]);
+
+        device.remap_circuit_nodes(|node| {
+            if node == 2 {
+                0
+            } else if node > 2 {
+                node - 1
+            } else {
+                node
+            }
+        });
+
+        assert_eq!(device.node_for_terminal(0), 0);
+        assert_eq!(device.internal_node_index(0), Some(4));
+        assert_eq!(device.mapped_rhs_rows()[0], vec![(3, 1.0)]);
+        assert_eq!(device.mapped_jacobian_locations()[0][0], (Some(3), None));
     }
 }

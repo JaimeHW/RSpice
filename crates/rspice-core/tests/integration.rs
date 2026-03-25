@@ -113,6 +113,47 @@ R2 out 0 1k
     );
 }
 
+#[test]
+fn test_explicit_ground_on_nonlinear_device_is_not_auto_remapped() {
+    let netlist_str = r#"
+* Explicit ground only appears on a nonlinear device
+V1 in ref DC 1
+D1 ref 0 DTEST
+.MODEL DTEST D(IS=1e-14)
+.OP
+.END
+"#;
+
+    let netlist = parse_netlist(netlist_str);
+    let engine = Engine::new(SimulationConfig::default());
+
+    let circuit = engine
+        .build_circuit(&netlist)
+        .expect("circuit should build without collapsing explicit ground");
+    let ref_node = circuit
+        .get_node_by_name("ref")
+        .expect("ref node should be preserved");
+    assert_ne!(ref_node, 0, "ref must remain a signal node");
+
+    let result = engine.run_dc_op(&netlist).expect("DC OP failed");
+    let ref_index = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("ref"))
+        .expect("result should retain ref node");
+    let in_index = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("in"))
+        .expect("result should retain in node");
+
+    assert!(
+        ((result.node_voltages[in_index] - result.node_voltages[ref_index]) - 1.0).abs() < 1e-6,
+        "in should remain 1V above ref, got {:?}",
+        result.node_voltages
+    );
+}
+
 /// Test BJT common-emitter amplifier
 #[test]
 fn test_bjt_amplifier() {
