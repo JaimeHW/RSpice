@@ -1,9 +1,14 @@
 use super::*;
 use std::path::PathBuf;
 
-fn write_tf_include_fixture() -> (tempfile::TempDir, PathBuf, String) {
+fn write_signal_include_fixture(
+    source_file_name: &str,
+    include_file_name: &str,
+    include_contents: &str,
+    netlist: &str,
+) -> (tempfile::TempDir, PathBuf, String) {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
-    let source_path = temp_dir.path().join("project").join("tf_top.rsch");
+    let source_path = temp_dir.path().join("project").join(source_file_name);
     std::fs::create_dir_all(
         source_path
             .parent()
@@ -13,18 +18,24 @@ fn write_tf_include_fixture() -> (tempfile::TempDir, PathBuf, String) {
     std::fs::create_dir_all(temp_dir.path().join("models"))
         .expect("models directory should be created");
     std::fs::write(
-        temp_dir.path().join("models").join("tf_stage.inc"),
-        "R1 in out 1k\nC1 out 0 1n\n",
+        temp_dir.path().join("models").join(include_file_name),
+        include_contents,
     )
     .expect("include file should be written");
 
-    let netlist = "* tf include fixture\n\
+    (temp_dir, source_path, netlist.to_string())
+}
+
+fn write_tf_include_fixture() -> (tempfile::TempDir, PathBuf, String) {
+    write_signal_include_fixture(
+        "tf_top.rsch",
+        "tf_stage.inc",
+        "R1 in out 1k\nC1 out 0 1n\n",
+        "* tf include fixture\n\
 V1 in 0 DC 1 AC 1\n\
 .include ../models/tf_stage.inc\n\
-.end\n"
-        .to_string();
-
-    (temp_dir, source_path, netlist)
+.end\n",
+    )
 }
 
 #[test]
@@ -205,6 +216,73 @@ fn test_run_tf_analysis_with_config_and_source_path_resolves_relative_include() 
         .output_impedance
         .as_ref()
         .is_some_and(|curve| curve.len() == with_source.frequencies.len()));
+}
+
+#[test]
+fn test_run_sparameter_analysis_with_source_path_resolves_relative_include() {
+    let (_temp_dir, source_path, netlist) = write_signal_include_fixture(
+        "sparameter_top.rsch",
+        "sparameter_stage.inc",
+        "R1 in 0 50\nR2 out 0 50\n",
+        "* sparameter include fixture\n\
+.include ../models/sparameter_stage.inc\n\
+.end\n",
+    );
+    let cfg = SParameterRunConfig {
+        start_freq: 1e3,
+        stop_freq: 1e6,
+        points_per_unit: 5,
+        sweep: SParameterSweep::Decade,
+        z0: 50.0,
+        ports: vec![
+            SParameterPort::single_ended("in"),
+            SParameterPort::single_ended("out"),
+        ],
+    };
+
+    let without_source = run_sparameter_analysis(&netlist, &cfg);
+    assert!(
+        without_source.is_err(),
+        "relative include should fail without source path"
+    );
+
+    let with_source = run_sparameter_analysis_with_source_path(&netlist, &cfg, Some(&source_path))
+        .expect("source-aware S-parameter analysis should resolve include");
+    assert!(!with_source.frequencies.is_empty());
+    assert_eq!(with_source.num_ports, 2);
+    assert_eq!(with_source.s.len(), 2);
+}
+
+#[test]
+fn test_run_stb_analysis_with_source_path_resolves_relative_include() {
+    let (_temp_dir, source_path, netlist) = write_signal_include_fixture(
+        "stb_top.rsch",
+        "stb_stage.inc",
+        "R1 in out 1k\nC1 out 0 1n\n",
+        "* stb include fixture\n\
+V1 in 0 DC 1 AC 1\n\
+.include ../models/stb_stage.inc\n\
+.end\n",
+    );
+
+    let without_source = run_stb_analysis(&netlist, "2", 1.0, 1e6, 5);
+    assert!(
+        without_source.is_err(),
+        "relative include should fail without source path"
+    );
+
+    let with_source =
+        run_stb_analysis_with_source_path(&netlist, "2", 1.0, 1e6, 5, Some(&source_path))
+            .expect("source-aware STB analysis should resolve include");
+    assert!(!with_source.frequencies.is_empty());
+    assert_eq!(
+        with_source.loop_gain_db.len(),
+        with_source.frequencies.len()
+    );
+    assert_eq!(
+        with_source.loop_phase_deg.len(),
+        with_source.frequencies.len()
+    );
 }
 
 #[test]
