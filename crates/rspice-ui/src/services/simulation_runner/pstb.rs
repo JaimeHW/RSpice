@@ -249,22 +249,11 @@ fn format_branch_name_list(names: &[String]) -> String {
 }
 
 fn available_branch_names(circuit: &rspice_core::circuit::CircuitData) -> Vec<String> {
-    let mut names = Vec::new();
-    names.extend(circuit.inductors.names.iter().cloned());
-    names.extend(circuit.voltage_sources.names.iter().cloned());
-    names.extend(circuit.ccvs.names.iter().cloned());
-    names.extend(
-        circuit
-            .behavioral_sources
-            .voltage_sources
-            .iter()
-            .map(|src| src.name.clone()),
-    );
-    normalize_branch_name_list(names)
+    normalize_branch_name_list(circuit.branch_probe_names())
 }
 
 fn available_inductor_probe_names(circuit: &rspice_core::circuit::CircuitData) -> Vec<String> {
-    normalize_branch_name_list(circuit.inductors.names.clone())
+    normalize_branch_name_list(circuit.inductor_probe_names())
 }
 
 fn resolve_pstb_probe(
@@ -280,11 +269,8 @@ fn resolve_pstb_probe(
         }
     })?;
 
-    let inductor_index = circuit
-        .inductors
-        .branch_indices
-        .iter()
-        .position(|branch| *branch == branch_ordinal)
+    let probe = circuit
+        .inductor_probe_for_branch(branch_ordinal)
         .ok_or_else(|| {
             let available = format_branch_name_list(&available_inductor_probe_names(circuit));
             PstbRunError::ProbeNotInductor {
@@ -294,13 +280,10 @@ fn resolve_pstb_probe(
             }
         })?;
 
-    let state_index = circuit.capacitors.len() + inductor_index;
-    let canonical_name = circuit.inductors.names[inductor_index].clone();
-
     Ok(ResolvedPstbProbe {
-        canonical_name,
-        branch_ordinal,
-        state_index,
+        canonical_name: probe.canonical_name,
+        branch_ordinal: probe.branch_ordinal,
+        state_index: probe.state_index,
     })
 }
 

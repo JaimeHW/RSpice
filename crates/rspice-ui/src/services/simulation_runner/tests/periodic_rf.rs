@@ -976,16 +976,12 @@ fn test_run_pstb_analysis_with_config_maps_probe_to_expected_state_index() {
     let expected_branch = circuit
         .get_branch_by_name("LPROBE")
         .expect("LPROBE branch must exist");
-    let expected_inductor_index = circuit
-        .inductors
-        .branch_indices
-        .iter()
-        .position(|branch| *branch == expected_branch)
+    let expected_probe = circuit
+        .inductor_probe_for_branch(expected_branch)
         .expect("LPROBE should map to inductor branch");
-    let expected_state_index = circuit.capacitors.len() + expected_inductor_index;
 
     assert_eq!(result.probe_branch_ordinal, expected_branch);
-    assert_eq!(result.probe_state_index, expected_state_index);
+    assert_eq!(result.probe_state_index, expected_probe.state_index);
 }
 
 #[test]

@@ -1665,23 +1665,23 @@ pub struct CircuitData {
     num_branches: usize,
 
     // Linear device storage (SoA for cache efficiency)
-    pub resistors: Resistors,
-    pub capacitors: Capacitors,
-    pub inductors: Inductors,
-    pub voltage_sources: VoltageSources,
-    pub current_sources: CurrentSources,
+    pub(crate) resistors: Resistors,
+    pub(crate) capacitors: Capacitors,
+    pub(crate) inductors: Inductors,
+    pub(crate) voltage_sources: VoltageSources,
+    pub(crate) current_sources: CurrentSources,
 
     // Nonlinear device storage (require Newton-Raphson iteration)
-    pub diodes: Diodes,
-    pub bjts: Bjts,
-    pub mosfets: Mosfets,
-    pub jfets: Vec<crate::device::Jfet>,
+    pub(crate) diodes: Diodes,
+    pub(crate) bjts: Bjts,
+    pub(crate) mosfets: Mosfets,
+    pub(crate) jfets: Vec<crate::device::Jfet>,
 
     // Controlled sources
-    pub vcvs: Vcvs,
-    pub vccs: Vccs,
-    pub cccs: Cccs,
-    pub ccvs: Ccvs,
+    pub(crate) vcvs: Vcvs,
+    pub(crate) vccs: Vccs,
+    pub(crate) cccs: Cccs,
+    pub(crate) ccvs: Ccvs,
 
     // Pending control element resolutions (element name -> CCCS/CCVS indices)
     /// CCCS elements pending control branch resolution: (cccs_index, control_element_name)
@@ -1692,26 +1692,34 @@ pub struct CircuitData {
     pending_iswitch: Vec<(usize, String)>,
 
     // Advanced device storage
-    pub vswitches: Vec<crate::device::VoltageSwitch>,
-    pub iswitches: Vec<crate::device::CurrentSwitch>,
-    pub tlines: Vec<crate::device::TransmissionLine>,
-    pub couplings: Vec<crate::device::InductorCoupling>,
-    pub coupled_inductor_pairs: Vec<CoupledInductorPairBinding>,
-    pub multi_winding_transformers: Vec<MultiWindingTransformerBinding>,
-    pub jiles_atherton_inductors: Vec<JilesAthertonBinding>,
+    pub(crate) vswitches: Vec<crate::device::VoltageSwitch>,
+    pub(crate) iswitches: Vec<crate::device::CurrentSwitch>,
+    pub(crate) tlines: Vec<crate::device::TransmissionLine>,
+    pub(crate) couplings: Vec<crate::device::InductorCoupling>,
+    pub(crate) coupled_inductor_pairs: Vec<CoupledInductorPairBinding>,
+    pub(crate) multi_winding_transformers: Vec<MultiWindingTransformerBinding>,
+    pub(crate) jiles_atherton_inductors: Vec<JilesAthertonBinding>,
 
     // Behavioral sources (expression-based B-elements)
-    pub behavioral_sources: BehavioralSources,
+    pub(crate) behavioral_sources: BehavioralSources,
 
     // XSPICE code model instances
     /// XSPICE instance storage for code model evaluation
-    pub xspice_instances: Vec<XspiceInstance>,
+    pub(crate) xspice_instances: Vec<XspiceInstance>,
     /// XSPICE code model registry (shared across instances)
-    pub xspice_registry: Arc<CodeModelRegistry>,
+    pub(crate) xspice_registry: Arc<CodeModelRegistry>,
 
     // Verilog-A devices (feature-gated)
     #[cfg(feature = "veriloga")]
-    pub veriloga_devices: crate::device::veriloga::VerilogADevices,
+    pub(crate) veriloga_devices: crate::device::veriloga::VerilogADevices,
+}
+
+/// Stable probe metadata for inductor-backed branch measurements.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InductorProbeInfo {
+    pub canonical_name: String,
+    pub branch_ordinal: NodeId,
+    pub state_index: usize,
 }
 
 impl CircuitData {
@@ -2046,6 +2054,52 @@ impl CircuitData {
             .get(name)
             .or_else(|| self.branch_names.get(&name.to_uppercase()))
             .copied()
+    }
+
+    /// Return the set of branch-bearing element names that can be used as probes.
+    pub fn branch_probe_names(&self) -> Vec<String> {
+        let mut names = Vec::with_capacity(
+            self.inductors.names.len()
+                + self.voltage_sources.names.len()
+                + self.ccvs.len()
+                + self.behavioral_sources.voltage_sources.len(),
+        );
+        names.extend(self.inductors.names.iter().cloned());
+        names.extend(self.voltage_sources.names.iter().cloned());
+        names.extend(self.ccvs.names.iter().cloned());
+        names.extend(
+            self.behavioral_sources
+                .voltage_sources
+                .iter()
+                .map(|source| source.name.clone()),
+        );
+        names
+    }
+
+    /// Return the canonical set of inductor probe names.
+    pub fn inductor_probe_names(&self) -> Vec<String> {
+        self.inductors.names.clone()
+    }
+
+    /// Resolve a probe name to the inductor state tracked during periodic RF analyses.
+    pub fn resolve_inductor_probe(&self, probe_name: &str) -> Option<InductorProbeInfo> {
+        let branch_ordinal = self.get_branch_by_name(probe_name)?;
+        self.inductor_probe_for_branch(branch_ordinal)
+    }
+
+    /// Resolve an existing branch ordinal to the owning inductor probe metadata.
+    pub fn inductor_probe_for_branch(&self, branch_ordinal: NodeId) -> Option<InductorProbeInfo> {
+        let inductor_index = self
+            .inductors
+            .branch_indices
+            .iter()
+            .position(|branch| *branch == branch_ordinal)?;
+
+        Some(InductorProbeInfo {
+            canonical_name: self.inductors.names.get(inductor_index)?.clone(),
+            branch_ordinal,
+            state_index: self.capacitors.len() + inductor_index,
+        })
     }
 
     /// Register a CCCS element for pending control branch resolution
@@ -3004,7 +3058,7 @@ pub type Circuit = CircuitData;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::device::{Bjt, Diode, Mosfet, VoltageSwitch};
+    use crate::device::{BehavioralVoltageSource, Bjt, Diode, Mosfet, VoltageSwitch};
     use crate::netlist::SourceSpec;
     use std::fs;
     use std::path::PathBuf;
@@ -3059,6 +3113,65 @@ mod tests {
         assert_eq!(gnd2, 0);
         assert_eq!(gnd3, 0);
         assert!(circuit.has_explicit_ground_reference());
+    }
+
+    #[test]
+    fn test_branch_probe_names_cover_supported_branch_families() {
+        let mut circuit = CircuitData::new();
+        let n1 = circuit.get_or_create_node("1");
+        let n2 = circuit.get_or_create_node("2");
+
+        let v_branch = circuit.allocate_branch_named("V1");
+        let l_branch = circuit.allocate_branch_named("L1");
+        let h_branch = circuit.allocate_branch_named("H1");
+        let b_branch = circuit.allocate_branch_named("B1");
+
+        circuit
+            .voltage_sources
+            .add("V1".to_string(), n1, 0, v_branch, 5.0);
+        circuit
+            .inductors
+            .add("L1".to_string(), n1, n2, l_branch, 1e-9);
+        circuit
+            .ccvs
+            .add("H1".to_string(), n2, 0, h_branch, v_branch, 10.0);
+        circuit.behavioral_sources.add_voltage(
+            BehavioralVoltageSource::new("B1".to_string(), n2, 0, b_branch, "1.0")
+                .expect("behavioral source should parse"),
+        );
+
+        assert_eq!(
+            circuit.branch_probe_names(),
+            vec![
+                "L1".to_string(),
+                "V1".to_string(),
+                "H1".to_string(),
+                "B1".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_resolve_inductor_probe_returns_canonical_name_and_state_index() {
+        let mut circuit = CircuitData::new();
+        let n1 = circuit.get_or_create_node("1");
+        let n2 = circuit.get_or_create_node("2");
+
+        circuit.capacitors.add("C1".to_string(), n1, 0, 1e-12);
+        circuit.capacitors.add("C2".to_string(), n2, 0, 2e-12);
+
+        let l_branch = circuit.allocate_branch_named("LPROBE");
+        circuit
+            .inductors
+            .add("LPROBE".to_string(), n1, n2, l_branch, 1e-9);
+
+        let probe = circuit
+            .resolve_inductor_probe("lprobe")
+            .expect("inductor probe should resolve case-insensitively");
+        assert_eq!(probe.canonical_name, "LPROBE");
+        assert_eq!(probe.branch_ordinal, l_branch);
+        assert_eq!(probe.state_index, 2);
+        assert!(circuit.resolve_inductor_probe("missing").is_none());
     }
 
     #[test]
