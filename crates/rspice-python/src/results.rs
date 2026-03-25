@@ -92,11 +92,12 @@ impl PySimulationResult {
     /// Returns:
     ///     float or None: Current through the element, or None if not found
     fn branch_current(&self, name: &str) -> Option<f64> {
-        // For now, return the first branch current if any exist
-        // Full implementation would track branch names
-        if !self.inner.branch_currents.is_empty() {
-            // Try to find by index for voltage sources (V1 -> 0, V2 -> 1, etc.)
-            if name.to_uppercase().starts_with('V') || name.to_uppercase().starts_with('L') {
+        self.inner.branch_current_named(name).or_else(|| {
+            // Preserve legacy index-based fallback for synthetic test results
+            // that have branch currents but no canonical branch metadata.
+            if !self.inner.branch_currents.is_empty()
+                && (name.to_uppercase().starts_with('V') || name.to_uppercase().starts_with('L'))
+            {
                 if let Ok(idx) = name[1..].parse::<usize>() {
                     return self
                         .inner
@@ -105,11 +106,8 @@ impl PySimulationResult {
                         .copied();
                 }
             }
-            // Default to first branch current
-            self.inner.branch_currents.first().copied()
-        } else {
             None
-        }
+        })
     }
 
     /// Get all branch currents as a NumPy array
@@ -119,6 +117,12 @@ impl PySimulationResult {
     #[getter]
     fn branch_currents<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
         self.inner.branch_currents.to_pyarray(py)
+    }
+
+    /// Get canonical branch names aligned with `branch_currents`.
+    #[getter]
+    fn branch_names(&self) -> Vec<String> {
+        self.inner.branch_names.clone()
     }
 
     /// Number of nodes in the circuit (excluding ground)
@@ -1066,6 +1070,7 @@ mod tests {
             "3".to_string(),
         ];
         result.branch_currents = vec![0.005]; // 5mA
+        result.branch_names = vec!["V1".to_string()];
         result
     }
 
@@ -1143,6 +1148,14 @@ mod tests {
         let current = result.branch_current("V1");
         assert!(current.is_some());
         assert!((current.unwrap() - 0.005).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_simulation_result_branch_names() {
+        let inner = create_test_simulation_result();
+        let result = PySimulationResult::new(inner);
+
+        assert_eq!(result.branch_names(), vec!["V1".to_string()]);
     }
 
     #[test]
