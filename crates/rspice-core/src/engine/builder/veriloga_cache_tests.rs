@@ -103,6 +103,28 @@ fn test_dependency_fingerprint_invalidates_after_file_change() {
 }
 
 #[test]
+fn test_dependency_matches_cached_fingerprint_rejects_stale_hash_even_with_current_metadata() {
+    with_cache_env("hash_wins_over_metadata", |dir| {
+        let file = write_source(&dir, "model.va", "`define X 1\n");
+        let stale = dependency_fingerprint(&file).expect("initial fingerprint expected");
+
+        fs::write(&file, "`define Y 1\n").expect("failed to rewrite dependency with same length");
+        let metadata = fs::metadata(&file).expect("updated metadata should be available");
+        let simulated_stale = VerilogADependencyFingerprint {
+            canonical_path: stale.canonical_path.clone(),
+            modified_ns: metadata_modified_ns(&metadata),
+            file_len: metadata.len(),
+            content_hash: stale.content_hash,
+        };
+
+        assert!(
+            !dependency_matches_cached_fingerprint(&simulated_stale),
+            "content hash should invalidate cache freshness even when metadata matches"
+        );
+    });
+}
+
+#[test]
 fn test_fingerprint_paths_deduplicates_same_file() {
     with_cache_env("dedup", |dir| {
         let file = write_source(&dir, "model.va", "module m; endmodule\n");

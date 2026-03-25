@@ -183,16 +183,6 @@ pub(super) fn fingerprint_paths(
 
 #[cfg(feature = "veriloga")]
 pub(super) fn dependency_matches_cached_fingerprint(dep: &VerilogADependencyFingerprint) -> bool {
-    let metadata = match std::fs::metadata(&dep.canonical_path) {
-        Ok(metadata) => metadata,
-        Err(_) => return false,
-    };
-
-    let current_modified_ns = metadata_modified_ns(&metadata);
-    if metadata.len() == dep.file_len && current_modified_ns == dep.modified_ns {
-        return true;
-    }
-
     match hash_file(&dep.canonical_path) {
         Ok(hash) => hash == dep.content_hash,
         Err(_) => false,
