@@ -4,7 +4,8 @@
 
 use crate::cli::{CliError, ConvertArgs, OutputFormat};
 use crate::hdf5::{Hdf5SimulationData, Hdf5WaveformSection, read_hdf5, write_hdf5};
-use std::io::Write;
+use std::fmt;
+use std::io::{BufWriter, Write};
 
 /// Execute the convert command
 pub fn execute(args: ConvertArgs, _verbose: bool, quiet: bool) -> Result<(), CliError> {
@@ -122,20 +123,26 @@ fn read_input(args: &ConvertArgs, from_format: OutputFormat) -> Result<WaveformD
 
 /// Write output file
 fn write_output(args: &ConvertArgs, data: &WaveformData) -> Result<(), CliError> {
-    let mut file = std::fs::File::create(&args.output).map_err(|e| CliError::OutputError {
-        path: args.output.clone(),
-        source: e,
-    })?;
-
     match args.to {
-        OutputFormat::Csv => write_csv(&mut file, data, ",")?,
-        OutputFormat::Tsv => write_csv(&mut file, data, "\t")?,
-        OutputFormat::Json => write_json(&mut file, data)?,
-        OutputFormat::Raw | OutputFormat::RawAscii => write_raw(&mut file, data)?,
-        OutputFormat::Hdf5 => {
-            drop(file);
-            write_hdf5_output(&args.output, data)?;
+        OutputFormat::Csv
+        | OutputFormat::Tsv
+        | OutputFormat::Json
+        | OutputFormat::Raw
+        | OutputFormat::RawAscii => {
+            let file = std::fs::File::create(&args.output)
+                .map_err(|e| CliError::output_error(&args.output, e))?;
+            let mut writer = BufWriter::new(file);
+            match args.to {
+                OutputFormat::Csv => write_csv(&mut writer, &args.output, data, ",")?,
+                OutputFormat::Tsv => write_csv(&mut writer, &args.output, data, "\t")?,
+                OutputFormat::Json => write_json(&mut writer, &args.output, data)?,
+                OutputFormat::Raw | OutputFormat::RawAscii => {
+                    write_raw(&mut writer, &args.output, data)?
+                }
+                OutputFormat::Hdf5 => unreachable!("HDF5 handled separately"),
+            }
         }
+        OutputFormat::Hdf5 => write_hdf5_output(&args.output, data)?,
     }
 
     Ok(())
@@ -208,28 +215,37 @@ fn waveform_data_from_section(section: Hdf5WaveformSection) -> WaveformData {
     }
 }
 
-fn write_csv(file: &mut std::fs::File, data: &WaveformData, sep: &str) -> Result<(), CliError> {
+fn write_csv<W: Write>(
+    writer: &mut W,
+    path: &std::path::Path,
+    data: &WaveformData,
+    sep: &str,
+) -> Result<(), CliError> {
     // Header
-    write!(file, "{}", data.independent_var).unwrap();
+    write_fmt(writer, path, format_args!("{}", data.independent_var))?;
     for name in &data.variable_names {
-        write!(file, "{}{}", sep, name).unwrap();
+        write_fmt(writer, path, format_args!("{}{}", sep, name))?;
     }
-    writeln!(file).unwrap();
+    write_newline(writer, path)?;
 
     // Data
     for (i, &x) in data.independent_values.iter().enumerate() {
-        write!(file, "{:.9e}", x).unwrap();
+        write_fmt(writer, path, format_args!("{:.9e}", x))?;
         for values in &data.variable_values {
             if let Some(&v) = values.get(i) {
-                write!(file, "{}{:.9e}", sep, v).unwrap();
+                write_fmt(writer, path, format_args!("{}{:.9e}", sep, v))?;
             }
         }
-        writeln!(file).unwrap();
+        write_newline(writer, path)?;
     }
     Ok(())
 }
 
-fn write_json(file: &mut std::fs::File, data: &WaveformData) -> Result<(), CliError> {
+fn write_json<W: Write>(
+    writer: &mut W,
+    path: &std::path::Path,
+    data: &WaveformData,
+) -> Result<(), CliError> {
     let mut vars = serde_json::Map::new();
     vars.insert(
         data.independent_var.clone(),
@@ -244,38 +260,116 @@ fn write_json(file: &mut std::fs::File, data: &WaveformData) -> Result<(), CliEr
         "points": data.independent_values.len(),
     });
 
-    writeln!(file, "{}", serde_json::to_string_pretty(&json).unwrap()).unwrap();
+    serde_json::to_writer_pretty(&mut *writer, &json)
+        .map_err(|e| CliError::output_json_error(path, e))?;
+    write_newline(writer, path)?;
     Ok(())
 }
 
-fn write_raw(file: &mut std::fs::File, data: &WaveformData) -> Result<(), CliError> {
-    writeln!(file, "Title: RSpice Converted Data").unwrap();
-    writeln!(file, "Plotname: Data").unwrap();
-    writeln!(file, "Flags: real").unwrap();
-    writeln!(file, "No. Variables: {}", data.variable_names.len() + 1).unwrap();
-    writeln!(file, "No. Points: {}", data.independent_values.len()).unwrap();
-    writeln!(file, "Variables:").unwrap();
-    writeln!(file, "\t0\t{}\ttime", data.independent_var).unwrap();
+fn write_raw<W: Write>(
+    writer: &mut W,
+    path: &std::path::Path,
+    data: &WaveformData,
+) -> Result<(), CliError> {
+    write_line(writer, path, format_args!("Title: RSpice Converted Data"))?;
+    write_line(writer, path, format_args!("Plotname: Data"))?;
+    write_line(writer, path, format_args!("Flags: real"))?;
+    write_line(
+        writer,
+        path,
+        format_args!("No. Variables: {}", data.variable_names.len() + 1),
+    )?;
+    write_line(
+        writer,
+        path,
+        format_args!("No. Points: {}", data.independent_values.len()),
+    )?;
+    write_line(writer, path, format_args!("Variables:"))?;
+    write_line(
+        writer,
+        path,
+        format_args!("\t0\t{}\ttime", data.independent_var),
+    )?;
     for (i, name) in data.variable_names.iter().enumerate() {
-        writeln!(file, "\t{}\t{}\tvoltage", i + 1, name).unwrap();
+        write_line(writer, path, format_args!("\t{}\t{}\tvoltage", i + 1, name))?;
     }
-    writeln!(file, "Values:").unwrap();
+    write_line(writer, path, format_args!("Values:"))?;
     for (idx, &x) in data.independent_values.iter().enumerate() {
-        writeln!(file, "{}", idx).unwrap();
-        writeln!(file, "\t{:.9e}", x).unwrap();
+        write_line(writer, path, format_args!("{}", idx))?;
+        write_line(writer, path, format_args!("\t{:.9e}", x))?;
         for values in &data.variable_values {
             if let Some(&v) = values.get(idx) {
-                writeln!(file, "\t{:.9e}", v).unwrap();
+                write_line(writer, path, format_args!("\t{:.9e}", v))?;
             }
         }
     }
     Ok(())
 }
 
+fn write_fmt<W: Write>(
+    writer: &mut W,
+    path: &std::path::Path,
+    args: fmt::Arguments<'_>,
+) -> Result<(), CliError> {
+    writer
+        .write_fmt(args)
+        .map_err(|e| CliError::output_error(path, e))
+}
+
+fn write_newline<W: Write>(writer: &mut W, path: &std::path::Path) -> Result<(), CliError> {
+    writer
+        .write_all(b"\n")
+        .map_err(|e| CliError::output_error(path, e))
+}
+
+fn write_line<W: Write>(
+    writer: &mut W,
+    path: &std::path::Path,
+    args: fmt::Arguments<'_>,
+) -> Result<(), CliError> {
+    write_fmt(writer, path, args)?;
+    write_newline(writer, path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::hdf5::{Hdf5AcSection, Hdf5SimulationData};
+    use std::io;
+    use std::path::PathBuf;
+
+    struct FailAfterWriter {
+        remaining: usize,
+    }
+
+    impl FailAfterWriter {
+        fn new(remaining: usize) -> Self {
+            Self { remaining }
+        }
+    }
+
+    impl Write for FailAfterWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            if buf.len() > self.remaining {
+                return Err(io::Error::other("injected write failure"));
+            }
+            self.remaining -= buf.len();
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn sample_waveform() -> WaveformData {
+        WaveformData {
+            independent_var: "time".to_string(),
+            independent_values: vec![0.0, 1.0],
+            variable_names: vec!["V(out)".to_string()],
+            variable_values: vec![vec![0.1, 0.2]],
+        }
+    }
 
     #[test]
     fn test_detect_format() {
@@ -327,12 +421,7 @@ mod tests {
     fn test_write_hdf5_output_round_trip() {
         let temp = tempfile::tempdir().expect("temp dir");
         let path = temp.path().join("converted.h5");
-        let waveform = WaveformData {
-            independent_var: "time".to_string(),
-            independent_values: vec![0.0, 1.0],
-            variable_names: vec!["V(out)".to_string()],
-            variable_values: vec![vec![0.1, 0.2]],
-        };
+        let waveform = sample_waveform();
 
         write_hdf5_output(&path, &waveform).expect("HDF5 output should succeed");
         let restored = read_hdf5(&path).expect("round-trip read should succeed");
@@ -340,5 +429,46 @@ mod tests {
         assert_eq!(section.independent_name, "time");
         assert_eq!(section.signals[0].name, "V(out)");
         assert_eq!(section.signals[0].values, vec![0.1, 0.2]);
+    }
+
+    #[test]
+    fn test_write_csv_propagates_write_failure() {
+        let waveform = sample_waveform();
+        let path = std::path::Path::new("converted.csv");
+        let mut writer = FailAfterWriter::new(8);
+        let err = write_csv(&mut writer, path, &waveform, ",").expect_err("write should fail");
+
+        match err {
+            CliError::OutputError { path, .. } => assert_eq!(path, PathBuf::from("converted.csv")),
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_write_json_propagates_write_failure() {
+        let waveform = sample_waveform();
+        let path = std::path::Path::new("converted.json");
+        let mut writer = FailAfterWriter::new(8);
+        let err = write_json(&mut writer, path, &waveform).expect_err("write should fail");
+
+        match err {
+            CliError::OutputError { path, .. } => {
+                assert_eq!(path, PathBuf::from("converted.json"))
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_write_raw_propagates_write_failure() {
+        let waveform = sample_waveform();
+        let path = std::path::Path::new("converted.raw");
+        let mut writer = FailAfterWriter::new(8);
+        let err = write_raw(&mut writer, path, &waveform).expect_err("write should fail");
+
+        match err {
+            CliError::OutputError { path, .. } => assert_eq!(path, PathBuf::from("converted.raw")),
+            other => panic!("unexpected error variant: {other:?}"),
+        }
     }
 }

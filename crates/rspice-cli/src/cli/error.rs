@@ -3,7 +3,7 @@
 //! Professional error handling with structured error types,
 //! exit codes following GNU conventions, and helpful diagnostics.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 /// Exit codes following GNU conventions
@@ -71,6 +71,13 @@ pub enum CliError {
         source: std::io::Error,
     },
 
+    #[error("Failed to serialize output: {path}")]
+    OutputSerializationError {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+
     #[error("Invalid argument: {message}")]
     InvalidArgument {
         message: String,
@@ -100,6 +107,7 @@ impl CliError {
             CliError::ParseError { .. } => ExitCode::InputError,
             CliError::SimulationError { .. } => ExitCode::GeneralError,
             CliError::OutputError { .. } => ExitCode::IoError,
+            CliError::OutputSerializationError { .. } => ExitCode::InternalError,
             CliError::InvalidArgument { .. } => ExitCode::MisuseOfCommand,
             CliError::ConfigError { .. } => ExitCode::ConfigError,
             CliError::VerilogAError { .. } => ExitCode::GeneralError,
@@ -152,6 +160,26 @@ impl CliError {
             analysis: Some(analysis.into()),
         }
     }
+
+    /// Create an output I/O error with path context.
+    pub fn output_error(path: &Path, source: std::io::Error) -> Self {
+        CliError::OutputError {
+            path: path.to_path_buf(),
+            source,
+        }
+    }
+
+    /// Create an output JSON error, preserving underlying I/O failures.
+    pub fn output_json_error(path: &Path, source: serde_json::Error) -> Self {
+        if source.is_io() {
+            return CliError::output_error(path, source.into());
+        }
+
+        CliError::OutputSerializationError {
+            path: path.to_path_buf(),
+            source,
+        }
+    }
 }
 
 impl From<std::io::Error> for CliError {
@@ -184,6 +212,31 @@ impl From<rspice_core::SimulationError> for CliError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Serialize;
+    use std::io;
+
+    struct FailingWriter;
+
+    impl io::Write for FailingWriter {
+        fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+            Err(io::Error::other("injected write failure"))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct AlwaysFails;
+
+    impl Serialize for AlwaysFails {
+        fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            Err(serde::ser::Error::custom("injected serialization failure"))
+        }
+    }
 
     #[test]
     fn test_exit_codes() {
@@ -216,5 +269,33 @@ mod tests {
         let err = CliError::parse_error_at_line("Syntax error", 42);
         let msg = err.to_string();
         assert!(msg.contains("parse netlist"));
+    }
+
+    #[test]
+    fn test_output_json_error_maps_io_failures_to_output_error() {
+        let source = serde_json::to_writer(FailingWriter, &serde_json::json!({ "value": 1 }))
+            .expect_err("writer should fail");
+
+        let err = CliError::output_json_error(Path::new("report.json"), source);
+        match err {
+            CliError::OutputError { path, .. } => {
+                assert_eq!(path, PathBuf::from("report.json"));
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_output_json_error_preserves_serialization_failures() {
+        let source = serde_json::to_string(&AlwaysFails).expect_err("serialization should fail");
+
+        let err = CliError::output_json_error(Path::new("report.json"), source);
+        match err {
+            CliError::OutputSerializationError { path, source } => {
+                assert_eq!(path, PathBuf::from("report.json"));
+                assert!(!source.is_io());
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
     }
 }

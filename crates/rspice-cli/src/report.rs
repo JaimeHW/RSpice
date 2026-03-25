@@ -8,7 +8,8 @@
 #![allow(dead_code)] // Reserved APIs for future measurement collection
 
 use crate::cli::CliError;
-use std::io::Write;
+use std::fmt;
+use std::io::{BufWriter, Write};
 use std::path::Path;
 
 /// Report format enumeration
@@ -113,93 +114,114 @@ pub struct JUnitReporter;
 impl JUnitReporter {
     /// Write JUnit XML report to file
     pub fn write(reports: &[SimulationReport], path: &Path) -> Result<(), CliError> {
-        let mut file = std::fs::File::create(path).map_err(|e| CliError::OutputError {
-            path: path.to_path_buf(),
-            source: e,
-        })?;
+        let file = std::fs::File::create(path).map_err(|e| CliError::output_error(path, e))?;
+        let mut writer = BufWriter::new(file);
+        write_junit_report(&mut writer, path, reports)
+    }
+}
 
-        let total_tests: usize = reports.iter().map(|r| 1 + r.measurements.len()).sum();
-        let failures: usize = reports
-            .iter()
-            .map(|r| {
-                (if r.passed { 0 } else { 1 }) + r.measurements.iter().filter(|m| !m.passed).count()
-            })
-            .sum();
-        let total_time: f64 = reports.iter().map(|r| r.duration_secs).sum();
+fn write_junit_report<W: Write>(
+    writer: &mut W,
+    path: &Path,
+    reports: &[SimulationReport],
+) -> Result<(), CliError> {
+    let total_tests: usize = reports.iter().map(|r| 1 + r.measurements.len()).sum();
+    let failures: usize = reports
+        .iter()
+        .map(|r| {
+            (if r.passed { 0 } else { 1 }) + r.measurements.iter().filter(|m| !m.passed).count()
+        })
+        .sum();
+    let total_time: f64 = reports.iter().map(|r| r.duration_secs).sum();
 
-        writeln!(file, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>").unwrap();
-        writeln!(
-            file,
+    write_line(
+        writer,
+        path,
+        format_args!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"),
+    )?;
+    write_line(
+        writer,
+        path,
+        format_args!(
             "<testsuites tests=\"{}\" failures=\"{}\" time=\"{:.3}\">",
             total_tests, failures, total_time
-        )
-        .unwrap();
+        ),
+    )?;
 
-        for report in reports {
-            let test_count = 1 + report.measurements.len();
-            let failure_count = (if report.passed { 0 } else { 1 })
-                + report.measurements.iter().filter(|m| !m.passed).count();
+    for report in reports {
+        let test_count = 1 + report.measurements.len();
+        let failure_count = (if report.passed { 0 } else { 1 })
+            + report.measurements.iter().filter(|m| !m.passed).count();
 
-            writeln!(
-                file,
+        write_line(
+            writer,
+            path,
+            format_args!(
                 "  <testsuite name=\"{}\" tests=\"{}\" failures=\"{}\" time=\"{:.3}\">",
                 xml_escape(&report.name),
                 test_count,
                 failure_count,
                 report.duration_secs
-            )
-            .unwrap();
+            ),
+        )?;
 
-            // Main simulation test case
-            writeln!(
-                file,
+        // Main simulation test case
+        write_line(
+            writer,
+            path,
+            format_args!(
                 "    <testcase name=\"simulation\" classname=\"{}\" time=\"{:.3}\">",
                 xml_escape(&report.netlist),
                 report.duration_secs
-            )
-            .unwrap();
+            ),
+        )?;
 
-            if !report.passed {
-                if let Some(ref err) = report.error {
-                    writeln!(
-                        file,
+        if !report.passed {
+            if let Some(ref err) = report.error {
+                write_line(
+                    writer,
+                    path,
+                    format_args!(
                         "      <failure message=\"Simulation failed\">{}</failure>",
                         xml_escape(err)
-                    )
-                    .unwrap();
-                }
+                    ),
+                )?;
             }
-            writeln!(file, "    </testcase>").unwrap();
+        }
+        write_line(writer, path, format_args!("    </testcase>"))?;
 
-            // Measurement test cases
-            for meas in &report.measurements {
-                writeln!(
-                    file,
+        // Measurement test cases
+        for meas in &report.measurements {
+            write_line(
+                writer,
+                path,
+                format_args!(
                     "    <testcase name=\"{}\" classname=\"{}\">",
                     xml_escape(&meas.name),
                     xml_escape(&report.netlist)
-                )
-                .unwrap();
+                ),
+            )?;
 
-                if !meas.passed {
-                    if let Some(ref err) = meas.error {
-                        writeln!(
-                            file,
+            if !meas.passed {
+                if let Some(ref err) = meas.error {
+                    write_line(
+                        writer,
+                        path,
+                        format_args!(
                             "      <failure message=\"Measurement failed\">{}</failure>",
                             xml_escape(err)
-                        )
-                        .unwrap();
-                    }
+                        ),
+                    )?;
                 }
-                writeln!(file, "    </testcase>").unwrap();
             }
-
-            writeln!(file, "  </testsuite>").unwrap();
+            write_line(writer, path, format_args!("    </testcase>"))?;
         }
 
-        writeln!(file, "</testsuites>").unwrap();
-        Ok(())
+        write_line(writer, path, format_args!("  </testsuite>"))?;
     }
+
+    write_line(writer, path, format_args!("</testsuites>"))?;
+    Ok(())
 }
 
 /// TAP (Test Anything Protocol) report writer
@@ -208,50 +230,71 @@ pub struct TapReporter;
 impl TapReporter {
     /// Write TAP report to file
     pub fn write(reports: &[SimulationReport], path: &Path) -> Result<(), CliError> {
-        let mut file = std::fs::File::create(path).map_err(|e| CliError::OutputError {
-            path: path.to_path_buf(),
-            source: e,
-        })?;
+        let file = std::fs::File::create(path).map_err(|e| CliError::output_error(path, e))?;
+        let mut writer = BufWriter::new(file);
+        write_tap_report(&mut writer, path, reports)
+    }
+}
 
-        let total_tests: usize = reports.iter().map(|r| 1 + r.measurements.len()).sum();
-        writeln!(file, "TAP version 13").unwrap();
-        writeln!(file, "1..{}", total_tests).unwrap();
+fn write_tap_report<W: Write>(
+    writer: &mut W,
+    path: &Path,
+    reports: &[SimulationReport],
+) -> Result<(), CliError> {
+    let total_tests: usize = reports.iter().map(|r| 1 + r.measurements.len()).sum();
+    write_line(writer, path, format_args!("TAP version 13"))?;
+    write_line(writer, path, format_args!("1..{}", total_tests))?;
 
-        let mut test_num = 0;
-        for report in reports {
-            test_num += 1;
-            if report.passed {
-                writeln!(file, "ok {} - {}", test_num, report.name).unwrap();
-            } else {
-                writeln!(file, "not ok {} - {}", test_num, report.name).unwrap();
-                if let Some(ref err) = report.error {
-                    writeln!(file, "  ---").unwrap();
-                    writeln!(file, "  message: '{}'", err).unwrap();
-                    writeln!(file, "  ...").unwrap();
-                }
-            }
-
-            for meas in &report.measurements {
-                test_num += 1;
-                if meas.passed {
-                    let value_str = meas
-                        .value
-                        .map(|v| format!(" = {:.6}", v))
-                        .unwrap_or_default();
-                    writeln!(file, "ok {} - {}{}", test_num, meas.name, value_str).unwrap();
-                } else {
-                    writeln!(file, "not ok {} - {}", test_num, meas.name).unwrap();
-                    if let Some(ref err) = meas.error {
-                        writeln!(file, "  ---").unwrap();
-                        writeln!(file, "  message: '{}'", err).unwrap();
-                        writeln!(file, "  ...").unwrap();
-                    }
-                }
+    let mut test_num = 0;
+    for report in reports {
+        test_num += 1;
+        if report.passed {
+            write_line(
+                writer,
+                path,
+                format_args!("ok {} - {}", test_num, report.name),
+            )?;
+        } else {
+            write_line(
+                writer,
+                path,
+                format_args!("not ok {} - {}", test_num, report.name),
+            )?;
+            if let Some(ref err) = report.error {
+                write_line(writer, path, format_args!("  ---"))?;
+                write_line(writer, path, format_args!("  message: '{}'", err))?;
+                write_line(writer, path, format_args!("  ..."))?;
             }
         }
 
-        Ok(())
+        for meas in &report.measurements {
+            test_num += 1;
+            if meas.passed {
+                let value_str = meas
+                    .value
+                    .map(|v| format!(" = {:.6}", v))
+                    .unwrap_or_default();
+                write_line(
+                    writer,
+                    path,
+                    format_args!("ok {} - {}{}", test_num, meas.name, value_str),
+                )?;
+            } else {
+                write_line(
+                    writer,
+                    path,
+                    format_args!("not ok {} - {}", test_num, meas.name),
+                )?;
+                if let Some(ref err) = meas.error {
+                    write_line(writer, path, format_args!("  ---"))?;
+                    write_line(writer, path, format_args!("  message: '{}'", err))?;
+                    write_line(writer, path, format_args!("  ..."))?;
+                }
+            }
+        }
     }
+
+    Ok(())
 }
 
 /// JSON report for measurements
@@ -260,37 +303,59 @@ pub struct JsonMeasReporter;
 impl JsonMeasReporter {
     /// Write measurement results to JSON file
     pub fn write(reports: &[SimulationReport], path: &Path) -> Result<(), CliError> {
-        let mut results = Vec::new();
-
-        for report in reports {
-            for meas in &report.measurements {
-                results.push(serde_json::json!({
-                    "netlist": report.netlist,
-                    "name": meas.name,
-                    "value": meas.value,
-                    "expected": meas.expected,
-                    "tolerance": meas.tolerance,
-                    "passed": meas.passed,
-                    "error": meas.error,
-                }));
-            }
-        }
-
-        let json = serde_json::json!({
-            "measurements": results,
-            "total": results.len(),
-            "passed": results.iter().filter(|r| r["passed"] == true).count(),
-            "failed": results.iter().filter(|r| r["passed"] == false).count(),
-        });
-
-        let mut file = std::fs::File::create(path).map_err(|e| CliError::OutputError {
-            path: path.to_path_buf(),
-            source: e,
-        })?;
-        writeln!(file, "{}", serde_json::to_string_pretty(&json).unwrap()).unwrap();
-
-        Ok(())
+        let file = std::fs::File::create(path).map_err(|e| CliError::output_error(path, e))?;
+        let mut writer = BufWriter::new(file);
+        write_measurement_json(&mut writer, path, reports)
     }
+}
+
+fn write_measurement_json<W: Write>(
+    writer: &mut W,
+    path: &Path,
+    reports: &[SimulationReport],
+) -> Result<(), CliError> {
+    let mut results = Vec::new();
+
+    for report in reports {
+        for meas in &report.measurements {
+            results.push(serde_json::json!({
+                "netlist": report.netlist,
+                "name": meas.name,
+                "value": meas.value,
+                "expected": meas.expected,
+                "tolerance": meas.tolerance,
+                "passed": meas.passed,
+                "error": meas.error,
+            }));
+        }
+    }
+
+    let json = serde_json::json!({
+        "measurements": results,
+        "total": results.len(),
+        "passed": results.iter().filter(|r| r["passed"] == true).count(),
+        "failed": results.iter().filter(|r| r["passed"] == false).count(),
+    });
+
+    serde_json::to_writer_pretty(&mut *writer, &json)
+        .map_err(|e| CliError::output_json_error(path, e))?;
+    writer
+        .write_all(b"\n")
+        .map_err(|e| CliError::output_error(path, e))?;
+    Ok(())
+}
+
+fn write_line<W: Write>(
+    writer: &mut W,
+    path: &Path,
+    args: fmt::Arguments<'_>,
+) -> Result<(), CliError> {
+    writer
+        .write_fmt(args)
+        .map_err(|e| CliError::output_error(path, e))?;
+    writer
+        .write_all(b"\n")
+        .map_err(|e| CliError::output_error(path, e))
 }
 
 /// Escape XML special characters
@@ -305,7 +370,44 @@ fn xml_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io;
+    use std::path::PathBuf;
     use tempfile::tempdir;
+
+    struct FailAfterWriter {
+        remaining: usize,
+    }
+
+    impl FailAfterWriter {
+        fn new(remaining: usize) -> Self {
+            Self { remaining }
+        }
+    }
+
+    impl Write for FailAfterWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            if buf.len() > self.remaining {
+                return Err(io::Error::other("injected write failure"));
+            }
+            self.remaining -= buf.len();
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn sample_reports() -> Vec<SimulationReport> {
+        vec![SimulationReport {
+            name: "test_sim".to_string(),
+            netlist: "test.sp".to_string(),
+            passed: true,
+            duration_secs: 0.5,
+            error: None,
+            measurements: vec![MeasurementReport::passed("VDD", 1.8)],
+        }]
+    }
 
     #[test]
     fn test_measurement_passed() {
@@ -325,15 +427,7 @@ mod tests {
 
     #[test]
     fn test_junit_report() {
-        let reports = vec![SimulationReport {
-            name: "test_sim".to_string(),
-            netlist: "test.sp".to_string(),
-            passed: true,
-            duration_secs: 0.5,
-            error: None,
-            measurements: vec![MeasurementReport::passed("VDD", 1.8)],
-        }];
-
+        let reports = sample_reports();
         let dir = tempdir().unwrap();
         let path = dir.path().join("report.xml");
         JUnitReporter::write(&reports, &path).unwrap();
@@ -345,15 +439,7 @@ mod tests {
 
     #[test]
     fn test_tap_report() {
-        let reports = vec![SimulationReport {
-            name: "test_sim".to_string(),
-            netlist: "test.sp".to_string(),
-            passed: true,
-            duration_secs: 0.5,
-            error: None,
-            measurements: vec![MeasurementReport::passed("VDD", 1.8)],
-        }];
-
+        let reports = sample_reports();
         let dir = tempdir().unwrap();
         let path = dir.path().join("report.tap");
         TapReporter::write(&reports, &path).unwrap();
@@ -361,6 +447,46 @@ mod tests {
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("TAP version 13"));
         assert!(content.contains("ok 1"));
+    }
+
+    #[test]
+    fn test_junit_report_propagates_write_failure() {
+        let reports = sample_reports();
+        let path = Path::new("report.xml");
+        let mut writer = FailAfterWriter::new(8);
+        let err = write_junit_report(&mut writer, path, &reports).expect_err("write should fail");
+
+        match err {
+            CliError::OutputError { path, .. } => assert_eq!(path, PathBuf::from("report.xml")),
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_tap_report_propagates_write_failure() {
+        let reports = sample_reports();
+        let path = Path::new("report.tap");
+        let mut writer = FailAfterWriter::new(8);
+        let err = write_tap_report(&mut writer, path, &reports).expect_err("write should fail");
+
+        match err {
+            CliError::OutputError { path, .. } => assert_eq!(path, PathBuf::from("report.tap")),
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_json_report_propagates_write_failure() {
+        let reports = sample_reports();
+        let path = Path::new("report.json");
+        let mut writer = FailAfterWriter::new(8);
+        let err =
+            write_measurement_json(&mut writer, path, &reports).expect_err("write should fail");
+
+        match err {
+            CliError::OutputError { path, .. } => assert_eq!(path, PathBuf::from("report.json")),
+            other => panic!("unexpected error variant: {other:?}"),
+        }
     }
 
     #[test]
