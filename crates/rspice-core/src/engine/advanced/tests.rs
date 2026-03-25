@@ -751,6 +751,27 @@ fn test_run_noise_with_input_source_rejects_unknown_source() {
 }
 
 #[test]
+fn test_run_noise_with_input_source_rejects_zero_transfer_gain() {
+    let netlist = crate::netlist::parse_netlist(
+        "* Noise input source zero gain\n\
+             V1 in 0 DC 1 AC 1\n\
+             C1 in out 1u\n\
+             .END\n",
+    )
+    .expect("netlist should parse");
+    let engine = Engine::default();
+
+    let err = engine
+        .run_noise_with_input_source(&netlist, 2, None, "V1", &[0.0], 300.0)
+        .expect_err("undefined input-referred gain should fail");
+
+    match err {
+        SimulationError::Circuit(msg) => assert!(msg.contains("undefined")),
+        other => panic!("expected Circuit error, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_run_noise_ports_rejects_invalid_output_node() {
     let netlist = crate::netlist::parse_netlist(
         "* Noise invalid node\n\
@@ -798,6 +819,93 @@ fn test_run_noise_contributions_use_resistor_instance_names() {
         .collect();
     assert!(names.contains("RFEED"));
     assert!(names.contains("RLOAD"));
+}
+
+#[test]
+fn test_run_noise_collects_bjt_shot_and_flicker_sources() {
+    let netlist = crate::netlist::parse_netlist(
+        "* BJT noise\n\
+             VCC vcc 0 5\n\
+             VB base 0 0.6\n\
+             RC vcc out 1k\n\
+             Q1 out base 0 QB\n\
+             .MODEL QB NPN (IS=1e-14 BF=200 BR=1 NF=1 NR=1 VAF=1e12 CJE=0 CJC=0 TF=0 TR=0 IKF=1e9 IKR=1e9 KF=1e-14 AF=1.2 EF=1.1)\n\
+             .END\n",
+    )
+    .expect("netlist should parse");
+    let engine = Engine::default();
+
+    let result = engine
+        .run_noise(&netlist, 3, &[1e3], 300.0)
+        .expect("BJT noise analysis should succeed");
+    let contribs = &result[0].contributions;
+
+    assert!(
+        contribs.iter().any(|c| c.device_name == "Q1:IC"),
+        "expected collector shot noise contribution"
+    );
+    assert!(
+        contribs.iter().any(|c| c.device_name == "Q1:flicker"),
+        "expected BJT flicker noise contribution"
+    );
+}
+
+#[test]
+fn test_run_noise_collects_mosfet_thermal_and_flicker_sources() {
+    let netlist = crate::netlist::parse_netlist(
+        "* MOS noise\n\
+             VDD vdd 0 5\n\
+             VG gate 0 2\n\
+             RD vdd out 1k\n\
+             M1 out gate 0 0 NM1 W=20u L=1u\n\
+             .MODEL NM1 NMOS (KP=200u VTO=0.7 KF=1e-24 AF=1.1 EF=1.3)\n\
+             .END\n",
+    )
+    .expect("netlist should parse");
+    let engine = Engine::default();
+
+    let result = engine
+        .run_noise(&netlist, 3, &[1e3], 300.0)
+        .expect("MOS noise analysis should succeed");
+    let contribs = &result[0].contributions;
+
+    assert!(
+        contribs.iter().any(|c| c.device_name == "M1:thermal"),
+        "expected MOS thermal noise contribution"
+    );
+    assert!(
+        contribs.iter().any(|c| c.device_name == "M1:flicker"),
+        "expected MOS flicker noise contribution"
+    );
+}
+
+#[test]
+fn test_run_noise_collects_jfet_noise_sources() {
+    let netlist = crate::netlist::parse_netlist(
+        "* JFET noise\n\
+             VDD vdd 0 5\n\
+             VG gate 0 -1\n\
+             RD vdd out 1k\n\
+             J1 out gate 0 JN\n\
+             .MODEL JN NJF (VTO=-2 BETA=1e-3 KF=1e-18 AF=1.0 EF=1.0)\n\
+             .END\n",
+    )
+    .expect("netlist should parse");
+    let engine = Engine::default();
+
+    let result = engine
+        .run_noise(&netlist, 3, &[1e3], 300.0)
+        .expect("JFET noise analysis should succeed");
+    let contribs = &result[0].contributions;
+
+    assert!(
+        contribs.iter().any(|c| c.device_name == "J1:thermal"),
+        "expected JFET thermal noise contribution"
+    );
+    assert!(
+        contribs.iter().any(|c| c.device_name == "J1:flicker"),
+        "expected JFET flicker noise contribution"
+    );
 }
 
 #[test]
@@ -1101,6 +1209,46 @@ fn test_run_monte_carlo_reports_named_node_aliases() {
     assert!((vin_num.std_dev - vin_named.std_dev).abs() < 1e-15);
     assert!((vout_num.mean - vout_named.mean).abs() < 1e-15);
     assert!((vout_num.std_dev - vout_named.std_dev).abs() < 1e-15);
+}
+
+#[test]
+fn test_run_monte_carlo_reports_all_nodes_beyond_ten() {
+    let netlist = crate::netlist::parse_netlist(
+        "* Monte Carlo long ladder\n\
+             .PARAM RVAR=1k\n\
+             V1 n1 0 1\n\
+             R1 n1 n2 {RVAR}\n\
+             R2 n2 n3 1k\n\
+             R3 n3 n4 1k\n\
+             R4 n4 n5 1k\n\
+             R5 n5 n6 1k\n\
+             R6 n6 n7 1k\n\
+             R7 n7 n8 1k\n\
+             R8 n8 n9 1k\n\
+             R9 n9 n10 1k\n\
+             R10 n10 n11 1k\n\
+             R11 n11 n12 1k\n\
+             R12 n12 0 1k\n\
+             .END\n",
+    )
+    .expect("netlist should parse");
+    let engine = Engine::default();
+
+    let result = engine
+        .run_monte_carlo(&netlist, 64, 91)
+        .expect("monte carlo should succeed");
+
+    assert!(
+        result.variables.contains_key("V(12)"),
+        "highest-index node statistic should not be truncated"
+    );
+    assert!(
+        result
+            .variables
+            .keys()
+            .any(|name| name.eq_ignore_ascii_case("V(n12)")),
+        "named alias for the last node should be preserved"
+    );
 }
 
 #[test]

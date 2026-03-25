@@ -42,6 +42,35 @@ R2 2 0 1k
     }
 
     #[test]
+    fn test_transient_result_checked_accessors_validate_bounds() {
+        let result = crate::engine::TransientResult {
+            time: vec![0.0, 1.0],
+            voltages: vec![vec![1.0, 1.5], vec![2.0, 2.5]],
+            num_nodes: 2,
+            node_names: vec!["n1".to_string(), "n2".to_string()],
+        };
+
+        assert_eq!(result.try_voltage_at(1, 1), Some(1.5));
+        assert_eq!(result.try_voltage_at(0, 1), None);
+        assert_eq!(result.try_voltage_at(2, 3), None);
+        assert_eq!(result.try_voltage_waveform(2), Some(&[2.0, 2.5][..]));
+        assert_eq!(result.try_voltage_waveform(0), None);
+    }
+
+    #[test]
+    fn test_transient_result_fail_fast_accessors_panic_on_invalid_lookup() {
+        let result = crate::engine::TransientResult {
+            time: vec![0.0, 1.0],
+            voltages: vec![vec![1.0, 1.5]],
+            num_nodes: 1,
+            node_names: vec!["n1".to_string()],
+        };
+
+        assert!(std::panic::catch_unwind(|| result.voltage_at(2, 0)).is_err());
+        assert!(std::panic::catch_unwind(|| result.voltage_waveform(2)).is_err());
+    }
+
+    #[test]
     fn test_model_based_resistor_uses_rsh_and_geometry() {
         let netlist_str = r#"
 * Model-based resistor with geometry
