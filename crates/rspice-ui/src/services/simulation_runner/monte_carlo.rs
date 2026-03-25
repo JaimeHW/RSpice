@@ -1,10 +1,11 @@
 //! Monte Carlo analysis runner.
 
-use super::{build_engine_config, DEFAULT_MONTE_CARLO_SEED};
+use super::{build_engine_config, parse_runner_netlist, DEFAULT_MONTE_CARLO_SEED};
 use rspice_core::analysis::monte_carlo::Distribution;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{AnalysisCommand, MonteCarloDistribution};
 use rspice_core::Value;
+use std::path::Path;
 
 /// Monte Carlo variable summary statistics.
 #[derive(Debug, Clone)]
@@ -30,8 +31,16 @@ pub struct MonteCarloData {
 
 /// Run Monte Carlo analysis by executing the first `.MC` command in the netlist.
 pub fn run_monte_carlo_analysis(netlist_text: &str) -> Result<MonteCarloData, String> {
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    run_monte_carlo_analysis_with_source_path(netlist_text, None)
+}
+
+/// Run Monte Carlo analysis with a source path used to resolve relative
+/// includes and model file references.
+pub fn run_monte_carlo_analysis_with_source_path(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+) -> Result<MonteCarloData, String> {
+    let netlist = parse_runner_netlist(netlist_text, source_path)?;
 
     let mc_cmd = netlist
         .analyses

@@ -1,12 +1,13 @@
 #![allow(clippy::needless_range_loop)]
 
-use super::{build_engine_config, generate_freq_points};
+use super::{build_engine_config, generate_freq_points, parse_runner_netlist};
 use num_complex::Complex64;
 use rspice_core::analysis::ac::AcResult;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{Element, ElementKind, SourceSpec};
 use rspice_core::Value;
 use std::fmt;
+use std::path::Path;
 
 /// Sweep type for S-parameter analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,17 +149,29 @@ pub fn run_sparameter_analysis(
     netlist_text: &str,
     config: &SParameterRunConfig,
 ) -> Result<SParameterData, String> {
-    run_sparameter_analysis_typed(netlist_text, config).map_err(|error| error.to_string())
+    run_sparameter_analysis_with_source_path(netlist_text, config, None)
+}
+
+/// Run N-port S-parameter analysis with a source path used to resolve relative
+/// includes and model file references.
+pub fn run_sparameter_analysis_with_source_path(
+    netlist_text: &str,
+    config: &SParameterRunConfig,
+    source_path: Option<&Path>,
+) -> Result<SParameterData, String> {
+    run_sparameter_analysis_typed(netlist_text, config, source_path)
+        .map_err(|error| error.to_string())
 }
 
 fn run_sparameter_analysis_typed(
     netlist_text: &str,
     config: &SParameterRunConfig,
+    source_path: Option<&Path>,
 ) -> Result<SParameterData, SParameterRunError> {
     config.validate()?;
 
-    let parsed_netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| SParameterRunError::Parse(format!("Parse error: {}", e)))?;
+    let parsed_netlist =
+        parse_runner_netlist(netlist_text, source_path).map_err(SParameterRunError::Parse)?;
 
     let frequencies = generate_freq_points(
         config.start_freq,

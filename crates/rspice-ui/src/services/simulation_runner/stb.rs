@@ -1,7 +1,8 @@
-use super::build_engine_config;
+use super::{build_engine_config, parse_runner_netlist};
 use num_complex::Complex64;
 use rspice_core::engine::Engine;
 use rspice_core::Value;
+use std::path::Path;
 
 /// STB analysis data for feedback loop stability
 #[derive(Debug, Clone)]
@@ -86,10 +87,29 @@ pub fn run_stb_analysis(
     stop_freq: Value,
     points_per_decade: usize,
 ) -> Result<StbData, String> {
+    run_stb_analysis_with_source_path(
+        netlist_text,
+        probe_node,
+        start_freq,
+        stop_freq,
+        points_per_decade,
+        None,
+    )
+}
+
+/// Run STB (loop stability) analysis with a source path used to resolve
+/// relative includes and model file references.
+pub fn run_stb_analysis_with_source_path(
+    netlist_text: &str,
+    probe_node: &str,
+    start_freq: Value,
+    stop_freq: Value,
+    points_per_decade: usize,
+    source_path: Option<&Path>,
+) -> Result<StbData, String> {
     use rspice_core::analysis::advanced::stb::{StbAnalyzer, StbConfig};
 
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    let netlist = parse_runner_netlist(netlist_text, source_path)?;
     let engine = Engine::new(build_engine_config(&netlist, None));
 
     let stb_config = StbConfig::new()

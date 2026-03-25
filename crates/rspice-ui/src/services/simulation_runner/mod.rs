@@ -60,7 +60,10 @@ use helpers::{
     infer_primary_source_name, is_ground_like, netlist_has_independent_source_named,
     normalize_voltage_signal_name, parse_runner_netlist,
 };
-pub use monte_carlo::{run_monte_carlo_analysis, MonteCarloData, MonteCarloVariableData};
+pub use monte_carlo::{
+    run_monte_carlo_analysis, run_monte_carlo_analysis_with_source_path, MonteCarloData,
+    MonteCarloVariableData,
+};
 pub use noise::{run_noise_analysis, run_noise_analysis_with_source_path, NoiseData};
 pub use optimization::{
     run_optimization_analysis, run_optimization_analysis_with_config, OptimizationAlgorithmMode,
@@ -90,13 +93,17 @@ pub use sensitivity::{
 };
 pub use soa::{run_soa_analysis, run_soa_analysis_with_config, SoaData, SoaRunConfig};
 pub use sparameter::{
-    run_sparameter_analysis, SParameterData, SParameterPort, SParameterRunConfig, SParameterSweep,
+    run_sparameter_analysis, run_sparameter_analysis_with_source_path, SParameterData,
+    SParameterPort, SParameterRunConfig, SParameterSweep,
 };
-pub use stb::{run_stb_analysis, StbData};
+pub use stb::{run_stb_analysis, run_stb_analysis_with_source_path, StbData};
 pub use sweeps::{
-    run_corner_analysis, run_corner_analysis_with_config, run_parametric_analysis,
-    run_parametric_analysis_with_config, CornerBaseMode, CornerData, CornerFrequencySweep,
-    CornerProcess, CornerRunConfig, ParametricData, TempRunConfig,
+    run_corner_analysis, run_corner_analysis_with_config,
+    run_corner_analysis_with_config_and_source_path, run_corner_analysis_with_source_path,
+    run_parametric_analysis, run_parametric_analysis_with_config,
+    run_parametric_analysis_with_config_and_source_path, run_parametric_analysis_with_source_path,
+    CornerBaseMode, CornerData, CornerFrequencySweep, CornerProcess, CornerRunConfig,
+    ParametricData, TempRunConfig,
 };
 pub use tf::{
     run_tf_analysis, run_tf_analysis_with_config, run_tf_analysis_with_config_and_source_path,

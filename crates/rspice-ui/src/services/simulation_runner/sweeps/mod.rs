@@ -2,13 +2,14 @@
 
 #![allow(clippy::needless_range_loop, clippy::type_complexity)]
 
-use super::{build_engine_config, generate_freq_points};
+use super::{build_engine_config, generate_freq_points, parse_runner_netlist};
 use rspice_core::engine::{Engine, TransientResult};
 #[cfg(test)]
 use rspice_core::netlist::StepSweep;
 use rspice_core::netlist::{AnalysisCommand, ElementKind, SourceSpec, StepCommand, StepTarget};
 use rspice_core::solver::SimulationResult as CoreSimulationResult;
 use rspice_core::Value;
+use std::path::Path;
 
 mod sweep_points;
 use sweep_points::{expand_step_sweep_values, extract_temp_points};
@@ -53,8 +54,16 @@ impl TempRunConfig {
 
 /// Run parametric analysis by executing the first `.STEP` command in the netlist.
 pub fn run_parametric_analysis(netlist_text: &str) -> Result<ParametricData, String> {
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    run_parametric_analysis_with_source_path(netlist_text, None)
+}
+
+/// Run parametric analysis by executing the first `.STEP` command in the
+/// netlist, resolving relative includes from the source path when provided.
+pub fn run_parametric_analysis_with_source_path(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+) -> Result<ParametricData, String> {
+    let netlist = parse_runner_netlist(netlist_text, source_path)?;
 
     let step_cmd = netlist
         .analyses
@@ -104,8 +113,17 @@ pub fn run_parametric_analysis_with_config(
     netlist_text: &str,
     config: &TempRunConfig,
 ) -> Result<ParametricData, String> {
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    run_parametric_analysis_with_config_and_source_path(netlist_text, config, None)
+}
+
+/// Run temperature sweep analysis with explicit base-mode configuration and a
+/// source path used to resolve relative includes and model file references.
+pub fn run_parametric_analysis_with_config_and_source_path(
+    netlist_text: &str,
+    config: &TempRunConfig,
+    source_path: Option<&Path>,
+) -> Result<ParametricData, String> {
+    let netlist = parse_runner_netlist(netlist_text, source_path)?;
     run_parametric_analysis_with_netlist_and_config(&netlist, config, "TEMP")
 }
 
@@ -445,8 +463,16 @@ pub struct CornerData {
 ///
 /// This compatibility entry point executes temperature-only TT/nominal sweeps.
 pub fn run_corner_analysis(netlist_text: &str) -> Result<CornerData, String> {
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    run_corner_analysis_with_source_path(netlist_text, None)
+}
+
+/// Run corner analysis from `.TEMP` commands in the netlist, resolving relative
+/// includes from the source path when provided.
+pub fn run_corner_analysis_with_source_path(
+    netlist_text: &str,
+    source_path: Option<&Path>,
+) -> Result<CornerData, String> {
+    let netlist = parse_runner_netlist(netlist_text, source_path)?;
     let temperatures = extract_temp_points(&netlist);
 
     if temperatures.is_empty() {
@@ -465,8 +491,18 @@ pub fn run_corner_analysis_with_config(
     netlist_text: &str,
     config: &CornerRunConfig,
 ) -> Result<CornerData, String> {
-    let netlist = rspice_core::netlist::parse_netlist(netlist_text)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    run_corner_analysis_with_config_and_source_path(netlist_text, config, None)
+}
+
+/// Run corner analysis with explicit process/voltage/temperature configuration
+/// and a source path used to resolve relative includes and model file
+/// references.
+pub fn run_corner_analysis_with_config_and_source_path(
+    netlist_text: &str,
+    config: &CornerRunConfig,
+    source_path: Option<&Path>,
+) -> Result<CornerData, String> {
+    let netlist = parse_runner_netlist(netlist_text, source_path)?;
     run_corner_analysis_with_netlist(&netlist, config)
 }
 
