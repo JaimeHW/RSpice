@@ -50,7 +50,8 @@ rspice-core = { path = "crates/rspice-core" }
 incremental = true
 
 [profile.release]
-incremental = true
+# Release artifacts should prioritize deterministic, fully optimized builds.
+incremental = false
 
 # Faster test compilation
 [profile.test]

@@ -1,0 +1,5 @@
+[target.'cfg(all(target_os = "windows", target_env = "msvc"))']
+# Large Windows/MSVC release test binaries in this workspace can trigger
+# link.exe LNK1328 while emitting PDB data. Disabling linker-generated debug
+# info keeps `cargo test --release` reliable on Windows.
+rustflags = ["-C", "link-arg=/DEBUG:NONE"]
