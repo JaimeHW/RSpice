@@ -6,6 +6,7 @@ members = [
     "crates/rspice-ui",
     "crates/rspice-veriloga",
     "crates/rspice-python",
+    "crates/rspice-wasm",
 ]
 
 [workspace.package]
@@ -14,7 +15,7 @@ edition = "2024"
 authors = ["RSpice Contributors"]
 license-file = "LICENSE"
 repository = "https://github.com/JaimeHW/rspice"
-rust-version = "1.85"
+rust-version = "1.94"
 
 [workspace.dependencies]
 # Core dependencies - faer for high-performance sparse linear algebra
