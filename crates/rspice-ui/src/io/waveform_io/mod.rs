@@ -1207,7 +1207,7 @@ impl WaveformReader {
 
         let values_per_freq = Self::touchstone_values_per_frequency(num_ports, matrix_format)
             .ok_or_else(|| "Touchstone matrix dimensions overflow".to_string())?;
-        if !numeric_tokens.len().is_multiple_of(values_per_freq) {
+        if !crate::utils::numeric::is_multiple_of(numeric_tokens.len(), values_per_freq) {
             return Err(format!(
                 "Touchstone numeric data length {} is not divisible by record width {}",
                 numeric_tokens.len(),
@@ -1418,7 +1418,9 @@ impl WaveformReader {
             else {
                 continue;
             };
-            if tokens.len() < record_width || !tokens.len().is_multiple_of(record_width) {
+            if tokens.len() < record_width
+                || !crate::utils::numeric::is_multiple_of(tokens.len(), record_width)
+            {
                 continue;
             }
             let num_freqs = tokens.len() / record_width;

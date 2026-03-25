@@ -163,7 +163,7 @@ fn encode_f64_slice_le(data: &[f64]) -> Vec<u8> {
 }
 
 fn decode_f64_slice_le(bytes: &[u8]) -> std::io::Result<Vec<f64>> {
-    if !bytes.len().is_multiple_of(F64_SIZE_BYTES) {
+    if !crate::utils::numeric::is_multiple_of(bytes.len(), F64_SIZE_BYTES) {
         return Err(Error::new(
             ErrorKind::InvalidData,
             "f64 payload size is not a multiple of 8 bytes",

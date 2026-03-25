@@ -236,7 +236,7 @@ fn run_pac_analysis_for_netlist(
     netlist: &rspice_core::Netlist,
     config: &PacRunConfig,
 ) -> Result<PacData, String> {
-    let pac_internal = run_pac_internal(&netlist, config)?;
+    let pac_internal = run_pac_internal(netlist, config)?;
     let output_node_idx = pac_internal.output_node_idx;
     let pac_result = pac_internal.pac_result;
 

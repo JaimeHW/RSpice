@@ -254,7 +254,7 @@ impl FftData {
         let n_freqs = n / 2 + 1;
         let mut points = Vec::with_capacity(n_freqs);
         let base_scale = (1.0 / (n as f64 * cg)) * normalization.scale_from_peak();
-        let has_nyquist = n.is_multiple_of(2);
+        let has_nyquist = crate::utils::numeric::is_multiple_of(n, 2);
 
         for (k, bin) in buffer.iter().take(n_freqs).enumerate() {
             let freq = k as f64 * sample_rate / n as f64;

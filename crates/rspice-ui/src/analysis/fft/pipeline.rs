@@ -509,7 +509,7 @@ fn ceil_div(n: usize, d: usize) -> usize {
 
 fn fir_tap_count(factor: usize) -> usize {
     let mut taps = (32 * factor).clamp(63, 1023);
-    if taps.is_multiple_of(2) {
+    if crate::utils::numeric::is_multiple_of(taps, 2) {
         taps += 1;
     }
     taps

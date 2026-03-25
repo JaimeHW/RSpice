@@ -258,12 +258,6 @@ impl PyTransientResult {
         Self { inner }
     }
 
-    fn find_node_index(names: &[String], name: &str) -> Option<usize> {
-        names
-            .iter()
-            .position(|candidate| candidate.eq_ignore_ascii_case(name))
-    }
-
     fn checked_time_index(&self, time_index: usize) -> AccessResult<()> {
         if time_index < self.inner.time.len() {
             Ok(())
@@ -1401,8 +1395,14 @@ mod tests {
 
     #[test]
     fn test_transient_result_node_lookup_is_case_insensitive() {
-        let names = vec!["Out".to_string()];
-        assert_eq!(PyTransientResult::find_node_index(&names, "out"), Some(0));
+        let mut inner = create_test_transient_result();
+        inner.node_names = vec!["Out".to_string()];
+        let result = PyTransientResult::new(inner);
+
+        let waveform = result
+            .checked_waveform_named("out")
+            .expect("named lookup should be case-insensitive");
+        assert_eq!(waveform.len(), result.num_points());
     }
 
     #[test]

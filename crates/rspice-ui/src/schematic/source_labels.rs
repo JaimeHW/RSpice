@@ -298,7 +298,7 @@ fn push_parasitic_lines(lines: &mut Vec<String>, params: &HashMap<String, String
 
 fn summarize_pwl(data: &str) -> (usize, String, String) {
     let tokens: Vec<&str> = data.split_whitespace().collect();
-    if tokens.len() < 2 || !tokens.len().is_multiple_of(2) {
+    if tokens.len() < 2 || !crate::utils::numeric::is_multiple_of(tokens.len(), 2) {
         return (0, "-".to_string(), "-".to_string());
     }
     let points = tokens.len() / 2;
