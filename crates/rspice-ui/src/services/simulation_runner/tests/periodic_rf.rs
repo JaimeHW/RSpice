@@ -1,4 +1,30 @@
 use super::*;
+use std::path::PathBuf;
+
+fn write_periodic_include_fixture(
+    source_file_name: &str,
+    include_file_name: &str,
+    include_contents: &str,
+    netlist: &str,
+) -> (tempfile::TempDir, PathBuf, String) {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let source_path = temp_dir.path().join("project").join(source_file_name);
+    std::fs::create_dir_all(
+        source_path
+            .parent()
+            .expect("source path should have parent directory"),
+    )
+    .expect("project directory should be created");
+    std::fs::create_dir_all(temp_dir.path().join("models"))
+        .expect("models directory should be created");
+    std::fs::write(
+        temp_dir.path().join("models").join(include_file_name),
+        include_contents,
+    )
+    .expect("include file should be written");
+
+    (temp_dir, source_path, netlist.to_string())
+}
 
 #[test]
 fn test_run_pac_analysis_executes_for_driven_rc() {
@@ -62,6 +88,59 @@ fn test_run_pac_analysis_auto_infers_source_and_output() {
     assert!(result.converged);
     assert!(!result.frequencies.is_empty());
     assert!(!result.spectra.is_empty());
+}
+
+#[test]
+fn test_run_pac_analysis_with_source_path_resolves_relative_include() {
+    let (_temp_dir, source_path, netlist) = write_periodic_include_fixture(
+        "pac_top.rsch",
+        "pac_stage.inc",
+        "R1 in out 1k\nC1 out 0 1n\n",
+        "* pac include fixture\n\
+V1 in 0 1\n\
+.include ../models/pac_stage.inc\n\
+.end\n",
+    );
+    let cfg = PacRunConfig {
+        input_source: "V1".to_string(),
+        output_node: "out".to_string(),
+        ..PacRunConfig::default()
+    };
+
+    let without_source = run_pac_analysis(&netlist, &cfg);
+    assert!(
+        without_source.is_err(),
+        "relative include should fail without source path"
+    );
+
+    let with_source = run_pac_analysis_with_source_path(&netlist, &cfg, Some(&source_path))
+        .expect("source-aware PAC analysis should resolve include");
+    assert!(with_source.converged);
+    assert!(!with_source.frequencies.is_empty());
+}
+
+#[test]
+fn test_run_pac_analysis_auto_with_source_path_resolves_relative_include() {
+    let (_temp_dir, source_path, netlist) = write_periodic_include_fixture(
+        "pac_auto_top.rsch",
+        "pac_auto_stage.inc",
+        "R1 in out 1k\nC1 out 0 1n\n",
+        "* pac auto include fixture\n\
+V1 in 0 1\n\
+.include ../models/pac_auto_stage.inc\n\
+.end\n",
+    );
+
+    let without_source = run_pac_analysis_auto(&netlist);
+    assert!(
+        without_source.is_err(),
+        "relative include should fail without source path"
+    );
+
+    let with_source = run_pac_analysis_auto_with_source_path(&netlist, Some(&source_path))
+        .expect("source-aware PAC auto analysis should resolve include");
+    assert!(with_source.converged);
+    assert!(!with_source.spectra.is_empty());
 }
 
 #[test]
@@ -158,6 +237,63 @@ fn test_run_pxf_analysis_auto_infers_output_node() {
     assert!(!result.frequencies.is_empty());
     assert_eq!(result.frequencies.len(), result.transfer.len());
     assert!(result.output_label.to_ascii_uppercase().contains("OUT"));
+}
+
+#[test]
+fn test_run_pxf_analysis_with_config_and_source_path_resolves_relative_include() {
+    let (_temp_dir, source_path, netlist) = write_periodic_include_fixture(
+        "pxf_top.rsch",
+        "pxf_stage.inc",
+        "R1 in out 1k\nC1 out 0 1n\n",
+        "* pxf include fixture\n\
+V1 in 0 1\n\
+.include ../models/pxf_stage.inc\n\
+.end\n",
+    );
+    let cfg = PxfRunConfig {
+        input_source: "V1".to_string(),
+        output_node: "out".to_string(),
+        ..PxfRunConfig::default()
+    };
+
+    let without_source = run_pxf_analysis_with_config(&netlist, &cfg);
+    assert!(
+        without_source.is_err(),
+        "relative include should fail without source path"
+    );
+
+    let with_source =
+        run_pxf_analysis_with_config_and_source_path(&netlist, &cfg, Some(&source_path))
+            .expect("source-aware PXF analysis should resolve include");
+    assert!(!with_source.frequencies.is_empty());
+    assert_eq!(with_source.frequencies.len(), with_source.transfer.len());
+}
+
+#[test]
+fn test_run_pxf_analysis_with_source_path_resolves_relative_include() {
+    let (_temp_dir, source_path, netlist) = write_periodic_include_fixture(
+        "pxf_auto_top.rsch",
+        "pxf_auto_stage.inc",
+        "R1 in out 1k\nC1 out 0 1n\n",
+        "* pxf auto include fixture\n\
+V1 in 0 1\n\
+.include ../models/pxf_auto_stage.inc\n\
+.end\n",
+    );
+
+    let without_source = run_pxf_analysis(&netlist);
+    assert!(
+        without_source.is_err(),
+        "relative include should fail without source path"
+    );
+
+    let with_source = run_pxf_analysis_with_source_path(&netlist, Some(&source_path))
+        .expect("source-aware PXF auto analysis should resolve include");
+    assert!(!with_source.frequencies.is_empty());
+    assert!(with_source
+        .output_label
+        .to_ascii_uppercase()
+        .contains("OUT"));
 }
 
 #[test]
@@ -650,6 +786,66 @@ fn test_run_pnoise_analysis_auto_infers_output_node() {
 }
 
 #[test]
+fn test_run_pnoise_analysis_with_config_and_source_path_resolves_relative_include() {
+    let (_temp_dir, source_path, netlist) = write_periodic_include_fixture(
+        "pnoise_top.rsch",
+        "pnoise_stage.inc",
+        "R1 in out 1k\nC1 out 0 1n\n",
+        "* pnoise include fixture\n\
+V1 in 0 1\n\
+.include ../models/pnoise_stage.inc\n\
+.end\n",
+    );
+    let cfg = PnoiseRunConfig {
+        output_node: "out".to_string(),
+        input_source: "V1".to_string(),
+        ..PnoiseRunConfig::default()
+    };
+
+    let without_source = run_pnoise_analysis_with_config(&netlist, &cfg);
+    assert!(
+        without_source.is_err(),
+        "relative include should fail without source path"
+    );
+
+    let with_source =
+        run_pnoise_analysis_with_config_and_source_path(&netlist, &cfg, Some(&source_path))
+            .expect("source-aware PNOISE analysis should resolve include");
+    assert!(!with_source.frequencies.is_empty());
+    assert_eq!(
+        with_source.output_noise.len(),
+        with_source.frequencies.len()
+    );
+}
+
+#[test]
+fn test_run_pnoise_analysis_with_source_path_resolves_relative_include() {
+    let (_temp_dir, source_path, netlist) = write_periodic_include_fixture(
+        "pnoise_auto_top.rsch",
+        "pnoise_auto_stage.inc",
+        "R1 in out 1k\nC1 out 0 1n\n",
+        "* pnoise auto include fixture\n\
+V1 in 0 1\n\
+.include ../models/pnoise_auto_stage.inc\n\
+.end\n",
+    );
+
+    let without_source = run_pnoise_analysis(&netlist);
+    assert!(
+        without_source.is_err(),
+        "relative include should fail without source path"
+    );
+
+    let with_source = run_pnoise_analysis_with_source_path(&netlist, Some(&source_path))
+        .expect("source-aware PNOISE auto analysis should resolve include");
+    assert!(!with_source.frequencies.is_empty());
+    assert_eq!(
+        with_source.output_noise.len(),
+        with_source.frequencies.len()
+    );
+}
+
+#[test]
 fn test_run_pstb_analysis_with_config_executes_for_driven_rlc_probe() {
     let netlist = "* pstb\nV1 in 0 1\nR1 in mid 1k\nLPROBE mid out 1u\nC1 out 0 1n\n.end\n";
     let cfg = PstbRunConfig {
@@ -817,4 +1013,57 @@ fn test_run_pstb_analysis_default_executes() {
     assert_eq!(result.mode_indices.len(), result.multiplier_magnitude.len());
     assert!(result.stability_classification.len() >= 4);
     assert_eq!(result.probe_instance, "LPROBE");
+}
+
+#[test]
+fn test_run_pstb_analysis_with_config_and_source_path_resolves_relative_include() {
+    let (_temp_dir, source_path, netlist) = write_periodic_include_fixture(
+        "pstb_top.rsch",
+        "pstb_stage.inc",
+        "R1 in mid 1k\nLPROBE mid out 1u\nC1 out 0 1n\n",
+        "* pstb include fixture\n\
+V1 in 0 1\n\
+.include ../models/pstb_stage.inc\n\
+.end\n",
+    );
+    let cfg = PstbRunConfig {
+        probe_instance: "LPROBE".to_string(),
+        ..PstbRunConfig::default()
+    };
+
+    let without_source = run_pstb_analysis_with_config(&netlist, &cfg);
+    assert!(
+        without_source.is_err(),
+        "relative include should fail without source path"
+    );
+
+    let with_source =
+        run_pstb_analysis_with_config_and_source_path(&netlist, &cfg, Some(&source_path))
+            .expect("source-aware PSTB analysis should resolve include");
+    assert!(!with_source.mode_indices.is_empty());
+    assert_eq!(with_source.probe_instance, "LPROBE");
+}
+
+#[test]
+fn test_run_pstb_analysis_with_source_path_resolves_relative_include() {
+    let (_temp_dir, source_path, netlist) = write_periodic_include_fixture(
+        "pstb_auto_top.rsch",
+        "pstb_auto_stage.inc",
+        "R1 in mid 1k\nLPROBE mid out 1u\nC1 out 0 1n\n",
+        "* pstb auto include fixture\n\
+V1 in 0 1\n\
+.include ../models/pstb_auto_stage.inc\n\
+.end\n",
+    );
+
+    let without_source = run_pstb_analysis(&netlist);
+    assert!(
+        without_source.is_err(),
+        "relative include should fail without source path"
+    );
+
+    let with_source = run_pstb_analysis_with_source_path(&netlist, Some(&source_path))
+        .expect("source-aware PSTB default analysis should resolve include");
+    assert!(!with_source.mode_indices.is_empty());
+    assert_eq!(with_source.probe_instance, "LPROBE");
 }

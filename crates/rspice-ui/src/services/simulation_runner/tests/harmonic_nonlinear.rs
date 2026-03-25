@@ -1,4 +1,30 @@
 use super::*;
+use std::path::PathBuf;
+
+fn write_nonlinear_include_fixture(
+    source_file_name: &str,
+    include_file_name: &str,
+    include_contents: &str,
+    netlist: &str,
+) -> (tempfile::TempDir, PathBuf, String) {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let source_path = temp_dir.path().join("project").join(source_file_name);
+    std::fs::create_dir_all(
+        source_path
+            .parent()
+            .expect("source path should have parent directory"),
+    )
+    .expect("project directory should be created");
+    std::fs::create_dir_all(temp_dir.path().join("models"))
+        .expect("models directory should be created");
+    std::fs::write(
+        temp_dir.path().join("models").join(include_file_name),
+        include_contents,
+    )
+    .expect("include file should be written");
+
+    (temp_dir, source_path, netlist.to_string())
+}
 
 #[test]
 fn test_run_disto_analysis_generates_harmonic_metrics() {
@@ -57,6 +83,38 @@ fn test_run_disto_analysis_rejects_invalid_f2_ratio() {
     let err = run_disto_analysis("* invalid\nV1 in 0 AC 1\nR1 in 0 1k\n.end\n", &cfg)
         .expect_err("f2 ratio <= 1 should fail validation");
     assert!(err.contains("f2_over_f1"));
+}
+
+#[test]
+fn test_run_disto_analysis_with_source_path_resolves_relative_include() {
+    let (_temp_dir, source_path, netlist) = write_nonlinear_include_fixture(
+        "disto_top.rsch",
+        "disto_stage.inc",
+        "R1 in out 1k\nC1 out 0 1n\n",
+        "* disto include fixture\n\
+V1 in 0 DC 1 AC 1\n\
+.include ../models/disto_stage.inc\n\
+.end\n",
+    );
+    let cfg = DistoRunConfig {
+        start_freq: 1e3,
+        stop_freq: 1e6,
+        points_per_unit: 8,
+        sweep: DistoFrequencySweep::Decade,
+        f2_over_f1: Some(1.5),
+        allow_linearized_fallback: false,
+    };
+
+    let without_source = run_disto_analysis(&netlist, &cfg);
+    assert!(
+        without_source.is_err(),
+        "relative include should fail without source path"
+    );
+
+    let with_source = run_disto_analysis_with_source_path(&netlist, &cfg, Some(&source_path))
+        .expect("source-aware DISTO analysis should resolve include");
+    assert!(!with_source.frequencies.is_empty());
+    assert!(!with_source.traces.is_empty());
 }
 
 #[test]
@@ -168,6 +226,30 @@ fn test_run_pss_analysis_executes_for_driven_rc() {
 }
 
 #[test]
+fn test_run_pss_analysis_with_source_path_resolves_relative_include() {
+    let (_temp_dir, source_path, netlist) = write_nonlinear_include_fixture(
+        "pss_top.rsch",
+        "pss_stage.inc",
+        "R1 in out 1k\nC1 out 0 1n\n",
+        "* pss include fixture\n\
+V1 in 0 1\n\
+.include ../models/pss_stage.inc\n\
+.end\n",
+    );
+
+    let without_source = run_pss_analysis(&netlist, 1e6, 8, 1e-4);
+    assert!(
+        without_source.is_err(),
+        "relative include should fail without source path"
+    );
+
+    let with_source = run_pss_analysis_with_source_path(&netlist, 1e6, 8, 1e-4, Some(&source_path))
+        .expect("source-aware PSS analysis should resolve include");
+    assert!(with_source.period > 0.0);
+    assert!(!with_source.waveforms.is_empty());
+}
+
+#[test]
 fn test_run_hb_analysis_executes_for_driven_rc() {
     let netlist = "* hb\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1n\n.end\n";
     let hb_cfg = HbRunConfig {
@@ -188,6 +270,34 @@ fn test_run_hb_analysis_executes_for_driven_rc() {
             .any(|(_, spectrum)| !spectrum.is_empty()),
         "expected at least one non-empty HB spectrum"
     );
+}
+
+#[test]
+fn test_run_hb_analysis_with_source_path_resolves_relative_include() {
+    let (_temp_dir, source_path, netlist) = write_nonlinear_include_fixture(
+        "hb_top.rsch",
+        "hb_stage.inc",
+        "R1 in out 1k\nC1 out 0 1n\n",
+        "* hb include fixture\n\
+V1 in 0 1\n\
+.include ../models/hb_stage.inc\n\
+.end\n",
+    );
+    let hb_cfg = HbRunConfig {
+        tones: vec![HbToneRunConfig::new(1e6, 5)],
+        ..HbRunConfig::default()
+    };
+
+    let without_source = run_hb_analysis(&netlist, &hb_cfg);
+    assert!(
+        without_source.is_err(),
+        "relative include should fail without source path"
+    );
+
+    let with_source = run_hb_analysis_with_source_path(&netlist, &hb_cfg, Some(&source_path))
+        .expect("source-aware HB analysis should resolve include");
+    assert_eq!(with_source.fundamentals, vec![1e6]);
+    assert!(with_source.converged);
 }
 
 #[test]
