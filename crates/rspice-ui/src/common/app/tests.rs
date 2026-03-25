@@ -121,6 +121,22 @@ fn make_test_app() -> RSpiceApp {
     RSpiceApp::new_for_tests(AppState::default())
 }
 
+#[test]
+fn test_prepare_frame_applies_first_frame_setup_once() {
+    let mut app = make_test_app();
+    app.first_frame = true;
+
+    let ctx = egui::Context::default();
+    app.prepare_frame(&ctx);
+    assert!(!app.first_frame, "first-frame preparation should complete");
+
+    app.prepare_frame(&ctx);
+    assert!(
+        !app.first_frame,
+        "subsequent frame preparation should be stable"
+    );
+}
+
 fn seed_eye_data(state: &mut AppState) {
     let mut eye = crate::analysis::eye_diagram::data::EyeData::default();
     eye.add_trace(crate::analysis::eye_diagram::data::EyeTrace::new(

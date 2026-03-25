@@ -100,69 +100,67 @@ mod app_state_init;
 #[derive(Clone)]
 pub struct AppState {
     /// Circuit schematic state (components, wires, topology)
-    pub schematic: SchematicState,
+    pub(crate) schematic: SchematicState,
     /// Simulation results and waveforms
-    pub simulation: SimulationState,
+    pub(crate) simulation: SimulationState,
     /// Panel visibility
-    pub panels: PanelVisibility,
+    pub(crate) panels: PanelVisibility,
     /// Panel sizes
-    pub panel_sizes: PanelSizes,
+    pub(crate) panel_sizes: PanelSizes,
     /// Dialog visibility
-    pub dialogs: DialogState,
+    pub(crate) dialogs: DialogState,
     /// Current theme
-    pub theme: RSpiceTheme,
+    pub(crate) theme: RSpiceTheme,
     /// Console messages
-    pub console_messages: Vec<ConsoleMessage>,
+    pub(crate) console_messages: Vec<ConsoleMessage>,
     /// Structured log history buffer (ring-buffer, filterable).
-    pub log_buffer: crate::panels::LogBuffer,
+    pub(crate) log_buffer: crate::panels::LogBuffer,
     /// UI state for the structured log panel.
-    pub log_panel_state: crate::panels::LogPanelState,
+    pub(crate) log_panel_state: crate::panels::LogPanelState,
     /// Component property editor state
-    pub property_editor: crate::properties::dialog::PropertyEditorState,
+    pub(crate) property_editor: crate::properties::dialog::PropertyEditorState,
     /// Scripting/Automation console state
-    pub script_console: crate::panels::ScriptConsoleState,
+    pub(crate) script_console: crate::panels::ScriptConsoleState,
     /// Open specialized viewer workspace tabs.
-    pub viewer_workspace: crate::viewers::ViewerWorkspace,
+    pub(crate) viewer_workspace: crate::viewers::ViewerWorkspace,
     /// Waveform viewer state (persists across frames for pan/zoom)
-    pub waveform_viewer: WaveformViewerState,
+    pub(crate) waveform_viewer: WaveformViewerState,
     /// Library/Cell/View manager for design hierarchy
-    pub library_manager: crate::state::LibraryManager,
+    pub(crate) library_manager: crate::state::LibraryManager,
     /// Pending cell deletion (library, cell_name)
-    pub pending_delete_cell: Option<(String, String)>,
+    pub(crate) pending_delete_cell: Option<(String, String)>,
     /// Pending view deletion (library, cell, view_name)
-    pub pending_delete_view: Option<(String, String, String)>,
+    pub(crate) pending_delete_view: Option<(String, String, String)>,
     /// Tabbed property dialog state (commercial-grade property editing)
-    pub tabbed_property_dialog: crate::properties::TabbedPropertyDialogState,
+    pub(crate) tabbed_property_dialog: crate::properties::TabbedPropertyDialogState,
     /// Property registry (component property schemas)
-    pub property_registry: crate::state::PropertyRegistry,
+    pub(crate) property_registry: crate::state::PropertyRegistry,
     /// Calculator panel state
-    pub calculator_panel: crate::panels::calculator::CalculatorPanel,
-    /// Operating point annotation renderer for schematic overlay
-    pub op_annotation_renderer: crate::schematic::op_annotation::OpAnnotationRenderer,
+    pub(crate) calculator_panel: crate::panels::calculator::CalculatorPanel,
     /// PDK Settings dialog state
-    pub pdk_settings_dialog: crate::panels::PdkSettingsDialogState,
+    pub(crate) pdk_settings_dialog: crate::panels::PdkSettingsDialogState,
     /// PDK configuration (library paths, environment variables)
-    pub pdk_config: crate::state::pdk_config::PdkConfig,
+    pub(crate) pdk_config: crate::state::pdk_config::PdkConfig,
     /// Model library manager (PDK models, device libraries)
-    pub model_library_manager: crate::state::model_library::ModelLibraryManager,
+    pub(crate) model_library_manager: crate::state::model_library::ModelLibraryManager,
     /// Standalone model browser state (for Tools menu access)
-    pub model_browser_state: crate::properties::model_browser::ModelBrowserState,
+    pub(crate) model_browser_state: crate::properties::model_browser::ModelBrowserState,
     /// Flag to signal that application exit has been requested (after confirmation)
-    pub exit_requested: bool,
+    pub(crate) exit_requested: bool,
     /// Pole-Zero viewer state
-    pub pole_zero_state: crate::analysis::pole_zero::PoleZeroState,
+    pub(crate) pole_zero_state: crate::analysis::pole_zero::PoleZeroState,
     /// Bode viewer state
-    pub bode_plot_state: crate::analysis::bode::BodePlotState,
+    pub(crate) bode_plot_state: crate::analysis::bode::BodePlotState,
     /// Nyquist viewer state
-    pub nyquist_state: crate::analysis::nyquist::NyquistState,
+    pub(crate) nyquist_state: crate::analysis::nyquist::NyquistState,
     /// Eye diagram viewer state
-    pub eye_diagram_state: crate::analysis::eye_diagram::EyeDiagramState,
+    pub(crate) eye_diagram_state: crate::analysis::eye_diagram::EyeDiagramState,
     /// FFT viewer state
-    pub fft_state: crate::analysis::fft::FftState,
+    pub(crate) fft_state: crate::analysis::fft::FftState,
     /// Smith chart viewer state
-    pub smith_chart_state: crate::analysis::smith_chart::SmithChartState,
+    pub(crate) smith_chart_state: crate::analysis::smith_chart::SmithChartState,
     /// Histogram viewer state
-    pub histogram_state: crate::analysis::histogram::HistogramState,
+    pub(crate) histogram_state: crate::analysis::histogram::HistogramState,
 }
 
 impl Default for AppState {
@@ -220,11 +218,11 @@ impl AppState {
 /// The main egui application providing commercial-grade CAD interface.
 pub struct RSpiceApp {
     /// Application state
-    pub state: AppState,
+    pub(crate) state: AppState,
     /// First frame flag (for initialization)
     first_frame: bool,
     /// SVG symbol library for component rendering
-    pub symbol_library: Option<crate::schematic::symbols::SymbolLibrary>,
+    pub(crate) symbol_library: Option<crate::schematic::symbols::SymbolLibrary>,
     /// Simulation controller for running analyses
     simulation_controller: crate::simulation::SimulationController,
     /// File workflow IO backend (native in production, injectable in tests).
@@ -278,26 +276,18 @@ impl RSpiceApp {
             export_workflow_io: Box::new(crate::common::export_workflow::NativeExportWorkflowIo),
         }
     }
-}
 
-impl eframe::App for RSpiceApp {
-    /// Called on each frame
-    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        // Apply theme on first frame
+    fn prepare_frame(&mut self, ctx: &Context) {
         if self.first_frame {
             self.state.theme.apply_to_egui(ctx);
             self.first_frame = false;
         }
 
-        // Handle global keyboard shortcuts
         self.handle_shortcuts(ctx);
-
-        // Process simulation state (handles trigger_simulation flag)
         self.simulation_controller.update(&mut self.state);
+    }
 
-        // =====================================================================
-        // Menu Bar - slightly lighter than panels
-        // =====================================================================
+    fn render_frame_chrome(&mut self, ctx: &Context) {
         TopBottomPanel::top("menu_bar")
             .frame(
                 Frame::none()
@@ -313,9 +303,6 @@ impl eframe::App for RSpiceApp {
                 super::menu_bar::render_menu_bar(ui, state, file_workflow_io, export_workflow_io);
             });
 
-        // =====================================================================
-        // Toolbar - distinct mid-tone
-        // =====================================================================
         TopBottomPanel::top("toolbar")
             .frame(
                 Frame::none()
@@ -326,40 +313,34 @@ impl eframe::App for RSpiceApp {
                 crate::schematic::toolbar::render_toolbar(ui, &mut self.state);
             });
 
-        // Note: Status bar is now rendered as an in-canvas overlay within schematic_view
-
         self.render_workspace_layout(ctx);
+    }
 
-        // =====================================================================
-        // Modal Dialogs
-        // =====================================================================
-
+    fn render_frame_dialogs(&mut self, ctx: &Context) {
         self.render_confirmation_dialog(ctx);
-
         self.process_component_properties_dialog(ctx);
-
         self.process_veriloga_load_dialog(ctx);
-
-        // Property Dialog (commercial-grade tabbed property editor)
         crate::panels::render_property_dialog(ctx, &mut self.state);
-
         self.process_pdk_settings_dialog(ctx);
-
         self.render_simulation_setup_dialog(ctx);
-
-        // Simulation Options Dialog
         self.render_simulation_options_dialog(ctx);
-
         self.render_about_dialog(ctx);
         self.render_waveform_calculator_dialog(ctx);
         self.render_shortcuts_help_dialog(ctx);
-
         self.process_model_browser_dialog(ctx);
-
         self.process_new_cell_dialog(ctx);
         self.process_new_view_dialog(ctx);
         self.process_pending_library_deletions();
         self.process_exit_request(ctx);
+    }
+}
+
+impl eframe::App for RSpiceApp {
+    /// Called on each frame
+    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        self.prepare_frame(ctx);
+        self.render_frame_chrome(ctx);
+        self.render_frame_dialogs(ctx);
     }
 
     /// Save state on exit

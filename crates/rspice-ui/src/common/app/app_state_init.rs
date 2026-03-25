@@ -51,7 +51,6 @@ pub(super) fn default_app_state() -> AppState {
         tabbed_property_dialog: crate::properties::TabbedPropertyDialogState::default(),
         property_registry: crate::state::PropertyRegistry::new(),
         calculator_panel: crate::panels::calculator::CalculatorPanel::new(),
-        op_annotation_renderer: crate::schematic::op_annotation::OpAnnotationRenderer::new(),
         pdk_settings_dialog: crate::panels::PdkSettingsDialogState::new(),
         pdk_config: crate::state::pdk_config::PdkConfig::load_or_default(),
         model_library_manager: default_model_library_manager(),
