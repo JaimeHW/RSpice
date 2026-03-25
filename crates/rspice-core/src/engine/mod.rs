@@ -294,27 +294,60 @@ pub struct TransientResult {
 }
 
 impl TransientResult {
-    /// Get voltage at a node at a specific time index
+    /// Get voltage at a node at a specific time index.
+    ///
+    /// Panics for invalid non-ground node IDs or time indices. Use
+    /// [`Self::try_voltage_at`] for checked access.
+    #[track_caller]
     pub fn voltage_at(&self, node: usize, time_index: usize) -> Value {
+        if node == 0 {
+            return 0.0;
+        }
+
+        self.try_voltage_at(node, time_index).unwrap_or_else(|| {
+            panic!(
+                "node {} / time index {} out of range for TransientResult with {} nodes and {} samples",
+                node,
+                time_index,
+                self.num_nodes,
+                self.time.len()
+            )
+        })
+    }
+
+    /// Get voltage at a node at a specific time index, returning `None` when
+    /// the node or index is invalid.
+    pub fn try_voltage_at(&self, node: usize, time_index: usize) -> Option<Value> {
         if node == 0 || node > self.num_nodes {
-            return 0.0; // Ground or invalid
+            return None;
         }
         self.voltages
             .get(node - 1)
             .and_then(|v| v.get(time_index))
             .copied()
-            .unwrap_or(0.0)
     }
 
-    /// Get the complete voltage waveform for a node
+    /// Get the complete voltage waveform for a node.
+    ///
+    /// Panics when `node` is invalid. Use [`Self::try_voltage_waveform`] for
+    /// checked access.
+    #[track_caller]
     pub fn voltage_waveform(&self, node: usize) -> &[Value] {
+        self.try_voltage_waveform(node).unwrap_or_else(|| {
+            panic!(
+                "node {} out of range for TransientResult with {} nodes",
+                node, self.num_nodes
+            )
+        })
+    }
+
+    /// Get the complete voltage waveform for a node, returning `None` when the
+    /// node is invalid.
+    pub fn try_voltage_waveform(&self, node: usize) -> Option<&[Value]> {
         if node == 0 || node > self.num_nodes {
-            return &[];
+            return None;
         }
-        self.voltages
-            .get(node - 1)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
+        self.voltages.get(node - 1).map(|v| v.as_slice())
     }
 
     /// Get number of time points

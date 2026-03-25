@@ -71,12 +71,31 @@ impl SimulationResult {
         }
     }
 
-    /// Get voltage at a node
+    /// Get voltage at a node.
+    ///
+    /// Panics when `node` is out of range. Use [`Self::try_voltage`] when
+    /// probing dynamically-specified nodes.
+    #[track_caller]
     pub fn voltage(&self, node: usize) -> Value {
         if node == 0 {
-            0.0 // Ground
+            return 0.0;
+        }
+
+        self.try_voltage(node).unwrap_or_else(|| {
+            panic!(
+                "node {} out of range for SimulationResult with {} nodes",
+                node,
+                self.node_voltages.len().saturating_sub(1)
+            )
+        })
+    }
+
+    /// Get voltage at a node, returning `None` for invalid node IDs.
+    pub fn try_voltage(&self, node: usize) -> Option<Value> {
+        if node == 0 {
+            Some(0.0)
         } else {
-            self.node_voltages.get(node).copied().unwrap_or(0.0)
+            self.node_voltages.get(node).copied()
         }
     }
 
@@ -257,5 +276,24 @@ mod tests {
 
         let lookup = HashMap::new();
         assert_eq!(result.branch_current_by_name("vdrv", &lookup), Some(3e-3));
+    }
+
+    #[test]
+    fn test_simulation_result_try_voltage_checks_bounds() {
+        let mut result = super::SimulationResult::new(2, 0);
+        result.node_voltages[1] = 1.25;
+        result.node_voltages[2] = -0.5;
+
+        assert_eq!(result.try_voltage(0), Some(0.0));
+        assert_eq!(result.try_voltage(1), Some(1.25));
+        assert_eq!(result.try_voltage(2), Some(-0.5));
+        assert_eq!(result.try_voltage(3), None);
+    }
+
+    #[test]
+    fn test_simulation_result_voltage_panics_on_invalid_node() {
+        let result = super::SimulationResult::new(1, 0);
+        let panic = std::panic::catch_unwind(|| result.voltage(2));
+        assert!(panic.is_err(), "invalid node access should panic");
     }
 }
