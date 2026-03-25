@@ -880,16 +880,20 @@ mod tests {
         let zeros = vec![Complex::real(0.0)];
 
         let pole_zero = StateSpaceFilter::from_poles_zeros(&poles, &zeros, 1.0);
-        let transfer = StateSpaceFilter::from_transfer_function(
-            &[1.0, 0.0],
-            &[1.0, 2.0 * PI * 500.0],
-        );
+        let transfer =
+            StateSpaceFilter::from_transfer_function(&[1.0, 0.0], &[1.0, 2.0 * PI * 500.0]);
 
         for freq_hz in [10.0, 500.0, 10_000.0] {
             let (pz_mag, pz_phase) = pole_zero.frequency_response(freq_hz);
             let (tf_mag, tf_phase) = transfer.frequency_response(freq_hz);
-            assert!((pz_mag - tf_mag).abs() < 5e-3, "magnitude mismatch at {freq_hz} Hz");
-            assert!((pz_phase - tf_phase).abs() < 5e-3, "phase mismatch at {freq_hz} Hz");
+            assert!(
+                (pz_mag - tf_mag).abs() < 5e-3,
+                "magnitude mismatch at {freq_hz} Hz"
+            );
+            assert!(
+                (pz_phase - tf_phase).abs() < 5e-3,
+                "phase mismatch at {freq_hz} Hz"
+            );
         }
     }
 }
