@@ -179,6 +179,17 @@ struct ParseLineContext<'a> {
     options: &'a mut super::SimulationOptions,
 }
 
+struct ParseCommandContext<'a> {
+    analyses: &'a mut Vec<AnalysisCommand>,
+    models: &'a mut Vec<ModelDef>,
+    params: &'a mut ParamContext,
+    initial_conditions: &'a mut Vec<InitialCondition>,
+    node_sets: &'a mut Vec<NodeSet>,
+    global_nodes: &'a mut HashSet<String>,
+    measurements: &'a mut Vec<MeasureStatement>,
+    options: &'a mut super::SimulationOptions,
+}
+
 fn qualify_nested_subckt_name(parent_scope: Option<&str>, local_name: &str) -> String {
     match parent_scope {
         Some(scope) if !scope.is_empty() => format!("{scope}.{local_name}"),
@@ -522,14 +533,16 @@ fn parse_line(
         '.' => parse_command(
             &mut stream,
             line_num,
-            analyses,
-            models,
-            params,
-            initial_conditions,
-            node_sets,
-            global_nodes,
-            measurements,
-            options,
+            ParseCommandContext {
+                analyses,
+                models,
+                params,
+                initial_conditions,
+                node_sets,
+                global_nodes,
+                measurements,
+                options,
+            },
         ),
         'R' => parse_resistor(
             &mut stream,
@@ -582,15 +595,19 @@ fn parse_line(
 fn parse_command(
     stream: &mut TokenStream,
     line_num: usize,
-    analyses: &mut Vec<AnalysisCommand>,
-    models: &mut Vec<ModelDef>,
-    params: &mut ParamContext,
-    initial_conditions: &mut Vec<InitialCondition>,
-    node_sets: &mut Vec<NodeSet>,
-    global_nodes: &mut std::collections::HashSet<String>,
-    measurements: &mut Vec<crate::analysis::MeasureStatement>,
-    options: &mut super::SimulationOptions,
+    context: ParseCommandContext<'_>,
 ) -> Result<(), ParseError> {
+    let ParseCommandContext {
+        analyses,
+        models,
+        params,
+        initial_conditions,
+        node_sets,
+        global_nodes,
+        measurements,
+        options,
+    } = context;
+
     let cmd = expect_ident(stream, line_num)?;
 
     match cmd.as_str() {

@@ -2070,6 +2070,47 @@ V1 1 0 PWL FILE="stim;ulus.csv" ; trailing comment
 }
 
 #[test]
+fn test_parse_command_context_updates_all_command_collections() {
+    let netlist = r#"Command Context Coverage
+.PARAM gain=2
+.MODEL DMOD D (IS=1e-14)
+.IC V(OUT)=1.2
+.NODESET V(MID)=0.45
+.GLOBAL VDD vss
+.OPTIONS RELTOL=4e-4 ITL1=77
+.MEAS TRAN rise_delay TRIG V(IN) VAL=0.5 RISE=1 TARG V(OUT) VAL=0.9 RISE=1
+.TRAN 1n 10n
+.END
+"#;
+    let result = parse_netlist(netlist).expect("netlist should parse");
+
+    assert_eq!(result.models.len(), 1);
+    assert_eq!(result.initial_conditions.len(), 1);
+    assert_eq!(result.node_sets.len(), 1);
+    assert_eq!(result.measurements.len(), 1);
+    assert_eq!(result.analyses.len(), 1);
+    assert!(result.is_global("VDD"));
+    assert!(result.is_global("vss"));
+    assert_eq!(result.options.reltol, Some(4e-4));
+    assert_eq!(result.options.itl1, Some(77));
+
+    match &result.analyses[0] {
+        AnalysisCommand::Tran {
+            step,
+            stop,
+            start,
+            max_step,
+        } => {
+            assert_eq!(*step, 1e-9);
+            assert_eq!(*stop, 10e-9);
+            assert!(start.is_none());
+            assert!(max_step.is_none());
+        }
+        other => panic!("expected transient analysis, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_parse_global_directive_collects_nodes() {
     let netlist = r#"Global Node Test
 .GLOBAL VDD gnd 17
