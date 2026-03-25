@@ -686,9 +686,7 @@ fn parse_command(
         }
         ".MEAS" | ".MEASURE" => {
             // Parse measurement statement: .MEAS TRAN name TYPE signal [options]
-            if let Ok(meas) = parse_meas_command(stream, line_num, params) {
-                measurements.push(meas);
-            }
+            measurements.push(parse_meas_command(stream, line_num, params)?);
         }
         _ => {
             // Ignore unknown commands
@@ -856,10 +854,13 @@ fn parse_meas_signal(stream: &mut TokenStream, line_num: usize) -> Result<String
 ///   .MEAS TRAN name TYPE signal [FROM=x TO=y]
 ///   .MEAS TRAN name FIND signal AT=time
 ///   .MEAS TRAN name FIND signal WHEN ref_signal=value
+///   .MEAS TRAN name TRIG signal VAL=x [RISE=n|FALL=n|CROSS=n] [TD=x]
+///                     TARG signal VAL=x [RISE=n|FALL=n|CROSS=n] [TD=x]
 /// Examples:
 ///   .MEAS TRAN vmax MAX V(out)
 ///   .MEAS TRAN vavg AVG V(out) FROM=0 TO=1m
 ///   .MEAS TRAN vout FIND V(out) AT=1u
+///   .MEAS TRAN delay TRIG V(in) VAL=0.5 RISE=1 TARG V(out) VAL=0.5 RISE=1
 fn parse_meas_command(
     stream: &mut TokenStream,
     line_num: usize,
@@ -877,107 +878,127 @@ fn parse_meas_command(
     let measure_type_str = expect_ident(stream, line_num)?;
     let measure_type_key = measure_type_str.to_ascii_uppercase();
 
-    // Parse signal name - handle V(node), V(pos,neg), or just node
-    let signal = parse_meas_signal(stream, line_num)?;
-
     // Create the measurement type based on keyword
     let measure_type = match measure_type_key.as_str() {
-        "AVG" => {
-            let (from, to) = parse_measure_range_options(stream, line_num, params)?;
-            MeasureType::Avg {
-                signal: signal.clone(),
-                from,
-                to,
+        "TRIG" => {
+            let trig = parse_meas_delay_spec(stream, line_num, params, "TRIG", true)?;
+            let targ_keyword = expect_ident(stream, line_num)?;
+            if !targ_keyword.eq_ignore_ascii_case("TARG") {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "Expected TARG after .MEAS TRIG specification, found '{}'",
+                        targ_keyword
+                    ),
+                });
             }
-        }
-        "MAX" => {
-            let (from, to) = parse_measure_range_options(stream, line_num, params)?;
-            MeasureType::Max {
-                signal: signal.clone(),
-                from,
-                to,
-            }
-        }
-        "MIN" => {
-            let (from, to) = parse_measure_range_options(stream, line_num, params)?;
-            MeasureType::Min {
-                signal: signal.clone(),
-                from,
-                to,
-            }
-        }
-        "PP" => {
-            let (from, to) = parse_measure_range_options(stream, line_num, params)?;
-            MeasureType::PeakToPeak {
-                signal: signal.clone(),
-                from,
-                to,
-            }
-        }
-        "RMS" => {
-            let (from, to) = parse_measure_range_options(stream, line_num, params)?;
-            MeasureType::Rms {
-                signal: signal.clone(),
-                from,
-                to,
-            }
-        }
-        "INTEG" => {
-            let (from, to) = parse_measure_range_options(stream, line_num, params)?;
-            MeasureType::Integ {
-                signal: signal.clone(),
-                from,
-                to,
-            }
-        }
-        "FIND" => {
-            let mut at = None;
-            let mut when_signal = None;
-            let mut when_value = None;
-
-            while !stream.is_eof()
-                && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
-            {
-                match &stream.peek().kind {
-                    TokenKind::Ident(s) if s.eq_ignore_ascii_case("AT") => {
-                        stream.advance();
-                        if !stream.consume(&TokenKind::Equals) {
-                            return Err(ParseError::Syntax {
-                                line: line_num,
-                                message: "Expected '=' after AT in .MEAS FIND".to_string(),
-                            });
-                        }
-                        at = Some(expect_value(stream, line_num, params)?);
-                    }
-                    TokenKind::Ident(s) if s.eq_ignore_ascii_case("WHEN") => {
-                        stream.advance();
-                        when_signal = Some(parse_meas_signal(stream, line_num)?);
-                        if !stream.consume(&TokenKind::Equals) {
-                            return Err(ParseError::Syntax {
-                                line: line_num,
-                                message: "Expected '=' after WHEN signal in .MEAS FIND".to_string(),
-                            });
-                        }
-                        when_value = Some(expect_value(stream, line_num, params)?);
-                    }
-                    _ => {
-                        stream.advance();
-                    }
-                }
-            }
-
-            MeasureType::Find {
-                signal: signal.clone(),
-                at,
-                when_signal,
-                when_value,
-            }
+            let targ = parse_meas_delay_spec(stream, line_num, params, "TARG", false)?;
+            MeasureType::Delay { trig, targ }
         }
         _ => {
-            return Err(ParseError::Syntax {
-                line: line_num,
-                message: format!("Unknown measurement type: {}", measure_type_str),
-            });
+            // Parse signal name - handle V(node), V(pos,neg), or just node
+            let signal = parse_meas_signal(stream, line_num)?;
+
+            match measure_type_key.as_str() {
+                "AVG" => {
+                    let (from, to) = parse_measure_range_options(stream, line_num, params)?;
+                    MeasureType::Avg {
+                        signal: signal.clone(),
+                        from,
+                        to,
+                    }
+                }
+                "MAX" => {
+                    let (from, to) = parse_measure_range_options(stream, line_num, params)?;
+                    MeasureType::Max {
+                        signal: signal.clone(),
+                        from,
+                        to,
+                    }
+                }
+                "MIN" => {
+                    let (from, to) = parse_measure_range_options(stream, line_num, params)?;
+                    MeasureType::Min {
+                        signal: signal.clone(),
+                        from,
+                        to,
+                    }
+                }
+                "PP" => {
+                    let (from, to) = parse_measure_range_options(stream, line_num, params)?;
+                    MeasureType::PeakToPeak {
+                        signal: signal.clone(),
+                        from,
+                        to,
+                    }
+                }
+                "RMS" => {
+                    let (from, to) = parse_measure_range_options(stream, line_num, params)?;
+                    MeasureType::Rms {
+                        signal: signal.clone(),
+                        from,
+                        to,
+                    }
+                }
+                "INTEG" => {
+                    let (from, to) = parse_measure_range_options(stream, line_num, params)?;
+                    MeasureType::Integ {
+                        signal: signal.clone(),
+                        from,
+                        to,
+                    }
+                }
+                "FIND" => {
+                    let mut at = None;
+                    let mut when_signal = None;
+                    let mut when_value = None;
+
+                    while !stream.is_eof()
+                        && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
+                    {
+                        match &stream.peek().kind {
+                            TokenKind::Ident(s) if s.eq_ignore_ascii_case("AT") => {
+                                stream.advance();
+                                if !stream.consume(&TokenKind::Equals) {
+                                    return Err(ParseError::Syntax {
+                                        line: line_num,
+                                        message: "Expected '=' after AT in .MEAS FIND".to_string(),
+                                    });
+                                }
+                                at = Some(expect_value(stream, line_num, params)?);
+                            }
+                            TokenKind::Ident(s) if s.eq_ignore_ascii_case("WHEN") => {
+                                stream.advance();
+                                when_signal = Some(parse_meas_signal(stream, line_num)?);
+                                if !stream.consume(&TokenKind::Equals) {
+                                    return Err(ParseError::Syntax {
+                                        line: line_num,
+                                        message: "Expected '=' after WHEN signal in .MEAS FIND"
+                                            .to_string(),
+                                    });
+                                }
+                                when_value = Some(expect_value(stream, line_num, params)?);
+                            }
+                            _ => {
+                                stream.advance();
+                            }
+                        }
+                    }
+
+                    MeasureType::Find {
+                        signal: signal.clone(),
+                        at,
+                        when_signal,
+                        when_value,
+                    }
+                }
+                _ => {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!("Unknown measurement type: {}", measure_type_str),
+                    });
+                }
+            }
         }
     };
 
@@ -986,6 +1007,122 @@ fn parse_meas_command(
         measure_type,
         analysis,
     })
+}
+
+fn parse_meas_delay_spec(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    section_name: &str,
+    stop_at_targ: bool,
+) -> Result<crate::analysis::TrigSpec, ParseError> {
+    use crate::analysis::{EdgeType, TrigSpec};
+
+    let signal = parse_meas_signal(stream, line_num)?;
+    let mut value = None;
+    let mut edge = EdgeType::Rise;
+    let mut number = 1usize;
+    let mut td = 0.0;
+
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        match &stream.peek().kind {
+            TokenKind::Comma => {
+                stream.advance();
+            }
+            TokenKind::Ident(s) if stop_at_targ && s.eq_ignore_ascii_case("TARG") => break,
+            TokenKind::Ident(s) if s.eq_ignore_ascii_case("VAL") => {
+                stream.advance();
+                if !stream.consume(&TokenKind::Equals) {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "Expected '=' after VAL in .MEAS {} specification",
+                            section_name
+                        ),
+                    });
+                }
+                value = Some(expect_value(stream, line_num, params)?);
+            }
+            TokenKind::Ident(s) if s.eq_ignore_ascii_case("TD") => {
+                stream.advance();
+                if !stream.consume(&TokenKind::Equals) {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "Expected '=' after TD in .MEAS {} specification",
+                            section_name
+                        ),
+                    });
+                }
+                td = expect_value(stream, line_num, params)?;
+            }
+            TokenKind::Ident(s)
+                if s.eq_ignore_ascii_case("RISE")
+                    || s.eq_ignore_ascii_case("FALL")
+                    || s.eq_ignore_ascii_case("CROSS") =>
+            {
+                let keyword = s.to_ascii_uppercase();
+                stream.advance();
+                if !stream.consume(&TokenKind::Equals) {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "Expected '=' after {} in .MEAS {} specification",
+                            keyword, section_name
+                        ),
+                    });
+                }
+                number = parse_measure_occurrence(stream, line_num, params, &keyword)?;
+                edge = match keyword.as_str() {
+                    "RISE" => EdgeType::Rise,
+                    "FALL" => EdgeType::Fall,
+                    "CROSS" => EdgeType::Cross,
+                    _ => unreachable!(),
+                };
+            }
+            _ => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "Unexpected token '{}' in .MEAS {} specification",
+                        stream.peek().kind,
+                        section_name
+                    ),
+                });
+            }
+        }
+    }
+
+    let value = value.ok_or_else(|| ParseError::Syntax {
+        line: line_num,
+        message: format!("Expected VAL=... in .MEAS {} specification", section_name),
+    })?;
+
+    let mut spec = TrigSpec::new(&signal, value)
+        .with_edge(edge)
+        .with_number(number);
+    spec.td = td;
+    Ok(spec)
+}
+
+fn parse_measure_occurrence(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    keyword: &str,
+) -> Result<usize, ParseError> {
+    let value = expect_value(stream, line_num, params)?;
+    let rounded = value.round();
+    if !value.is_finite() || value < 1.0 || (value - rounded).abs() > 1e-12 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Expected positive integer occurrence for {} in .MEAS, found {}",
+                keyword, value
+            ),
+        });
+    }
+    Ok(rounded as usize)
 }
 
 fn parse_measure_range_options(

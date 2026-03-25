@@ -329,6 +329,44 @@ fn test_parse_meas_find_when_statement() {
 }
 
 #[test]
+fn test_parse_meas_delay_statement() {
+    let netlist = r#"Measure Delay
+.MEAS TRAN prop_delay TRIG V(in) VAL=0.5 RISE=2 TD=10n TARG V(out) VAL=1.2 FALL=3 TD=20n
+.END
+"#;
+    let result = parse_netlist(netlist).expect("netlist should parse");
+
+    assert_eq!(result.measurements.len(), 1);
+    match &result.measurements[0].measure_type {
+        crate::analysis::MeasureType::Delay { trig, targ } => {
+            assert_eq!(trig.signal, "V(IN)");
+            assert_eq!(trig.value, 0.5);
+            assert_eq!(trig.edge, crate::analysis::EdgeType::Rise);
+            assert_eq!(trig.number, 2);
+            assert_eq!(trig.td, 10e-9);
+
+            assert_eq!(targ.signal, "V(OUT)");
+            assert_eq!(targ.value, 1.2);
+            assert_eq!(targ.edge, crate::analysis::EdgeType::Fall);
+            assert_eq!(targ.number, 3);
+            assert_eq!(targ.td, 20e-9);
+        }
+        other => panic!("Expected DELAY measurement, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_meas_delay_requires_val() {
+    let netlist = r#"Measure Delay Missing Val
+.MEAS TRAN prop_delay TRIG V(in) RISE=1 TARG V(out) VAL=0.5 RISE=1
+.END
+"#;
+    let error = parse_netlist(netlist).expect_err("delay measurement without VAL should fail");
+    let message = format!("{error:?}");
+    assert!(message.contains("Expected VAL"));
+}
+
+#[test]
 fn test_parse_ac_phase_is_degrees_converted_to_radians() {
     let netlist = r#"AC Phase Test
 V1 1 0 AC 1 90

@@ -313,10 +313,17 @@ impl MeasureEngine {
         threshold: Value,
         edge: EdgeType,
         occurrence: usize,
+        start_at: Option<Value>,
     ) -> Option<Value> {
         let mut count = 0;
 
         for i in 1..signal.len() {
+            if let Some(start_time) = start_at {
+                if time[i] < start_time {
+                    continue;
+                }
+            }
+
             let prev = signal[i - 1];
             let curr = signal[i];
             let crossed = match edge {
@@ -329,11 +336,19 @@ impl MeasureEngine {
             };
 
             if crossed {
+                // Linear interpolation for exact crossing time.
+                let frac = (threshold - prev) / (curr - prev);
+                let crossing_time = time[i - 1] + frac * (time[i] - time[i - 1]);
+
+                if let Some(start_time) = start_at {
+                    if crossing_time < start_time {
+                        continue;
+                    }
+                }
+
                 count += 1;
                 if count == occurrence {
-                    // Linear interpolation for exact crossing time
-                    let frac = (threshold - prev) / (curr - prev);
-                    return Some(time[i - 1] + frac * (time[i] - time[i - 1]));
+                    return Some(crossing_time);
                 }
             }
         }
@@ -362,13 +377,27 @@ impl MeasureEngine {
             }
         };
 
-        let t_trig = match self.find_crossing(time, trig_sig, trig.value, trig.edge, trig.number) {
-            Some(t) => t + trig.td,
+        let t_trig = match self.find_crossing(
+            time,
+            trig_sig,
+            trig.value,
+            trig.edge,
+            trig.number,
+            Some(trig.td),
+        ) {
+            Some(t) => t,
             None => return MeasureResult::failed(name, "Trigger condition not found"),
         };
 
-        let t_targ = match self.find_crossing(time, targ_sig, targ.value, targ.edge, targ.number) {
-            Some(t) => t + targ.td,
+        let t_targ = match self.find_crossing(
+            time,
+            targ_sig,
+            targ.value,
+            targ.edge,
+            targ.number,
+            Some(targ.td),
+        ) {
+            Some(t) => t,
             None => return MeasureResult::failed(name, "Target condition not found"),
         };
 
@@ -555,8 +584,8 @@ impl MeasureEngine {
             EdgeType::Fall
         };
 
-        let t1 = self.find_crossing(time, signal, th_low, edge, number);
-        let t2 = self.find_crossing(time, signal, th_high, edge, number);
+        let t1 = self.find_crossing(time, signal, th_low, edge, number, None);
+        let t2 = self.find_crossing(time, signal, th_high, edge, number, None);
 
         match (t1, t2) {
             (Some(t1), Some(t2)) => MeasureResult::success(name, (t2 - t1).abs()),
@@ -605,7 +634,8 @@ impl MeasureEngine {
                 }
             };
 
-            if let Some(t_when) = self.find_crossing(time, when_sig, threshold, EdgeType::Cross, 1)
+            if let Some(t_when) =
+                self.find_crossing(time, when_sig, threshold, EdgeType::Cross, 1, None)
             {
                 // Interpolate signal at this time
                 for i in 0..time.len() - 1 {
@@ -845,6 +875,46 @@ mod tests {
         let results = engine.evaluate(&time, &signals);
         assert!(results[0].value.is_some());
         assert!((results[0].value.unwrap() - 0.10).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_delay_measurement_td_uses_search_window_not_time_shift() {
+        let time: Vec<Value> = (0..501).map(|i| i as f64 / 1000.0).collect();
+        let input: Vec<Value> = time
+            .iter()
+            .map(|&t| {
+                if (0.05..0.10).contains(&t) || t >= 0.18 {
+                    1.0
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+        let output: Vec<Value> = time
+            .iter()
+            .map(|&t| if t >= 0.35 { 1.0 } else { 0.0 })
+            .collect();
+
+        let mut signals = HashMap::new();
+        signals.insert("V(in)".to_string(), input.as_slice());
+        signals.insert("V(out)".to_string(), output.as_slice());
+
+        let mut trig = TrigSpec::new("V(in)", 0.5);
+        trig.td = 0.1;
+
+        let mut engine = MeasureEngine::new();
+        engine.add(MeasureStatement {
+            name: "delay_td".to_string(),
+            measure_type: MeasureType::Delay {
+                trig,
+                targ: TrigSpec::new("V(out)", 0.5),
+            },
+            analysis: "TRAN".to_string(),
+        });
+
+        let results = engine.evaluate(&time, &signals);
+        assert!(results[0].value.is_some());
+        assert!((results[0].value.unwrap() - 0.17).abs() < 0.01);
     }
 
     #[test]
