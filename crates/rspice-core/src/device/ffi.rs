@@ -31,6 +31,8 @@
 
 use crate::Value;
 use std::collections::HashMap;
+#[cfg(feature = "ffi")]
+use std::path::Path;
 
 //=============================================================================
 // C-compatible Structures
@@ -222,9 +224,26 @@ pub trait FfiMatrixStamper {
 mod dynamic {
     use super::*;
     use libloading::{Library, Symbol};
-    use std::ffi::{CStr, CString};
+    use std::ffi::CString;
     use std::os::raw::c_void;
+    use std::path::Path;
+    use std::ptr::NonNull;
     use std::sync::Arc;
+
+    #[derive(Debug, Clone, Copy)]
+    struct DeviceHandle(NonNull<c_void>);
+
+    impl DeviceHandle {
+        fn new(handle: *mut c_void) -> Result<Self, FfiError> {
+            NonNull::new(handle)
+                .map(Self)
+                .ok_or(FfiError::InvalidHandle)
+        }
+
+        fn as_ptr(self) -> *mut c_void {
+            self.0.as_ptr()
+        }
+    }
 
     /// A dynamically loaded library containing external device models
     pub struct DynamicLibrary {
@@ -265,46 +284,41 @@ mod dynamic {
             create_symbol: &str,
             destroy_symbol: &str,
         ) -> Result<Self, FfiError> {
-            let library = Library::new(path).map_err(|e| {
+            let library = unsafe { Library::new(path) }.map_err(|e| {
                 FfiError::LibraryError(format!("Failed to load {}: {}", path.display(), e))
             })?;
 
             let library = Arc::new(library);
 
             // Load required functions
-            let create_fn: Symbol<ffi_types::CreateDeviceFn> = library
-                .get(create_symbol.as_bytes())
-                .map_err(|e| FfiError::SymbolError(format!("{}: {}", create_symbol, e)))?;
+            let create_fn: Symbol<ffi_types::CreateDeviceFn> =
+                unsafe { library.get(create_symbol.as_bytes()) }
+                    .map_err(|e| FfiError::SymbolError(format!("{}: {}", create_symbol, e)))?;
             let create_fn = *create_fn;
 
-            let destroy_fn: Symbol<ffi_types::DestroyDeviceFn> = library
-                .get(destroy_symbol.as_bytes())
-                .map_err(|e| FfiError::SymbolError(format!("{}: {}", destroy_symbol, e)))?;
+            let destroy_fn: Symbol<ffi_types::DestroyDeviceFn> =
+                unsafe { library.get(destroy_symbol.as_bytes()) }
+                    .map_err(|e| FfiError::SymbolError(format!("{}: {}", destroy_symbol, e)))?;
             let destroy_fn = *destroy_fn;
 
             // Load optional functions
-            let stamp_fn = library
-                .get::<ffi_types::StampDeviceFn>(b"stamp_device")
+            let stamp_fn = unsafe { library.get::<ffi_types::StampDeviceFn>(b"stamp_device") }
                 .ok()
                 .map(|s| *s);
 
-            let update_fn = library
-                .get::<ffi_types::UpdateDeviceFn>(b"update_device")
+            let update_fn = unsafe { library.get::<ffi_types::UpdateDeviceFn>(b"update_device") }
                 .ok()
                 .map(|s| *s);
 
-            let reset_fn = library
-                .get::<ffi_types::ResetDeviceFn>(b"reset_device")
+            let reset_fn = unsafe { library.get::<ffi_types::ResetDeviceFn>(b"reset_device") }
                 .ok()
                 .map(|s| *s);
 
-            let get_param_fn = library
-                .get::<ffi_types::GetParamFn>(b"get_param")
+            let get_param_fn = unsafe { library.get::<ffi_types::GetParamFn>(b"get_param") }
                 .ok()
                 .map(|s| *s);
 
-            let set_param_fn = library
-                .get::<ffi_types::SetParamFn>(b"set_param")
+            let set_param_fn = unsafe { library.get::<ffi_types::SetParamFn>(b"set_param") }
                 .ok()
                 .map(|s| *s);
 
@@ -331,11 +345,8 @@ mod dynamic {
                 FfiError::ParameterError("Device name contains null byte".to_string())
             })?;
 
-            let handle = unsafe { (self.create_fn)(c_name.as_ptr(), terminals.len()) };
-
-            if handle.is_null() {
-                return Err(FfiError::InvalidHandle);
-            }
+            let handle =
+                DeviceHandle::new(unsafe { (self.create_fn)(c_name.as_ptr(), terminals.len()) })?;
 
             Ok(DynamicExternalDevice {
                 name: name.to_string(),
@@ -360,7 +371,7 @@ mod dynamic {
     pub struct DynamicExternalDevice {
         name: String,
         terminals: Vec<usize>,
-        handle: *mut c_void,
+        handle: DeviceHandle,
         destroy_fn: ffi_types::DestroyDeviceFn,
         stamp_fn: Option<ffi_types::StampDeviceFn>,
         update_fn: Option<ffi_types::UpdateDeviceFn>,
@@ -380,9 +391,7 @@ mod dynamic {
 
     impl Drop for DynamicExternalDevice {
         fn drop(&mut self) {
-            if !self.handle.is_null() {
-                unsafe { (self.destroy_fn)(self.handle) };
-            }
+            unsafe { (self.destroy_fn)(self.handle.as_ptr()) };
         }
     }
 
@@ -401,26 +410,26 @@ mod dynamic {
 
         fn stamp(&self, ctx: &FfiContext, _matrix: &mut dyn FfiMatrixStamper, _rhs: &mut [Value]) {
             if let Some(stamp_fn) = self.stamp_fn {
-                unsafe { stamp_fn(self.handle, ctx as *const FfiContext) };
+                unsafe { stamp_fn(self.handle.as_ptr(), ctx as *const FfiContext) };
             }
         }
 
         fn update(&mut self, ctx: &FfiContext) {
             if let Some(update_fn) = self.update_fn {
-                unsafe { update_fn(self.handle, ctx as *const FfiContext) };
+                unsafe { update_fn(self.handle.as_ptr(), ctx as *const FfiContext) };
             }
         }
 
         fn reset(&mut self) {
             if let Some(reset_fn) = self.reset_fn {
-                unsafe { reset_fn(self.handle) };
+                unsafe { reset_fn(self.handle.as_ptr()) };
             }
         }
 
         fn get_param(&self, name: &str) -> Option<Value> {
             if let Some(get_fn) = self.get_param_fn {
                 let c_name = CString::new(name).ok()?;
-                let value = unsafe { get_fn(self.handle, c_name.as_ptr()) };
+                let value = unsafe { get_fn(self.handle.as_ptr(), c_name.as_ptr()) };
                 if value.is_nan() { None } else { Some(value) }
             } else {
                 None
@@ -430,7 +439,7 @@ mod dynamic {
         fn set_param(&mut self, name: &str, value: Value) -> bool {
             if let Some(set_fn) = self.set_param_fn {
                 if let Ok(c_name) = CString::new(name) {
-                    let result = unsafe { set_fn(self.handle, c_name.as_ptr(), value) };
+                    let result = unsafe { set_fn(self.handle.as_ptr(), c_name.as_ptr(), value) };
                     return result != 0;
                 }
             }
@@ -447,7 +456,7 @@ mod dynamic {
         create_symbol: &str,
         destroy_symbol: &str,
     ) -> Result<DynamicLibrary, FfiError> {
-        DynamicLibrary::load(path, create_symbol, destroy_symbol)
+        unsafe { DynamicLibrary::load(path, create_symbol, destroy_symbol) }
     }
 }
 
@@ -516,7 +525,7 @@ impl FfiModelRegistry {
         destroy_entry: &str,
     ) -> Result<(), FfiError> {
         // Verify the library can be loaded
-        let _lib = load_library(library_path, create_entry, destroy_entry)?;
+        let _lib = unsafe { load_library(library_path, create_entry, destroy_entry) }?;
 
         let factory = FfiModelFactory {
             name: name.to_string(),

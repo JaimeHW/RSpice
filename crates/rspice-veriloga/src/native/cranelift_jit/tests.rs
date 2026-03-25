@@ -51,6 +51,67 @@ fn test_simple_model_compilation() {
     );
 }
 
+#[test]
+fn test_compiled_stamp_evaluates_with_typed_function_pointer_bridge() {
+    let model = CompiledModel {
+        name: "gm".into(),
+        num_terminals: 2,
+        terminal_names: vec!["p".into(), "n".into()],
+        parameters: vec![CompiledParameter {
+            name: "g".into(),
+            default: 0.002,
+            min: Some(0.0),
+            max: None,
+        }],
+        num_variables: 0,
+        assignment_programs: vec![],
+        stamp_programs: vec![StampProgram {
+            stamp_locations: vec![],
+            value_program: BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushParam(0),
+                    Instruction::PushVoltage(0, 1),
+                    Instruction::Mul,
+                ],
+            },
+            jacobian_programs: vec![],
+        }],
+        lookup_tables: vec![],
+        laplace_filters: vec![],
+        internal_nodes: 0,
+        branch_currents: 0,
+    };
+
+    let native = JitCompiler::new()
+        .expect("jit compiler")
+        .compile(&model)
+        .expect("compiled model");
+
+    let voltages = [1.5, 0.5];
+    let params = [0.002];
+    let ctx = EvalContext {
+        voltages: voltages.as_ptr(),
+        internal_voltages: std::ptr::null(),
+        params: params.as_ptr(),
+        branch_currents: std::ptr::null(),
+        branch_currents_len: 0,
+        currents: std::ptr::null(),
+        currents_len: 0,
+        num_terminals: 2,
+        temperature: 300.0,
+        time: 0.0,
+        timestep: 0.0,
+        state_prev: std::ptr::null(),
+        lookup_tables: std::ptr::null(),
+        lookup_tables_len: 0,
+        laplace_filters: std::ptr::null_mut(),
+        laplace_filters_len: 0,
+    };
+
+    let value = native.evaluate_stamp(0, &ctx, &[]);
+    assert!((value - 0.002).abs() < 1e-12);
+}
+
 // ============================================
 // Laplace JIT Tests - Comprehensive Coverage
 // ============================================

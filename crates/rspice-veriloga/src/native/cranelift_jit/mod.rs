@@ -21,6 +21,9 @@ pub use abi::{
     rspice_table_lookup,
 };
 
+type AssignmentFn = extern "C" fn(*const EvalContext, *mut f64);
+type StampFn = extern "C" fn(*const EvalContext, *const f64) -> f64;
+
 /// Result type for JIT operations
 pub type JitResult<T> = Result<T, JitError>;
 
@@ -54,9 +57,9 @@ pub struct NativeModel {
     /// Number of stamp programs
     pub num_stamps: usize,
     /// Assignment evaluation function: fn(*const EvalContext, *mut f64 vars)
-    assignment_fn: Option<*const u8>,
+    assignment_fn: Option<AssignmentFn>,
     /// Stamp evaluation functions: fn(*const EvalContext, *const f64 vars) -> f64
-    stamp_fns: Vec<*const u8>,
+    stamp_fns: Vec<StampFn>,
     /// Keep module alive
     _module: JITModule,
 }
@@ -100,26 +103,31 @@ const EVAL_CTX_OFFSET_LAPLACE_FILTERS_LEN: i32 =
     std::mem::offset_of!(EvalContext, laplace_filters_len) as i32;
 
 impl NativeModel {
+    unsafe fn cast_assignment_fn(ptr: *const u8) -> AssignmentFn {
+        // Safety: the JIT compiler emits `assignment_fn` using the
+        // `extern "C" fn(*const EvalContext, *mut f64)` ABI and keeps the
+        // owning `JITModule` alive for the lifetime of the function pointer.
+        unsafe { std::mem::transmute(ptr) }
+    }
+
+    unsafe fn cast_stamp_fn(ptr: *const u8) -> StampFn {
+        // Safety: the JIT compiler emits each stamp entry using the
+        // `extern "C" fn(*const EvalContext, *const f64) -> f64` ABI and keeps
+        // the owning `JITModule` alive for the lifetime of the function pointer.
+        unsafe { std::mem::transmute(ptr) }
+    }
+
     /// Evaluate all assignments, storing results in vars array
     pub fn evaluate_assignments(&self, ctx: &EvalContext, vars: &mut [f64]) {
         if let Some(fn_ptr) = self.assignment_fn {
-            // Safety: function signature matches, arrays are properly sized
-            unsafe {
-                let func: extern "C" fn(*const EvalContext, *mut f64) = std::mem::transmute(fn_ptr);
-                func(ctx as *const EvalContext, vars.as_mut_ptr());
-            }
+            fn_ptr(ctx as *const EvalContext, vars.as_mut_ptr());
         }
     }
 
     /// Evaluate a single stamp program
     pub fn evaluate_stamp(&self, index: usize, ctx: &EvalContext, vars: &[f64]) -> f64 {
         if let Some(&fn_ptr) = self.stamp_fns.get(index) {
-            // Safety: function signature matches
-            unsafe {
-                let func: extern "C" fn(*const EvalContext, *const f64) -> f64 =
-                    std::mem::transmute(fn_ptr);
-                func(ctx as *const EvalContext, vars.as_ptr())
-            }
+            fn_ptr(ctx as *const EvalContext, vars.as_ptr())
         } else {
             0.0
         }
@@ -190,10 +198,12 @@ impl JitCompiler {
             .map_err(|e| JitError::Module(e.to_string()))?;
 
         // Get function pointers
-        let assignment_fn = assignment_fn_id.map(|id| module.get_finalized_function(id));
+        let assignment_fn = assignment_fn_id.map(|id| unsafe {
+            NativeModel::cast_assignment_fn(module.get_finalized_function(id))
+        });
         let stamp_fns: Vec<_> = stamp_fn_ids
             .iter()
-            .map(|&id| module.get_finalized_function(id))
+            .map(|&id| unsafe { NativeModel::cast_stamp_fn(module.get_finalized_function(id)) })
             .collect();
 
         Ok(NativeModel {
