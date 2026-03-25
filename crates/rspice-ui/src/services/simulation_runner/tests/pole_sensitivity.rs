@@ -1,4 +1,31 @@
 use super::*;
+use std::path::PathBuf;
+
+fn write_pole_sensitivity_include_fixture() -> (tempfile::TempDir, PathBuf, String) {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let source_path = temp_dir.path().join("project").join("analysis_top.rsch");
+    std::fs::create_dir_all(
+        source_path
+            .parent()
+            .expect("source path should have parent directory"),
+    )
+    .expect("project directory should be created");
+    std::fs::create_dir_all(temp_dir.path().join("models"))
+        .expect("models directory should be created");
+    std::fs::write(
+        temp_dir.path().join("models").join("analysis_stage.inc"),
+        ".param RVAL=1k\nR1 in out {RVAL}\nC1 out 0 1n\n",
+    )
+    .expect("include file should be written");
+
+    let netlist = "* analysis include fixture\n\
+V1 in 0 DC 1 AC 1\n\
+.include ../models/analysis_stage.inc\n\
+.end\n"
+        .to_string();
+
+    (temp_dir, source_path, netlist)
+}
 
 #[test]
 fn test_run_pole_zero_analysis_validation() {
@@ -233,4 +260,53 @@ fn test_run_sensitivity_analysis_normalized_reports_zero_when_nominal_is_near_ze
         .expect("expected RVAL sensitivity");
     assert!(raw.is_finite());
     assert_eq!(*normalized, 0.0);
+}
+
+#[test]
+fn test_run_pole_zero_analysis_with_source_path_resolves_relative_include() {
+    let (_temp_dir, source_path, netlist) = write_pole_sensitivity_include_fixture();
+
+    let without_source = run_pole_zero_analysis(&netlist, "in", "0", "out", "0", "VOL", "PZ");
+    assert!(
+        without_source.is_err(),
+        "relative include should fail without source path"
+    );
+
+    let with_source = run_pole_zero_analysis_with_source_path(
+        &netlist,
+        "in",
+        "0",
+        "out",
+        "0",
+        "VOL",
+        "PZ",
+        Some(&source_path),
+    )
+    .expect("source-aware pole-zero analysis should resolve include");
+    assert!(with_source.gain.is_finite());
+}
+
+#[test]
+fn test_run_sensitivity_analysis_with_source_path_resolves_relative_include() {
+    let (_temp_dir, source_path, netlist) = write_pole_sensitivity_include_fixture();
+
+    let without_source = run_sensitivity_analysis(&netlist, "V(out)", false, None);
+    assert!(
+        without_source.is_err(),
+        "relative include should fail without source path"
+    );
+
+    let with_source = run_sensitivity_analysis_with_source_path(
+        &netlist,
+        "V(out)",
+        false,
+        None,
+        Some(&source_path),
+    )
+    .expect("source-aware sensitivity analysis should resolve include");
+    assert!(!with_source.sensitivities.is_empty());
+    assert!(with_source
+        .sensitivities
+        .iter()
+        .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL")));
 }

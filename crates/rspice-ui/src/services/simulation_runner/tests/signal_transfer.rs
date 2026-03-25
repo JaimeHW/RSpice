@@ -1,4 +1,31 @@
 use super::*;
+use std::path::PathBuf;
+
+fn write_tf_include_fixture() -> (tempfile::TempDir, PathBuf, String) {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let source_path = temp_dir.path().join("project").join("tf_top.rsch");
+    std::fs::create_dir_all(
+        source_path
+            .parent()
+            .expect("source path should have parent directory"),
+    )
+    .expect("project directory should be created");
+    std::fs::create_dir_all(temp_dir.path().join("models"))
+        .expect("models directory should be created");
+    std::fs::write(
+        temp_dir.path().join("models").join("tf_stage.inc"),
+        "R1 in out 1k\nC1 out 0 1n\n",
+    )
+    .expect("include file should be written");
+
+    let netlist = "* tf include fixture\n\
+V1 in 0 DC 1 AC 1\n\
+.include ../models/tf_stage.inc\n\
+.end\n"
+        .to_string();
+
+    (temp_dir, source_path, netlist)
+}
 
 #[test]
 fn test_ac_data_magnitude_db() {
@@ -120,6 +147,64 @@ fn test_run_tf_analysis_auto_infers_configuration() {
     assert_eq!(result.transfer.len(), result.frequencies.len());
     assert_eq!(result.input_source, "VDRIVE");
     assert!(result.output_label.contains("out") || result.output_label.contains("OUT"));
+}
+
+#[test]
+fn test_run_tf_analysis_with_source_path_resolves_relative_include() {
+    let (_temp_dir, source_path, netlist) = write_tf_include_fixture();
+
+    let without_source = run_tf_analysis(&netlist);
+    assert!(
+        without_source.is_err(),
+        "relative include should fail without source path"
+    );
+
+    let with_source = run_tf_analysis_with_source_path(&netlist, Some(&source_path))
+        .expect("source-aware TF analysis should resolve include");
+    assert!(!with_source.frequencies.is_empty());
+    assert_eq!(with_source.transfer.len(), with_source.frequencies.len());
+    assert_eq!(with_source.input_source, "V1");
+}
+
+#[test]
+fn test_run_tf_analysis_with_config_and_source_path_resolves_relative_include() {
+    let (_temp_dir, source_path, netlist) = write_tf_include_fixture();
+    let cfg = TfRunConfig {
+        start_freq: 10.0,
+        stop_freq: 1e6,
+        points_per_unit: 6,
+        sweep: TfFrequencySweep::Decade,
+        input_source: "V1".to_string(),
+        output_node: "out".to_string(),
+        output_ref: None,
+        group_delay: true,
+        input_impedance: true,
+        output_impedance: true,
+    };
+
+    let without_source = run_tf_analysis_with_config(&netlist, &cfg);
+    assert!(
+        without_source.is_err(),
+        "relative include should fail without source path"
+    );
+
+    let with_source =
+        run_tf_analysis_with_config_and_source_path(&netlist, &cfg, Some(&source_path))
+            .expect("source-aware configured TF analysis should resolve include");
+    assert!(!with_source.frequencies.is_empty());
+    assert_eq!(with_source.transfer.len(), with_source.frequencies.len());
+    assert!(with_source
+        .group_delay
+        .as_ref()
+        .is_some_and(|curve| !curve.is_empty()));
+    assert!(with_source
+        .input_impedance
+        .as_ref()
+        .is_some_and(|curve| curve.len() == with_source.frequencies.len()));
+    assert!(with_source
+        .output_impedance
+        .as_ref()
+        .is_some_and(|curve| curve.len() == with_source.frequencies.len()));
 }
 
 #[test]
