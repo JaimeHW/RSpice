@@ -671,9 +671,11 @@ pub fn render_schematic_view(
 
             // Try to use SVG symbol for preview (matches placed component appearance)
             let svg_rendered = if let Some(library) = symbol_library {
-                if let Some((symbol, adjusted_rotation)) =
-                    library.get_with_rotation_variant(component_type, preview_rotation_degrees, None)
-                {
+                if let Some((symbol, adjusted_rotation)) = library.get_with_rotation_variant(
+                    component_type,
+                    preview_rotation_degrees,
+                    None,
+                ) {
                     super::symbols::draw_symbol(
                         &painter,
                         symbol,
@@ -1071,13 +1073,11 @@ fn draw_component(
 
     // Try to use SVG symbol if available
     let svg_rendered = if let Some(library) = symbol_library {
-        if let Some((symbol, adjusted_rotation)) =
-            library.get_with_rotation_variant(
-                component.kind,
-                rotation_degrees,
-                component.symbol_variant.as_deref(),
-            )
-        {
+        if let Some((symbol, adjusted_rotation)) = library.get_with_rotation_variant(
+            component.kind,
+            rotation_degrees,
+            component.symbol_variant.as_deref(),
+        ) {
             // Note: SVG symbol is being used (removed per-frame logging)
             super::symbols::draw_symbol(
                 painter,

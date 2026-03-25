@@ -590,10 +590,8 @@ impl<'a> NetlistGenerator<'a> {
 
             ComponentType::Inductor | ComponentType::SaturableInductor => {
                 let nodes = self.format_nodes(&node_names, 2);
-                let filtered_params = self.filter_component_params(
-                    &component.params,
-                    &["coupled_to", "coupling_factor"],
-                );
+                let filtered_params = self
+                    .filter_component_params(&component.params, &["coupled_to", "coupling_factor"]);
                 let value_with_params =
                     self.format_value_with_params(&component.value, &filtered_params);
                 Some(format!("{} {} {}", instance_name, nodes, value_with_params))
@@ -605,7 +603,10 @@ impl<'a> NetlistGenerator<'a> {
                 let nodes = self.format_nodes(&node_names, 2);
                 let source_value = self.format_source_value(component);
                 let params = self.format_params(&component.params);
-                Some(format!("{} {} {}{}", instance_name, nodes, source_value, params))
+                Some(format!(
+                    "{} {} {}{}",
+                    instance_name, nodes, source_value, params
+                ))
             }
             // Voltage sources with positional params (SIN, PULSE, etc.) - no extra params needed
             ComponentType::VoltageSourcePulse
@@ -624,7 +625,10 @@ impl<'a> NetlistGenerator<'a> {
                 let nodes = self.format_nodes(&node_names, 2);
                 let source_value = self.format_source_value(component);
                 let params = self.format_params(&component.params);
-                Some(format!("{} {} {}{}", instance_name, nodes, source_value, params))
+                Some(format!(
+                    "{} {} {}{}",
+                    instance_name, nodes, source_value, params
+                ))
             }
             // Current sources with positional params (SIN, PULSE, etc.) - no extra params needed
             ComponentType::CurrentSourcePulse
@@ -988,7 +992,10 @@ impl<'a> NetlistGenerator<'a> {
             )
         };
         let secondary_line = if secondary_suffix.is_empty() {
-            format!("{} {} {}", secondary_name, secondary_nodes, secondary_inductance)
+            format!(
+                "{} {} {}",
+                secondary_name, secondary_nodes, secondary_inductance
+            )
         } else {
             format!(
                 "{} {} {} {}",
@@ -1103,17 +1110,14 @@ impl<'a> NetlistGenerator<'a> {
         inductor_lookup: &HashMap<String, String>,
     ) -> Option<(String, String, String, String)> {
         let params = crate::properties::parse_params_string(&component.params);
-        let raw_windings = params
-            .get("inductors")
-            .cloned()
-            .unwrap_or_else(|| {
-                ["l1", "l2", "l3", "l4"]
-                    .iter()
-                    .filter_map(|key| params.get(*key))
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            });
+        let raw_windings = params.get("inductors").cloned().unwrap_or_else(|| {
+            ["l1", "l2", "l3", "l4"]
+                .iter()
+                .filter_map(|key| params.get(*key))
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" ")
+        });
         let winding_refs = Self::parse_inductor_list(&raw_windings);
         if winding_refs.len() < 2 {
             self.errors.push(format!(
@@ -1142,8 +1146,11 @@ impl<'a> NetlistGenerator<'a> {
             }
         }
 
-        let emitted_windings =
-            self.resolve_inductor_refs(&winding_refs, inductor_lookup, component.spice_instance_name().as_str())?;
+        let emitted_windings = self.resolve_inductor_refs(
+            &winding_refs,
+            inductor_lookup,
+            component.spice_instance_name().as_str(),
+        )?;
         let key = Self::coupling_key(&emitted_windings);
         let line = format!(
             "{} {} {}",
@@ -1318,7 +1325,10 @@ impl<'a> NetlistGenerator<'a> {
     }
 
     fn is_couplable_inductor(kind: ComponentType) -> bool {
-        matches!(kind, ComponentType::Inductor | ComponentType::SaturableInductor)
+        matches!(
+            kind,
+            ComponentType::Inductor | ComponentType::SaturableInductor
+        )
     }
 
     /// Format node list for SPICE line

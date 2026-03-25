@@ -10,26 +10,20 @@ impl SimulationController {
         use crate::state::WaveformData;
 
         match sim_result {
-            SimulationResult::Transient { time, waveforms } => {
-                self.build_sorted_waveforms_with_shared_x(time, waveforms, |name, waveform| {
+            SimulationResult::Transient { time, waveforms } => self
+                .build_sorted_waveforms_with_shared_x(time, waveforms, |name, waveform| {
                     (name, waveform.y_values.clone())
-                })
-            }
+                }),
 
             SimulationResult::Ac {
                 frequencies,
                 waveforms,
-            } => {
-                self.build_waveforms_with_shared_x(
-                    frequencies,
-                    waveforms
-                        .iter()
-                        .enumerate()
-                        .map(|(idx, (name, waveform))| {
-                            (idx, format!("|{}|", name), waveform.magnitude())
-                        }),
-                )
-            }
+            } => self.build_waveforms_with_shared_x(
+                frequencies,
+                waveforms.iter().enumerate().map(|(idx, (name, waveform))| {
+                    (idx, format!("|{}|", name), waveform.magnitude())
+                }),
+            ),
 
             SimulationResult::DcSweep {
                 sweep_values,
@@ -219,12 +213,10 @@ impl SimulationController {
             SimulationResult::Transient { .. }
             | SimulationResult::Ac { .. }
             | SimulationResult::DcSweep { .. }
-            | SimulationResult::Noise { .. } => AnalysisResult::new(
-                1,
-                analysis_type,
-                label.to_string(),
-            )
-            .with_waveforms(self.waveforms_for_result(sim_result)),
+            | SimulationResult::Noise { .. } => {
+                AnalysisResult::new(1, analysis_type, label.to_string())
+                    .with_waveforms(self.waveforms_for_result(sim_result))
+            }
 
             SimulationResult::PoleZero { .. } => {
                 // Pole-Zero results are displayed in console, not as waveforms
@@ -241,12 +233,10 @@ impl SimulationController {
             | SimulationResult::Corner { .. }
             | SimulationResult::Reliability { .. }
             | SimulationResult::Optimization { .. }
-            | SimulationResult::Soa { .. } => AnalysisResult::new(
-                1,
-                analysis_type,
-                label.to_string(),
-            )
-            .with_waveforms(self.waveforms_for_result(sim_result)),
+            | SimulationResult::Soa { .. } => {
+                AnalysisResult::new(1, analysis_type, label.to_string())
+                    .with_waveforms(self.waveforms_for_result(sim_result))
+            }
 
             SimulationResult::MeasurementsOnly { .. } => {
                 AnalysisResult::new(1, analysis_type, label.to_string())

@@ -556,7 +556,9 @@ mod tests {
             .find(|element| element.name.eq_ignore_ascii_case("__rspice_sp_port1"))
             .expect("expected pre-existing auxiliary resistor");
         match &existing.kind {
-            ElementKind::Resistor { value, value_expr, .. } => {
+            ElementKind::Resistor {
+                value, value_expr, ..
+            } => {
                 assert_eq!(*value, 1e3);
                 assert_eq!(value_expr, &None);
             }

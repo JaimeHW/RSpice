@@ -8,9 +8,7 @@
 use std::io::Write;
 use std::path::Path;
 
-use crate::common::export_workflow::{
-    ExportWorkflowIo, NativeExportWorkflowIo, SaveDialogConfig,
-};
+use crate::common::export_workflow::{ExportWorkflowIo, NativeExportWorkflowIo, SaveDialogConfig};
 
 use super::state::TraceData;
 

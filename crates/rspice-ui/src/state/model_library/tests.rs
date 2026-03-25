@@ -879,25 +879,25 @@ fn test_library_remove_nonexistent() {
 #[test]
 fn test_model_type_from_str_comprehensive() {
     // Standard casing
-        assert_eq!(ModelType::from_name("nmos"), ModelType::Nmos);
-        assert_eq!(ModelType::from_name("pmos"), ModelType::Pmos);
-        assert_eq!(ModelType::from_name("npn"), ModelType::Npn);
-        assert_eq!(ModelType::from_name("pnp"), ModelType::Pnp);
+    assert_eq!(ModelType::from_name("nmos"), ModelType::Nmos);
+    assert_eq!(ModelType::from_name("pmos"), ModelType::Pmos);
+    assert_eq!(ModelType::from_name("npn"), ModelType::Npn);
+    assert_eq!(ModelType::from_name("pnp"), ModelType::Pnp);
 
     // Mixed casing
-        assert_eq!(ModelType::from_name("NMOS"), ModelType::Nmos);
-        assert_eq!(ModelType::from_name("NMos"), ModelType::Nmos);
-        assert_eq!(ModelType::from_name("nMoS"), ModelType::Nmos);
+    assert_eq!(ModelType::from_name("NMOS"), ModelType::Nmos);
+    assert_eq!(ModelType::from_name("NMos"), ModelType::Nmos);
+    assert_eq!(ModelType::from_name("nMoS"), ModelType::Nmos);
 
     // Alternative names
-        assert_eq!(ModelType::from_name("r"), ModelType::Resistor);
-        assert_eq!(ModelType::from_name("c"), ModelType::Capacitor);
-        assert_eq!(ModelType::from_name("l"), ModelType::Inductor);
-        assert_eq!(ModelType::from_name("d"), ModelType::Diode);
+    assert_eq!(ModelType::from_name("r"), ModelType::Resistor);
+    assert_eq!(ModelType::from_name("c"), ModelType::Capacitor);
+    assert_eq!(ModelType::from_name("l"), ModelType::Inductor);
+    assert_eq!(ModelType::from_name("d"), ModelType::Diode);
 
     // Unknown types
-        assert_eq!(ModelType::from_name("unknown_type"), ModelType::Other);
-        assert_eq!(ModelType::from_name(""), ModelType::Other);
+    assert_eq!(ModelType::from_name("unknown_type"), ModelType::Other);
+    assert_eq!(ModelType::from_name(""), ModelType::Other);
 }
 
 // =========================================================================

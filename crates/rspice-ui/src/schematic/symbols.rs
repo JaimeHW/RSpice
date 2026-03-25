@@ -179,15 +179,31 @@ impl SymbolLibrary {
                 "inductor.svg",
                 "Saturable Inductor",
             ),
-            (ComponentType::VoltageSource, "v_src_dc.svg", "Voltage Source"),
-            (ComponentType::VoltageSourceAc, "v_src_ac_vertical.svg", "AC Voltage Source"),
+            (
+                ComponentType::VoltageSource,
+                "v_src_dc.svg",
+                "Voltage Source",
+            ),
+            (
+                ComponentType::VoltageSourceAc,
+                "v_src_ac_vertical.svg",
+                "AC Voltage Source",
+            ),
             (
                 ComponentType::VoltageSourceSin,
                 "v_src_ac_vertical.svg",
                 "Sinusoidal Voltage Source",
             ),
-            (ComponentType::VoltageSourcePulse, "v_src_dc.svg", "Pulse Voltage Source"),
-            (ComponentType::VoltageSourcePwl, "v_src_dc.svg", "PWL Voltage Source"),
+            (
+                ComponentType::VoltageSourcePulse,
+                "v_src_dc.svg",
+                "Pulse Voltage Source",
+            ),
+            (
+                ComponentType::VoltageSourcePwl,
+                "v_src_dc.svg",
+                "PWL Voltage Source",
+            ),
             (
                 ComponentType::VoltageSourceExp,
                 "v_src_dc.svg",
@@ -199,20 +215,48 @@ impl SymbolLibrary {
                 "SFFM Voltage Source",
             ),
             (ComponentType::CurrentSource, "i_src.svg", "Current Source"),
-            (ComponentType::CurrentSourceAc, "i_src.svg", "AC Current Source"),
-            (ComponentType::CurrentSourcePulse, "i_src.svg", "Pulse Current Source"),
-            (ComponentType::CurrentSourceSin, "i_src.svg", "Sinusoidal Current Source"),
-            (ComponentType::CurrentSourcePwl, "i_src.svg", "PWL Current Source"),
+            (
+                ComponentType::CurrentSourceAc,
+                "i_src.svg",
+                "AC Current Source",
+            ),
+            (
+                ComponentType::CurrentSourcePulse,
+                "i_src.svg",
+                "Pulse Current Source",
+            ),
+            (
+                ComponentType::CurrentSourceSin,
+                "i_src.svg",
+                "Sinusoidal Current Source",
+            ),
+            (
+                ComponentType::CurrentSourcePwl,
+                "i_src.svg",
+                "PWL Current Source",
+            ),
             (
                 ComponentType::CurrentSourceExp,
                 "i_src.svg",
                 "Exponential Current Source",
             ),
-            (ComponentType::CurrentSourceNoise, "i_src.svg", "Noise Current Source"),
+            (
+                ComponentType::CurrentSourceNoise,
+                "i_src.svg",
+                "Noise Current Source",
+            ),
             (ComponentType::Ground, "ground_signal.svg", "Ground"),
             (ComponentType::Diode, "diode.svg", "Diode"),
-            (ComponentType::Nmos, "mos_n_chan_enh_no_substrate.svg", "NMOS"),
-            (ComponentType::Pmos, "mos_p_chan_enh_no_substrate.svg", "PMOS"),
+            (
+                ComponentType::Nmos,
+                "mos_n_chan_enh_no_substrate.svg",
+                "NMOS",
+            ),
+            (
+                ComponentType::Pmos,
+                "mos_p_chan_enh_no_substrate.svg",
+                "PMOS",
+            ),
             (ComponentType::Njfet, "jfet_n_chan.svg", "N-JFET"),
             (ComponentType::Pjfet, "jfet_p_chan.svg", "P-JFET"),
             (
@@ -230,15 +274,19 @@ impl SymbolLibrary {
         ];
 
         for (component_type, filename, name) in default_mappings {
-            let symbol =
-                library.prepare_symbol(*component_type, filename, name, false)?;
+            let symbol = library.prepare_symbol(*component_type, filename, name, false)?;
             library.symbols.insert(*component_type, symbol);
         }
 
         // Load non-default visual variants for symbol families that already share
         // the same electrical terminals and can be treated as pure schematic skins.
         let variant_mappings: &[(ComponentType, &str, &str, &str)] = &[
-            (ComponentType::VoltageSource, "battery", "battery.svg", "Battery"),
+            (
+                ComponentType::VoltageSource,
+                "battery",
+                "battery.svg",
+                "Battery",
+            ),
             (
                 ComponentType::VoltageSource,
                 "battery_multi_cell",
@@ -246,20 +294,59 @@ impl SymbolLibrary {
                 "Battery",
             ),
             (ComponentType::Ground, "earth", "ground_earth.svg", "Ground"),
-            (ComponentType::Ground, "chassis", "ground_chassis.svg", "Ground"),
-            (ComponentType::Diode, "schottky", "diode_schottky.svg", "Schottky Diode"),
-            (ComponentType::Diode, "zener", "diode_zener.svg", "Zener Diode"),
-            (ComponentType::Diode, "tunnel", "diode_tunnel.svg", "Tunnel Diode"),
+            (
+                ComponentType::Ground,
+                "chassis",
+                "ground_chassis.svg",
+                "Ground",
+            ),
+            (
+                ComponentType::Diode,
+                "schottky",
+                "diode_schottky.svg",
+                "Schottky Diode",
+            ),
+            (
+                ComponentType::Diode,
+                "zener",
+                "diode_zener.svg",
+                "Zener Diode",
+            ),
+            (
+                ComponentType::Diode,
+                "tunnel",
+                "diode_tunnel.svg",
+                "Tunnel Diode",
+            ),
             (ComponentType::Diode, "led", "led.svg", "LED"),
-            (ComponentType::NpnBjt, "discrete", "bjt_npn_descrete.svg", "NPN BJT"),
-            (ComponentType::PnpBjt, "discrete", "bjt_pnp_discrete.svg", "PNP BJT"),
-            (ComponentType::Njfet, "discrete", "jfet_n_chan_discrete.svg", "N-JFET"),
-            (ComponentType::Pjfet, "discrete", "jfet_p_chan_discrete.svg", "P-JFET"),
+            (
+                ComponentType::NpnBjt,
+                "discrete",
+                "bjt_npn_descrete.svg",
+                "NPN BJT",
+            ),
+            (
+                ComponentType::PnpBjt,
+                "discrete",
+                "bjt_pnp_discrete.svg",
+                "PNP BJT",
+            ),
+            (
+                ComponentType::Njfet,
+                "discrete",
+                "jfet_n_chan_discrete.svg",
+                "N-JFET",
+            ),
+            (
+                ComponentType::Pjfet,
+                "discrete",
+                "jfet_p_chan_discrete.svg",
+                "P-JFET",
+            ),
         ];
 
         for (component_type, variant_id, filename, name) in variant_mappings {
-            let symbol =
-                library.prepare_symbol(*component_type, filename, name, false)?;
+            let symbol = library.prepare_symbol(*component_type, filename, name, false)?;
             library
                 .variant_symbols
                 .insert((*component_type, (*variant_id).to_string()), symbol);
@@ -280,8 +367,7 @@ impl SymbolLibrary {
         ];
 
         for (component_type, filename, name) in horizontal_mappings {
-            let symbol =
-                library.prepare_symbol(*component_type, filename, name, true)?;
+            let symbol = library.prepare_symbol(*component_type, filename, name, true)?;
             library.horizontal_symbols.insert(*component_type, symbol);
         }
 

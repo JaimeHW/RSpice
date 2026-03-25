@@ -183,7 +183,12 @@ mod tests {
     fn test_palette_covers_supported_symbol_backed_devices() {
         let actual = component_palette()
             .iter()
-            .flat_map(|section| section.entries.iter().map(|entry| format!("{:?}", entry.kind)))
+            .flat_map(|section| {
+                section
+                    .entries
+                    .iter()
+                    .map(|entry| format!("{:?}", entry.kind))
+            })
             .collect::<BTreeSet<_>>();
 
         let expected = [

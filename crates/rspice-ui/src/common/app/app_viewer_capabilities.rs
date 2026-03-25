@@ -65,7 +65,9 @@ impl AppState {
                 if self.eye_diagram_state.trace_count() > 0 {
                     ViewerCapability::available("Eye traces loaded")
                 } else if self.active_analysis_supports_eye_diagram() {
-                    ViewerCapability::available("Can derive eye data from active transient waveforms")
+                    ViewerCapability::available(
+                        "Can derive eye data from active transient waveforms",
+                    )
                 } else {
                     ViewerCapability::unavailable("Requires transient eye traces")
                 }
@@ -262,18 +264,16 @@ mod tests {
     }
 
     fn seed_active_transient_analysis(state: &mut AppState) {
-        let time = vec![0.0, 1e-9, 2e-9, 3e-9, 4e-9, 5e-9, 6e-9, 7e-9, 8e-9, 9e-9, 10e-9, 11e-9,
-            12e-9, 13e-9, 14e-9, 15e-9];
+        let time = vec![
+            0.0, 1e-9, 2e-9, 3e-9, 4e-9, 5e-9, 6e-9, 7e-9, 8e-9, 9e-9, 10e-9, 11e-9, 12e-9, 13e-9,
+            14e-9, 15e-9,
+        ];
         let values = vec![
-            1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0,
-            -1.0,
+            1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0,
         ];
         let analysis = crate::state::AnalysisResult::new(1, AnalysisType::Transient, "TR")
             .with_waveforms(vec![crate::state::WaveformData::new(
-                "V(out)",
-                time,
-                values,
-                "#4aa3ff",
+                "V(out)", time, values, "#4aa3ff",
             )]);
         let run = state.simulation.start_run();
         run.add_analysis(analysis);

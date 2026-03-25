@@ -1,6 +1,6 @@
 use super::*;
-use crate::analysis::fft::{FftInputOptions, PreparedFftInput};
 use crate::analysis::eye_diagram::data::{EyeData, EyeDataBuilder};
+use crate::analysis::fft::{FftInputOptions, PreparedFftInput};
 use crate::common::app::AppState;
 use crate::state::AnalysisType;
 use crate::viewers::ActiveViewer;
@@ -88,11 +88,7 @@ impl SimulationController {
         }
     }
 
-    pub(crate) fn mark_transient_view_ready(
-        &mut self,
-        state: &AppState,
-        viewer: ActiveViewer,
-    ) {
+    pub(crate) fn mark_transient_view_ready(&mut self, state: &AppState, viewer: ActiveViewer) {
         let Some(analysis) = self.active_transient_analysis_key(state) else {
             return;
         };
@@ -362,10 +358,7 @@ impl SimulationController {
         }
     }
 
-    fn task_slot_mut(
-        &mut self,
-        view: DerivedViewKind,
-    ) -> &mut Option<PendingDerivedViewTask> {
+    fn task_slot_mut(&mut self, view: DerivedViewKind) -> &mut Option<PendingDerivedViewTask> {
         match view {
             DerivedViewKind::EyeDiagram => &mut self.transient_post.eye_task,
             DerivedViewKind::Fft => &mut self.transient_post.fft_task,

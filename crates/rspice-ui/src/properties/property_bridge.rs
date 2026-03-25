@@ -911,8 +911,8 @@ mod tests {
     #[test]
     fn test_apply_properties_persists_symbol_variant_without_netlist_leakage() {
         let registry = PropertyRegistry::new();
-        let mut component = Component::new(1, ComponentType::Diode, Point::new(0, 0))
-            .with_name_value("D1", "1");
+        let mut component =
+            Component::new(1, ComponentType::Diode, Point::new(0, 0)).with_name_value("D1", "1");
 
         let mut props = HashMap::new();
         props.insert("name".to_string(), PropertyValue::String("D1".to_string()));
@@ -990,9 +990,8 @@ mod tests {
     fn test_full_roundtrip_coupled_inductor() {
         let registry = PropertyRegistry::new();
 
-        let mut original =
-            Component::new(1, ComponentType::CoupledInductor, Point::new(0, 0))
-                .with_name_value("K1", "0.995");
+        let mut original = Component::new(1, ComponentType::CoupledInductor, Point::new(0, 0))
+            .with_name_value("K1", "0.995");
         original.params = "inductors=\"L1 L2\"".to_string();
 
         let props = collect_properties_from_component(&original, &registry);
@@ -1012,8 +1011,7 @@ mod tests {
 
         let mut original = Component::new(1, ComponentType::Transformer, Point::new(0, 0))
             .with_name_value("T1", "12m");
-        original.params = "icp=1m ics=2m k=0.998 ls=3m rp=50m rs=75m turns_ratio=0.5"
-            .to_string();
+        original.params = "icp=1m ics=2m k=0.998 ls=3m rp=50m rs=75m turns_ratio=0.5".to_string();
 
         let props = collect_properties_from_component(&original, &registry);
         let mut restored = Component::new(1, ComponentType::Transformer, Point::new(0, 0));
@@ -1025,10 +1023,7 @@ mod tests {
         let restored_params = parse_params_string(&restored.params);
         assert_eq!(restored_params.get("k"), Some(&"0.998".to_string()));
         assert_eq!(restored_params.get("ls"), Some(&"3m".to_string()));
-        assert_eq!(
-            restored_params.get("turns_ratio"),
-            Some(&"0.5".to_string())
-        );
+        assert_eq!(restored_params.get("turns_ratio"), Some(&"0.5".to_string()));
         assert_eq!(restored_params.get("rp"), Some(&"50m".to_string()));
         assert_eq!(restored_params.get("rs"), Some(&"75m".to_string()));
     }

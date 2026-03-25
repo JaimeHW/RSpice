@@ -692,15 +692,19 @@ fn test_inductor_coupling_metadata_generates_k_statement() {
     let mut l1 =
         Component::new(1, ComponentType::Inductor, Point::new(0, 0)).with_name_value("L1", "10u");
     l1.params = "coupled_to=L2 coupling_factor=0.98 ic=0".to_string();
-    let l2 = Component::new(2, ComponentType::Inductor, Point::new(80, 0))
-        .with_name_value("L2", "40u");
+    let l2 =
+        Component::new(2, ComponentType::Inductor, Point::new(80, 0)).with_name_value("L2", "40u");
 
     schematic.components.push(l1);
     schematic.components.push(l2);
 
     let result = generate_netlist(&schematic);
 
-    assert!(result.errors.is_empty(), "unexpected netlist errors: {:?}", result.errors);
+    assert!(
+        result.errors.is_empty(),
+        "unexpected netlist errors: {:?}",
+        result.errors
+    );
     assert!(result.netlist.contains("L1 "));
     assert!(result.netlist.contains("L2 "));
     assert!(result.netlist.contains("ic=0"));
@@ -715,8 +719,8 @@ fn test_explicit_coupled_inductor_component_generates_k_statement() {
 
     let l1 =
         Component::new(1, ComponentType::Inductor, Point::new(0, 0)).with_name_value("L1", "10u");
-    let l2 = Component::new(2, ComponentType::Inductor, Point::new(80, 0))
-        .with_name_value("L2", "40u");
+    let l2 =
+        Component::new(2, ComponentType::Inductor, Point::new(80, 0)).with_name_value("L2", "40u");
     let mut k1 = Component::new(3, ComponentType::CoupledInductor, Point::new(40, 20))
         .with_name_value("K1", "0.995");
     k1.params = "inductors=\"L1 L2\"".to_string();
@@ -727,7 +731,11 @@ fn test_explicit_coupled_inductor_component_generates_k_statement() {
 
     let result = generate_netlist(&schematic);
 
-    assert!(result.errors.is_empty(), "unexpected netlist errors: {:?}", result.errors);
+    assert!(
+        result.errors.is_empty(),
+        "unexpected netlist errors: {:?}",
+        result.errors
+    );
     assert!(result.netlist.contains("K1 L1 L2 0.995"));
 }
 
@@ -742,7 +750,10 @@ fn test_generate_netlist_reports_unknown_coupling_target() {
 
     let result = generate_netlist(&schematic);
 
-    assert!(result.errors.iter().any(|err| err.contains("unknown inductor")));
+    assert!(result
+        .errors
+        .iter()
+        .any(|err| err.contains("unknown inductor")));
 }
 
 #[test]
@@ -752,8 +763,8 @@ fn test_generate_netlist_rejects_conflicting_coupling_metadata() {
     let mut l1 =
         Component::new(1, ComponentType::Inductor, Point::new(0, 0)).with_name_value("L1", "10u");
     l1.params = "coupled_to=L2 coupling_factor=0.98".to_string();
-    let mut l2 = Component::new(2, ComponentType::Inductor, Point::new(80, 0))
-        .with_name_value("L2", "40u");
+    let mut l2 =
+        Component::new(2, ComponentType::Inductor, Point::new(80, 0)).with_name_value("L2", "40u");
     l2.params = "coupled_to=L1 coupling_factor=0.97".to_string();
 
     schematic.components.push(l1);
@@ -839,7 +850,11 @@ fn test_generate_netlist_synthesizes_transformer_without_raw_t_instance() {
 
     let result = generate_netlist(&schematic);
 
-    assert!(result.errors.is_empty(), "unexpected errors: {:?}", result.errors);
+    assert!(
+        result.errors.is_empty(),
+        "unexpected errors: {:?}",
+        result.errors
+    );
     assert!(result.netlist.contains("LT1_PRI "));
     assert!(result.netlist.contains("LT1_SEC "));
     assert!(result.netlist.contains("KT1 LT1_PRI LT1_SEC 0.998"));

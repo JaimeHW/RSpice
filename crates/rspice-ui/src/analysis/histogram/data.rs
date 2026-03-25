@@ -607,9 +607,7 @@ mod tests {
     #[test]
     fn test_gaussian_distribution() {
         // Simulate Gaussian samples
-        let samples: Vec<f64> = (0..1000)
-            .map(|i| (i as f64 - 500.0) / 100.0)
-            .collect();
+        let samples: Vec<f64> = (0..1000).map(|i| (i as f64 - 500.0) / 100.0).collect();
 
         let hist = HistogramBuilder::new()
             .name("Gaussian")

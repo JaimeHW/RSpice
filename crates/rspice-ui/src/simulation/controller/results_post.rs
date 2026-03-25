@@ -170,11 +170,9 @@ impl SimulationController {
                 return Some((waveform.name.clone(), waveform));
             }
 
-            if let Some(waveform) = candidates
-                .iter()
-                .copied()
-                .find(|wf| Self::parse_fft_source_name(&wf.name).core == Self::parse_fft_source_name(name).core)
-            {
+            if let Some(waveform) = candidates.iter().copied().find(|wf| {
+                Self::parse_fft_source_name(&wf.name).core == Self::parse_fft_source_name(name).core
+            }) {
                 return Some((waveform.name.clone(), waveform));
             }
         }

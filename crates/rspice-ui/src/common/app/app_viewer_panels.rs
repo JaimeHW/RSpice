@@ -410,7 +410,8 @@ impl RSpiceApp {
 
     /// Render the FFT panel.
     pub(super) fn render_fft_panel(&mut self, ui: &mut Ui) {
-        if let Some(state) = self.ensure_transient_viewer_ready(ui, crate::viewers::ActiveViewer::Fft)
+        if let Some(state) =
+            self.ensure_transient_viewer_ready(ui, crate::viewers::ActiveViewer::Fft)
         {
             if !matches!(state, DerivedViewerLoadState::Ready) {
                 return;

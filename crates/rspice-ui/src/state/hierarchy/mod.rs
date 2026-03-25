@@ -393,7 +393,7 @@ pub struct CellView {
     pub modified: String,
 }
 
-    /// View type enumeration
+/// View type enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ViewType {
     /// Schematic (circuit design)

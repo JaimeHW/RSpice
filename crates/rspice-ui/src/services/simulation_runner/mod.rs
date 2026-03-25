@@ -3,9 +3,7 @@
 //! Async wrapper around rspice-core for running simulations from the GUI.
 
 #[cfg(test)]
-use crate::output_spec::{
-    resolve_node_or_ground_index, OutputSpec, OutputVoltageSpec,
-};
+use crate::output_spec::{resolve_node_or_ground_index, OutputSpec, OutputVoltageSpec};
 #[cfg(test)]
 use crate::simulation::reliability_engine::{ParamShift, ReliabilityResult, StressMetrics};
 #[cfg(test)]

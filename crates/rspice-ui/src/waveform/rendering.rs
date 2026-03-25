@@ -21,15 +21,15 @@
 //! commercial tools like Cadence ViVA.
 
 use egui::{
-    Color32, CursorIcon, FontId, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui,
-    Shape, UiBuilder, Vec2,
+    Color32, CursorIcon, FontId, Painter, Pos2, Rect, Response, Rounding, Sense, Shape, Stroke, Ui,
+    UiBuilder, Vec2,
 };
 use std::cell::RefCell;
 
 use super::axis::{self, GridLineType};
 use super::export::{
-    build_export_payload, calculate_export_stats, export_format_display_name, ExportFormat,
-    save_export_payload_with_native_dialog,
+    build_export_payload, calculate_export_stats, export_format_display_name,
+    save_export_payload_with_native_dialog, ExportFormat,
 };
 use super::legend::{self, LegendSortOrder};
 use super::measurements::TraceMeasurements;
@@ -2668,14 +2668,13 @@ fn render_export_panel(ui: &mut Ui, viewer_state: &mut WaveformViewerState) {
         }
         if ui.button("Save...").clicked() {
             let payload = build_export_payload(&viewer_state.traces, &viewer_state.export_options);
-            viewer_state.export_status =
-                match save_export_payload_with_native_dialog(
-                    &payload,
-                    viewer_state.export_options.format,
-                ) {
-                    Ok(path) => Some(format!("Saved {}", path.display())),
-                    Err(err) => Some(err),
-                };
+            viewer_state.export_status = match save_export_payload_with_native_dialog(
+                &payload,
+                viewer_state.export_options.format,
+            ) {
+                Ok(path) => Some(format!("Saved {}", path.display())),
+                Err(err) => Some(err),
+            };
         }
     });
 

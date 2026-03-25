@@ -65,9 +65,7 @@ static FFT_PLAN_CACHE: Lazy<Mutex<HashMap<usize, Arc<dyn Fft<f64>>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn cached_window(window: WindowFunction, length: usize) -> WindowCacheEntry {
-    let mut cache = WINDOW_CACHE
-        .lock()
-        .expect("window cache lock poisoned");
+    let mut cache = WINDOW_CACHE.lock().expect("window cache lock poisoned");
     if let Some(entry) = cache.get(&(window, length)) {
         return entry.clone();
     }
@@ -87,9 +85,7 @@ fn cached_window(window: WindowFunction, length: usize) -> WindowCacheEntry {
 }
 
 fn cached_fft_plan(length: usize) -> Arc<dyn Fft<f64>> {
-    let mut cache = FFT_PLAN_CACHE
-        .lock()
-        .expect("fft plan cache lock poisoned");
+    let mut cache = FFT_PLAN_CACHE.lock().expect("fft plan cache lock poisoned");
     if let Some(plan) = cache.get(&length) {
         return Arc::clone(plan);
     }

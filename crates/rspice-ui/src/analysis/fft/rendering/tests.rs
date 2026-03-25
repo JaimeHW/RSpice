@@ -287,7 +287,9 @@ fn test_build_spectrum_polyline_decimates_dense_visible_range() {
     let points = build_spectrum_polyline(rect, &data, &state);
     assert!(points.len() >= rect.width() as usize);
     assert!(points.len() < n / 4);
-    assert!(points.iter().all(|point| point.x.is_finite() && point.y.is_finite()));
+    assert!(points
+        .iter()
+        .all(|point| point.x.is_finite() && point.y.is_finite()));
 }
 
 #[test]

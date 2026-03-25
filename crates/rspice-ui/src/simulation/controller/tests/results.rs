@@ -101,7 +101,10 @@ fn test_convert_transient_result_reuses_shared_time_axis_across_waveforms() {
     );
 
     assert_eq!(analysis.waveforms.len(), 2);
-    assert!(Arc::ptr_eq(&analysis.waveforms[0].x, &analysis.waveforms[1].x));
+    assert!(Arc::ptr_eq(
+        &analysis.waveforms[0].x,
+        &analysis.waveforms[1].x
+    ));
 }
 
 #[test]
@@ -382,10 +385,7 @@ fn seed_active_transient_analysis(
 ) {
     let analysis = crate::state::AnalysisResult::new(1, AnalysisType::Transient, "Transient")
         .with_waveforms(vec![crate::state::WaveformData::new(
-            name,
-            time,
-            values,
-            "#4aa3ff",
+            name, time, values, "#4aa3ff",
         )]);
     let run = state.simulation.start_run();
     run.add_analysis(analysis);
@@ -483,23 +483,24 @@ fn test_ensure_transient_fft_viewer_data_loads_in_background() {
         .collect();
     seed_active_transient_analysis(&mut state, "V(out)", time, values);
 
-    let initial = controller.ensure_transient_viewer_data(&mut state, crate::viewers::ActiveViewer::Fft);
+    let initial =
+        controller.ensure_transient_viewer_data(&mut state, crate::viewers::ActiveViewer::Fft);
     assert_eq!(
         initial,
         crate::simulation::controller::DerivedViewerLoadState::Loading
     );
 
-    let final_state =
-        wait_for_derived_view(&mut controller, &mut state, crate::viewers::ActiveViewer::Fft);
+    let final_state = wait_for_derived_view(
+        &mut controller,
+        &mut state,
+        crate::viewers::ActiveViewer::Fft,
+    );
     assert_eq!(
         final_state,
         crate::simulation::controller::DerivedViewerLoadState::Ready
     );
     assert!(state.fft_state.has_data());
-    assert_eq!(
-        state.fft_state.selected_source.as_deref(),
-        Some("V(out)")
-    );
+    assert_eq!(state.fft_state.selected_source.as_deref(), Some("V(out)"));
 }
 
 #[test]
@@ -551,29 +552,22 @@ fn test_sync_transient_post_views_clears_fft_when_active_analysis_changes() {
 
     let run = state.simulation.start_run();
     run.add_analysis(
-        crate::state::AnalysisResult::new(1, AnalysisType::Transient, "TR-A").with_waveforms(
-            vec![crate::state::WaveformData::new(
-                "V(a)",
-                time.clone(),
-                values_a,
-                "#4aa3ff",
-            )],
-        ),
+        crate::state::AnalysisResult::new(1, AnalysisType::Transient, "TR-A").with_waveforms(vec![
+            crate::state::WaveformData::new("V(a)", time.clone(), values_a, "#4aa3ff"),
+        ]),
     );
     run.add_analysis(
-        crate::state::AnalysisResult::new(2, AnalysisType::Transient, "TR-B").with_waveforms(
-            vec![crate::state::WaveformData::new(
-                "V(b)",
-                time,
-                values_b,
-                "#ffb347",
-            )],
-        ),
+        crate::state::AnalysisResult::new(2, AnalysisType::Transient, "TR-B").with_waveforms(vec![
+            crate::state::WaveformData::new("V(b)", time, values_b, "#ffb347"),
+        ]),
     );
     state.simulation.complete_run();
 
-    let final_state =
-        wait_for_derived_view(&mut controller, &mut state, crate::viewers::ActiveViewer::Fft);
+    let final_state = wait_for_derived_view(
+        &mut controller,
+        &mut state,
+        crate::viewers::ActiveViewer::Fft,
+    );
     assert_eq!(
         final_state,
         crate::simulation::controller::DerivedViewerLoadState::Ready
@@ -584,16 +578,16 @@ fn test_sync_transient_post_views_clears_fft_when_active_analysis_changes() {
     controller.sync_transient_post_views(&mut state);
 
     assert!(!state.fft_state.has_data());
-    let reload_state =
-        wait_for_derived_view(&mut controller, &mut state, crate::viewers::ActiveViewer::Fft);
+    let reload_state = wait_for_derived_view(
+        &mut controller,
+        &mut state,
+        crate::viewers::ActiveViewer::Fft,
+    );
     assert_eq!(
         reload_state,
         crate::simulation::controller::DerivedViewerLoadState::Ready
     );
-    assert_eq!(
-        state.fft_state.selected_source.as_deref(),
-        Some("V(b)")
-    );
+    assert_eq!(state.fft_state.selected_source.as_deref(), Some("V(b)"));
 }
 
 #[test]
@@ -1539,4 +1533,3 @@ fn test_touchstone_export_path_uses_port_count_extension() {
         normalized
     );
 }
-

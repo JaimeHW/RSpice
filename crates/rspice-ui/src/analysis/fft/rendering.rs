@@ -5,9 +5,9 @@
 use egui::{
     Color32, CursorIcon, FontId, Pos2, Rect, Rounding, Sense, Shape, Stroke, Ui, UiBuilder, Vec2,
 };
+use std::cell::RefCell;
 #[cfg(test)]
 use std::f64::consts::PI;
-use std::cell::RefCell;
 
 use super::data::{FftData, FftPoint, SpectrumNormalization};
 use super::state::{FftState, FrequencyScale, InputFidelity, MagnitudeScale};
@@ -1449,7 +1449,7 @@ fn visible_spectrum_index_window(data: &FftData, state: &FftState) -> Option<(us
         .points
         .partition_point(|point| point.frequency <= upper_bound)
         + 1)
-        .min(data.points.len());
+    .min(data.points.len());
 
     (end > start).then_some((start, end))
 }
@@ -1593,8 +1593,8 @@ fn build_spectrum_polyline_in_scratch(
             continue;
         }
 
-        let bucket_index = ((x - rect.min.x).floor() as isize).clamp(0, bucket_count as isize - 1)
-            as usize;
+        let bucket_index =
+            ((x - rect.min.x).floor() as isize).clamp(0, bucket_count as isize - 1) as usize;
         update_spectrum_bucket(
             &mut scratch.buckets[bucket_index],
             SpectrumScreenSample {

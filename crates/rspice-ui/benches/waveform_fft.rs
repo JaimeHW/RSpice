@@ -16,7 +16,11 @@ fn run_ui_frame(ctx: &egui::Context, mut f: impl FnMut(&mut egui::Ui)) {
     });
 }
 
-fn build_uniform_transient(sample_count: usize, sample_rate: f64, tone_hz: f64) -> (Vec<f64>, Vec<f64>) {
+fn build_uniform_transient(
+    sample_count: usize,
+    sample_rate: f64,
+    tone_hz: f64,
+) -> (Vec<f64>, Vec<f64>) {
     let time: Vec<f64> = (0..sample_count)
         .map(|idx| idx as f64 / sample_rate)
         .collect();
@@ -30,7 +34,11 @@ fn build_uniform_transient(sample_count: usize, sample_rate: f64, tone_hz: f64) 
     (time, values)
 }
 
-fn build_nonuniform_transient(sample_count: usize, sample_rate: f64, tone_hz: f64) -> (Vec<f64>, Vec<f64>) {
+fn build_nonuniform_transient(
+    sample_count: usize,
+    sample_rate: f64,
+    tone_hz: f64,
+) -> (Vec<f64>, Vec<f64>) {
     let dt = 1.0 / sample_rate;
     let mut time = Vec::with_capacity(sample_count);
     let mut values = Vec::with_capacity(sample_count);
@@ -74,7 +82,8 @@ fn bench_waveform_render(c: &mut Criterion) {
 fn bench_fft_pipeline(c: &mut Criterion) {
     let sample_rate = 10_000_000.0;
     let sample_count = 1_000_000usize;
-    let (uniform_time, uniform_values) = build_uniform_transient(sample_count, sample_rate, 250_000.0);
+    let (uniform_time, uniform_values) =
+        build_uniform_transient(sample_count, sample_rate, 250_000.0);
     let (nonuniform_time, nonuniform_values) =
         build_nonuniform_transient(sample_count, sample_rate, 250_000.0);
 
@@ -109,13 +118,9 @@ fn bench_fft_pipeline(c: &mut Criterion) {
         });
     });
 
-    let prepared = prepare_fft_input_with_options(
-        "V(out)",
-        &uniform_time,
-        &uniform_values,
-        reference_options,
-    )
-    .expect("prepared FFT input");
+    let prepared =
+        prepare_fft_input_with_options("V(out)", &uniform_time, &uniform_values, reference_options)
+            .expect("prepared FFT input");
 
     c.bench_function("fft_compute_reference_spectrum_1m", |b| {
         b.iter(|| {

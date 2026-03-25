@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::{
-    Arc,
     atomic::{AtomicBool, Ordering},
+    Arc,
 };
 
 use super::super::config::{

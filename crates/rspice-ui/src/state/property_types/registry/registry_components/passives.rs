@@ -494,7 +494,9 @@ impl PropertyRegistry {
         sheet.add(
             PropertyDefinition::new("inductors")
                 .with_display_name("Windings")
-                .with_description("Space- or comma-separated inductor instance names (for example: L1 L2)")
+                .with_description(
+                    "Space- or comma-separated inductor instance names (for example: L1 L2)",
+                )
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("L1 L2"))
                 .with_order(11)
