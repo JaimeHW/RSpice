@@ -7,32 +7,29 @@
 
 [![License](https://img.shields.io/badge/license-Source%20Available-red.svg?style=flat-square)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg?style=flat-square)](https://www.rust-lang.org)
-[![Platform](https://img.shields.io/badge/platform-win%20%7C%20macos%20%7C%20linux-lightgrey.svg?style=flat-square)](https://github.com/JaimeHW/RSpice)
+[![Platform](https://img.shields.io/badge/platform-win%20%7C%20macos%20%7C%20linux-lightgrey.svg?style=flat-square)](https://github.com/JaimeHW/rspice)
 
-<img src="assets/image.png" alt="RSpice Studio" width="100%" style="border-radius: 8px; box-shadow: 0 12px 40px rgba(0,0,0,0.6);" />
-<img src="assets/image2.png" alt="RSpice Studio" width="100%" style="border-radius: 8px; box-shadow: 0 12px 40px rgba(0,0,0,0.6);" />
+<img src="assets/image.png" alt="RSpice Studio schematic and waveform view" width="100%" />
+<img src="assets/image2.png" alt="RSpice Studio analysis view" width="100%" />
 
 </div>
 
 ## Overview
 
-RSpice is a Rust workspace for circuit simulation and design exploration. It includes a SPICE engine, a desktop UI, a command-line workflow, Python bindings, and a Verilog-A compiler/runtime.
+RSpice is a Rust workspace for circuit simulation and design exploration. It combines a SPICE engine, a desktop UI, a command-line workflow, Python bindings, and a Verilog-A toolchain in one repository.
 
-The project is aimed at serious analog and mixed-signal work: fast release-mode execution, regression-driven validation, broad device-model coverage, and tooling that is practical for batch flows as well as interactive debugging.
+The project is aimed at practical analog and mixed-signal work: release-oriented execution, regression-driven validation, broad device-model coverage, and tooling that supports both scripted flows and interactive debugging.
 
-## Current Status
+## Project Status
 
-This repository is ready for an early public release, not a finished replacement for commercial EDA suites.
+RSpice is in active development.
 
-What is solid today:
-- Release-mode workspace tests are green.
-- Release-mode `clippy` is green for the full workspace.
-- The ngspice regression aggregate in this repository runs without skips in release mode.
-- The CLI supports built-in RAW, ASCII RAW, CSV, JSON, TSV, and HDF5 output.
+- The repository already contains a broad implementation surface: core analyses, device models, CLI workflows, a desktop UI, Python bindings, and Verilog-A infrastructure.
+- The workspace includes extensive automated tests and ngspice-based regression coverage.
+- The breadth of implemented functionality is ahead of product polish in some areas.
+- It is not yet a drop-in replacement for mature commercial EDA suites.
 
-What to expect:
-- The project has a broad feature set, but some areas are still evolving.
-- Claims in this README are limited to what is implemented in the current repository state.
+This README is intentionally scoped to what is implemented in the repository today.
 
 ## Highlights
 
@@ -45,9 +42,9 @@ What to expect:
 
 ## Capabilities
 
-### Analyses
+The workspace includes implementations for the following analysis families. Frontend coverage and workflow polish vary by crate.
 
-RSpice includes support for a wide range of analysis flows, including:
+### Analyses
 
 - DC operating point and DC sweep
 - Transient
@@ -76,7 +73,7 @@ The repository includes implementations for:
 
 ## Workspace
 
-RSpice is currently organized as a five-crate Rust workspace:
+RSpice is organized as a five-crate Rust workspace:
 
 | Crate | Purpose |
 | :--- | :--- |
@@ -85,6 +82,10 @@ RSpice is currently organized as a five-crate Rust workspace:
 | `rspice-ui` | Desktop application for schematic editing and waveform inspection |
 | `rspice-veriloga` | Verilog-A parser, semantic pipeline, runtime, and optional native codegen |
 | `rspice-python` | Python bindings built with PyO3 |
+
+Additional crate-specific details:
+- [CLI README](crates/rspice-cli/README.md)
+- [Python README](crates/rspice-python/README.md)
 
 ## Building
 
@@ -97,7 +98,13 @@ RSpice is currently organized as a five-crate Rust workspace:
 ```bash
 git clone https://github.com/JaimeHW/RSpice.git
 cd RSpice
-RUSTFLAGS="-C target-cpu=native" cargo build --release
+cargo build --release --workspace
+```
+
+Optional host-tuned build:
+
+```bash
+RUSTFLAGS="-C target-cpu=native" cargo build --release --workspace
 ```
 
 ## Quick Start
@@ -115,7 +122,7 @@ C1 2 0 1n
 .END
 ```
 
-Run it from the CLI:
+Run it with the CLI:
 
 ```bash
 cargo run -p rspice-cli --release -- run rc_circuit.sp
@@ -127,7 +134,7 @@ Write the results directly to HDF5:
 cargo run -p rspice-cli --release -- run rc_circuit.sp -o rc_circuit.h5 --format hdf5
 ```
 
-## Usage
+## Running the Workspace
 
 ### Desktop UI
 
@@ -138,7 +145,7 @@ cargo run -p rspice-ui --release
 ### CLI
 
 ```bash
-cargo run -p rspice-cli --release -- run design.cir
+cargo run -p rspice-cli --release -- --help
 ```
 
 ### Python
