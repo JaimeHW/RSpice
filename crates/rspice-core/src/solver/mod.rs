@@ -140,12 +140,7 @@ pub struct Simulator {
 
 impl Default for Simulator {
     fn default() -> Self {
-        Self {
-            tolerance: 1e-9,
-            max_iterations: 50,
-            min_timestep: 1e-15,
-            max_timestep: 1e-3,
-        }
+        crate::engine::SimulationConfig::default().into()
     }
 }
 
@@ -164,5 +159,65 @@ impl Simulator {
     pub fn with_max_iterations(mut self, max: usize) -> Self {
         self.max_iterations = max;
         self
+    }
+}
+
+impl From<&crate::engine::SimulationConfig> for Simulator {
+    fn from(config: &crate::engine::SimulationConfig) -> Self {
+        Self {
+            tolerance: config.tolerance,
+            max_iterations: config.max_iterations,
+            min_timestep: config.min_timestep,
+            max_timestep: config.max_timestep,
+        }
+    }
+}
+
+impl From<crate::engine::SimulationConfig> for Simulator {
+    fn from(config: crate::engine::SimulationConfig) -> Self {
+        Self::from(&config)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Simulator;
+
+    #[test]
+    fn test_simulator_default_matches_engine_defaults() {
+        let simulator = Simulator::default();
+        let config = crate::engine::SimulationConfig::default();
+
+        assert_eq!(simulator.tolerance, config.tolerance);
+        assert_eq!(simulator.max_iterations, config.max_iterations);
+        assert_eq!(simulator.min_timestep, config.min_timestep);
+        assert_eq!(simulator.max_timestep, config.max_timestep);
+    }
+
+    #[test]
+    fn test_simulation_config_default_uses_shared_constants() {
+        let config = crate::engine::SimulationConfig::default();
+
+        assert_eq!(config.tolerance, crate::constants::DEFAULT_TOLERANCE);
+        assert_eq!(config.max_iterations, crate::constants::MAX_NR_ITERATIONS);
+        assert_eq!(config.min_timestep, crate::constants::MIN_TIMESTEP);
+        assert_eq!(config.max_timestep, crate::constants::MAX_TIMESTEP);
+        assert_eq!(config.temperature, crate::constants::TEMP_REFERENCE);
+    }
+
+    #[test]
+    fn test_simulator_from_engine_config_preserves_selected_fields() {
+        let mut config = crate::engine::SimulationConfig::default();
+        config.tolerance = 2e-5;
+        config.max_iterations = 87;
+        config.min_timestep = 4e-12;
+        config.max_timestep = 9e-6;
+
+        let simulator = Simulator::from(&config);
+
+        assert_eq!(simulator.tolerance, 2e-5);
+        assert_eq!(simulator.max_iterations, 87);
+        assert_eq!(simulator.min_timestep, 4e-12);
+        assert_eq!(simulator.max_timestep, 9e-6);
     }
 }

@@ -157,10 +157,10 @@ impl Default for ConvergenceConfig {
             damping_strategy: DampingStrategy::VoltageLimiting,
             gmin_initial: 1e-12,
             gmin_target: 1e-15,
-            voltage_reltol: 1e-3,
+            voltage_reltol: crate::constants::RELTOL,
             voltage_abstol: 0.0,
-            current_abstol: 1e-12,
-            residual_reltol: 1e-3,
+            current_abstol: crate::constants::ITOL,
+            residual_reltol: crate::constants::RELTOL,
             verbose: false,
         }
     }
@@ -238,9 +238,9 @@ pub struct BypassConfig {
 impl Default for BypassConfig {
     fn default() -> Self {
         Self {
-            enabled: false, // Conservative default - must be explicitly enabled
-            reltol: 1e-3,   // 0.1% relative change threshold
-            abstol: 1e-6,   // 1µV absolute change threshold
+            enabled: false,                   // Conservative default - must be explicitly enabled
+            reltol: crate::constants::RELTOL, // 0.1% relative change threshold
+            abstol: crate::constants::VNTOL,  // 1uV absolute change threshold
         }
     }
 }
@@ -267,11 +267,11 @@ impl BypassConfig {
 impl Default for SimulationConfig {
     fn default() -> Self {
         Self {
-            tolerance: 1e-6, // 1μV tolerance (was 1e-9, too tight)
-            max_iterations: 50,
-            min_timestep: 1e-12, // 1ps min timestep (was 1e-15, impractical)
-            max_timestep: 1e-3,
-            temperature: 300.0, // Room temperature
+            tolerance: crate::constants::DEFAULT_TOLERANCE,
+            max_iterations: crate::constants::MAX_NR_ITERATIONS,
+            min_timestep: crate::constants::MIN_TIMESTEP,
+            max_timestep: crate::constants::MAX_TIMESTEP,
+            temperature: crate::constants::TEMP_REFERENCE,
             integration_method: crate::analysis::IntegrationMethod::TrapGear,
             bypass_config: BypassConfig::default(),
             convergence_config: ConvergenceConfig::default(),

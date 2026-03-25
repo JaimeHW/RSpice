@@ -15,11 +15,6 @@ use crate::Value;
 // Numerical Tolerances
 //=============================================================================
 
-/// Default absolute voltage tolerance for convergence checking (volts)
-///
-/// Similar to SPICE ABSTOL parameter. Typical range: 1e-12 to 1e-6.
-pub const ABSTOL: Value = 1e-9;
-
 /// Default relative tolerance for convergence checking (dimensionless)
 ///
 /// Similar to SPICE RELTOL parameter. Typical range: 1e-4 to 1e-2.
@@ -40,6 +35,16 @@ pub const CHGTOL: Value = 1e-14;
 /// Similar to SPICE VNTOL parameter.
 pub const VNTOL: Value = 1e-6;
 
+/// Default simulator-wide voltage/error tolerance used by legacy solver APIs.
+///
+/// Prefer `VNTOL` in new code. This alias is kept so older public entry points
+/// resolve to the same behavior as the engine defaults.
+pub const ABSTOL: Value = VNTOL;
+
+/// Default top-level simulator tolerance used by `SimulationConfig` and
+/// compatibility wrappers like `solver::Simulator`.
+pub const DEFAULT_TOLERANCE: Value = VNTOL;
+
 //=============================================================================
 // Newton-Raphson Iteration Control
 //=============================================================================
@@ -59,8 +64,9 @@ pub const MAX_TOTAL_ITERATIONS: usize = 100_000;
 
 /// Minimum allowable timestep for transient analysis (seconds)
 ///
-/// Prevents infinite loops when convergence is difficult.
-pub const MIN_TIMESTEP: Value = 1e-15;
+/// Prevents infinite loops when convergence is difficult while staying aligned
+/// with the engine's practical default floor.
+pub const MIN_TIMESTEP: Value = 1e-12;
 
 /// Maximum timestep for transient analysis (seconds)
 ///
