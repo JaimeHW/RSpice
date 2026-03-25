@@ -99,6 +99,25 @@ impl SimulationResult {
         }
     }
 
+    /// Resolve a node name to a node index, treating common ground aliases as
+    /// node 0.
+    pub fn node_index_named(&self, name: &str) -> Option<usize> {
+        if Self::is_ground_name(name) {
+            return Some(0);
+        }
+
+        self.node_names
+            .iter()
+            .position(|candidate| candidate.eq_ignore_ascii_case(name))
+    }
+
+    /// Get voltage at a node by name, returning `None` when the name does not
+    /// resolve to a known node.
+    pub fn try_voltage_named(&self, name: &str) -> Option<Value> {
+        let node = self.node_index_named(name)?;
+        self.try_voltage(node)
+    }
+
     /// Initialize waveform storage for transient analysis
     pub fn init_waveforms(&mut self, num_nodes: usize, estimated_points: usize) {
         self.voltage_waveforms = vec![Vec::with_capacity(estimated_points); num_nodes + 1];
@@ -156,6 +175,10 @@ impl SimulationResult {
                 .get(name)
                 .and_then(|&idx| self.branch_currents.get(idx).copied())
         })
+    }
+
+    fn is_ground_name(name: &str) -> bool {
+        matches!(name, "0") || name.eq_ignore_ascii_case("gnd")
     }
 }
 
@@ -288,6 +311,22 @@ mod tests {
         assert_eq!(result.try_voltage(1), Some(1.25));
         assert_eq!(result.try_voltage(2), Some(-0.5));
         assert_eq!(result.try_voltage(3), None);
+    }
+
+    #[test]
+    fn test_simulation_result_named_lookup_supports_ground_and_case_insensitive_names() {
+        let mut result = super::SimulationResult::new(2, 0);
+        result.node_names = vec!["0".to_string(), "In".to_string(), "OUT".to_string()];
+        result.node_voltages[1] = 1.25;
+        result.node_voltages[2] = -0.5;
+
+        assert_eq!(result.node_index_named("gnd"), Some(0));
+        assert_eq!(result.node_index_named("in"), Some(1));
+        assert_eq!(result.node_index_named("out"), Some(2));
+        assert_eq!(result.try_voltage_named("GND"), Some(0.0));
+        assert_eq!(result.try_voltage_named("IN"), Some(1.25));
+        assert_eq!(result.try_voltage_named("out"), Some(-0.5));
+        assert_eq!(result.try_voltage_named("missing"), None);
     }
 
     #[test]

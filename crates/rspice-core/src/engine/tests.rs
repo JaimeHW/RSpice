@@ -58,6 +58,28 @@ R2 2 0 1k
     }
 
     #[test]
+    fn test_transient_result_named_lookup_supports_ground_and_case_insensitive_names() {
+        let result = crate::engine::TransientResult {
+            time: vec![0.0, 1.0],
+            voltages: vec![vec![1.0, 1.5], vec![2.0, 2.5]],
+            num_nodes: 2,
+            node_names: vec!["n1".to_string(), "OUT".to_string()],
+        };
+
+        assert_eq!(result.node_index_named("gnd"), Some(0));
+        assert_eq!(result.node_index_named("n1"), Some(1));
+        assert_eq!(result.node_index_named("out"), Some(2));
+        assert_eq!(result.try_voltage_at_named("OUT", 1), Some(2.5));
+        assert_eq!(result.try_voltage_at_named("0", 1), Some(0.0));
+        assert_eq!(
+            result.try_voltage_waveform_named("n1"),
+            Some(&[1.0, 1.5][..])
+        );
+        assert_eq!(result.try_voltage_waveform_named("gnd"), None);
+        assert_eq!(result.try_voltage_at_named("missing", 0), None);
+    }
+
+    #[test]
     fn test_transient_result_fail_fast_accessors_panic_on_invalid_lookup() {
         let result = crate::engine::TransientResult {
             time: vec![0.0, 1.0],

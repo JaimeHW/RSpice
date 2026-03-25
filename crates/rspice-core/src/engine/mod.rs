@@ -327,6 +327,19 @@ impl TransientResult {
             .copied()
     }
 
+    /// Resolve a node name to a 1-based node index, treating common ground
+    /// aliases as node 0.
+    pub fn node_index_named(&self, name: &str) -> Option<usize> {
+        if Self::is_ground_name(name) {
+            return Some(0);
+        }
+
+        self.node_names
+            .iter()
+            .position(|candidate| candidate.eq_ignore_ascii_case(name))
+            .map(|idx| idx + 1)
+    }
+
     /// Get the complete voltage waveform for a node.
     ///
     /// Panics when `node` is invalid. Use [`Self::try_voltage_waveform`] for
@@ -350,9 +363,33 @@ impl TransientResult {
         self.voltages.get(node - 1).map(|v| v.as_slice())
     }
 
+    /// Get the complete voltage waveform for a named node, returning `None`
+    /// when the name does not resolve to a non-ground node.
+    pub fn try_voltage_waveform_named(&self, name: &str) -> Option<&[Value]> {
+        let node = self.node_index_named(name)?;
+        if node == 0 {
+            return None;
+        }
+        self.try_voltage_waveform(node)
+    }
+
+    /// Get voltage at a named node and time index, returning `None` when the
+    /// name or time index is invalid.
+    pub fn try_voltage_at_named(&self, name: &str, time_index: usize) -> Option<Value> {
+        let node = self.node_index_named(name)?;
+        if node == 0 {
+            return self.time.get(time_index).map(|_| 0.0);
+        }
+        self.try_voltage_at(node, time_index)
+    }
+
     /// Get number of time points
     pub fn num_points(&self) -> usize {
         self.time.len()
+    }
+
+    fn is_ground_name(name: &str) -> bool {
+        matches!(name, "0") || name.eq_ignore_ascii_case("gnd")
     }
 }
 
