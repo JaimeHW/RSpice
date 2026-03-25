@@ -93,7 +93,6 @@ pub struct PathConfig {
     pub veriloga_includes: Vec<PathBuf>,
 }
 
-
 impl Default for SimulationConfig {
     fn default() -> Self {
         Self {
@@ -121,7 +120,6 @@ impl Default for OutputConfig {
         }
     }
 }
-
 
 impl Config {
     /// Load configuration from default locations

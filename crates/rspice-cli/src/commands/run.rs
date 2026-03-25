@@ -15,8 +15,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use rspice_core::netlist::AnalysisCommand;
 use rspice_core::{
     ConvergenceConfig, ConvergencePreset, Engine, Netlist, SimulationConfig,
-    SimulationConfigOverrides,
-    resolve_simulation_config,
+    SimulationConfigOverrides, resolve_simulation_config,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -708,8 +707,9 @@ fn run_dc_sweep(
                     data.title = "DC Sweep".to_string();
 
                     let mut dc_sweep = Hdf5WaveformSection::new(source, sweep_vals.clone());
-                    for (signal_name, waveform) in
-                        voltage_signal_names(node_waveforms.len()).into_iter().zip(&node_waveforms)
+                    for (signal_name, waveform) in voltage_signal_names(node_waveforms.len())
+                        .into_iter()
+                        .zip(&node_waveforms)
                     {
                         dc_sweep.add_signal(signal_name, waveform.clone());
                     }
@@ -841,8 +841,9 @@ fn run_transient(
                     data.title = "Transient Analysis".to_string();
 
                     let mut transient = Hdf5WaveformSection::new("time", result.time.clone());
-                    for (signal_name, waveform) in
-                        transient_signal_names(&result).into_iter().zip(&result.voltages)
+                    for (signal_name, waveform) in transient_signal_names(&result)
+                        .into_iter()
+                        .zip(&result.voltages)
                     {
                         transient.add_signal(signal_name, waveform.clone());
                     }
@@ -927,13 +928,15 @@ fn run_ac(
                     let mut data = Hdf5SimulationData::new();
                     data.title = "AC Analysis".to_string();
 
-                    let mut ac = Hdf5AcSection::new(results.iter().map(|result| result.frequency).collect());
+                    let mut ac =
+                        Hdf5AcSection::new(results.iter().map(|result| result.frequency).collect());
                     if let Some(first) = results.first() {
                         for node in 1..=first.voltages.len() {
                             let mut real = Vec::with_capacity(results.len());
                             let mut imag = Vec::with_capacity(results.len());
                             for result in &results {
-                                let value = result.voltages.get(node - 1).copied().unwrap_or_default();
+                                let value =
+                                    result.voltages.get(node - 1).copied().unwrap_or_default();
                                 real.push(value.re);
                                 imag.push(value.im);
                             }

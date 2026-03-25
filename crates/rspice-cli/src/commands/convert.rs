@@ -145,8 +145,10 @@ fn write_hdf5_output(path: &std::path::Path, data: &WaveformData) -> Result<(), 
     let mut hdf5_data = Hdf5SimulationData::new();
     hdf5_data.title = "Converted Waveform Data".to_string();
 
-    let mut section =
-        Hdf5WaveformSection::new(data.independent_var.clone(), data.independent_values.clone());
+    let mut section = Hdf5WaveformSection::new(
+        data.independent_var.clone(),
+        data.independent_values.clone(),
+    );
     for (name, values) in data.variable_names.iter().zip(&data.variable_values) {
         section.add_signal(name.clone(), values.clone());
     }
@@ -193,8 +195,16 @@ fn waveform_data_from_section(section: Hdf5WaveformSection) -> WaveformData {
     WaveformData {
         independent_var: section.independent_name,
         independent_values: section.independent_values,
-        variable_names: section.signals.iter().map(|signal| signal.name.clone()).collect(),
-        variable_values: section.signals.into_iter().map(|signal| signal.values).collect(),
+        variable_names: section
+            .signals
+            .iter()
+            .map(|signal| signal.name.clone())
+            .collect(),
+        variable_values: section
+            .signals
+            .into_iter()
+            .map(|signal| signal.values)
+            .collect(),
     }
 }
 

@@ -13,7 +13,11 @@ fn fixtures_dir() -> PathBuf {
 
 fn fixture(name: &str) -> PathBuf {
     let path = fixtures_dir().join(name);
-    assert!(path.exists(), "missing CLI test fixture: {}", path.display());
+    assert!(
+        path.exists(),
+        "missing CLI test fixture: {}",
+        path.display()
+    );
     path
 }
 
@@ -860,13 +864,17 @@ fn test_run_hdf5_output_creates_operating_point_file() {
     let file = Hdf5File::open(&output_path).expect("HDF5 output should open");
     let root = file.root();
     let attrs = root.attrs().expect("root attrs");
-    assert!(matches!(attrs.get("title"), Some(AttrValue::String(title)) if title == "DC Operating Point"));
+    assert!(
+        matches!(attrs.get("title"), Some(AttrValue::String(title)) if title == "DC Operating Point")
+    );
 
     let mut groups = root.groups().expect("root groups");
     groups.sort();
     assert!(groups.contains(&"operating_point".to_string()));
 
-    let operating_point = file.group("operating_point").expect("operating point group");
+    let operating_point = file
+        .group("operating_point")
+        .expect("operating point group");
     let mut datasets = operating_point.datasets().expect("datasets");
     datasets.sort();
     assert!(datasets.contains(&"independent".to_string()));
@@ -896,7 +904,9 @@ fn test_convert_csv_to_hdf5_creates_waveform_file() {
     let file = Hdf5File::open(&output_path).expect("converted HDF5 should open");
     let transient = file.group("transient").expect("transient group");
     let attrs = transient.attrs().expect("transient attrs");
-    assert!(matches!(attrs.get("independent_name"), Some(AttrValue::String(name)) if name == "time"));
+    assert!(
+        matches!(attrs.get("independent_name"), Some(AttrValue::String(name)) if name == "time")
+    );
     let values = transient
         .dataset("signal_0000")
         .expect("signal dataset")

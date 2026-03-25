@@ -180,7 +180,10 @@ pub fn write_hdf5(path: &Path, data: &Hdf5SimulationData) -> Result<()> {
     data.validate()?;
 
     let mut builder = FileBuilder::new();
-    builder.set_attr("schema_version", AttrValue::String(SCHEMA_VERSION.to_string()));
+    builder.set_attr(
+        "schema_version",
+        AttrValue::String(SCHEMA_VERSION.to_string()),
+    );
     builder.set_attr("simulator", AttrValue::String("RSpice".to_string()));
     builder.set_attr("title", AttrValue::String(data.title.clone()));
 
@@ -308,7 +311,9 @@ fn add_ac_section(builder: &mut FileBuilder, section: &Hdf5AcSection) -> Result<
     let mut group = builder.create_group("ac");
     group.set_attr("section_type", AttrValue::String("ac".to_string()));
     group.set_attr("signal_count", AttrValue::I64(section.signals.len() as i64));
-    group.create_dataset("frequency").with_f64_data(&section.frequency);
+    group
+        .create_dataset("frequency")
+        .with_f64_data(&section.frequency);
 
     for (index, signal) in section.signals.iter().enumerate() {
         let prefix = format!("signal_{index:04}");
@@ -360,7 +365,10 @@ fn add_measurements(builder: &mut FileBuilder, measurements: &[Hdf5Measurement])
             &format!("{prefix}_name"),
             AttrValue::String(measurement.name.clone()),
         );
-        group.set_attr(&format!("{prefix}_value"), AttrValue::F64(measurement.value));
+        group.set_attr(
+            &format!("{prefix}_value"),
+            AttrValue::F64(measurement.value),
+        );
     }
     builder.add_group(group.finish());
     Ok(())
@@ -392,8 +400,9 @@ fn read_string_attr(attrs: &HashMap<String, AttrValue>, name: &str) -> Result<Op
 }
 
 fn read_required_string_attr(attrs: &HashMap<String, AttrValue>, name: &str) -> Result<String> {
-    read_string_attr(attrs, name)?
-        .ok_or_else(|| Hdf5Error::InvalidSchema(format!("missing required string attribute '{name}'")))
+    read_string_attr(attrs, name)?.ok_or_else(|| {
+        Hdf5Error::InvalidSchema(format!("missing required string attribute '{name}'"))
+    })
 }
 
 fn read_required_i64_attr(attrs: &HashMap<String, AttrValue>, name: &str) -> Result<i64> {
@@ -445,7 +454,8 @@ mod tests {
         ac.add_signal("V(out)", vec![1.0, 0.5, 0.1], vec![0.0, -0.1, -0.2]);
         data.ac = Some(ac);
 
-        data.measurements.push(Hdf5Measurement::new("gain_db", 20.0));
+        data.measurements
+            .push(Hdf5Measurement::new("gain_db", 20.0));
         data
     }
 
@@ -454,7 +464,9 @@ mod tests {
         let mut section = Hdf5WaveformSection::new("time", vec![0.0, 1.0]);
         section.add_signal("V(out)", vec![1.0]);
 
-        let err = section.validate("transient").expect_err("length mismatch should fail");
+        let err = section
+            .validate("transient")
+            .expect_err("length mismatch should fail");
         assert!(err.to_string().contains("expected 2"));
     }
 
@@ -463,7 +475,9 @@ mod tests {
         let mut section = Hdf5AcSection::new(vec![1.0, 2.0]);
         section.add_signal("V(out)", vec![1.0, 0.5], vec![0.0]);
 
-        let err = section.validate().expect_err("imaginary length mismatch should fail");
+        let err = section
+            .validate()
+            .expect_err("imaginary length mismatch should fail");
         assert!(err.to_string().contains("imaginary part"));
     }
 
