@@ -4,6 +4,7 @@
 
 use egui::{pos2, Color32, Rect, RichText, Stroke, Ui, Vec2};
 
+use super::component_palette::component_palette;
 use crate::common::app::AppState;
 use crate::state::{ComponentType, Tool};
 
@@ -527,59 +528,30 @@ pub fn render_toolbar(ui: &mut Ui, state: &mut AppState) {
             &component_response,
             egui::PopupCloseBehavior::CloseOnClickOutside,
             |ui| {
-                ui.set_min_width(140.0);
-                ui.label("Components");
-                ui.separator();
+                ui.set_min_width(220.0);
 
-                if ui.button("Resistor (R+Shift)").clicked() {
-                    state.schematic.tool = Tool::Place(ComponentType::Resistor);
-                    ui.memory_mut(|mem| mem.close_popup());
-                }
-                if ui.button("Capacitor (C)").clicked() {
-                    state.schematic.tool = Tool::Place(ComponentType::Capacitor);
-                    ui.memory_mut(|mem| mem.close_popup());
-                }
-                if ui.button("Inductor (L)").clicked() {
-                    state.schematic.tool = Tool::Place(ComponentType::Inductor);
-                    ui.memory_mut(|mem| mem.close_popup());
-                }
+                for (section_idx, section) in component_palette().iter().enumerate() {
+                    ui.label(section.title);
+                    ui.separator();
 
-                ui.separator();
+                    for entry in section.entries {
+                        let button_label = if entry.kind == ComponentType::Resistor {
+                            format!("{} (R+Shift)", entry.label)
+                        } else if let Some(shortcut) = Tool::Place(entry.kind).shortcut() {
+                            format!("{} ({})", entry.label, shortcut.to_ascii_uppercase())
+                        } else {
+                            entry.label.to_string()
+                        };
 
-                if ui.button("Voltage Source (V)").clicked() {
-                    state.schematic.tool = Tool::Place(ComponentType::VoltageSource);
-                    ui.memory_mut(|mem| mem.close_popup());
-                }
-                if ui.button("Current Source (I)").clicked() {
-                    state.schematic.tool = Tool::Place(ComponentType::CurrentSource);
-                    ui.memory_mut(|mem| mem.close_popup());
-                }
-                if ui.button("Ground (G)").clicked() {
-                    state.schematic.tool = Tool::Place(ComponentType::Ground);
-                    ui.memory_mut(|mem| mem.close_popup());
-                }
+                        if ui.button(button_label).clicked() {
+                            state.schematic.tool = Tool::Place(entry.kind);
+                            ui.memory_mut(|mem| mem.close_popup());
+                        }
+                    }
 
-                ui.separator();
-
-                if ui.button("Diode (D)").clicked() {
-                    state.schematic.tool = Tool::Place(ComponentType::Diode);
-                    ui.memory_mut(|mem| mem.close_popup());
-                }
-                if ui.button("NMOS (M)").clicked() {
-                    state.schematic.tool = Tool::Place(ComponentType::Nmos);
-                    ui.memory_mut(|mem| mem.close_popup());
-                }
-                if ui.button("PMOS").clicked() {
-                    state.schematic.tool = Tool::Place(ComponentType::Pmos);
-                    ui.memory_mut(|mem| mem.close_popup());
-                }
-                if ui.button("NPN BJT (Q)").clicked() {
-                    state.schematic.tool = Tool::Place(ComponentType::NpnBjt);
-                    ui.memory_mut(|mem| mem.close_popup());
-                }
-                if ui.button("PNP BJT").clicked() {
-                    state.schematic.tool = Tool::Place(ComponentType::PnpBjt);
-                    ui.memory_mut(|mem| mem.close_popup());
+                    if section_idx + 1 < component_palette().len() {
+                        ui.separator();
+                    }
                 }
             },
         );

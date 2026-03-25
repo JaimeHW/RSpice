@@ -15,6 +15,7 @@
 //! - This module provides the egui view layer
 //! - User interactions are translated to state mutations
 
+mod component_palette;
 pub mod export;
 pub mod op_annotation;
 mod source_labels;
