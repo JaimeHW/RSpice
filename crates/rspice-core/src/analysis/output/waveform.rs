@@ -346,6 +346,7 @@ impl WaveformRecorder {
             time: self.times.clone(),
             voltages: self.values.clone(),
             num_nodes: self.num_channels,
+            node_names: (1..=self.num_channels).map(|i| i.to_string()).collect(),
             compression_ratio: self.compression_ratio(),
             input_points: self.input_count,
         }
@@ -367,6 +368,9 @@ pub struct TransientResultCompressed {
 
     /// Number of nodes
     pub num_nodes: usize,
+
+    /// Node names aligned with `voltages`
+    pub node_names: Vec<String>,
 
     /// Compression ratio achieved
     pub compression_ratio: Value,
@@ -708,6 +712,7 @@ mod tests {
             time: vec![0.0, 1.0],
             voltages: vec![vec![0.0, 1.0]],
             num_nodes: 1,
+            node_names: vec!["1".to_string()],
             compression_ratio: 1.0,
             input_points: 2,
         };
@@ -722,10 +727,22 @@ mod tests {
             time: vec![0.0, 1.0],
             voltages: vec![vec![0.0, 1.0]],
             num_nodes: 1,
+            node_names: vec!["1".to_string()],
             compression_ratio: 1.0,
             input_points: 2,
         };
 
         assert!(result.interpolate(0, f64::NAN).is_none());
+    }
+
+    #[test]
+    fn test_to_transient_result_populates_default_node_names() {
+        let config = CompressionConfig::none();
+        let mut recorder = WaveformRecorder::new(2, 0.0, &[0.0, 1.0], config);
+        recorder.record(1.0, &[1.0, 2.0]);
+        recorder.finalize(1.0, &[1.0, 2.0]);
+
+        let result = recorder.to_transient_result();
+        assert_eq!(result.node_names, vec!["1".to_string(), "2".to_string()]);
     }
 }

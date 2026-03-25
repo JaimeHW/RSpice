@@ -2462,6 +2462,7 @@ impl Engine {
                 time: Vec::new(),
                 voltages: vec![Vec::new(); result.num_nodes],
                 num_nodes: result.num_nodes,
+                node_names: result.node_names.clone(),
                 compression_ratio: 1.0,
                 input_points: 0,
             });
@@ -2495,7 +2496,9 @@ impl Engine {
             .collect();
         recorder.finalize(*result.time.last().unwrap_or(&tstop), &final_values);
 
-        Ok(recorder.to_transient_result())
+        let mut compressed = recorder.to_transient_result();
+        compressed.node_names = result.node_names.clone();
+        Ok(compressed)
     }
 }
 

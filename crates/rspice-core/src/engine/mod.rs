@@ -325,8 +325,11 @@ impl TransientResult {
 
 impl From<TransientResultCompressed> for TransientResult {
     fn from(compressed: TransientResultCompressed) -> Self {
-        // Generate numeric fallback names - caller should override with actual names
-        let node_names = (1..=compressed.num_nodes).map(|i| i.to_string()).collect();
+        let node_names = if compressed.node_names.len() == compressed.num_nodes {
+            compressed.node_names
+        } else {
+            (1..=compressed.num_nodes).map(|i| i.to_string()).collect()
+        };
         Self {
             time: compressed.time,
             voltages: compressed.voltages,

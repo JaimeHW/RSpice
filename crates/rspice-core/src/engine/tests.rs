@@ -3748,6 +3748,32 @@ Rload 2 0 50
     }
 
     #[test]
+    fn test_run_tran_compressed_preserves_node_names() {
+        let netlist = Netlist::parse(
+            r#"
+* Compressed transient node-name mapping
+V1 in 0 PULSE(0 1 0 1n 1n 5n 10n)
+R1 in out 1k
+C1 out 0 1n
+.end
+"#,
+        )
+        .unwrap();
+
+        let result = Engine::default()
+            .run_tran_compressed(
+                &netlist,
+                20e-9,
+                1e-9,
+                crate::engine::CompressionConfig::none(),
+            )
+            .expect("compressed transient should succeed");
+
+        assert_eq!(result.node_names, vec!["IN".to_string(), "OUT".to_string()]);
+        assert_eq!(result.node_names.len(), result.num_nodes);
+    }
+
+    #[test]
     fn test_transient_tline_model_attenuation_reduces_load_peak() {
         let lossless_netlist = Netlist::parse(
             r#"
