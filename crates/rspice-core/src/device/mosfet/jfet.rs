@@ -103,6 +103,12 @@ pub struct JfetParams {
     pub eta: Value,
     /// HFET/MESFET low-field channel conductivity term
     pub sigma0: Value,
+    /// Flicker noise coefficient (KF)
+    pub kf: Value,
+    /// Flicker noise current exponent (AF)
+    pub af: Value,
+    /// Flicker noise frequency exponent (EF)
+    pub ef: Value,
     /// Nominal temperature (K)
     pub tnom: Value,
     /// Channel model to evaluate.
@@ -205,20 +211,23 @@ pub struct JfetParams {
 impl Default for JfetParams {
     fn default() -> Self {
         Self {
-            vto: -2.0,    // Threshold voltage (depletion mode)
-            beta: 1e-4,   // Transconductance coefficient
-            lambda: 0.0,  // Channel-length modulation
-            is: 1e-14,    // Gate saturation current
-            cgs: 0.0,     // Gate-source capacitance
-            cgd: 0.0,     // Gate-drain capacitance
-            pb: 1.0,      // Junction potential
-            m: 0.5,       // Grading coefficient
-            rd: 0.0,      // Drain resistance
-            rs: 0.0,      // Source resistance
-            fc: 0.5,      // Forward bias coefficient
-            n: 1.0,       // Emission coefficient
-            eta: 0.0,     // DIBL disabled by default
-            sigma0: 0.0,  // No extra linear channel conductivity by default
+            vto: -2.0,   // Threshold voltage (depletion mode)
+            beta: 1e-4,  // Transconductance coefficient
+            lambda: 0.0, // Channel-length modulation
+            is: 1e-14,   // Gate saturation current
+            cgs: 0.0,    // Gate-source capacitance
+            cgd: 0.0,    // Gate-drain capacitance
+            pb: 1.0,     // Junction potential
+            m: 0.5,      // Grading coefficient
+            rd: 0.0,     // Drain resistance
+            rs: 0.0,     // Source resistance
+            fc: 0.5,     // Forward bias coefficient
+            n: 1.0,      // Emission coefficient
+            eta: 0.0,    // DIBL disabled by default
+            sigma0: 0.0, // No extra linear channel conductivity by default
+            kf: 0.0,
+            af: 1.0,
+            ef: 1.0,
             tnom: 300.15, // 27C nominal
             channel_model: JfetChannelModel::ShichmanHodges,
             hfet_level: 2,
@@ -811,6 +820,27 @@ impl Jfet {
             .filter(|v| v.is_finite() && *v >= 0.0)
         {
             p.sigma0 = v;
+        }
+        if let Some(v) = params
+            .get("KF")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            p.kf = v;
+        }
+        if let Some(v) = params
+            .get("AF")
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.0)
+        {
+            p.af = v;
+        }
+        if let Some(v) = params
+            .get("EF")
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.0)
+        {
+            p.ef = v;
         }
 
         if let Some(v) = params
@@ -2609,6 +2639,20 @@ impl Jfet {
         (igs, igd)
     }
 
+    /// Return flicker-noise coefficients normalized by active area.
+    pub fn flicker_noise_coefficients(&self) -> Option<(Value, Value, Value)> {
+        if self.params.kf <= 0.0 || !self.params.kf.is_finite() {
+            return None;
+        }
+
+        let area = (self.width.max(1e-18) * self.length.max(1e-18)).max(1e-30);
+        Some((
+            self.params.kf / area,
+            self.params.af.max(1e-12),
+            self.params.ef.max(1e-12),
+        ))
+    }
+
     /// Calculate gate junction currents and conductances.
     ///
     /// Returned currents are defined in external terminal orientation:
@@ -3529,6 +3573,28 @@ mod tests {
         assert!((jfet.params.tnom - 325.0).abs() < 1e-12);
         assert!((jfet.params.m - 0.35).abs() < 1e-12);
         assert!((jfet.params.fc - 0.4).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_with_model_params_applies_noise_coefficients() {
+        use std::collections::HashMap;
+
+        let mut model = HashMap::new();
+        model.insert("KF".to_string(), 5e-18);
+        model.insert("AF".to_string(), 1.1);
+        model.insert("EF".to_string(), 1.6);
+
+        let jfet = Jfet::njf("J1", 1, 2, 0)
+            .with_model_params(&model)
+            .with_instance_params(&[("W".to_string(), 20e-6), ("L".to_string(), 0.8e-6)]);
+
+        let (kf, af, ef) = jfet
+            .flicker_noise_coefficients()
+            .expect("KF should enable flicker noise");
+        let expected_kf = 5e-18 / (jfet.width * jfet.length);
+        assert!((kf - expected_kf).abs() / expected_kf < 1e-12);
+        assert!((af - 1.1).abs() < 1e-12);
+        assert!((ef - 1.6).abs() < 1e-12);
     }
 
     #[test]

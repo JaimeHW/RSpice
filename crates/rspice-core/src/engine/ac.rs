@@ -7,7 +7,7 @@
 use super::{Engine, SimulationError};
 use crate::analysis::ac::AcResult;
 use crate::device::{MatrixStamper, NonlinearDevice};
-use crate::solver::ComplexMatrix;
+use crate::solver::{ComplexMatrix, StaticMatrix};
 use crate::{CircuitData, Complex64, Netlist, NodeId, Value};
 use std::f64::consts::PI;
 
@@ -257,6 +257,301 @@ impl Engine {
         }
     }
 
+    pub(super) fn build_small_signal_ac_matrix(
+        circuit: &CircuitData,
+        matrix: &StaticMatrix,
+        op_voltages: &[Value],
+        omega: Value,
+    ) -> ComplexMatrix {
+        let has_nonlinear = circuit.has_nonlinear_devices();
+        let size = circuit.matrix_size();
+        let mut ac_matrix = ComplexMatrix::from_real_structure(matrix);
+
+        // Stamp resistors (real conductance)
+        for (r_idx, stamp) in circuit.resistors.stamps.iter().enumerate() {
+            let g = circuit.resistors.conductances[r_idx];
+
+            if stamp.pp.row > 0 && stamp.pp.col > 0 {
+                ac_matrix.add_real(stamp.pp.row - 1, stamp.pp.col - 1, g);
+            }
+            if stamp.pn.row > 0 && stamp.pn.col > 0 {
+                ac_matrix.add_real(stamp.pn.row - 1, stamp.pn.col - 1, -g);
+            }
+            if stamp.np.row > 0 && stamp.np.col > 0 {
+                ac_matrix.add_real(stamp.np.row - 1, stamp.np.col - 1, -g);
+            }
+            if stamp.nn.row > 0 && stamp.nn.col > 0 {
+                ac_matrix.add_real(stamp.nn.row - 1, stamp.nn.col - 1, g);
+            }
+        }
+
+        // Stamp transmission lines as distributed 2-port Y-parameters.
+        for tline in &circuit.tlines {
+            Self::stamp_transmission_line_ac(&mut ac_matrix, tline, omega);
+        }
+
+        // Nonlinear device Jacobian (real part) evaluated at DC operating point.
+        if has_nonlinear {
+            Self::stamp_nonlinear_small_signal_real(&mut ac_matrix, circuit, op_voltages);
+        }
+
+        // Stamp capacitors: jωC
+        for (i, stamp) in circuit.capacitors.stamps.iter().enumerate() {
+            let c = circuit
+                .capacitors
+                .capacitances
+                .get(i)
+                .copied()
+                .unwrap_or(0.0);
+            let jwc = omega * c;
+
+            if stamp.pp.row > 0 && stamp.pp.col > 0 {
+                ac_matrix.add_imag(stamp.pp.row - 1, stamp.pp.col - 1, jwc);
+            }
+            if stamp.pn.row > 0 && stamp.pn.col > 0 {
+                ac_matrix.add_imag(stamp.pn.row - 1, stamp.pn.col - 1, -jwc);
+            }
+            if stamp.np.row > 0 && stamp.np.col > 0 {
+                ac_matrix.add_imag(stamp.np.row - 1, stamp.np.col - 1, -jwc);
+            }
+            if stamp.nn.row > 0 && stamp.nn.col > 0 {
+                ac_matrix.add_imag(stamp.nn.row - 1, stamp.nn.col - 1, jwc);
+            }
+        }
+
+        // Nonlinear semiconductor junction capacitances at the operating point.
+        if has_nonlinear {
+            Self::stamp_nonlinear_capacitances(&mut ac_matrix, circuit, op_voltages, omega);
+        }
+
+        // Stamp MOSFET capacitances: jωCgs, jωCgd, jωCgb (Meyer model)
+        for mos in &circuit.mosfets.devices {
+            let (cgs, cgd, cgb) = mos.ac_capacitances();
+            let ng = mos.node_gate;
+            let nd = mos.node_drain;
+            let ns = mos.node_source;
+            let nb = mos.node_bulk;
+
+            let jwcgs = omega * cgs;
+            if ng > 0 {
+                ac_matrix.add_imag(ng - 1, ng - 1, jwcgs);
+            }
+            if ng > 0 && ns > 0 {
+                ac_matrix.add_imag(ng - 1, ns - 1, -jwcgs);
+            }
+            if ns > 0 && ng > 0 {
+                ac_matrix.add_imag(ns - 1, ng - 1, -jwcgs);
+            }
+            if ns > 0 {
+                ac_matrix.add_imag(ns - 1, ns - 1, jwcgs);
+            }
+
+            let jwcgd = omega * cgd;
+            if ng > 0 {
+                ac_matrix.add_imag(ng - 1, ng - 1, jwcgd);
+            }
+            if ng > 0 && nd > 0 {
+                ac_matrix.add_imag(ng - 1, nd - 1, -jwcgd);
+            }
+            if nd > 0 && ng > 0 {
+                ac_matrix.add_imag(nd - 1, ng - 1, -jwcgd);
+            }
+            if nd > 0 {
+                ac_matrix.add_imag(nd - 1, nd - 1, jwcgd);
+            }
+
+            let jwcgb = omega * cgb;
+            if ng > 0 {
+                ac_matrix.add_imag(ng - 1, ng - 1, jwcgb);
+            }
+            if ng > 0 && nb > 0 {
+                ac_matrix.add_imag(ng - 1, nb - 1, -jwcgb);
+            }
+            if nb > 0 && ng > 0 {
+                ac_matrix.add_imag(nb - 1, ng - 1, -jwcgb);
+            }
+            if nb > 0 {
+                ac_matrix.add_imag(nb - 1, nb - 1, jwcgb);
+            }
+        }
+
+        // Voltage sources for AC (MNA branch equations)
+        for i in 0..circuit.voltage_sources.len() {
+            let np = circuit.voltage_sources.node_pos[i];
+            let nn = circuit.voltage_sources.node_neg[i];
+            let br_ordinal = circuit.voltage_sources.branch_indices[i];
+            let br = circuit.get_branch_matrix_index(br_ordinal);
+
+            if np > 0 {
+                ac_matrix.add_real(br - 1, np - 1, 1.0);
+                ac_matrix.add_real(np - 1, br - 1, 1.0);
+            }
+            if nn > 0 {
+                ac_matrix.add_real(br - 1, nn - 1, -1.0);
+                ac_matrix.add_real(nn - 1, br - 1, -1.0);
+            }
+        }
+
+        // Inductors for AC:
+        // V(np)-V(nn)-jωL*I = 0
+        for i in 0..circuit.inductors.len() {
+            let np = circuit.inductors.node_pos[i];
+            let nn = circuit.inductors.node_neg[i];
+            let br_ordinal = circuit.inductors.branch_indices[i];
+            let br = circuit.get_branch_matrix_index(br_ordinal);
+            let l = circuit.inductors.inductances[i];
+
+            if np > 0 {
+                ac_matrix.add_real(br - 1, np - 1, 1.0);
+                ac_matrix.add_real(np - 1, br - 1, 1.0);
+            }
+            if nn > 0 {
+                ac_matrix.add_real(br - 1, nn - 1, -1.0);
+                ac_matrix.add_real(nn - 1, br - 1, -1.0);
+            }
+            ac_matrix.add_imag(br - 1, br - 1, -omega * l);
+        }
+
+        // Controlled sources: VCVS
+        for i in 0..circuit.vcvs.len() {
+            let np = circuit.vcvs.node_pos[i];
+            let nn = circuit.vcvs.node_neg[i];
+            let cp = circuit.vcvs.ctrl_pos[i];
+            let cn = circuit.vcvs.ctrl_neg[i];
+            let br_ordinal = circuit.vcvs.branch_indices[i];
+            let br = circuit.get_branch_matrix_index(br_ordinal);
+            let gain = circuit.vcvs.gains[i];
+
+            if np > 0 {
+                ac_matrix.add_real(br - 1, np - 1, 1.0);
+                ac_matrix.add_real(np - 1, br - 1, 1.0);
+            }
+            if nn > 0 {
+                ac_matrix.add_real(br - 1, nn - 1, -1.0);
+                ac_matrix.add_real(nn - 1, br - 1, -1.0);
+            }
+            if cp > 0 {
+                ac_matrix.add_real(br - 1, cp - 1, -gain);
+            }
+            if cn > 0 {
+                ac_matrix.add_real(br - 1, cn - 1, gain);
+            }
+        }
+
+        // Controlled sources: VCCS
+        for i in 0..circuit.vccs.len() {
+            let np = circuit.vccs.node_pos[i];
+            let nn = circuit.vccs.node_neg[i];
+            let cp = circuit.vccs.ctrl_pos[i];
+            let cn = circuit.vccs.ctrl_neg[i];
+            let gm = circuit.vccs.transconductances[i];
+
+            if np > 0 && cp > 0 {
+                ac_matrix.add_real(np - 1, cp - 1, gm);
+            }
+            if np > 0 && cn > 0 {
+                ac_matrix.add_real(np - 1, cn - 1, -gm);
+            }
+            if nn > 0 && cp > 0 {
+                ac_matrix.add_real(nn - 1, cp - 1, -gm);
+            }
+            if nn > 0 && cn > 0 {
+                ac_matrix.add_real(nn - 1, cn - 1, gm);
+            }
+        }
+
+        // Controlled sources: CCCS
+        for i in 0..circuit.cccs.len() {
+            let np = circuit.cccs.node_pos[i];
+            let nn = circuit.cccs.node_neg[i];
+            let ctrl_branch_ordinal = circuit.cccs.ctrl_branch[i];
+            let gain = circuit.cccs.gains[i];
+            if ctrl_branch_ordinal == 0 {
+                continue;
+            }
+            let cb = circuit.get_branch_matrix_index(ctrl_branch_ordinal);
+
+            if np > 0 {
+                ac_matrix.add_real(np - 1, cb - 1, gain);
+            }
+            if nn > 0 {
+                ac_matrix.add_real(nn - 1, cb - 1, -gain);
+            }
+        }
+
+        // Controlled sources: CCVS
+        for i in 0..circuit.ccvs.len() {
+            let np = circuit.ccvs.node_pos[i];
+            let nn = circuit.ccvs.node_neg[i];
+            let br_ordinal = circuit.ccvs.branch_indices[i];
+            let ctrl_branch_ordinal = circuit.ccvs.ctrl_branch[i];
+            let rm = circuit.ccvs.transresistances[i];
+            if br_ordinal == 0 || ctrl_branch_ordinal == 0 {
+                continue;
+            }
+            let br = circuit.get_branch_matrix_index(br_ordinal);
+            let cb = circuit.get_branch_matrix_index(ctrl_branch_ordinal);
+
+            if np > 0 {
+                ac_matrix.add_real(br - 1, np - 1, 1.0);
+                ac_matrix.add_real(np - 1, br - 1, 1.0);
+            }
+            if nn > 0 {
+                ac_matrix.add_real(br - 1, nn - 1, -1.0);
+                ac_matrix.add_real(nn - 1, br - 1, -1.0);
+            }
+            ac_matrix.add_real(br - 1, cb - 1, -rm);
+        }
+
+        // Add small diagonal for numerical stability
+        for i in 0..size {
+            ac_matrix.add_real(i, i, 1e-15);
+        }
+
+        ac_matrix
+    }
+
+    fn build_ac_excitation_rhs(circuit: &CircuitData) -> Vec<Complex64> {
+        let size = circuit.matrix_size();
+        let mut rhs = vec![Complex64::new(0.0, 0.0); size];
+
+        // Independent voltage sources with AC specification.
+        for i in 0..circuit.voltage_sources.len() {
+            let ac_mag = circuit.voltage_sources.ac_magnitudes[i];
+            let ac_phase = circuit.voltage_sources.ac_phases[i];
+
+            if ac_mag.abs() <= 1e-15 {
+                continue;
+            }
+
+            let br_ordinal = circuit.voltage_sources.branch_indices[i];
+            let br = circuit.get_branch_matrix_index(br_ordinal);
+            rhs[br - 1] = Complex64::from_polar(ac_mag, ac_phase);
+        }
+
+        // Independent current sources with AC specification.
+        for i in 0..circuit.current_sources.len() {
+            let ac_mag = circuit.current_sources.ac_magnitudes[i];
+            let ac_phase = circuit.current_sources.ac_phases[i];
+            if ac_mag.abs() <= 1e-15 {
+                continue;
+            }
+
+            let i_ac = Complex64::from_polar(ac_mag, ac_phase);
+            let np = circuit.current_sources.node_pos[i];
+            let nn = circuit.current_sources.node_neg[i];
+
+            if np > 0 {
+                rhs[np - 1] -= i_ac;
+            }
+            if nn > 0 {
+                rhs[nn - 1] += i_ac;
+            }
+        }
+
+        rhs
+    }
+
     /// Run AC small-signal analysis
     ///
     /// Linearizes circuit at DC operating point, then solves at each frequency.
@@ -290,290 +585,9 @@ impl Engine {
         // Closure to solve at a single frequency
         let solve_at_freq = |freq: Value| -> Result<AcResult, SimulationError> {
             let omega = 2.0 * PI * freq;
-
-            // Create fresh complex matrix for this frequency (thread-safe)
-            let mut ac_matrix = ComplexMatrix::from_real_structure(&matrix);
-
-            // Stamp resistors (real conductance)
-            for (r_idx, stamp) in circuit.resistors.stamps.iter().enumerate() {
-                let g = circuit.resistors.conductances[r_idx];
-
-                if stamp.pp.row > 0 && stamp.pp.col > 0 {
-                    ac_matrix.add_real(stamp.pp.row - 1, stamp.pp.col - 1, g);
-                }
-                if stamp.pn.row > 0 && stamp.pn.col > 0 {
-                    ac_matrix.add_real(stamp.pn.row - 1, stamp.pn.col - 1, -g);
-                }
-                if stamp.np.row > 0 && stamp.np.col > 0 {
-                    ac_matrix.add_real(stamp.np.row - 1, stamp.np.col - 1, -g);
-                }
-                if stamp.nn.row > 0 && stamp.nn.col > 0 {
-                    ac_matrix.add_real(stamp.nn.row - 1, stamp.nn.col - 1, g);
-                }
-            }
-
-            // Stamp transmission lines as distributed 2-port Y-parameters.
-            for tline in &circuit.tlines {
-                Self::stamp_transmission_line_ac(&mut ac_matrix, tline, omega);
-            }
-
-            // Nonlinear device Jacobian (real part) evaluated at DC operating point.
-            if has_nonlinear {
-                Self::stamp_nonlinear_small_signal_real(&mut ac_matrix, &circuit, &dc_solution);
-            }
-
-            // Stamp capacitors: jωC
-            for (i, stamp) in circuit.capacitors.stamps.iter().enumerate() {
-                let c = circuit
-                    .capacitors
-                    .capacitances
-                    .get(i)
-                    .copied()
-                    .unwrap_or(0.0);
-                let jwc = omega * c; // Imaginary part
-
-                if stamp.pp.row > 0 && stamp.pp.col > 0 {
-                    ac_matrix.add_imag(stamp.pp.row - 1, stamp.pp.col - 1, jwc);
-                }
-                if stamp.pn.row > 0 && stamp.pn.col > 0 {
-                    ac_matrix.add_imag(stamp.pn.row - 1, stamp.pn.col - 1, -jwc);
-                }
-                if stamp.np.row > 0 && stamp.np.col > 0 {
-                    ac_matrix.add_imag(stamp.np.row - 1, stamp.np.col - 1, -jwc);
-                }
-                if stamp.nn.row > 0 && stamp.nn.col > 0 {
-                    ac_matrix.add_imag(stamp.nn.row - 1, stamp.nn.col - 1, jwc);
-                }
-            }
-
-            // Nonlinear semiconductor junction capacitances at the operating point.
-            if has_nonlinear {
-                Self::stamp_nonlinear_capacitances(&mut ac_matrix, &circuit, &dc_solution, omega);
-            }
-
-            // Stamp MOSFET capacitances: jωCgs, jωCgd, jωCgb (Meyer model)
-            for mos in &circuit.mosfets.devices {
-                let (cgs, cgd, cgb) = mos.ac_capacitances();
-                let ng = mos.node_gate;
-                let nd = mos.node_drain;
-                let ns = mos.node_source;
-                let nb = mos.node_bulk;
-
-                // Cgs: gate-source capacitance
-                let jwcgs = omega * cgs;
-                if ng > 0 {
-                    ac_matrix.add_imag(ng - 1, ng - 1, jwcgs);
-                }
-                if ng > 0 && ns > 0 {
-                    ac_matrix.add_imag(ng - 1, ns - 1, -jwcgs);
-                }
-                if ns > 0 && ng > 0 {
-                    ac_matrix.add_imag(ns - 1, ng - 1, -jwcgs);
-                }
-                if ns > 0 {
-                    ac_matrix.add_imag(ns - 1, ns - 1, jwcgs);
-                }
-
-                // Cgd: gate-drain capacitance
-                let jwcgd = omega * cgd;
-                if ng > 0 {
-                    ac_matrix.add_imag(ng - 1, ng - 1, jwcgd);
-                }
-                if ng > 0 && nd > 0 {
-                    ac_matrix.add_imag(ng - 1, nd - 1, -jwcgd);
-                }
-                if nd > 0 && ng > 0 {
-                    ac_matrix.add_imag(nd - 1, ng - 1, -jwcgd);
-                }
-                if nd > 0 {
-                    ac_matrix.add_imag(nd - 1, nd - 1, jwcgd);
-                }
-
-                // Cgb: gate-bulk capacitance
-                let jwcgb = omega * cgb;
-                if ng > 0 {
-                    ac_matrix.add_imag(ng - 1, ng - 1, jwcgb);
-                }
-                if ng > 0 && nb > 0 {
-                    ac_matrix.add_imag(ng - 1, nb - 1, -jwcgb);
-                }
-                if nb > 0 && ng > 0 {
-                    ac_matrix.add_imag(nb - 1, ng - 1, -jwcgb);
-                }
-                if nb > 0 {
-                    ac_matrix.add_imag(nb - 1, nb - 1, jwcgb);
-                }
-            }
-
-            // Voltage sources for AC (MNA branch equations)
-            for i in 0..circuit.voltage_sources.len() {
-                let np = circuit.voltage_sources.node_pos[i];
-                let nn = circuit.voltage_sources.node_neg[i];
-                let br_ordinal = circuit.voltage_sources.branch_indices[i];
-                let br = circuit.get_branch_matrix_index(br_ordinal);
-
-                if np > 0 {
-                    ac_matrix.add_real(br - 1, np - 1, 1.0);
-                    ac_matrix.add_real(np - 1, br - 1, 1.0);
-                }
-                if nn > 0 {
-                    ac_matrix.add_real(br - 1, nn - 1, -1.0);
-                    ac_matrix.add_real(nn - 1, br - 1, -1.0);
-                }
-            }
-
-            // Inductors for AC:
-            // V(np)-V(nn)-jωL*I = 0
-            for i in 0..circuit.inductors.len() {
-                let np = circuit.inductors.node_pos[i];
-                let nn = circuit.inductors.node_neg[i];
-                let br_ordinal = circuit.inductors.branch_indices[i];
-                let br = circuit.get_branch_matrix_index(br_ordinal);
-                let l = circuit.inductors.inductances[i];
-
-                if np > 0 {
-                    ac_matrix.add_real(br - 1, np - 1, 1.0);
-                    ac_matrix.add_real(np - 1, br - 1, 1.0);
-                }
-                if nn > 0 {
-                    ac_matrix.add_real(br - 1, nn - 1, -1.0);
-                    ac_matrix.add_real(nn - 1, br - 1, -1.0);
-                }
-                ac_matrix.add_imag(br - 1, br - 1, -omega * l);
-            }
-
-            // Controlled sources: VCVS
-            for i in 0..circuit.vcvs.len() {
-                let np = circuit.vcvs.node_pos[i];
-                let nn = circuit.vcvs.node_neg[i];
-                let cp = circuit.vcvs.ctrl_pos[i];
-                let cn = circuit.vcvs.ctrl_neg[i];
-                let br_ordinal = circuit.vcvs.branch_indices[i];
-                let br = circuit.get_branch_matrix_index(br_ordinal);
-                let gain = circuit.vcvs.gains[i];
-
-                if np > 0 {
-                    ac_matrix.add_real(br - 1, np - 1, 1.0);
-                    ac_matrix.add_real(np - 1, br - 1, 1.0);
-                }
-                if nn > 0 {
-                    ac_matrix.add_real(br - 1, nn - 1, -1.0);
-                    ac_matrix.add_real(nn - 1, br - 1, -1.0);
-                }
-                if cp > 0 {
-                    ac_matrix.add_real(br - 1, cp - 1, -gain);
-                }
-                if cn > 0 {
-                    ac_matrix.add_real(br - 1, cn - 1, gain);
-                }
-            }
-
-            // Controlled sources: VCCS
-            for i in 0..circuit.vccs.len() {
-                let np = circuit.vccs.node_pos[i];
-                let nn = circuit.vccs.node_neg[i];
-                let cp = circuit.vccs.ctrl_pos[i];
-                let cn = circuit.vccs.ctrl_neg[i];
-                let gm = circuit.vccs.transconductances[i];
-
-                if np > 0 && cp > 0 {
-                    ac_matrix.add_real(np - 1, cp - 1, gm);
-                }
-                if np > 0 && cn > 0 {
-                    ac_matrix.add_real(np - 1, cn - 1, -gm);
-                }
-                if nn > 0 && cp > 0 {
-                    ac_matrix.add_real(nn - 1, cp - 1, -gm);
-                }
-                if nn > 0 && cn > 0 {
-                    ac_matrix.add_real(nn - 1, cn - 1, gm);
-                }
-            }
-
-            // Controlled sources: CCCS
-            for i in 0..circuit.cccs.len() {
-                let np = circuit.cccs.node_pos[i];
-                let nn = circuit.cccs.node_neg[i];
-                let ctrl_branch_ordinal = circuit.cccs.ctrl_branch[i];
-                let gain = circuit.cccs.gains[i];
-                if ctrl_branch_ordinal == 0 {
-                    continue;
-                }
-                let cb = circuit.get_branch_matrix_index(ctrl_branch_ordinal);
-
-                if np > 0 {
-                    ac_matrix.add_real(np - 1, cb - 1, gain);
-                }
-                if nn > 0 {
-                    ac_matrix.add_real(nn - 1, cb - 1, -gain);
-                }
-            }
-
-            // Controlled sources: CCVS
-            for i in 0..circuit.ccvs.len() {
-                let np = circuit.ccvs.node_pos[i];
-                let nn = circuit.ccvs.node_neg[i];
-                let br_ordinal = circuit.ccvs.branch_indices[i];
-                let ctrl_branch_ordinal = circuit.ccvs.ctrl_branch[i];
-                let rm = circuit.ccvs.transresistances[i];
-                if br_ordinal == 0 || ctrl_branch_ordinal == 0 {
-                    continue;
-                }
-                let br = circuit.get_branch_matrix_index(br_ordinal);
-                let cb = circuit.get_branch_matrix_index(ctrl_branch_ordinal);
-
-                if np > 0 {
-                    ac_matrix.add_real(br - 1, np - 1, 1.0);
-                    ac_matrix.add_real(np - 1, br - 1, 1.0);
-                }
-                if nn > 0 {
-                    ac_matrix.add_real(br - 1, nn - 1, -1.0);
-                    ac_matrix.add_real(nn - 1, br - 1, -1.0);
-                }
-                ac_matrix.add_real(br - 1, cb - 1, -rm);
-            }
-
-            // Add small diagonal for numerical stability
-            for i in 0..size {
-                ac_matrix.add_real(i, i, 1e-15);
-            }
-
-            // RHS: stamp AC excitation for each voltage source with AC specification
-            let mut rhs = vec![Complex64::new(0.0, 0.0); size];
-            for i in 0..circuit.voltage_sources.len() {
-                let ac_mag = circuit.voltage_sources.ac_magnitudes[i];
-                let ac_phase = circuit.voltage_sources.ac_phases[i];
-
-                // Only stamp sources with non-zero AC magnitude
-                if ac_mag.abs() > 1e-15 {
-                    let br_ordinal = circuit.voltage_sources.branch_indices[i];
-                    let br = circuit.get_branch_matrix_index(br_ordinal);
-                    // Convert magnitude and phase to complex: mag * e^(j*phase)
-                    let ac_value = Complex64::from_polar(ac_mag, ac_phase);
-                    rhs[br - 1] = ac_value;
-                }
-            }
-
-            // Independent current sources AC excitation
-            for i in 0..circuit.current_sources.len() {
-                let ac_mag = circuit.current_sources.ac_magnitudes[i];
-                let ac_phase = circuit.current_sources.ac_phases[i];
-                if ac_mag.abs() <= 1e-15 {
-                    continue;
-                }
-                let i_ac = Complex64::from_polar(ac_mag, ac_phase);
-                let np = circuit.current_sources.node_pos[i];
-                let nn = circuit.current_sources.node_neg[i];
-
-                if np > 0 {
-                    rhs[np - 1] -= i_ac;
-                }
-                if nn > 0 {
-                    rhs[nn - 1] += i_ac;
-                }
-            }
-
-            // Solve
+            let ac_matrix =
+                Self::build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, omega);
+            let rhs = Self::build_ac_excitation_rhs(&circuit);
             let solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
 
             Ok(AcResult {

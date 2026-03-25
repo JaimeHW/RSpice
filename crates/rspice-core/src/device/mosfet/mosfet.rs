@@ -126,6 +126,14 @@ pub struct Mosfet {
     pub cgbo: Value,
     /// Source/drain sheet resistance (RSH) in ohm/square
     pub rsh: Value,
+    /// Flicker noise coefficient (KF)
+    pub kf: Value,
+    /// Flicker noise current exponent (AF)
+    pub af: Value,
+    /// Flicker noise frequency exponent (EF)
+    pub ef: Value,
+    /// Channel thermal-noise coefficient (gamma)
+    pub thermal_noise_gamma: Value,
 
     // Level 6 (double-exponent/simplified) MOSFET parameters
     /// Current gain coefficient (KC) - drain current multiplier
@@ -235,6 +243,10 @@ impl Mosfet {
             cgdo: 2.4e-10, // Gate-drain overlap cap (F/m)
             cgbo: 0.0,     // Gate-bulk overlap cap (F/m)
             rsh: 0.0,      // Sheet resistance (ohm/sq)
+            kf: 0.0,
+            af: 1.0,
+            ef: 1.0,
+            thermal_noise_gamma: 2.0 / 3.0,
 
             // Level 6 parameters (double-exponent model)
             kc: 110e-6,    // Current gain (similar to KP)
@@ -453,6 +465,42 @@ impl Mosfet {
         }
         if let Some(&v) = params.get("RSH") {
             self.rsh = v;
+        }
+        if let Some(v) = params
+            .get("KF")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            self.kf = v;
+        }
+        if let Some(v) = params
+            .get("AF")
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.0)
+        {
+            self.af = v;
+        }
+        if let Some(v) = params
+            .get("EF")
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.0)
+        {
+            self.ef = v;
+        }
+        if let Some(v) = params
+            .get("TNOIA")
+            .or_else(|| params.get("NOIA"))
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            self.thermal_noise_gamma = (2.0 / 3.0) * v;
+        }
+        if let Some(v) = params
+            .get("GAMMA_NOISE")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            self.thermal_noise_gamma = v;
         }
         // Level 6 parameters
         if let Some(&v) = params.get("KC") {
@@ -728,6 +776,31 @@ impl Mosfet {
             let cgd_int = 0.0; // Small in saturation
             (cgs_int + cgs_ov, cgd_int + cgd_ov, cgb_ov)
         }
+    }
+
+    /// Return the cached drain current at the converged operating point.
+    pub fn drain_current(&self) -> Value {
+        self.id
+    }
+
+    /// Return the cached transconductance magnitude at the operating point.
+    pub fn transconductance(&self) -> Value {
+        self.gm.abs()
+    }
+
+    /// Return the current thermal-noise coefficient used for channel noise.
+    pub fn channel_thermal_noise_gamma(&self) -> Value {
+        self.thermal_noise_gamma.max(0.0)
+    }
+
+    /// Return the effective flicker-noise coefficients, normalized by active area.
+    pub fn flicker_noise_coefficients(&self) -> Option<(Value, Value, Value)> {
+        if self.kf <= 0.0 || !self.kf.is_finite() {
+            return None;
+        }
+
+        let area = (self.cox * self.w.max(1e-18) * self.l.max(1e-18)).max(1e-30);
+        Some((self.kf / area, self.af.max(1e-12), self.ef.max(1e-12)))
     }
 
     //=========================================================================
@@ -1367,6 +1440,28 @@ mod tests {
             "unexpected derived GAMMA={}",
             m.gamma
         );
+    }
+
+    #[test]
+    fn test_with_params_applies_noise_coefficients() {
+        let mut params = std::collections::HashMap::new();
+        params.insert("KF".to_string(), 4e-24);
+        params.insert("AF".to_string(), 1.3);
+        params.insert("EF".to_string(), 1.1);
+        params.insert("TNOIA".to_string(), 1.8);
+
+        let m = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0)
+            .with_geometry(20e-6, 0.5e-6)
+            .with_params(&params);
+
+        let (kf, af, ef) = m
+            .flicker_noise_coefficients()
+            .expect("KF should enable flicker noise");
+        let expected_kf = 4e-24 / (m.cox * m.w * m.l);
+        assert!((kf - expected_kf).abs() / expected_kf < 1e-12);
+        assert!((af - 1.3).abs() < 1e-12);
+        assert!((ef - 1.1).abs() < 1e-12);
+        assert!((m.channel_thermal_noise_gamma() - 1.2).abs() < 1e-12);
     }
 
     #[test]

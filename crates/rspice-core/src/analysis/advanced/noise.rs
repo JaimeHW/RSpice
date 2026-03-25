@@ -6,7 +6,7 @@
 //! Supports:
 //! - **Thermal noise**: Johnson-Nyquist noise from resistors (4kTR)
 //! - **Shot noise**: From PN junctions in diodes and BJTs (2qI)
-//! - **Flicker noise**: 1/f noise in semiconductors (KF/f^AF)
+//! - **Flicker noise**: 1/f^EF noise in semiconductors (KF * I^AF / f^EF)
 //!
 //! # Algorithm
 //! 1. Compute small-signal AC solution at each frequency
@@ -67,6 +67,8 @@ pub struct NoiseSource {
     pub parameter: Value,
     /// Flicker noise exponent (AF, typically 1.0)
     pub af: Value,
+    /// Flicker frequency exponent (EF, typically 1.0)
+    pub ef: Value,
     /// Current for flicker/burst noise
     pub current: Value,
     /// Corner frequency for burst noise (FB, Hz)
@@ -88,6 +90,7 @@ impl NoiseSource {
             node_neg,
             parameter: resistance,
             af: 1.0,
+            ef: 1.0,
             current: 0.0,
             corner_freq: 1.0,
         }
@@ -102,6 +105,7 @@ impl NoiseSource {
             node_neg,
             parameter: current.abs(),
             af: 1.0,
+            ef: 1.0,
             current: 0.0,
             corner_freq: 1.0,
         }
@@ -116,6 +120,19 @@ impl NoiseSource {
         af: Value,
         current: Value,
     ) -> Self {
+        Self::flicker_with_frequency_exponent(device_name, node_pos, node_neg, kf, af, 1.0, current)
+    }
+
+    /// Create a flicker (1/f^EF) noise source
+    pub fn flicker_with_frequency_exponent(
+        device_name: String,
+        node_pos: usize,
+        node_neg: usize,
+        kf: Value,
+        af: Value,
+        ef: Value,
+        current: Value,
+    ) -> Self {
         Self {
             device_name,
             noise_type: NoiseSourceType::Flicker,
@@ -123,6 +140,7 @@ impl NoiseSource {
             node_neg,
             parameter: kf,
             af,
+            ef,
             current,
             corner_freq: 1.0,
         }
@@ -149,6 +167,7 @@ impl NoiseSource {
             node_neg,
             parameter: kb,
             af: ab, // Reuse af field for AB exponent
+            ef: 1.0,
             current,
             corner_freq,
         }
@@ -171,9 +190,9 @@ impl NoiseSource {
                 2.0 * Q_ELECTRON * self.parameter
             }
             NoiseSourceType::Flicker => {
-                // Flicker noise: Si = KF * I^AF / f (A²/Hz)
+                // Flicker noise: Si = KF * I^AF / f^EF (A²/Hz)
                 if frequency > 0.0 {
-                    self.parameter * self.current.abs().powf(self.af) / frequency
+                    self.parameter * self.current.abs().powf(self.af) / frequency.powf(self.ef)
                 } else {
                     0.0 // Avoid division by zero
                 }
@@ -711,6 +730,27 @@ mod tests {
         assert!(
             (ratio_af2 - 4.0).abs() < 0.001,
             "AF=2 should give quadratic current dependence"
+        );
+    }
+
+    #[test]
+    fn test_flicker_noise_frequency_exponent_ef() {
+        let source = NoiseSource::flicker_with_frequency_exponent(
+            "Q1".to_string(),
+            1,
+            0,
+            1e-15,
+            1.0,
+            2.0,
+            1e-3,
+        );
+
+        let density_10hz = source.spectral_density(10.0, 300.0);
+        let density_100hz = source.spectral_density(100.0, 300.0);
+
+        assert!(
+            (density_10hz / density_100hz - 100.0).abs() < 1e-6,
+            "EF=2 should scale as 1/f^2"
         );
     }
 

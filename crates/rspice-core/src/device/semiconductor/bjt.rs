@@ -109,6 +109,12 @@ pub struct Bjt {
     pub area: Value,
     /// Instance multiplicity factor
     pub m: Value,
+    /// Flicker noise coefficient (KF)
+    pub kf: Value,
+    /// Flicker noise current exponent (AF)
+    pub af: Value,
+    /// Flicker noise frequency exponent (EF)
+    pub ef: Value,
     /// Active ideal base-emitter saturation current.
     ibei: Value,
     /// Active non-ideal base-emitter saturation current.
@@ -223,6 +229,9 @@ impl Bjt {
             ikr: 0.01,    // Reverse knee
             area: 1.0,
             m: 1.0,
+            kf: 0.0,
+            af: 1.0,
+            ef: 1.0,
             ibei: 5e-17, // Derived from IS/BF defaults
             iben: 0.0,
             ibci: 1e-14, // Derived from IS/BR defaults
@@ -379,6 +388,27 @@ impl Bjt {
             if v.is_finite() && v > 0.0 {
                 self.tnom = if v > 200.0 { v } else { v + 273.15 };
             }
+        }
+        if let Some(v) = params
+            .get("KF")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            self.kf = v;
+        }
+        if let Some(v) = params
+            .get("AF")
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.0)
+        {
+            self.af = v;
+        }
+        if let Some(v) = params
+            .get("EF")
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.0)
+        {
+            self.ef = v;
         }
         // VBIC aliases used in ngspice level=4 decks.
         if !has_vaf {
@@ -568,6 +598,31 @@ impl Bjt {
     pub fn junction_capacitances(&self, vbe: Value, vbc: Value) -> (Value, Value) {
         let gm = self.gm(vbe);
         (self.cbe(vbe, gm), self.cbc(vbc))
+    }
+
+    /// Return cached collector, base, and emitter currents at the operating point.
+    pub fn operating_point_currents(&self) -> (Value, Value, Value) {
+        (self.ic, self.ib, self.ie)
+    }
+
+    /// Return the shot-noise branch currents referenced to the physical junctions.
+    pub fn noise_branch_currents(&self) -> (Value, Value, Value) {
+        let vp_be = self.polarity() * self.vbe;
+        let vp_bc = self.polarity() * self.vbc;
+        let ibe = self.diode_current_with_is(self.ibei, vp_be, self.nei)
+            + self.diode_current_with_is(self.iben, vp_be, self.nen);
+        let ibc = self.diode_current_with_is(self.ibci, vp_bc, self.nci)
+            + self.diode_current_with_is(self.ibcn, vp_bc, self.ncn);
+        (self.ic.abs(), ibe.abs(), ibc.abs())
+    }
+
+    /// Return flicker-noise coefficients, if enabled by the model card.
+    pub fn flicker_noise_coefficients(&self) -> Option<(Value, Value, Value)> {
+        if self.kf > 0.0 && self.kf.is_finite() {
+            Some((self.kf, self.af.max(1e-12), self.ef.max(1e-12)))
+        } else {
+            None
+        }
     }
 
     /// Link this device to a StaticMatrix for O(1) stamping
@@ -1110,6 +1165,31 @@ mod tests {
         assert_eq!(q.tf, 1e-9);
         assert_eq!(q.tr, 10e-9);
         assert_eq!(q.ikf, 0.05);
+    }
+
+    #[test]
+    fn test_bjt_noise_params_and_helpers() {
+        use std::collections::HashMap;
+
+        let mut params = HashMap::new();
+        params.insert("KF".to_string(), 2e-14);
+        params.insert("AF".to_string(), 1.4);
+        params.insert("EF".to_string(), 1.2);
+
+        let mut q = Bjt::new_npn("Q1".to_string(), 2, 1, 0).with_params(&params);
+        q.update(&[0.7, 5.0]);
+
+        let (kf, af, ef) = q
+            .flicker_noise_coefficients()
+            .expect("KF should enable flicker noise");
+        assert!((kf - 2e-14).abs() < 1e-24);
+        assert!((af - 1.4).abs() < 1e-12);
+        assert!((ef - 1.2).abs() < 1e-12);
+
+        let (ic, ibe, ibc) = q.noise_branch_currents();
+        assert!(ic > 0.0);
+        assert!(ibe > 0.0);
+        assert!(ibc >= 0.0);
     }
 
     #[test]
